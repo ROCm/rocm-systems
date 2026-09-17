@@ -1671,8 +1671,8 @@ TEST_F(RmaDebugLoggingTest, BothCallocFailuresUnwindUnderEveryDebugState) {
 
 // --- ncclRmaProxyEnabled / ncclRmaInitialized (rma.cc:19, :24) --------------
 //
-// Both arrived with the NCCL 2.31.2 sync and are plain predicates over comm
-// state, so they need no plan or launch machinery.
+// Both are plain predicates over comm state, so they need no plan or launch
+// machinery.
 
 class RmaProxyGatingTest : public RmaTestBase {
 protected:
@@ -1687,14 +1687,25 @@ protected:
     SetOneLsaTeam(false);
   }
 
+  void TearDown() override {
+    comm_->devrState.lsaRankList = nullptr;  // borrowed from lsaRanks_
+    RmaTestBase::TearDown();
+  }
+
   // ncclDevrIsOneLsaTeam is dev_runtime.cc's real predicate here, derived from
   // computeLsaSize; a non-zero bigSize short-circuits that to lsaSize, so the
-  // team is "one" exactly when lsaSize == nRanks.
+  // team is "one" exactly when lsaSize == nRanks. Move nRanks, not lsaSize, so
+  // lsaSize keeps matching lsaRanks_ -- isLsaAccessible walks it by lsaSize.
   void SetOneLsaTeam(bool oneTeam) {
     comm_->devrState.bigSize = 1;
-    comm_->nRanks = 4;
-    comm_->devrState.lsaSize = oneTeam ? 4 : 2;
+    lsaRanks_ = {0, 1};
+    comm_->devrState.lsaSize = static_cast<int>(lsaRanks_.size());
+    comm_->devrState.lsaRankList = lsaRanks_.data();
+    comm_->nRanks = oneTeam ? 2 : 4;
   }
+
+private:
+  std::vector<int> lsaRanks_;
 };
 
 // All four terms hold, which is the only way the predicate is true.
@@ -1760,9 +1771,9 @@ TEST_F(RmaProxyGatingTest, Initialized_ProxyDisabled_IgnoresConnectedFlag) {
 
 // --- ensureRmaProxyReady (rma.cc:43) ---------------------------------------
 //
-// New with the NCCL 2.31.2 sync: every proxy launch is gated on the proxy being
-// connected. It runs before the dispatch both launch suites cover, so its arms
-// live here rather than being repeated in each.
+// Every proxy launch is gated on the proxy being connected. It runs before the
+// dispatch both launch suites cover, so its arms live here rather than being
+// repeated in each.
 
 class RmaProxyReadyTest : public RmaTestBase {
 protected:

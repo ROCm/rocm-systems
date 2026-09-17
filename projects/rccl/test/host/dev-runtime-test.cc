@@ -241,11 +241,12 @@ protected:
   // rma.cc's ncclRmaProxyEnabled is compiled into this binary, so set the terms
   // it reads rather than stubbing the predicate. Its first term is
   // ncclDevrIsOneLsaTeam, which dev_runtime.cc derives from computeLsaSize --
-  // short-circuited here by a non-zero bigSize so lsaSize is taken as given.
+  // short-circuited by the fixture's non-zero bigSize, so lsaSize is taken as given.
+  // Move nRanks, not lsaSize: lsaSize indexes the fixture's two-element
+  // lsaRankList, so growing it reads off the end.
   static void RmaProxyTerms(ncclComm* c, bool enabled) {
-    c->devrState.bigSize = 1;
-    c->nRanks = 4;
-    c->devrState.lsaSize = enabled ? 2 : 4;  // == nRanks means one LSA team
+    c->nRanks = enabled ? 4 : 2;
+    c->devrState.lsaSize = 2;  // == nRanks when disabled, so one LSA team
     c->config.numRmaCtx = enabled ? 1 : 0;
     c->globalRmaProxySupport = enabled;
   }
