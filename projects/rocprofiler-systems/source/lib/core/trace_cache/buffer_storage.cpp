@@ -3,6 +3,7 @@
 
 #include "buffer_storage.hpp"
 
+#include "core/trace_cache/cacheable.hpp"
 #include "logger/debug.hpp"
 
 #include <condition_variable>
@@ -61,21 +62,21 @@ flush_worker_t::start(const pid_t& current_pid)
         // Local cv/mutex pair: kept off the worker_synchronization struct so
         // the destructor runs on this thread's stack frame, never during TLS
         // teardown of a foreign thread (TSan DTLS_Destroy deadlock).
-        std::condition_variable cv;
-        std::mutex              mu;
+        std::condition_variable wait_condition;
+        std::mutex              wait_mutex;
 
         while(!stoken.stop_requested())
         {
             m_worker_function(m_ofs, false);
-            std::unique_lock _lock{ mu };
+            std::unique_lock _lock{ wait_mutex };
             // Avoid condition_variable_any's stop-token overload here. Its
             // internal stop callback can still be executing notify_all() on
             // the requesting thread while the worker destroys the callback's
             // heap-backed condition-variable state. Polling at the existing
             // 10 ms flush interval bounds shutdown latency without that
             // callback lifetime race.
-            cv.wait_for(_lock, CACHE_FILE_FLUSH_TIMEOUT,
-                        [&]() { return stoken.stop_requested(); });
+            wait_condition.wait_for(_lock, CACHE_FILE_FLUSH_TIMEOUT,
+                                    [&]() { return stoken.stop_requested(); });
         }
 
         LOG_TRACE("Flush worker thread performing final flush");

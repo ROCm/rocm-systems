@@ -159,8 +159,7 @@ TEST_F(LoggerTest, EndlManipulator) {
 }
 
 
-// Regression coverage for the singleton's shared streaming state. Under TSAN,
-// this test must remain free of races between concurrent operator<< calls.
+// Test concurrent logging from multiple threads
 TEST_F(LoggerTest, ConcurrentLogging) {
     EnableFileLogging();
     
