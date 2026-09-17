@@ -568,6 +568,9 @@ memory:
   Unit_hipMemsetAsync_SetMemoryWithOffset:
     <<: *level_2
     tags: [memset, P0]
+  Unit_hipMemsetAsync_PatternSizeScaling:
+    <<: *level_2
+    tags: [memset, P1]
   Unit_hipMemset_SmallBufferSizes:
     <<: *level_2
     tags: [memset, P1]
