@@ -1,4 +1,5 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
+import os
 import struct
 
 import pytest
@@ -107,3 +108,43 @@ def test_dump_rejects_unknown_kind():
     struct.pack_into("<I", sec, hdr_size + 7 * 4, 99)
     with pytest.raises(ValueError, match="kind"):
         aie_hsaco_dump.parse_section(bytes(sec))
+
+
+import subprocess
+
+ELF = "build/kernel_full_elf_vsadd/aie.elf"
+
+
+@pytest.mark.skipif(not os.path.exists(ELF), reason="full-ELF artifact not built")
+def test_full_elf_yields_one_entry_per_kernel():
+    kernels = aie_hsaco.kernels_from_full_elf(ELF)
+    assert len(kernels) >= 1
+    assert all(k["kind"] == 1 for k in kernels)
+    assert all(k["pdi"] is None for k in kernels)
+    # Every entry embeds the same ELF, so the pool dedups to one copy.
+    assert len({bytes(k["insts"]) for k in kernels}) == 1
+    assert all(":" in k["name"] for k in kernels)
+
+
+@pytest.mark.skipif(not os.path.exists(ELF), reason="full-ELF artifact not built")
+def test_full_elf_round_trips_through_section(tmp_path):
+    kernels = aie_hsaco.kernels_from_full_elf(ELF)
+    sec = aie_hsaco.build_section("aie2p", kernels)
+    parsed = aie_hsaco_dump.parse_section(sec)
+    assert [p["name"] for p in parsed["kernels"]] == [k["name"] for k in kernels]
+    assert all(p["kind"] == 1 for p in parsed["kernels"])
+
+
+def test_ensure_hsaco_creates_loadable_container(tmp_path):
+    out = tmp_path / "fresh.hsaco"
+    aie_hsaco.ensure_hsaco(str(out))
+    assert out.exists()
+    # A container created from nothing must accept an injected AIE section,
+    # and the section must survive intact.
+    section = aie_hsaco.build_section("aie2p", [
+        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=None, kernarg_size=0, num_cols=1)])
+    aie_hsaco._inject(str(out), "aie2p", section)
+    dumped = tmp_path / "aie2p.bin"
+    subprocess.run(["llvm-objcopy", f"--dump-section=aie2p={dumped}", str(out)],
+                   check=True)
+    assert dumped.read_bytes() == section
