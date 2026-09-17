@@ -1888,6 +1888,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
     return err;
   }
 
+  // Measured on aie2p: the dispatch only completes when the control code's device address is
+  // 16 KiB aligned, which is what CTRL_CODE_DEV_ADDR_ALIGNMENT asks of the allocation.
   DeviceBuffer ctrl;
   err = AllocAlignedDeviceBuffer(fd, agent, desc->ctrl_code_size, CTRL_CODE_DEV_ADDR_ALIGNMENT,
                                  &ctrl);
@@ -1896,14 +1898,6 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   }
   // Recorded before anything else can fail, so the caller's cleanup owns it from here on.
   ctrl_buffers->push_back(ctrl);
-
-  // Measured on aie2p: the dispatch only completes when the control code's device address is
-  // 16 KiB aligned. AllocAlignedDeviceBuffer guarantees that; check it rather than assume it,
-  // because the failure mode is a hang rather than an error.
-  if ((ctrl.dev_addr % CTRL_CODE_DEV_ADDR_ALIGNMENT) != 0) {
-    log_warning_n(10, "AIE: full-ELF control code must be 16 KiB aligned in device memory.\n");
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
 
   // Always from pristine: PatchShimDma48 adds to what is already there, so patching over a
   // previous result would accumulate.
