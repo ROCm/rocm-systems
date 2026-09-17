@@ -28,15 +28,18 @@ make -j
 
 ```bat
 mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
-cmake .. -DROCM_PATH=<path-to-TheRock-build> -DFFMPEG_ROOT=<path-to-ffmpeg>
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
 cmake --build . --config Release
 ```
 
 > [!NOTE]
-> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
 > ```bat
-> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> set PATH=%ROCM_PATH%\bin;<path-to-ffmpeg>\bin;%PATH%
 > ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 
