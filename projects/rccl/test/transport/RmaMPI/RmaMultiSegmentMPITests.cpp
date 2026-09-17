@@ -173,17 +173,28 @@ protected:
         size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
         RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
     {
-        *out = AllocHybrid(gpuBytes, localCpuBytes, reason);
-        if (SyncSkip(*out == nullptr)) {
+        *out = nullptr;
+        int dev = 0;
+        std::string localReason;
+        bool supported = hipGetDevice(&dev) == hipSuccess &&
+            RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason);
+        if (SyncSkip(!supported)) {
+            if (reason && reason->empty())
+                *reason = "hybrid VMM runtime support is unavailable on another rank";
+            return false;
+        }
+        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
+        const bool ok = RCCLHybridVmmTests::AllocHybridForLocalRanks(
+            dev, gpuBytes, localCpuBytes, expectedLocalRanks, buf.get(), &localReason);
+        if (reason && reason->empty())
+            *reason = localReason;
+        if (SyncSkip(!ok)) {
             if (reason && reason->empty())
                 *reason = "hybrid VMM allocation failed on another rank";
             return false;
         }
-        if (SyncSkip((*out)->localSize != expectedLocalRanks)) {
-            if (reason)
-                *reason = "unexpected number of shared-memory local ranks";
-            return false;
-        }
+        hybridBuffers_.push_back(std::move(buf));
+        *out = hybridBuffers_.back().get();
         return true;
     }
 
