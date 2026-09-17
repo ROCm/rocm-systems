@@ -20,9 +20,9 @@
 #define NCCL_RMA_MAX_SEGMENTS 16
 #endif
 
-// A paired data transfer can split at every local and remote boundary. A
-// segment slice may split once more at the verbs 32-bit SGE length limit; the
-// fixed budget deliberately rejects larger chains before posting.
+// A paired data transfer can split at every local and remote boundary. Each
+// slice also splits at the 32-bit SGE limit, so a window larger than
+// NCCL_RMA_MAX_DATA_WRS * UINT32_MAX bytes is rejected before posting.
 #define NCCL_RMA_MAX_DATA_WRS (2 * NCCL_RMA_MAX_SEGMENTS)
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
@@ -42,8 +42,32 @@ static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRema
   return chunk;
 }
 
+static inline int ncclRmaDataWrBudgetFull(int n, int maxWr) {
+  return n >= maxWr;
+}
+
+// Paired data WRs to move `size` inside one local and one remote segment
+// (UINT32_MAX SGE splits only). Returns maxWr+1 if the chain does not fit.
+static inline int ncclRmaCountPairedDataWrs(size_t size, int maxWr) {
+  int n = 0;
+  size_t rem = size;
+  while (rem > 0) {
+    if (ncclRmaDataWrBudgetFull(n, maxWr)) {
+      return maxWr + 1;
+    }
+    rem -= ncclRmaSegmentSliceBytes(rem, rem, rem);
+    n++;
+  }
+  return n;
+}
+
 static inline int ncclRmaWrIsSignaled(int wrIndex, int nWrs) {
   return nWrs > 0 && wrIndex == nWrs - 1;
+}
+
+// True when ibv_post_send accepted a prefix that did not include the signaled last WR.
+static inline int ncclRmaPrefixPostLostSignaledTail(int posted, int nWr) {
+  return posted > 0 && posted < nWr;
 }
 
 static inline int ncclRmaSignalOffsetValid(size_t signalOff, size_t segmentEnd) {
@@ -74,23 +98,6 @@ static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
 static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
   if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
   return postRet;
-}
-
-struct ncclIbMrHandle;
-struct ncclRmaIbProxyMrHandle {
-  int nSegments;
-  // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
-  // base_vas indexed [rank*nSegments + seg].
-  // rkeys indexed (rank * nSegments + seg) * NCCL_IB_MAX_DEVS_PER_NIC + remDevIdx
-  size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];
-  struct ncclIbMrHandle* mrHandle[NCCL_RMA_MAX_SEGMENTS];
-  uintptr_t* base_vas;
-  uint32_t* rkeys;
-};
-
-static inline int ncclRmaHandleNSegments(const void* mhandle) {
-  const struct ncclRmaIbProxyMrHandle* h = (const struct ncclRmaIbProxyMrHandle*)mhandle;
-  return h != NULL ? h->nSegments : 0;
 }
 
 struct ncclGinIbCollComm {

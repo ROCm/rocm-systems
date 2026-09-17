@@ -33,6 +33,28 @@ struct MultiSegmentVmmBuffer
     bool valid() const { return ptr != nullptr && nSegments > 0; }
 };
 
+// Unmap, release, and free a reserved VA. `segSizes` wins when non-empty;
+// otherwise each mapped handle is `uniformSegSize` bytes.
+inline void ReleaseMappedVmm(hipDeviceptr_t base, size_t totalSize,
+                             const std::vector<hipMemGenericAllocationHandle_t>& handles,
+                             const std::vector<size_t>& segSizes, size_t uniformSegSize)
+{
+    size_t off = 0;
+    for (size_t i = 0; i < handles.size(); ++i)
+    {
+        const size_t len = segSizes.empty() ? uniformSegSize : segSizes[i];
+        if (base != 0 && len != 0)
+        {
+            hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(
+                reinterpret_cast<uintptr_t>(base) + off);
+            (void)hipMemUnmap(segVa, len);
+        }
+        if (handles[i] != 0) (void)hipMemRelease(handles[i]);
+        off += len;
+    }
+    if (base != 0 && totalSize != 0) (void)hipMemAddressFree(base, totalSize);
+}
+
 // Map `nSegments` granularity-rounded segments contiguously on `dev`. Returns
 // false (cleaned up) on any HIP failure so the caller can GTEST_SKIP.
 inline bool AllocMultiSegmentVmm(int dev, int nSegments, size_t segBytes,
@@ -69,14 +91,7 @@ inline bool AllocMultiSegmentVmm(int dev, int nSegments, size_t segBytes,
     handles.reserve(nSegments);
 
     auto cleanup = [&]() {
-        for (size_t i = 0; i < handles.size(); ++i)
-        {
-            (void)hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(
-                                  reinterpret_cast<uintptr_t>(base) + i * segSize),
-                              segSize);
-            (void)hipMemRelease(handles[i]);
-        }
-        (void)hipMemAddressFree(base, totalSize);
+        ReleaseMappedVmm(base, totalSize, handles, /*segSizes=*/{}, segSize);
     };
 
     hipMemAccessDesc accessDesc = {};
@@ -161,15 +176,7 @@ inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes,
     std::vector<hipMemGenericAllocationHandle_t> handles;
     std::vector<size_t> segSizes = {gpuBytes, cpuBytes};
     auto cleanup = [&]() {
-        size_t off = 0;
-        for (size_t i = 0; i < handles.size(); ++i) {
-            (void)hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(
-                                  reinterpret_cast<uintptr_t>(base) + off),
-                              segSizes[i]);
-            (void)hipMemRelease(handles[i]);
-            off += segSizes[i];
-        }
-        (void)hipMemAddressFree(base, totalSize);
+        ReleaseMappedVmm(base, totalSize, handles, segSizes, /*uniformSegSize=*/0);
     };
 
     for (int s = 0; s < 2; ++s) {
@@ -214,18 +221,8 @@ inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes,
 // Release in HIP-required order: unmap each segment, release each handle, free VA.
 inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b)
 {
-    if (b.ptr == nullptr) return;
-    size_t off = 0;
-    for (size_t i = 0; i < b.handles.size(); ++i)
-    {
-        const size_t len = b.segSizes.empty() ? b.segSize : b.segSizes[i];
-        hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(
-            reinterpret_cast<uintptr_t>(b.base) + off);
-        (void)hipMemUnmap(segVa, len);
-        (void)hipMemRelease(b.handles[i]);
-        off += len;
-    }
-    (void)hipMemAddressFree(b.base, b.totalSize);
+    if (b.ptr == nullptr && b.base == 0) return;
+    ReleaseMappedVmm(b.base, b.totalSize, b.handles, b.segSizes, b.segSize);
     b = MultiSegmentVmmBuffer{};
 }
 
