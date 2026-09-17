@@ -291,32 +291,63 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 
 TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
-  // Allocate buffers for 64x64 tile (default test size)
-  // For strided layouts, we need more space than just 64×64 elements
-  size_t tile_size = 64 * 64;
-  size_t buffer_elements_per_thread;
+  // Derive tile dimensions from max_msg_size if provided.
+  // max_msg_size is the total tile payload in bytes: tile_extent_0 * tile_extent_1 * sizeof(float).
+  // tile_extent_0 (rows) is fixed at 64; tile_extent_1 (cols) scales with message size.
+  tile_extent_0 = 64;
+  tile_extent_1 = 64;
+  if (args.max_msg_size_set) {
+    int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(float)));
+    if (derived >= 1) {
+      tile_extent_1 = derived;
+    }
+  }
+  // For the arbitrary-stride layout (row_stride=257, col_stride=3), tile_extent_1
+  // columns must fit within the row stride: tile_extent_1 * col_stride <= row_stride.
+  if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
+      tile_extent_1 > 85) {
+    tile_extent_1 = 85;  // floor(257 / 3)
+  }
 
+  // Set the message size sweep bounds.
+  // For contiguous/wave/wg/1D layouts, each doubling step is a valid tile
+  // (tile_extent_0 rows × increasing columns), so sweep from one row up to
+  // the full tile. For strided layouts the buffer footprint depends on fixed
+  // stride constants, so pin to a single point (the full tile size) for now.
+  size_t tile_size_bytes =
+      static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(float);
+  size_t row_bytes = static_cast<size_t>(tile_extent_0) * sizeof(float);
+
+  // Sweep from one column to the full tile for all layouts.
+  // Strided layouts (row-major: stride=2*t1, col-major: col_stride=t0,
+  // arbitrary: row_stride=257 fixed with t1 clamped to 85) are all safe
+  // because the buffer is allocated for the maximum tile_extent_1 and
+  // smaller ke_tile_extent_1 values only access a subset of it.
+  this->args.min_msg_size = row_bytes;
+  max_msg_size            = tile_size_bytes;
+
+  // Buffer footprint per tile slot — accounts for strided layouts that need
+  // more address space than a contiguous tile_extent_0 * tile_extent_1 region.
+  size_t buffer_elements_per_thread;
   switch (_type) {
     case TilePutRowMajorTestType:
     case TileGetRowMajorTestType:
-      // Row stride = 2*64 = 128, need 64 rows * 128 stride
-      buffer_elements_per_thread = 64 * 128;
+      // row_stride = 2 * tile_extent_1
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
       break;
     case TilePutColumnMajorTestType:
     case TileGetColumnMajorTestType:
-      // Column-major: row_stride=1, col_stride=64
-      // Need 64 cols * 64 col_stride = 4096 (same as contiguous)
-      buffer_elements_per_thread = tile_size;
+      // col_stride = tile_extent_0; contiguous in col direction
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
       break;
     case TilePutArbitraryTestType:
     case TileGetArbitraryTestType:
-      // Arbitrary strides: row_stride=257, col_stride=3
-      // Need 64 rows * 257 row_stride
-      buffer_elements_per_thread = 64 * 257;
+      // row_stride = 257 (fixed constant), col_stride = 3
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * 257;
       break;
     default:
-      // Contiguous and other cases: just 64×64
-      buffer_elements_per_thread = tile_size;
+      // Contiguous, wave, wg, 1D: tile_extent_0 * tile_extent_1
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
       break;
   }
 
@@ -362,21 +393,17 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   }
 
   // Initialize source buffer with pattern
-  // For strided layouts, we need to initialize the tile elements correctly
-  int tile_rows = 64;
-  int tile_cols = 64;
   int row_stride, col_stride;
-
   switch (_type) {
     case TilePutRowMajorTestType:
     case TileGetRowMajorTestType:
-      row_stride = 2 * 64;  // 128
+      row_stride = 2 * tile_extent_1;
       col_stride = 1;
       break;
     case TilePutColumnMajorTestType:
     case TileGetColumnMajorTestType:
       row_stride = 1;
-      col_stride = 64;
+      col_stride = tile_extent_0;
       break;
     case TilePutArbitraryTestType:
     case TileGetArbitraryTestType:
@@ -384,22 +411,17 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
       col_stride = 3;
       break;
     default:
-      // Contiguous: row_stride = cols
-      row_stride = tile_cols;
+      row_stride = tile_extent_1;
       col_stride = 1;
       break;
   }
 
-  // Initialize with strided pattern for all threads
   for (size_t tile_id = 0; tile_id < total_threads; tile_id++) {
     size_t base_offset = tile_id * buffer_elements_per_thread;
-
-    // Initialize each element in the 64×64 tile using stride pattern
-    for (int row = 0; row < tile_rows; row++) {
-      for (int col = 0; col < tile_cols; col++) {
-        size_t tile_linear_idx = row * tile_cols + col;
+    for (int row = 0; row < tile_extent_0; row++) {
+      for (int col = 0; col < tile_extent_1; col++) {
+        size_t tile_linear_idx = row * tile_extent_1 + col;
         size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
-
         source[buffer_idx] = static_cast<float>(tile_linear_idx % 256);
       }
     }
@@ -418,45 +440,105 @@ TileRMATester::~TileRMATester() {
 }
 
 void TileRMATester::resetBuffers(uint64_t size) {
-  // Use the same buffer size calculation as constructor
-  size_t tile_size = 64 * 64;
   size_t buffer_elements_per_thread;
-
   switch (_type) {
     case TilePutRowMajorTestType:
     case TileGetRowMajorTestType:
-      buffer_elements_per_thread = 64 * 128;
-      break;
-    case TilePutColumnMajorTestType:
-    case TileGetColumnMajorTestType:
-      buffer_elements_per_thread = tile_size;
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
       break;
     case TilePutArbitraryTestType:
     case TileGetArbitraryTestType:
-      buffer_elements_per_thread = 64 * 257;
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * 257;
       break;
     default:
-      buffer_elements_per_thread = tile_size;
+      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
       break;
   }
 
   size_t total_threads = args.num_wgs * args.num_threads;
   size_t buff_size = buffer_elements_per_thread * total_threads * sizeof(float);
   memset(dest, 0, buff_size);
+
+  // Re-initialize source using the current iteration's tile dimensions so that
+  // tile_linear_idx and buffer offsets match exactly what the kernel expects.
+  // The per-slot stride in the source must use the same ke_tile_extent_1 that
+  // the kernel uses for its offset calculations.
+  int t1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (tile_extent_0 * sizeof(float)));
+    if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
+  }
+  if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
+      t1 > 85) {
+    t1 = 85;
+  }
+
+  int src_row_stride, src_col_stride;
+  size_t src_elements_per_slot;
+  switch (_type) {
+    case TilePutRowMajorTestType:
+    case TileGetRowMajorTestType:
+      src_row_stride = 2 * t1;
+      src_col_stride = 1;
+      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * (2 * t1);
+      break;
+    case TilePutColumnMajorTestType:
+    case TileGetColumnMajorTestType:
+      src_row_stride = 1;
+      src_col_stride = tile_extent_0;
+      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
+      break;
+    case TilePutArbitraryTestType:
+    case TileGetArbitraryTestType:
+      src_row_stride = 257;
+      src_col_stride = 3;
+      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * 257;
+      break;
+    default:
+      src_row_stride = t1;
+      src_col_stride = 1;
+      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
+      break;
+  }
+
+  for (size_t tile_id = 0; tile_id < total_threads; tile_id++) {
+    size_t base_offset = tile_id * src_elements_per_slot;
+    for (int row = 0; row < tile_extent_0; row++) {
+      for (int col = 0; col < t1; col++) {
+        size_t tile_linear_idx = row * t1 + col;
+        size_t buffer_idx = base_offset + row * src_row_stride + col * src_col_stride;
+        source[buffer_idx] = static_cast<float>(tile_linear_idx % 256);
+      }
+    }
+  }
 }
 
 void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                  uint64_t size) {
   size_t shared_bytes = 0;
 
-  // Default to 64x64 tiles
-  int tile_extent_0 = 64;
-  int tile_extent_1 = 64;
+  // Derive tile dimensions for this iteration from the current message size so
+  // that the reported bandwidth matches the actual bytes transferred.
+  // Clamp to the member tile_extent_1 (the max allocated in the constructor)
+  // to ensure we never address beyond the allocated buffer.
+  int ke_tile_extent_0 = tile_extent_0;
+  int ke_tile_extent_1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (ke_tile_extent_0 * sizeof(float)));
+    if (derived >= 1 && derived <= tile_extent_1) {
+      ke_tile_extent_1 = derived;
+    }
+  }
+  // Apply the same arbitrary-stride column clamp
+  if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
+      ke_tile_extent_1 > 85) {
+    ke_tile_extent_1 = 85;
+  }
 
-#define LAUNCH_TILE_RMA_TEST(SPECIFIC_TYPE)                                  \
-  hipLaunchKernelGGL(TileRMATest<SPECIFIC_TYPE>, gridSize, blockSize,   \
-                     shared_bytes, stream, loop, args.skip, start_time,      \
-                     end_time, source, dest, tile_extent_0, tile_extent_1,   \
+#define LAUNCH_TILE_RMA_TEST(SPECIFIC_TYPE)                                    \
+  hipLaunchKernelGGL(TileRMATest<SPECIFIC_TYPE>, gridSize, blockSize,         \
+                     shared_bytes, stream, loop, args.skip, start_time,        \
+                     end_time, source, dest, ke_tile_extent_0, ke_tile_extent_1, \
                      _shmem_context, wf_size)
 
   switch (_type) {
@@ -510,8 +592,25 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
 #undef LAUNCH_TILE_RMA_TEST
 
-  num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
-  num_timed_msgs = loop * gridSize.x * blockSize.x;
+  // Count tiles transferred, not threads: wave transfers one tile per wave,
+  // wg transfers one tile per workgroup, thread transfers one tile per thread.
+  size_t tiles_per_loop;
+  switch (_type) {
+    case TilePutWaveContiguousTestType:
+    case TileGetWaveContiguousTestType:
+      tiles_per_loop = gridSize.x * num_warps;
+      break;
+    case TilePutWGContiguousTestType:
+    case TileGetWGContiguousTestType:
+      tiles_per_loop = gridSize.x;
+      break;
+    default:
+      tiles_per_loop = gridSize.x * blockSize.x;
+      break;
+  }
+  num_msgs = (loop + args.skip) * tiles_per_loop;
+  num_timed_msgs = loop * tiles_per_loop;
+
 }
 
 void TileRMATester::verifyResults(uint64_t size) {
@@ -532,21 +631,32 @@ void TileRMATester::verifyResults(uint64_t size) {
   }
 
   if (args.myid == check_id) {
-    int tile_rows = 64;
-    int tile_cols = 64;
-    int row_stride, col_stride;
+    // Re-derive tile dimensions from size using the same logic as launchKernel
+    // so that we only verify the elements the kernel actually transferred.
+    int t0 = tile_extent_0;
+    int t1 = tile_extent_1;
+    if (size > 0) {
+      int derived = static_cast<int>(size / (t0 * sizeof(float)));
+      if (derived >= 1 && derived <= tile_extent_1) {
+        t1 = derived;
+      }
+    }
+    if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
+        t1 > 85) {
+      t1 = 85;
+    }
 
-    // Determine strides based on test type
+    int row_stride, col_stride;
     switch (_type) {
       case TilePutRowMajorTestType:
       case TileGetRowMajorTestType:
-        row_stride = 2 * 64;  // 128
+        row_stride = 2 * t1;
         col_stride = 1;
         break;
       case TilePutColumnMajorTestType:
       case TileGetColumnMajorTestType:
         row_stride = 1;
-        col_stride = 64;
+        col_stride = t0;
         break;
       case TilePutArbitraryTestType:
       case TileGetArbitraryTestType:
@@ -554,67 +664,57 @@ void TileRMATester::verifyResults(uint64_t size) {
         col_stride = 3;
         break;
       default:
-        // Contiguous: row_stride = cols
-        row_stride = tile_cols;
+        row_stride = t1;
         col_stride = 1;
         break;
     }
 
-    // Verify all tiles
-    // For collective operations, the number of tiles transferred depends on the collective granularity
     size_t num_tiles_transferred;
     switch (_type) {
       case TilePutWaveContiguousTestType:
       case TileGetWaveContiguousTestType:
-        // Wave-collective: one tile per wave
         num_tiles_transferred = (args.num_wgs * args.num_threads) / wf_size;
         break;
       case TilePutWGContiguousTestType:
       case TileGetWGContiguousTestType:
-        // Workgroup-collective: one tile per workgroup
         num_tiles_transferred = args.num_wgs;
         break;
       default:
-        // Thread-level: one tile per thread
         num_tiles_transferred = args.num_wgs * args.num_threads;
         break;
     }
 
+    // buffer_elements_per_thread must match the kernel's per-slot stride,
+    // which is based on the MAX tile_extent_1 (the allocation granularity),
+    // not the current iteration's t1. The kernel uses matrix_size * wg_id
+    // where matrix_size = ke_tile_extent_0 * ke_tile_extent_1 = t0 * t1,
+    // so we use t0 * t1 here to match.
+    size_t buffer_elements_per_thread;
+    switch (_type) {
+      case TilePutRowMajorTestType:
+      case TileGetRowMajorTestType:
+        buffer_elements_per_thread = static_cast<size_t>(t0) * (2 * t1);
+        break;
+      case TilePutArbitraryTestType:
+      case TileGetArbitraryTestType:
+        buffer_elements_per_thread = static_cast<size_t>(t0) * 257;
+        break;
+      default:
+        buffer_elements_per_thread = static_cast<size_t>(t0) * t1;
+        break;
+    }
+
     for (size_t tile_id = 0; tile_id < num_tiles_transferred; tile_id++) {
-      // Calculate buffer offset for this thread
-      size_t buffer_elements_per_thread;
-      switch (_type) {
-        case TilePutRowMajorTestType:
-        case TileGetRowMajorTestType:
-          buffer_elements_per_thread = 64 * 128;
-          break;
-        case TilePutColumnMajorTestType:
-        case TileGetColumnMajorTestType:
-          buffer_elements_per_thread = 64 * 64;
-          break;
-        case TilePutArbitraryTestType:
-        case TileGetArbitraryTestType:
-          buffer_elements_per_thread = 64 * 257;
-          break;
-        default:
-          buffer_elements_per_thread = 64 * 64;
-          break;
-      }
-
       size_t base_offset = tile_id * buffer_elements_per_thread;
-
-      // Verify each element in the 64×64 tile using stride pattern
-      for (int row = 0; row < tile_rows; row++) {
-        for (int col = 0; col < tile_cols; col++) {
-          size_t tile_linear_idx = row * tile_cols + col;
+      for (int row = 0; row < t0; row++) {
+        for (int col = 0; col < t1; col++) {
+          size_t tile_linear_idx = row * t1 + col;
           size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
-
-          // Expected value based on source initialization
           float expected = static_cast<float>(tile_linear_idx % 256);
-
           if (dest[buffer_idx] != expected) {
             std::cerr << "Data validation error at buffer idx " << buffer_idx
-                      << " (tile pos [" << row << "," << col << "], tile_id=" << tile_id << ")" << std::endl;
+                      << " (tile pos [" << row << "," << col << "], tile_id=" << tile_id << ")"
+                      << std::endl;
             std::cerr << " Got " << dest[buffer_idx] << ", Expected " << expected << std::endl;
             exit(-1);
           }

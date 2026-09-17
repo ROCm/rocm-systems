@@ -32,6 +32,13 @@ class TileRMATester : public Tester {
   float *source = nullptr;
   float *dest = nullptr;
 
+  // Maximum tile dimensions — set from max_msg_size at construction time.
+  // tile_extent_0 (rows) is fixed; tile_extent_1 (cols) scales with message size.
+  // These bound the allocated buffer size.
+  int tile_extent_0 = 64;
+  int tile_extent_1 = 64;
+
+
   // Symmetric heap allocations
   SymmetricTensorBuffer<float> *local_alloc = nullptr;
   SymmetricTensorBuffer<float> *remote_alloc = nullptr;
