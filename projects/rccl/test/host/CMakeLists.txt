@@ -58,7 +58,6 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc (ncclGetSymRegType)
   fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
