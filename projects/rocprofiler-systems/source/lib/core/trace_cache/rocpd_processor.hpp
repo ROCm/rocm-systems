@@ -4,7 +4,6 @@
 #pragma once
 #include "agent_manager.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
@@ -17,6 +16,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <unordered_set>
 
 namespace rocprofsys
@@ -28,8 +28,8 @@ class rocpd_processor_t : public processor_t<rocpd_processor_t>
 {
 public:
     rocpd_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                      const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-                      output_file_registry& output_registry);
+                      const std::shared_ptr<agent_manager>& agent_mngr, pid_t pid,
+                      pid_t ppid);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -71,7 +71,6 @@ private:
     std::shared_ptr<metadata_registry>      m_metadata;
     std::shared_ptr<agent_manager>          m_agent_manager;
     std::unique_ptr<profiler_hub::writer_t> m_writer;
-    output_file_registry&                   m_output_registry;
     std::string                             m_db_output_path;
 
     // PMC keys that have already been warned about

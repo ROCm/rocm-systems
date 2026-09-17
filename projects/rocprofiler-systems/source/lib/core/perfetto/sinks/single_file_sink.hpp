@@ -8,7 +8,7 @@
 #include "core/perfetto/sinks/trace_sink.hpp"
 
 #include <cstdint>
-#include <functional>
+#include <limits>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -16,8 +16,6 @@
 
 namespace rocprofsys
 {
-class output_file_registry;
-
 namespace core
 {
 // Cached-mode sink: concatenates per-pid bytes into one .proto file.
@@ -26,10 +24,10 @@ namespace core
 class single_file_sink : public trace_sink_interface
 {
 public:
-    // An empty output_filename_override defers to config::get_perfetto_output_filename(),
-    // resolved lazily in finalize() rather than at construction time.
-    explicit single_file_sink(output_file_registry& registry,
-                              std::string           output_filename_override = {});
+    // output_filename_override empty -> resolve via
+    // config::get_perfetto_output_filename() at finalize time. Set to a concrete
+    // path to write to a different location than the configured base.
+    explicit single_file_sink(std::string output_filename_override = {});
 
     void on_source_drained(int source_id, std::span<const char> bytes) override;
     void finalize() override;
@@ -47,12 +45,13 @@ public:
 private:
     static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
 
-    std::reference_wrapper<output_file_registry> m_registry;
-    std::string                                  m_output_filename_override{};
-    std::vector<char>                            m_buffer{};
-    std::unordered_map<int, std::uint32_t>       m_source_seq_id_bases{};
-    std::uint64_t                                m_next_source_base{ 1 };
-    bool                                         m_append_mode{ false };
+    static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
+        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+    std::string                            m_output_filename_override{};
+    std::vector<char>                      m_buffer{};
+    std::unordered_map<int, std::uint32_t> m_source_seq_id_bases{};
+    std::uint64_t                          m_next_source_base{ 1 };
+    bool                                   m_append_mode{ false };
     std::uint32_t m_source_stride{ PER_SOURCE_SEQ_ID_BASE_STRIDE };
     std::uint64_t m_seq_id_window_limit_exclusive{ TRUSTED_SEQ_ID_MAX_EXCLUSIVE };
     bool          m_output_disabled{ false };

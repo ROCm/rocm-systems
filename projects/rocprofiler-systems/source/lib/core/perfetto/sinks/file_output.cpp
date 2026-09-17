@@ -4,7 +4,8 @@
 #include "core/perfetto/sinks/file_output.hpp"
 
 #include "common/path.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/artifact.hpp"
+#include "core/output/registry.hpp"
 #include "logger/debug.hpp"
 
 #include <cerrno>
@@ -47,8 +48,7 @@ ensure_parent_directory(const std::string& filename)
 }  // namespace
 
 bool
-write_proto_to(const std::string& filename, const char* data, std::size_t size,
-               output_file_registry& registry)
+write_proto_to(const std::string& filename, const char* data, std::size_t size)
 {
     std::ofstream ofs{};
     if(!path::create_parent_dirs_and_open_ofstream(ofs, filename,
@@ -65,7 +65,7 @@ write_proto_to(const std::string& filename, const char* data, std::size_t size,
         return false;
     }
 
-    registry.register_file(filename, output_format::perfetto);
+    output::registry::instance().register_file(filename, output::output_format::perfetto);
     return true;
 }
 
