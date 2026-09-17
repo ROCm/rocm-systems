@@ -238,8 +238,9 @@ def _gpu_uses_auto_perf_level(agent):
         result = subprocess.run(
             [amd_smi, "metric", "--gpu", "0", "--perf-level", "--json"],
             check=True,
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             timeout=5,
         )
         metrics = json.loads(result.stdout)
