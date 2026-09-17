@@ -427,7 +427,7 @@ static __forceinline std::string& rtrim(std::string& s) {
 static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
 static __forceinline void cpu_relax() {
-#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc__)
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   _mm_pause();
 #elif __has_builtin(__builtin_arm_yield)
   __builtin_arm_yield();
