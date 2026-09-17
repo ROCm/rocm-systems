@@ -93,6 +93,7 @@ TEST_F(RegistryTest, start_new_session_compacts_entries_older_than_the_ended_ses
 TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
 {
     constexpr int WRITES_PER_ROUND = 50;
+    constexpr int SESSION_ROUNDS   = 5;
 
     std::atomic<bool> stop{ false };
     std::thread       writer([&]() {
@@ -105,7 +106,7 @@ TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
         }
     });
 
-    for(int round = 0; round < 5; ++round)
+    for(int round = 0; round < SESSION_ROUNDS; ++round)
     {
         for(int i = 0; i < WRITES_PER_ROUND; ++i)
         {
@@ -208,7 +209,8 @@ TEST_F(RegistryTest, record_process_sparse_upsert_preserves_ppid)
 
 TEST_F(RegistryTest, record_process_non_empty_fields_win_on_upsert)
 {
-    constexpr pid_t MAIN_PID = 1001;
+    constexpr pid_t MAIN_PID     = 1001;
+    constexpr pid_t RESOLVED_PPID = 7;
 
     process_metadata sparse;
     sparse.pid     = MAIN_PID;
@@ -218,7 +220,7 @@ TEST_F(RegistryTest, record_process_non_empty_fields_win_on_upsert)
 
     process_metadata rich;
     rich.pid     = MAIN_PID;
-    rich.ppid    = 7;
+    rich.ppid    = RESOLVED_PPID;
     rich.command = "main-resolved";
     registry::instance().record_process(rich);
 
