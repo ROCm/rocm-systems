@@ -247,9 +247,7 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
   // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
   // CE never dispatches. Full contract is on the declaration in rccl_common.h.
-  return !ceAlltoAllAllowed &&
-         rcclDdaEnabled(comm, totalBytes, kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
-                        kDdaAlltoAllGfx1250ThresholdBytes);
+  return !ceAlltoAllAllowed && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll));
 }
 
 // Check if symmetric kernels is requested for this collective.
