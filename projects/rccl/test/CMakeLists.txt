@@ -475,6 +475,7 @@ if(BUILD_TESTS)
     )
 
     target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
       ${PROJECT_SOURCE_DIR}/src

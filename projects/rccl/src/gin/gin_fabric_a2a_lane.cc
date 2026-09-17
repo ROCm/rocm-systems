@@ -47,6 +47,28 @@ ncclResult_t ncclGinFabricA2ALaneAgreeEnabled(struct ncclComm* comm, int localEn
   return ncclGinBootstrapAgreeAll(comm, localEnabled, allEnabled);
 }
 
+ncclResult_t ncclGinFabricA2ALaneAgreeEnabledAndThreshold(struct ncclComm* comm, int localEnabled,
+                                                         size_t localThreshold, int* allEnabled) {
+  if (allEnabled == nullptr) return ncclInvalidArgument;
+  *allEnabled = 0;
+
+  struct Vote {
+    size_t threshold;
+    int enabled;
+  };
+  const Vote local{localThreshold, localEnabled ? 1 : 0};
+  int agreed = 1;
+  ncclResult_t ret = ncclGinBootstrapAgree(comm, local, [&agreed](Vote const* votes, int n) {
+    const size_t threshold = votes[0].threshold;
+    for (int i = 0; i < n; ++i) {
+      if (!votes[i].enabled || votes[i].threshold != threshold) agreed = 0;
+    }
+  });
+  if (ret != ncclSuccess) return ret;
+  *allEnabled = agreed;
+  return ncclSuccess;
+}
+
 ncclResult_t ginFabricA2ALaneBuildPeerScratchDev(struct ncclComm* comm, void*** outPeerDev, size_t* outRegionBytes) {
   if (outPeerDev == nullptr || outRegionBytes == nullptr) return ncclInvalidArgument;
   *outPeerDev = nullptr;

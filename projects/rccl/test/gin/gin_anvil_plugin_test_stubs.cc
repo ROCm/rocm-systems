@@ -29,6 +29,8 @@ struct State {
   int probeResult = 1;
   bool bootstrapFail = false;
   int bootstrapNranks = 1;
+  bool bootstrapPeerThresholdSet = false;
+  size_t bootstrapPeerThreshold = 0;
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
@@ -58,6 +60,10 @@ void Reset() { g = State{}; }
 void SetProbeResult(int result) { g.probeResult = result; }
 void SetBootstrapFail(bool fail) { g.bootstrapFail = fail; }
 void SetBootstrapNranks(int nranks) { g.bootstrapNranks = nranks; }
+void SetBootstrapPeerThreshold(size_t threshold) {
+  g.bootstrapPeerThresholdSet = true;
+  g.bootstrapPeerThreshold = threshold;
+}
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
@@ -145,6 +151,13 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
                bytes + static_cast<size_t>(src) * static_cast<size_t>(size), static_cast<size_t>(size));
       }
     }
+  }
+  // The LL agreement vote starts with size_t threshold and is wider than the
+  // existing int-only agreements. Override rank 1 after replication to model
+  // processes that parsed different per-rank environment values.
+  if (GinAnvilPluginStubs::g.bootstrapPeerThresholdSet && n > 1 &&
+      size >= static_cast<int>(sizeof(size_t) + sizeof(int))) {
+    memcpy(bytes + static_cast<size_t>(size), &GinAnvilPluginStubs::g.bootstrapPeerThreshold, sizeof(size_t));
   }
   if (size == static_cast<int>(sizeof(int))) {
     int* devs = static_cast<int*>(allData);

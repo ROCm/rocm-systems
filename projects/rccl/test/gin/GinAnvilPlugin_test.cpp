@@ -357,6 +357,33 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricA2ALane) {
   plugin_.finalize(ictx);
 }
 
+TEST_F(GinAnvilPluginTest, CreateContext_ThresholdMismatchDisablesFabricA2ALane) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  setupFabricDdaResources(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+  GinAnvilPluginStubs::SetBootstrapPeerThreshold(128u * 1024u);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2AEnabled, 0u);
+  EXPECT_EQ(hostCtx.fabricA2ALlThreshold, 0u);
+  EXPECT_EQ(hostCtx.fabricA2APeerScratch, nullptr);
+  EXPECT_EQ(hostCtx.fabricA2ALlEpoch, nullptr);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 TEST_F(GinAnvilPluginTest, CreateContext_LsaEnvUnsetDisablesLane) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);

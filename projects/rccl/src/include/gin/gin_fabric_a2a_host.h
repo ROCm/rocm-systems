@@ -38,6 +38,12 @@ void ncclGinFabricA2ALaneClearAll();
 // that as "not eligible". A caller-side gate must not skip this call: it is a
 // collective, so a rank that returns early hangs the peers blocked inside it.
 ncclResult_t ncclGinFabricA2ALaneAgreeEnabled(struct ncclComm* comm, int localEnabled, int* allEnabled);
+// AND-reduce localEnabled and require the LL threshold to match on every rank.
+// The threshold determines both the DDA allocation size and the GIN carve
+// offset, so enabling the lane with divergent values would corrupt peer
+// scratch. *allEnabled is written only after a successful allgather.
+ncclResult_t ncclGinFabricA2ALaneAgreeEnabledAndThreshold(struct ncclComm* comm, int localEnabled,
+                                                         size_t localThreshold, int* allEnabled);
 // Build a device peer-scratch table pointing at the GIN LL carve-out in ddaScratch.
 // Rank-local and fallible: callers must vote the result into a collective agree
 // before any later allgather, not NCCLCHECKGOTO out between two agrees.

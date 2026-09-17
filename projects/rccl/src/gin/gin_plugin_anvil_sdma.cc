@@ -976,7 +976,12 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
       }
     }
     int allEnabled = 0;
-    NCCLCHECKGOTO(ncclGinFabricA2ALaneAgreeEnabled(cctx->comm, localEnabled, &allEnabled), ret, fail);
+    // Agree both eligibility and geometry. llThreshold determines each rank's
+    // DDA allocation and the offset added to peer scratch bases; a boolean-only
+    // vote could arm ranks with incompatible carve offsets.
+    NCCLCHECKGOTO(
+        ncclGinFabricA2ALaneAgreeEnabledAndThreshold(cctx->comm, localEnabled, llThreshold, &allEnabled), ret,
+        fail);
     if (allEnabled) {
       ctx->gpuCtxHost.fabricA2ALlThreshold = lane.llThreshold;
       ctx->gpuCtxHost.fabricA2AEnabled = 1;
