@@ -489,6 +489,13 @@ std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHip
 std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
     DefaultHipStreamWaitEvent;
 
+static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
+                                             hipStreamBatchMemOpParams*, unsigned int)
+{
+    FailLoudUnfaked("hip_fakes", "hipStreamBatchMemOp");
+}
+std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)>
+    g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 // Restore every HIP hook to its default.
 void ResetHipFakes()
 {
@@ -545,6 +552,7 @@ void ResetHipFakes()
     g_hipGetLastError               = DefaultHipGetLastError;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
+    g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
 }
 
 // ===========================================================================
@@ -664,6 +672,12 @@ hipError_t hipHostFree(void* ptr) { return g_hipHostFree(ptr); }
 hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
 {
     return g_hipHostMalloc(ptr, size, flags);
+}
+
+hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                               hipStreamBatchMemOpParams* params, unsigned int flags)
+{
+    return g_hipStreamBatchMemOp(stream, count, params, flags);
 }
 
 hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }

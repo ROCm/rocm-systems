@@ -180,6 +180,12 @@ extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
 
+// hipStreamBatchMemOp: the HIP primitive behind rma_proxy_launch.cc's chunking
+// wrapper. Keep this distinct from g_cuStreamBatchMemOp, which is the RCCL
+// wrapper used as a seam by rma_ce.cc.
+extern std::function<hipError_t(hipStream_t /*stream*/, unsigned int /*count*/,
+                                hipStreamBatchMemOpParams* /*params*/, unsigned int /*flags*/)>
+    g_hipStreamBatchMemOp;
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
