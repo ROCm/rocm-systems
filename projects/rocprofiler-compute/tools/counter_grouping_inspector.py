@@ -180,9 +180,8 @@ def run_soc_detect_and_coalesce(
     )
 
     counters, _unused_filter_blocks = soc.detect_counters()
-    # Same as OmniSoC_Base.perfmon_filter before perfmon_coalesce: drop
-    # SQ_ACCUM_PREV_HIRES here; it is injected again when LEVEL counters are
-    # allocated so pass grouping matches profiling.
+    # Drop legacy SQ_ACCUM_PREV_HIRES if present; rocprofiler-sdk uses named
+    # *_ACCUM counters (accumulate(LEVEL, HIGH_RES) in sdk_config.yaml).
     counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), []
