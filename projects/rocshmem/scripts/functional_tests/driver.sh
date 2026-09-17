@@ -255,45 +255,9 @@ AdjustGridBarrierProblemSize() {
 ExecTest() {
   if [[ "$1" == "buffer_register_symmetric" ]]; then
     local selected_backend="${ROCSHMEM_BACKEND:-${ROCSHMEM_BACKEND_TYPE:-$TEST}}"
-    if [[ "$selected_backend" == ro* ]]; then
-      echo "Skip:   buffer_register_symmetric (RO backend is unsupported)"
+    if [[ "${ROCSHMEM_HEAP_ALLOCATOR_TYPE,,}" != "vmm_posix" ]]; then
+      echo "Skip:   buffer_register_symmetric (set ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix)"
       return
-    fi
-
-    local rocm_version=""
-    if [[ -x "$ROCSHMEM_INFO" ]]; then
-      rocm_version=$("$ROCSHMEM_INFO" 2>/dev/null |
-        awk -F ':' '/^# ROCm[[:space:]]*:/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); split($2, fields, " "); print fields[1]; exit}')
-    fi
-
-    local rocm_major=0
-    local rocm_minor=0
-    IFS='.' read -r rocm_major rocm_minor _ <<< "$rocm_version"
-    if (( rocm_major < 7 || (rocm_major == 7 && rocm_minor < 2) )); then
-      echo "Skip:   buffer_register_symmetric (requires ROCm 7.2 or newer)"
-      return
-    fi
-
-    if ! command -v rocminfo >/dev/null 2>&1 ||
-       ! rocminfo 2>/dev/null |
-         awk -F ':' '
-           /^[[:space:]]*VMM Support[[:space:]]*:/ {
-             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
-             if (toupper($2) == "YES") found = 1
-           }
-           END { exit !found }
-         '; then
-      echo "Skip:   buffer_register_symmetric (HIP VMM is unavailable)"
-      return
-    fi
-
-    if [ $USE_SLR -ne 1 ]; then
-      if ! command -v nm >/dev/null ||
-         ! nm -D "$APP" 2>/dev/null |
-           awk '$NF == "PMIx_Init" { found = 1 } END { exit !found }'; then
-        echo "Skip:   buffer_register_symmetric (MPI UUID bootstrap requires PMIx)"
-        return
-      fi
     fi
   fi
 
@@ -363,7 +327,6 @@ ExecTest_SLR() {
   fi
   if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
     env_vars+=(
-      "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
       "ROCSHMEM_GDA_ENABLE_DMABUF=1"
     )
     if [[ "${selected_backend:-}" == gda* ]]; then
@@ -510,7 +473,7 @@ ExecTest_MPI() {
   if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
     test_env_args+=(
       -x "ROCSHMEM_TEST_UUID=1"
-      -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix"
+      -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=$ROCSHMEM_HEAP_ALLOCATOR_TYPE"
       -x "ROCSHMEM_GDA_ENABLE_DMABUF=1"
     )
     if [[ "${selected_backend:-}" == gda* ]]; then
