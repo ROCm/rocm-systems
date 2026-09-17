@@ -23,22 +23,22 @@ using rocprofsys::output::process_tree;
 artifact
 make_row(std::string path, pid_t pid, std::uint64_t size_bytes = 0)
 {
-    artifact a{};
-    a.path       = std::move(path);
-    a.pid        = pid;
-    a.size_bytes = size_bytes;
-    a.format     = output_format::text;
-    return a;
+    artifact row{};
+    row.path       = std::move(path);
+    row.pid        = pid;
+    row.size_bytes = size_bytes;
+    row.format     = output_format::text;
+    return row;
 }
 
 process_metadata
 make_meta(pid_t pid, pid_t ppid, std::string command = "")
 {
-    process_metadata m{};
-    m.pid     = pid;
-    m.ppid    = ppid;
-    m.command = std::move(command);
-    return m;
+    process_metadata meta{};
+    meta.pid     = pid;
+    meta.ppid    = ppid;
+    meta.command = std::move(command);
+    return meta;
 }
 }  // namespace
 

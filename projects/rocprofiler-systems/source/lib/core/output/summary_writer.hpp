@@ -38,7 +38,7 @@ box_width(std::span<const std::string> header_lines,
 
 // Writes nothing at all if `rows` is empty — there is no output to summarize.
 void
-write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
+write_summary(std::ostream& stream, const process_tree& tree, const run_metadata& meta,
               std::span<const artifact> rows);
 
 }  // namespace rocprofsys::output

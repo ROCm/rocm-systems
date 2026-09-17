@@ -71,10 +71,10 @@ run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
 {
     run_metadata meta{};
 
-    const auto now = std::chrono::system_clock::now();
-    const auto tt  = std::chrono::system_clock::to_time_t(now);
+    const auto now           = std::chrono::system_clock::now();
+    const auto time_t_value  = std::chrono::system_clock::to_time_t(now);
     std::tm    utc{};
-    if(::gmtime_r(&tt, &utc) != nullptr)
+    if(::gmtime_r(&time_t_value, &utc) != nullptr)
     {
         std::array<char, ISO_8601_BUFFER_BYTES> buf{};
         if(std::strftime(buf.data(), buf.size(), "%Y-%m-%dT%H:%M:%SZ", &utc) > 0)
@@ -113,28 +113,28 @@ repeat_glyph(std::string_view glyph, std::size_t count)
 }
 
 std::string
-strip_terminal_control_chars(std::string_view s)
+strip_terminal_control_chars(std::string_view text)
 {
     std::string out;
-    out.reserve(s.size());
-    for(std::size_t i = 0; i < s.size();)
+    out.reserve(text.size());
+    for(std::size_t i = 0; i < text.size();)
     {
-        const auto byte = static_cast<unsigned char>(s[i]);
+        const auto byte = static_cast<unsigned char>(text[i]);
         // CSI sequence: ESC [ ... <final byte in CSI_FINAL_BYTE_MIN..CSI_FINAL_BYTE_MAX>
-        if(byte == ESCAPE_BYTE && i + 1 < s.size() && s[i + 1] == '[')
+        if(byte == ESCAPE_BYTE && i + 1 < text.size() && text[i + 1] == '[')
         {
-            std::size_t j = i + 2;
-            while(j < s.size())
+            std::size_t scan_index = i + 2;
+            while(scan_index < text.size())
             {
-                const auto fb = static_cast<unsigned char>(s[j]);
-                if(fb >= CSI_FINAL_BYTE_MIN && fb <= CSI_FINAL_BYTE_MAX)
+                const auto final_byte = static_cast<unsigned char>(text[scan_index]);
+                if(final_byte >= CSI_FINAL_BYTE_MIN && final_byte <= CSI_FINAL_BYTE_MAX)
                 {
-                    ++j;
+                    ++scan_index;
                     break;
                 }
-                ++j;
+                ++scan_index;
             }
-            i = j;
+            i = scan_index;
             continue;
         }
         // Drop other C0 controls + DEL; keep tab and newline so downstream
@@ -268,12 +268,12 @@ process_label(const process_node& node, pid_t main_pid)
 [[nodiscard]] std::string
 display_path(const std::string& path, const std::filesystem::path& cwd)
 {
-    std::filesystem::path p{ path };
-    if(!p.is_absolute())
+    std::filesystem::path resolved{ path };
+    if(!resolved.is_absolute())
     {
-        p = cwd / p;
+        resolved = cwd / resolved;
     }
-    return strip_terminal_control_chars(p.string());
+    return strip_terminal_control_chars(resolved.string());
 }
 
 [[nodiscard]] std::string
@@ -334,9 +334,9 @@ derive_output_dir(const run_metadata& meta, std::span<const artifact> rows)
 void
 push_root_tasks(std::vector<render_task>& stack, const process_tree& tree)
 {
-    for(auto it = tree.roots().rbegin(); it != tree.roots().rend(); ++it)
+    for(auto root_it = tree.roots().rbegin(); root_it != tree.roots().rend(); ++root_it)
     {
-        stack.push_back({ .node         = &*it,
+        stack.push_back({ .node         = &*root_it,
                          .connector    = std::string{},
                          .child_prefix = std::string{ GLYPH_ROOT_INDENT } });
     }
@@ -370,19 +370,19 @@ push_child_tasks(std::vector<render_task>& stack, const render_task& task,
                  const process_node& node)
 {
     const std::size_t child_count = node.children.size();
-    for(std::size_t ri = child_count; ri-- > 0;)
+    for(std::size_t reverse_index = child_count; reverse_index-- > 0;)
     {
-        const bool  last_child = (ri + 1 == child_count);
+        const bool  last_child = (reverse_index + 1 == child_count);
         std::string child_conn =
             task.child_prefix +
             std::string{ last_child ? GLYPH_CHILD_CONN_LAST : GLYPH_CHILD_CONN_MID };
         std::string next_prefix =
             task.child_prefix +
             std::string{ last_child ? GLYPH_CHILD_INDENT_LAST : GLYPH_CHILD_INDENT_MID };
-        stack.push_back({ .node         = &node.children[ri],
+        stack.push_back({ .node         = &node.children[reverse_index],
                          .connector    = std::move(child_conn),
                          .child_prefix = std::move(next_prefix) });
-        if(ri > 0)
+        if(reverse_index > 0)
         {
             stack.push_back(
                 { .node = nullptr, .connector = {}, .child_prefix = task.child_prefix });
@@ -514,7 +514,7 @@ build_legend(std::span<const artifact> rows)
 }  // namespace
 
 void
-write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
+write_summary(std::ostream& stream, const process_tree& tree, const run_metadata& meta,
               std::span<const artifact> rows)
 {
     if(rows.empty())
@@ -538,7 +538,7 @@ write_summary(std::ostream& os, const process_tree& tree, const run_metadata& me
         out += fmt::format("\n  {}\n", legend);
     }
 
-    os << out;
+    stream << out;
 }
 
 }  // namespace rocprofsys::output
