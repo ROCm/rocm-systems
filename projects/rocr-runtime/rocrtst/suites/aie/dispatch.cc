@@ -12,15 +12,14 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <map>
 #include <numeric>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
+#include <elf.h>
+
 #include "gtest/gtest.h"
 
-#include "aie_full_elf.h"
 #include "aie_test_env.h"
 
 #include "hsa/hsa.h"
@@ -294,6 +293,135 @@ std::uint64_t enqueue_aie_packet(hsa_queue_t* q, const hsa_amd_aie_kernel_dispat
   return wr_idx;
 }
 
+// ---------------------------------------------------------------------------
+// Unified hsaco artifacts
+//
+// The suite's CMake packages each design's artifacts into an AIE hsaco: the PDI + instruction
+// sequence build into <design>.hsaco and the full-ELF build into <design>_elf.hsaco. A dispatch
+// packet names a kernel loaded from one of these and carries nothing else about it -- which of
+// the two shapes it turns into is the loader's business, not the application's.
+// ---------------------------------------------------------------------------
+const std::filesystem::path kHsacoPath = STRINGIFY(DEFAULT_HSACO_PATH);
+constexpr const char* kHsacoKernelName = DEFAULT_HSACO_KERNEL_NAME;
+const std::filesystem::path kMulHsacoPath = STRINGIFY(MUL_HSACO_PATH);
+constexpr const char* kMulHsacoKernelName = MUL_HSACO_KERNEL_NAME;
+const std::filesystem::path kElfHsacoPath = STRINGIFY(DEFAULT_ELF_HSACO_PATH);
+constexpr const char* kElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
+const std::filesystem::path kMulElfHsacoPath = STRINGIFY(MUL_ELF_HSACO_PATH);
+// Neither design names its aie.device or its runtime sequence, so aiecc defaults both to the
+// same "<device>:<sequence>" key.
+constexpr const char* kMulElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
+
+// The build skips packaging an hsaco when the toolchain cannot produce what it is built from, so
+// every test that needs one checks first and skips itself rather than failing.
+bool hsaco_available() { return std::filesystem::exists(kHsacoPath); }
+bool mul_hsaco_available() { return std::filesystem::exists(kMulHsacoPath); }
+bool elf_hsaco_available() { return std::filesystem::exists(kElfHsacoPath); }
+bool mul_elf_hsaco_available() { return std::filesystem::exists(kMulElfHsacoPath); }
+
+// Reads a whole hsaco file into memory. Returns an empty vector on failure; callers are expected
+// to have checked the matching *_available() first.
+std::vector<std::uint8_t> read_hsaco(const std::filesystem::path& path) {
+  std::size_t size = 0;
+  auto f = open_binary(path, &size);
+  if (!f) return {};
+  std::vector<std::uint8_t> buf(size);
+  if (!read_exact(f, buf.data(), size)) return {};
+  return buf;
+}
+
+std::vector<std::uint8_t> hsaco_bytes() { return read_hsaco(kHsacoPath); }
+std::vector<std::uint8_t> elf_hsaco_bytes() { return read_hsaco(kElfHsacoPath); }
+
+std::size_t hsaco_size() {
+  std::size_t size = 0;
+  open_binary(kHsacoPath, &size);
+  return size;
+}
+
+const char* kernel_name() { return kHsacoKernelName; }
+
+// Owns one loaded, frozen AIE executable and the reader it came from, and hands out the kernel
+// object handles its dispatch packets carry. A separate instance per load is what gives the PDI
+// cache tests distinct PDI buffer objects from a single hsaco: each load places its own copy.
+class loaded_hsaco {
+ public:
+  loaded_hsaco() = default;
+  loaded_hsaco(const loaded_hsaco&) = delete;
+  loaded_hsaco& operator=(const loaded_hsaco&) = delete;
+  ~loaded_hsaco() { reset(); }
+
+  // Loads and freezes `bytes` against `agent`. Leaves nothing behind on failure.
+  testing::AssertionResult load(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent) {
+    reset();
+    if (bytes.empty()) {
+      return testing::AssertionFailure() << "empty code object";
+    }
+    if (auto s = hsa_code_object_reader_create_from_memory(bytes.data(), bytes.size(), &reader_);
+        s != HSA_STATUS_SUCCESS) {
+      return testing::AssertionFailure() << "hsa_code_object_reader_create_from_memory: " << s;
+    }
+    if (auto s = hsa_executable_create_alt(HSA_PROFILE_FULL,
+                                           HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                           &executable_);
+        s != HSA_STATUS_SUCCESS) {
+      hsa_code_object_reader_destroy(reader_);
+      reader_ = {};
+      return testing::AssertionFailure() << "hsa_executable_create_alt: " << s;
+    }
+    loaded_ = true;
+    agent_ = agent;
+    if (auto s = hsa_executable_load_agent_code_object(executable_, agent, reader_, nullptr,
+                                                       nullptr);
+        s != HSA_STATUS_SUCCESS) {
+      reset();
+      return testing::AssertionFailure() << "hsa_executable_load_agent_code_object: " << s;
+    }
+    if (auto s = hsa_executable_freeze(executable_, nullptr); s != HSA_STATUS_SUCCESS) {
+      reset();
+      return testing::AssertionFailure() << "hsa_executable_freeze: " << s;
+    }
+    return testing::AssertionSuccess();
+  }
+
+  testing::AssertionResult load(const std::filesystem::path& path, hsa_agent_t agent) {
+    return load(read_hsaco(path), agent);
+  }
+
+  // The handle to put in a dispatch packet, or 0 if `name` is not in this executable.
+  std::uint64_t kernel_object(const char* name) const {
+    if (!loaded_) return 0;
+    hsa_executable_symbol_t symbol{};
+    hsa_agent_t agent = agent_;
+    if (hsa_executable_get_symbol_by_name(executable_, name, &agent, &symbol) !=
+        HSA_STATUS_SUCCESS) {
+      return 0;
+    }
+    std::uint64_t kernel_object = 0;
+    if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                       &kernel_object) != HSA_STATUS_SUCCESS) {
+      return 0;
+    }
+    return kernel_object;
+  }
+
+  void reset() {
+    if (loaded_) {
+      hsa_executable_destroy(executable_);
+      hsa_code_object_reader_destroy(reader_);
+      executable_ = {};
+      reader_ = {};
+      loaded_ = false;
+    }
+  }
+
+ private:
+  hsa_executable_t executable_{};
+  hsa_code_object_reader_t reader_{};
+  hsa_agent_t agent_{};
+  bool loaded_ = false;
+};
+
 // Compile-time constants and dispatch helper for the vector-scalar-add AIE
 // kernel: adds 1 to every element of a uint32 array of element_count entries.
 struct aie_vector_scalar_kernel {
@@ -316,31 +444,26 @@ struct aie_vector_scalar_kernel {
   /**
    * @brief Create a AIE packet payload for vector-scalar add.
    *
-   * @param pdi_buf buffer containing the PDI for this packet
-   * @param insts_buf buffer containing the instruction sequence for this packet
-   * @param insts_size size of the instruction sequence in bytes
+   * @param kernel_object kernel object handle of the loaded vsadd kernel
    * @param input source buffer for the packet
    * @param output destination buffer for the packet
    * @param kernargs pointer to the kernel arguments buffer
    * @param completion_signal signal to be used for completion notification
-   * @param pkt_payload packet payload
    * @param q HSA queue to which the packet will be submitted
    */
-  static std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::uint32_t insts_size,
-                                       void* input, void* output, uint64_t* kernargs,
-                                       hsa_signal_t completion_signal, hsa_queue_t* q) {
+  static std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, void* output,
+                                       uint64_t* kernargs, hsa_signal_t completion_signal,
+                                       hsa_queue_t* q) {
     kernargs[0] = reinterpret_cast<uint64_t>(input);
     kernargs[1] = reinterpret_cast<uint64_t>(output);
     kernargs[2] = element_bytes;  // input size in bytes
     kernargs[3] = element_bytes;  // output size in bytes
 
     auto pkt = make_aie_packet(completion_signal);
-    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
-    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
+    pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
+    pkt.kernel_object_high = kernel_object >> 32;
     pkt.num_kernargs = num_kernargs;
     pkt.kernarg_address = kernargs;
-    pkt.insts_size = insts_size;
-    pkt.pdi_addr = pdi_buf;
 
     return enqueue_aie_packet(q, pkt);
   }
@@ -377,27 +500,23 @@ struct aie_vector_scalar_mul_kernel {
   /**
    * @brief Create an AIE packet payload for vector-scalar mul.
    *
-   * @param pdi_buf buffer containing the PDI for this packet
-   * @param insts_buf buffer containing the instruction sequence for this packet
-   * @param insts_size size of the instruction sequence in bytes
+   * @param kernel_object kernel object handle of the loaded vsmul kernel
    * @param inout buffer read and written by the packet
    * @param kernargs pointer to the kernel arguments buffer
    * @param completion_signal signal to be used for completion notification
    * @param q HSA queue to which the packet will be submitted
    */
-  static std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::uint32_t insts_size,
-                                       void* inout, uint64_t* kernargs,
-                                       hsa_signal_t completion_signal, hsa_queue_t* q) {
+  static std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* inout,
+                                       uint64_t* kernargs, hsa_signal_t completion_signal,
+                                       hsa_queue_t* q) {
     kernargs[0] = reinterpret_cast<uint64_t>(inout);
     kernargs[1] = element_bytes;  // in/out size in bytes
 
     auto pkt = make_aie_packet(completion_signal);
-    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
-    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
+    pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
+    pkt.kernel_object_high = kernel_object >> 32;
     pkt.num_kernargs = num_kernargs;
     pkt.kernarg_address = kernargs;
-    pkt.insts_size = insts_size;
-    pkt.pdi_addr = pdi_buf;
 
     return enqueue_aie_packet(q, pkt);
   }
@@ -609,6 +728,39 @@ class DispatchTest : public aie_test::AieTestBase {
         hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
         HSA_STATUS_SUCCESS);
   }
+
+  void TearDown() override {
+    // Release the executables before the base class shuts the runtime down: destroying one after
+    // hsa_shut_down() is a no-op whose error nothing can see, and it owns device memory.
+    loaded_.clear();
+    AieTestBase::TearDown();
+  }
+
+  // Loads `path` and returns the kernel object for `name`, or 0 on failure. The executable is
+  // owned by the fixture and lives until TearDown, so every handle handed out stays valid for the
+  // whole test. Each call loads a fresh executable, which is what gives a caller distinct PDI
+  // buffer objects from one hsaco.
+  std::uint64_t LoadKernel(const std::filesystem::path& path, const char* name) {
+    auto loaded = std::make_unique<loaded_hsaco>();
+    if (auto r = loaded->load(path, aie_agents.front()); !r) {
+      ADD_FAILURE() << "loading " << path << ": " << r.message();
+      return 0;
+    }
+    const std::uint64_t kernel_object = loaded->kernel_object(name);
+    if (kernel_object == 0) {
+      ADD_FAILURE() << "kernel '" << name << "' not published by " << path;
+      return 0;
+    }
+    loaded_.push_back(std::move(loaded));
+    return kernel_object;
+  }
+
+  // The two PDI + instruction sequence designs most tests use.
+  std::uint64_t LoadAddKernel() { return LoadKernel(kHsacoPath, kHsacoKernelName); }
+  std::uint64_t LoadMulKernel() { return LoadKernel(kMulHsacoPath, kMulHsacoKernelName); }
+
+ private:
+  std::vector<std::unique_ptr<loaded_hsaco>> loaded_;
 };
 
 TEST_F(DispatchTest, SingleDispatch) {
@@ -618,14 +770,10 @@ TEST_F(DispatchTest, SingleDispatch) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   std::uint32_t* input = nullptr;
@@ -653,7 +801,7 @@ TEST_F(DispatchTest, SingleDispatch) {
 
   // --- Dispatch packet ---
   const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi_buf, insts_buf, insts_size, input, output, kernargs, signal, queue);
+      kernel_object, input, output, kernargs, signal, queue);
 
   // --- Ring doorbell ---
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -672,8 +820,6 @@ TEST_F(DispatchTest, SingleDispatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, SingleDispatchVMem) {
@@ -698,32 +844,13 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  // These must come from the dev pool, which is the XDNA dev heap. The dev heap
-  // is incompatible with the vmem reserve+map path (see
-  // docs/bug-vmem-map-dev-heap.md), so they use plain pool allocation while the
-  // I/O buffers and kernargs below go through the vmem API. The vmem variant is
-  // preserved behind `#if 0` for when the runtime/driver gains dev-heap vmem
-  // support.
-#if 0
-  vmem_buffer pdi{};
-  ASSERT_TRUE(load_binary_vmem(dev_pool, access_agents, aie_vector_scalar_kernel::pdiPath, &pdi));
-  void* const pdi_buf = pdi.va;
-
-  vmem_buffer insts{};
-  ASSERT_TRUE(
-      load_binary_vmem(dev_pool, access_agents, aie_vector_scalar_kernel::instsPath, &insts));
-  void* const insts_buf = insts.va;
-  const std::size_t insts_size = insts.size;
-#else
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-#endif
+  // --- Load the kernel ---
+  // The runtime places the kernel's own buffers in the XDNA dev heap; only the I/O buffers and
+  // kernargs below go through the vmem API, which the dev heap is incompatible with (see
+  // docs/bug-vmem-map-dev-heap.md).
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   vmem_buffer input{};
@@ -750,7 +877,7 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
 
   // --- Dispatch packet ---
   const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi_buf, insts_buf, insts_size, input.va, output.va, static_cast<std::uint64_t*>(kernargs.va),
+      kernel_object, input.va, output.va, static_cast<std::uint64_t*>(kernargs.va),
       signal, queue);
 
   // --- Ring doorbell ---
@@ -770,13 +897,6 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
   EXPECT_TRUE(vmem_free(kernargs));
   EXPECT_TRUE(vmem_free(output));
   EXPECT_TRUE(vmem_free(input));
-#if 0
-  EXPECT_TRUE(vmem_free(insts));
-  EXPECT_TRUE(vmem_free(pdi));
-#else
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
-#endif
 }
 
 TEST_F(DispatchTest, MultiDispatch) {
@@ -788,14 +908,10 @@ TEST_F(DispatchTest, MultiDispatch) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -834,7 +950,7 @@ TEST_F(DispatchTest, MultiDispatch) {
 
     // Dispatch packet
     const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+        kernel_object, input_ptr, output_ptr, kernarg_ptr, signal, queue);
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -854,8 +970,6 @@ TEST_F(DispatchTest, MultiDispatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatchAsync) {
@@ -867,14 +981,10 @@ TEST_F(DispatchTest, MultiDispatchAsync) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -914,7 +1024,7 @@ TEST_F(DispatchTest, MultiDispatchAsync) {
 
     // Dispatch packet
     last_wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+        kernel_object, input_ptr, output_ptr, kernarg_ptr, signal, queue);
   }
 
   // Ring doorbell
@@ -934,8 +1044,6 @@ TEST_F(DispatchTest, MultiDispatchAsync) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatchWrapAround) {
@@ -949,14 +1057,10 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -995,7 +1099,7 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
 
     // Dispatch packet
     const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+        kernel_object, input_ptr, output_ptr, kernarg_ptr, signal, queue);
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -1012,7 +1116,7 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
 
     // Dispatch packet
     const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+        kernel_object, input_ptr, output_ptr, kernarg_ptr, signal, queue);
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   }
@@ -1031,8 +1135,6 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
@@ -1046,14 +1148,10 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -1092,7 +1190,7 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
 
     // Dispatch packet
     const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+        kernel_object, input_ptr, output_ptr, kernarg_ptr, signal, queue);
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -1110,7 +1208,7 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
 
     // Dispatch packet
     last_wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+        kernel_object, input_ptr, output_ptr, kernarg_ptr, signal, queue);
   }
 
   // Ring doorbell
@@ -1130,8 +1228,6 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 TEST(Dispatch, AgentInfo) {
@@ -1237,14 +1333,10 @@ TEST_F(DispatchTest, DestroyQueueWithPendingPacket) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Allocate I/O buffers ---
   std::uint32_t* input = nullptr;
@@ -1270,7 +1362,7 @@ TEST_F(DispatchTest, DestroyQueueWithPendingPacket) {
 
   // --- Dispatch and ring the doorbell, then tear the queue down without waiting ---
   const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi_buf, insts_buf, insts_size, input, output, kernargs, signal, queue);
+      kernel_object, input, output, kernargs, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
 
   // AieAqlQueue::Inactivate destroys the kernel-mode queue; it does not drain the ring,
@@ -1283,8 +1375,6 @@ TEST_F(DispatchTest, DestroyQueueWithPendingPacket) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
@@ -1300,14 +1390,10 @@ TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
               HSA_STATUS_SUCCESS);
   }
 
-  // --- Load PDI and instructions (shared by both queues) ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load the kernel (shared by both queues) ---
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   // --- Per-queue I/O buffers, so a cross-queue bleed shows up as a wrong value ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * num_rounds;
@@ -1348,7 +1434,7 @@ TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
       auto* kernarg_ptr = kernargs[q] + iter * aie_vector_scalar_kernel::num_kernargs_sizes;
 
       const auto wr_idx =
-          aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, input_ptr,
+          aie_vector_scalar_kernel::dispatch_packet(kernel_object, input_ptr,
                                                     output_ptr, kernarg_ptr, signals[q], queues[q]);
       hsa_signal_store_screlease(queues[q]->doorbell_signal, wr_idx);
     }
@@ -1372,20 +1458,17 @@ TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
     EXPECT_EQ(hsa_amd_memory_pool_free(output[q]), HSA_STATUS_SUCCESS);
     EXPECT_EQ(hsa_amd_memory_pool_free(input[q]), HSA_STATUS_SUCCESS);
   }
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 
 // ===========================================================================
 // Full-ELF dispatch
 //
-// The application, not the runtime, reads the ELF: it extracts the PDI and the
-// control code, allocates both from the device pool, and patches its argument
-// addresses into the control code. The packet then names those buffers. The one
-// thing the application cannot compute is the PDI's device address, so it passes
-// the offset of that patch site and the runtime writes it -- and that non-zero
-// offset is also what tells the runtime this is a full-ELF dispatch.
+// The runtime reads the ELF at load: it places the PDI in device memory, keeps a pristine copy of
+// the control code, and records where the arguments go. A dispatch names the kernel object and
+// nothing else -- the runtime copies the control code per packet, patches the packet's arguments
+// into the copy, and dispatches that. The application cannot tell this apart from a PDI dispatch
+// except by which artifacts its hsaco was built from.
 //
 // Supported on aie2p only.
 // ===========================================================================
@@ -1430,48 +1513,6 @@ class pool_buffer {
   void* ptr_ = nullptr;
 };
 
-// Load a file straight into a pool_buffer, so ownership never passes through a raw pointer the
-// caller has to remember to release.
-testing::AssertionResult load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path,
-                                     pool_buffer* out, std::size_t& size_out) {
-  void* p = nullptr;
-  if (auto r = load_binary(pool, path, &p, size_out); !r) {
-    // Leave nothing half-built: a caller that loads several artifacts in sequence should not see
-    // a stale size paired with an empty buffer.
-    out->reset();
-    size_out = 0;
-    return r;
-  }
-  *out = pool_buffer(p);
-  return testing::AssertionSuccess();
-}
-
-// A PDI-path design's two artifacts, loaded into the device heap and owned for the caller's scope.
-struct kernel_artifacts {
-  pool_buffer pdi;
-  pool_buffer insts;
-  std::size_t pdi_size = 0;
-  std::size_t insts_size = 0;
-
-  testing::AssertionResult load(hsa_amd_memory_pool_t dev_pool,
-                                const std::filesystem::path& pdi_path,
-                                const std::filesystem::path& insts_path) {
-    if (auto r = load_binary(dev_pool, pdi_path, &pdi, pdi_size); !r) return r;
-    return load_binary(dev_pool, insts_path, &insts, insts_size);
-  }
-
-  // The add design, which most PDI-path tests use.
-  testing::AssertionResult load_add(hsa_amd_memory_pool_t dev_pool) {
-    return load(dev_pool, aie_vector_scalar_kernel::pdiPath, aie_vector_scalar_kernel::instsPath);
-  }
-
-  // The mul design, used by the interleaving tests.
-  testing::AssertionResult load_mul(hsa_amd_memory_pool_t dev_pool) {
-    return load(dev_pool, aie_vector_scalar_mul_kernel::pdiPath,
-                aie_vector_scalar_mul_kernel::instsPath);
-  }
-};
-
 // Post-dispatch checks for the two designs.
 void VerifyAdd(const std::uint32_t* in, const std::uint32_t* out, std::size_t count) {
   for (std::size_t i = 0; i < count; ++i) {
@@ -1491,17 +1532,17 @@ void VerifyMul(const std::uint32_t* inout, std::size_t count, std::size_t base_i
   }
 }
 
-// Dispatch one add-kernel packet against `pdi`, wait for it, and check the whole output buffer.
-// Both PDI-cache tests walk the cache one PDI at a time exactly like this; call it under
-// ASSERT_NO_FATAL_FAILURE so a mismatch stops the caller too.
-void DispatchAddAndVerify(hsa_queue_t* queue, void* pdi, const kernel_artifacts& artifacts,
-                          std::uint32_t* in, std::uint32_t* out, std::uint64_t* kernargs) {
+// Dispatch one add-kernel packet against `kernel_object`, wait for it, and check the whole output
+// buffer. Both PDI-cache tests walk the cache one kernel object at a time exactly like this; call
+// it under ASSERT_NO_FATAL_FAILURE so a mismatch stops the caller too.
+void DispatchAddAndVerify(hsa_queue_t* queue, std::uint64_t kernel_object, std::uint32_t* in,
+                          std::uint32_t* out, std::uint64_t* kernargs) {
   std::fill_n(out, aie_vector_scalar_kernel::element_count, 0);
 
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi, artifacts.insts.get(), artifacts.insts_size, in, out, kernargs, signal, queue);
+  const auto wr_idx =
+      aie_vector_scalar_kernel::dispatch_packet(kernel_object, in, out, kernargs, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
@@ -1511,15 +1552,14 @@ void DispatchAddAndVerify(hsa_queue_t* queue, void* pdi, const kernel_artifacts&
 
 // The mul counterpart. Seeds the in-place buffer itself, since the kernel overwrites what it read
 // and a second run over a stale buffer would be checking the wrong expectations.
-void DispatchMulAndVerify(hsa_queue_t* queue, const kernel_artifacts& artifacts,
-                          std::uint32_t* inout, std::uint64_t* kernargs) {
+void DispatchMulAndVerify(hsa_queue_t* queue, std::uint64_t kernel_object, std::uint32_t* inout,
+                          std::uint64_t* kernargs) {
   std::iota(inout, inout + aie_vector_scalar_mul_kernel::element_count, 0);
 
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_vector_scalar_mul_kernel::dispatch_packet(
-      artifacts.pdi.get(), artifacts.insts.get(), artifacts.insts_size, inout, kernargs, signal,
-      queue);
+  const auto wr_idx =
+      aie_vector_scalar_mul_kernel::dispatch_packet(kernel_object, inout, kernargs, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
@@ -1535,32 +1575,6 @@ void DispatchMulAndVerify(hsa_queue_t* queue, const kernel_artifacts& artifacts,
 // hsa_executable_load_agent_code_object end to end. The suite also packages the vsadd full-ELF
 // artifact into a second hsaco (kind = FullElf); see the HsacoFullElf* tests below.
 // ---------------------------------------------------------------------------
-const std::filesystem::path kHsacoPath = STRINGIFY(DEFAULT_HSACO_PATH);
-constexpr const char* kHsacoKernelName = DEFAULT_HSACO_KERNEL_NAME;
-
-// The build skips packaging the hsaco when the toolchain cannot produce the PDI/insts it is
-// built from; mirrors the GTEST_SKIP idiom used by the full-ELF tests below.
-bool hsaco_available() { return std::filesystem::exists(kHsacoPath); }
-
-// Reads the whole hsaco file into memory. Returns an empty vector on failure; callers are
-// expected to have already checked hsaco_available().
-std::vector<std::uint8_t> hsaco_bytes() {
-  std::size_t size = 0;
-  auto f = open_binary(kHsacoPath, &size);
-  if (!f) return {};
-  std::vector<std::uint8_t> buf(size);
-  if (!read_exact(f, buf.data(), size)) return {};
-  return buf;
-}
-
-std::size_t hsaco_size() {
-  std::size_t size = 0;
-  open_binary(kHsacoPath, &size);
-  return size;
-}
-
-const char* kernel_name() { return kHsacoKernelName; }
-
 TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
   if (!hsaco_available()) {
     GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
@@ -1628,7 +1642,7 @@ TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
 // This is a minimal, header-only re-scan (not a use of AieCode: that parser is internal to
 // hsa-runtime64 and not exported, see amd_aie_code.cpp) good enough to corrupt one field for the
 // negative test below; it does not need to be a general-purpose reader.
-std::size_t FindKindFieldOffset(const std::vector<std::uint8_t>& hsaco) {
+std::size_t FindAieSectionOffset(const std::vector<std::uint8_t>& hsaco) {
   if (hsaco.size() < sizeof(Elf64_Ehdr)) return 0;
   const auto* base = hsaco.data();
   const auto* ehdr = reinterpret_cast<const Elf64_Ehdr*>(base);
@@ -1642,9 +1656,37 @@ std::size_t FindKindFieldOffset(const std::vector<std::uint8_t>& hsaco) {
     const auto* sec_hdr =
         reinterpret_cast<const rocr::AMD::aie_section_header*>(base + shdr->sh_offset);
     if (sec_hdr->magic != rocr::AMD::kAieSectionMagic) continue;
-    return shdr->sh_offset + sec_hdr->header_size + offsetof(rocr::AMD::aie_kernel_entry, kind);
+    return shdr->sh_offset;
   }
   return 0;
+}
+
+std::size_t FindKindFieldOffset(const std::vector<std::uint8_t>& hsaco) {
+  const std::size_t section_offset = FindAieSectionOffset(hsaco);
+  if (section_offset == 0) return 0;
+  const auto* sec_hdr =
+      reinterpret_cast<const rocr::AMD::aie_section_header*>(hsaco.data() + section_offset);
+  return section_offset + sec_hdr->header_size + offsetof(rocr::AMD::aie_kernel_entry, kind);
+}
+
+// Returns a copy of the PdiInsts hsaco with its first kernel's instruction blob overwritten with
+// bytes the NPU cannot execute, or an empty vector if the section cannot be located. Everything
+// host-side still accepts it -- the blob is the right size and the loader places it in the device
+// heap exactly as before -- so a batch naming it builds normally and the device faults on the
+// contents.
+std::vector<std::uint8_t> BadInstsHsaco() {
+  auto hsaco = hsaco_bytes();
+  const std::size_t section_offset = FindAieSectionOffset(hsaco);
+  if (section_offset == 0) return {};
+  const auto* sec_hdr =
+      reinterpret_cast<const rocr::AMD::aie_section_header*>(hsaco.data() + section_offset);
+  if (sec_hdr->kernel_count == 0) return {};
+  const auto* entry = reinterpret_cast<const rocr::AMD::aie_kernel_entry*>(
+      hsaco.data() + section_offset + sec_hdr->header_size);
+  const std::size_t insts_offset = section_offset + entry->insts_offset;
+  if (insts_offset + entry->insts_size > hsaco.size()) return {};
+  std::fill_n(hsaco.begin() + insts_offset, entry->insts_size, std::uint8_t{0xFF});
+  return hsaco;
 }
 
 // Closes I-4/Concern-2: the kind-validation switch in LoadAieCodeObject (executable.cpp) is
@@ -1691,10 +1733,12 @@ TEST_F(DispatchTest, AieKindIsValidated) {
 }
 
 // The full-ELF build of the same vector-scalar-add kernel used above.
+//
+// Nothing in a full-ELF packet distinguishes it from a PDI one: the dispatch shape follows from
+// the kernel object. The runtime copies the kernel's control code per packet and patches these
+// argument addresses into the copy, so two packets naming one kernel with different buffers need
+// nothing special from the caller.
 struct aie_full_elf_kernel {
-  static const std::filesystem::path elfPath;
-  static constexpr const char* kernel_name = DEFAULT_ELF_KERNEL_NAME;
-
   static constexpr std::size_t element_count = 1024;
   static constexpr std::size_t element_bytes = element_count * sizeof(std::uint32_t);
 
@@ -1702,27 +1746,11 @@ struct aie_full_elf_kernel {
   static constexpr std::size_t num_kernargs_sizes = 2 * num_kernargs;
   static constexpr std::size_t kernarg_bytes = num_kernargs_sizes * sizeof(std::uint64_t);
 
-  // The runtime requires a full-ELF control code to sit on a 16 KiB boundary in device memory;
-  // see the pdi_patch_offset documentation in hsa_ext_amd_aie.h.
-  static constexpr std::size_t ctrl_code_alignment = 16384;
-
-  // Rounds strictly past `p` to the next control-code boundary, so the result is always at a
-  // non-zero offset into the allocation even when the pool already returned an aligned pointer.
-  static std::uint8_t* align_ctrl_code_past(std::uint8_t* p) {
-    const auto addr = reinterpret_cast<std::uintptr_t>(p);
-    return p + (ctrl_code_alignment - (addr % ctrl_code_alignment));
-  }
-
   // Write a full-ELF packet into the next queue slot. Does not ring the doorbell,
   // so a caller can batch several packets into one command chain.
-  //
-  // `ctrl_code` must already hold this dispatch's patched control code; because the
-  // arguments live in the control code rather than in the command, two dispatches
-  // with different buffers need two control-code buffers.
   static std::uint64_t dispatch_packet(
-      void* ctrl_code, std::size_t ctrl_code_size, void* pdi, std::uint64_t pdi_patch_offset,
-      void* input, void* output, std::uint64_t* kernargs, hsa_signal_t completion_signal,
-      hsa_queue_t* q,
+      std::uint64_t kernel_object, void* input, void* output, std::uint64_t* kernargs,
+      hsa_signal_t completion_signal, hsa_queue_t* q,
       const std::function<void(hsa_amd_aie_kernel_dispatch_packet_t&)>& mutate = {}) {
     kernargs[0] = reinterpret_cast<std::uint64_t>(input);
     kernargs[1] = reinterpret_cast<std::uint64_t>(output);
@@ -1730,13 +1758,10 @@ struct aie_full_elf_kernel {
     kernargs[3] = element_bytes;  // output size in bytes
 
     auto pkt = make_aie_packet(completion_signal);
-    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(ctrl_code) & 0xFFFFFFFF;
-    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(ctrl_code) >> 32;
-    pkt.insts_size = ctrl_code_size;
+    pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
+    pkt.kernel_object_high = kernel_object >> 32;
     pkt.num_kernargs = num_kernargs;
     pkt.kernarg_address = kernargs;
-    pkt.pdi_addr = pdi;
-    pkt.pdi_patch_offset = pdi_patch_offset;
 
     // Applied last, so a test can corrupt exactly one field of a packet that is otherwise known
     // to be good.
@@ -1745,16 +1770,10 @@ struct aie_full_elf_kernel {
     return enqueue_aie_packet(q, pkt);
   }
 };
-const std::filesystem::path aie_full_elf_kernel::elfPath = STRINGIFY(DEFAULT_ELF_PATH);
 
 // The full-ELF build of the vector-scalar-mul kernel. Same shape as above, but one argument
 // instead of two, since the design reads and writes a single buffer.
 struct aie_full_elf_mul_kernel {
-  static const std::filesystem::path elfPath;
-  // Neither design names its aie.device or its runtime sequence, so aiecc gives both the same
-  // default name.
-  static constexpr const char* kernel_name = DEFAULT_ELF_KERNEL_NAME;
-
   static constexpr std::size_t element_count = 1024;
   static constexpr std::size_t element_bytes = element_count * sizeof(std::uint32_t);
 
@@ -1762,65 +1781,28 @@ struct aie_full_elf_mul_kernel {
   static constexpr std::size_t num_kernargs_sizes = 2 * num_kernargs;
   static constexpr std::size_t kernarg_bytes = num_kernargs_sizes * sizeof(std::uint64_t);
 
-  static std::uint64_t dispatch_packet(void* ctrl_code, std::size_t ctrl_code_size, void* pdi,
-                                       std::uint64_t pdi_patch_offset, void* inout,
+  static std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* inout,
                                        std::uint64_t* kernargs, hsa_signal_t completion_signal,
                                        hsa_queue_t* q) {
     kernargs[0] = reinterpret_cast<std::uint64_t>(inout);
     kernargs[1] = element_bytes;  // in/out size in bytes
 
     auto pkt = make_aie_packet(completion_signal);
-    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(ctrl_code) & 0xFFFFFFFF;
-    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(ctrl_code) >> 32;
-    pkt.insts_size = ctrl_code_size;
+    pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
+    pkt.kernel_object_high = kernel_object >> 32;
     pkt.num_kernargs = num_kernargs;
     pkt.kernarg_address = kernargs;
-    pkt.pdi_addr = pdi;
-    pkt.pdi_patch_offset = pdi_patch_offset;
 
     return enqueue_aie_packet(q, pkt);
   }
 };
-const std::filesystem::path aie_full_elf_mul_kernel::elfPath = STRINGIFY(MUL_ELF_PATH);
-
-// Rewrite the relocation at `index` in .rela.dyn to reference symbol `sym` with relocation type
-// `type`. Lets a test build a malformed variant of the real ELF in memory -- the entries are
-// fixed size, so this is an in-place edit that shifts nothing.
-bool mutate_relocation(std::vector<std::uint8_t>& image, std::size_t index, std::uint32_t sym,
-                       std::uint32_t type) {
-  if (image.size() < sizeof(Elf32_Ehdr)) return false;
-  Elf32_Ehdr ehdr{};
-  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
-  if (ehdr.e_shoff + ehdr.e_shnum * sizeof(Elf32_Shdr) > image.size()) return false;
-
-  Elf32_Shdr shstrtab{};
-  std::memcpy(&shstrtab, image.data() + ehdr.e_shoff + ehdr.e_shstrndx * sizeof(Elf32_Shdr),
-              sizeof(shstrtab));
-
-  for (std::uint32_t i = 0; i < ehdr.e_shnum; ++i) {
-    Elf32_Shdr sh{};
-    std::memcpy(&sh, image.data() + ehdr.e_shoff + i * sizeof(Elf32_Shdr), sizeof(sh));
-    const auto* name =
-        reinterpret_cast<const char*>(image.data() + shstrtab.sh_offset + sh.sh_name);
-    if (std::strcmp(name, ".rela.dyn") != 0) continue;
-    if ((index + 1) * sizeof(Elf32_Rela) > sh.sh_size) return false;
-
-    const std::size_t entry = sh.sh_offset + index * sizeof(Elf32_Rela);
-    const std::uint32_t r_info = (sym << 8) | (type & 0xFF);
-    std::memcpy(image.data() + entry + offsetof(Elf32_Rela, r_info), &r_info, sizeof(r_info));
-    return true;
-  }
-  return false;
-}
-
 
 }  // namespace
 
 class FullElfDispatchTest : public DispatchTest {
  protected:
-  aie_full_elf::Kernel kernel;
-  // The PDI is fixed for the life of the kernel, so one copy serves every dispatch.
-  pool_buffer pdi;
+  // Kernel object of the full-ELF vector-scalar-add kernel, loaded once per test.
+  std::uint64_t elf_kernel = 0;
 
   void SetUp() override {
     DispatchTest::SetUp();
@@ -1835,57 +1817,26 @@ class FullElfDispatchTest : public DispatchTest {
       GTEST_SKIP() << "full-ELF dispatch needs an aie2p agent, found '" << agent_name << "'";
     }
 
-    // The build skips the full ELF when the toolchain cannot produce one.
-    if (!std::filesystem::exists(aie_full_elf_kernel::elfPath)) {
-      GTEST_SKIP() << "full ELF was not built: " << aie_full_elf_kernel::elfPath;
+    // The build skips the hsaco when the toolchain cannot produce a full ELF.
+    if (!elf_hsaco_available()) {
+      GTEST_SKIP() << "full-ELF hsaco was not built: " << kElfHsacoPath;
     }
 
-    ASSERT_NO_THROW({
-      auto kernels = aie_full_elf::ParseFile(aie_full_elf_kernel::elfPath.string());
-      auto it = kernels.find(aie_full_elf_kernel::kernel_name);
-      ASSERT_NE(it, kernels.end()) << "kernel not in ELF: " << aie_full_elf_kernel::kernel_name;
-      kernel = std::move(it->second);
-    });
-
-    // PDI and control code are fetched by the NPU directly, so they have to live in the device
-    // heap; the data buffers do not.
-    ASSERT_TRUE(kernel.has_pdi_patch) << "full ELF has no PDI to load";
-    ASSERT_EQ(pdi.allocate(dev_pool, kernel.pdi.size()), HSA_STATUS_SUCCESS);
-    std::memcpy(pdi.get(), kernel.pdi.data(), kernel.pdi.size());
+    elf_kernel = LoadKernel(kElfHsacoPath, kElfHsacoKernelName);
+    ASSERT_NE(elf_kernel, 0u);
   }
 
-  void TearDown() override {
-    // Release before the base class shuts the runtime down: a pool_buffer member outlives
-    // TearDown(), and freeing after hsa_shut_down() is a no-op whose error nothing can see.
-    pdi.reset();
-    DispatchTest::TearDown();
-  }
-
-  // Allocate a control-code buffer for `design` and fill it with `arg_addrs` patched in. Takes the
-  // kernel rather than reading the fixture's, so a test carrying a second design patches it the
-  // same way instead of open-coding allocate-then-write.
-  testing::AssertionResult make_ctrl_code(const aie_full_elf::Kernel& design, pool_buffer* out,
-                                          const std::vector<std::uint64_t>& arg_addrs) {
-    if (out->allocate(dev_pool, design.ctrl_code.size()) != HSA_STATUS_SUCCESS) {
-      return testing::AssertionFailure() << "failed to allocate control code";
+  // Checks the whole output buffer of an add dispatch.
+  static void ExpectVsaddCorrect(const std::uint32_t* in, const std::uint32_t* out,
+                                 std::size_t count) {
+    for (std::size_t i = 0; i < count; ++i) {
+      ASSERT_EQ(out[i], in[i] + 1) << "mismatch at index " << i;
     }
-    try {
-      aie_full_elf::WriteControlCode(design, out->get(), design.ctrl_code.size(), arg_addrs);
-    } catch (const std::exception& e) {
-      return testing::AssertionFailure() << "patching control code: " << e.what();
-    }
-    return testing::AssertionSuccess();
-  }
-
-  // The fixture's own design, which most full-ELF tests use.
-  testing::AssertionResult make_ctrl_code(pool_buffer* out,
-                                          const std::vector<std::uint64_t>& arg_addrs) {
-    return make_ctrl_code(kernel, out, arg_addrs);
   }
 
   // Dispatch `num_dispatches` full-ELF packets with distinct buffer pairs as a
-  // single command chain, and check every output. Each dispatch gets its own
-  // control-code buffer, since that is where its arguments live.
+  // single command chain, and check every output. The runtime gives each packet its own
+  // control-code buffer; sharing one would run them all with the last packet's arguments.
   void RunChain(hsa_queue_t* queue, std::uint32_t num_dispatches) {
     const std::size_t total_elements = aie_full_elf_kernel::element_count * num_dispatches;
 
@@ -1902,16 +1853,6 @@ class FullElfDispatchTest : public DispatchTest {
     std::iota(in, in + total_elements, 0);
     std::fill_n(out, total_elements, 0);
 
-    // Each dispatch carries its arguments in its own control code.
-    std::vector<pool_buffer> ctrl_codes(num_dispatches);
-    for (std::uint32_t i = 0; i < num_dispatches; ++i) {
-      SCOPED_TRACE(i);
-      ASSERT_TRUE(make_ctrl_code(
-          &ctrl_codes[i],
-          {reinterpret_cast<std::uint64_t>(in + i * aie_full_elf_kernel::element_count),
-           reinterpret_cast<std::uint64_t>(out + i * aie_full_elf_kernel::element_count)}));
-    }
-
     hsa_signal_t signal{};
     ASSERT_EQ(hsa_signal_create(num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
@@ -1920,8 +1861,8 @@ class FullElfDispatchTest : public DispatchTest {
     std::uint64_t wr_idx = 0;
     for (std::uint32_t i = 0; i < num_dispatches; ++i) {
       wr_idx = aie_full_elf_kernel::dispatch_packet(
-          ctrl_codes[i].get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset,
-          in + i * aie_full_elf_kernel::element_count, out + i * aie_full_elf_kernel::element_count,
+          elf_kernel, in + i * aie_full_elf_kernel::element_count,
+          out + i * aie_full_elf_kernel::element_count,
           kernargs.as<std::uint64_t>() + i * aie_full_elf_kernel::num_kernargs_sizes, signal,
           queue);
     }
@@ -1929,9 +1870,7 @@ class FullElfDispatchTest : public DispatchTest {
     hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
                               HSA_WAIT_STATE_BLOCKED);
 
-    for (std::size_t i = 0; i < total_elements; ++i) {
-      ASSERT_EQ(out[i], in[i] + 1) << "mismatch at index " << i;
-    }
+    ASSERT_NO_FATAL_FAILURE(ExpectVsaddCorrect(in, out, total_elements));
 
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
   }
@@ -1945,24 +1884,6 @@ class FullElfDispatchTest : public DispatchTest {
 // hsa_executable_load_agent_code_object on the FullElf path added by Task 5, mirroring the
 // PdiInsts coverage above (HsacoKernelObjectIsPublished, AieKindIsValidated).
 // ---------------------------------------------------------------------------
-const std::filesystem::path kElfHsacoPath = STRINGIFY(DEFAULT_ELF_HSACO_PATH);
-constexpr const char* kElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
-
-// The build skips packaging this hsaco when the toolchain cannot produce a full ELF; mirrors
-// hsaco_available() above.
-bool elf_hsaco_available() { return std::filesystem::exists(kElfHsacoPath); }
-
-// Reads the whole hsaco file into memory. Returns an empty vector on failure; callers are
-// expected to have already checked elf_hsaco_available().
-std::vector<std::uint8_t> elf_hsaco_bytes() {
-  std::size_t size = 0;
-  auto f = open_binary(kElfHsacoPath, &size);
-  if (!f) return {};
-  std::vector<std::uint8_t> buf(size);
-  if (!read_exact(f, buf.data(), size)) return {};
-  return buf;
-}
-
 // Loads `bytes` as a code object reader against `agent` and returns the load status without
 // asserting on it, so a caller can check a specific failure code. On success, `executable` and
 // `reader` are left open for the caller to inspect and destroy; on failure, both are already
@@ -2066,110 +1987,58 @@ TEST_F(FullElfDispatchTest, HsacoFullElfRejectsUnknownKernelName) {
             HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
 }
 
-TEST_F(FullElfDispatchTest, ElfParse) {
-  // The vector-scalar-add design has one PDI and two buffer arguments.
-  EXPECT_EQ(kernel.name, aie_full_elf_kernel::kernel_name);
-  EXPECT_FALSE(kernel.pdi.empty());
-  EXPECT_FALSE(kernel.ctrl_code.empty());
-  EXPECT_TRUE(kernel.has_pdi_patch);
-  EXPECT_EQ(kernel.num_args(), aie_full_elf_kernel::num_kernargs);
-  // The PDI address is 8 bytes, so its patch site has to fit in the control code.
-  EXPECT_LE(kernel.pdi_patch_offset + sizeof(std::uint64_t), kernel.ctrl_code.size());
-}
-
-TEST_F(FullElfDispatchTest, ElfParseRejectsGarbage) {
-  std::vector<std::uint8_t> garbage(1024, 0xAB);
-  EXPECT_THROW(aie_full_elf::Parse(garbage.data(), garbage.size()), std::runtime_error);
-
-  // A truncated but otherwise valid ELF must not be walked off the end of.
-  std::size_t size = 0;
-  auto f = open_binary(aie_full_elf_kernel::elfPath, &size);
-  ASSERT_TRUE(static_cast<bool>(f));
-  std::vector<std::uint8_t> bytes(size);
-  ASSERT_TRUE(read_exact(f, bytes.data(), size));
-  EXPECT_THROW(aie_full_elf::Parse(bytes.data(), bytes.size() / 2), std::runtime_error);
-}
-
-TEST_F(FullElfDispatchTest, ElfParseRejectsSecondPdiPatchSite) {
-  // A Kernel carries one PDI patch offset. If an ELF asked for two, keeping only one would leave
-  // the other load_pdi pointing at a placeholder and the dispatch would run against a bogus PDI
-  // address -- so the reader has to refuse rather than pick one. Turn the first argument
-  // relocation into a second PDI relocation to provoke it: symbol 1 is .pdi.1 and type 8 is
-  // address_64, matching the relocation the ELF already has at index 0.
-  std::size_t size = 0;
-  auto f = open_binary(aie_full_elf_kernel::elfPath, &size);
-  ASSERT_TRUE(static_cast<bool>(f));
-  std::vector<std::uint8_t> image(size);
-  ASSERT_TRUE(read_exact(f, image.data(), size));
-
-  // Unmodified, it parses.
-  ASSERT_NO_THROW(aie_full_elf::Parse(image.data(), image.size()));
-
-  ASSERT_TRUE(mutate_relocation(image, 1, /*sym=*/1, /*type=*/8));
-  // Assert on the reason, not just that something threw: this ELF encodes the patch scheme in
-  // r_info, but an ABI-version-1 ELF encodes it in the addend, where rewriting r_info alone would
-  // leave the scheme unchanged and trip a different check.
-  try {
-    aie_full_elf::Parse(image.data(), image.size());
-    FAIL() << "a second PDI patch site was accepted";
-  } catch (const std::runtime_error& e) {
-    EXPECT_NE(std::string(e.what()).find("more than one PDI patch site"), std::string::npos)
-        << "rejected for the wrong reason: " << e.what();
-  }
-}
-
-TEST_F(FullElfDispatchTest, ElfWriteControlCodeChecksItsInputs) {
-  // The arguments live in the control code rather than in the packet, so nothing downstream can
-  // notice a short argument list -- the dispatch would run against whatever the ELF's
-  // placeholder happened to be. The check has to happen here.
-  std::vector<std::uint8_t> scratch(kernel.ctrl_code.size());
-  const std::vector<std::uint64_t> args(kernel.num_args(), 0x1000);
-  ASSERT_GT(kernel.num_args(), 0u);
-
-  EXPECT_NO_THROW(aie_full_elf::WriteControlCode(kernel, scratch.data(), scratch.size(), args));
-
-  const std::vector<std::uint64_t> too_few(kernel.num_args() - 1, 0x1000);
-  EXPECT_THROW(aie_full_elf::WriteControlCode(kernel, scratch.data(), scratch.size(), too_few),
-               std::runtime_error);
-
-  // Likewise a destination that cannot hold the control code.
-  EXPECT_THROW(aie_full_elf::WriteControlCode(kernel, scratch.data(), scratch.size() - 1, args),
-               std::runtime_error);
-}
-
-TEST_F(FullElfDispatchTest, ElfSingleDispatch) {
+TEST_F(FullElfDispatchTest, HsacoFullElfDispatches) {
+  // End to end: load, dispatch, check the output buffer.
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
+  ASSERT_NO_FATAL_FAILURE(RunChain(queue, 1));
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
 
-  pool_buffer input, output, kernargs;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
+TEST_F(FullElfDispatchTest, SameKernelDifferentArgsInOneBatch) {
+  // Two packets, one kernel, different argument buffers, ONE submission. Each needs its own
+  // control-code buffer; sharing one runs both with the second packet's arguments, which shows up
+  // as the first dispatch's output never being written.
+  constexpr std::uint32_t n = aie_full_elf_kernel::element_count;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_GE(queue->size, 2u);
+
+  // Separate allocations rather than two halves of one, so the two dispatches cannot be told
+  // apart by an offset the runtime might have got right by accident.
+  pool_buffer in_a, out_a, in_b, out_b, kernargs;
+  ASSERT_EQ(in_a.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(out_a.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(in_b.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(out_b.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes * 2),
             HSA_STATUS_SUCCESS);
 
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  std::fill_n(out, aie_full_elf_kernel::element_count, 0);
-
-  pool_buffer ctrl_code;
-  ASSERT_TRUE(make_ctrl_code(
-      &ctrl_code, {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
+  auto* ia = in_a.as<std::uint32_t>();
+  auto* oa = out_a.as<std::uint32_t>();
+  auto* ib = in_b.as<std::uint32_t>();
+  auto* ob = out_b.as<std::uint32_t>();
+  std::iota(ia, ia + n, 0);
+  std::iota(ib, ib + n, 5000);
+  std::fill_n(oa, n, 0);
+  std::fill_n(ob, n, 0);
 
   hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-
+  ASSERT_EQ(hsa_signal_create(2, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  auto* args = kernargs.as<std::uint64_t>();
+  aie_full_elf_kernel::dispatch_packet(elf_kernel, ia, oa, args, signal, queue);
   const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in, out,
-      kernargs.as<std::uint64_t>(), signal, queue);
+      elf_kernel, ib, ob, args + aie_full_elf_kernel::num_kernargs_sizes, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], static_cast<std::uint32_t>(i + 1)) << "mismatch at index " << i;
-  }
+  ASSERT_NO_FATAL_FAILURE(ExpectVsaddCorrect(ia, oa, n));
+  ASSERT_NO_FATAL_FAILURE(ExpectVsaddCorrect(ib, ob, n));
 
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
@@ -2190,25 +2059,21 @@ TEST_F(FullElfDispatchTest, ElfFullQueueDispatch) {
 }
 
 TEST_F(FullElfDispatchTest, ElfRepatch) {
-  // Reusing one control-code buffer across dispatches with different arguments has
-  // to give the right answer every time. The shim-DMA patch scheme adds to the
-  // buffer descriptor already in the control code, so patching over the previous
-  // result instead of over a pristine copy gets the second dispatch wrong while
-  // the first still looks fine.
+  // Dispatching one kernel repeatedly with different arguments has to give the right answer every
+  // time. The shim-DMA patch scheme adds to the buffer descriptor already in the control code, so
+  // a runtime that patched over the previous result instead of over a pristine copy gets the
+  // second dispatch wrong while the first still looks fine.
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  pool_buffer ctrl_code;
-  ASSERT_EQ(ctrl_code.allocate(dev_pool, kernel.ctrl_code.size()), HSA_STATUS_SUCCESS);
-
   constexpr std::uint32_t rounds = 4;
   for (std::uint32_t round = 0; round < rounds; ++round) {
     SCOPED_TRACE(round);
 
-    // Fresh buffers each round, so every dispatch patches a different address into
-    // the same control-code buffer.
+    // Fresh buffers each round, so every dispatch patches a different address into the control
+    // code of the same kernel.
     pool_buffer input, output, kernargs;
     ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
     ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
@@ -2220,92 +2085,29 @@ TEST_F(FullElfDispatchTest, ElfRepatch) {
     std::iota(in, in + aie_full_elf_kernel::element_count, round * 1000);
     std::fill_n(out, aie_full_elf_kernel::element_count, 0);
 
-    ASSERT_NO_THROW(aie_full_elf::WriteControlCode(
-        kernel, ctrl_code.get(), kernel.ctrl_code.size(),
-        {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
     hsa_signal_t signal{};
     ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
     const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-        ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in, out,
-        kernargs.as<std::uint64_t>(), signal, queue);
+        elf_kernel, in, out, kernargs.as<std::uint64_t>(), signal, queue);
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
     hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
                               HSA_WAIT_STATE_BLOCKED);
 
-    for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-      ASSERT_EQ(out[i], in[i] + 1) << "mismatch at index " << i;
-    }
+    ASSERT_NO_FATAL_FAILURE(
+        ExpectVsaddCorrect(in, out, aie_full_elf_kernel::element_count));
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
   }
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
-TEST_F(FullElfDispatchTest, ElfBuffersAtAllocationOffset) {
-  // Neither buffer has to sit at the start of its allocation, so the runtime has to add the
-  // offset into the allocation when it derives their device addresses. Every other test passes
-  // allocation bases, where that arithmetic is a no-op. The control code still has to land on a
-  // 16 KiB boundary; the PDI is deliberately left unaligned to show it has no such requirement.
-  constexpr std::size_t pdi_offset = 4096;
-
-  hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
-            HSA_STATUS_SUCCESS);
-
-  pool_buffer input, output, kernargs, ctrl_alloc, pdi_alloc;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(ctrl_alloc.allocate(dev_pool,
-                                aie_full_elf_kernel::ctrl_code_alignment + kernel.ctrl_code.size()),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(pdi_alloc.allocate(dev_pool, pdi_offset + kernel.pdi.size()), HSA_STATUS_SUCCESS);
-
-  auto* ctrl_code = aie_full_elf_kernel::align_ctrl_code_past(ctrl_alloc.as<std::uint8_t>());
-  ASSERT_GT(ctrl_code, ctrl_alloc.as<std::uint8_t>());
-  auto* pdi_at_offset = pdi_alloc.as<std::uint8_t>() + pdi_offset;
-
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  std::fill_n(out, aie_full_elf_kernel::element_count, 0);
-
-  // Poison the bytes before each buffer: a runtime that resolved the allocation base instead of
-  // the pointer it was given would point the hardware at this.
-  std::fill_n(ctrl_alloc.as<std::uint8_t>(),
-              static_cast<std::size_t>(ctrl_code - ctrl_alloc.as<std::uint8_t>()), 0xA5);
-  std::fill_n(pdi_alloc.as<std::uint8_t>(), pdi_offset, 0xA5);
-
-  std::memcpy(pdi_at_offset, kernel.pdi.data(), kernel.pdi.size());
-  ASSERT_NO_THROW(aie_full_elf::WriteControlCode(
-      kernel, ctrl_code, kernel.ctrl_code.size(),
-      {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      ctrl_code, kernel.ctrl_code.size(), pdi_at_offset, kernel.pdi_patch_offset, in, out,
-      kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], static_cast<std::uint32_t>(i + 1)) << "mismatch at index " << i;
-  }
-
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-}
-
 TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
-  // The PDI + instruction sequence path can hold at most 32 distinct PDIs per
-  // hardware context, because each one costs a compute-unit slot. Full-ELF loads
-  // the PDI from the control code instead, so there is no such ceiling: use more
-  // than 32 separate PDI copies on one queue.
+  // The PDI + instruction sequence path can hold at most 32 distinct PDIs per hardware context,
+  // because each one costs a compute-unit slot. Full-ELF loads the PDI from the control code
+  // instead, so there is no such ceiling: use more than 32 separate PDIs on one queue. Each load
+  // of the hsaco places its own copy of the PDI, so these are distinct buffer objects holding
+  // identical bytes -- which is what the PDI cache would key on.
   constexpr std::uint32_t num_pdis = 40;
 
   hsa_queue_t* queue = nullptr;
@@ -2313,11 +2115,11 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  std::vector<pool_buffer> pdis(num_pdis);
+  std::vector<std::uint64_t> kernels(num_pdis);
   for (std::uint32_t i = 0; i < num_pdis; ++i) {
     SCOPED_TRACE(i);
-    ASSERT_EQ(pdis[i].allocate(dev_pool, kernel.pdi.size()), HSA_STATUS_SUCCESS);
-    std::memcpy(pdis[i].get(), kernel.pdi.data(), kernel.pdi.size());
+    kernels[i] = LoadKernel(kElfHsacoPath, kElfHsacoKernelName);
+    ASSERT_NE(kernels[i], 0u);
   }
 
   pool_buffer input, output, kernargs;
@@ -2329,10 +2131,6 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
   auto* out = output.as<std::uint32_t>();
   std::iota(in, in + aie_full_elf_kernel::element_count, 0);
 
-  pool_buffer ctrl_code;
-  ASSERT_TRUE(make_ctrl_code(
-      &ctrl_code, {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
   for (std::uint32_t i = 0; i < num_pdis; ++i) {
     SCOPED_TRACE(i);
     std::fill_n(out, aie_full_elf_kernel::element_count, 0);
@@ -2340,25 +2138,18 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
     hsa_signal_t signal{};
     ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
     const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-        ctrl_code.get(), kernel.ctrl_code.size(), pdis[i].get(), kernel.pdi_patch_offset, in, out,
-        kernargs.as<std::uint64_t>(), signal, queue);
+        kernels[i], in, out, kernargs.as<std::uint64_t>(), signal, queue);
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
     hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
                               HSA_WAIT_STATE_BLOCKED);
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
 
-    for (std::size_t e = 0; e < aie_full_elf_kernel::element_count; ++e) {
-      ASSERT_EQ(out[e], in[e] + 1) << "PDI " << i << " mismatch at index " << e;
-    }
+    ASSERT_NO_FATAL_FAILURE(
+        ExpectVsaddCorrect(in, out, aie_full_elf_kernel::element_count));
   }
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
-
-// ===========================================================================
-// Tests that a rejected dispatch is refused rather than executed.
-//
-// A rejected dispatch is reported through the queue's error callback and nowhere
 // else. The doorbell store is void, so it cannot return a status; and the packet
 // never reached the device, so its completion signal is never released. A blocking
 // wait on that signal would therefore hang forever -- these tests must not wait on
@@ -2389,69 +2180,33 @@ void ExpectRejected(const aie_test::dispatch_error& err, hsa_queue_t* queue, hsa
       << "a refused packet was consumed from the ring";
 }
 
-TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
-  // A control code that is not 16 KiB aligned is accepted by the hardware and then never
-  // completes, so the runtime rejects it up front rather than letting the dispatch hang.
-  dispatch_error err;
+TEST_F(FullElfDispatchTest, ControlCodeIsAlignedForDispatch) {
+  // The driver rejects a control code whose device address is not 16 KiB aligned, so a
+  // successful dispatch is the assertion: the runtime's own allocation satisfies it. The
+  // application has no say in the placement and so cannot get it wrong.
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
-
-  pool_buffer input, output, kernargs, ctrl_alloc, pdi;
-  ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(ctrl_alloc.allocate(
-                dev_pool, 2 * aie_full_elf_kernel::ctrl_code_alignment + kernel.ctrl_code.size()),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(pdi.allocate(dev_pool, kernel.pdi.size()), HSA_STATUS_SUCCESS);
-
-  // Deliberately one page past a 16 KiB boundary.
-  auto* ctrl_code = aie_full_elf_kernel::align_ctrl_code_past(ctrl_alloc.as<std::uint8_t>()) + 4096;
-
-  auto* in = input.as<std::uint32_t>();
-  auto* out = output.as<std::uint32_t>();
-  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
-  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
-  std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
-  std::memcpy(pdi.get(), kernel.pdi.data(), kernel.pdi.size());
-  ASSERT_NO_THROW(aie_full_elf::WriteControlCode(
-      kernel, ctrl_code, kernel.ctrl_code.size(),
-      {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
-  hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      ctrl_code, kernel.ctrl_code.size(), pdi.as<std::uint8_t>(), kernel.pdi_patch_offset, in, out,
-      kernargs.as<std::uint64_t>(), signal, queue);
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-
-  ExpectRejected(err, queue, signal, 1);
-
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
-  }
-
-  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  ASSERT_NO_FATAL_FAILURE(RunChain(queue, 1));
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
-TEST_F(FullElfDispatchTest, ElfHostOnlyControlCodeRejected) {
-  // The NPU fetches the control code directly, so it has to come from the device
-  // pool. A host-only allocation has no device address and would not be reachable.
+TEST_F(FullElfDispatchTest, KernargCountMismatchRejected) {
+  // The arguments are patched into a copy of the kernel's control code rather than handed to the
+  // hardware, so nothing downstream would notice a short list: the dispatch would run against
+  // whatever the ELF's placeholder happened to be. The refusal has to name the reason, so this
+  // asserts the status as well as the fact that it was refused.
   dispatch_error err;
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
-  pool_buffer input, output, kernargs, ctrl_code;
+  pool_buffer input, output, kernargs;
   ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
             HSA_STATUS_SUCCESS);
-  // data_pool, not dev_pool: this is the mistake being tested.
-  ASSERT_EQ(ctrl_code.allocate(data_pool, kernel.ctrl_code.size()), HSA_STATUS_SUCCESS);
 
   auto* in = input.as<std::uint32_t>();
   auto* out = output.as<std::uint32_t>();
@@ -2459,21 +2214,17 @@ TEST_F(FullElfDispatchTest, ElfHostOnlyControlCodeRejected) {
   constexpr std::uint32_t sentinel = 0xD0D0D0D0;
   std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
 
-  ASSERT_NO_THROW(aie_full_elf::WriteControlCode(
-      kernel, ctrl_code.get(), kernel.ctrl_code.size(),
-      {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
   const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in, out,
-      kernargs.as<std::uint64_t>(), signal, queue);
+      elf_kernel, in, out, kernargs.as<std::uint64_t>(), signal, queue,
+      [](hsa_amd_aie_kernel_dispatch_packet_t& p) {
+        p.num_kernargs = aie_full_elf_kernel::num_kernargs - 1;
+      });
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  ExpectRejected(err, queue, signal, 1);
 
-  for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
-    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
-  }
+  ExpectRejected(err, queue, signal, 1);
+  EXPECT_EQ(err.status, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT);
 
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
@@ -2484,15 +2235,7 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
   // points at one validation rather than at "the packet was bad somehow". Either way the output
   // buffer must come back untouched and the refusal must reach the error callback.
   //
-  // Most cases are refused while the batch is being built, before anything is submitted. "PDI not
-  // in device memory" is the exception: the buffer is a registered BO, so it resolves, and the
-  // runtime builds a device address for it anyway -- the hardware cannot fetch it and the command
-  // is only caught by the driver's ~6 s watchdog. That is a missing validation, not an intended
-  // path; it is what makes this test slow.
-  pool_buffer host_pdi;
-  ASSERT_EQ(host_pdi.allocate(data_pool, kernel.pdi.size()), HSA_STATUS_SUCCESS);
-
-  const std::size_t ctrl_code_size = kernel.ctrl_code.size();
+  // All of them are refused while the batch is being built, before anything is submitted.
   using packet_t = hsa_amd_aie_kernel_dispatch_packet_t;
 
   struct malformed_case {
@@ -2500,21 +2243,16 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
     std::function<void(packet_t&)> mutate;
   };
   const std::vector<malformed_case> cases = {
-      {"null control code",
+      {"null kernel object",
        [](packet_t& p) {
-         p.insts_addr_low = 0;
-         p.insts_addr_high = 0;
+         p.kernel_object_low = 0;
+         p.kernel_object_high = 0;
        }},
-      {"zero insts_size", [](packet_t& p) { p.insts_size = 0; }},
-      {"insts_size past the end of the allocation",
-       [ctrl_code_size](packet_t& p) { p.insts_size = ctrl_code_size + 1024 * 1024; }},
-      {"null PDI", [](packet_t& p) { p.pdi_addr = nullptr; }},
-      // The NPU fetches the PDI itself, so a host-only allocation has no address it can use.
-      {"PDI not in device memory", [&host_pdi](packet_t& p) { p.pdi_addr = host_pdi.get(); }},
-      // The patch site is 8 bytes and has to lie wholly inside the control code.
-      {"PDI patch site past the end of the control code",
-       [ctrl_code_size](packet_t& p) { p.pdi_patch_offset = ctrl_code_size - 4; }},
-      {"PDI patch site misaligned", [](packet_t& p) { p.pdi_patch_offset += 1; }},
+      // The arguments are patched into the kernel's control code rather than handed to the
+      // hardware, so a miscounted list would otherwise run against the ELF's placeholders.
+      {"too few kernargs", [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs - 1; }},
+      {"too many kernargs",
+       [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs + 1; }},
       {"unrecognised opcode", [](packet_t& p) { p.opcode = 0xFF; }},
   };
 
@@ -2528,10 +2266,13 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
     ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
               HSA_STATUS_SUCCESS);
 
-    pool_buffer input, output, kernargs, ctrl_code;
+    pool_buffer input, output, kernargs;
     ASSERT_EQ(input.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
     ASSERT_EQ(output.allocate(data_pool, aie_full_elf_kernel::element_bytes), HSA_STATUS_SUCCESS);
-    ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes),
+    // Sized for one more argument than the kernel takes, so the "too many kernargs" case is
+    // refused by the count check rather than by the buffer bound.
+    ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes +
+                                                  2 * sizeof(std::uint64_t)),
               HSA_STATUS_SUCCESS);
 
     auto* in = input.as<std::uint32_t>();
@@ -2540,14 +2281,10 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
     constexpr std::uint32_t sentinel = 0xD0D0D0D0;
     std::fill_n(out, aie_full_elf_kernel::element_count, sentinel);
 
-    ASSERT_TRUE(make_ctrl_code(
-        &ctrl_code, {reinterpret_cast<std::uint64_t>(in), reinterpret_cast<std::uint64_t>(out)}));
-
     hsa_signal_t signal{};
     ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
     const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-        ctrl_code.get(), ctrl_code_size, pdi.get(), kernel.pdi_patch_offset, in, out,
-        kernargs.as<std::uint64_t>(), signal, queue, c.mutate);
+        elf_kernel, in, out, kernargs.as<std::uint64_t>(), signal, queue, c.mutate);
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
     ExpectRejected(err, queue, signal, 1);
 
@@ -2571,12 +2308,9 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   std::uint32_t* input = nullptr;
   std::uint32_t* output = nullptr;
@@ -2597,9 +2331,9 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   // declares far more kernel arguments than its kernarg buffer holds.
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(2, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, input, output, kernargs,
+  aie_vector_scalar_kernel::dispatch_packet(kernel_object, input, output, kernargs,
                                             signal, queue);
-  auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, input,
+  auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(kernel_object, input,
                                                           output, kernargs, signal, queue);
   auto* ring = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(queue->base_address);
   ring[wr_idx % queue->size].num_kernargs = 2000;
@@ -2616,7 +2350,7 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  wr_idx = aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, input, output,
+  wr_idx = aie_vector_scalar_kernel::dispatch_packet(kernel_object, input, output,
                                                      kernargs, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
@@ -2629,8 +2363,6 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 // The ceiling DispatchTest.PdiCacheHoldsThirtyTwo walks up to, seen from the other side. A
@@ -2647,15 +2379,15 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
-  kernel_artifacts add;
-  ASSERT_TRUE(add.load_add(dev_pool));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
 
-  // One more than the cache holds. Identical bytes, distinct BOs: the cache keys on the handle.
-  std::vector<pool_buffer> pdis(cache_capacity + 1);
-  for (std::uint32_t i = 0; i < pdis.size(); ++i) {
+  // One more kernel than the cache holds. Each load places its own copy of the PDI, so these are
+  // identical bytes in distinct buffer objects -- and the cache keys on the handle.
+  std::vector<std::uint64_t> kernels(cache_capacity + 1);
+  for (std::uint32_t i = 0; i < kernels.size(); ++i) {
     SCOPED_TRACE(i);
-    ASSERT_EQ(pdis[i].allocate(dev_pool, add.pdi_size), HSA_STATUS_SUCCESS);
-    std::memcpy(pdis[i].get(), add.pdi.get(), add.pdi_size);
+    kernels[i] = LoadAddKernel();
+    ASSERT_NE(kernels[i], 0u);
   }
 
   pool_buffer input, output, kernargs;
@@ -2672,7 +2404,7 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   // Fill the cache. Each of these has to succeed, or the test is not measuring what it claims.
   for (std::uint32_t i = 0; i < cache_capacity; ++i) {
     SCOPED_TRACE(i);
-    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[i].get(), add, in, out, args));
+    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, kernels[i], in, out, args));
   }
 
   // The 33rd: rejected, so the output keeps the sentinel.
@@ -2681,8 +2413,8 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
 
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdis[cache_capacity].get(), add.insts.get(), add.insts_size, in, out, args, signal, queue);
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(kernels[cache_capacity], in, out,
+                                                                args, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   ExpectRejected(err, queue, signal, 1);
   for (std::size_t e = 0; e < aie_vector_scalar_kernel::element_count; ++e) {
@@ -2697,7 +2429,7 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
-  ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[0].get(), add, in, out, args));
+  ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, kernels[0], in, out, args));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
@@ -2716,10 +2448,11 @@ TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
             HSA_STATUS_SUCCESS);
   ASSERT_GE(queue->size, 2u);
 
-  kernel_artifacts add;
-  ASSERT_TRUE(add.load_add(dev_pool));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t add_kernel = LoadAddKernel();
+  ASSERT_NE(add_kernel, 0u);
 
-  pool_buffer input, output, pdi_kernargs, elf_kernargs, ctrl_code;
+  pool_buffer input, output, pdi_kernargs, elf_kernargs;
   ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * 2),
             HSA_STATUS_SUCCESS);
   ASSERT_EQ(output.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * 2),
@@ -2735,19 +2468,14 @@ TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
   constexpr std::uint32_t sentinel = 0xD0D0D0D0;
   std::fill_n(out, n * 2, sentinel);
 
-  ASSERT_TRUE(make_ctrl_code(
-      &ctrl_code,
-      {reinterpret_cast<std::uint64_t>(in + n), reinterpret_cast<std::uint64_t>(out + n)}));
-
   // One PDI packet and one full-ELF packet staged together and released with a single doorbell.
   // The first fixes the batch's mode, the second contradicts it, so neither runs.
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(2, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  aie_vector_scalar_kernel::dispatch_packet(add.pdi.get(), add.insts.get(), add.insts_size, in, out,
+  aie_vector_scalar_kernel::dispatch_packet(add_kernel, in, out,
                                             pdi_kernargs.as<std::uint64_t>(), signal, queue);
   const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
-      ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in + n, out + n,
-      elf_kernargs.as<std::uint64_t>(), signal, queue);
+      elf_kernel, in + n, out + n, elf_kernargs.as<std::uint64_t>(), signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   // Neither packet runs, so the signal keeps both of its counts.
   ExpectRejected(err, queue, signal, 2);
@@ -2764,7 +2492,7 @@ TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_NO_FATAL_FAILURE(
-      DispatchAddAndVerify(queue, add.pdi.get(), add, in, out, pdi_kernargs.as<std::uint64_t>()));
+      DispatchAddAndVerify(queue, add_kernel, in, out, pdi_kernargs.as<std::uint64_t>()));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
@@ -2786,12 +2514,9 @@ TEST_F(DispatchTest, PdiChainSplit) {
             HSA_STATUS_SUCCESS);
   ASSERT_GE(min_queue_size, total_num_dispatches);
 
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
 
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
   std::uint32_t* input = nullptr;
@@ -2820,7 +2545,7 @@ TEST_F(DispatchTest, PdiChainSplit) {
   std::uint64_t wr_idx = 0;
   for (std::uint32_t i = 0; i < total_num_dispatches; ++i) {
     wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input + i * aie_vector_scalar_kernel::element_count,
+        kernel_object, input + i * aie_vector_scalar_kernel::element_count,
         output + i * aie_vector_scalar_kernel::element_count,
         kernargs + i * aie_vector_scalar_kernel::num_kernargs_sizes, signal, queue);
   }
@@ -2836,8 +2561,6 @@ TEST_F(DispatchTest, PdiChainSplit) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 // A batch too large for one chain is split and submitted as several chains back to back. When a
@@ -2846,11 +2569,11 @@ TEST_F(DispatchTest, PdiChainSplit) {
 // through the queue callback, and a waiter on an earlier packet has no other way to learn that its
 // own dispatch succeeded.
 //
-// The failure is induced with an instruction sequence in host memory. It resolves as a registered
-// BO, so the batch builds normally, and unlike the PDI it takes no part in configuring the
-// hardware context -- so the failure lands at the device, mid-batch, instead of before submission.
-// The device has no address it can fetch those instructions from, and only the driver's ~6 s
-// watchdog catches it, which is what makes this test slow.
+// The failure is induced with a second kernel whose instruction sequence has been overwritten with
+// bytes the NPU cannot execute. It loads and builds normally, and unlike the PDI the instruction
+// sequence takes no part in configuring the hardware context -- so the failure lands at the device,
+// mid-batch, instead of before submission. Only the driver's ~6 s watchdog catches it, which is
+// what makes this test slow.
 //
 // The last packet is the failing one, so the split point does not have to be hardcoded: whatever
 // it is, at least one whole chain ran. The check that every retired packet also produced correct
@@ -2866,17 +2589,16 @@ TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
             HSA_STATUS_SUCCESS);
   ASSERT_GE(min_queue_size, total_num_dispatches);
 
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-  // A device-resident instruction sequence the NPU cannot execute: right size and right pool, so
-  // everything host-side accepts it, and the device faults on the contents.
-  void* bad_insts = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, insts_size, 0, &bad_insts), HSA_STATUS_SUCCESS);
-  std::memset(bad_insts, 0xFF, insts_size);
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t kernel_object = LoadAddKernel();
+  ASSERT_NE(kernel_object, 0u);
+  // A second kernel whose instruction sequence the NPU cannot execute.
+  const auto bad_bytes = BadInstsHsaco();
+  ASSERT_FALSE(bad_bytes.empty()) << "could not build a corrupted copy of " << kHsacoPath;
+  loaded_hsaco bad_hsaco;
+  ASSERT_TRUE(bad_hsaco.load(bad_bytes, aie_agents.front()));
+  const std::uint64_t bad_kernel = bad_hsaco.kernel_object(kHsacoKernelName);
+  ASSERT_NE(bad_kernel, 0u);
 
   std::uint32_t* input = nullptr;
   ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool,
@@ -2907,9 +2629,9 @@ TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
   // One doorbell for the whole batch, so the runtime splits it itself.
   std::uint64_t wr_idx = 0;
   for (std::uint32_t i = 0; i < total_num_dispatches; ++i) {
-    void* insts = (i == total_num_dispatches - 1) ? bad_insts : insts_buf;
+    const std::uint64_t kernel = (i == total_num_dispatches - 1) ? bad_kernel : kernel_object;
     wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts, insts_size, input + i * n, output + i * n,
+        kernel, input + i * n, output + i * n,
         kernargs + i * aie_vector_scalar_kernel::num_kernargs_sizes, signal, queue);
   }
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -2951,9 +2673,6 @@ TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(bad_insts), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
 // The PDI + instruction sequence path gives every distinct PDI a compute-unit slot in the queue's
@@ -2972,16 +2691,16 @@ TEST_F(DispatchTest, PdiCacheHoldsThirtyTwo) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  kernel_artifacts add;
-  ASSERT_TRUE(add.load_add(dev_pool));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
 
   // Distinct BOs holding identical PDI bytes: the cache keys on the BO handle, so these count as
-  // 32 separate PDIs even though the design is the same one every time.
-  std::vector<pool_buffer> pdis(num_pdis);
+  // 32 separate PDIs even though the design is the same one every time. Each load of the hsaco
+  // places its own copy.
+  std::vector<std::uint64_t> kernels(num_pdis);
   for (std::uint32_t i = 0; i < num_pdis; ++i) {
     SCOPED_TRACE(i);
-    ASSERT_EQ(pdis[i].allocate(dev_pool, add.pdi_size), HSA_STATUS_SUCCESS);
-    std::memcpy(pdis[i].get(), add.pdi.get(), add.pdi_size);
+    kernels[i] = LoadAddKernel();
+    ASSERT_NE(kernels[i], 0u);
   }
 
   pool_buffer input, output, kernargs;
@@ -2999,7 +2718,7 @@ TEST_F(DispatchTest, PdiCacheHoldsThirtyTwo) {
   // forces a context rebuild, and the result shows the rebuilt context still runs the kernel.
   for (std::uint32_t i = 0; i < num_pdis; ++i) {
     SCOPED_TRACE(i);
-    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[i].get(), add, in, out, args));
+    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, kernels[i], in, out, args));
   }
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
@@ -3013,8 +2732,9 @@ TEST_F(DispatchTest, MulSingleDispatch) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  kernel_artifacts mul;
-  ASSERT_TRUE(mul.load_mul(dev_pool));
+  if (!mul_hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kMulHsacoPath;
+  const std::uint64_t mul_kernel = LoadMulKernel();
+  ASSERT_NE(mul_kernel, 0u);
 
   pool_buffer inout, kernargs;
   ASSERT_EQ(inout.allocate(data_pool, aie_vector_scalar_mul_kernel::element_bytes),
@@ -3022,8 +2742,8 @@ TEST_F(DispatchTest, MulSingleDispatch) {
   ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_vector_scalar_mul_kernel::kernarg_bytes),
             HSA_STATUS_SUCCESS);
 
-  ASSERT_NO_FATAL_FAILURE(
-      DispatchMulAndVerify(queue, mul, inout.as<std::uint32_t>(), kernargs.as<std::uint64_t>()));
+  ASSERT_NO_FATAL_FAILURE(DispatchMulAndVerify(queue, mul_kernel, inout.as<std::uint32_t>(),
+                                               kernargs.as<std::uint64_t>()));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
@@ -3048,9 +2768,11 @@ TEST_F(DispatchTest, InterleavedKernels) {
   // batch is staged, so a ring smaller than the batch would hang rather than fail.
   ASSERT_GE(queue->size, 2 * num_pairs);
 
-  kernel_artifacts add, mul;
-  ASSERT_TRUE(add.load_add(dev_pool));
-  ASSERT_TRUE(mul.load_mul(dev_pool));
+  if (!hsaco_available() || !mul_hsaco_available()) GTEST_SKIP() << "hsacos were not built";
+  const std::uint64_t add_kernel = LoadAddKernel();
+  ASSERT_NE(add_kernel, 0u);
+  const std::uint64_t mul_kernel = LoadMulKernel();
+  ASSERT_NE(mul_kernel, 0u);
 
   constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
   pool_buffer add_in, add_out, add_kernargs, mul_inout, mul_kernargs;
@@ -3082,11 +2804,11 @@ TEST_F(DispatchTest, InterleavedKernels) {
   std::uint64_t wr_idx = 0;
   for (std::uint32_t i = 0; i < num_pairs; ++i) {
     wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        add.pdi.get(), add.insts.get(), add.insts_size, ain + i * n, aout + i * n,
+        add_kernel, ain + i * n, aout + i * n,
         add_kernargs.as<std::uint64_t>() + i * aie_vector_scalar_kernel::num_kernargs_sizes, signal,
         queue);
     wr_idx = aie_vector_scalar_mul_kernel::dispatch_packet(
-        mul.pdi.get(), mul.insts.get(), mul.insts_size, mio + i * n,
+        mul_kernel, mio + i * n,
         mul_kernargs.as<std::uint64_t>() + i * aie_vector_scalar_mul_kernel::num_kernargs_sizes,
         signal, queue);
   }
@@ -3113,9 +2835,11 @@ TEST_F(DispatchTest, InterleavedKernelsSeparateBatches) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  kernel_artifacts add, mul;
-  ASSERT_TRUE(add.load_add(dev_pool));
-  ASSERT_TRUE(mul.load_mul(dev_pool));
+  if (!hsaco_available() || !mul_hsaco_available()) GTEST_SKIP() << "hsacos were not built";
+  const std::uint64_t add_kernel = LoadAddKernel();
+  ASSERT_NE(add_kernel, 0u);
+  const std::uint64_t mul_kernel = LoadMulKernel();
+  ASSERT_NE(mul_kernel, 0u);
 
   constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
   pool_buffer add_in, add_out, add_kernargs, mul_inout, mul_kernargs;
@@ -3137,62 +2861,41 @@ TEST_F(DispatchTest, InterleavedKernelsSeparateBatches) {
 
   for (std::uint32_t round = 0; round < num_rounds; ++round) {
     SCOPED_TRACE(round);
-    ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, add.pdi.get(), add, ain, aout,
-                                                 add_kernargs.as<std::uint64_t>()));
     ASSERT_NO_FATAL_FAILURE(
-        DispatchMulAndVerify(queue, mul, mio, mul_kernargs.as<std::uint64_t>()));
+        DispatchAddAndVerify(queue, add_kernel, ain, aout, add_kernargs.as<std::uint64_t>()));
+    ASSERT_NO_FATAL_FAILURE(
+        DispatchMulAndVerify(queue, mul_kernel, mio, mul_kernargs.as<std::uint64_t>()));
   }
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
-// Adds the second design's full ELF on top of FullElfDispatchTest's.
+// Adds the second design's full-ELF kernel on top of FullElfDispatchTest's.
 class FullElfInterleaveTest : public FullElfDispatchTest {
  protected:
-  aie_full_elf::Kernel mul_kernel;
-  pool_buffer mul_pdi;
+  std::uint64_t elf_mul_kernel = 0;
 
   void SetUp() override {
     FullElfDispatchTest::SetUp();
     if (::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped()) return;
 
-    if (!std::filesystem::exists(aie_full_elf_mul_kernel::elfPath)) {
-      GTEST_SKIP() << "full ELF was not built: " << aie_full_elf_mul_kernel::elfPath;
+    if (!mul_elf_hsaco_available()) {
+      GTEST_SKIP() << "full-ELF hsaco was not built: " << kMulElfHsacoPath;
     }
-    // ParseFile throws on a malformed ELF; the lookup failure is a plain assertion. Keeping the
-    // two separate matters -- an ASSERT_* inside the ASSERT_NO_THROW block would only return from
-    // that block, and setup would carry on against an empty Kernel.
-    std::map<std::string, aie_full_elf::Kernel> kernels;
-    ASSERT_NO_THROW(kernels = aie_full_elf::ParseFile(aie_full_elf_mul_kernel::elfPath.string()));
-    auto it = kernels.find(aie_full_elf_mul_kernel::kernel_name);
-    ASSERT_NE(it, kernels.end()) << "kernel not in ELF: " << aie_full_elf_mul_kernel::kernel_name;
-    mul_kernel = std::move(it->second);
-    ASSERT_TRUE(mul_kernel.has_pdi_patch) << "full ELF has no PDI to load";
-    ASSERT_EQ(mul_pdi.allocate(dev_pool, mul_kernel.pdi.size()), HSA_STATUS_SUCCESS);
-    std::memcpy(mul_pdi.get(), mul_kernel.pdi.data(), mul_kernel.pdi.size());
-  }
-
-  void TearDown() override {
-    // Same ordering reason as the base class: release before the runtime shuts down.
-    mul_pdi.reset();
-    FullElfDispatchTest::TearDown();
+    elf_mul_kernel = LoadKernel(kMulElfHsacoPath, kMulElfHsacoKernelName);
+    ASSERT_NE(elf_mul_kernel, 0u);
   }
 };
 
 // The full-ELF counterpart of DispatchTest.InterleavedKernels. This path has no PDI cache and no
-// CU masks -- each packet points at its own control code, which carries both its arguments and
-// the PDI it loads -- so what is being checked is the other half of interleaving: that alternating
+// CU masks -- each packet gets its own control-code copy, which carries both its arguments and the
+// PDI it loads -- so what is being checked is the other half of interleaving: that alternating
 // designs in one chain each run against their own control code and PDI rather than the previous
 // packet's.
 TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
   constexpr std::uint32_t num_pairs = 4;
   constexpr std::size_t n = aie_full_elf_kernel::element_count;
   static_assert(aie_full_elf_kernel::element_count == aie_full_elf_mul_kernel::element_count);
-
-  // The differing argument counts are what make the two designs distinguishable at the ABI level,
-  // so assert it rather than assume the ELFs are what this test thinks they are.
-  ASSERT_EQ(kernel.num_args(), aie_full_elf_kernel::num_kernargs);
-  ASSERT_EQ(mul_kernel.num_args(), aie_full_elf_mul_kernel::num_kernargs);
 
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
@@ -3221,30 +2924,17 @@ TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
   std::fill_n(aout, n * num_pairs, 0);
   std::iota(mio, mio + n * num_pairs, 0);
 
-  // Arguments live in the control code, so every dispatch needs its own copy.
-  std::vector<pool_buffer> add_ctrl(num_pairs), mul_ctrl(num_pairs);
-  for (std::uint32_t i = 0; i < num_pairs; ++i) {
-    SCOPED_TRACE(i);
-    ASSERT_TRUE(make_ctrl_code(&add_ctrl[i],
-                               {reinterpret_cast<std::uint64_t>(ain + i * n),
-                                reinterpret_cast<std::uint64_t>(aout + i * n)}));
-    ASSERT_TRUE(
-        make_ctrl_code(mul_kernel, &mul_ctrl[i], {reinterpret_cast<std::uint64_t>(mio + i * n)}));
-  }
-
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(2 * num_pairs, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
   std::uint64_t wr_idx = 0;
   for (std::uint32_t i = 0; i < num_pairs; ++i) {
     wr_idx = aie_full_elf_kernel::dispatch_packet(
-        add_ctrl[i].get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, ain + i * n,
-        aout + i * n,
+        elf_kernel, ain + i * n, aout + i * n,
         add_kernargs.as<std::uint64_t>() + i * aie_full_elf_kernel::num_kernargs_sizes, signal,
         queue);
     wr_idx = aie_full_elf_mul_kernel::dispatch_packet(
-        mul_ctrl[i].get(), mul_kernel.ctrl_code.size(), mul_pdi.get(), mul_kernel.pdi_patch_offset,
-        mio + i * n,
+        elf_mul_kernel, mio + i * n,
         mul_kernargs.as<std::uint64_t>() + i * aie_full_elf_mul_kernel::num_kernargs_sizes, signal,
         queue);
   }
@@ -3278,8 +2968,9 @@ TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
             HSA_STATUS_SUCCESS);
   ASSERT_GE(queue->size, pkts_per_batch);
 
-  kernel_artifacts add;
-  ASSERT_TRUE(add.load_add(dev_pool));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  const std::uint64_t add_kernel = LoadAddKernel();
+  ASSERT_NE(add_kernel, 0u);
 
   pool_buffer input, output, pdi_kernargs, elf_kernargs;
   ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes * pkts_per_batch),
@@ -3301,16 +2992,6 @@ TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
     SCOPED_TRACE(b);
     std::fill_n(out, n * pkts_per_batch, 0);
 
-    // A full-ELF dispatch carries its arguments in its control code, so each packet needs its own.
-    std::vector<pool_buffer> ctrl_codes(pkts_per_batch);
-    if (!batch_is_pdi[b]) {
-      for (std::uint32_t i = 0; i < pkts_per_batch; ++i) {
-        ASSERT_TRUE(make_ctrl_code(&ctrl_codes[i],
-                                   {reinterpret_cast<std::uint64_t>(in + i * n),
-                                    reinterpret_cast<std::uint64_t>(out + i * n)}));
-      }
-    }
-
     hsa_signal_t signal{};
     ASSERT_EQ(hsa_signal_create(pkts_per_batch, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
@@ -3318,12 +2999,11 @@ TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
     for (std::uint32_t i = 0; i < pkts_per_batch; ++i) {
       wr_idx = batch_is_pdi[b]
           ? aie_vector_scalar_kernel::dispatch_packet(
-                add.pdi.get(), add.insts.get(), add.insts_size, in + i * n, out + i * n,
+                add_kernel, in + i * n, out + i * n,
                 pdi_kernargs.as<std::uint64_t>() + i * aie_vector_scalar_kernel::num_kernargs_sizes,
                 signal, queue)
           : aie_full_elf_kernel::dispatch_packet(
-                ctrl_codes[i].get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset,
-                in + i * n, out + i * n,
+                elf_kernel, in + i * n, out + i * n,
                 elf_kernargs.as<std::uint64_t>() + i * aie_full_elf_kernel::num_kernargs_sizes,
                 signal, queue);
     }

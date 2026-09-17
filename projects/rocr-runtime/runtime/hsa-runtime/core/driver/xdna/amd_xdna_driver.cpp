@@ -63,6 +63,8 @@
 #include <unistd.h>
 
 #include "inc/hsa_ext_amd_aie.h"
+#include "core/inc/amd_aie_elf.h"
+#include "core/inc/amd_aie_section.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
@@ -700,31 +702,125 @@ struct CmdBOPool {
   }
 };
 
-/// @brief Which dispatch ABI a queue is using.
+/// @brief Returns the kernel descriptor @p pkt names, or nullptr when it names none.
 ///
-/// The two modes need incompatible hardware contexts - PDI + instruction sequence needs CU
+/// The packet carries the handle published as HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, which is
+/// a pointer to the descriptor the loader built.
+///
+/// @param[in] pkt packet to read the kernel object from
+static const AieKernelDescriptor* PacketDescriptor(
+    const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
+  return reinterpret_cast<const AieKernelDescriptor*>(
+      Concat<uint64_t>(pkt->kernel_object_high, pkt->kernel_object_low));
+}
+
+/// @brief Returns the dispatch kind @p pkt is asking for, from its kernel descriptor.
+///
+/// The two kinds need incompatible hardware contexts - PDI + instruction sequence needs CU
 /// configuration, full-ELF must not have any - and a hardware context's CU configuration cannot
 /// be changed once set. That rules out switching a live context, not a queue: one batch is one
-/// mode, and between batches the queue is drained, so the context can be torn down and rebuilt
-/// then. This records which mode the current context was built for.
-enum class QueueMode {
-  /// @brief No context has been built for either mode yet.
-  Undecided,
-  /// @brief PDI plus a separate instruction sequence, dispatched as ERT_START_CU.
-  PdiInsts,
-  /// @brief Full ELF, dispatched as ERT_START_NPU_PREEMPT_ELF.
-  FullElf,
-};
-
-/// @brief Returns the dispatch mode @p pkt is asking for.
-///
-/// A packet asks for a full-ELF dispatch by giving the offset at which its control code takes the
-/// PDI's device address; a PDI plus instruction sequence has no such patch site and leaves the
-/// field zero.
+/// kind, and between batches the queue is drained, so the context can be torn down and rebuilt
+/// then.
 ///
 /// @param[in] pkt packet to classify
-static QueueMode PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
-  return (pkt->pdi_patch_offset != 0) ? QueueMode::FullElf : QueueMode::PdiInsts;
+/// @return the descriptor's kind, or @c Undecided when the handle is null
+static AieKernelKind PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
+  const auto* desc = PacketDescriptor(pkt);
+  return desc ? desc->kind : AieKernelKind::Undecided;
+}
+
+/// @brief A device buffer allocated for one dispatch, freed when the batch completes.
+struct DeviceBuffer {
+  /// @brief Allocation base, which is what must be freed.
+  void* base = nullptr;
+  /// @brief Aligned pointer into @ref base, which is what is written and dispatched.
+  void* ptr = nullptr;
+  /// @brief Device address the NPU sees for @ref ptr.
+  uint64_t dev_addr = 0;
+  /// @brief BO handle of the allocation.
+  uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
+};
+
+/// @brief Allocates @p size bytes of device memory whose device address is @p align aligned.
+///
+/// @ref XdnaDriver::AllocateMemory takes no alignment, so this over-allocates by @p align and
+/// rounds up. The rounding is computed on the *device* address rather than the host one, so the
+/// result is aligned whatever relationship the two happen to have.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] agent agent owning the device pool
+/// @param[in] size bytes needed
+/// @param[in] align required alignment of the device address
+/// @param[out] out the allocation; left empty unless the call succeeds
+static hsa_status_t AllocAlignedDeviceBuffer(int fd, const core::Agent& agent, size_t size,
+                                             size_t align, DeviceBuffer* out) {
+  *out = DeviceBuffer{};
+  if (size == 0 || align == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const MemoryRegion* dev_region = nullptr;
+  for (const auto& region : agent.regions()) {
+    const auto* candidate = static_cast<const MemoryRegion*>(region.get());
+    if (candidate->IsDeviceSVM()) {
+      dev_region = candidate;
+      break;
+    }
+  }
+  if (dev_region == nullptr) {
+    log_warning_n(10, "AIE: the agent has no device memory to allocate control code from.\n");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  void* base = nullptr;
+  hsa_status_t err = core::Runtime::runtime_singleton_->AllocateMemory(
+      dev_region, size + align, core::MemoryRegion::AllocateNoFlags, &base);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+  MAKE_NAMED_SCOPE_GUARD(base_guard, [&] { core::Runtime::runtime_singleton_->FreeMemory(base); });
+
+  uint32_t bo_handle = AMDXDNA_INVALID_BO_HANDLE;
+  uint64_t dev_addr = 0;
+  size_t bytes_from_base = 0;
+  err = ResolveDeviceBuffer(fd, base, agent, &bo_handle, &dev_addr, &bytes_from_base);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+  if (dev_addr == 0) {
+    log_warning_n(10, "AIE: the agent's device memory has no address the NPU can fetch from.\n");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  const uint64_t aligned_dev_addr = AlignUp(dev_addr, align);
+  const size_t offset = static_cast<size_t>(aligned_dev_addr - dev_addr);
+  if (offset + size > bytes_from_base) {
+    // Only reachable if the allocator handed back less than was asked for.
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  base_guard.Dismiss();
+  out->base = base;
+  out->ptr = static_cast<uint8_t*>(base) + offset;
+  out->dev_addr = aligned_dev_addr;
+  out->handle = bo_handle;
+  return HSA_STATUS_SUCCESS;
+}
+
+/// @brief Frees every buffer in @p buffers and empties it.
+///
+/// @param[in,out] buffers per-dispatch buffers to release
+static void FreeDeviceBuffers(std::vector<DeviceBuffer>* buffers) {
+  for (auto& buffer : *buffers) {
+    if (buffer.base != nullptr) {
+      const hsa_status_t err = core::Runtime::runtime_singleton_->FreeMemory(buffer.base);
+      assert(err == HSA_STATUS_SUCCESS && "Failed to free a per-dispatch control-code buffer.");
+      if (err != HSA_STATUS_SUCCESS) {
+        log_warning_n(10, "AIE: failed to free a per-dispatch control-code buffer.\n");
+      }
+    }
+  }
+  buffers->clear();
 }
 
 /// @brief Metadata for a Kernel Mode Queue (KMQ).
@@ -739,8 +835,8 @@ struct KmqMetadata {
   XDNADeviceType device_type = XDNADeviceType::Unknown;
   /// @brief PDIs the current hardware context has compute units configured for, indexed by CU.
   PDICache pdi_cache;
-  /// @brief Dispatch ABI the current hardware context was built for.
-  QueueMode mode = QueueMode::Undecided;
+  /// @brief Dispatch kind the current hardware context was built for.
+  AieKernelKind mode = AieKernelKind::Undecided;
   /// @brief Command BO pool.
   CmdBOPool cmd_bo_pool;
 };
@@ -1632,8 +1728,12 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
 
 /// @brief Builds an ERT_START_CU command for a PDI + instruction sequence packet.
 ///
-/// Adds the packet's instruction and argument BOs to @p bo_handles, and sets @p reconfigure if the
-/// packet introduced a PDI the hardware context does not know about yet.
+/// The instruction sequence and the PDI come from the packet's kernel descriptor, where the
+/// loader placed them; the packet itself carries only the handle and the arguments. Both blobs
+/// are immutable and were flushed from the CPU cache once at load, so neither is flushed here.
+///
+/// Adds the kernel's instruction BO and the packet's argument BOs to @p bo_handles, and sets
+/// @p reconfigure if the packet introduced a PDI the hardware context does not know about yet.
 ///
 /// @param[in] pkt packet to build the command from
 /// @param[in] agent agent that owns the queue
@@ -1647,54 +1747,35 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
                                          const core::Agent& agent, KmqMetadata* kmq_metadata,
                                          std::vector<uint32_t>* bo_handles, bool* reconfigure,
                                          BOHandle* cmd_bo, uint32_t* arg_cnt) {
+  const AieKernelDescriptor* desc = PacketDescriptor(pkt);
+  // PacketMode already classified the batch from this handle, but nothing between there and here
+  // re-reads it, so a null or mismatched descriptor must be refused rather than dereferenced.
+  if (desc == nullptr || desc->kind != AieKernelKind::PdiInsts) {
+    log_warning_n(10, "AIE: the packet does not name a PDI + instruction sequence kernel.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  if (desc->insts_bo_va == nullptr || desc->insts_size == 0 || desc->pdi_size == 0) {
+    log_warning_n(10, "AIE: the kernel has no instruction sequence or no PDI to dispatch.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+
   // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
   // context will be reconfigured.
-  void* pdi_base = nullptr;
-  size_t pdi_size = 0;
-  uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
-  hsa_status_t err = ResolveBOHandle(pkt->pdi_addr, agent, &pdi_handle, &pdi_base, &pdi_size);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-  auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(pdi_handle);
+  auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(desc->pdi_bo_handle);
   if (cached_pdi_index == PDICache::NotFound) {
-    FlushCpuCache(pdi_base, 0, pdi_size);
-    err = kmq_metadata->pdi_cache.SetNext(pdi_handle, cached_pdi_index);
-    if (err != HSA_STATUS_SUCCESS) {
+    const hsa_status_t cache_err =
+        kmq_metadata->pdi_cache.SetNext(desc->pdi_bo_handle, cached_pdi_index);
+    if (cache_err != HSA_STATUS_SUCCESS) {
       log_warning_n(10, "AIE: no free compute unit for a new PDI; a queue can hold at most 32.\n");
-      return err;
+      return cache_err;
     }
     *reconfigure = true;
   }
 
-  // Add the instruction sequence BO handle to bo_handles and flush cache.
-  void* insts_addr =
-      reinterpret_cast<void*>(Concat<uint64_t>(pkt->insts_addr_high, pkt->insts_addr_low));
-  uint32_t instr_handle = AMDXDNA_INVALID_BO_HANDLE;
-  void* insts_base = nullptr;
-  size_t insts_alloc_size = 0;
-  err = ResolveBOHandle(insts_addr, agent, &instr_handle, &insts_base, &insts_alloc_size);
-  if (err != HSA_STATUS_SUCCESS) {
-    log_warning_n(10,
-                  "AIE: the instruction sequence is not a buffer registered with the driver.\n");
-    return err;
-  }
+  void* insts_addr = desc->insts_bo_va;
+  bo_handles->push_back(desc->insts_bo_handle);
 
-  // Check insts size.
-  const size_t insts_offset = static_cast<uint8_t*>(insts_addr) - static_cast<uint8_t*>(insts_base);
-  const size_t insts_avail =
-      (insts_offset <= insts_alloc_size) ? insts_alloc_size - insts_offset : 0;
-  if (pkt->insts_size > insts_avail || (pkt->insts_size % sizeof(uint32_t)) != 0) {
-    log_warning_n(10,
-                  "AIE: the instruction sequence does not fit its buffer, or is not a whole "
-                  "number of dwords.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-
-  bo_handles->push_back(instr_handle);
-  FlushCpuCache(insts_addr, 0, pkt->insts_size);
-
-  err = AddKernargBOs(pkt, agent, bo_handles);
+  hsa_status_t err = AddKernargBOs(pkt, agent, bo_handles);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1715,8 +1796,8 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
   cmd->data[3] = (DEV_ADDR_BASE |
                   (reinterpret_cast<uintptr_t>(insts_addr) &
                    DEV_ADDR_OFFSET_MASK));              // instruction sequence address (lo)
-  cmd->data[4] = 0x0;                                   // instruction sequence address (hi)
-  cmd->data[5] = (pkt->insts_size / sizeof(uint32_t));  // instruction sequence dword count
+  cmd->data[4] = 0x0;                                    // instruction sequence address (hi)
+  cmd->data[5] = (desc->insts_size / sizeof(uint32_t));  // instruction sequence dword count
   // On this path the hardware patches the arguments into the instruction sequence itself, so
   // their addresses go in the command's register map.
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
@@ -1733,96 +1814,97 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
 
 /// @brief Builds an ERT_START_NPU_PREEMPT_ELF command for a full-ELF packet.
 ///
-/// The packet's control code arrives with the application's argument addresses already patched in;
-/// this writes the PDI's device address into it, which the application cannot know, and points the
-/// command at it.
+/// Copies the kernel's pristine control code into a fresh device buffer, patches this dispatch's
+/// argument addresses into the copy, and points the command at it. The copy is not an
+/// optimization that could be skipped: @ref aie_elf::PatchShimDma48 adds to the buffer descriptor
+/// already in place, so patching over a previous result would accumulate. Every packet therefore
+/// needs its own buffer -- two packets naming one kernel with different arguments would otherwise
+/// both run with whichever was patched last. Pooling these buffers is a measurement-gated
+/// follow-up, deliberately not done here.
+///
+/// The PDI's device address is already in the pristine copy: the loader writes it once, so there
+/// is nothing per-dispatch to resolve or patch. The PDI BO is still listed so the driver keeps it
+/// resident for the dispatch.
 ///
 /// @param[in] fd driver file descriptor
 /// @param[in] pkt packet to build the command from
 /// @param[in] agent agent that owns the queue
 /// @param[in,out] kmq_metadata KMQ metadata supplying the command BO pool
 /// @param[in,out] bo_handles list the packet's BOs are appended to
+/// @param[in,out] ctrl_buffers per-submission list this dispatch's control-code buffer is
+/// appended to; the caller frees them once the batch is done with them
 /// @param[out] cmd_bo the command BO, drawn from @p kmq_metadata's command BO pool.
 /// @param[out] arg_cnt number of argument dwords the driver will see.
 static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
                                         const core::Agent& agent, KmqMetadata* kmq_metadata,
-                                        std::vector<uint32_t>* bo_handles, BOHandle* cmd_bo,
+                                        std::vector<uint32_t>* bo_handles,
+                                        std::vector<DeviceBuffer>* ctrl_buffers, BOHandle* cmd_bo,
                                         uint32_t* arg_cnt) {
-  // The control code comes from the application already patched with its argument addresses; all
-  // this path adds is the PDI's device address, which only the runtime can know. A packet only
-  // reaches here when it asked for that patch, so pdi_patch_offset is non-zero.
-  void* ctrl_code =
-      reinterpret_cast<void*>(Concat<uint64_t>(pkt->insts_addr_high, pkt->insts_addr_low));
-
-  // Validate what can be validated from the packet alone, before spending any ioctls on it.
-  //
-  // The PDI patch site is a 64-bit address and has to lie wholly inside the control code. Check
-  // the size first: both operands are unsigned, so subtracting from an unvalidated insts_size or
-  // adding to an unvalidated offset could wrap and let the bound pass. This also rejects a zero
-  // insts_size.
-  if (ctrl_code == nullptr || pkt->pdi_addr == nullptr || pkt->insts_size < sizeof(uint64_t) ||
-      pkt->pdi_patch_offset > pkt->insts_size - sizeof(uint64_t) ||
-      (pkt->pdi_patch_offset % sizeof(uint32_t)) != 0) {
+  const AieKernelDescriptor* desc = PacketDescriptor(pkt);
+  // PacketMode already classified the batch from this handle, but nothing between there and here
+  // re-reads it, so a null or mismatched descriptor must be refused rather than dereferenced.
+  if (desc == nullptr || desc->kind != AieKernelKind::FullElf) {
+    log_warning_n(10, "AIE: the packet does not name a full-ELF kernel.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  if (desc->ctrl_code == nullptr || desc->ctrl_code_size == 0) {
+    log_warning_n(10, "AIE: the full-ELF kernel has no control code to dispatch.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  // The arguments are patched into the control code rather than handed to the hardware, so
+  // nothing downstream would notice a short list: the dispatch would run against whatever the
+  // ELF's placeholder happened to be.
+  if (pkt->num_kernargs != desc->num_args) {
+    log_warning_n(10, "AIE: the packet's kernarg count does not match the kernel's.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
-  uint32_t ctrl_code_handle = AMDXDNA_INVALID_BO_HANDLE;
-  uint64_t ctrl_code_dev_addr = 0;
-  size_t ctrl_code_avail = 0;
-  hsa_status_t err = ResolveDeviceBuffer(fd, ctrl_code, agent, &ctrl_code_handle,
-                                         &ctrl_code_dev_addr, &ctrl_code_avail);
+  // Resolves the argument buffers and bounds-checks the kernarg buffer, which the patch loop
+  // below relies on before it reads num_args addresses out of it. They take no part in the
+  // command, but have to stay resident for the dispatch.
+  hsa_status_t err = AddKernargBOs(pkt, agent, bo_handles);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
-  if (ctrl_code_dev_addr == 0) {
-    // The control code has to be somewhere the NPU can fetch it from directly, which means the
-    // device heap. A host-only buffer has no device address and would not be reachable.
-    log_warning_n(10, "AIE: full-ELF control code must be allocated from device memory.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+
+  DeviceBuffer ctrl;
+  err = AllocAlignedDeviceBuffer(fd, agent, desc->ctrl_code_size, CTRL_CODE_DEV_ADDR_ALIGNMENT,
+                                 &ctrl);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
-  if ((ctrl_code_dev_addr % CTRL_CODE_DEV_ADDR_ALIGNMENT) != 0) {
-    // Measured on aie2p: the dispatch only completes when the control code's device
-    // address is 16 KiB aligned.
+  // Recorded before anything else can fail, so the caller's cleanup owns it from here on.
+  ctrl_buffers->push_back(ctrl);
+
+  // Measured on aie2p: the dispatch only completes when the control code's device address is
+  // 16 KiB aligned. AllocAlignedDeviceBuffer guarantees that; check it rather than assume it,
+  // because the failure mode is a hang rather than an error.
+  if ((ctrl.dev_addr % CTRL_CODE_DEV_ADDR_ALIGNMENT) != 0) {
     log_warning_n(10, "AIE: full-ELF control code must be 16 KiB aligned in device memory.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  // insts_size comes from the packet, so it has to be shown to fit before anything reads or
-  // writes that many bytes.
-  if (pkt->insts_size > ctrl_code_avail) {
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  bo_handles->push_back(ctrl_code_handle);
-
-  // Write the PDI's device address into the control code where the application asked.
-  uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
-  uint64_t pdi_dev_addr = 0;
-  size_t pdi_avail = 0;
-  err = ResolveDeviceBuffer(fd, pkt->pdi_addr, agent, &pdi_handle, &pdi_dev_addr, &pdi_avail);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-  if (pdi_dev_addr == 0) {
-    log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  auto* site =
-      reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl_code) + pkt->pdi_patch_offset);
-  site[0] = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFF);
-  site[1] = static_cast<uint32_t>(pdi_dev_addr >> 32);
+  // Always from pristine: PatchShimDma48 adds to what is already there, so patching over a
+  // previous result would accumulate. The copy also brings the PDI's device address, which was
+  // written into the pristine copy at load.
+  std::memcpy(ctrl.ptr, desc->ctrl_code, desc->ctrl_code_size);
 
-  // The PDI is reached only through the address just written, so the command still has to list it
-  // for the driver to keep it resident.
-  FlushCpuCache(pkt->pdi_addr, 0, pdi_avail);
-  bo_handles->push_back(pdi_handle);
+  const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
+  for (uint32_t arg = 0; arg < desc->num_args; ++arg) {
+    for (uint32_t i = desc->arg_site_offset[arg]; i < desc->arg_site_offset[arg + 1]; ++i) {
+      const aie_elf::PatchSite& site = desc->arg_sites[i];
+      aie_elf::PatchShimDma48(
+          reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl.ptr) + site.offset),
+          kernarg_address[arg] + site.addend);
+    }
+  }
+  FlushCpuCache(ctrl.ptr, 0, desc->ctrl_code_size);
 
-  FlushCpuCache(ctrl_code, 0, pkt->insts_size);
-
-  // The arguments are already patched into the control code, so they are not passed to the
-  // hardware but they still have to be resident for the duration of the dispatch.
-  err = AddKernargBOs(pkt, agent, bo_handles);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  bo_handles->push_back(ctrl.handle);
+  // The PDI is reached only through the address the loader wrote into the control code, so the
+  // command still has to list it for the driver to keep it resident.
+  if (desc->pdi_size != 0) {
+    bo_handles->push_back(desc->pdi_bo_handle);
   }
 
   const uint32_t cmd_dwords = 1 +  // CU mask
@@ -1838,8 +1920,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // The payload starts after the CU mask, which is data[0]; that puts it at byte offset 8 in a
   // page-aligned command BO, so the 64-bit fields below are aligned.
   auto* npu = reinterpret_cast<ert_npu_preempt_data*>(&cmd->data[1]);
-  npu->instruction_buffer = ctrl_code_dev_addr;
-  npu->instruction_buffer_size = static_cast<uint32_t>(pkt->insts_size);
+  npu->instruction_buffer = ctrl.dev_addr;
+  npu->instruction_buffer_size = static_cast<uint32_t>(desc->ctrl_code_size);
   // The save and restore buffers and the property count are left zero. This design has no
   // preemption sections, and aie2p firmware accepts null preemption buffers.
   //
@@ -2027,7 +2109,21 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // it walks them. Grouping dispatches by mode is the caller's job: a mixed batch is rejected
   // rather than split. The queue itself is not pinned to that mode - a later batch may pick the
   // other one, and the rebuild below switches the context to it.
-  const QueueMode mode = PacketMode(&queue[first_pkt_idx & mask]);
+  const AieKernelKind mode = PacketMode(&queue[first_pkt_idx & mask]);
+  // A packet with no kernel object names no dispatch shape at all. Refused here rather than left
+  // to the homogeneity check below, which would pass a whole batch of them through to a command
+  // builder and a hardware context rebuild for a kind that does not exist.
+  if (mode != AieKernelKind::PdiInsts && mode != AieKernelKind::FullElf) {
+    log_warning_n(10, "AIE: the packet does not name a kernel object.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+
+  // Control-code buffers this batch's full-ELF packets are dispatched from, one per packet. They
+  // must outlive the dispatch, so they are freed on the way out of this function -- after the
+  // chains have been submitted and waited on, and on every early return in between. A PDI +
+  // instruction sequence batch allocates none.
+  std::vector<DeviceBuffer> ctrl_buffers;
+  MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(&ctrl_buffers); });
 
   // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
   std::vector<uint32_t> bo_handles;
@@ -2050,7 +2146,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // drops the cache outright below, so for one the rollback would have nothing to restore.
   const auto pdi_cache_watermark = kmq_metadata->pdi_cache.size();
   MAKE_NAMED_SCOPE_GUARD(pdi_cache_guard, [&] {
-    if (mode == QueueMode::PdiInsts) kmq_metadata->pdi_cache.Truncate(pdi_cache_watermark);
+    if (mode == AieKernelKind::PdiInsts) kmq_metadata->pdi_cache.Truncate(pdi_cache_watermark);
   });
 
   for (uint64_t i = 0; i < num_pkts; ++i) {
@@ -2058,9 +2154,9 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     auto* pkt = queue + pkt_idx;
 
     // The first packet fixed the batch's mode; the rest have to agree. Checked here rather than in
-    // a pass of its own, so the ring is walked once. Packets built before a refusal keep what the
-    // build wrote - for full ELF, the PDI device address in the caller's control code - which is
-    // what a resubmission would write anyway.
+    // a pass of its own, so the ring is walked once. A refusal leaves nothing of the packets built
+    // before it: their control-code buffers are the runtime's own and are freed on the way out,
+    // and nothing the build wrote is visible to the caller.
     if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
@@ -2073,8 +2169,9 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
 
     BOHandle cmd_bo_handle;
     uint32_t arg_cnt = 0;
-    const hsa_status_t err = (mode == QueueMode::FullElf)
-        ? BuildFullElfCommand(fd_, pkt, agent, kmq_metadata, &bo_handles, &cmd_bo_handle, &arg_cnt)
+    const hsa_status_t err = (mode == AieKernelKind::FullElf)
+        ? BuildFullElfCommand(fd_, pkt, agent, kmq_metadata, &bo_handles, &ctrl_buffers,
+                              &cmd_bo_handle, &arg_cnt)
         : BuildPdiInstsCommand(pkt, agent, kmq_metadata, &bo_handles, &reconfigure_queue,
                                &cmd_bo_handle, &arg_cnt);
     if (err != HSA_STATUS_SUCCESS) return err;
@@ -2102,7 +2199,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
     // PDI cache, so the cache is dropped before the rebuild. Switching back later finds it empty
     // and re-adds each PDI, which is what forces the reconfigure that restores the CU config.
-    if (mode == QueueMode::FullElf) {
+    if (mode == AieKernelKind::FullElf) {
       // Full ELF is an aie2p feature. Reached whenever the queue enters the mode, which is the
       // only time the device has to be asked about it.
       if (kmq_metadata->device_type != XDNADeviceType::Stx) {

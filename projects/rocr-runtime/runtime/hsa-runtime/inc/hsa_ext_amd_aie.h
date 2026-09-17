@@ -100,10 +100,17 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint32_t reserved2;
 
   /**
-   * Address of the instruction sequence.
+   * Opaque kernel object handle obtained from HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT.
+   *
+   * Selects the dispatch shape -- PDI plus instruction sequence, or full ELF -- from the
+   * loaded code object. The application does not choose, and cannot tell which it got.
+   *
+   * The packets submitted by one doorbell ring fix the dispatch shape for the batch, and a
+   * packet of the other shape in the same batch is rejected. A later batch on the same queue
+   * may use the other shape, at the cost of a hardware context rebuild.
    */
-  uint32_t insts_addr_low;
-  uint32_t insts_addr_high;
+  uint32_t kernel_object_low;
+  uint32_t kernel_object_high;
 
   /**
    * Number of kernel arguments. Must be 0 if ::kernarg_address is NULL, and must be greater than 0
@@ -130,53 +137,27 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
    *
    * A size of 0 for a kernarg means no cacheline is flushed for that argument; the argument is
    * still resolved and kept resident for the duration of the dispatch.
+   *
+   * Both dispatch shapes take their arguments from here; what the runtime does with them --
+   * hand the addresses to the hardware, or patch them into a copy of the kernel's control
+   * code -- follows from the kernel object and is not the application's concern.
    */
   void* kernarg_address;
 
   /**
-   * Size of the instruction sequence in bytes.
+   * Reserved. Must be 0.
    */
-  uint64_t insts_size;
+  uint64_t reserved4;
 
   /**
-   * PDI address.
+   * Reserved. Must be 0.
    */
-  void* pdi_addr;
+  void* reserved5;
 
   /**
-   * Byte offset into the instruction sequence at which the runtime writes the 64-bit device
-   * address of ::pdi_addr, or 0 if the instruction sequence needs no such patch.
-   *
-   * This field selects between the two modes a dispatch can use:
-   *
-   * - **0 -- PDI plus instruction sequence.** ::insts_addr_low / ::insts_addr_high point at a
-   *   standalone instruction sequence, ::pdi_addr at the PDI that configures the array for it,
-   *   and the hardware patches the arguments in ::kernarg_address into the instruction sequence
-   *   as it runs.
-   *
-   * - **Non-zero -- full ELF.** ::insts_addr_low / ::insts_addr_high point at the control code
-   *   of a full-ELF kernel, which loads its own PDI rather than relying on the array having been
-   *   configured out of band. Supported only on aie2p agents.
-   *
-   *   The application extracts the control code and the PDI from the ELF and allocates both from
-   *   the agent's device memory pool. Neither has to sit at the start of its allocation, but the
-   *   control code must be 16 KiB aligned.
-   *
-   *   The application patches its argument addresses into the control code before enqueuing, using
-   *   the relocations in the ELF. The arguments are not passed to the hardware, so two dispatches
-   *   with different arguments need two control-code buffers ::kernarg_address and ::num_kernargs
-   *   must still list the argument buffers.
-   *
-   *   The PDI's device address resolution needs the offset of that patch site.
-   *
-   * The packets submitted by one doorbell ring fix the mode of queue for the batch, and a packet
-   * of the other mode in the same batch is rejected. A later batch on the same queue may use the
-   * other mode.
-   *
-   * Grouping dispatches by shape is the application's job; alternating shapes batch by batch works,
-   * but pays a context rebuild each time it switches.
+   * Reserved. Must be 0.
    */
-  uint64_t pdi_patch_offset;
+  uint64_t reserved6;
 } hsa_amd_aie_kernel_dispatch_packet_t;
 
 /** @} */

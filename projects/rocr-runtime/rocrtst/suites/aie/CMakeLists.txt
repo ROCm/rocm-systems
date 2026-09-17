@@ -314,6 +314,24 @@ add_custom_command(
 )
 add_custom_target(vsadd_hsaco_artifact DEPENDS "${vsadd_HSACO}")
 
+# The same packaging for the mul design, so the interleaving tests can dispatch two distinct
+# kernels by handle. Its kernarg buffer is 1 pointer + 1 size (see
+# aie_vector_scalar_mul_kernel::kernarg_bytes in dispatch.cc).
+set(VSMUL_HSACO_KERNEL_NAME "vsmul")
+set(vsmul_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsmul.hsaco")
+add_custom_command(
+  OUTPUT "${vsmul_HSACO}"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+          --hsaco "${vsmul_HSACO}"
+          --arch "${AIE_HSACO_ARCH}"
+          --kernel "${VSMUL_HSACO_KERNEL_NAME}:${vsmul_INSTS_BIN}:${vsmul_DESIGN_PDI}:16:1"
+  # Depend on the target, not its output files: see the vsadd_HSACO rule above for why.
+  DEPENDS vsmul_kernel_artifacts
+  COMMENT "Packaging vsmul PDI+insts artifacts into a unified AIE hsaco"
+  VERBATIM
+)
+add_custom_target(vsmul_hsaco_artifact DEPENDS "${vsmul_HSACO}")
+
 # Packages the vsadd full-ELF artifact into a single AIE hsaco with kind=FullElf, so the
 # loader test in dispatch.cc can exercise hsa_executable_load_agent_code_object on a
 # FullElf hsaco. The path is set unconditionally (mirroring vsadd_FULL_ELF above) so the test's
@@ -333,6 +351,23 @@ if(AIE_FULL_ELF_SUPPORTED)
     VERBATIM
   )
   add_custom_target(vsadd_elf_hsaco_artifact DEPENDS "${vsadd_ELF_HSACO}")
+endif()
+
+# The mul design's full ELF, packaged the same way, for the full-ELF interleaving test.
+set(vsmul_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsmul_elf.hsaco")
+if(AIE_FULL_ELF_SUPPORTED)
+  add_custom_command(
+    OUTPUT "${vsmul_ELF_HSACO}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+            --hsaco "${vsmul_ELF_HSACO}"
+            --arch "${AIE_HSACO_ARCH}"
+            --kernel "elf:${vsmul_FULL_ELF}:0:1"
+    # Depend on the target, not its output files: see the vsadd_HSACO rule above for why.
+    DEPENDS vsmul_full_elf_artifacts
+    COMMENT "Packaging vsmul full-ELF artifact into a unified AIE hsaco"
+    VERBATIM
+  )
+  add_custom_target(vsmul_elf_hsaco_artifact DEPENDS "${vsmul_ELF_HSACO}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -377,13 +412,17 @@ target_compile_definitions(dispatch
     # Same "<device>:<sequence>" kernel key as DEFAULT_ELF_KERNEL_NAME above; aie_hsaco.py's elf:
     # form derives the hsaco's kernel name from the same underlying ELF, so the two must match.
     DEFAULT_ELF_HSACO_KERNEL_NAME="main:sequence"
+    MUL_HSACO_PATH=${vsmul_HSACO}
+    MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"
+    MUL_ELF_HSACO_PATH=${vsmul_ELF_HSACO}
 )
 target_link_libraries(dispatch
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact)
+add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
+                          vsmul_hsaco_artifact)
 # Both are empty when the toolchain cannot build full ELFs. The guard is needed because
 # add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
 # rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
@@ -392,7 +431,7 @@ if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
   add_dependencies(dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
 endif()
 if(AIE_FULL_ELF_SUPPORTED)
-  add_dependencies(dispatch vsadd_elf_hsaco_artifact)
+  add_dependencies(dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact)
 endif()
 
 gtest_discover_tests(dispatch)
