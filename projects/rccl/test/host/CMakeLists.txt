@@ -56,6 +56,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
+  fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
@@ -107,15 +108,10 @@ if(BUILD_TESTS)
   # libamdhip64.so (HIP compile requirements are applied below without linking).
   add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
   target_sources(rccl-UnitTestsMicro PRIVATE
-    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc   # real IsArchMatch, for wrap-test.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/ras/ras_param.cc)  # real timeout scaling, for ras-client-test.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
   set_source_files_properties(
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/ras/ras_param.cc
     PROPERTIES GENERATED TRUE)
-  set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/ras/ras_param.cc
-    PROPERTIES COMPILE_DEFINITIONS NCCL_RAS_CLIENT)
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -817,18 +813,13 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # than librccl.so or the HIP runtime.
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 target_sources(rccl-UnitTestsMicro PRIVATE
-  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc   # real IsArchMatch, for wrap-test.cc
-  ${RCCL_HIPIFY_DIR}/src/ras/ras_param.cc)  # real timeout scaling, for ras-client-test.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
 # Produced by the hipify step, so it does not exist at configure time. Source-file
 # properties are DIRECTORY-scoped, so setting this here rather than relying on
 # another block having done so keeps this target standing alone.
 set_source_files_properties(
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
-  ${RCCL_HIPIFY_DIR}/src/ras/ras_param.cc
   PROPERTIES GENERATED TRUE)
-set_source_files_properties(
-  ${RCCL_HIPIFY_DIR}/src/ras/ras_param.cc
-  PROPERTIES COMPILE_DEFINITIONS NCCL_RAS_CLIENT)
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
