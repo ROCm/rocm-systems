@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -17,7 +18,49 @@
 
 #include "nccl.h"
 #include "comm.h"
+#include "gdrwrap.h"
 #include "rma/rma_proxy.h"
+
+// Persistent descriptors own two CPU-accessible sequence words. The production
+// helper is file-static and version-gated, so route only this included unit's
+// calls through a deterministic allocator. The tests can then drive allocation
+// failures and observe cleanup without a GPU or driver VMM.
+struct RmaProxyCpuAllocCall {
+  size_t count;
+  void* host;
+  void* device;
+  void* gdrHandle;
+};
+struct RmaProxyCpuFreeCall {
+  void* host;
+  void* gdrHandle;
+};
+static int g_rmaProxyCpuAllocFailAt = -1;
+static int g_rmaProxyCpuAllocCallIndex = 0;
+static std::vector<RmaProxyCpuAllocCall> g_rmaProxyCpuAllocCalls;
+static std::vector<RmaProxyCpuFreeCall> g_rmaProxyCpuFreeCalls;
+
+template <typename T>
+static ncclResult_t RmaProxyAllocMemCPUAccessible(T** ptr, T** devPtr, size_t nelem,
+                                                  int, void** gdrHandle,
+                                                  struct ncclMemManager*, bool = false) {
+  int call = g_rmaProxyCpuAllocCallIndex++;
+  if (call == g_rmaProxyCpuAllocFailAt) return ncclSystemError;
+  *ptr = static_cast<T*>(std::calloc(nelem, sizeof(T)));
+  if (*ptr == nullptr && nelem != 0) return ncclSystemError;
+  *devPtr = *ptr;
+  *gdrHandle = reinterpret_cast<void*>(0xA000 + call * 0x10);
+  g_rmaProxyCpuAllocCalls.push_back({nelem, *ptr, *devPtr, *gdrHandle});
+  return ncclSuccess;
+}
+
+template <typename T>
+static ncclResult_t RmaProxyFreeMemCPUAccessible(T* ptr, void* gdrHandle,
+                                                 struct ncclMemManager*) {
+  g_rmaProxyCpuFreeCalls.push_back({ptr, gdrHandle});
+  std::free(ptr);
+  return ncclSuccess;
+}
 
 // Other units in rccl-UnitTestsMicro need controllable doubles for these
 // exported functions. Rename this translation unit's definitions at inclusion
@@ -29,7 +72,11 @@
 #define ncclRmaProxyPutLaunch ncclRmaProxyPutLaunchUut
 #define ncclRmaProxyWaitLaunch ncclRmaProxyWaitLaunchUut
 #define ncclRmaProxyReclaimPlan ncclRmaProxyReclaimPlanUut
+#define allocMemCPUAccessible RmaProxyAllocMemCPUAccessible
+#define freeMemCPUAccessible RmaProxyFreeMemCPUAccessible
 #include RMA_PROXY_LAUNCH_CC_PATH
+#undef freeMemCPUAccessible
+#undef allocMemCPUAccessible
 #undef ncclRmaProxyReclaimPlan
 #undef ncclRmaProxyWaitLaunch
 #undef ncclRmaProxyPutLaunch
@@ -133,6 +180,10 @@ protected:
   std::vector<uint64_t> doneSeqsDev_;
 
   void SetUp() override {
+    g_rmaProxyCpuAllocFailAt = -1;
+    g_rmaProxyCpuAllocCallIndex = 0;
+    g_rmaProxyCpuAllocCalls.clear();
+    g_rmaProxyCpuFreeCalls.clear();
     comm_ = std::make_unique<ncclComm>();
     comm_->nRanks = kNRanks;
     comm_->rank = kRank;
@@ -164,6 +215,129 @@ protected:
     dstWin_.rmaHostWins[kContext] = reinterpret_cast<void*>(0x6660);
   }
 };
+
+TEST_F(RmaProxyDescriptorTest, PutDesc_PersistentOwnsDedicatedSequencesUntilDestroyed) {
+  plan_->persistent = true;
+  auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
+  ASSERT_NE(nullptr, desc);
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyPutBuildDesc(comm_.get(), ctx_.get(), plan_.get(),
+                                     &srcWin_, 7, &dstWin_, 13, 512, kPeer,
+                                     kContext, 1, NCCL_SIGNAL, desc));
+
+  ASSERT_EQ(2u, g_rmaProxyCpuAllocCalls.size());
+  EXPECT_EQ(1u, g_rmaProxyCpuAllocCalls[0].count);
+  EXPECT_EQ(1u, g_rmaProxyCpuAllocCalls[1].count);
+  EXPECT_EQ(1u, desc->opSeq);
+  EXPECT_EQ(plan_.get(), desc->persistPlan);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[0].host, desc->readySeq);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[0].device, desc->readySeqDev);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[0].gdrHandle, desc->readySeqGdrHandle);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[1].host, desc->doneSeq);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[1].device, desc->doneSeqDev);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[1].gdrHandle, desc->doneSeqGdrHandle);
+
+  ASSERT_EQ(ncclSuccess, ncclRmaProxyDestroyDescUut(comm_.get(), &desc));
+  EXPECT_EQ(nullptr, desc);
+  ASSERT_EQ(2u, g_rmaProxyCpuFreeCalls.size());
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[0].host, g_rmaProxyCpuFreeCalls[0].host);
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[1].host, g_rmaProxyCpuFreeCalls[1].host);
+}
+
+TEST_F(RmaProxyDescriptorTest, PutDesc_SecondSequenceAllocationFailsAndReleasesTheFirst) {
+  plan_->persistent = true;
+  g_rmaProxyCpuAllocFailAt = 1;
+  ncclRmaProxyDesc desc{};
+
+  EXPECT_EQ(ncclSystemError,
+            ncclRmaProxyPutBuildDesc(comm_.get(), ctx_.get(), plan_.get(),
+                                     &srcWin_, 7, &dstWin_, 13, 512, kPeer,
+                                     kContext, 1, NCCL_SIGNAL, &desc));
+
+  EXPECT_EQ(2, g_rmaProxyCpuAllocCallIndex);
+  ASSERT_EQ(1u, g_rmaProxyCpuFreeCalls.size());
+  EXPECT_EQ(g_rmaProxyCpuAllocCalls[0].host, g_rmaProxyCpuFreeCalls[0].host);
+  EXPECT_EQ(nullptr, desc.readySeq);
+  EXPECT_EQ(nullptr, desc.readySeqDev);
+  EXPECT_EQ(nullptr, desc.readySeqGdrHandle);
+  EXPECT_EQ(nullptr, desc.doneSeq);
+  EXPECT_EQ(nullptr, desc.doneSeqDev);
+  EXPECT_EQ(nullptr, desc.doneSeqGdrHandle);
+}
+
+TEST_F(RmaProxyDescriptorTest, PutGroupDesc_PersistentOwnsTheOpsAndDedicatedSequences) {
+  plan_->persistent = true;
+  auto* ops = static_cast<ncclRmaPutSignalOp*>(std::calloc(2, sizeof(ncclRmaPutSignalOp)));
+  ASSERT_NE(nullptr, ops);
+  ncclRmaPutSignalOp* submittedOps = ops;
+  auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
+  ASSERT_NE(nullptr, desc);
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyPutGroupBuildDesc(comm_.get(), ctx_.get(), plan_.get(),
+                                          2, &submittedOps, kContext, desc));
+
+  EXPECT_EQ(nullptr, submittedOps);
+  EXPECT_EQ(ops, desc->putSignalGroup.ops);
+  EXPECT_EQ(2, desc->putSignalGroup.nOps);
+  EXPECT_EQ(1u, desc->opSeq);
+  EXPECT_EQ(plan_.get(), desc->persistPlan);
+  ASSERT_EQ(2u, g_rmaProxyCpuAllocCalls.size());
+
+  EXPECT_EQ(ncclSuccess, ncclRmaProxyDestroyDescUut(comm_.get(), &desc));
+  EXPECT_EQ(nullptr, desc);
+  EXPECT_EQ(2u, g_rmaProxyCpuFreeCalls.size());
+}
+
+TEST_F(RmaProxyDescriptorTest, WaitDesc_PersistentWithoutGdrRequestsAFlush) {
+  plan_->persistent = true;
+  auto* peers = static_cast<int*>(std::calloc(1, sizeof(int)));
+  auto* nsignals = static_cast<int*>(std::calloc(1, sizeof(int)));
+  auto* signalIdxs = static_cast<int*>(std::calloc(1, sizeof(int)));
+  ASSERT_NE(nullptr, peers);
+  ASSERT_NE(nullptr, nsignals);
+  ASSERT_NE(nullptr, signalIdxs);
+  int* submittedPeers = peers;
+  int* submittedSignals = nsignals;
+  int* submittedSignalIdxs = signalIdxs;
+  auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
+  ASSERT_NE(nullptr, desc);
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyWaitBuildDesc(comm_.get(), ctx_.get(), plan_.get(), 1,
+                                      &submittedPeers, &submittedSignals,
+                                      &submittedSignalIdxs, desc));
+
+  EXPECT_EQ(nullptr, submittedPeers);
+  EXPECT_EQ(nullptr, submittedSignals);
+  EXPECT_EQ(nullptr, submittedSignalIdxs);
+  EXPECT_TRUE(desc->waitSignal.needFlush);
+  EXPECT_EQ(1u, desc->opSeq);
+  EXPECT_EQ(plan_.get(), desc->persistPlan);
+  ASSERT_EQ(2u, g_rmaProxyCpuAllocCalls.size());
+
+  EXPECT_EQ(ncclSuccess, ncclRmaProxyDestroyDescUut(comm_.get(), &desc));
+  EXPECT_EQ(nullptr, desc);
+  EXPECT_EQ(2u, g_rmaProxyCpuFreeCalls.size());
+}
+
+TEST_F(RmaProxyDescriptorTest, WaitDesc_PersistentWithGdrDoesNotRequestAFlush) {
+  plan_->persistent = true;
+  ctx_->cpuAccessSignalsGdrHandle = reinterpret_cast<void*>(0x7770);
+  int* peers = nullptr;
+  int* nsignals = nullptr;
+  int* signalIdxs = nullptr;
+  auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
+  ASSERT_NE(nullptr, desc);
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyWaitBuildDesc(comm_.get(), ctx_.get(), plan_.get(), 0,
+                                      &peers, &nsignals, &signalIdxs, desc));
+
+  EXPECT_FALSE(desc->waitSignal.needFlush);
+  EXPECT_EQ(ncclSuccess, ncclRmaProxyDestroyDescUut(comm_.get(), &desc));
+}
 
 TEST_F(RmaProxyDescriptorTest, PutOp_NoSignalCopiesTheDataOperationOnly) {
   ncclRmaPutSignalOp op{};
