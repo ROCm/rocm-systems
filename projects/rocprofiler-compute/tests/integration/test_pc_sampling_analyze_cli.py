@@ -156,7 +156,8 @@ def test_pc_sampling_analyze_database_output(
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
                 "SELECT kernel_name, offset, instruction, instruction_type, "
-                "source, count, count_issue, count_stall, "
+                "source, count, "
+                "issue_count, stall_count, "
                 "wave_occupancy_percent, active_thread_percent, stall_reason "
                 "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
