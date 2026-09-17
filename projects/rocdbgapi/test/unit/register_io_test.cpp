@@ -18,19 +18,24 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-/* Unit tests for the register I/O C API entry points
-   (amd_dbgapi_read_register and amd_dbgapi_write_register) at the
-   argument-validation layer that does not need a real wave:
+/* Unit tests for the register C API entry points at the
+   argument-validation layer:
 
-     * amd_dbgapi_read_register
-         - NOT_INITIALIZED when called before amd_dbgapi_initialize
-         - INVALID_WAVE_ID for an arbitrary handle once initialized
-         - INVALID_REGISTER_ID for an arbitrary register handle
+     * amd_dbgapi_read_register / amd_dbgapi_write_register
+         - NOT_INITIALIZED, INVALID_WAVE_ID, INVALID_REGISTER_ID
 
-     * amd_dbgapi_write_register
-         - NOT_INITIALIZED when called before amd_dbgapi_initialize
-         - INVALID_WAVE_ID for an arbitrary handle once initialized
-         - INVALID_REGISTER_ID for an arbitrary register handle
+     * amd_dbgapi_prefetch_register
+         - NOT_INITIALIZED, INVALID_WAVE_ID, INVALID_REGISTER_ID
+
+     * amd_dbgapi_wave_register_exists / amd_dbgapi_wave_register_list
+         - NOT_INITIALIZED, INVALID_WAVE_ID, INVALID_REGISTER_ID
+
+     * amd_dbgapi_register_is_in_register_class
+         - NOT_INITIALIZED, INVALID_REGISTER_CLASS_ID, INVALID_REGISTER_ID
+
+     * amd_dbgapi_architecture_register_list /
+       amd_dbgapi_architecture_register_class_list
+         - NOT_INITIALIZED, INVALID_ARCHITECTURE_ID
 
    These tests share the global detail::is_initialized flag with the rest
    of the process, so they use scoped_init_t to manage initialization.
@@ -218,4 +223,150 @@ TEST (RegisterIO, WriteRegisterInvalidRegisterId)
                                         amd_dbgapi_register_id_t{ 0xcafe }, 0,
                                         value_size, &value),
              AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_prefetch_register                                       */
+/* ------------------------------------------------------------------ */
+
+TEST (RegisterIO, PrefetchRegisterNotInitialized)
+{
+  EXPECT_EQ (amd_dbgapi_prefetch_register (amd_dbgapi_wave_id_t{ 1 },
+                                           amd_dbgapi_register_id_t{ 1 }, 1),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (RegisterIO, PrefetchRegisterInvalidWaveId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  EXPECT_EQ (amd_dbgapi_prefetch_register (amd_dbgapi_wave_id_t{ 0xdead },
+                                           amd_dbgapi_register_id_t{ 1 }, 1),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_wave_register_exists                                    */
+/* ------------------------------------------------------------------ */
+
+TEST (RegisterIO, WaveRegisterExistsNotInitialized)
+{
+  amd_dbgapi_register_exists_t exists;
+  EXPECT_EQ (amd_dbgapi_wave_register_exists (amd_dbgapi_wave_id_t{ 1 },
+                                              amd_dbgapi_register_id_t{ 1 },
+                                              &exists),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (RegisterIO, WaveRegisterExistsInvalidWaveId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  amd_dbgapi_register_exists_t exists;
+  EXPECT_EQ (amd_dbgapi_wave_register_exists (amd_dbgapi_wave_id_t{ 0xdead },
+                                              amd_dbgapi_register_id_t{ 1 },
+                                              &exists),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_wave_register_list                                      */
+/* ------------------------------------------------------------------ */
+
+TEST (RegisterIO, WaveRegisterListNotInitialized)
+{
+  size_t count;
+  amd_dbgapi_register_id_t *registers;
+  EXPECT_EQ (amd_dbgapi_wave_register_list (amd_dbgapi_wave_id_t{ 1 }, &count,
+                                            &registers),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (RegisterIO, WaveRegisterListInvalidWaveId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  size_t count;
+  amd_dbgapi_register_id_t *registers;
+  EXPECT_EQ (amd_dbgapi_wave_register_list (amd_dbgapi_wave_id_t{ 0xdead },
+                                            &count, &registers),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_register_is_in_register_class                           */
+/* ------------------------------------------------------------------ */
+
+TEST (RegisterIO, RegisterIsInRegisterClassNotInitialized)
+{
+  amd_dbgapi_register_class_state_t state;
+  EXPECT_EQ (amd_dbgapi_register_is_in_register_class (
+               amd_dbgapi_register_class_id_t{ 1 },
+               amd_dbgapi_register_id_t{ 1 }, &state),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (RegisterIO, RegisterIsInRegisterClassInvalidRegisterClassId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  amd_dbgapi_register_class_state_t state;
+  EXPECT_EQ (amd_dbgapi_register_is_in_register_class (
+               amd_dbgapi_register_class_id_t{ 0xdead },
+               amd_dbgapi_register_id_t{ 1 }, &state),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_REGISTER_CLASS_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_architecture_register_list                              */
+/* ------------------------------------------------------------------ */
+
+TEST (RegisterIO, ArchitectureRegisterListNotInitialized)
+{
+  size_t count;
+  amd_dbgapi_register_id_t *registers;
+  EXPECT_EQ (amd_dbgapi_architecture_register_list (
+               amd_dbgapi_architecture_id_t{ 1 }, &count, &registers),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (RegisterIO, ArchitectureRegisterListInvalidArchitectureId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  size_t count;
+  amd_dbgapi_register_id_t *registers;
+  EXPECT_EQ (amd_dbgapi_architecture_register_list (
+               amd_dbgapi_architecture_id_t{ 0xdead }, &count, &registers),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_ARCHITECTURE_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_architecture_register_class_list                        */
+/* ------------------------------------------------------------------ */
+
+TEST (RegisterIO, ArchitectureRegisterClassListNotInitialized)
+{
+  size_t count;
+  amd_dbgapi_register_class_id_t *classes;
+  EXPECT_EQ (amd_dbgapi_architecture_register_class_list (
+               amd_dbgapi_architecture_id_t{ 1 }, &count, &classes),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (RegisterIO, ArchitectureRegisterClassListInvalidArchitectureId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  size_t count;
+  amd_dbgapi_register_class_id_t *classes;
+  EXPECT_EQ (amd_dbgapi_architecture_register_class_list (
+               amd_dbgapi_architecture_id_t{ 0xdead }, &count, &classes),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_ARCHITECTURE_ID);
 }
