@@ -114,10 +114,11 @@ For cross-wave conflicts, the predicate requires:
 
 ## ConSan presets
 
-Use `RJ_CONSAN_PRESET=low|default|high|max` to tune ConSan coverage.
+Use `RJ_CONSAN_PRESET=low|default|high|higher|max` to tune ConSan coverage.
 Unset, empty, and `default` preserve existing behavior. Workgroup/cell strides
-are respectively `1024/1024`, `256/256`, `1/4`, and `1/1`. Use `high` for small
-repros and `max` to remove both sampling filters; bounded retention still applies.
+are respectively `1024/1024`, `256/256`, `16/16`, `1/4`, and `1/1`. Use `high`
+for increased sampling, `higher` for small repros, and `max` to remove both
+sampling filters; bounded retention still applies.
 Explicit selector knobs override preset defaults. See the
 [usage guide](../../consan/USAGE.md#presets) for precedence and limitations.
 

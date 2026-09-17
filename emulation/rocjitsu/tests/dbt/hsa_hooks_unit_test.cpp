@@ -7852,7 +7852,9 @@ TEST(HsaHooksUnitTest, ConSanPresetsResolveAndAllowExplicitOverrides) {
                      "workgroup_stride=256 workgroup_offset=0 cell_stride=256 cell_offset=0"},
            std::pair{"low",
                      "workgroup_stride=1024 workgroup_offset=0 cell_stride=1024 cell_offset=0"},
-           std::pair{"high", "workgroup_stride=1 workgroup_offset=0 cell_stride=4 cell_offset=0"},
+           std::pair{"high", "workgroup_stride=16 workgroup_offset=0 cell_stride=16 cell_offset=0"},
+           std::pair{"higher", "workgroup_stride=1 workgroup_offset=0 cell_stride=4 cell_offset=0"},
+           std::pair{"HiGhEr", "workgroup_stride=1 workgroup_offset=0 cell_stride=4 cell_offset=0"},
            std::pair{"max", "workgroup_stride=1 workgroup_offset=0 cell_stride=1 cell_offset=0"}}) {
     ScopedEnvVar selected("RJ_CONSAN_PRESET", preset);
     const auto [ok, log] = install();
@@ -7867,7 +7869,7 @@ TEST(HsaHooksUnitTest, ConSanPresetsResolveAndAllowExplicitOverrides) {
     ScopedEnvVar explicit_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", "7");
     const auto [ok, log] = install();
     ASSERT_TRUE(ok) << log;
-    EXPECT_NE(log.find("workgroup_stride=1 workgroup_offset=0 cell_stride=8 cell_offset=7"),
+    EXPECT_NE(log.find("workgroup_stride=16 workgroup_offset=0 cell_stride=8 cell_offset=7"),
               std::string::npos)
         << log;
     ScopedEnvVar mixed("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "2");
@@ -7882,14 +7884,14 @@ TEST(HsaHooksUnitTest, ConSanPresetsResolveAndAllowExplicitOverrides) {
         << log;
   }
   {
-    ScopedEnvVar bad_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", "4");
+    ScopedEnvVar bad_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", "16");
     EXPECT_FALSE(install().first);
   }
   {
     ScopedEnvVar invalid("RJ_CONSAN_PRESET", "highest");
     const auto [ok, log] = install();
     EXPECT_FALSE(ok);
-    EXPECT_NE(log.find("expected low|default|high|max"), std::string::npos) << log;
+    EXPECT_NE(log.find("expected low|default|high|higher|max"), std::string::npos) << log;
   }
   for (const char *other : {"supercollider"}) {
     ScopedEnvVar other_mode("RJ_CONSAN_MODE", other);
