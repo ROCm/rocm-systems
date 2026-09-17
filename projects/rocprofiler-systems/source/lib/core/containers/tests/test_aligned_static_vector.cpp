@@ -74,6 +74,7 @@ TEST(AlignedStaticVector, emplace_back_throws_when_full)
     vec.push_back(1);
     vec.push_back(2);
     EXPECT_THROW(vec.push_back(3), std::out_of_range);
+    EXPECT_EQ(vec.size(), 2u);
 }
 
 TEST(AlignedStaticVector, pop_back_and_clear)

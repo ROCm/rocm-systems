@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <cstdlib>
 #include <initializer_list>
@@ -55,8 +56,12 @@ struct aligned_static_vector
     // std::atomic is neither copyable nor movable, so the AtomicSizeV=true instantiation
     // cannot use defaulted copy/move special members; read/write it through
     // load()/store() instead while the non-atomic instantiation copies/moves the plain
-    // size_t directly.
+    // size_t directly. Each member is split into a `requires`-constrained overload with
+    // the real body and a `= deleted` overload for the complementary case, so this class
+    // stays SFINAE-friendly (e.g. std::is_copy_constructible_v) for non-copyable/movable
+    // Tp, matching what a defaulted special member would give.
     constexpr aligned_static_vector(const aligned_static_vector& other)
+        requires std::copyable<Tp>
     : m_data(other.m_data)
     {
         if constexpr(AtomicSizeV)
@@ -69,7 +74,12 @@ struct aligned_static_vector
         }
     }
 
+    constexpr aligned_static_vector(const aligned_static_vector&)
+        requires(!std::copyable<Tp>)
+    = delete;
+
     constexpr aligned_static_vector(aligned_static_vector&& other) noexcept
+        requires std::movable<Tp>
     : m_data(std::move(other.m_data))
     {
         if constexpr(AtomicSizeV)
@@ -82,7 +92,12 @@ struct aligned_static_vector
         }
     }
 
+    constexpr aligned_static_vector(aligned_static_vector&&) noexcept
+        requires(!std::movable<Tp>)
+    = delete;
+
     constexpr aligned_static_vector& operator=(const aligned_static_vector& other)
+        requires std::copyable<Tp>
     {
         if(this == &other)
         {
@@ -100,7 +115,12 @@ struct aligned_static_vector
         return *this;
     }
 
+    constexpr aligned_static_vector& operator=(const aligned_static_vector&)
+        requires(!std::copyable<Tp>)
+    = delete;
+
     constexpr aligned_static_vector& operator=(aligned_static_vector&& other) noexcept
+        requires std::movable<Tp>
     {
         if(this == &other)
         {
@@ -117,6 +137,10 @@ struct aligned_static_vector
         }
         return *this;
     }
+
+    constexpr aligned_static_vector& operator=(aligned_static_vector&&) noexcept
+        requires(!std::movable<Tp>)
+    = delete;
 
     explicit constexpr aligned_static_vector(size_t count, Tp value = {});
 
@@ -262,6 +286,9 @@ public:
     constexpr const_iterator cend() const noexcept { return end(); }
 
 private:
+    constexpr void update_size(size_t);
+
+private:
     count_type m_size = count_type{ 0 };
     array_type m_data = {};
 };
@@ -367,7 +394,7 @@ template <typename... Args>
 constexpr Tp&
 aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::emplace_back(Args&&... args)
 {
-    auto idx = m_size++;
+    const auto idx = static_cast<size_t>(m_size);
     if(idx >= N) [[unlikely]]
     {
         throw std::out_of_range{
@@ -375,6 +402,7 @@ aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::emplace_back(Args&&... args)
             std::to_string(N)
         };
     }
+    update_size(idx + 1);
 
     if constexpr(sizeof...(Args) > 0)
     {
@@ -401,6 +429,20 @@ aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::emplace_back(Args&&... args)
     }
 
     return m_data[idx].value;
+}
+
+template <typename Tp, size_t N, size_t AlignN, bool AtomicSizeV>
+constexpr void
+aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::update_size(size_t count)
+{
+    if constexpr(AtomicSizeV)
+    {
+        m_size.store(count);
+    }
+    else
+    {
+        m_size = count;
+    }
 }
 
 }  // namespace rocprofsys::container

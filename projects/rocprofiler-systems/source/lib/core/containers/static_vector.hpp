@@ -191,13 +191,14 @@ template <typename... Args>
 constexpr Tp&
 static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... args)
 {
-    auto idx = m_size++;
+    const auto idx = static_cast<size_t>(m_size);
     if(idx >= N) [[unlikely]]
     {
         throw std::out_of_range{ std::string{
                                      "static_vector::emplace_back - reached capacity " } +
                                  std::to_string(N) };
     }
+    update_size(idx + 1);
 
     if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(args))...>::value)
     {
