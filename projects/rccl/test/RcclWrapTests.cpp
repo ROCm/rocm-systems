@@ -1608,8 +1608,7 @@ TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
 
     auto selectedAlgo = [&](ncclRedOp_t op) {
         struct rcclCollDecision decision = {};
-        EXPECT_EQ(rcclSelectReduceScatter(mockComm, &sendbuff, &recvbuff, recvcount, ncclFloat32, op,
-                                          /*query=*/false, &decision),
+        EXPECT_EQ(rcclSelectReduceScatter(mockComm, &sendbuff, &recvbuff, recvcount, ncclFloat32, op, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision),
                   ncclSuccess);
         return decision.algo;
     };

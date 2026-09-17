@@ -4596,7 +4596,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) 
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclProd, /*query=*/false, &decision));
+                                                        ncclProd, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         // query=false returns right after rccl_wrap.cc:1291's unconditional
         // `decision->algo = NCCL_ALGO_RING;`, before the query-only
         // getAlgoInfo block -- so the exact value is deterministic, not just
@@ -4623,7 +4623,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricAcceptsSumOrAvg) {
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, sumDecision.algo);
         rcclCollDecision avgDecision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclAvg, /*query=*/false, &avgDecision));
+                                                        ncclAvg, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &avgDecision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, avgDecision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4643,7 +4643,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLChosenOnGfx1250) {
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL, decision.protocol);
@@ -4671,7 +4671,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenW
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo); // DDA won, not SYMMETRIC
         DeleteCommWithArch(comm);
       });
@@ -4698,7 +4698,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotS
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo); // symmetric won, not DDA_IPC
         DeleteCommWithArch(comm);
       });
@@ -4718,7 +4718,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
@@ -4749,7 +4749,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLThresholdBoundary) {
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, atCutoff.algo);
         rcclCollDecision pastCutoff{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/9, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &pastCutoff));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &pastCutoff));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, pastCutoff.algo);
         DeleteCommWithArch(comm);
       });
@@ -4776,11 +4776,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ThresholdBoundary)
         comm->nNodes = 1;
         rcclCollDecision atCutoff{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &atCutoff));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &atCutoff));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, atCutoff.algo);
         rcclCollDecision pastCutoff{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/9, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &pastCutoff));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &pastCutoff));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, pastCutoff.algo);
         DeleteCommWithArch(comm);
       });
@@ -4799,7 +4799,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaIpcChosenOnNonGfx1250Arch) {
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
 
         DeleteCommWithArch(comm);
@@ -4820,7 +4820,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_HierarchicalChosenLiveMode) {
         comm->hierarchicalCommsInitialized = true;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4838,7 +4838,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesHierarchical)
         ncclGroupDepth = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4857,7 +4857,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_HierarchicalGatedOnSumOpOnly) {
         comm->hierarchicalCommsInitialized = true;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclAvg, /*query=*/false, &decision));
+                                                        ncclAvg, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4895,7 +4895,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_HierarchicalQueryModeSucceeds) {
         comm->hierarchicalIntraComm = intraComm;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/true, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         EXPECT_EQ(9, decision.nMaxChannels);
@@ -4915,8 +4915,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DirectChosenWhenEligible) {
         comm->p2pnChannels = 23;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclSum,
-                                          /*query=*/false, &decision)); // 1MiB total, within [128KiB,2MiB]
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision)); // 1MiB total, within [128KiB,2MiB]
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DIRECT_REDUCESCATTER, decision.algo);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
         EXPECT_EQ(23, decision.nMaxChannels);
@@ -4934,8 +4933,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesDirect) {
         ncclGroupDepth = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclSum,
-                                          /*query=*/false, &decision));
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4956,8 +4954,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_AvgOpIsExcludedFromDirect) {
         comm->nRanks = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclAvg,
-                                          /*query=*/false, &decision));
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/1048576 / 4, ncclFloat32, ncclAvg, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << "ncclAvg must fall through to the plain-kernel path";
         DeleteCommWithArch(comm);
       });
@@ -5113,7 +5110,7 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 }
 
 // ===========================================================================
-// Back to rcclSelectReduceScatter (rccl_wrap.cc:1206-1317) for three cases
+// Back to rcclSelectReduceScatter(rccl_wrap.cc:1206-1317) for three cases
 // that need the sub-comm helpers defined in the section above, which is why
 // they sit here rather than with the rest of that function's tests.
 // ===========================================================================
@@ -5137,7 +5134,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeam
         ncclComm* comm = MakeSelectComm(); // not DDA/Direct/Hierarchical eligible
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain-kernel placeholder
@@ -5165,7 +5162,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricReportedWhenQueryAndEli
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/true, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL, decision.protocol);
         EXPECT_EQ(7, decision.nMaxChannels);
@@ -5197,7 +5194,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_PlainKernelFallbackReportsGetAlg
         ncclComm* comm = MakeSelectComm();
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/true, &decision));
+                                                        ncclSum, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_TREE, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         EXPECT_EQ(39, decision.nMaxChannels);
@@ -5862,7 +5859,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_PlainKernelFallbackGetAlgoInfoFa
         ncclComm* comm = MakeSelectComm();
         rcclCollDecision decision{};
         EXPECT_EQ(ncclInternalError, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                              ncclSum, /*query=*/true, &decision));
+                                                              ncclSum, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
         DeleteCommWithArch(comm);
       });
 }

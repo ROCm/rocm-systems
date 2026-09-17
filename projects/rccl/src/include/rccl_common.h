@@ -172,11 +172,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
-// Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
-// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel. RS has no CE.
+// Single source of truth for ReduceScatter selection: symmetric -> CE 2-shot -> DDA fabric
+// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> CE registered -> symmetric -> ring/pat.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
-                                     ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision);
+                                     ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
+                                     bool graphCapturingHint, struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
@@ -198,6 +198,7 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -210,6 +211,8 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm);
 // the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
                                     bool symEligible, bool ceAllReduceAllowed);
+bool rcclReduceScatterShouldTakeDdaPath(const struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype,
+                                        bool symEligible, bool ceReduceScatterAllowed);
 // Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
 // symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
 // `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.

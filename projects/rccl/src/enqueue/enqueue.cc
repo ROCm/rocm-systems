@@ -4104,7 +4104,9 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
 }
 
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
+RCCL_PARAM_DECLARE(ForceCeReduceScatter);
 RCCL_PARAM_DECLARE(CeAllReduce);
+RCCL_PARAM_DECLARE(CeReduceScatter);
 RCCL_PARAM(ForceCe, "FORCE_CE", 1);
 // TODO(raw task): move this raw task capture implementation into raw_task.cc
 // once the remaining enqueue-local profiler and red-op dependencies are split.
@@ -4291,8 +4293,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // while the stream is capturing and fall through to the graph-safe
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
-      if (info->decisionValid) {
-        // Already computed by ncclAllReduce_impl() via rcclSelectAllReduce().
+      if (info->decisionValid &&
+          (info->coll == ncclFuncAllReduce || info->coll == ncclFuncReduceScatter)) {
+        // Already computed by ncclAllReduce_impl() / ncclReduceScatter_impl() via rcclSelect*().
         ceCapturing = info->decision.ceCapturing;
         ceArGraphAllowed = info->decision.ceArGraphAllowed;
       } else {
@@ -4318,9 +4321,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
       }
 
-      // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
-      // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      // Size gate for CE AllReduce / ReduceScatter without symmetric memory registration:
+      // ceARTmpBuf is sized for at most NCCL_CE_AR_MAX_MSG_BYTES total bytes.
       bool ceAllReduceFits = false;
+      bool ceReduceScatterFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable =
@@ -4352,22 +4356,37 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
         }
       }
+      if (info->coll == ncclFuncReduceScatter) {
+        const bool ceReduceScatterOpSupported =
+          (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
+        if (!ceArGraphAllowed || !ceReduceScatterOpSupported || !rcclParamCeReduceScatter()) {
+          ceAvailable = false;
+        } else if (ceReduceScatterOpSupported) {
+          size_t totalBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeReduceScatter() ||
+              !comm->symmetricSupport || comm->nNodes > 1) {
+            ceReduceScatterFits = false;
+          } else {
+            ceReduceScatterFits = true;
+          }
+        }
+      }
 
       // Append CE collective task if CE is supported and requested by user
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      // Uncapped sym-window CE AllReduce (-R 2), without flipping whole comm to CE mode
+      // Uncapped sym-window CE AllReduce / ReduceScatter (-R 2), without flipping whole comm to CE mode
       bool ceArSymRegistered =
-        info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment;
+        (info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment) ||
+        (info->coll == ncclFuncReduceScatter && rcclParamForceCeReduceScatter() && ceAvailable &&
+         !hasSysmemSegment);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (info->coll == ncclFuncAllReduce && info->decisionValid) {
-        // AllReduce's backend was already chosen once by rcclSelectAllReduce();
-        // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
-        // step 5 reproduces develop's CE-registered condition exactly
-        // (!hasSysmemSegment && ceAvailable && ((CTAPolicy & ZERO) || force)), so
-        // decision.algo == RCCL_CE_REGISTERED <=> the CE branches below would fire.
+      if ((info->coll == ncclFuncAllReduce || info->coll == ncclFuncReduceScatter) && info->decisionValid) {
+        // Backend was already chosen once by rcclSelectAllReduce() / rcclSelectReduceScatter();
+        // honor it here instead of recomputing CE eligibility.
         if (info->decision.algo == RCCL_CE_REGISTERED) {
-          INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
+          INFO(NCCL_INIT, "Taking CE collective path for %s",
+               info->coll == ncclFuncAllReduce ? "AllReduce" : "ReduceScatter");
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                      opDev));
         } else {
@@ -4375,7 +4394,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
         // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
-        // AllReduce), so it never affects this AllReduce branch.
+        // AllReduce / ReduceScatter), so it never affects this branch.
       } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
                   !hasSysmemSegment) ||
                  ceArSymRegistered) {
@@ -4385,12 +4404,14 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 
       } else if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
                  winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-                 recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+                 recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce &&
+                 info->coll != ncclFuncReduceScatter) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
                                    comm->ddaPeerPtrsHost, opDev));
-      } else if (ceAllReduceFits && !hasSysmemSegment) {
-        INFO(NCCL_COLL, "CE AllReduce Path without symmetric memory registration, count=%zu", info->count);
+      } else if ((ceAllReduceFits || ceReduceScatterFits) && !hasSysmemSegment) {
+        INFO(NCCL_COLL, "CE %s path without symmetric memory registration, count=%zu",
+             info->coll == ncclFuncReduceScatter ? "ReduceScatter" : "AllReduce", info->count);
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
       } else {

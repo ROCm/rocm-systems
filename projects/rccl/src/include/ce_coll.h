@@ -216,6 +216,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                              struct ncclDevrWindow* recvWin = nullptr,
                              struct ncclCeCollArgs* profilerArgs = nullptr);
 
+// CE ReduceScatter: scatter → local-reduce into recvbuff (recvcount elements per rank).
+// Uses the same staging buffer as CE AllReduce (ncclCeEnsureAllReduceStaging).
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                 ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                                 struct ncclDevrWindow* recvWin = nullptr,
+                                 struct ncclCeCollArgs* profilerArgs = nullptr);
+
 // Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
 // (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce
 // launches; for host-side impl-selection reporting. Returns 0 if chunkElems==0.

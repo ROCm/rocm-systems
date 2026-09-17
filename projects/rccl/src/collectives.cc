@@ -243,6 +243,13 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
 }
 
+bool rcclReduceScatterShouldTakeDdaPath(const ncclComm* comm, size_t recvcount, ncclDataType_t datatype,
+                                        bool symEligible, bool ceReduceScatterAllowed) {
+  const size_t msgBytes = recvcount * ncclTypeSize(datatype) * (size_t)comm->nRanks;
+  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  return !symEligible && (ddaFabricArch1250 || !ceReduceScatterAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
+}
+
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
   // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
   // CE never dispatches. Full contract is on the declaration in rccl_common.h.
@@ -1147,7 +1154,10 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   // Select once in rccl_wrap.cc; the same function backs rcclGetCollImplInfo.
   struct rcclCollDecision decision;
-  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
+  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, /*query=*/false,
+                                    /*graphCapturingHint=*/false, &decision));
+  info.decision = decision;
+  info.decisionValid = true;
 
   // Canonical line for addon backends; native kernels report via the enqueue tuning line.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
@@ -1157,6 +1167,24 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   }
 
   switch (decision.algo) {
+  case RCCL_CE_2SHOT: {
+    if (recvcount == 0) return ncclSuccess;
+    INFO(NCCL_COLL, "CE 2-shot ReduceScatter: recvcount=%zu datatype=%d op=%d rank=%d/%d", recvcount, (int)datatype,
+         (int)op, comm->rank, comm->nRanks);
+    struct ncclCeCollArgs ceArgs = {};
+    ceArgs.func = ncclFuncReduceScatter;
+    ceArgs.datatype = datatype;
+    ceArgs.redOp = op;
+    ceArgs.nElts = recvcount;
+    ceArgs.eltSize = ncclTypeSize(datatype);
+    ceArgs.sendBuff = (uint8_t*)sendbuff;
+    ceArgs.recvBuff = (uint8_t*)recvbuff;
+    NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
+    ncclResult_t ceRet =
+      ncclCeReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, nullptr, &ceArgs);
+    ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
+    return ceRet;
+  }
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
@@ -1185,7 +1213,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
          "sendbuff=%p recvbuff=%p",
          recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
     return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
-  default: // RCCL_SYMMETRIC / native go through the standard enqueue path.
+  default: // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native go through the standard enqueue path.
     return ncclEnqueueCheck(&info);
   }
 }

@@ -56,9 +56,11 @@ RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
+RCCL_PARAM(CeReduceScatter, "CE_REDUCESCATTER", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
+RCCL_PARAM(ForceCeReduceScatter, "FORCE_CE_REDUCESCATTER", 0);
 
 // Common DDA protocol-tier knobs, shared by every fabric collective (no
 // per-collective variants). For a given collective's size:
@@ -516,8 +518,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
 
   if (coll == ncclFuncReduceScatter) {
     struct rcclCollDecision decision;
-    NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*query=*/true,
-                                      &decision));
+    NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, (size_t)count, dataType, op, /*stream=*/nullptr,
+                                      /*query=*/true, /*graphCapturingHint=*/graphCapturing != 0, &decision));
     *algo = decision.algo;
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
@@ -853,6 +855,63 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t data
   // Float8 types require specialised handling not yet implemented for CE AR.
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
     WARN("Skipping CE AllReduce: unsupported datatype: Float8");
+    return false;
+  }
+
+  return true;
+}
+
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op) {
+  static int enabled = rcclParamCeReduceScatter();
+  static int force = rcclParamForceCeReduceScatter();
+  if (!enabled) {
+    static bool warnedDisabled = false;
+    if (!warnedDisabled) {
+      warnedDisabled = true;
+      INFO(NCCL_INIT, "CE ReduceScatter not enabled. Set RCCL_CE_REDUCESCATTER=1 to enable.");
+    }
+    return false;
+  }
+
+  if (!comm->symmetricSupport) {
+    WARN("Skipping CE ReduceScatter: symmetric support is not enabled");
+    return false;
+  }
+  if (comm->nNodes != 1) {
+    WARN("Skipping CE ReduceScatter: nNodes is not 1");
+    return false;
+  }
+
+  if (recvcount == 0) {
+    WARN("Skipping CE ReduceScatter: recvcount is 0");
+    return false;
+  }
+
+  size_t msgBytes = recvcount * ncclTypeSize(datatype) * (size_t)comm->nRanks;
+  if (force) {
+    if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
+      WARN("Skipping CE ReduceScatter despite RCCL_FORCE_CE_REDUCESCATTER=1: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)",
+           msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+      return false;
+    }
+  }
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) {
+    WARN("Skipping CE ReduceScatter: msgBytes (%zu) > NCCL_CE_AR_MAX_MSG_BYTES (%zu)", msgBytes, NCCL_CE_AR_MAX_MSG_BYTES);
+    return false;
+  }
+
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
+    WARN("Skipping CE ReduceScatter: CTA policy is not ZERO");
+    return false;
+  }
+
+  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) {
+    WARN("Skipping CE ReduceScatter: unsupported reduction operation");
+    return false;
+  }
+
+  if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
+    WARN("Skipping CE ReduceScatter: unsupported datatype: Float8");
     return false;
   }
 
@@ -1253,8 +1312,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 // See the header comment. Consolidates the backend picking formerly inlined in
 // ncclReduceScatter_impl(); the outcome for any given operands is identical.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
-                                     ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision) {
+                                     ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
+                                     bool graphCapturingHint, struct rcclCollDecision* decision) {
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
@@ -1270,10 +1329,48 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                datatype, recvcount, sendbuff, recvbuff);
 
-  // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
-  // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
+  // (1b) CE ReduceScatter graph state (shared latch with CE AllReduce).
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
+  }
+  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+  if (query && ceCapturing) ceArGraphAllowed = false;
+  decision->ceCapturing = ceCapturing;
+  decision->ceArGraphAllowed = ceArGraphAllowed;
+
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+
+  const bool force = rcclParamForceCeReduceScatter() != 0;
+  const bool symReg =
+    ncclCeAvailable(comm, ncclFuncReduceScatter, (int)op, datatype, winRegType, sendWin, recvWin);
+  const bool ceReduceScatterAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
+                                      rcclUseCeReduceScatter(comm, recvcount, datatype, op) && (force || symReg);
+
+  // (2) Eager CE 2-shot (staging buffer). Requires !symEligible and initialized ceARTmpBuf.
+  if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    decision->algo = RCCL_CE_2SHOT;
+    decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
+    return ncclSuccess;
+  }
+
+  // (3) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
+  // state); IPC keeps the strict !symEligible guard. Yield to CE when it will service
+  // this call (non-gfx1250), matching AllReduce.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608) &&
+      (ddaFabricArch || !ceReduceScatterAllowed)) {
     if (ddaFabricArch) {
       if (rcclParamDdaLL() && rsShardBytes <= (size_t)rcclParamDdaLLThreshold() &&
           ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
@@ -1297,7 +1394,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
   }
 
-  // (3) Hierarchical ReduceScatter (multi-node, sum only). Live dispatch requires
+  // (4) Hierarchical ReduceScatter (multi-node, sum only). Live dispatch requires
   // being outside a group; the reporting query always runs outside a group, so the
   // same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
   if (!symEligible && ncclGroupDepth == 0 && op == ncclSum && rcclUseHierarchicalReduceScatter(comm, totalBytes)) {
@@ -1311,7 +1408,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     return ncclSuccess;
   }
 
-  // (4) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
+  // (5) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
   // That reduce runs with PreOpSrcs=0 / postOp=false, an unscaled sum, so ncclAvg and
   // user-defined PreMulSum (op >= ncclNumOps) fall through to the ring kernel instead.
   size_t directMsgSize = totalBytes;
@@ -1322,7 +1419,20 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     return ncclSuccess;
   }
 
-  // (5) Symmetric kernel. Live path dispatches symk via the downstream extraction.
+  // (6) CE via registered symmetric windows / force path (enqueue-bound).
+  bool ceAvailable =
+    !ceCapturing && ncclCeAvailable(comm, ncclFuncReduceScatter, (int)op, datatype, winRegType, sendWin, recvWin);
+  const bool ceReduceScatterOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
+  if (!ceArGraphAllowed || !ceReduceScatterOpSupported || !rcclParamCeReduceScatter()) {
+    ceAvailable = false;
+  }
+  if (ceAvailable && !hasSysmemSegment && ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+    decision->algo = RCCL_CE_REGISTERED;
+    decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
+    return ncclSuccess;
+  }
+
+  // (7) Symmetric kernel. Live path dispatches symk via the downstream extraction.
   if (symEligible) {
     decision->algo = RCCL_SYMMETRIC;
     if (query) {
@@ -1335,7 +1445,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     return ncclSuccess;
   }
 
-  // (6) Standard ring/pat kernel. Only the query needs algo/proto/channels filled;
+  // (8) Standard ring/pat kernel. Only the query needs algo/proto/channels filled;
   // the live path recomputes these in taskAppend().
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
