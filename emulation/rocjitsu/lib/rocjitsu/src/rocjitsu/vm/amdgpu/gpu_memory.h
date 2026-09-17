@@ -586,12 +586,15 @@ public:
       std::ranges::fill(dst, uint8_t{0});
       return AccessOutcome::Faulted;
     }
+    // SDMA's mapped-endpoint path uses read_block(), not copy_block(). A
+    // client-owned address must not first be probed in the daemon here either.
+    const bool client_backed = vmid != 0 && has_client_backing(vmid);
     size_t stopped_at = dst.size();
     const bool completed =
         for_each_page_chunk_until(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
           const FaultScope chunk_faults;
           auto out = dst.subspan(offset, chunk);
-          if (read_mapped(ea, out.data(), chunk, vmid))
+          if (read_mapped(ea, out.data(), chunk, vmid, !client_backed))
             return true;
           // A refused read has already zero-filled its own chunk. Substituting
           // sparse storage for it would hand back invented bytes as if they
@@ -606,7 +609,7 @@ public:
           // refused hands back fabricated zeroes as if they were the address's
           // contents. Sparse remains the backing for GPU memory never written,
           // which is what an address with no client behind it is.
-          if (vmid > 0 && has_client_backing(vmid)) {
+          if (client_backed) {
             if (read_client_memory(ea, out.data(), chunk, vmid))
               return true;
             note_rejected_identity_access(ea, vmid);
@@ -656,11 +659,12 @@ public:
       note_rejected_identity_access(addr, vmid);
       return AccessOutcome::Faulted;
     }
+    const bool client_backed = vmid != 0 && has_client_backing(vmid);
     const bool completed =
         for_each_page_chunk_until(addr, src.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
           const FaultScope chunk_faults;
           auto in = src.subspan(offset, chunk);
-          if (write_mapped(ea, in.data(), chunk, vmid))
+          if (write_mapped(ea, in.data(), chunk, vmid, !client_backed))
             return true;
           // A refusal is not "nothing is mapped here, try elsewhere": the
           // address exists and may not be written. Falling through to the
@@ -672,7 +676,7 @@ public:
           // As in read_block(): a client-owned address that the kernel refused
           // is a fault, not an invitation to write somewhere the client will
           // never look.
-          if (vmid > 0 && has_client_backing(vmid)) {
+          if (client_backed) {
             if (write_client_memory(ea, in.data(), chunk, vmid))
               return true;
             note_rejected_identity_access(ea, vmid, MemoryFaultCause::Indeterminate);
@@ -2271,7 +2275,8 @@ private:
     });
   }
 
-  bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+  bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid,
+                   bool allow_identity = true) const {
     const FaultDispatch fault_dispatch(*this);
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
@@ -2310,6 +2315,8 @@ private:
               note_clipped_mapped_access("read", addr, len, vmid);
             return true;
           }
+          if (!allow_identity)
+            return false;
           if (page.read(access_begin, dst, len))
             return true;
           note_rejected_identity_access(addr, vmid);
@@ -2317,7 +2324,8 @@ private:
         });
   }
 
-  bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+  bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid,
+                    bool allow_identity = true) {
     const FaultDispatch fault_dispatch(*this);
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
@@ -2351,6 +2359,8 @@ private:
               note_clipped_mapped_access("write", addr, len, vmid);
             return true;
           }
+          if (!allow_identity)
+            return false;
           if (page.write(access_begin, src, len))
             return true;
           note_rejected_identity_access(addr, vmid, page.write_refusal_cause());

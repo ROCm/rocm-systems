@@ -4,6 +4,9 @@
 #include "cdna5_sim_test_common.h"
 
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <limits>
 
@@ -124,6 +127,8 @@ public:
   uint64_t signal_va() const { return kSignalVa; }
   uint64_t poll_va() const { return kPollVa; }
 
+  void set_client_pid(pid_t pid) { sim_.memory->set_process_client_pid(kProcessId, pid); }
+
   /// @brief Leave the signal value mapped but drop the metadata behind it.
   void clip_signal_mapping_after_value() {
     process_.unmap_pages(kSignalVa, signal_.size() * sizeof(signal_[0]));
@@ -196,6 +201,92 @@ void write_sdma_qword_va(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, uint6
 void write_sdma_qword_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void *addr) {
   write_sdma_qword_va(packet, lo_dw, hi_dw, reinterpret_cast<uintptr_t>(addr));
 }
+
+// Drive the real SDMA packet caller with daemon-style translated queue storage
+// and a remote pageable endpoint. The parent's reservation is inaccessible;
+// only the child makes its private copy readable/writable. Keeping the parent
+// reservation prevents later allocations from accidentally reusing that VA.
+void run_client_sdma_copy(bool passthrough, bool to_client) {
+  constexpr size_t kBytes = 64;
+  constexpr uint8_t kPattern = 0x5a;
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  sim.memory->set_passthrough(passthrough);
+  void *remote =
+      mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(remote, MAP_FAILED);
+  int ready[2], release[2];
+  ASSERT_EQ(pipe(ready), 0);
+  ASSERT_EQ(pipe(release), 0);
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    close(ready[0]);
+    close(release[1]);
+    if (prctl(PR_SET_DUMPABLE, 1) != 0 || prctl(PR_SET_PTRACER, getppid()) != 0 ||
+        mprotect(remote, KfdProcess::kPageSize, PROT_READ | PROT_WRITE) != 0)
+      _exit(2);
+    std::memset(remote, to_client ? 0 : kPattern, kBytes);
+    uint8_t value = 1;
+    if (write(ready[1], &value, 1) != 1)
+      _exit(3);
+    if (read(release[0], &value, 1) != 1)
+      _exit(4);
+    for (size_t i = 0; i < kBytes; ++i)
+      if (static_cast<uint8_t *>(remote)[i] != kPattern)
+        _exit(5);
+    _exit(0);
+  }
+  close(ready[1]);
+  close(release[0]);
+  // No fatal assertions below: always release and reap the child, even when
+  // exercising the broken implementation as the negative control.
+  uint8_t value = 0;
+  const bool child_ready = read(ready[0], &value, 1) == 1;
+  EXPECT_TRUE(child_ready);
+  if (child_ready) {
+    queue.set_client_pid(child);
+    std::memset(queue.src(), kPattern, kBytes);
+    std::memset(queue.dst(), 0, kBytes);
+    queue.signal_value() = 0;
+    const uint64_t remote_va = reinterpret_cast<uint64_t>(remote);
+    auto *packet = queue.ring();
+    packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+    packet[1] = kBytes - 1;
+    packet[2] = 0;
+    write_sdma_qword_va(packet, 3, 4, to_client ? queue.src_va() : remote_va);
+    write_sdma_qword_va(packet, 5, 6, to_client ? remote_va : queue.dst_va());
+    // Completion must only become visible after the actual copy succeeds.
+    packet[7] = kSdmaOpFence;
+    write_sdma_qword_va(packet, 8, 9, queue.signal_va());
+    packet[10] = 0x1234;
+    queue.submit(11);
+    EXPECT_TRUE(sim.engine->step());
+    EXPECT_EQ(queue.read_idx(), 11u * sizeof(uint32_t));
+    EXPECT_EQ(queue.signal_value(), 0x1234);
+    if (!to_client) {
+      for (size_t i = 0; i < kBytes; ++i) {
+        EXPECT_EQ(queue.dst()[i], kPattern) << "byte " << i;
+      }
+    }
+    value = 1;
+    EXPECT_EQ(write(release[1], &value, 1), 1);
+  }
+  close(ready[0]);
+  close(release[1]);
+  int status = 0;
+  EXPECT_EQ(waitpid(child, &status, 0), child);
+  EXPECT_TRUE(WIFEXITED(status));
+  if (WIFEXITED(status)) {
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+  }
+  EXPECT_EQ(munmap(remote, KfdProcess::kPageSize), 0);
+}
+
+TEST(Gfx1250SdmaTest, ClientSourceBypassesDaemonIdentity) { run_client_sdma_copy(true, false); }
+TEST(Gfx1250SdmaTest, ClientDestinationBypassesDaemonIdentity) { run_client_sdma_copy(true, true); }
+TEST(Gfx1250SdmaTest, ClientSourceWithoutPassthrough) { run_client_sdma_copy(false, false); }
+TEST(Gfx1250SdmaTest, ClientDestinationWithoutPassthrough) { run_client_sdma_copy(false, true); }
 
 TEST(Gfx1250SdmaTest, UnrungDoorbellSentinelDoesNotAdvanceAnEmptyQueue) {
   Gfx1250Sim sim;

@@ -2296,6 +2296,9 @@ TEST(GpuMemoryTest, ClientCopyBypassesDaemonIdentityTranslation) {
   ASSERT_NE(destination.data, nullptr);
   process.map_pages(0x400000, destination.data, KfdProcess::kPageSize);
 
+  std::array<uint8_t, kBytes> direct_read{};
+  EXPECT_EQ(memory.read_block(source_address, direct_read, kPid), amdgpu::AccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::all_of(direct_read, [](uint8_t byte) { return byte == 0x5a; }));
   EXPECT_EQ(memory.copy_block(0x400000, source_address, kBytes, kPid),
             amdgpu::CopyOutcome::Complete);
   EXPECT_TRUE(std::all_of(destination.data, destination.data + kBytes,
