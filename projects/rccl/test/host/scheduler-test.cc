@@ -16,7 +16,9 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
+#include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/scheduler_fakes.h"
+#include "fakes/sym_kernels_fakes.h"
 
 // Local to this TU only: struct ncclComm is never shared across a TU boundary here, so no ABI mismatch.
 #define ENABLE_WARP_SPEED
@@ -80,6 +82,16 @@ std::vector<ncclTaskBcast*> ScheduleBcastTasksToPlan_CollectBcastTaskQueue(struc
   return items;
 }
 
+// Minimal ncclComm scaffold for ncclMakeSymmetricTaskList; nRanks=1 skips the bootstrap-consensus block by default.
+class MakeSymmetricTaskList_Scene {
+ public:
+  MakeSymmetricTaskList_Scene() : comm(new ncclComm{}) {
+    comm->nRanks = 1;
+    comm->rank = 0;
+  }
+  std::unique_ptr<ncclComm> comm;
+};
+
 // Mirrors ncclDevFuncId's general-collective key (device.h); AllGatherV never takes the special-cased branches.
 uint64_t ScheduleBcastTasksToPlan_DevFuncKey(int proto) {
   return (uint64_t(ncclFuncAllGatherV & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
@@ -90,7 +102,11 @@ uint64_t ScheduleBcastTasksToPlan_DevFuncKey(int proto) {
 
 class SchedulerMicrotest : public ::testing::Test {
  protected:
-  void TearDown() override { ResetSchedulerFakes(); }
+  void TearDown() override {
+    ResetSchedulerFakes();
+    ResetSymKernelsFakes();      // g_symRegType is a plain global, not a ScopedHook-restorable std::function
+    ResetDevRuntimeMicroFakes();  // covers g_devrBootstrapAllGather, reused here for real bootstrapAllGather
+  }
 };
 
 TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
@@ -874,3 +890,352 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_PeerWithTwoQueuedTa
   EXPECT_EQ(scene.comm->planner.nTasksBcast, 4);
   EXPECT_EQ(scene.peers[0].bcastQueue.head, &task1);  // task1 remains queued for a later call
 }
+
+// ncclDevrInitOnce is real dev_runtime.cc code, not a stub, but this TU's local ENABLE_WARP_SPEED shifts
+// ncclComm's layout vs dev-runtime-test.cc's TU past warpSpeedChannelMultiplier, so symmetricSupport/devrState
+// are unreadable/unwritable from here (confirmed): the guard's kept-vs-dropped distinction is thus unobservable.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_ReturnsSuccessWithoutTouchingRemainder) {
+  MakeSymmetricTaskList_Scene scene;
+  struct ncclTaskColl* remainTasksHead = reinterpret_cast<struct ncclTaskColl*>(0x1);
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_SymkAvailable_ReceivesTaskFieldsAndCorrectedSymkOp) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllGather;
+  task.datatype = ncclFloat16;
+  task.count = 777;
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;  // symkRedOp(ncclAvg, ncclDevSum) == ncclDevSumPostDiv, not the raw ncclDevSum here
+
+  ncclFunc_t capturedFunc = ncclFuncSend;
+  int capturedRed = -1;
+  ncclDataType_t capturedDtype = ncclInt32;
+  size_t capturedCount = 0;
+  ScopedHook symkHook(g_symkAvailable, [&](struct ncclComm*, ncclFunc_t coll, int red, ncclDataType_t ty, size_t c) {
+    capturedFunc = coll;
+    capturedRed = red;
+    capturedDtype = ty;
+    capturedCount = c;
+    return false;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(capturedFunc, ncclFuncAllGather);
+  EXPECT_EQ(capturedRed, static_cast<int>(ncclDevSumPostDiv));
+  EXPECT_EQ(capturedDtype, ncclFloat16);
+  EXPECT_EQ(capturedCount, 777u);
+  EXPECT_EQ(remainTasksHead, &task);
+}
+
+TEST_F(SchedulerMicrotest,
+      MakeSymmetricTaskList_SymmetricTaskBetweenTwoRemainderTasks_AppendCorrectsStalePointer) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;  // task2 (the middle task) accepts through the window check
+
+  ncclTaskColl task3{};
+  task3.func = ncclFuncBroadcast;
+  task3.algMask = NCCL_TUNING_MASK_GENERAL_KERNELS;  // wantSym false: remainder
+  ncclTaskColl task2{};
+  task2.func = ncclFuncBroadcast;  // wantSym true (defaults): diverts into the symmetric bucket
+  task2.next = &task3;
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.algMask = NCCL_TUNING_MASK_GENERAL_KERNELS;  // wantSym false: remainder
+  task1.next = &task2;  // input chain: task1(remainder) -> task2(symmetric, diverts) -> task3(remainder)
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  // task1.next starts as &task2; only task3's append (remainTasksTail->next=task3) corrects it to &task3.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, &task1);
+  EXPECT_EQ(task1.next, &task3);  // would still be &task2 if the append line were dropped
+  EXPECT_EQ(task3.next, nullptr);
+  EXPECT_EQ(task2.next, nullptr);  // alone in its bucket
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_RemainderTaskFollowedBySymmetricTask_NullsStaleNextPointer) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;  // task2 (defaults otherwise) accepts through the window check
+  ncclTaskColl task2{};
+  task2.func = ncclFuncBroadcast;  // wantSym true: default symAvailable/algMask/windows all pass, func!=AllReduce
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.algMask = NCCL_TUNING_MASK_GENERAL_KERNELS;  // wantSym false: rejected on algMask alone
+  task1.next = &task2;  // input chain: task1 (remainder) is immediately followed by task2 (symmetric bucket)
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  // task1.next starts as &task2; with no later remainder task, only the tail-nulling line clears it to nullptr.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, &task1);
+  EXPECT_EQ(task1.next, nullptr);  // would still be &task2 if the tail-nulling line were dropped
+  EXPECT_EQ(task2.next, nullptr);  // alone in its bucket
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CfgAllowsSymkFalse_AlgMaskRestrictsAwayFromSym_GoesToRemainder) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.algMask = NCCL_TUNING_MASK_GENERAL_KERNELS;  // nonzero, disjoint from NCCL_TUNING_MASK_SYM_KERNELS
+  task.sendWin = reinterpret_cast<struct ncclDevrWindow*>(0xBADF00D);  // sentinel: window lookup must never run
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(task.sendWin, reinterpret_cast<struct ncclDevrWindow*>(0xBADF00D));  // untouched: block was skipped
+}
+
+TEST_F(SchedulerMicrotest,
+      MakeSymmetricTaskList_ForcedOverridesRestrictiveAlgMask_AcceptsThroughWindows_GoesToSymmetricBucket) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.algMask = NCCL_TUNING_MASK_GENERAL_KERNELS;  // would reject on its own, but forced below bypasses it
+  scene.comm->tuningContext.forced[task.func] = 1;
+  g_symRegType = ncclSymSendRegRecvReg;
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  // foundSymm==true reaches Block 8's args-size guard next; workArgsBytes defaults to 0, so it always rejects.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_WindowRejection_DefaultRegType_GoesToRemainder) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  // All defaults reach the window-rejection arm untouched: symAvailable/cfgAllowsSymk true, regType=reject.
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceForcedOutDespiteGoodWindows_GoesToRemainder) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  g_symRegType = ncclSymSendRegRecvReg;  // windows are GOOD here, isolating this from the window-rejection test
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllLocalChecksPass_NRanksOne_GoesToSymmetricBucket) {
+  MakeSymmetricTaskList_Scene scene;  // nRanks=1: bootstrap-consensus block skipped by construction
+  scene.comm->planner.nTasksColl = 5;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  g_symRegType = ncclSymSendRegRecvReg;
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksSameSymkOp_LifoChainUsesCorrectedOpNotRawOpDev) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+
+  ncclTaskColl task2{};
+  task2.func = ncclFuncBroadcast;
+  task2.datatype = ncclFloat32;
+  task2.opHost = ncclSum;
+  task2.opDev.op = ncclDevSumPostDiv;  // symkOp == ncclDevSumPostDiv directly
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclFloat32;
+  task1.opHost = ncclAvg;
+  task1.opDev.op = ncclDevSum;  // symkOp == ncclDevSumPostDiv too, via symkRedOp's averaging rule
+  task1.next = &task2;          // input chain: task1 processed first, then task2
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(task1.next, nullptr);   // task1 processed first: became its bucket's tail
+  EXPECT_EQ(task2.next, &task1);    // task2 processed second: prepended, points at task1 -- same bucket as task1
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 3);  // both tasks counted as symmetric
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksDifferentSymkOp_LandInSeparateBuckets) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+
+  ncclTaskColl task2{};
+  task2.func = ncclFuncBroadcast;
+  task2.datatype = ncclFloat32;
+  task2.opHost = ncclMax;
+  task2.opDev.op = ncclDevMinMax;  // symkOp == ncclDevMinMax: distinct from task1's
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclFloat32;
+  task1.opHost = ncclSum;
+  task1.opDev.op = ncclDevSum;  // symkOp == ncclDevSum
+  task1.next = &task2;
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(task1.next, nullptr);  // singleton in its own bucket
+  EXPECT_EQ(task2.next, nullptr);  // singleton in its own (different) bucket, NOT chained to task1
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 3);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksSameFuncAndOpDifferentDatatype_LandInSeparateBuckets) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+
+  ncclTaskColl task2{};
+  task2.func = ncclFuncBroadcast;
+  task2.datatype = ncclFloat16;  // distinct from task1's
+  task2.opHost = ncclSum;
+  task2.opDev.op = ncclDevSum;
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclFloat32;
+  task1.opHost = ncclSum;
+  task1.opDev.op = ncclDevSum;
+  task1.next = &task2;
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(task1.next, nullptr);  // singleton in its own bucket
+  EXPECT_EQ(task2.next, nullptr);  // singleton in its own (different) bucket, NOT chained to task1
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 3);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksSameOpAndDatatypeDifferentFunc_LandInSeparateBuckets) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+
+  ncclTaskColl task2{};
+  task2.func = ncclFuncAllGather;  // distinct from task1's
+  task2.datatype = ncclFloat32;
+  task2.opHost = ncclSum;
+  task2.opDev.op = ncclDevSum;
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclFloat32;
+  task1.opHost = ncclSum;
+  task1.opDev.op = ncclDevSum;
+  task1.next = &task2;
+
+  struct ncclTaskColl* remainTasksHead2 = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead2), ncclInternalError);
+  EXPECT_EQ(remainTasksHead2, nullptr);
+  EXPECT_EQ(task1.next, nullptr);  // singleton in its own bucket
+  EXPECT_EQ(task2.next, nullptr);  // singleton in its own (different) bucket, NOT chained to task1
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 3);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksTwoBootstrapNull_SkipsConsensusBlock) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 2;
+  std::vector<int> rankToNode(2, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
+  scene.comm->rankToNode = rankToNode.data();
+  scene.comm->bootstrap = nullptr;  // half of the guard: consensus block must not run without this
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
+  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(bootstrapHook.calls, 0);  // direct proof the consensus block's bootstrapAllGather never ran
+  EXPECT_EQ(remainTasksHead, &task);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksOneBootstrapNonNull_SkipsConsensusBlock) {
+  MakeSymmetricTaskList_Scene scene;  // nRanks=1: the other half of the guard
+  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
+  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(bootstrapHook.calls, 0);
+  EXPECT_EQ(remainTasksHead, &task);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysTrue_GoesToSymmetricBucket) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 3;
+  std::vector<int> rankToNode(3, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
+  scene.comm->rankToNode = rankToNode.data();
+  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+
+  uint8_t preGatherOwnFlag = 0xFF;
+  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [&](void*, void* allData, int) {
+    uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
+    preGatherOwnFlag = buf[0];  // this rank's own wantSym flag, written before the call
+    buf[0] = 1;
+    buf[1] = 1;
+    buf[2] = 1;  // every rank agrees
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(bootstrapHook.calls, 1);
+  EXPECT_EQ(preGatherOwnFlag, 1);  // proves flags[comm->rank] = wantSym?1:0 ran before bootstrapAllGather
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusOneDisagrees_WantSymFlipsFalse_GoesToRemainder) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 3;
+  std::vector<int> rankToNode(3, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
+  scene.comm->rankToNode = rankToNode.data();
+  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+
+  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [&](void*, void* allData, int) {
+    uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
+    buf[0] = 1;
+    buf[1] = 0;  // rank 1 disagrees
+    buf[2] = 1;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(bootstrapHook.calls, 1);
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+}
+

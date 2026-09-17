@@ -13,6 +13,7 @@
 #include <functional>
 
 #include "nccl.h"
+#include "nccl_common.h"  // ncclFunc_t: an internal type, not part of the public nccl.h API surface
 
 struct ncclComm;
 struct ncclTaskColl;
@@ -40,6 +41,9 @@ extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum nc
 // enqueue.cc's ncclAddProxyOpIfNeeded: default accepts every proxy op.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)>
     g_addProxyOpIfNeeded;
+
+// sym_kernels.cc's ncclSymkAvailable: default reports every (func, redOp, dtype, count) as symmetric-eligible.
+extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
 
 void ResetSchedulerFakes();
 

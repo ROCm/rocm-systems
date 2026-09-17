@@ -18,6 +18,7 @@
 #include "config/algorithm_registry.h"
 
 #include "fail_loud.h"
+#include "scheduler_fakes.h"
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
 static bool DefaultTestBudget(struct ncclKernelPlanBudget*, int, ssize_t) { return true; }
@@ -57,6 +58,10 @@ static ncclResult_t DefaultAddProxyOpIfNeeded(struct ncclComm*, struct ncclKerne
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)> g_addProxyOpIfNeeded =
     DefaultAddProxyOpIfNeeded;
 
+// Generous default: lets an uninterested caller reach the symmetric-eligible branch.
+static bool DefaultSymkAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }
+std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable = DefaultSymkAvailable;
+
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
@@ -64,6 +69,7 @@ void ResetSchedulerFakes() {
   g_planSetDefaultKernel = DefaultPlanSetDefaultKernel;
   g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
   g_addProxyOpIfNeeded = DefaultAddProxyOpIfNeeded;
+  g_symkAvailable = DefaultSymkAvailable;
   ncclDevFuncNameToId.clear();
 }
 
@@ -94,8 +100,8 @@ ncclResult_t ncclGetRegBuff(struct ncclComm*, struct ncclTaskColl*, int*) {
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
 // src/sym_kernels.cc
-bool ncclSymkAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
-  FailLoudUnfaked("scheduler_fakes", "ncclSymkAvailable");
+bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int red, ncclDataType_t ty, size_t count) {
+  return g_symkAvailable(comm, coll, red, ty, count);
 }
 int ncclSymkLLKernelMask() { FailLoudUnfaked("scheduler_fakes", "ncclSymkLLKernelMask"); }
 int ncclSymkDynamicSmemKernelMask() { FailLoudUnfaked("scheduler_fakes", "ncclSymkDynamicSmemKernelMask"); }
