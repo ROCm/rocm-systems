@@ -793,8 +793,9 @@ fn spread_thread_allocations_over_gpus(
 #[derive(Debug)]
 enum SimConfig {
     /// A config file of the user's own, named by the drop-in `--config`
-    /// option, whose bytes are used verbatim. Already on disk; mirage
-    /// reads it and copies it into the session, never writes to it.
+    /// option. Already on disk; mirage reads it and copies it into the
+    /// session — byte for byte but for the reference
+    /// [`pin_external_references`] pins — and never writes to it.
     Supplied(PathBuf),
     /// Config JSON synthesised from the profile's topology + agent,
     /// still to be written into a session's scratch directory.
@@ -952,6 +953,11 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
 /// a few kilobytes in a directory that is already the session's and
 /// removes the whole class.
 ///
+/// The copy is byte for byte apart from one thing: a relative
+/// `dbt_guest.simulator_config` is made absolute against the original's
+/// directory first, because moving the file would otherwise move what
+/// that reference means.
+///
 /// Nothing is written beside the user's file, then or now.
 ///
 /// # Errors
@@ -961,12 +967,70 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
 /// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be read or written.
 pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<PathBuf> {
     let bytes = match resolve_sim_config(def)? {
-        SimConfig::Supplied(path) => std::fs::read(&path).map_err(|e| MirageError::io(path, e))?,
+        SimConfig::Supplied(path) => {
+            let bytes = std::fs::read(&path).map_err(|e| MirageError::io(path.clone(), e))?;
+            pin_external_references(bytes, &path)
+        }
         SimConfig::Synthesised(bytes) => bytes,
     };
     let cfg = rj_config_path(session_dir);
     mirage_core::state::write_bytes(&cfg, &bytes)?;
     Ok(cfg)
+}
+
+/// JSON pointer to the one field in a rocjitsu `SimulationConfig` that
+/// names another file relative to the config's own directory.
+const SIMULATOR_CONFIG_POINTER: &str = "/dbt_guest/simulator_config";
+
+/// A drop-in `--config`'s external reference, pinned to where it was
+/// written rather than to where the copy lands.
+///
+/// rocjitsu resolves a relative `dbt_guest.simulator_config` beside the
+/// config file it was handed — `resolve_dbt_host_config_path` joins it
+/// onto that file's parent directory — and the file it is handed is
+/// whatever the `config_path` discovery file names. Copying the config
+/// into the session therefore moves the anchor: the shipped
+/// `guest_gfx950_on_simulated_gfx942.json` asks for
+/// `gfx942_cdna3_kmd.json` beside itself and would be looked up in the
+/// session scratch directory instead. Making the reference absolute
+/// against the original's directory is the same path rocjitsu would
+/// have resolved, so the composition form keeps working while the bytes
+/// the session emulates stay the session's own.
+///
+/// Everything else is returned byte for byte: an absolute reference, a
+/// config without one, or JSON this does not recognise. It is the only
+/// such field in the schema — `ProgramConfig::binary_path` is the other
+/// path-valued one and nothing loads it — so this is a pin, not a
+/// rewriter.
+///
+/// The file it points *at* is still the user's, and still theirs to
+/// edit. Following the reference would mean copying a graph; the value
+/// here is that a supplied config no longer silently retargets the
+/// device, not that every file it can reach becomes immutable.
+fn pin_external_references(bytes: Vec<u8>, original: &std::path::Path) -> Vec<u8> {
+    let Some(directory) = original.parent() else {
+        return bytes;
+    };
+    let Ok(mut config) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return bytes;
+    };
+    let reference = match config
+        .pointer(SIMULATOR_CONFIG_POINTER)
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(path) if !path.is_empty() && !std::path::Path::new(path).is_absolute() => {
+            directory.join(path)
+        }
+        _ => return bytes,
+    };
+    let Some(slot) = config.pointer_mut(SIMULATOR_CONFIG_POINTER) else {
+        return bytes;
+    };
+    *slot = serde_json::Value::String(reference.display().to_string());
+    // Unreachable in practice — this `Value` came from `from_slice`, so
+    // it holds nothing serde_json cannot write back — and the original
+    // bytes are the only honest fallback if it ever is reached.
+    serde_json::to_vec_pretty(&config).unwrap_or(bytes)
 }
 
 /// The configuration bring-up materialised for a live session.
@@ -1713,6 +1777,55 @@ mod tests {
             1,
             "nothing may be written beside the user's own config file"
         );
+    }
+
+    /// Copying a drop-in `--config` moves it, so the one reference that
+    /// resolves *beside* it has to be pinned before it travels.
+    ///
+    /// `resolve_dbt_host_config_path` joins a relative
+    /// `dbt_guest.simulator_config` onto the parent of the config the
+    /// interposer was handed, and after bring-up that is the session's
+    /// copy — so the shipped `guest_gfx950_on_simulated_gfx942.json`
+    /// would look for `gfx942_cdna3_kmd.json` in the session scratch
+    /// directory. Absolute references and configs without one travel
+    /// byte for byte.
+    #[test]
+    fn a_relative_external_reference_survives_the_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user_dir = tmp.path().join("configs");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let original = user_dir.join("guest.json");
+
+        let relative = br#"{"dbt_guest": {"simulator_config": "gfx942_cdna3_kmd.json"}}"#;
+        let pinned = pin_external_references(relative.to_vec(), &original);
+        let pinned: serde_json::Value = serde_json::from_slice(&pinned).unwrap();
+        assert_eq!(
+            pinned
+                .pointer(SIMULATOR_CONFIG_POINTER)
+                .and_then(serde_json::Value::as_str),
+            Some(
+                user_dir
+                    .join("gfx942_cdna3_kmd.json")
+                    .display()
+                    .to_string()
+                    .as_str()
+            ),
+            "the reference must still name the file beside the original"
+        );
+
+        // Nothing to pin, nothing touched — which is what keeps the
+        // ordinary copy a copy.
+        for untouched in [
+            &br#"{"dbt_guest": {"simulator_config": "/opt/rocm/share/kmd.json"}}"#[..],
+            br#"{"dbt_guest": {"enabled": true}}"#,
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}}"#,
+            b"not json at all",
+        ] {
+            assert_eq!(
+                pin_external_references(untouched.to_vec(), &original),
+                untouched.to_vec()
+            );
+        }
     }
 
     /// Nothing may read a session's configuration before bring-up has

@@ -287,7 +287,7 @@ test suite.
   run` does; start one in another terminal and `mirage exec` into that.
 - **The workload sees no GPU, and exits 0 anyway** — `rocminfo` reports
   only the CPU agent, the session came up normally and nothing failed.
-  Almost always this is a ROCm that predates the GPU the profile
+  Almost always this is a ROCm that predates the GPU the session
   emulates: `libhsa-runtime64.so` enumerates agents by looking their ISA
   up in the table it was compiled with, and one it does not recognise is
   skipped without a word. Before each host workload starts, mirage
@@ -295,11 +295,12 @@ test suite.
   resolution and warns —
 
   > `mirage: the ROCm runtime this workload will load does not support
-  > gfx1250, which is the GPU this profile emulates. …`
+  > gfx1250, which is the GPU this session emulates. …`
 
   — naming the resolved runtime and the ROCm version beside it. Run the
   workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
-  is the usual way) or pick a profile whose target this ROCm supports.
+  is the usual way) or emulate a GPU this ROCm supports — which is the
+  profile's target, or the device a drop-in `--config` describes.
   The check is deliberately conservative. It warns only when a trusted
   system executable directly links ROCr through a modern absolute or
   `$ORIGIN`-based `RUNPATH`, with no loader override or hardware-capability
