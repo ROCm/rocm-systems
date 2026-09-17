@@ -5,6 +5,7 @@ set(perfetto_sources
     ${CMAKE_CURRENT_LIST_DIR}/cached_perfetto_session.cpp
     ${CMAKE_CURRENT_LIST_DIR}/emitter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/engine.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/log_filter.cpp
 )
 
 set(perfetto_headers
@@ -15,6 +16,7 @@ set(perfetto_headers
     ${CMAKE_CURRENT_LIST_DIR}/engine.hpp
     ${CMAKE_CURRENT_LIST_DIR}/engine_impl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/log_filter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/packet_framing.hpp
     ${CMAKE_CURRENT_LIST_DIR}/session_backend.hpp
 )

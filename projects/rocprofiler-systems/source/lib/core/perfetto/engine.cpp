@@ -7,6 +7,7 @@
 
 #include "core/config.hpp"
 #include "core/perfetto/category_registry.hpp"
+#include "core/perfetto/log_filter.hpp"
 #include "core/perfetto/session_backend.hpp"
 #include "logger/debug.hpp"
 
@@ -256,6 +257,8 @@ perfetto_sdk_backend::init_sdk(const engine_config& cfg) const
         {
             args.log_message_callback = [](::perfetto::base::LogMessageCallbackArgs) {};
         }
+        else
+            log_filter::register_with_perfetto_logger();
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
