@@ -18,11 +18,11 @@
 //!
 //! The mapping is very nearly a function of its inputs, and everything
 //! it decides is testable without a container runtime or an emulator.
-//! The one thing it asks the world about is a containerised
-//! `--workdir`, which is a question only the image can answer and is
-//! asked only when the caller passed one. One more thing is read from
-//! the process rather than passed in — which runtime directory this
-//! mirage resolved — and both callers necessarily agree on it.
+//! One thing it asks the world about is a containerised `--workdir`,
+//! which is a question only the image can answer and is asked only when
+//! the caller passed one. One more thing is read from the process rather
+//! than passed in — which runtime directory this mirage resolved — and
+//! both callers necessarily agree on it.
 //!
 //! Whether the caller's streams are a terminal used to be read here too,
 //! and it was the one input that broke the promise above. A test runs
@@ -32,6 +32,25 @@
 //! most needed pinning was the branch no test could enter. It is a
 //! parameter now, [`CallerStreams`], which the caller probes once with
 //! [`CallerStreams::probe`] and a test states outright.
+//!
+//! The ROCr preflight is the exception that stayed, and the promise
+//! above is narrower for it. Once the concrete specs exist,
+//! [`build_specs`] asks whether the ROCm runtime each host process will
+//! load knows the ISA the session emulates — reading this process's
+//! environment, the workload's executable and the runtime that
+//! executable resolves — and prints a warning on stderr when it does
+//! not. It is here because here is the only place both `mirage run` and
+//! every `mirage exec` have a concrete command, workdir and environment
+//! to ask about; an earlier version that lived in the run checked the
+//! run and silently skipped every exec.
+//!
+//! What the `CallerStreams` lesson costs is paid rather than ignored.
+//! The decision — which specs to ask about, which sessions to skip
+//! without asking, how ranks that share loader inputs collapse to one
+//! question, and what the notice says — is `unsupported_target_notices`,
+//! a pure function of the description, the specs and a verdict its
+//! caller supplies, which the tests drive with a stub. Ambient here is
+//! the answer, never the policy.
 
 use std::collections::BTreeMap;
 

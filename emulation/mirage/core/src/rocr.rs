@@ -152,12 +152,12 @@ impl UnsupportedTarget {
 ///
 /// Legacy `DT_RPATH`, transitive or `dlopen` dependencies, cache-only
 /// resolution, hardware-capability alternatives, mutable executables,
-/// privileged executables, and loader overrides all produce
-/// [`TargetSupport::Unknown`]. These deliberate false negatives keep
-/// warnings trustworthy. Extending coverage requires a bounded,
-/// loader-equivalent static resolver and can be done later without
-/// weakening the rule that preflight never executes workload code or
-/// emits a guess.
+/// privileged executables, a system-wide preload, and loader overrides
+/// all produce [`TargetSupport::Unknown`]. These deliberate false
+/// negatives keep warnings trustworthy. Extending coverage requires a
+/// bounded, loader-equivalent static resolver and can be done later
+/// without weakening the rule that preflight never executes workload
+/// code or emits a guess.
 #[must_use]
 pub fn check_target_for_process(
     target: &str,
@@ -167,7 +167,9 @@ pub fn check_target_for_process(
     inherit_env: bool,
 ) -> TargetSupport {
     let effective = merged_environment(std::env::vars_os(), env, inherit_env);
-    if loader_state_is_ambiguous(&effective) {
+    if global_preload_is_ambiguous(Path::new(GLOBAL_PRELOAD))
+        || loader_state_is_ambiguous(&effective)
+    {
         return TargetSupport::Unknown;
     }
     let Some(runtime) = locate_for_process(command, workdir, &effective) else {
@@ -200,6 +202,28 @@ fn merged_environment(
     };
     effective.extend(explicit.iter().cloned());
     effective
+}
+
+/// The file glibc preloads into every dynamically linked process on the
+/// host, whatever its environment.
+const GLOBAL_PRELOAD: &str = "/etc/ld.so.preload";
+
+/// Whether a system-wide preload could be interposing ROCr.
+///
+/// `LD_PRELOAD` is the environment's half of this; `/etc/ld.so.preload`
+/// is the host's, and no workload environment mentions it. A library
+/// listed there is loaded before the workload's own dependencies and can
+/// interpose the HSA entry points the target table is evidence about, so
+/// the file's own image stops being the answer.
+///
+/// Only an outright absent file is harmless. Present and empty says
+/// nothing is preloaded; unreadable says this probe could not find out,
+/// which is not the same as finding out that there is nothing.
+fn global_preload_is_ambiguous(path: &Path) -> bool {
+    match std::fs::read(path) {
+        Ok(bytes) => bytes.iter().any(|byte| !byte.is_ascii_whitespace()),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 /// State that can replace ROCr or change the ISA ROCr evaluates without
@@ -307,7 +331,7 @@ fn direct_runpath_runtime(
             if require_trusted_paths {
                 directory = trusted_system_directory(&directory)?;
             }
-            if hwcap_runtime_exists(&directory, require_trusted_paths)? {
+            if alternative_runtime_exists(&directory, require_trusted_paths)? {
                 return None;
             }
             let mut candidate = directory.join(ROCR_SONAME);
@@ -354,17 +378,54 @@ fn expand_origin(directory: &str, origin: &str) -> String {
     expanded
 }
 
-fn hwcap_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
-    // Modern glibc augments one RUNPATH directory with candidates at
-    // `<dir>/glibc-hwcaps/<level>`. It does not recursively search every
-    // directory below `<dir>`: walking ordinary ROCm asset trees such as
-    // hipblaslt/library and rocblas/library both invents candidates the
-    // loader cannot select and can exhaust any bounded walk before the
-    // real runtime is considered.
-    let mut hwcaps = directory.join("glibc-hwcaps");
-    if !hwcaps.exists() {
-        return Some(false);
+/// Whether some other ROCr under `directory` could be selected ahead of
+/// the one directly in it.
+///
+/// Two families of them, because glibc has had two. Modern glibc
+/// augments a RUNPATH directory with `<dir>/glibc-hwcaps/<level>`.
+/// Before 2.37 it also searched hardware-capability subdirectories
+/// directly — `<dir>/tls`, `<dir>/x86_64`, `<dir>/haswell` and the
+/// platform's own name — so a runtime in one of those is the one a
+/// workload on such a host loads while this probe reads the base copy.
+///
+/// Neither family is searched for by name: the legacy names are
+/// per-architecture and per-CPU and a list of them would be a second
+/// thing to keep in step with glibc. Any immediate subdirectory holding
+/// a ROCr is treated as an alternative instead, which needs no list and
+/// costs one directory read.
+///
+/// What it is *not* is a recursive search. glibc does not look below
+/// those directories, and walking every tree under `<dir>` both invents
+/// candidates the loader cannot select and, on an ordinary ROCm install,
+/// buries the real runtime under asset trees like `hipblaslt/library`.
+/// The remaining gap is the legacy *combinations* — `<dir>/haswell/tls`
+/// and friends, nested one level deeper — which no ROCm packaging ships
+/// and which stay a documented false verdict rather than an unbounded
+/// walk.
+fn alternative_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
+    for entry in std::fs::read_dir(directory).ok()? {
+        let path = entry.ok()?.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let found = if path.file_name() == Some(OsStr::new("glibc-hwcaps")) {
+            hwcap_runtime_exists(&path, require_trusted_paths)?
+        } else {
+            // Only whether it is there. An alternative this probe cannot
+            // rule out means no verdict either way, so nothing about it
+            // is worth a trust check the selected runtime already gets.
+            path.join(ROCR_SONAME).is_file()
+        };
+        if found {
+            return Some(true);
+        }
     }
+    Some(false)
+}
+
+/// Whether a modern `<dir>/glibc-hwcaps/<level>` holds a ROCr.
+fn hwcap_runtime_exists(hwcaps: &Path, require_trusted_paths: bool) -> Option<bool> {
+    let mut hwcaps = hwcaps.to_path_buf();
     if require_trusted_paths {
         hwcaps = trusted_system_directory(&hwcaps)?;
     }
@@ -986,6 +1047,26 @@ mod tests {
         );
         std::fs::remove_dir_all(tmp.path().join("glibc-hwcaps")).unwrap();
 
+        // The other half of the same question, on the glibc most hosts
+        // are still running: before 2.37 the hardware-capability
+        // directories sat directly under the RUNPATH entry, so a runtime
+        // in `tls` is the one such a loader picks while this probe reads
+        // the base copy beside it.
+        let legacy = tmp.path().join("tls");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::os::unix::fs::symlink(&runtime, legacy.join(ROCR_SONAME)).unwrap();
+        assert_eq!(
+            direct_runpath_runtime(&workload, &workload_image, false),
+            None,
+            "a pre-2.37 glibc searches <dir>/tls, so the selected runtime is ambiguous"
+        );
+        std::fs::remove_dir_all(&legacy).unwrap();
+        assert_eq!(
+            direct_runpath_runtime(&workload, &workload_image, false),
+            Some(runtime.canonicalize().unwrap()),
+            "and the verdict comes back once the alternative is gone"
+        );
+
         for tag in ["--audit", "--depaudit"] {
             let audited_workload = tmp
                 .path()
@@ -1089,6 +1170,35 @@ mod tests {
             .into_iter()
             .collect();
         assert!(!loader_state_is_ambiguous(&unrelated));
+    }
+
+    /// `LD_PRELOAD` is the environment's half of the preload question
+    /// and `/etc/ld.so.preload` is the host's, which no workload
+    /// environment mentions and which glibc applies to every
+    /// dynamically linked process on the machine.
+    ///
+    /// Absent is the ordinary case and the only harmless one. Present
+    /// and blank preloads nothing; unreadable is not the same fact as
+    /// "there is nothing there", and this module does not round the
+    /// second into the first.
+    #[test]
+    fn a_system_wide_preload_makes_the_answer_ambiguous() {
+        let tmp = tempfile::tempdir().unwrap();
+        let preload = tmp.path().join("ld.so.preload");
+
+        assert!(!global_preload_is_ambiguous(&preload));
+
+        for blank in [&b""[..], b"\n", b"  \t\n \n"] {
+            std::fs::write(&preload, blank).unwrap();
+            assert!(!global_preload_is_ambiguous(&preload));
+        }
+
+        std::fs::write(&preload, b"/usr/lib/libinterpose.so\n").unwrap();
+        assert!(global_preload_is_ambiguous(&preload));
+
+        // A directory stands in for the file that is there and cannot be
+        // read: the error is not `NotFound`, so nothing was ruled out.
+        assert!(global_preload_is_ambiguous(tmp.path()));
     }
 
     /// Setting a loader search list to nothing is still setting it.
