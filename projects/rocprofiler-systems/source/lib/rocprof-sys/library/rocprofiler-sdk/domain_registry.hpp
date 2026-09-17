@@ -18,6 +18,10 @@
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback/hip/compiler_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
+#include "library/rocprofiler-sdk/callback/hsa/amd_ext_api.hpp"
+#include "library/rocprofiler-sdk/callback/hsa/core_api.hpp"
+#include "library/rocprofiler-sdk/callback/hsa/finalize_ext_api.hpp"
+#include "library/rocprofiler-sdk/callback/hsa/image_ext_api.hpp"
 
 #include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -143,7 +147,7 @@ private:
 
     consteval static auto collect_callback_domains()
     {
-        constexpr auto k_callback_domains_size = 3;
+        constexpr auto k_callback_domains_size = 7;
         simple_static_vector<callback_domain_definition<SdkBackend>,
                              k_callback_domains_size>
             result;
@@ -151,6 +155,10 @@ private:
         result.add(callback::k_code_object<SdkBackend, Externals>);
         result.add(callback::hip::k_compiler_api<SdkBackend, Externals>);
         result.add(callback::hip::k_runtime_api<SdkBackend, Externals>);
+        result.add(callback::hsa::k_core_api<SdkBackend, Externals>);
+        result.add(callback::hsa::k_amd_ext_api<SdkBackend, Externals>);
+        result.add(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
+        result.add(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
 
         return result;
     }

@@ -229,6 +229,13 @@ struct external_dependencies
     static constexpr std::string_view rocm_hip_api_category_name =
         trait::name<category::rocm_hip_api>::value;
 
+    // ─── Members required by domains::callback::hsa::{core,amd_ext,image_ext,
+    // finalize_ext}_api ─────────────────────────────────────────────────────────
+    using rocm_hsa_api_category = category::rocm_hsa_api;
+
+    static constexpr std::string_view rocm_hsa_api_category_name =
+        trait::name<category::rocm_hsa_api>::value;
+
     static bool is_active()
     {
         return ::rocprofsys::state::process::get() ==
@@ -2677,13 +2684,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // MARKER_CORE_API is handled by roctx_client on control_ctx
     for(auto itr : {
-            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            // HSA_CORE_API/HSA_AMD_EXT_API/HSA_IMAGE_EXT_API/HSA_FINALIZE_EXT_API and
             // HIP_RUNTIME_API/HIP_COMPILER_API are configured via domain_service
-            // (domains::callback::hip::k_runtime_api/k_compiler_api) below, on their own
-            // context, to avoid double-registering these kinds on primary_ctx.
+            // (domains::callback::hsa::k_core_api/k_amd_ext_api/k_image_ext_api/
+            // k_finalize_ext_api, domains::callback::hip::k_runtime_api/k_compiler_api)
+            // below, on their own context, to avoid double-registering these kinds on
+            // primary_ctx.
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
 #if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
@@ -2858,9 +2864,31 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-    auto get_operation_names = [](sdk_backend_t::callback_tracing_kind_t kind) {
+    // A std::nullopt tells domain_service::configure() to trace every operation of
+    // the domain, so only build an explicit name list when the resolved selection is
+    // narrower than the full operation set for the kind.
+    auto get_operation_names = [](sdk_backend_t::callback_tracing_kind_t kind)
+        -> std::optional<std::vector<std::string>> {
+        auto selected_operations = tracing_config_t::get_operations(kind);
+
+        std::size_t total_operations = 0;
+        for(const auto& entry : sdk_backend_t::get_callback_tracing_names())
+        {
+            if(static_cast<sdk_backend_t::callback_tracing_kind_t>(entry.value) == kind)
+            {
+                total_operations = std::ranges::size(entry.operations);
+                break;
+            }
+        }
+
+        if(selected_operations.size() == total_operations)
+        {
+            return std::nullopt;
+        }
+
         std::vector<std::string> names;
-        for(auto operation : tracing_config_t::get_operations(kind))
+        names.reserve(selected_operations.size());
+        for(auto operation : selected_operations)
         {
             names.emplace_back(sdk_backend_t::get_callback_tracing_names().at(
                 kind, static_cast<std::uint32_t>(operation)));
@@ -2896,6 +2924,62 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API);
         domain_selection_list.push_back(selection);
         LOG_CRITICAL("Adding Hip runtime api");
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API));
+
+        domain_selection selection;
+        selection.name = "hsa_core_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API));
+
+        domain_selection selection;
+        selection.name = "hsa_amd_ext_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API));
+
+        domain_selection selection;
+        selection.name = "hsa_image_ext_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API));
+
+        domain_selection selection;
+        selection.name = "hsa_finalize_ext_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API);
+        domain_selection_list.push_back(selection);
     }
 
     try
