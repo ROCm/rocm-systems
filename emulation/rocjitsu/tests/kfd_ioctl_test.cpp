@@ -933,7 +933,22 @@ INSTANTIATE_TEST_SUITE_P(KfdMasks, KfdSdmaCuMaskTest,
                          ::testing::Combine(::testing::Values(false, true),
                                             ::testing::Values(KFD_IOC_QUEUE_TYPE_SDMA,
                                                               KFD_IOC_QUEUE_TYPE_SDMA_XGMI,
-                                                              KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID)));
+                                                              KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID)),
+                         [](const ::testing::TestParamInfo<std::tuple<bool, uint32_t>> &info) {
+                           const std::string architecture =
+                               std::get<0>(info.param) ? "Rdna" : "Cdna";
+                           switch (std::get<1>(info.param)) {
+                           case KFD_IOC_QUEUE_TYPE_SDMA:
+                             return architecture + "Sdma";
+                           case KFD_IOC_QUEUE_TYPE_SDMA_XGMI:
+                             return architecture + "SdmaXgmi";
+                           case KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID:
+                             return architecture + "SdmaByEngineId";
+                           default:
+                             ADD_FAILURE() << "Unexpected SDMA queue type";
+                             return architecture + "Unknown";
+                           }
+                         });
 
 struct CuMaskPlacementCase {
   const char *config;
@@ -1627,6 +1642,7 @@ void KfdIoctlCdna5Test::expect_runtime_exception_timeout(
 
   auto *cp = soc_->xcd(0)->command_processor();
   ASSERT_NE(cp, nullptr);
+  cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(10));
   ASSERT_FALSE(cp->compute_units().empty());
   auto *cu = cp->compute_units().front();
   auto *memory = soc_->memory();

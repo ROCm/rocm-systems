@@ -989,6 +989,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
                                                uint64_t status) {
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
+  std::chrono::milliseconds ack_timeout;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
     auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const HwQueue &candidate) {
@@ -998,12 +999,13 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
       return false;
     exception_status_va = queue->exception_status_va;
     exception_event_id = queue->exception_event_id;
+    ack_timeout = runtime_exception_ack_timeout_;
   }
 
   const uint64_t combined_status = memory_->read64(exception_status_va, process_id) | status;
   memory_->write64(exception_status_va, combined_status, process_id);
   invoke_interrupt_callback(process_id, exception_event_id);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
   while (memory_->read64(exception_status_va, process_id) == combined_status &&
          std::chrono::steady_clock::now() < deadline)
     std::this_thread::yield();

@@ -3707,9 +3707,9 @@ int SimulatedKfd::retry_debug_notifications(pid_t target_pid, bool invoke_result
     };
     auto collect_process_mask = [&] {
       process_claims.clear();
-      std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
-      auto events = debug_events_.find(target_pid);
-      if (events == debug_events_.end())
+      std::lock_guard<std::mutex> event_lock(debug_process_events_mutex_);
+      auto events = debug_process_events_.find(target_pid);
+      if (events == debug_process_events_.end())
         return uint64_t{0};
       uint64_t mask = 0;
       const uint64_t unavailable = session->second.notified_process_exception_mask |
@@ -4258,8 +4258,8 @@ void SimulatedKfd::apply_debug_event_publication_hook_for_testing(
     debug_sessions_.erase(target_pid);
     lk.unlock();
     {
-      std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
-      debug_events_.erase(target_pid);
+      std::lock_guard<std::mutex> event_lock(debug_process_events_mutex_);
+      debug_process_events_.erase(target_pid);
     }
     std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
     for (auto &entry : proc->queue_snapshot_map_)
@@ -4538,8 +4538,8 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid, KfdProcess *target_p
   // debug_sessions_mutex_ from its trap/watchpoint callbacks, so holding both
   // in this order closes an AB-BA cycle against a wave that is trapping.
   {
-    std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
-    debug_events_.erase(target_pid);
+    std::lock_guard<std::mutex> event_lock(debug_process_events_mutex_);
+    debug_process_events_.erase(target_pid);
   }
 
   // Nothing below has a debuggee to release; the event purge above was the
@@ -5133,9 +5133,9 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
     }
   }
 
-  std::lock_guard<std::mutex> lk(debug_events_mutex_);
-  auto process = debug_events_.find(target_pid);
-  if (process == debug_events_.end())
+  std::lock_guard<std::mutex> lk(debug_process_events_mutex_);
+  auto process = debug_process_events_.find(target_pid);
+  if (process == debug_process_events_.end())
     return -EAGAIN;
   auto &queues = process->second;
   for (auto queue = queues.begin(); queue != queues.end(); ++queue) {
@@ -5163,8 +5163,8 @@ void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exceptio
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
-    std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
-    auto &event = debug_events_[target_pid][0];
+    std::lock_guard<std::mutex> event_lock(debug_process_events_mutex_);
+    auto &event = debug_process_events_[target_pid][0];
     event.gpu_id = 0;
     event.mask |= exception_mask;
     if (std::find(event.events.begin(), event.events.end(), exception_mask) == event.events.end())
@@ -5301,9 +5301,9 @@ int SimulatedKfd::debug_query_exception_info(pid_t target_pid,
     std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args.info_ptr)), &info,
                 std::min(static_cast<size_t>(capacity), sizeof(info)));
   if (args.clear_exception) {
-    std::lock_guard<std::mutex> lk(debug_events_mutex_);
-    auto process = debug_events_.find(target_pid);
-    if (process != debug_events_.end()) {
+    std::lock_guard<std::mutex> lk(debug_process_events_mutex_);
+    auto process = debug_process_events_.find(target_pid);
+    if (process != debug_process_events_.end()) {
       auto event = process->second.find(0);
       if (event != process->second.end()) {
         constexpr uint64_t kRuntime = KFD_EC_MASK(EC_PROCESS_RUNTIME);

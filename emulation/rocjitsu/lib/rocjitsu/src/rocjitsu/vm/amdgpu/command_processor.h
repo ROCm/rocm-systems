@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -397,6 +398,12 @@ public:
   /// @brief Test-only count of executed command-processor doorbell passes.
   [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
     return doorbell_handle_count_.load(std::memory_order_relaxed);
+  }
+
+  /// @brief Override the wall-clock ROCr acknowledgment deadline in timeout tests.
+  void set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds timeout) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    runtime_exception_ack_timeout_ = timeout;
   }
 
   /// @brief Exercise the synchronized interrupt path without constructing a queue.
@@ -860,6 +867,9 @@ private:
       std::make_shared<InterruptCallbackState>();
   std::vector<std::shared_ptr<InterruptCallbackState>> retired_interrupt_cb_states_;
   std::function<void()> interrupt_callback_drain_hook_for_testing_;
+  static constexpr std::chrono::milliseconds kRuntimeExceptionAckTimeout{1000};
+  // Protected by hw_queue_mutex_; each publication snapshots its deadline.
+  std::chrono::milliseconds runtime_exception_ack_timeout_ = kRuntimeExceptionAckTimeout;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;

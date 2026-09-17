@@ -755,13 +755,14 @@ private:
   /// @details Queue exceptions live in QueueSnapshotInfo::exception_status,
   /// matching KFD's single authoritative status word. This table retains
   /// process and device exceptions for KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT.
-  struct DebugQueueException {
+  struct DebugProcessException {
     uint32_t gpu_id = 0;
     uint64_t mask = 0;
     std::vector<uint64_t> events;
   };
-  mutable std::mutex debug_events_mutex_;
-  std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugQueueException>> debug_events_;
+  mutable std::mutex debug_process_events_mutex_;
+  std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugProcessException>>
+      debug_process_events_;
 
   mutable std::mutex runtime_handshake_mutex_;
   std::condition_variable runtime_handshake_cv_;
