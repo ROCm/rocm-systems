@@ -210,6 +210,13 @@ pop_client(uint32_t value)
     get_client_index() = invalid_client_idx;
 }
 
+std::optional<uint32_t>
+get_current_client()
+{
+    if(get_client_index() == invalid_client_idx) return std::nullopt;
+    return get_client_index();
+}
+
 std::optional<rocprofiler_context_id_t>
 allocate_context()
 {
