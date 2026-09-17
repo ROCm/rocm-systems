@@ -311,6 +311,10 @@ const std::filesystem::path kMulElfHsacoPath = STRINGIFY(MUL_ELF_HSACO_PATH);
 // Neither design names its aie.device or its runtime sequence, so aiecc defaults both to the
 // same "<device>:<sequence>" key.
 constexpr const char* kMulElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
+// A FullElf hsaco whose kernel table has two entries sharing one blob (the same vsadd ELF,
+// referenced twice) and therefore declaring the same kernel name; see
+// HsacoFullElfRejectsDuplicateKernelName below.
+const std::filesystem::path kDupElfHsacoPath = STRINGIFY(DUP_ELF_HSACO_PATH);
 
 // The build skips packaging an hsaco when the toolchain cannot produce what it is built from, so
 // every test that needs one checks first and skips itself rather than failing.
@@ -318,6 +322,7 @@ bool hsaco_available() { return std::filesystem::exists(kHsacoPath); }
 bool mul_hsaco_available() { return std::filesystem::exists(kMulHsacoPath); }
 bool elf_hsaco_available() { return std::filesystem::exists(kElfHsacoPath); }
 bool mul_elf_hsaco_available() { return std::filesystem::exists(kMulElfHsacoPath); }
+bool dup_elf_hsaco_available() { return std::filesystem::exists(kDupElfHsacoPath); }
 
 // Reads a whole hsaco file into memory. Returns an empty vector on failure; callers are expected
 // to have checked the matching *_available() first.
@@ -1984,6 +1989,35 @@ TEST_F(FullElfDispatchTest, HsacoFullElfRejectsUnknownKernelName) {
   hsa_executable_t executable{};
   hsa_code_object_reader_t reader{};
   EXPECT_EQ(TryLoad(bad_hsaco, aie_agents.front(), &executable, &reader),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+}
+
+// The suite's CMake packages this hsaco (kDupElfHsacoPath) by pointing aie_hsaco.py at the vsadd
+// full-ELF artifact twice. aie_hsaco.py derives each kernel-table entry's name from the nested
+// ELF's own COMDAT symbols, so two references to the same ELF always produce two entries with the
+// identical name "main:sequence"; its blob-pool dedup (keyed on raw bytes) then collapses the two
+// identical instruction blobs into one shared blob. That is exactly the shape
+// AieCode::Parse's `kernels_.count(info.name)` check (core/runtime/amd_aie_code.cpp) exists to
+// reject, and nothing exercised it on the FullElf path before this test.
+//
+// NOTE: this is not the multi-kernel-ELF scenario the design spec describes -- one ELF containing
+// two *different* kernels (two distinct COMDAT groups), which would also produce two entries
+// sharing one blob, but with two different names, both resolving successfully. That scenario is
+// not covered by any test: every full-ELF artifact this suite's toolchain can build
+// (kernel_full_elf_vsadd/aie.elf, kernel_full_elf_vsmul/aie.elf) contains exactly one COMDAT
+// group, so there is no multi-kernel ELF anywhere in the tree to build such a test from, and
+// producing one needs a new aiecc design, not just test code. That gap is real and left open.
+TEST_F(FullElfDispatchTest, HsacoFullElfRejectsDuplicateKernelName) {
+  if (!dup_elf_hsaco_available()) {
+    GTEST_SKIP() << "duplicate-name elf hsaco was not built: " << kDupElfHsacoPath;
+  }
+
+  const auto hsaco = read_hsaco(kDupElfHsacoPath);
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kDupElfHsacoPath;
+
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(hsaco, aie_agents.front(), &executable, &reader),
             HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
 }
 

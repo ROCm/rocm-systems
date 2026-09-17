@@ -353,6 +353,29 @@ if(AIE_FULL_ELF_SUPPORTED)
   add_custom_target(vsadd_elf_hsaco_artifact DEPENDS "${vsadd_ELF_HSACO}")
 endif()
 
+# A FullElf hsaco whose kernel table has two entries sharing one blob and declaring the same
+# kernel name, for HsacoFullElfRejectsDuplicateKernelName in dispatch.cc. Pointing aie_hsaco.py at
+# the vsadd ELF twice is deliberate: it derives each entry's name from the ELF's own COMDAT
+# symbols, so two references to the same ELF always produce two identical names, and its blob-pool
+# dedup (keyed on raw bytes) collapses the two identical instruction blobs into one shared blob --
+# exactly the "two entries, one blob, same name" shape the loader must reject.
+set(vsadd_DUP_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_dup_elf.hsaco")
+if(AIE_FULL_ELF_SUPPORTED)
+  add_custom_command(
+    OUTPUT "${vsadd_DUP_ELF_HSACO}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+            --hsaco "${vsadd_DUP_ELF_HSACO}"
+            --arch "${AIE_HSACO_ARCH}"
+            --kernel "elf:${vsadd_FULL_ELF}:0:1"
+            --kernel "elf:${vsadd_FULL_ELF}:0:1"
+    # Depend on the target, not its output files: see the vsadd_HSACO rule above for why.
+    DEPENDS vsadd_full_elf_artifacts
+    COMMENT "Packaging a duplicate-kernel-name FullElf hsaco for the rejection test"
+    VERBATIM
+  )
+  add_custom_target(vsadd_dup_elf_hsaco_artifact DEPENDS "${vsadd_DUP_ELF_HSACO}")
+endif()
+
 # The mul design's full ELF, packaged the same way, for the full-ELF interleaving test.
 set(vsmul_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsmul_elf.hsaco")
 if(AIE_FULL_ELF_SUPPORTED)
@@ -412,6 +435,7 @@ target_compile_definitions(dispatch
     # Same "<device>:<sequence>" kernel key as DEFAULT_ELF_KERNEL_NAME above; aie_hsaco.py's elf:
     # form derives the hsaco's kernel name from the same underlying ELF, so the two must match.
     DEFAULT_ELF_HSACO_KERNEL_NAME="main:sequence"
+    DUP_ELF_HSACO_PATH=${vsadd_DUP_ELF_HSACO}
     MUL_HSACO_PATH=${vsmul_HSACO}
     MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"
     MUL_ELF_HSACO_PATH=${vsmul_ELF_HSACO}
@@ -431,7 +455,8 @@ if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
   add_dependencies(dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
 endif()
 if(AIE_FULL_ELF_SUPPORTED)
-  add_dependencies(dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact)
+  add_dependencies(dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact
+                            vsadd_dup_elf_hsaco_artifact)
 endif()
 
 gtest_discover_tests(dispatch)
