@@ -107,7 +107,8 @@ void CompletionTracker::deliver_completion(DispatchEntry &entry) {
 
   // Only the XCD that read the packet reports completion and fires its signal.
   if (!entry.fanout_peer) {
-    plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+    if (!entry.is_non_kernel())
+      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
     if (entry.completion_signal != 0)
       fire_signal(entry);
   }
