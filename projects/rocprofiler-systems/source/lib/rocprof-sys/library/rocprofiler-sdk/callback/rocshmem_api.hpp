@@ -8,6 +8,8 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include <optional>
+
 namespace rocprofsys::domains::callback
 {
 
@@ -22,13 +24,10 @@ struct rocshmem_api_category
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline constexpr auto k_rocshmem_api = callback_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "rocshmem_api",
-            .id    = SdkBackend::CALLBACK_TRACING_ROCSHMEM_API,
-            .mode  = collection_mode::callback,
-            .group = domain_group{ .name = "rocshmem_api" },
-        },
+    .meta      = domain_descriptor{ .name  = "rocshmem_api",
+                                    .id    = SdkBackend::CALLBACK_TRACING_ROCSHMEM_API,
+                                    .mode  = collection_mode::callback,
+                                    .group = std::nullopt },
     .on_record = tracing_callback_dispatcher<
         SdkBackend, on_tracing_api_enter<SdkBackend, Externals, rocshmem_api_category>,
         on_tracing_api_exit<SdkBackend, Externals, rocshmem_api_category>>::callback,

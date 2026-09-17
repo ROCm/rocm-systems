@@ -28,8 +28,8 @@ TEST(hipfile_api_test, descriptor_reports_correct_metadata)
     EXPECT_EQ(k_domain.meta.name, "hipfile_api");
     EXPECT_EQ(k_domain.meta.id, mock_sdk::CALLBACK_TRACING_HIPFILE_API);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::callback);
-    ASSERT_TRUE(k_domain.meta.group.has_value());
-    EXPECT_EQ(k_domain.meta.group->name, "hipfile_api");
+    ASSERT_FALSE(k_domain.meta.group.has_value());
+    EXPECT_EQ(k_domain.meta.group, std::nullopt);
 }
 
 TEST(hipfile_api_test, on_record_dispatches_by_phase_without_crashing)

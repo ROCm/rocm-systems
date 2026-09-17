@@ -8,6 +8,8 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include <optional>
+
 namespace rocprofsys::domains::callback
 {
 
@@ -23,13 +25,10 @@ struct rocdecode_api_category
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline constexpr auto k_rocdecode_api = callback_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "rocdecode_api",
-            .id    = SdkBackend::CALLBACK_TRACING_ROCDECODE_API,
-            .mode  = collection_mode::callback,
-            .group = domain_group{ .name = "rocdecode_api" },
-        },
+    .meta      = domain_descriptor{ .name  = "rocdecode_api",
+                                    .id    = SdkBackend::CALLBACK_TRACING_ROCDECODE_API,
+                                    .mode  = collection_mode::callback,
+                                    .group = std::nullopt },
     .on_record = tracing_callback_dispatcher<
         SdkBackend, on_tracing_api_enter<SdkBackend, Externals, rocdecode_api_category>,
         on_tracing_api_exit<SdkBackend, Externals, rocdecode_api_category>>::callback,
