@@ -320,17 +320,19 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_TerminatesProcessWithSta
 
 // --- case 't': accepting and rejecting arms --------------------------------
 
-// case 't' is one strtol plus one `< 0 || *endPtr` check, so the three spellings differ only in how getopt hands the
-// value over and the values differ only in what strtol makes of them. One test per side, driven by a table.
+// case 't' is one strtod plus validation of the parsed value and trailing text, so the three spellings differ only in
+// how getopt hands the value over. One test per side, driven by a table.
 TEST_F(RasClientMicrotest, ParseArgsTimeout_AcceptedValues_StoreTheParsedSeconds) {
-  const struct { std::vector<std::string> argv; int want; } cases[] = {
-      {{"-t", "37"}, 37},          // short, separate argument
-      {{"--timeout=37"}, 37},      // long, attached
-      {{"--timeout", "37"}, 37},   // long, separate
-      {{"-t", "0"}, 0},            // 0 is valid and disables the timeout
-      {{"-t", "010"}, 10},         // base 10: 8 if the base were 0, 16 if it were 16
-      {{"--timeout="}, 0},         // empty optarg: strtol parses nothing, endPtr sits on the NUL, timeout stays 0
-      {{"-t", "4294967296"}, 0},   // 2^32 fits strtol's long but narrows to 0 in the int store; disabled, not rejected
+  const struct { std::vector<std::string> argv; double want; } cases[] = {
+      {{"-t", "37"}, 37.0},          // short, separate argument
+      {{"--timeout=37"}, 37.0},      // long, attached
+      {{"--timeout", "37"}, 37.0},   // long, separate
+      {{"-t", "0"}, 0.0},            // 0 is valid and disables the timeout
+      {{"-t", "1.5"}, 1.5},          // fractional seconds are accepted
+      {{"-t", "010"}, 10.0},         // decimal spelling without an exponent
+      {{"-t", "0x10"}, 16.0},        // strtod accepts hexadecimal floating constants
+      {{"--timeout="}, 0.0},         // empty optarg parses as 0 and leaves endPtr on the NUL
+      {{"-t", "4294967296"}, 4294967296.0},  // values are retained as double rather than narrowed to int
   };
   for (const auto& c : cases) {
     ResetLibcFakes();
@@ -338,20 +340,20 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_AcceptedValues_StoreTheParsedSeconds
     const ParseArgsOutcome out = RunParseArgs(c.argv);
 
     EXPECT_EQ(kParseArgsNoExit, out.exitStatus) << c.argv[0];
-    EXPECT_EQ(c.want, timeout) << c.argv[0];
+    EXPECT_DOUBLE_EQ(c.want, timeout) << c.argv[0];
     // A dropped `break` in case 't' falls through to case 'v', which sets this.
     EXPECT_FALSE(verbose) << c.argv[0];
   }
 }
 
-// The rejecting side. `timeout` still carries what strtol produced: the store precedes the check, so a mutant that
+// The rejecting side. `timeout` still carries what strtod produced: the store precedes the check, so a mutant that
 // moved the check first would leave the -1 initializer here instead.
-TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWhatStrtolParsed) {
-  const struct { std::vector<std::string> argv; int stored; } cases[] = {
-      {{"-t", "-5"}, -5},          // negative
-      {{"-t", "5x"}, 5},           // trailing garbage
-      {{"--timeout=abc"}, 0},      // strtol consumed nothing
-      {{"-t", "0x10"}, 0},         // base 10 stops at 'x'
+TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWhatStrtodParsed) {
+  const struct { std::vector<std::string> argv; double stored; } cases[] = {
+      {{"-t", "-5"}, -5.0},          // negative
+      {{"-t", "5x"}, 5.0},           // trailing garbage
+      {{"--timeout=abc"}, 0.0},      // strtod consumed nothing
+      {{"-t", "inf"}, INFINITY},     // non-finite
   };
   for (const auto& c : cases) {
     ResetLibcFakes();
@@ -359,7 +361,7 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWh
     const ParseArgsOutcome out = RunParseArgs(c.argv);
 
     EXPECT_EQ(1, out.exitStatus) << c.argv[0];
-    EXPECT_EQ(c.stored, timeout) << c.argv[0];
+    EXPECT_DOUBLE_EQ(c.stored, timeout) << c.argv[0];
     EXPECT_EQ(std::vector<FILE*>{stderr}, g_fprintfCalls) << c.argv[0];
   }
 }
@@ -3007,4 +3009,3 @@ TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturns
   ExpectPerrors({EIO});
   EXPECT_EQ("peer 0 ok\n", g_stdoutData);
 }
-
