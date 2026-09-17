@@ -324,6 +324,24 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "no ROCm-capable device is detected"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+rocprofiler_add_integration_execute_test(
+    rocattach-reconfiguration-rejection-test-execute
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/reconfiguration_rejection_test.py --rocattach
+        $<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library> --target
+        $<TARGET_FILE:attachment-test> --tool $<TARGET_FILE:rocprofiler-sdk-tool>
+        --output-dir ${CMAKE_CURRENT_BINARY_DIR}/reconfiguration-rejection
+    DEPENDS rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library rocprofiler-sdk-tool
+            attachment-test
+    TIMEOUT 120
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PASS_REGULAR_EXPRESSION "Attachment reconfiguration rejection test PASSED"
+    SKIP_REGULAR_EXPRESSION "no ROCm-capable device is detected|No HIP devices found"
+    FAIL_REGULAR_EXPRESSION "FATAL|Segmentation fault|Subprocess aborted")
+
 # Verify a framework-owned rocprofiler_configure client can initialize normally while the
 # attachment listener remains available. Standalone SDK builds skip this cross-component
 # test when using an older rocprofiler-register package.
