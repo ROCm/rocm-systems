@@ -3,16 +3,17 @@
 ## What is it
 
 This optional Linux plugin forwards supported gfx1250 RocJITsu execution events
-to a separately supplied Perfsim FFM-v13 backend.
+to a separately supplied Perfsim backend implementing FFM observer API versions
+8 through 13.
 
 ## How to install
 
 The build below installs the RocJITsu adapter as
 `librocjitsu_plugin_perfsim.so`. Its Perfsim backend is not included with
 RocJITsu; obtain or build the backend's `libgpucsim_ffm_plugin.so` shared
-library separately. The backend must support observer ABI version 8; other ABI
-versions are rejected during initialization. Its Linux runtime dependencies
-must also be compatible with the launch environment.
+library separately. The backend must support an observer ABI version from 8
+through 13; versions outside that range are rejected during initialization. Its
+Linux runtime dependencies must also be compatible with the launch environment.
 
 From the repository root, build and install RocJITsu with the adapter enabled:
 
@@ -69,21 +70,24 @@ Configure Perfsim through its own environment, then launch the workload:
 
 ## Backend ABI
 
-The adapter contains a private, non-installed declaration of only the FFM
-observer API-v13 binary prefix that it consumes. The declaration is limited to
-the validated little-endian Linux LP64 GCC/Clang ABI. The separately built
-Perfsim library must export `ffm_observer_plugin_get_api`, accept an API-v13
-request, return an API-v13 table, and provide the required lifecycle,
-instruction, regular-memory, and tensor-DMA callbacks.
+The adapter contains a private, non-installed declaration of only the latest
+FFM observer binary prefix that it consumes. The declaration is limited to the
+validated little-endian Linux LP64 GCC/Clang ABI. The separately built Perfsim
+library must export `ffm_observer_plugin_get_api`, negotiate an API version from
+8 through 13, and provide the required lifecycle, instruction, regular-memory,
+and tensor-DMA callbacks. The adapter requests versions from newest to oldest
+and passes the negotiated version back through `FfmHostApi::api_version`.
 
-The adapter forwards the v9 dispatch name from dispatch-owned storage, provides
-the v12 host logger through the configured RocJITsu sink, and forwards the v13
-tensor-DMA descriptor geometry. Tensor-DMA descriptor strides are converted
-from element units to the byte units required by the v13 callback.
+The ABI additions consumed here are append-only: v8 backends read the legacy
+payload prefixes, while newer backends additionally receive the v9 dispatch
+name from dispatch-owned storage, the v12 host logger through the configured
+RocJITsu sink, and the v13 tensor-DMA descriptor geometry. Tensor-DMA descriptor
+strides are converted from element units to the byte units required by the v13
+callback.
 
-FFM v13 does not expose a table size or ABI fingerprint, and `on_init` returns
-no status. Qualify the exact Perfsim build with a known dispatch and require a
-nonempty report containing that dispatch.
+These FFM versions do not expose a table size or ABI fingerprint, and `on_init`
+returns no status. Qualify the exact Perfsim build with a known dispatch and
+require a nonempty report containing that dispatch.
 
 ## Real-world example: GPT-OSS kernels
 

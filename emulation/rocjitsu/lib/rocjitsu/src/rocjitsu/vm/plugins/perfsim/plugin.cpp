@@ -43,8 +43,11 @@ namespace {
 using namespace observer_abi_v13;
 
 constexpr size_t kDefaultMaxStagedBytes = 256 * 1024 * 1024;
+constexpr uint32_t kOldestCompatibleApiVersion = 8;
 static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 13,
-              "the Perfsim adapter constructs FFM API v13 payloads");
+              "the Perfsim adapter constructs FFM API v13 payload supersets");
+static_assert(kOldestCompatibleApiVersion >= FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION);
+static_assert(kOldestCompatibleApiVersion <= FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
 
 class InstanceClaim {
 public:
@@ -408,20 +411,32 @@ struct PerfsimPlugin::Impl {
           std::format("Perfsim backend '{}' is missing ffm_observer_plugin_get_api: {}",
                       config.library_path, util::last_library_error()));
 
-    FfmObserverPluginApi *raw_api =
-        invoke_foreign_abi(get_api, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
+    FfmObserverPluginApi *raw_api = nullptr;
+    for (uint32_t requested_version = FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION;;
+         --requested_version) {
+      raw_api = invoke_foreign_abi(get_api, requested_version);
+      if (raw_api) {
+        uint32_t returned_version = 0;
+        std::memcpy(&returned_version, raw_api, sizeof(returned_version));
+        if (returned_version < kOldestCompatibleApiVersion ||
+            returned_version > requested_version) {
+          throw std::runtime_error(std::format(
+              "Perfsim backend returned incompatible API version {} for version {} request; "
+              "supported versions are {} through {}",
+              returned_version, requested_version, kOldestCompatibleApiVersion,
+              FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
+        }
+        negotiated_api_version = returned_version;
+        std::memcpy(&api, raw_api, sizeof(api));
+        break;
+      }
+      if (requested_version == kOldestCompatibleApiVersion)
+        break;
+    }
     if (!raw_api)
-      throw std::runtime_error(std::format("Perfsim backend rejected required FFM API version {}",
-                                           FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
-    // The adapter constructs v13-only TDM and metadata payloads, so a table
-    // tagged as any other ABI is unsafe.
-    uint32_t api_version = 0;
-    std::memcpy(&api_version, raw_api, sizeof(api_version));
-    if (api_version != FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION)
       throw std::runtime_error(
-          std::format("Perfsim backend returned API version {}; version {} is required",
-                      api_version, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
-    std::memcpy(&api, raw_api, sizeof(api));
+          std::format("Perfsim backend rejected supported FFM API versions {} through {}",
+                      kOldestCompatibleApiVersion, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
 
     require_callback(api.on_init, "on_init");
     require_callback(api.on_dispatch_begin, "on_dispatch_begin");
@@ -505,12 +520,15 @@ struct PerfsimPlugin::Impl {
   void init() {
     if (initialized || shutdown_called)
       return;
-    activate_host_log();
-    const FfmHostApi host{FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION, &host_log};
+    const bool supports_host_log = negotiated_api_version >= 12;
+    if (supports_host_log)
+      activate_host_log();
+    const FfmHostApi host{negotiated_api_version, supports_host_log ? &host_log : nullptr};
     try {
       invoke_foreign_abi(api.on_init, &host);
     } catch (...) {
-      deactivate_host_log();
+      if (supports_host_log)
+        deactivate_host_log();
       throw;
     }
     initialized = true;
@@ -1034,6 +1052,7 @@ struct PerfsimPlugin::Impl {
   AdapterConfig config;
   RetainedSharedLibrary library;
   FfmObserverPluginApiPrefix api{};
+  uint32_t negotiated_api_version = 0;
   bool initialized = false;
   bool shutdown_called = false;
   std::unordered_map<uint32_t, DispatchState> dispatches;
