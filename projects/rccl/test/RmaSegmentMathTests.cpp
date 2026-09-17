@@ -253,6 +253,8 @@ TEST(RmaSegmentMathTest, FlushLooksUpLocalIbDevNInRemoteRegistration)
     constexpr int remoteRank = 0;
     constexpr int remoteIbDevN = 3;
     constexpr int localIbDevN = 7;
+    EXPECT_EQ(ncclRmaRkeyIbDevN(localIbDevN, remoteIbDevN, /*flushMode=*/0), remoteIbDevN);
+    EXPECT_EQ(ncclRmaRkeyIbDevN(localIbDevN, remoteIbDevN, /*flushMode=*/1), localIbDevN);
     EXPECT_EQ(ncclRmaDevSlotOf(remoteIbDevNs, remoteRank, remoteIbDevN, kMaxDevsPerNic), 1);
     EXPECT_EQ(ncclRmaDevSlotOf(remoteIbDevNs, remoteRank, localIbDevN, kMaxDevsPerNic), 0);
 }

@@ -1287,13 +1287,13 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
                                    /*signalOff=*/4, sigMh, 0,
                                    NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "unaligned signal atomic must be rejected";
-        // The total window has room for eight bytes, but this address straddles
-        // two independently registered physical MRs.
+        // 8-byte aligned offset past the end of the signal window. A
+        // cross-segment 8-byte atomic cannot exist on an 8-aligned boundary.
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, /*size=*/0, 0, recvMh, 1,
-                                   /*signalOff=*/rb->segSize - 4, recvMh, 0,
+                                   /*signalOff=*/kSignalSize, sigMh, 0,
                                    NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
-            << "cross-segment signal atomic must be rejected";
+            << "signal offset at the window end must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
     Barrier();

@@ -411,7 +411,9 @@
         "NCCL_DEBUG_SUBSYS": "REG",
         "RCCL_MPI_LOG_ALL_RANKS": "1",
         "NCCL_GIN_ENABLE": "1",
-        "NCCL_GIN_TYPE": "2"
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1"
       },
       "tests": [
         {

@@ -22,6 +22,11 @@
 #define NCCL_RMA_MAX_DATA_WRS (4 * NCCL_RMA_MAX_SEGMENTS)
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
+// Equals NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS).
+// common_cast.h static_asserts the production macros against this.
+#define NCCL_RMA_MAX_INFLIGHT_REQUESTS 256
+#define NCCL_RMA_MAX_SEND_QP_WRS (2 * NCCL_RMA_MAX_INFLIGHT_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS - 2)
+#define NCCL_RMA_MAX_FLUSH_QP_WRS (NCCL_RMA_MAX_INFLIGHT_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS - 1)
 
 static_assert(NCCL_RMA_MAX_DATA_WRS == 4 * NCCL_RMA_MAX_SEGMENTS,
               "data WR budget must cover boundary splits plus UINT32_MAX SGE splits");
@@ -158,6 +163,12 @@ static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int
     if (slots[d] == ibDevN) return d;
   }
   return -1;
+}
+
+// Data WRs look up the remote QP's physical device. Flush RDMA_READs look up
+// the local QP's physical device in the same remote handle.
+static inline int ncclRmaRkeyIbDevN(int localIbDevN, int remoteIbDevN, int flushMode) {
+  return flushMode ? localIbDevN : remoteIbDevN;
 }
 
 #endif // NCCL_NET_IB_RMA_MULTISEG_H_
