@@ -153,6 +153,13 @@ def build_ctest_command(catch_tests_path: Path) -> List[str]:
         str(timeout),
     ]
 
+    # HIP_TESTS_REGEX: when set, run only matching tests (for targeted debugging).
+    # Overrides the normal shard/exclude logic.
+    tests_regex = os.getenv("HIP_TESTS_REGEX")
+    if tests_regex:
+        cmd.extend(["--tests-regex", tests_regex])
+        return cmd
+
     amdgpu_families = os.getenv("AMDGPU_FAMILIES")
     os_type = platform.system().lower()
     if amdgpu_families in TEST_TO_IGNORE and os_type in TEST_TO_IGNORE[amdgpu_families]:

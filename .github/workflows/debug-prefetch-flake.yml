@@ -1,0 +1,113 @@
+name: Debug hipMemPrefetchAsync flake (issue 8271)
+
+# Manually triggered workflow that runs the two intermittently failing prefetch
+# tests on gfx942 repeatedly to capture failure logs.
+# Issue: https://github.com/ROCm/TheRock/issues/8271
+#
+# Failing tests:
+#   - Unit_hipMemPrefetchAsync_Basic_AllDevices
+#   - Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: "TheRock artifact run ID to pull packages from"
+        required: true
+        type: string
+      repeat_count:
+        description: "Number of parallel repetitions (to stress the flake)"
+        required: false
+        default: "10"
+        type: choice
+        options: ["5", "10", "20", "30"]
+
+permissions:
+  contents: read
+
+jobs:
+  debug-prefetch-gfx942:
+    name: "prefetch-flake | gfx94X-dcgpu | run ${{ matrix.run_index }}"
+    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+    strategy:
+      fail-fast: false
+      matrix:
+        run_index: ${{ fromJSON(inputs.repeat_count == '5' && '[1,2,3,4,5]' ||
+                               inputs.repeat_count == '10' && '[1,2,3,4,5,6,7,8,9,10]' ||
+                               inputs.repeat_count == '20' && '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]' ||
+                               '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]') }}
+    container:
+      image: "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98"
+      options: "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: gfx94X-dcgpu
+      HIP_TESTS_REGEX: "Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation"
+      SHARD_INDEX: "1"
+      TOTAL_SHARDS: "1"
+
+    steps:
+      - name: Fetch build_tools from TheRock
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/TheRock
+          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
+          sparse-checkout: build_tools
+          path: prejob
+
+      - name: Pre-job cleanup GPU processes
+        timeout-minutes: 5
+        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup test environment
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ env.AMDGPU_FAMILIES }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: Driver and GPU info
+        timeout-minutes: 3
+        run: |
+          echo "=== rocminfo ==="
+          build/bin/rocminfo
+          echo ""
+          echo "=== XNACK ==="
+          build/bin/rocminfo | grep -i xnack || true
+          echo ""
+          echo "=== KFD noretry ==="
+          cat /sys/module/amdgpu/parameters/noretry 2>/dev/null || true
+          echo ""
+          echo "=== Large BAR (BAR0 size per GPU) ==="
+          for f in /sys/class/drm/card*/device/resource; do
+            awk 'NR==1{s=strtonum($1);e=strtonum($2);if(e>s)printf "  %s BAR0: %d MB\n",FILENAME,(e-s+1)/1024/1024}' "$f"
+          done
+          echo ""
+          echo "=== SVM_DIRECT_HOST_ACCESS ==="
+          python3 - <<'PYEOF'
+          import ctypes, ctypes.util
+          hsa = ctypes.CDLL("libhsa-runtime64.so.1", use_errno=True)
+          print("(query skipped - check rocminfo output above)")
+          PYEOF
+
+      - name: Run prefetch flake tests (run ${{ matrix.run_index }})
+        timeout-minutes: 10
+        run: |
+          echo "=== Run ${{ matrix.run_index }} of ${{ inputs.repeat_count }} ==="
+          python projects/hip-tests/catch/packaging/run_hiptests.py
+
+      - name: Post-job cleanup GPU processes
+        if: always()
+        timeout-minutes: 5
+        run: bash ./build_tools/github_actions/cleanup_processes.sh
