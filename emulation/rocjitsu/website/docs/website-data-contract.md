@@ -113,6 +113,9 @@ Every test contains:
 - `problem`: required object of workload facts. Keys must be non-empty; values must be strings, numbers, or booleans.
 
 The dashboard renders every `problem` entry under **Problem Details**.
+Every definition in `tests` must be referenced by at least one target. Catalogs with
+orphan definitions are rejected instead of silently dropping those definitions from
+the dashboard-wide test catalog.
 
 ### Catalog evolution
 
@@ -241,7 +244,9 @@ Target identity is intentionally absent from `execution`; targets are grouped un
 
 Array order and labels do not affect compatibility; normalized key/value pairs do. Two empty environments are compatible. An empty and populated environment are not.
 
-Publication validation requires the same normalized environment across all runs.
+Environments may change between independent historical runs. Runs sharing a
+`comparisonId` must have the same normalized environment because plugin overhead is
+valid only when the compared executions use the same environment.
 
 ### `targets` and results
 
@@ -283,6 +288,9 @@ The overall runtime overhead is the geometric mean of per-test duration ratios. 
 7. Add the run filenames to `data/index.json`, update `generatedAt`, and publish the index last.
 
 No React or Vite build is required for a data-only GitHub Pages update.
+Validation is mandatory before publication. The browser runs the same validation and
+fails closed with no benchmark data if invalid files bypass the publishing gate; it
+does not skip invalid runs or construct partial history.
 
 ## Values derived by the dashboard
 

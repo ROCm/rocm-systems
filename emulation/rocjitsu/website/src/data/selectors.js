@@ -26,7 +26,7 @@ export function periodKey(timestamp, period = 'weekly') {
   return date.toISOString().slice(0, 10);
 }
 
-export function testMatches(test, filters) {
+function testMatches(test, filters) {
   return filters.targets.includes(test.target) && filters.suites.includes(test.suite);
 }
 
@@ -38,7 +38,7 @@ export function isRunCompletedForFilters(run, filters) {
     ));
 }
 
-export function resultMap(run) {
+function resultMap(run) {
   return new Map((run?.tests ?? []).map((test) => [test.testId, test]));
 }
 
@@ -60,7 +60,7 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
   }).sort(compareRunsByCommit).at(-1) ?? null;
 }
 
-export function previousCompletedTestResult(runs, candidate, testId) {
+function previousCompletedTestResult(runs, candidate, testId) {
   if (!candidate || !testId) return null;
   const earlierRuns = runs.filter((run) => (
     compareCommitPosition(run, candidate) < 0
@@ -78,19 +78,19 @@ export function previousCompletedTestResult(runs, candidate, testId) {
 export function compareRuns(candidate, baseline, filters) {
   if (!candidate) return [];
   const baselineTests = resultMap(baseline);
-  return candidate.tests.filter((test) => testMatches(test, filters)).map((test) => {
-    const previous = baselineTests.get(test.testId);
-    const comparable = test.status === 'completed'
-      && Number.isFinite(test.durationSeconds)
-      && previous?.status === 'completed'
-      && Number.isFinite(previous.durationSeconds);
+  return candidate.tests.filter((test) => testMatches(test, filters)).map((candidateTest) => {
+    const baselineTest = baselineTests.get(candidateTest.testId) ?? null;
+    const comparable = candidateTest.status === 'completed'
+      && Number.isFinite(candidateTest.durationSeconds)
+      && baselineTest?.status === 'completed'
+      && Number.isFinite(baselineTest.durationSeconds);
     return {
-      test,
-      previous,
-      candidateTest: test,
-      baselineTest: previous ?? null,
+      candidateTest,
+      baselineTest,
       comparable,
-      delta: comparable ? ((test.durationSeconds - previous.durationSeconds) / previous.durationSeconds) * 100 : null,
+      delta: comparable
+        ? ((candidateTest.durationSeconds - baselineTest.durationSeconds) / baselineTest.durationSeconds) * 100
+        : null,
     };
   });
 }
@@ -346,7 +346,6 @@ export function selectOverview(data, filters, range = 'ALL') {
       data: projected.map(({ value }) => value),
       baseline: isIntraday && Number.isFinite(previousValue) ? previousValue : firstValue,
       estimated: projected.map(({ estimatedTests }) => estimatedTests.length > 0),
-      estimatedTests: projected.map(({ estimatedTests }) => estimatedTests),
     };
   });
   const normalizedDurationAt = (index) => {
@@ -394,7 +393,6 @@ export function selectOverview(data, filters, range = 'ALL') {
     mode: isIntraday ? 'intraday' : isWeekly ? 'weekly-by-commit' : 'daily-by-commit',
     anchorDay,
     slots,
-    runCount: representedRuns,
     currentDuration: displayedDuration,
     firstRun: historyBaseline ?? firstHistoryRun,
     latestRun: historyCandidate,
@@ -403,20 +401,7 @@ export function selectOverview(data, filters, range = 'ALL') {
       && normalizedBaselineDuration
       ? ((normalizedCandidateDuration - normalizedBaselineDuration) / normalizedBaselineDuration) * 100
       : null,
-    comparisonLabel: historyBaseline
-      ? `Latest vs first shown in ${range}${normalizedSeries.some((series) => series.estimated.some(Boolean)) ? ' · normalized workload' : ''}`
-      : 'At least two completed runs are needed',
     summary: `${representedRuns} commit${representedRuns === 1 ? '' : 's'} shown`,
-    description: [
-      isIntraday
-        ? `All official commits from ${shortDayLabel(anchorDay)} (UTC) are shown`
-        : isWeekly
-          ? `All official commits are shown, up to ${MAX_COMMITS_PER_DAY} per UTC date`
-          : 'The latest completed official run for each UTC commit date is shown',
-      normalizedSeries.some((series) => series.estimated.some(Boolean))
-        ? 'Historical values are normalized to the latest selected workload'
-        : null,
-    ].filter(Boolean).join('. '),
     normalized: normalizedSeries.some((series) => series.estimated.some(Boolean)),
     insufficientData,
     series: normalizedSeries,
@@ -429,11 +414,14 @@ export function selectOverview(data, filters, range = 'ALL') {
   return {
     candidate,
     baseline,
-    latestTests,
-    comparisons,
     changes,
     history,
-    results: comparisons.map((item) => ({ ...item, ...item.test })),
+    results: comparisons.map((item) => ({
+      ...item.candidateTest,
+      baselineTest: item.baselineTest,
+      comparable: item.comparable,
+      delta: item.delta,
+    })),
     metrics: {
       duration: candidateComplete ? sumDurations(completedTests) : null,
       durationDelta: metricsDurationDelta,
@@ -506,8 +494,8 @@ export function selectRecentRuns(data, filters, limit = 8) {
     const summary = runSummary(run, filters);
     const baseline = previousCompletedRunForFilters(data.runs, run, filters);
     const comparable = compareRuns(run, baseline, filters).filter((item) => item.comparable);
-    const candidateDuration = comparable.reduce((total, item) => total + item.test.durationSeconds, 0);
-    const baselineDuration = comparable.reduce((total, item) => total + item.previous.durationSeconds, 0);
+    const candidateDuration = comparable.reduce((total, item) => total + item.candidateTest.durationSeconds, 0);
+    const baselineDuration = comparable.reduce((total, item) => total + item.baselineTest.durationSeconds, 0);
     return {
       run,
       baseline,
@@ -545,13 +533,11 @@ export function selectRunReliability(data, filters, limit = 20) {
 
 export function selectRunComparison(candidate, baseline, filters, tolerance = 3) {
   const candidateComparisons = compareRuns(candidate, baseline, filters);
-  const candidateTestIds = new Set(candidateComparisons.map((item) => item.test.testId));
+  const candidateTestIds = new Set(candidateComparisons.map((item) => item.candidateTest.testId));
   const baselineOnlyComparisons = candidate && baseline
     ? baseline.tests
       .filter((test) => testMatches(test, filters) && !candidateTestIds.has(test.testId))
       .map((test) => ({
-        test,
-        previous: test,
         candidateTest: null,
         baselineTest: test,
         comparable: false,
@@ -561,14 +547,13 @@ export function selectRunComparison(candidate, baseline, filters, tolerance = 3)
   const comparisons = [...candidateComparisons, ...baselineOnlyComparisons];
   const comparable = comparisons.filter((item) => item.comparable);
   const notComparable = comparisons.filter((item) => !item.comparable);
-  const baselineDuration = comparable.reduce((total, item) => total + item.previous.durationSeconds, 0);
-  const candidateDuration = comparable.reduce((total, item) => total + item.test.durationSeconds, 0);
+  const baselineDuration = comparable.reduce((total, item) => total + item.baselineTest.durationSeconds, 0);
+  const candidateDuration = comparable.reduce((total, item) => total + item.candidateTest.durationSeconds, 0);
   const counts = comparable.reduce((summary, item) => {
     const state = item.delta > tolerance ? 'slower' : item.delta < -tolerance ? 'faster' : 'neutral';
     return { ...summary, [state]: summary[state] + 1 };
   }, { faster: 0, slower: 0, neutral: 0 });
   return {
-    comparisons,
     comparable: [...comparable].sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta)),
     notComparable,
     baselineDuration,

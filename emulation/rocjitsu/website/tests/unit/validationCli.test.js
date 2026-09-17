@@ -7,19 +7,13 @@ import { validateDashboardDataDirectory } from '../../scripts/validate-dashboard
 
 const fixtureDataDirectory = fileURLToPath(new URL('../fixtures/data/', import.meta.url));
 
-test('reports publication policy differences without relying on website filtering', async () => {
-  const error = await validateDashboardDataDirectory(fixtureDataDirectory)
-    .catch((validationError) => validationError);
+test('accepts historical environment changes in an otherwise valid publication', async () => {
+  const result = await validateDashboardDataDirectory(fixtureDataDirectory);
 
-  expect(error.message).toContain(
-    'benchmark-202608270530-0db03af1 uses machine sjc-rocjitsu-perf-02',
-  );
-  expect(error.message).toContain(
-    'benchmark-202608290530-19872076 uses a different environment',
-  );
+  expect(result.sourceData.runs).toHaveLength(83);
 });
 
-test('rejects generated data that the website would skip', async () => {
+test('rejects generated data that the website also rejects', async () => {
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'rocjitsu-dashboard-data-'));
   try {
     await cp(fixtureDataDirectory, temporaryDirectory, { recursive: true });

@@ -40,11 +40,11 @@ import CommitComparison from '../shared/CommitComparison';
 
 const NOISE_TOLERANCE = 3;
 
-function SummaryStat({ label, value, color = 'text.primary' }) {
+function SummaryStat({ label, value }) {
   return (
     <Box sx={{ p: 1.35, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
       <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography sx={{ fontSize: 20, fontWeight: 770, color, lineHeight: 1.2, mt: 0.3 }}>{value}</Typography>
+      <Typography sx={{ fontSize: 20, fontWeight: 770, lineHeight: 1.2, mt: 0.3 }}>{value}</Typography>
     </Box>
   );
 }
@@ -257,8 +257,8 @@ export default function CompareRunsView({
     return `${indicator} ${formatPercent(Math.abs(delta), false)}`;
   };
   const categoryFor = (item) => {
-    const target = item.test.target.replace(/[{}|]/g, '');
-    const benchmark = item.test.name.replace(/[{}|]/g, '');
+    const target = item.candidateTest.target.replace(/[{}|]/g, '');
+    const benchmark = item.candidateTest.name.replace(/[{}|]/g, '');
     const separator = compactChart ? '\n' : '{separator| · }';
     return `{target|${target}}${separator}{benchmark|${benchmark}}`;
   };
@@ -270,10 +270,10 @@ export default function CompareRunsView({
       borderColor: theme.palette.divider,
       textStyle: { color: theme.palette.text.primary },
       formatter: ({ data: point }) => [
-        `<strong>${escapeHtml(point.comparison.test.name)}</strong>`,
-        `${escapeHtml(point.comparison.test.target)} · ${escapeHtml(point.comparison.test.suite)}`,
-        `Candidate ${formatDuration(point.comparison.test.durationSeconds)}`,
-        `Baseline ${formatDuration(point.comparison.previous.durationSeconds)}`,
+        `<strong>${escapeHtml(point.comparison.candidateTest.name)}</strong>`,
+        `${escapeHtml(point.comparison.candidateTest.target)} · ${escapeHtml(point.comparison.candidateTest.suite)}`,
+        `Candidate ${formatDuration(point.comparison.candidateTest.durationSeconds)}`,
+        `Baseline ${formatDuration(point.comparison.baselineTest.durationSeconds)}`,
         `Change ${formatPercent(point.comparison.delta)}`,
         `Commits ${escapeHtml(shortSha(candidate))} vs ${escapeHtml(shortSha(baseline))}`,
       ].join('<br/>'),
@@ -316,8 +316,8 @@ export default function CompareRunsView({
         return {
           value: item.delta,
           comparison: item,
-          benchmarkId: item.test.logicalTestId,
-          targetId: item.test.target,
+          benchmarkId: item.candidateTest.logicalTestId,
+          targetId: item.candidateTest.target,
           itemStyle: {
             color: performanceColor,
             borderRadius: item.delta >= 0 ? [0, 5, 5, 0] : [5, 0, 0, 5],

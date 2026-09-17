@@ -15,7 +15,7 @@
   "execution": {
     "completedAt": "2026-08-27T05:30:00.000Z",
     "trigger": "auto",
-    "machine": "sjc-rocjitsu-perf-02"
+    "machine": "sjc-rocjitsu-perf-01"
   },
   "environment": [
     {

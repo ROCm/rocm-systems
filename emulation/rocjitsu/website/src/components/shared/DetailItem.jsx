@@ -1,8 +1,8 @@
 import { Box, Typography } from '@mui/material';
 
-export default function DetailItem({ label, children, wide = false }) {
+export default function DetailItem({ label, children }) {
   return (
-    <Box sx={wide ? { gridColumn: '1 / -1' } : undefined}>
+    <Box>
       <Typography
         component="div"
         variant="overline"

@@ -38,10 +38,6 @@ export async function readChart(chart, extract, argument = null) {
   return extracted;
 }
 
-export function chartOption(chart, extract, argument = null) {
-  return readChart(chart, extract, argument);
-}
-
 // ECharts animates layout changes, so a pixel read straight after a state change can point at a
 // stale position. Sampling until two consecutive reads agree replaces fixed sleeps before clicks.
 async function settledPosition(chart, extract, argument = null) {

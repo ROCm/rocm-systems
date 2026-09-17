@@ -57,7 +57,6 @@ export function selectPluginComparison(group, target, suites, baselinePluginId =
         result,
         comparable,
         delta: comparable ? ((result.durationSeconds - baseline.durationSeconds) / baseline.durationSeconds) * 100 : null,
-        speedup: comparable ? baseline.durationSeconds / result.durationSeconds : null,
       };
     }),
   }));

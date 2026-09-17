@@ -19,11 +19,10 @@ import {
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import BenchmarkResultDialog from '../benchmarks/BenchmarkResultDialog';
 import StatusChip from '../shared/StatusChip';
-import { formatDuration, formatPercent, formatProblem } from '../../utils/formatters';
+import { formatDuration, formatPercent } from '../../utils/formatters';
 import { detailActionStyles } from '../../theme/styles';
 import CommitComparison from '../shared/CommitComparison';
 
-const hiddenBelowLaptop = { display: { xs: 'none', lg: 'table-cell' } };
 const hiddenBelowTablet = { display: { xs: 'none', md: 'table-cell' } };
 const rightAlignedColumn = { pr: 4 };
 const rowsPerPageOptions = [10, 25, 50];
@@ -31,8 +30,6 @@ const resultColumns = [
   { key: 'target', label: 'Target' },
   { key: 'suite', label: 'Suite' },
   { key: 'benchmark', label: 'Benchmark' },
-  { key: 'type', label: 'Type', sx: hiddenBelowLaptop },
-  { key: 'problem', label: 'Problem', sx: hiddenBelowLaptop },
   { key: 'duration', label: 'Duration', align: 'right', sx: rightAlignedColumn },
   { key: 'baseline', label: 'Baseline', align: 'right', sx: { ...hiddenBelowTablet, ...rightAlignedColumn } },
   { key: 'change', label: 'Change', align: 'right', sx: rightAlignedColumn },
@@ -42,10 +39,8 @@ const resultCollator = new Intl.Collator(undefined, { numeric: true, sensitivity
 
 function resultSortValue(row, key) {
   if (key === 'benchmark') return row.name;
-  if (key === 'type') return row.problem?.dataType;
-  if (key === 'problem') return formatProblem(row.problem);
   if (key === 'duration') return row.durationSeconds;
-  if (key === 'baseline') return row.previous?.durationSeconds;
+  if (key === 'baseline') return row.baselineTest?.durationSeconds;
   if (key === 'change') return row.delta;
   return row[key];
 }
@@ -161,7 +156,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
         />
       </Stack>
       <TableContainer sx={{ maxHeight: 510, borderTop: 1, borderColor: 'divider' }}>
-        <Table stickyHeader size="small" sx={{ minWidth: 880 }}>
+        <Table stickyHeader size="small" sx={{ minWidth: 720 }}>
           <TableHead>
             <TableRow>
               {resultColumns.map((column) => (
@@ -189,10 +184,8 @@ export default function ResultsTable({ results, run, baseline, repository, searc
                     <Typography variant="body2" fontWeight={650}>{row.name}</Typography>
                   </ButtonBase>
                 </TableCell>
-                <TableCell sx={hiddenBelowLaptop}>{row.problem?.dataType?.toUpperCase() ?? '—'}</TableCell>
-                <TableCell sx={hiddenBelowLaptop}>{formatProblem(row.problem)}</TableCell>
                 <TableCell align="right" sx={{ ...rightAlignedColumn, fontVariantNumeric: 'tabular-nums', fontWeight: 650 }}>{formatDuration(row.durationSeconds)}</TableCell>
-                <TableCell align="right" sx={{ ...hiddenBelowTablet, ...rightAlignedColumn, fontVariantNumeric: 'tabular-nums', color: 'text.secondary' }}>{formatDuration(row.previous?.durationSeconds)}</TableCell>
+                <TableCell align="right" sx={{ ...hiddenBelowTablet, ...rightAlignedColumn, fontVariantNumeric: 'tabular-nums', color: 'text.secondary' }}>{formatDuration(row.baselineTest?.durationSeconds)}</TableCell>
                 <TableCell align="right" sx={rightAlignedColumn}>
                   <Typography variant="body2" fontWeight={720} color={!row.comparable ? 'text.secondary' : row.delta > 0 ? 'error.main' : 'success.main'}>
                     {formatPercent(row.delta)}
@@ -204,7 +197,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
             ))}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   {run ? 'No benchmarks match this search.' : '—'}
                 </TableCell>
               </TableRow>

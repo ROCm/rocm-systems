@@ -135,7 +135,7 @@ test('a newer rerun of the nearest earlier commit updates the Overview baseline'
 
   expect(commitShaFor(overview.candidate)).toMatch(/^31369c4d/);
   expect(overview.baseline.runId).toBe('newer-9f774d29-rerun');
-  expect(fp16Result.previous.durationSeconds).toBeCloseTo(
+  expect(fp16Result.baselineTest.durationSeconds).toBeCloseTo(
     source.tests.find((test) => test.logicalTestId === 'triton-gemm-f16-1024').durationSeconds * 2,
     2,
   );
@@ -191,10 +191,6 @@ test('catalog changes break Aggregate and normalize Overview history to the late
   expect(overview.history.normalized).toBe(true);
   expect(overview.history.series[0].data[oldCatalogIndex]).toBeTypeOf('number');
   expect(overview.history.series[0].estimated[oldCatalogIndex]).toBe(true);
-  expect(overview.history.series[0].estimatedTests[oldCatalogIndex]).toEqual(expect.arrayContaining([
-    'tensile-gemm-fp8-4096',
-    'deepseek-v3-decode-fp8',
-  ]));
   expect(overview.history.series[0].data[oldCatalogIndex]).toBeCloseTo(1259.645, 3);
   expect(overview.history.series[0].estimated[latestCatalogIndex]).toBe(false);
   expect(aggregateBreak).toBeGreaterThan(0);

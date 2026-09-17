@@ -81,21 +81,21 @@ test('run comparison marks rows without completed benchmark data as not comparab
   const august27 = runForCommit('0db03af1');
 
   const candidateIssue = selectRunComparison(august29, august28, filters).notComparable.find(
-    (item) => item.test.logicalTestId === 'triton-gemm-f16-1024',
+    (item) => item.candidateTest?.logicalTestId === 'triton-gemm-f16-1024',
   );
   expect(candidateIssue).toMatchObject({ comparable: false, delta: null });
   expect(candidateIssue.candidateTest.status).not.toBe('completed');
   expect(candidateIssue.baselineTest.status).toBe('completed');
 
   const bothIssue = selectRunComparison(august29, august28, filters).notComparable.find(
-    (item) => item.test.logicalTestId === 'triton-softmax-f32-4096',
+    (item) => item.candidateTest?.logicalTestId === 'triton-softmax-f32-4096',
   );
   expect(bothIssue).toMatchObject({ comparable: false, delta: null });
   expect(bothIssue.candidateTest.status).not.toBe('completed');
   expect(bothIssue.baselineTest.status).not.toBe('completed');
 
   const baselineIssue = selectRunComparison(august28, august27, filters).notComparable.find(
-    (item) => item.test.logicalTestId === 'tensile-gemm-fp8-4096',
+    (item) => item.candidateTest?.logicalTestId === 'tensile-gemm-fp8-4096',
   );
   expect(baselineIssue).toMatchObject({ comparable: false, delta: null });
   expect(baselineIssue.candidateTest.status).toBe('completed');

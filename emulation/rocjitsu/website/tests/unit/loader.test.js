@@ -55,9 +55,8 @@ beforeEach(() => {
 test('loads 500 runs in index order with at most eight run requests in flight', async () => {
   const { fetchImpl, state } = createFetchDouble({ delayMs: 1 });
 
-  const { data, warnings } = await loadSynthetic(fetchImpl);
+  const { data } = await loadSynthetic(fetchImpl);
 
-  expect(warnings).toEqual([]);
   expect(data.runs).toHaveLength(dataset.runCount);
   expect(data.runs.map((run) => run.runId)).toEqual(
     dataset.runFiles.map((runFile) => runFile.replace(/^runs\/|\.json$/g, '')),
@@ -97,7 +96,7 @@ test('reports determinate progress for every run file exactly once', async () =>
   expect(updates.every((update, index) => update.loaded === index)).toBe(true);
 });
 
-test('turns a timed-out run file into a warning and keeps the rest of the history', async () => {
+test('fails closed when a run file times out', async () => {
   const stalledUrl = `https://dashboard.test/data/${dataset.runFiles[7]}`;
   const { fetchImpl } = createFetchDouble({
     behavior: (url, options) => (url === stalledUrl
@@ -111,16 +110,12 @@ test('turns a timed-out run file into a warning and keeps the rest of the histor
       : null),
   });
 
-  const { data, warnings } = await loadSynthetic(fetchImpl, { requestTimeoutMs: 30 });
-
-  expect(data.runs).toHaveLength(dataset.runCount - 1);
-  expect(warnings).toHaveLength(1);
-  expect(warnings[0].runFile).toBe(dataset.runFiles[7]);
-  expect(warnings[0].message).toContain('Timed out after 30 ms');
-  expect(warnings[0].message).toContain(stalledUrl);
+  await expect(loadSynthetic(fetchImpl, { requestTimeoutMs: 30 })).rejects.toThrow(
+    new RegExp(`Timed out after 30 ms[\\s\\S]*${stalledUrl.replaceAll('/', '\\/')}`),
+  );
 });
 
-test('turns an unrelated AbortError from one run file into a warning', async () => {
+test('fails closed for an unrelated AbortError from one run file', async () => {
   const abortedUrl = `https://dashboard.test/data/${dataset.runFiles[7]}`;
   const { fetchImpl } = createFetchDouble({
     behavior: (url) => {
@@ -131,13 +126,9 @@ test('turns an unrelated AbortError from one run file into a warning', async () 
     },
   });
 
-  const { data, warnings } = await loadSynthetic(fetchImpl);
-
-  expect(data.runs).toHaveLength(dataset.runCount - 1);
-  expect(warnings).toEqual([{
-    runFile: dataset.runFiles[7],
-    message: 'The connection was aborted',
-  }]);
+  await expect(loadSynthetic(fetchImpl)).rejects.toThrow(
+    `- ${dataset.runFiles[7]}: The connection was aborted`,
+  );
 });
 
 test('applies a deadline to the whole load and surfaces a retryable error', async () => {
@@ -181,12 +172,12 @@ test('names the resource in fetch and JSON-parse diagnostics', async () => {
     },
   });
 
-  const { warnings } = await loadSynthetic(fetchImpl);
+  const error = await loadSynthetic(fetchImpl).catch((loadError) => loadError);
 
-  expect(warnings.map((warning) => warning.message)).toEqual([
-    `Unable to load run file ${missingUrl} (404 Not Found)`,
+  expect(error.message).toContain(`Unable to load run file ${missingUrl} (404 Not Found)`);
+  expect(error.message).toContain(
     `Unable to parse run file ${unparsableUrl} as JSON: Unexpected token <`,
-  ]);
+  );
 });
 
 test('an external abort cancels the whole load instead of skipping runs', async () => {
@@ -241,7 +232,6 @@ test('matches the result an unbounded loader produces', async () => {
   const unbounded = await loadSynthetic(fetchImpl, { concurrency: dataset.runCount });
 
   expect(JSON.stringify(bounded.data)).toBe(JSON.stringify(unbounded.data));
-  expect(bounded.warnings).toEqual(unbounded.warnings);
 });
 
 test('cancels in-flight requests when the caller aborts', async () => {

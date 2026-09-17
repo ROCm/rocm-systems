@@ -91,6 +91,15 @@ function normalizeCatalog(catalog, catalogPath) {
       throw new Error(`Test catalog ${catalogPath} contains an invalid test set for ${target || '(unknown target)'}`);
     }
   }
+  const referencedDefinitionIds = new Set(Object.values(catalog.targets).flat());
+  const unreferencedDefinition = catalog.tests.find((definition) => (
+    !referencedDefinitionIds.has(definition.id)
+  ));
+  if (unreferencedDefinition) {
+    throw new Error(
+      `Test catalog ${catalogPath} defines ${unreferencedDefinition.id} without assigning it to a target`,
+    );
+  }
 
   return catalog;
 }
@@ -202,7 +211,6 @@ function normalizePublishedRun(run, catalog) {
         target: targetGroup.id,
         durationSeconds: result.durationSeconds ?? null,
         status: result.status,
-        timedOut: result.status === 'timeout',
         error: result.error ?? null,
       };
     });
@@ -241,8 +249,11 @@ function testDefinitionIdentity(definition) {
 function comparisonIdentity(run) {
   return JSON.stringify({
     testCatalog: run.testCatalog,
+    branch: run.branch,
     commitTimestamp: run.commitTimestamp,
     trigger: run.trigger,
+    machineId: run.machineId,
+    environmentId: run.environmentId,
     targets: [...run.targets].sort(),
     commit: run.provenance.rocjitsuCommitSha,
     message: run.provenance.commitMessage ?? null,
@@ -305,7 +316,6 @@ function buildDashboardData(raw) {
   const runs = pluginRuns.filter((run) => run.plugin.id === 'vanilla');
   const latestCommitRun = sortRunsByCommit(runs).at(-1) ?? null;
   const targets = [...new Set(runs.flatMap((run) => run.targets))];
-  const plugins = [...new Map(pluginRuns.map((run) => [run.plugin.id, run.plugin])).values()];
 
   return {
     ...raw,
@@ -315,7 +325,6 @@ function buildDashboardData(raw) {
     latestCommitRun,
     backfillRunIds: backfillRunIds(runs),
     targets,
-    plugins,
     suites: [...new Set(raw.testCatalog.map((test) => test.suite))].sort(),
   };
 }
@@ -329,7 +338,6 @@ export function validatePublicationPolicy(runs) {
   const referenceRun = runs[0];
   if (!referenceRun) return [];
 
-  const referenceEnvironmentId = environmentIdentity(referenceRun.environment);
   return runs.flatMap((run) => {
     const issues = [];
     if (run.source.branch !== 'develop') {
@@ -343,12 +351,6 @@ export function validatePublicationPolicy(runs) {
         runId: run.id,
         message: `Run ${run.id} uses machine ${run.execution.machine}; `
           + `expected ${referenceRun.execution.machine}`,
-      });
-    }
-    if (environmentIdentity(run.environment) !== referenceEnvironmentId) {
-      issues.push({
-        runId: run.id,
-        message: `Run ${run.id} uses a different environment than ${referenceRun.id}`,
       });
     }
     return issues;
@@ -387,7 +389,7 @@ export function validatePublishedDashboardData({
 
   const normalizedRuns = [];
   const acceptedSourceRuns = [];
-  const warnings = [];
+  const validationFailures = [];
   const seenRunFiles = new Set();
   const seenRunIds = new Set();
   const commitTimestamps = new Map();
@@ -449,12 +451,24 @@ export function validatePublishedDashboardData({
       normalizedRuns.push(normalizedRun);
       acceptedSourceRuns.push(publishedRun);
     } catch (runError) {
-      warnings.push({
+      validationFailures.push({
         runFile: typeof runFile === 'string' ? runFile : String(runFile),
         message: runError instanceof Error ? runError.message : String(runError),
       });
     }
   });
+  if (validationFailures.length > 0) {
+    throw new Error(`Dashboard data failed validation:\n${validationFailures
+      .map(({ runFile, message }) => `- ${runFile}: ${message}`)
+      .join('\n')}`);
+  }
+
+  for (const [comparisonId, group] of comparisonGroups) {
+    const hasInstrumentedPlugin = [...group.plugins].some((pluginId) => pluginId !== 'vanilla');
+    if (hasInstrumentedPlugin && !group.plugins.has('vanilla')) {
+      throw new Error(`Comparison ${comparisonId} has plugin runs without a Vanilla baseline`);
+    }
+  }
 
   const derivedCatalog = new Map();
   const definitionSources = new Map();
@@ -489,13 +503,17 @@ export function validatePublishedDashboardData({
     ...metadata,
     generatedAt: index.generatedAt,
     testCatalog: [...derivedCatalog.values()],
-    testCatalogs: [...normalizedCatalogs.values()],
     runs: normalizedRuns,
   });
 
   if (!data.latestRun) throw new Error('The data files do not contain any Vanilla benchmark runs');
 
   const publicationIssues = validatePublicationPolicy(acceptedSourceRuns);
-  return { data, sourceData, warnings, publicationIssues };
+  if (publicationIssues.length > 0) {
+    throw new Error(`Dashboard data failed publication policy:\n${publicationIssues
+      .map(({ runId, message }) => `- ${runId}: ${message}`)
+      .join('\n')}`);
+  }
+  return { data, sourceData };
 }
 

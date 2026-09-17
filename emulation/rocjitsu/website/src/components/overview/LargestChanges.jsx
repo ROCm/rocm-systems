@@ -47,13 +47,15 @@ export default function LargestChanges({ changes, candidate, baseline }) {
         const tone = changeTone(changeState);
         const toneColor = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
         return (
-          <Box key={item.test.testId} data-change-state={changeState}>
+          <Box key={item.candidateTest.testId} data-change-state={changeState}>
             {index > 0 && <Divider />}
             <Box sx={{ py: 1.35 }}>
               <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
                 <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={680} noWrap>{item.test.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">{item.test.target} · {item.test.suite}</Typography>
+                  <Typography variant="body2" fontWeight={680} noWrap>{item.candidateTest.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {item.candidateTest.target} · {item.candidateTest.suite}
+                  </Typography>
                 </Box>
                 <Box sx={{ flexShrink: 0 }}>
                   <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end', color: toneColor }}>

@@ -188,7 +188,7 @@ test('latest results can be sorted by every column', async ({ page }) => {
   await page.goto('/');
 
   const results = page.getByTestId('latest-results');
-  const labels = ['Target', 'Suite', 'Benchmark', 'Type', 'Problem', 'Duration', 'Baseline', 'Change', 'Status'];
+  const labels = ['Target', 'Suite', 'Benchmark', 'Duration', 'Baseline', 'Change', 'Status'];
   for (const label of labels) {
     const header = results.getByRole('columnheader', { name: label, exact: true });
     await header.getByRole('button', { name: label, exact: true }).click();
@@ -198,14 +198,14 @@ test('latest results can be sorted by every column', async ({ page }) => {
   const durationHeader = results.getByRole('columnheader', { name: 'Duration', exact: true });
   await expect(durationHeader.getByRole('button', { name: 'Duration', exact: true })).toHaveCSS('flex-direction', 'row');
   await expect(durationHeader.locator('.MuiTableSortLabel-icon')).toHaveCSS('position', 'absolute');
-  const durationCell = results.locator('tbody tr').first().locator('td').nth(5);
+  const durationCell = results.locator('tbody tr').first().locator('td').nth(3);
   const rightPadding = await Promise.all([
     durationHeader.evaluate((element) => getComputedStyle(element).paddingRight),
     durationCell.evaluate((element) => getComputedStyle(element).paddingRight),
   ]);
   expect(rightPadding[0]).toBe(rightPadding[1]);
   await durationHeader.getByRole('button', { name: 'Duration', exact: true }).click();
-  const durations = (await results.locator('tbody tr td:nth-child(6)').allTextContents()).map((value) => {
+  const durations = (await results.locator('tbody tr td:nth-child(4)').allTextContents()).map((value) => {
     const minutes = Number(value.match(/(\d+)m/)?.[1] ?? 0);
     const seconds = Number(value.match(/([\d.]+)s/)?.[1] ?? 0);
     return minutes * 60 + seconds;

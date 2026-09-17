@@ -56,7 +56,7 @@ test('renders the dashboard shell and run progress while data is still loading',
   await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
 });
 
-test('renders valid history with a warning when an indexed run is invalid', async ({ page }) => {
+test('fails closed when an indexed run is invalid', async ({ page }) => {
   const invalidRunFile = 'runs/invalid-run.json';
   await page.route('**/data/index.json', async (route) => {
     const response = await route.fetch();
@@ -73,11 +73,12 @@ test('renders valid history with a warning when an indexed run is invalid', asyn
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Rocjitsu Performance Health' })).toBeVisible();
-  const warning = page.getByTestId('invalid-run-warning');
-  await expect(warning).toContainText('Skipped 1 invalid run file');
-  await expect(warning).toContainText(invalidRunFile);
-  await expect(warning).toContainText('references an invalid test catalog');
+  const failure = page.getByTestId('dashboard-data-error');
+  await expect(failure).toContainText('No available test data');
+  await expect(failure).toContainText(invalidRunFile);
+  await expect(failure).toContainText('references an invalid test catalog');
+  await expect(page.getByTestId('latest-results')).toBeVisible();
+  await expect(page.getByTestId('latest-results').locator('tbody tr')).toHaveCount(1);
 });
 
 test('offers a working Retry after a fatal data failure', async ({ page }) => {

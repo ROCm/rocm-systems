@@ -18,17 +18,7 @@ import {
 } from '../fixtures/publishedData.js';
 
 test('loads merged target runs from immutable test catalogs', () => {
-  expect(publishedResult.warnings).toEqual([]);
-  expect(publishedResult.publicationIssues).toEqual([
-    {
-      runId: 'benchmark-202608270530-0db03af1',
-      message: 'Run benchmark-202608270530-0db03af1 uses machine sjc-rocjitsu-perf-02; expected sjc-rocjitsu-perf-01',
-    },
-    {
-      runId: 'benchmark-202608290530-19872076',
-      message: 'Run benchmark-202608290530-19872076 uses a different environment than benchmark-202606010530-86b362ea',
-    },
-  ]);
+  expect(publishedResult.sourceData.runs).toHaveLength(83);
   expect(dataMetadata.schemaVersion).toBe(1);
   expect(dataIndex.runFiles).toHaveLength(83);
   expect(dataIndex.runFiles.every((runFile) => /^runs\/[^/]+\.json$/.test(runFile))).toBe(true);
@@ -190,11 +180,9 @@ describe('dataset-level validation', () => {
     expect(loadDashboardData(data).runs[0].branch).toBe('feature/experiment');
   });
 
-  test('reports publication policy differences without skipping runs', () => {
+  test('allows environments to change between independent historical runs', () => {
     const runFiles = dataIndex.runFiles.slice(0, 2);
     const runs = structuredClone(publishedRuns.slice(0, 2));
-    runs[1].source.branch = 'feature/experiment';
-    runs[1].execution.machine = 'different-runner';
     runs[1].environment[0].value = 'different-environment';
 
     const result = validatePublishedDashboardData({
@@ -205,21 +193,69 @@ describe('dataset-level validation', () => {
     });
 
     expect(result.data.runs).toHaveLength(2);
-    expect(result.warnings).toEqual([]);
-    expect(result.publicationIssues).toEqual([
-      {
-        runId: runs[1].id,
-        message: `Run ${runs[1].id} must use source branch develop`,
+  });
+
+  test('rejects branch and machine publication policy violations', () => {
+    const runFiles = dataIndex.runFiles.slice(0, 2);
+    const runs = structuredClone(publishedRuns.slice(0, 2));
+    runs[1].source.branch = 'feature/experiment';
+    runs[1].execution.machine = 'different-runner';
+
+    expect(() => validatePublishedDashboardData({
+      metadata: dataMetadata,
+      index: { generatedAt: dataIndex.generatedAt, runFiles },
+      runs,
+      catalogs: publishedCatalogs,
+    })).toThrow(/must use source branch develop[\s\S]*uses machine different-runner/);
+  });
+
+  test.each([
+    ['branch', (run) => { run.source.branch = 'feature/plugin-test'; }, 'does not match comparison'],
+    ['commit', (run) => { run.source.commit = 'f'.repeat(40); }, 'does not match comparison'],
+    [
+      'commit timestamp',
+      (run) => { run.source.committedAt = '2026-07-25T00:00:00.000Z'; },
+      'has conflicting committedAt values',
+    ],
+    [
+      'trigger',
+      (run) => { run.execution.trigger = run.execution.trigger === 'auto' ? 'manual' : 'auto'; },
+      'does not match comparison',
+    ],
+    ['machine', (run) => { run.execution.machine = 'different-runner'; }, 'does not match comparison'],
+    ['environment', (run) => { run.environment[0].value = 'different-environment'; }, 'does not match comparison'],
+  ])('rejects a plugin comparison with a different %s', (_, mutatePlugin, expectedMessage) => {
+    const comparisonId = 'benchmark-202607250530-8e0c5183';
+    const runs = structuredClone(publishedRuns.filter((run) => run.comparisonId === comparisonId));
+    const pluginRun = runs.find((run) => run.plugin.id !== 'vanilla');
+    mutatePlugin(pluginRun);
+
+    expect(() => validatePublishedDashboardData({
+      metadata: dataMetadata,
+      index: {
+        generatedAt: dataIndex.generatedAt,
+        runFiles: runs.map((run) => `runs/${run.id}.json`),
       },
-      {
-        runId: runs[1].id,
-        message: `Run ${runs[1].id} uses machine different-runner; expected ${runs[0].execution.machine}`,
+      runs,
+      catalogs: publishedCatalogs,
+    })).toThrow(expectedMessage);
+  });
+
+  test('rejects an instrumented plugin comparison without a Vanilla baseline', () => {
+    const comparisonId = 'benchmark-202607250530-8e0c5183';
+    const runs = structuredClone(publishedRuns.filter((run) => (
+      run.comparisonId === comparisonId && run.plugin.id !== 'vanilla'
+    )));
+
+    expect(() => validatePublishedDashboardData({
+      metadata: dataMetadata,
+      index: {
+        generatedAt: dataIndex.generatedAt,
+        runFiles: runs.map((run) => `runs/${run.id}.json`),
       },
-      {
-        runId: runs[1].id,
-        message: `Run ${runs[1].id} uses a different environment than ${runs[0].id}`,
-      },
-    ]);
+      runs,
+      catalogs: publishedCatalogs,
+    })).toThrow(`Comparison ${comparisonId} has plugin runs without a Vanilla baseline`);
   });
 
   test('requires metadata to contain a repository URL', () => {
@@ -247,18 +283,12 @@ describe('dataset-level validation', () => {
     const runs = structuredClone(publishedRuns.slice(0, 2));
     runFiles[1] = 'runs/a-different-run-id.json';
 
-    const result = validatePublishedDashboardData({
+    expect(() => validatePublishedDashboardData({
       metadata: dataMetadata,
       index: { generatedAt: dataIndex.generatedAt, runFiles },
       runs,
       catalogs: publishedCatalogs,
-    });
-
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.warnings).toEqual([{
-      runFile: runFiles[1],
-      message: `Run ${runs[1].id} must be published as runs/${runs[1].id}.json`,
-    }]);
+    })).toThrow(`Run ${runs[1].id} must be published as runs/${runs[1].id}.json`);
   });
 
   test('requires a catalog filename to match its catalog ID', () => {
@@ -269,18 +299,12 @@ describe('dataset-level validation', () => {
     catalogs[mismatchedPath] = catalogs[runs[1].testCatalog];
     runs[1].testCatalog = mismatchedPath;
 
-    const result = validatePublishedDashboardData({
+    expect(() => validatePublishedDashboardData({
       metadata: dataMetadata,
       index: { generatedAt: dataIndex.generatedAt, runFiles },
       runs,
       catalogs,
-    });
-
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.warnings).toEqual([{
-      runFile: runFiles[1],
-      message: `Test catalog ${mismatchedPath} must contain id a-different-catalog-id`,
-    }]);
+    })).toThrow(`Test catalog ${mismatchedPath} must contain id a-different-catalog-id`);
   });
 
   test.each([
@@ -292,6 +316,14 @@ describe('dataset-level validation', () => {
     ['target test IDs', (catalog) => {
       catalog.targets[Object.keys(catalog.targets)[0]][0] = 'unknown-test';
     }, 'contains an invalid test set'],
+    ['orphan test definition', (catalog) => {
+      catalog.tests.push({
+        id: 'unreferenced-test',
+        suite: 'validation',
+        name: 'Unreferenced test',
+        problem: {},
+      });
+    }, 'defines unreferenced-test without assigning it to a target'],
   ])('rejects an invalid %s in a referenced catalog', (_, makeInvalid, expectedMessage) => {
     const runFiles = dataIndex.runFiles.slice(0, 2);
     const runs = structuredClone(publishedRuns.slice(0, 2));
@@ -302,17 +334,12 @@ describe('dataset-level validation', () => {
     runs[1].testCatalog = catalogPath;
     makeInvalid(catalogs[catalogPath]);
 
-    const result = validatePublishedDashboardData({
+    expect(() => validatePublishedDashboardData({
       metadata: dataMetadata,
       index: { generatedAt: dataIndex.generatedAt, runFiles },
       runs,
       catalogs,
-    });
-
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toMatchObject({ runFile: runFiles[1] });
-    expect(result.warnings[0].message).toContain(expectedMessage);
+    })).toThrow(expectedMessage);
   });
 
   test.each([
@@ -338,18 +365,12 @@ describe('dataset-level validation', () => {
     const runs = structuredClone(publishedRuns.slice(0, 2));
     makeInvalid(runs[1]);
 
-    const result = validatePublishedDashboardData({
+    expect(() => validatePublishedDashboardData({
       metadata: dataMetadata,
       index: { generatedAt: dataIndex.generatedAt, runFiles },
       runs,
       catalogs: publishedCatalogs,
-    });
-
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.warnings).toEqual([{
-      runFile: runFiles[1],
-      message: `Run ${runs[1].id || '(unknown)'} does not match the schema-version-1 run contract`,
-    }]);
+    })).toThrow(`Run ${runs[1].id || '(unknown)'} does not match the schema-version-1 run contract`);
   });
 
   test.each([
@@ -375,17 +396,12 @@ describe('dataset-level validation', () => {
     const runs = structuredClone(publishedRuns.slice(0, 2));
     makeInvalid(runs[1]);
 
-    const result = validatePublishedDashboardData({
+    expect(() => validatePublishedDashboardData({
       metadata: dataMetadata,
       index: { generatedAt: dataIndex.generatedAt, runFiles },
       runs,
       catalogs: publishedCatalogs,
-    });
-
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toMatchObject({ runFile: runFiles[1] });
-    expect(result.warnings[0].message).toContain(expectedMessage);
+    })).toThrow(expectedMessage);
   });
 
   test('accepts an empty environment array', () => {
@@ -400,23 +416,17 @@ describe('dataset-level validation', () => {
     })).not.toThrow();
   });
 
-  test('skips a run when one commit has conflicting committedAt values', () => {
+  test('rejects a run when one commit has conflicting committedAt values', () => {
     const runFiles = dataIndex.runFiles.slice(0, 2);
     const runs = structuredClone(publishedRuns.slice(0, 2));
     runs[1].source.commit = runs[0].source.commit;
 
-    const result = validatePublishedDashboardData({
+    expect(() => validatePublishedDashboardData({
       metadata: dataMetadata,
       index: { generatedAt: dataIndex.generatedAt, runFiles },
       runs,
       catalogs: publishedCatalogs,
-    });
-
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.warnings).toEqual([{
-      runFile: runFiles[1],
-      message: `Commit ${runs[0].source.commit} has conflicting committedAt values`,
-    }]);
+    })).toThrow(`Commit ${runs[0].source.commit} has conflicting committedAt values`);
   });
 
   test('rejects catalogs that reuse a test ID for a different workload', () => {
@@ -434,22 +444,17 @@ describe('dataset-level validation', () => {
   });
 });
 
-test('skips an invalid published run and reports its filename and reason', () => {
+test('rejects an invalid published run with its filename and reason', () => {
   const runFiles = dataIndex.runFiles.slice(0, 2);
   const runs = structuredClone(publishedRuns.slice(0, 2));
   runs[1].targets[1].id = 'gfx1250';
 
-  const result = validatePublishedDashboardData({
+  expect(() => validatePublishedDashboardData({
     metadata: dataMetadata,
     index: { generatedAt: dataIndex.generatedAt, runFiles },
     runs,
     catalogs: publishedCatalogs,
-  });
-
-  expect(result.data.runs).toHaveLength(1);
-  expect(result.data.runs[0].targets).toEqual(['gfx1250', 'gfx950']);
-  expect(result.warnings).toEqual([{
-    runFile: runFiles[1],
-    message: `Run ${runs[1].id} does not contain exactly the targets required by rocjitsu-core-v1`,
-  }]);
+  })).toThrow(
+    `Run ${runs[1].id} does not contain exactly the targets required by rocjitsu-core-v1`,
+  );
 });

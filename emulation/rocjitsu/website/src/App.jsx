@@ -92,10 +92,8 @@ const emptyDashboardData = {
   runs: [],
   pluginRuns: [],
   testCatalog: [],
-  testCatalogs: [],
   targets: [],
   suites: [],
-  plugins: [],
   latestRun: null,
   latestCommitRun: null,
   backfillRunIds: new Set(),
@@ -105,8 +103,6 @@ function emptyOverview(range) {
   return {
     candidate: null,
     baseline: null,
-    latestTests: [],
-    comparisons: [],
     changes: [],
     results: [],
     metrics: {
@@ -122,14 +118,11 @@ function emptyOverview(range) {
       mode: 'daily-by-commit',
       anchorDay: null,
       slots: [],
-      runCount: 0,
       currentDuration: null,
       firstRun: null,
       latestRun: null,
       durationDelta: null,
-      comparisonLabel: '—',
       summary: '—',
-      description: 'No benchmark history is available',
       series: [],
     },
   };
@@ -173,7 +166,7 @@ function DashboardHero({ data = null }) {
   );
 }
 
-function Dashboard({ data, dataWarnings = [], dataError = null, onRetry = null }) {
+function Dashboard({ data, dataError = null, onRetry = null }) {
   const state = useDashboardState(data);
   const hasData = data.runs.length > 0;
   // Overview derives the whole history, so it stays uncomputed while another tab owns the view.
@@ -227,22 +220,6 @@ function Dashboard({ data, dataWarnings = [], dataError = null, onRetry = null }
                 <Typography variant="body2" sx={{ mt: 0.5 }}>{dataError.message}</Typography>
               )}
               <Typography variant="body2" sx={{ mt: 1 }}>Dashboard values will remain empty until benchmark data is published to the site.</Typography>
-            </Alert>
-          )}
-
-          {dataWarnings.length > 0 && (
-            <Alert data-testid="invalid-run-warning" severity="warning" variant="outlined" sx={{ mb: 1.75 }}>
-              <Typography fontWeight={700}>
-                Skipped {dataWarnings.length} invalid run {dataWarnings.length === 1 ? 'file' : 'files'}
-              </Typography>
-              {dataWarnings.slice(0, 3).map((warning) => (
-                <Typography key={`${warning.runFile}:${warning.message}`} component="div" variant="caption" sx={{ mt: 0.35, overflowWrap: 'anywhere' }}>
-                  <code>{warning.runFile}</code> — {warning.message}
-                </Typography>
-              ))}
-              {dataWarnings.length > 3 && (
-                <Typography variant="caption" color="text.secondary">And {dataWarnings.length - 3} more.</Typography>
-              )}
             </Alert>
           )}
 
@@ -319,7 +296,12 @@ export default function App() {
   const preferredMode = window.localStorage.getItem('rocjitsu-color-mode')
     ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   const [mode, setMode] = useState(preferredMode);
-  const [dataState, setDataState] = useState({ data: null, manifest: null, sourceData: null, warnings: [], error: null });
+  const [dataState, setDataState] = useState({
+    data: null,
+    manifest: null,
+    sourceData: null,
+    error: null,
+  });
   // Progress is tagged with the attempt that produced it so a retry starts from zero without an
   // extra state reset.
   const [progress, setProgress] = useState({ attempt: 0, loaded: 0, total: 0 });
@@ -335,12 +317,12 @@ export default function App() {
       onManifest: (manifest) => setDataState((current) => ({ ...current, manifest })),
       onProgress: ({ loaded, total }) => setProgress({ attempt, loaded, total }),
     })
-      .then(({ data, sourceData, warnings }) => {
-        setDataState({ data, manifest: data, sourceData, warnings, error: null });
+      .then(({ data, sourceData }) => {
+        setDataState({ data, manifest: data, sourceData, error: null });
       })
       .catch((error) => {
         if (isLoadCancelled(error)) return;
-        setDataState((current) => ({ ...current, data: null, sourceData: null, warnings: [], error }));
+        setDataState((current) => ({ ...current, data: null, sourceData: null, error }));
       });
     return () => controller.abort();
   }, [attempt]);
@@ -375,7 +357,7 @@ export default function App() {
           }}
         />
       )}
-      {dataState.data && <Dashboard data={dataState.data} dataWarnings={dataState.warnings} />}
+      {dataState.data && <Dashboard data={dataState.data} />}
     </ThemeProvider>
   );
 }

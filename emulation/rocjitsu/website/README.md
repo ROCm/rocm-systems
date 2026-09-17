@@ -23,6 +23,16 @@ Press **Ctrl+C** to stop the preview. The fixture build uses `.test-dist/`.
 
 For deployment, `npm run build` produces application files in `dist/` without dummy
 data. The browser loads real benchmark JSON from the deployed site's `data/` directory.
+Before every data or application deployment, validate the complete staged data
+directory:
+
+```bash
+npm run validate:data -- /absolute/path/to/staged/data
+```
+
+Do not publish when this command fails. The browser assumes published input is valid
+and fails closed instead of displaying partial history when invalid data bypasses the
+publication gate.
 
 See the [build and test guide](docs/build-and-test.md) for local development with
 dummy data, browser setup, verification commands, and the deployment branch handoff.

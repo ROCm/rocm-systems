@@ -70,17 +70,6 @@ export async function validateDashboardDataDirectory(directory) {
       .map(({ catalogPath, error }) => [catalogPath, error])),
   });
 
-  const issues = [
-    ...result.warnings.map(({ runFile, message }) => ({ item: runFile, message })),
-    ...result.publicationIssues.map(({ runId, message }) => ({ item: runId, message })),
-  ];
-  if (issues.length > 0) {
-    const details = issues
-      .map(({ item, message }) => `- ${item}: ${message}`)
-      .join('\n');
-    throw new Error(`Dashboard data failed validation:\n${details}`);
-  }
-
   return result;
 }
 

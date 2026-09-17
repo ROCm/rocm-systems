@@ -108,7 +108,7 @@ test('escapes injected catalog text instead of executing it in a chart tooltip',
     const option = instance.getOption();
     let located = null;
     option.series.forEach((series, seriesIndex) => series.data.forEach((point, dataIndex) => {
-      const name = point?.test?.name ?? point?.comparison?.test?.name;
+      const name = point?.test?.name ?? point?.comparison?.candidateTest?.name;
       if (!located && point?.value != null && name?.startsWith('<img')) {
         located = { seriesIndex, dataIndex, point };
       }

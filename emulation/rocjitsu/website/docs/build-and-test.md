@@ -86,10 +86,15 @@ Vite's public-directory copying; dummy fixtures cannot enter `dist/` through it.
 The intended release flow is:
 
 1. Build the website from the source branch.
-2. Copy the contents of `dist/` to the site root in a separate deployment-branch checkout.
-3. Publish real benchmark JSON separately under that site's `data/` directory, following
+2. Validate the complete staged benchmark directory with
+   `npm run validate:data -- /absolute/path/to/pages-checkout/data`.
+3. Copy the contents of `dist/` to the site root in a separate deployment-branch checkout.
+4. Publish real benchmark JSON separately under that site's `data/` directory, following
    [the data contract](website-data-contract.md).
-4. Commit and push the deployment branch through the release process used for GitHub Pages.
+5. Commit and push the deployment branch through the release process used for GitHub Pages.
+
+Do not deploy if validation fails. The browser uses the same validator and fails
+closed if invalid data bypasses this gate; it does not display a partial run history.
 
 For example, from `emulation/rocjitsu/website`, after checking out the deployment
 branch in a separate directory, set the destination to that checkout's site root:
