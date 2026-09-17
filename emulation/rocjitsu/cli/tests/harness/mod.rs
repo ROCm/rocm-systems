@@ -102,6 +102,9 @@ impl Env {
     /// A `rocjitsu` command wired to this environment.
     pub(crate) fn rocjitsu(&self) -> Command {
         let mut c = Command::new(&self.bin);
+        if let Some((key, value)) = sanitizer_preload() {
+            c.env(key, value);
+        }
         c.env("XDG_CONFIG_HOME", &self.config)
             .env("XDG_RUNTIME_DIR", &self.runtime)
             .env_remove("ROCJITSU_CLI_LOG")
@@ -124,7 +127,7 @@ impl Env {
     /// Exposed separately from [`Env::rocjitsu`] so a test that builds its
     /// own command still gets the same isolation.
     pub(crate) fn child_env(&self) -> Vec<(String, String)> {
-        vec![
+        let mut env = vec![
             (
                 "XDG_CONFIG_HOME".to_string(),
                 self.config.display().to_string(),
@@ -133,7 +136,9 @@ impl Env {
                 "XDG_RUNTIME_DIR".to_string(),
                 self.runtime.display().to_string(),
             ),
-        ]
+        ];
+        env.extend(sanitizer_preload());
+        env
     }
 
     /// Run a rocjitsu command and return its output, whatever the status.
@@ -453,6 +458,40 @@ impl Drop for Env {
 /// requirement that its runtime library is present.
 pub(crate) const TEST_EMULATOR: &str = "rocjitsu";
 
+/// The `LD_PRELOAD` a sanitizer build's CLI has to be started with, as a
+/// key and value to set on the child.
+///
+/// `None` on every ordinary build, which is every build but the sanitizer
+/// ones.
+///
+/// A sanitizer build of `librocjitsu.so` refuses to be loaded by a
+/// process that does not already have the runtime first in its library
+/// list, and the CLI loads it to bring a session up. Refusing is the
+/// right answer — it is what `rj_core::discovery::sanitizer_preload_missing`
+/// is for — so the CLI is started with the runtime rather than left to
+/// report that it is missing.
+///
+/// It goes on the spawned CLI rather than on the suite, which is the one
+/// difference from the C++ tests: `rj_add_test` can put it on the whole
+/// command because that command *is* the test, while these are run by
+/// `cargo test`, which compiles before it runs. Preloading there would
+/// put a sanitizer runtime inside `rustc`.
+///
+/// Any inherited `LD_PRELOAD` is kept, after this one: the runtime has to
+/// come first, and nothing else here has a claim on being earlier.
+fn sanitizer_preload() -> Option<(String, String)> {
+    let wanted = std::env::var("ROCJITSU_SANITIZER_PRELOAD").ok()?;
+    let wanted = wanted.trim();
+    if wanted.is_empty() {
+        return None;
+    }
+    let value = match std::env::var("LD_PRELOAD") {
+        Ok(existing) if !existing.trim().is_empty() => format!("{wanted}:{existing}"),
+        _ => wanted.to_string(),
+    };
+    Some(("LD_PRELOAD".to_string(), value))
+}
+
 /// Whether the test emulator's runtime is available on this machine.
 ///
 /// rocjitsu is a sibling project in this monorepo and rocjitsu discovers
@@ -470,7 +509,11 @@ pub(crate) fn test_emulator_available() -> bool {
         };
         // Isolated, so probing never reads or writes the developer's real
         // rocjitsu directories and never starts a daemon.
-        let output = Command::new(env!("CARGO_BIN_EXE_rocjitsu"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rocjitsu"));
+        if let Some((key, value)) = sanitizer_preload() {
+            command.env(key, value);
+        }
+        let output = command
             .args(["--json", "emulators"])
             .env("XDG_CONFIG_HOME", probe.path().join("config"))
             .env("XDG_RUNTIME_DIR", probe.path().join("runtime"))
