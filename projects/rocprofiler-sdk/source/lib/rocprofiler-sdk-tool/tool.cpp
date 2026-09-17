@@ -2852,11 +2852,15 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     // ensure the config has not changed which services were requested.
     // NOTE: this is a temporary restriction
-    ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
-        << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
-           "support changing the set of enabled tracing services between initial load and attach. "
-           "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
-           "<output_file> -d <output_directory> ...]` to attach to a new process.";
+    if(!tool::is_attach_invariant(tool::get_config(), original_config))
+    {
+        tool::get_config() = std::move(original_config);
+        ROCP_ERROR
+            << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
+               "yet support changing the set of enabled tracing services between attachment "
+               "sessions; this attachment was rejected without changing the retained client.";
+        return 1;
+    }
 
     assign_attach_output_session_suffix();
 
