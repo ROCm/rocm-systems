@@ -64,6 +64,12 @@ jobs:
       - name: Check CMake reaches the network only under the gate
         run: python3 profilers/profiler-hub/scripts/check_dependency_gate.py
 
+      # The callee-side check above proves no CMake file can fetch outside the
+      # gate. It never opens a workflow, so it cannot see a job that forgot to
+      # state the flag - which has happened once already.
+      - name: Check every workflow configuring profiler-hub states the gate
+        run: python3 profilers/profiler-hub/scripts/check_workflow_gate.py
+
   # Lane 1 of 2: downloading is permitted, and stated. Covers the full matrix.
   build-test-fetch:
     name: fetch=ON / ${{ matrix.os }} / ${{ matrix.compiler.name }} / ${{ matrix.build-type }}
