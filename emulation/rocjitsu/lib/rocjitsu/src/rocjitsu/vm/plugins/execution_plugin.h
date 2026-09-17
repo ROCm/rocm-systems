@@ -16,7 +16,9 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 
 #include <cstdint>
@@ -60,8 +62,8 @@ public:
   /// Output sink for this plugin. Use sink().write("msg") for all output.
   PluginSink &sink() { return *sink_; }
 
-  /// Whether high-frequency instruction, memory-routing, and register callbacks
-  /// must acquire the group's callback lock. By default, infrequent callbacks
+  /// Whether high-frequency instruction, memory-routing, tensor-DMA, and register
+  /// callbacks must acquire the group's callback lock. By default, infrequent callbacks
   /// exclude only other infrequent callbacks; high-frequency callbacks may
   /// overlap both one another and an infrequent callback. Returning true makes
   /// all callbacks share the same lock. Override after identifying shared mutable
@@ -90,6 +92,16 @@ public:
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                 amdgpu::Wavefront & /*wf*/) {}
 
+  /// Fetch-aware form of onAmdgpuBeforeExecuteInstruction(). The borrowed
+  /// window contains the four dwords fetched starting at @p pc, including any
+  /// words following a shorter decoded instruction. The default preserves
+  /// source compatibility by forwarding to the original hook.
+  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                                amdgpu::Wavefront &wf,
+                                                std::span<const uint32_t> /*fetch_window*/) {
+    onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+  }
+
   /// Called after every AMDGPU instruction is executed.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
   /// May run concurrently across simulation partitions unless
@@ -98,10 +110,34 @@ public:
                                                amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
+  /// Fires BEFORE routing decides anything: the instruction still carries the
+  /// space it decoded as and the addresses it computed. For what the memory
+  /// system will actually see, use onAmdgpuMemoryAccessRouted().
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction & /*inst*/,
                                               amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called once routing has settled, with the pipeline the access was issued
+  /// to and the addresses it was issued with. Fires for every routed memory
+  /// instruction, including one no pipeline accepted, which is reported with
+  /// an UNKNOWN route rather than dropped.
+  ///
+  /// The observation's spans borrow execution-owned storage and are valid
+  /// only for the duration of this callback.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
+
+  /// Called after one tensor DMA instruction and any descriptor-requested
+  /// atomic-barrier arrival return normally. The observation contains only
+  /// in-bounds global requests attempted, in execution order. It intentionally
+  /// does not filter memory access outcomes, matching the observer boundary.
+  /// Its deferred address view is borrowed and valid only during this callback.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void
+  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation & /*access*/) {}
 
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
@@ -197,6 +233,20 @@ public:
   /// Called with the waves synchronized by a completed barrier domain.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+
+  /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
+  /// observation is real work on the per-instruction path, so a plugin that
+  /// does not override the hook should not pay for it. The group samples this
+  /// policy once when the plugin is added, so implementations must return a
+  /// stable value from construction onward. The conservative default is false:
+  /// a plugin that wants the hook says so.
+  virtual bool observes_memory_routing() const { return false; }
+
+  /// Whether this plugin consumes onAmdgpuTensorDmaMemoryAccess(). Recording
+  /// every copied element is real work on the instruction path, so consumers
+  /// opt in explicitly. The group samples this stable policy when the plugin is
+  /// added.
+  virtual bool observes_tensor_dma_memory_access() const { return false; }
 
   /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
   /// The group samples this policy once when the plugin is added. The
