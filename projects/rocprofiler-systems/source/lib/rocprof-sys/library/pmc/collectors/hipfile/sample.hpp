@@ -30,12 +30,12 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, std::uint32_t _device_id, std::uint64_t _timestamp,
-           metrics _metric_values)
-    : enabled_metric(_settings)
-    , device_id(_device_id)
-    , timestamp(_timestamp)
-    , metric_values(_metric_values)
+    sample(enabled_metrics settings, std::uint32_t gpu_id, std::uint64_t timestamp_ns,
+           metrics values)
+    : enabled_metric(settings)
+    , device_id(gpu_id)
+    , timestamp(timestamp_ns)
+    , metric_values(values)
     {}
 
     enabled_metrics enabled_metric{};
