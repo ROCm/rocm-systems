@@ -5,7 +5,6 @@
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 // TODO: placeholder test file, expand coverage once hsa::finalize_ext_api gains real
@@ -32,6 +31,7 @@ TEST(finalize_ext_api_test, descriptor_reports_correct_metadata)
     EXPECT_EQ(k_domain.meta.id, mock_sdk::CALLBACK_TRACING_HSA_FINALIZE_EXT_API);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::callback);
     ASSERT_TRUE(k_domain.meta.group.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access) checked by ASSERT_TRUE above
     EXPECT_EQ(k_domain.meta.group->name, "hsa_api");
 }
 

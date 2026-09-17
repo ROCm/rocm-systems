@@ -45,12 +45,18 @@
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
+#include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
 
+#include <cstddef>
 #include <exception>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+
+#include <fmt/format.h>
+#include <nlohmann/json_fwd.hpp>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -104,28 +110,29 @@ namespace
 {
 
 auto
-get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
 {
     auto backtrace = nlohmann::json::object();
 
-    if(_bt_data && !_bt_data->empty())
+    if(bt_data && !bt_data->empty())
     {
-        const std::string _unk    = "??";
-        size_t            _bt_cnt = 0;
-        for(const auto& itr : *_bt_data)
+        const std::string unk    = "??";
+        size_t            bt_cnt = 0;
+        for(const auto& itr : *bt_data)
         {
-            auto        _linfo = itr.lineinfo.get();
-            const auto* _func  = (itr.name.empty()) ? &_unk : &itr.name;
-            const auto* _loc   = (_linfo && !_linfo.location.empty())
-                                     ? &_linfo.location
-                                     : ((itr.location.empty()) ? &_unk : &itr.location);
-            auto        _line  = (_linfo && _linfo.line > 0)
-                                     ? fmt::format("{}", _linfo.line)
-                                     : ((itr.lineno == 0) ? std::string{ "?" }
-                                                          : fmt::format("{}", itr.lineno));
-            auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
-                                      path::filename(*_loc), _line);
-            backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
+            auto        linfo        = itr.lineinfo.get();
+            const auto* func         = itr.name.empty() ? &unk : &itr.name;
+            const auto* fallback_loc = itr.location.empty() ? &unk : &itr.location;
+            const auto* loc =
+                (linfo && !linfo.location.empty()) ? &linfo.location : fallback_loc;
+            const auto fallback_line =
+                (itr.lineno == 0) ? std::string{ "?" } : fmt::format("{}", itr.lineno);
+            const auto line =
+                (linfo && linfo.line > 0) ? fmt::format("{}", linfo.line) : fallback_line;
+
+            auto entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*func),
+                                     path::filename(*loc), line);
+            backtrace[fmt::format("frame#{}", bt_cnt++)] = entry;
         }
     }
     return backtrace;
@@ -166,8 +173,9 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/,
     }
     return 0;
 }
-// NOLINTEND
+// NOLINTEND(readability-function-size)
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 client_data* g_tool_data = new client_data{};
 
 using rocprofiler_sdk::default_externals;
@@ -226,6 +234,7 @@ struct external_dependencies
     using rocm_hip_api_category = category::rocm_hip_api;
     using region_sample         = trace_cache::region_sample;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hip_api_category_name =
         trait::name<category::rocm_hip_api>::value;
 
@@ -233,6 +242,7 @@ struct external_dependencies
     // finalize_ext}_api ─────────────────────────────────────────────────────────
     using rocm_hsa_api_category = category::rocm_hsa_api;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hsa_api_category_name =
         trait::name<category::rocm_hsa_api>::value;
 
@@ -240,21 +250,25 @@ struct external_dependencies
     // hipfile}_api ──────────────────────────────────────────────────────────────
     using rocm_rocjpeg_api_category = category::rocm_rocjpeg_api;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rocjpeg_api_category_name =
         trait::name<category::rocm_rocjpeg_api>::value;
 
     using rocm_rocdecode_api_category = category::rocm_rocdecode_api;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rocdecode_api_category_name =
         trait::name<category::rocm_rocdecode_api>::value;
 
     using rocm_rocshmem_api_category = category::rocm_rocshmem_api;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rocshmem_api_category_name =
         trait::name<category::rocm_rocshmem_api>::value;
 
     using rocm_hipfile_api_category = category::rocm_hipfile_api;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hipfile_api_category_name =
         trait::name<category::rocm_hipfile_api>::value;
 
@@ -296,7 +310,7 @@ struct external_dependencies
     static bool check_backtrace_operations(rocprofiler_callback_tracing_kind_t kind,
                                            rocprofiler_tracing_operation_t     operation)
     {
-        return g_tool_data->backtrace_operations.at(kind).count(operation) > 0;
+        return g_tool_data->backtrace_operations.at(kind).contains(operation);
     }
 
     static auto get_backtrace_data(bool are_operations_available)
@@ -2812,8 +2826,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         names.reserve(selected_operations.size());
         for(auto operation : selected_operations)
         {
-            names.emplace_back(sdk_backend_t::get_callback_tracing_names().at(
-                kind, static_cast<std::uint32_t>(operation)));
+            names.emplace_back(
+                sdk_backend_t::get_callback_tracing_names().at(kind, operation));
         }
         return names;
     };

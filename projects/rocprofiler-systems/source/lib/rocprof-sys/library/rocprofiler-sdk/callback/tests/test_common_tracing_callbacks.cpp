@@ -3,7 +3,6 @@
 
 #include "library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
-#include "library/rocprofiler-sdk/types.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

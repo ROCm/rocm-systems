@@ -98,9 +98,12 @@ struct backend
         Wrapper::BUFFER_POLICY_LOSSLESS;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
         Wrapper::CALLBACK_PHASE_ENTER;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_phase_t CALLBACK_PHASE_EXIT = Wrapper::CALLBACK_PHASE_EXIT;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_phase_t CALLBACK_PHASE_NONE = Wrapper::CALLBACK_PHASE_NONE;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
