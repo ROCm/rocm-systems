@@ -119,8 +119,7 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     /// Start the trace and spawn helper threads when triple buffering is used.
-    std::shared_ptr<att_signal_t> start_thread_trace(
-        std::shared_ptr<std::atomic<int>> running_flag);
+    signal_ptr_t start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
     /// Stop the trace and flush the outstanding hardware packets.
     signal_ptr_t stop_thread_trace();
 
