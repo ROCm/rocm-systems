@@ -1271,4 +1271,75 @@ ncclProfiler_v6_t ncclProfiler_v6 = {
   exampleProfilerFinalize,
 };
 
-// =====================================================================
+// ============================================================================
+// v7 implementation: kernel phase sub-events + symmetric-kernel coll metadata
+// ============================================================================
+
+#include "nccl/profiler_v7.h"
+
+__hidden ncclResult_t exampleProfilerStartEvent_v7(void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) {
+  struct context* ctx = (struct context*)context;
+  if (ctx == NULL) { *eHandle = NULL; return ncclSuccess; }
+
+  // v7 adds the kernel phase sub-event: a child of a kernelCh, stored in the parent.
+  if (eDescr->type == ncclProfileKernelPhase) {
+    *eHandle = NULL;
+    if (__atomic_load_n(&ctx->finalizing, __ATOMIC_RELAXED)) return ncclSuccess;
+    struct kernelCh* parent = (struct kernelCh*)eDescr->parentObj;
+    if (parent == NULL || parent->type != ncclProfileKernelCh) return ncclSuccess;
+    int idx = eDescr->kernelPhase.phaseId;
+    if (idx < 0 || idx >= MAX_KERNEL_PHASES) return ncclSuccess;
+    struct kernelPhase* phase = &parent->phases[idx];
+    phase->type = ncclProfileKernelPhase;
+    phase->channelId = eDescr->kernelPhase.channelId;
+    phase->phaseId = eDescr->kernelPhase.phaseId;
+    phase->phaseName = eDescr->kernelPhase.phaseName;
+    phase->startGpuClk = eDescr->kernelPhase.pTimer;
+    phase->stopGpuClk = 0;
+    phase->startTs = gettime() - startTime;
+    phase->parent = parent;
+    *eHandle = phase;
+    return ncclSuccess;
+  }
+
+  // Other events: the v6 coll layout is a prefix of v7, so the v6 handler reads it
+  // safely. Capture the v7-only coll metadata on the created event afterwards.
+  ncclResult_t ret = exampleProfilerStartEvent_v6(context, eHandle, (ncclProfilerEventDescr_v6_t*)eDescr);
+  if (eDescr->type == ncclProfileColl && *eHandle) {
+    struct collective* c = (struct collective*)*eHandle;
+    c->kernelVariant = eDescr->coll.kernelVariant;
+    c->isSymColl = eDescr->coll.isSymColl;
+  }
+  return ret;
+}
+
+__hidden ncclResult_t exampleProfilerStopEvent_v7(void* eHandle) {
+  if (eHandle == NULL) return ncclSuccess;
+  if (*(uint64_t*)eHandle == ncclProfileKernelPhase) {
+    struct kernelPhase* phase = (struct kernelPhase*)eHandle;
+    phase->stopTs = gettime() - startTime;
+    return ncclSuccess;
+  }
+  return exampleProfilerStopEvent_v6(eHandle);
+}
+
+__hidden ncclResult_t exampleProfilerRecordEventState_v7(void* eHandle, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t* eStateArgs) {
+  if (eHandle == NULL) return ncclSuccess;
+  if (*(uint64_t*)eHandle == ncclProfileKernelPhase) {
+    if (eState == ncclProfilerKernelPhaseStop) {
+      struct kernelPhase* phase = (struct kernelPhase*)eHandle;
+      phase->stopGpuClk = eStateArgs->kernelCh.pTimer;
+    }
+    return ncclSuccess;
+  }
+  return exampleProfilerRecordEventState_v6(eHandle, (ncclProfilerEventState_v6_t)eState, (ncclProfilerEventStateArgs_v6_t*)eStateArgs);
+}
+
+ncclProfiler_v7_t ncclProfiler_v7 = {
+  "Example-profiler-v7",
+  exampleProfilerInit,
+  exampleProfilerStartEvent_v7,
+  exampleProfilerStopEvent_v7,
+  exampleProfilerRecordEventState_v7,
+  exampleProfilerFinalize,
+};

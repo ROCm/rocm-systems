@@ -942,6 +942,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)
     add_subdirectory(plugins/mixed/example)
+    add_subdirectory(plugins/rma/example)
   endif()
   add_subdirectory(test)
 
