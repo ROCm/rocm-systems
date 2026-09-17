@@ -1830,3 +1830,228 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
 
+// Block 7's wantSym gate is the only writer of task->winRegType, so it's always ncclSymSendRegRecvReg here,
+// never ncclSymSendNonregRecvNonreg: the LL-kernel-init check's whole && is provably always false.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_BecauseWinRegTypeIsAlwaysRegRecvReg) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclInt8;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });  // every bit set: isolates the regType operand
+  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = ncclSymkKernelId_AllGather_LL;
+    result->nChannels = 1;
+    result->nWarps = 1;
+    return ncclSuccess;
+  });
+  ScopedHook initOnceHook(g_devrSymkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(initOnceHook.calls, 0);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_SetsFieldsAndEnqueues) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclInt8;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = ncclSymkKernelId_AllGather_LL;
+    result->nChannels = 3;
+    result->nWarps = 5;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, nullptr);  // kernel found, no sysmem segment: never touches the remainder list
+  EXPECT_EQ(task.devFuncId, static_cast<uint32_t>(ncclSymkKernelId_AllGather_LL));
+  EXPECT_EQ(task.nMaxChannels, 3);
+  EXPECT_EQ(task.nWarps, 5);
+  ncclTaskColl* queued = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
+  ASSERT_NE(queued, nullptr);
+  EXPECT_EQ(queued, &task);
+  EXPECT_EQ(queued->next, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_ConvertSymTaskDevOpWiring) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 4;
+  std::vector<int> rankToNode(4, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
+  scene.comm->rankToNode = rankToNode.data();
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclFloat16;
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = ncclSymkKernelId_AllGather_LL;
+    result->nChannels = 1;
+    result->nWarps = 1;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(task.opDev.op, ncclDevSumPostDiv);
+  EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBatch_EnqueuesAllInOrder) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+
+  // Bucket is LIFO (last classified = head = first processed), so classify secondTask before headTask.
+  ncclTaskColl headTask{};
+  headTask.func = ncclFuncBroadcast;
+  headTask.datatype = ncclInt8;
+  ncclTaskColl secondTask{};
+  secondTask.func = ncclFuncBroadcast;
+  secondTask.datatype = ncclInt8;
+  secondTask.next = &headTask;
+
+  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = ncclSymkKernelId_AllGather_LL;
+    result->nChannels = 2;
+    result->nWarps = 4;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &secondTask, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  EXPECT_EQ(headTask.devFuncId, static_cast<uint32_t>(ncclSymkKernelId_AllGather_LL));
+  EXPECT_EQ(secondTask.devFuncId, static_cast<uint32_t>(ncclSymkKernelId_AllGather_LL));
+  EXPECT_EQ(headTask.nMaxChannels, 2);
+  EXPECT_EQ(secondTask.nMaxChannels, 2);
+  EXPECT_EQ(headTask.nWarps, 4);
+  EXPECT_EQ(secondTask.nWarps, 4);
+  ncclTaskColl* first = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first, &headTask);       // enqueued in Block 8/9's processing order, not classification order
+  ASSERT_NE(first->next, nullptr);
+  EXPECT_EQ(first->next, &secondTask);
+  EXPECT_EQ(first->next->next, nullptr);  // loop stopped exactly at isSymLast, not beyond
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_MultipleBucketsAllKernelFound_EnqueuesBoth) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, false));
+
+  ncclTaskColl task2{};
+  task2.func = ncclFuncAllGather;  // distinct bucket from task1 (different func)
+  task2.datatype = ncclInt8;
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclInt8;
+  task1.next = &task2;
+
+  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = ncclSymkKernelId_AllGather_LL;
+    result->nChannels = 1;
+    result->nWarps = 1;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, nullptr);
+  ncclTaskColl* first = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first, &task1);  // cursor order follows first-time bucket creation order
+  ASSERT_NE(first->next, nullptr);
+  EXPECT_EQ(first->next, &task2);
+  EXPECT_EQ(first->next->next, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_MixedBuckets_OneKernelFoundOneNotFound_RoutesEachCorrectly) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, false));
+
+  ncclTaskColl foundTask{};
+  foundTask.func = ncclFuncBroadcast;
+  foundTask.datatype = ncclInt8;
+  ncclTaskColl notFoundTask{};
+  notFoundTask.func = ncclFuncAllGather;  // distinct bucket
+  notFoundTask.datatype = ncclInt8;
+  foundTask.next = &notFoundTask;
+
+  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t* input, struct ncclTuningResult_t* result) {
+    if (input->func == ncclFuncBroadcast) {
+      result->symKernelId = ncclSymkKernelId_AllGather_LL;
+      result->nChannels = 1;
+      result->nWarps = 1;
+    }  // else: leave *result at its NCCL_TUNING_RESULT_INIT default (ncclSymkKernelId_Count -- "not found")
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &foundTask, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(remainTasksHead, &notFoundTask);  // only the not-found task falls back to the remainder
+  EXPECT_EQ(notFoundTask.next, nullptr);
+  ncclTaskColl* queued = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
+  ASSERT_NE(queued, nullptr);
+  EXPECT_EQ(queued, &foundTask);  // only the found task is enqueued for real kernel dispatch
+  EXPECT_EQ(queued->next, nullptr);
+  // 5 - 2 (both classified) + 1 (only notFoundTask's fallback++ cancels its own --): foundTask's stays decremented.
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_StopsAtIsSymLast_NotIntoTheNextBatch) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  // Room for exactly 2 works per batch, not 3: same split as Block 8's ArgsSizeBudgetExhausted test.
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 2, false));
+
+  // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
+  ncclTaskColl taskFirst{};
+  taskFirst.func = ncclFuncBroadcast;
+  taskFirst.datatype = ncclInt8;
+  ncclTaskColl taskSecond{};
+  taskSecond.func = ncclFuncBroadcast;
+  taskSecond.datatype = ncclInt8;
+  taskSecond.next = &taskFirst;
+  ncclTaskColl taskThird{};
+  taskThird.func = ncclFuncBroadcast;
+  taskThird.datatype = ncclInt8;
+  taskThird.next = &taskSecond;
+
+  int tuningCalls = 0;
+  ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    ++tuningCalls;
+    // One call per batch: distinct kernelIds make an isSymLast overrun into batch 2's task observable.
+    result->symKernelId = (tuningCalls == 1) ? ncclSymkKernelId_AllGather_LL : ncclSymkKernelId_AllGather_LLMC;
+    result->nChannels = 1;
+    result->nWarps = 1;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &taskThird, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(tuningHook.calls, 2);
+  EXPECT_EQ(taskFirst.devFuncId, static_cast<uint32_t>(ncclSymkKernelId_AllGather_LL));
+  EXPECT_EQ(taskSecond.devFuncId, static_cast<uint32_t>(ncclSymkKernelId_AllGather_LL));
+  // Would wrongly be AllGather_LL (batch 1's result) if the final loop overran isSymLast into batch 2's task.
+  EXPECT_EQ(taskThird.devFuncId, static_cast<uint32_t>(ncclSymkKernelId_AllGather_LLMC));
+  ncclTaskColl* first = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first, &taskFirst);
+  ASSERT_NE(first->next, nullptr);
+  EXPECT_EQ(first->next, &taskSecond);
+  ASSERT_NE(first->next->next, nullptr);
+  EXPECT_EQ(first->next->next, &taskThird);
+  EXPECT_EQ(first->next->next->next, nullptr);
+}
+
