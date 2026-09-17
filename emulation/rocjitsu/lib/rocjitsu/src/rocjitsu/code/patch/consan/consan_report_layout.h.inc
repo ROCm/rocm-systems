@@ -196,7 +196,7 @@ struct ReportRequirements {
 
 /// Address-free SuperCollider mismatch-evidence contract for one code object.
 ///
-/// SuperCollider does not share an ConSan record union. Trap-only evidence owns no
+/// SuperCollider does not share a ConSan record union. Trap-only evidence owns no
 /// runtime storage; sticky-marker evidence publishes one fixed mismatch word.
 /// `marker_bytes` is zero for trap-only evidence or an empty marker plan and
 /// otherwise states the complete allocation requirement.
@@ -225,7 +225,7 @@ struct SuperColliderEvidenceRequirements {
 ///
 /// Each alternative is its own schema and retains its schema-specific
 /// capacities. This variant presents common queries over those contracts.
-/// Visitors can ask common questions without assuming that an ConSan record array
+/// Visitors can ask common questions without assuming that a ConSan record array
 /// and a SuperCollider marker have compatible bytes.
 using EvidenceRequirements = std::variant<ReportRequirements, SuperColliderEvidenceRequirements>;
 

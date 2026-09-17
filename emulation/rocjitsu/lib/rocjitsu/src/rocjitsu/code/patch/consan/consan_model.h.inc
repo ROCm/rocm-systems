@@ -36,8 +36,6 @@ inline constexpr uint64_t epoch_generation_mask = epoch_mask | generation_mask;
 inline constexpr uint32_t max_owner = (1u << owner_bits) - 1u;
 inline constexpr uint32_t max_epoch = (1u << epoch_bits) - 1u;
 inline constexpr uint32_t max_generation = (1u << generation_bits) - 1u;
-inline constexpr uint32_t max_start_byte = (1u << start_byte_bits) - 1u;
-inline constexpr uint32_t max_byte_count = 1u << count_bits;
 
 } // namespace watchpoint
 

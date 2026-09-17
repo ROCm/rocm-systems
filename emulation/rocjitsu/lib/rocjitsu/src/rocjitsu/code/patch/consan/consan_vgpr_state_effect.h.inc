@@ -1,4 +1,4 @@
-/// Lifetime of the owner/epoch destinations initialized by an ConSan entry
+/// Lifetime of the owner/epoch destinations initialized by a ConSan entry
 /// prologue or consumed by a probe. Scalar- and private-persistent paths use
 /// transient vector scratch; vector-persistent kernels retain the pair either
 /// as one code-object-wide ABI or as an owner-component-local ABI.

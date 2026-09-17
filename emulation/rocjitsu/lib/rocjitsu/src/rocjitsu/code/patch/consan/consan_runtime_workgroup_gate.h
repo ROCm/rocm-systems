@@ -6,8 +6,6 @@
 #include "rocjitsu/code/patch/consan/consan_internal.h"
 
 #include <optional>
-#include <span>
-#include <string_view>
 #include <vector>
 
 namespace rocjitsu::consan::detail {
@@ -19,7 +17,6 @@ struct RuntimeWorkgroupGatePlan {
   uint32_t sample_offset = 0;
   std::optional<uint16_t> dispatch_id_sgpr;
   uint64_t literal_dispatch_id = 0;
-  DirectCallForm direct_call_form = DirectCallForm::SCallB64;
 };
 
 /// Position-independent predicate prefix for a whole-text probe fragment.

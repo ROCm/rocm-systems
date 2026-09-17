@@ -212,8 +212,7 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
                                            .sample_stride = options.runtime_sample_stride,
                                            .sample_offset = options.runtime_sample_offset,
                                            .dispatch_id_sgpr = candidate_point.dispatch_sgpr.base(),
-                                           .literal_dispatch_id = options.report_dispatch_id,
-                                           .direct_call_form = target->direct_call_form},
+                                           .literal_dispatch_id = options.report_dispatch_id},
                                           *workgroup_sources)
             : std::nullopt;
     const bool runtime_workgroup_gate_in_body =

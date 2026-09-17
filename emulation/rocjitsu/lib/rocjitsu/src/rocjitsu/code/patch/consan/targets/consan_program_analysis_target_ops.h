@@ -9,7 +9,6 @@
 #include "rocjitsu/code/patch/consan/consan_program_analysis_encoding.h"
 #include "rocjitsu/code/rj_code.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -57,24 +56,6 @@ struct ProgramAnalysisTargetOperations {
 
 [[nodiscard]] WaitInstructionEncoding classify_wait_instruction(std::string_view mnemonic,
                                                                 uint32_t word, rj_code_arch_t arch);
-
-/// One additive target registration. Concrete packages supply an operations
-/// facet; the common registry supplies only the architecture key.
-template <typename TargetKey> struct ProgramAnalysisTargetRegistrationFor {
-  TargetKey target;
-  const ProgramAnalysisTargetOperations *operations = nullptr;
-};
-
-using ProgramAnalysisTargetRegistration = ProgramAnalysisTargetRegistrationFor<rj_code_arch_t>;
-
-template <typename TargetKey>
-[[nodiscard]] const ProgramAnalysisTargetOperations *find_program_analysis_target_operations(
-    std::span<const ProgramAnalysisTargetRegistrationFor<TargetKey>> registrations,
-    TargetKey target) {
-  const auto registration = std::ranges::find(
-      registrations, target, &ProgramAnalysisTargetRegistrationFor<TargetKey>::target);
-  return registration == registrations.end() ? nullptr : registration->operations;
-}
 
 [[nodiscard]] std::optional<ScratchComponentEncoding>
 decode_scratch_component_encoding(std::span<const uint8_t> instruction, rj_code_arch_t arch);

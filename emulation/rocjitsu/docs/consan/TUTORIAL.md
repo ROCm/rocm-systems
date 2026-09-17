@@ -72,7 +72,7 @@ unsampled accesses and bounded retention can hide races. Complete static-site
 instrumentation does not guarantee complete dynamic evidence.
 
 If the application's own correctness checks still pass, ConSan preserved the
-result for that run. That does not make a clea ConSan report proof of race
+result for that run. That does not make a clean ConSan report proof of race
 freedom. A timeout, signal, GPU reset, or application failure is not by itself
 a ConSan diagnostic.
 

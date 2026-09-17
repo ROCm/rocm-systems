@@ -876,7 +876,7 @@ struct OperatingPoint {
   /// dynamic-stack bootstrap pair.
   std::optional<BranchOnlyScalarSpill> branch_only_spill;
   SgprAllocation dispatch_sgpr;
-  /// Uniform persistent scalar state selected when an ConSan owner cannot retain
+  /// Uniform persistent scalar state selected when a ConSan owner cannot retain
   /// the equivalent values in ordinary VGPRs. The owner is captured from the
   /// entry workitem ID; epoch, compact workgroup key, and exact workgroup
   /// coordinates are uniform for every lane. Keeping the complete ABI in one

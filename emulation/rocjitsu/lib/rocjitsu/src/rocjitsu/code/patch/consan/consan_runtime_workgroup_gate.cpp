@@ -4,14 +4,10 @@
 #include "rocjitsu/code/patch/consan/consan_runtime_workgroup_gate.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/patch/consan/consan_relocation.h"
-#include "rocjitsu/code/patch/consan/consan_report_emission.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <bit>
-#include <cstring>
-#include <limits>
 
 namespace rocjitsu::consan::detail {
 
@@ -94,9 +90,8 @@ plan_runtime_workgroup_gate(const RuntimeWorkgroupGatePlan &plan,
   return sequence.finish();
 }
 
-/// Emit the selection predicate shared by the inline-island and direct-call
-/// gate layouts. The caller owns only the surrounding return geometry and
-/// chooses registers that do not overlap its live continuation state.
+/// Emit the workgroup selection predicate. The caller owns the bypass branch
+/// and chooses registers that do not overlap its live continuation state.
 [[nodiscard]] bool append_runtime_workgroup_predicate(std::vector<uint32_t> &words,
                                                       const RuntimeWorkgroupGatePlan &plan,
                                                       const WorkgroupSources &workgroup_sources,

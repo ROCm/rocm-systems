@@ -16,13 +16,6 @@
 namespace rocjitsu::consan {
 namespace {
 
-VectorMemoryDecode decode_hypothetical_target_flat(std::span<const uint8_t>) {
-  VectorMemoryDecode decoded;
-  decoded.status = TargetDecodeStatus::Decoded;
-  decoded.encoding.raw_op = 0x5aU;
-  return decoded;
-}
-
 template <size_t N>
 VectorMemoryDecode decode_flat_words(const std::array<uint32_t, N> &words, rj_code_arch_t arch) {
   return decode_flat_memory_encoding(
@@ -100,41 +93,17 @@ TEST(ConSan, Rdna4Cdna5TargetsPublishRawAndNormalizedScopeIndependently) {
   }
 }
 
-TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
-  enum class HypotheticalTargetKey : uint8_t { GfxFuture, GfxFutureSibling, Unregistered };
-  const ProgramAnalysisTargetOperations operations{
-      .decode_flat_memory = decode_hypothetical_target_flat,
-  };
-  const ProgramAnalysisTargetOperations sibling_operations{
-      .classify_cache_operation =
-          [](std::string_view) {
-            return CacheOperationEncoding{.operation = CacheOperation::Release};
-          },
-  };
-  const std::array registrations{
-      ProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{HypotheticalTargetKey::GfxFuture,
-                                                                  &operations},
-      ProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
-          HypotheticalTargetKey::GfxFutureSibling, &sibling_operations},
-  };
-
-  const ProgramAnalysisTargetOperations *selected =
-      find_program_analysis_target_operations<HypotheticalTargetKey>(
-          registrations, HypotheticalTargetKey::GfxFuture);
-  ASSERT_EQ(selected, &operations);
-  ASSERT_NE(selected->decode_flat_memory, nullptr);
-  const VectorMemoryDecode decoded = selected->decode_flat_memory({});
-  EXPECT_EQ(decoded.status, TargetDecodeStatus::Decoded);
-  EXPECT_EQ(decoded.encoding.raw_op, 0x5aU);
-
-  const auto *sibling = find_program_analysis_target_operations<HypotheticalTargetKey>(
-      registrations, HypotheticalTargetKey::GfxFutureSibling);
-  ASSERT_EQ(sibling, &sibling_operations);
-  ASSERT_NE(sibling->classify_cache_operation, nullptr);
-  EXPECT_EQ(sibling->classify_cache_operation("future_release").operation, CacheOperation::Release);
-  EXPECT_EQ(find_program_analysis_target_operations<HypotheticalTargetKey>(
-                registrations, HypotheticalTargetKey::Unregistered),
-            nullptr);
+TEST(ConSan, UnregisteredTargetHasNoProgramAnalysisOperations) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_INVALID;
+  EXPECT_EQ(target_profile(arch), nullptr);
+  EXPECT_EQ(decode_flat_memory_encoding({}, arch).status,
+            TargetDecodeStatus::UnsupportedArchitecture);
+  EXPECT_EQ(decode_global_memory_encoding({}, arch).status,
+            TargetDecodeStatus::UnsupportedArchitecture);
+  EXPECT_EQ(decode_buffer_memory_encoding({}, arch).status,
+            TargetDecodeStatus::UnsupportedArchitecture);
+  EXPECT_FALSE(decode_scratch_component_encoding({}, arch));
+  EXPECT_EQ(classify_cache_operation("global_inv", arch).operation, CacheOperation::Unsupported);
 }
 
 TEST(ConSan, AtomicMnemonicWidthConventionIsTargetOwned) {
