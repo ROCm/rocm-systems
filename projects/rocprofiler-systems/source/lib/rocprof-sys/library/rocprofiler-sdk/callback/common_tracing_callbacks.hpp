@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 #include <cstdint>
@@ -11,11 +10,14 @@
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 
+#include <string>
+
 namespace rocprofsys::domains::callback
 {
-namespace
+namespace detail
 {
 inline auto
+// NOLINTNEXTLINE(readability-function-size)
 iterate_args_callback(auto /*kind*/, std::int32_t /*operation*/, std::uint32_t arg_number,
                       const void* const /*arg_value_addr*/,
                       std::int32_t /*arg_indirection_count*/, const char* arg_type,
@@ -33,7 +35,7 @@ iterate_args_callback(auto /*kind*/, std::int32_t /*operation*/, std::uint32_t a
     }
     return 0;
 }
-}  // namespace
+}  // namespace detail
 
 template <policies::domain_service::externals Externals>
 inline void
@@ -103,7 +105,7 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
     auto args = function_args_t{};
 
     SdkBackend::iterate_callback_tracing_kind_operation_args(
-        record, iterate_args_callback, 2, &args);
+        record, detail::iterate_args_callback, 2, &args);
 
     auto call_stack = Externals::get_backtrace_json(backtrace_data);
 

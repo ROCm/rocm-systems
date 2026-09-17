@@ -8,6 +8,8 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include <string_view>
+
 namespace rocprofsys::domains::callback::hip
 {
 

@@ -164,26 +164,34 @@ private:
         result.add(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
 
+        constexpr auto k_rocdecode_min_version =
+            version{ .major = 0, .minor = 6, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     version{ .major = 0, .minor = 6, .patch = 0 })
+                     k_rocdecode_min_version)
         {
             result.add(callback::k_rocdecode_api<SdkBackend, Externals>);
         }
 
+        constexpr auto k_rocjpeg_min_version =
+            version{ .major = 0, .minor = 7, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     version{ .major = 0, .minor = 7, .patch = 0 })
+                     k_rocjpeg_min_version)
         {
             result.add(callback::k_rocjpeg_api<SdkBackend, Externals>);
         }
 
+        constexpr auto k_rocshmem_min_version =
+            version{ .major = 1, .minor = 3, .patch = 4 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     version{ .major = 1, .minor = 3, .patch = 4 })
+                     k_rocshmem_min_version)
         {
             result.add(callback::k_rocshmem_api<SdkBackend, Externals>);
         }
 
+        constexpr auto k_hipfile_min_version =
+            version{ .major = 1, .minor = 3, .patch = 5 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     version{ .major = 1, .minor = 3, .patch = 5 })
+                     k_hipfile_min_version)
         {
             result.add(callback::k_hipfile_api<SdkBackend, Externals>);
         }

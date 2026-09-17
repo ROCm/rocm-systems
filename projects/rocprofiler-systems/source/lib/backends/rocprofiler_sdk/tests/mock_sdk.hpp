@@ -430,9 +430,12 @@ struct mock_sdk
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 = 1;
 
     // ── Callback phase constants ──────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER = 0;
-    static constexpr callback_phase_t CALLBACK_PHASE_EXIT  = 1;
-    static constexpr callback_phase_t CALLBACK_PHASE_NONE  = 2;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = 1;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = 2;
 
     // ── Callback/buffer tracing kind constants ────────────────────────────────
     // Only backend<Sdk>'s unconditional constants — ROCPROFILER_VERSION is

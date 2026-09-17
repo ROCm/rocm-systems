@@ -9,6 +9,7 @@
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
 #include <optional>
+#include <string_view>
 
 namespace rocprofsys::domains::callback
 {

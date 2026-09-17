@@ -586,6 +586,7 @@ struct externals
     struct rocm_hip_api_category
     {};
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hip_api_category_name = "rocm_hip_api";
 
     // ─── Members required by domains::callback::hsa::{core,amd_ext,image_ext,
@@ -593,6 +594,7 @@ struct externals
     struct rocm_hsa_api_category
     {};
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hsa_api_category_name = "rocm_hsa_api";
 
     // ─── Members required by domains::callback::{rocjpeg,rocdecode,rocshmem,
@@ -600,23 +602,27 @@ struct externals
     struct rocm_rocjpeg_api_category
     {};
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rocjpeg_api_category_name = "rocm_rocjpeg_api";
 
     struct rocm_rocdecode_api_category
     {};
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rocdecode_api_category_name =
         "rocm_rocdecode_api";
 
     struct rocm_rocshmem_api_category
     {};
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_rocshmem_api_category_name =
         "rocm_rocshmem_api";
 
     struct rocm_hipfile_api_category
     {};
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hipfile_api_category_name = "rocm_hipfile_api";
 
     struct region_sample
@@ -634,6 +640,9 @@ struct externals
 
     struct backtrace_json_t
     {
+        // dump() must mirror the SDK's std::string-returning json dump(), consumed
+        // via .c_str() at the call site.
+        // NOLINTNEXTLINE(modernize-use-string-view)
         [[nodiscard]] std::string dump() const { return {}; }
     };
 
