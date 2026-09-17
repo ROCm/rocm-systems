@@ -2757,3 +2757,47 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast
   EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
 }
 
+// Cross-task continuation (symmetric_sched.cc:400-410): task1 ends via "<", leaving task2 to start mid-channel.
+
+// task2's own taskCell(1) fits within task1's leftover remainCell(1): continues filling the SAME channel.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ContinuingTask_FitsSharedChannel_JoinsSameChannel) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.nMaxChannels = 1;
+  task1.count = 1024;  // 1 cell; leaves remainCell==1 of the aggregate cellPerChannel==2
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.nMaxChannels = 1;
+  task2.count = 1024;  // 1 cell; fits exactly into task1's leftover (taskCell <= remainCell)
+  task2.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* works = argsBuf->getWorks(1);
+  EXPECT_EQ(works[1].sChannelId, 0u);  // task2's own devWork: same channel task1 left off on
+  EXPECT_EQ(works[1].nChannels, 1u);
+}
+
+// task2's taskCell(3) exceeds task1's leftover(1): overflows immediately, landing on a NEW channel, not the shared one.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ContinuingTask_OverflowsSharedChannel_AttributesToNewChannel) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.nMaxChannels = 2;
+  task1.count = 1024;  // 1 cell; leaves remainCell==1 of the aggregate cellPerChannel==2
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.nMaxChannels = 2;
+  task2.count = 3072;  // 3 cells; overflows task1's 1-cell leftover on its very first touch
+  task2.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* works = argsBuf->getWorks(2);
+  EXPECT_EQ(works[1].sChannelId, 1u);  // not channel 0 (task1's channel), but the new channel task2 lands on
+  EXPECT_EQ(works[1].nChannels, 1u);
+}
+
