@@ -5,7 +5,6 @@
 #include "core/perfetto/sinks/file_output.hpp"
 
 #include "core/config.hpp"
-#include "core/output_file_registry.hpp"
 #include "logger/debug.hpp"
 
 #include <span>
@@ -14,9 +13,8 @@
 
 namespace rocprofsys::core
 {
-per_pid_file_sink::per_pid_file_sink(pid_t parent_pid, output_file_registry& registry)
+per_pid_file_sink::per_pid_file_sink(pid_t parent_pid)
 : m_parent_pid{ parent_pid }
-, m_registry{ registry }
 {}
 
 void
@@ -30,7 +28,7 @@ per_pid_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
                   ? config::get_perfetto_output_filename()
                   : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
 
-    if(!write_proto_to(filename, bytes.data(), bytes.size(), m_registry.get()))
+    if(!write_proto_to(filename, bytes.data(), bytes.size()))
     {
         LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", filename, pid);
     }

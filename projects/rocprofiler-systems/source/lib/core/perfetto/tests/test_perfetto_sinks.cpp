@@ -3,7 +3,7 @@
 
 #include "gtest/gtest.h"
 
-#include "core/output_file_registry.hpp"
+#include "core/output/registry.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks/file_output.hpp"
 #include "core/perfetto/sinks/per_pid_file_sink.hpp"
@@ -18,6 +18,18 @@
 #include <vector>
 
 #include <unistd.h>
+
+namespace
+{
+class PerfettoSinkTest : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        rocprofsys::output::registry::instance().start_new_session();
+    }
+};
+}  // namespace
 
 TEST(recording_sink, default_state_is_empty_and_unfinalized)
 {
@@ -111,44 +123,38 @@ TEST(locked_file_append, status_name_handles_known_and_unknown_values)
 // write_proto_to
 // ----------------------------------------------------------------------------
 
-TEST(write_proto_to, nested_directory_write_succeeds_and_registers_file)
+TEST_F(PerfettoSinkTest, nested_directory_write_succeeds_and_registers_file)
 {
     const auto root =
         std::filesystem::path{ ::testing::TempDir() } / "rocprofsys-write-proto-to-test";
     const auto path = root / "nested" / "trace.proto";
     std::filesystem::remove_all(root);
 
-    rocprofsys::output_file_registry registry;
-    const std::string                data{ "proto-bytes" };
-    EXPECT_TRUE(rocprofsys::core::write_proto_to(path.string(), data.data(), data.size(),
-                                                 registry));
+    const std::string data{ "proto-bytes" };
+    EXPECT_TRUE(
+        rocprofsys::core::write_proto_to(path.string(), data.data(), data.size()));
 
     std::ifstream     ifs{ path, std::ios::binary };
     const std::string contents{ std::istreambuf_iterator<char>{ ifs },
                                 std::istreambuf_iterator<char>{} };
     EXPECT_EQ(contents, data);
 
-    ::testing::internal::CaptureStdout();
-    registry.print_summary();
-    EXPECT_NE(::testing::internal::GetCapturedStdout().find(path.string()),
-              std::string::npos);
+    const auto rows = rocprofsys::output::registry::instance().rows();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows.front().path, path.string());
 
     std::filesystem::remove_all(root);
 }
 
-TEST(write_proto_to, empty_filename_fails_and_does_not_register)
+TEST_F(PerfettoSinkTest, empty_filename_fails_and_does_not_register)
 {
-    rocprofsys::output_file_registry registry;
-    const std::string                data{ "x" };
-    EXPECT_FALSE(
-        rocprofsys::core::write_proto_to("", data.data(), data.size(), registry));
+    const std::string data{ "x" };
+    EXPECT_FALSE(rocprofsys::core::write_proto_to("", data.data(), data.size()));
 
-    ::testing::internal::CaptureStdout();
-    registry.print_summary();
-    EXPECT_TRUE(::testing::internal::GetCapturedStdout().empty());
+    EXPECT_TRUE(rocprofsys::output::registry::instance().rows().empty());
 }
 
-TEST(write_proto_to, unwritable_parent_directory_fails_and_does_not_register)
+TEST_F(PerfettoSinkTest, unwritable_parent_directory_fails_and_does_not_register)
 {
     if(geteuid() == 0)
     {
@@ -164,47 +170,39 @@ TEST(write_proto_to, unwritable_parent_directory_fails_and_does_not_register)
 
     const auto path = root / "nested" / "trace.proto";
 
-    rocprofsys::output_file_registry registry;
-    const std::string                data{ "x" };
-    EXPECT_FALSE(rocprofsys::core::write_proto_to(path.string(), data.data(), data.size(),
-                                                  registry));
+    const std::string data{ "x" };
+    EXPECT_FALSE(
+        rocprofsys::core::write_proto_to(path.string(), data.data(), data.size()));
 
-    ::testing::internal::CaptureStdout();
-    registry.print_summary();
-    EXPECT_TRUE(::testing::internal::GetCapturedStdout().empty());
+    EXPECT_TRUE(rocprofsys::output::registry::instance().rows().empty());
 
     std::filesystem::permissions(root, std::filesystem::perms::owner_all);
     std::filesystem::remove_all(root);
 }
 
-TEST(write_proto_to, write_failure_after_open_fails_and_does_not_register)
+TEST_F(PerfettoSinkTest, write_failure_after_open_fails_and_does_not_register)
 {
     // /dev/full is a real Linux device: opening it for writing always
     // succeeds, but every write() call fails with ENOSPC. Exercises the
     // post-open write/close failure path without any fault-injection
     // scaffolding in production code.
-    rocprofsys::output_file_registry registry;
-    const std::string                data{ "abc" };
-    EXPECT_FALSE(rocprofsys::core::write_proto_to("/dev/full", data.data(), data.size(),
-                                                  registry));
+    const std::string data{ "abc" };
+    EXPECT_FALSE(rocprofsys::core::write_proto_to("/dev/full", data.data(), data.size()));
 
-    ::testing::internal::CaptureStdout();
-    registry.print_summary();
-    EXPECT_TRUE(::testing::internal::GetCapturedStdout().empty());
+    EXPECT_TRUE(rocprofsys::output::registry::instance().rows().empty());
 }
 
 // ----------------------------------------------------------------------------
 // per_pid_file_sink
 // ----------------------------------------------------------------------------
 
-TEST(per_pid_file_sink, empty_bytes_is_early_return)
+TEST_F(PerfettoSinkTest, empty_bytes_is_early_return)
 {
     // Empty drains must not touch the filesystem or the registry —
     // per_pid_file_sink::on_source_drained returns early on empty bytes
     // so the (uninitialised in unit tests) config singleton is never
     // queried for the output filename.
-    rocprofsys::output_file_registry    registry;
-    rocprofsys::core::per_pid_file_sink sink{ static_cast<pid_t>(1), registry };
+    rocprofsys::core::per_pid_file_sink sink{ static_cast<pid_t>(1) };
 
     EXPECT_NO_THROW(sink.on_source_drained(1, std::vector<char>{}));
     EXPECT_NO_THROW(sink.finalize());
@@ -294,14 +292,13 @@ read_framed_packet(const std::vector<char>& buf, std::size_t start,
 }
 }  // namespace
 
-TEST(single_file_sink, cross_source_preserves_seq_id_namespace)
+TEST_F(PerfettoSinkTest, cross_source_preserves_seq_id_namespace)
 {
     // Feed two sources whose inputs both carry the SDK placeholder
     // seq_id=1. Each source must end up with its own disjoint effective
     // seq_id so downstream interned-data resolution does not collapse
     // the two sources' iid namespaces into one.
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
 
     auto bytes_a = build_framed_placeholder_packet('A');
     auto bytes_b = build_framed_placeholder_packet('B');
@@ -331,13 +328,12 @@ TEST(single_file_sink, cross_source_preserves_seq_id_namespace)
     EXPECT_GE(seq_id_b - seq_id_a, 1u << 16);
 }
 
-TEST(single_file_sink, same_source_shares_base_offset)
+TEST_F(PerfettoSinkTest, same_source_shares_base_offset)
 {
     // Two drains from the same source share the same base offset, so
     // their outputs end up with the same effective seq_id (when their
     // original seq_ids match). The per-source allocation is sticky.
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
 
     sink.on_source_drained(7, build_framed_placeholder_packet('X'));
     sink.on_source_drained(7, build_framed_placeholder_packet('Y'));
@@ -358,13 +354,12 @@ TEST(single_file_sink, same_source_shares_base_offset)
     EXPECT_EQ(seq_id_x, seq_id_y);
 }
 
-TEST(single_file_sink, append_mode_splits_rank_window_across_declared_sources)
+TEST_F(PerfettoSinkTest, append_mode_splits_rank_window_across_declared_sources)
 {
     // Regression: fixed 1<<16 source strides collide with rank+1 after the
     // 16th cached pid. With 20 declared sources, the per-source stride must be
     // derived from the rank window so every source stays below rank 1's window.
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
     sink.set_append_mode(
         rocprofsys::core::append_mode_config{ .seq_id_base = 0, .source_count = 20 });
 
@@ -401,10 +396,9 @@ TEST(single_file_sink, append_mode_splits_rank_window_across_declared_sources)
     EXPECT_EQ(markers.back(), 'T');
 }
 
-TEST(single_file_sink, append_mode_single_source_keeps_legacy_base_offset)
+TEST_F(PerfettoSinkTest, append_mode_single_source_keeps_legacy_base_offset)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
     sink.set_append_mode(
         rocprofsys::core::append_mode_config{ .seq_id_base = 128, .source_count = 1 });
 
@@ -418,10 +412,9 @@ TEST(single_file_sink, append_mode_single_source_keeps_legacy_base_offset)
     EXPECT_EQ(seq_id, 130u);
 }
 
-TEST(single_file_sink, append_mode_drops_sources_beyond_declared_window)
+TEST_F(PerfettoSinkTest, append_mode_drops_sources_beyond_declared_window)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
     sink.set_append_mode(rocprofsys::core::append_mode_config{
         .seq_id_base = 0, .seq_id_window_size = 4, .source_count = 2 });
 
@@ -441,10 +434,9 @@ TEST(single_file_sink, append_mode_drops_sources_beyond_declared_window)
     EXPECT_EQ(pos, buf.size()) << "third source must be dropped outside declared window";
 }
 
-TEST(single_file_sink, append_mode_rejects_slice_too_small_for_placeholder_seq_id)
+TEST_F(PerfettoSinkTest, append_mode_rejects_slice_too_small_for_placeholder_seq_id)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
     sink.set_append_mode(rocprofsys::core::append_mode_config{
         .seq_id_base = 0, .seq_id_window_size = 5, .source_count = 5 });
 
@@ -454,10 +446,9 @@ TEST(single_file_sink, append_mode_rejects_slice_too_small_for_placeholder_seq_i
         << "stride-1 slices must be rejected during append-mode setup";
 }
 
-TEST(single_file_sink, append_mode_drops_packet_exceeding_source_slice)
+TEST_F(PerfettoSinkTest, append_mode_drops_packet_exceeding_source_slice)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
     sink.set_append_mode(rocprofsys::core::append_mode_config{
         .seq_id_base = 0, .seq_id_window_size = 4, .source_count = 2 });
 
@@ -475,7 +466,7 @@ TEST(single_file_sink, append_mode_drops_packet_exceeding_source_slice)
         << "packet outside the source slice must be dropped before append";
 }
 
-TEST(single_file_sink, append_rank_base_helper_rejects_overflowing_rank_window)
+TEST_F(PerfettoSinkTest, append_rank_base_helper_rejects_overflowing_rank_window)
 {
     EXPECT_TRUE(rocprofsys::core::append_seq_id_base_for_rank(0).has_value());
     EXPECT_TRUE(rocprofsys::core::append_seq_id_base_for_rank(4094).has_value());
@@ -483,10 +474,9 @@ TEST(single_file_sink, append_rank_base_helper_rejects_overflowing_rank_window)
     EXPECT_FALSE(rocprofsys::core::append_seq_id_base_for_rank(1, 0).has_value());
 }
 
-TEST(single_file_sink, append_mode_zero_declared_sources_disables_output)
+TEST_F(PerfettoSinkTest, append_mode_zero_declared_sources_disables_output)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
     sink.set_append_mode(rocprofsys::core::append_mode_config{ .source_count = 0 });
 
     sink.on_source_drained(1, build_framed_placeholder_packet('A'));
@@ -494,15 +484,14 @@ TEST(single_file_sink, append_mode_zero_declared_sources_disables_output)
     EXPECT_TRUE(sink.buffer_for_testing().empty());
 }
 
-TEST(single_file_sink, finalize_creates_parent_directories)
+TEST_F(PerfettoSinkTest, finalize_creates_parent_directories)
 {
     const auto root = std::filesystem::path{ ::testing::TempDir() } /
                       "rocprofsys-single-file-sink-test";
     const auto path = root / "nested" / "trace.proto";
     std::filesystem::remove_all(root);
 
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry, path.string() };
+    rocprofsys::core::single_file_sink sink{ path.string() };
     sink.on_source_drained(1, build_framed_placeholder_packet('A'));
     sink.finalize();
 
@@ -520,10 +509,9 @@ TEST(single_file_sink, finalize_creates_parent_directories)
     std::filesystem::remove_all(root);
 }
 
-TEST(single_file_sink, malformed_trace_packets_tag_drops_remainder)
+TEST_F(PerfettoSinkTest, malformed_trace_packets_tag_drops_remainder)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
 
     auto bytes = build_framed_placeholder_packet('A');
     bytes.push_back(static_cast<char>(0xFF));
@@ -542,10 +530,9 @@ TEST(single_file_sink, malformed_trace_packets_tag_drops_remainder)
     EXPECT_EQ(end, buf.size()) << "packets after malformed tag must be dropped";
 }
 
-TEST(single_file_sink, truncated_trace_packets_frame_drops_remainder)
+TEST_F(PerfettoSinkTest, truncated_trace_packets_frame_drops_remainder)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
 
     auto bytes = build_framed_placeholder_packet('A');
     bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));
@@ -566,10 +553,9 @@ TEST(single_file_sink, truncated_trace_packets_frame_drops_remainder)
     EXPECT_EQ(end, buf.size()) << "packets after truncated frame must be dropped";
 }
 
-TEST(single_file_sink, malformed_inner_trace_packet_drops_remainder)
+TEST_F(PerfettoSinkTest, malformed_inner_trace_packet_drops_remainder)
 {
-    rocprofsys::output_file_registry   registry;
-    rocprofsys::core::single_file_sink sink{ registry };
+    rocprofsys::core::single_file_sink sink{};
 
     auto bytes = build_framed_placeholder_packet('A');
     bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));

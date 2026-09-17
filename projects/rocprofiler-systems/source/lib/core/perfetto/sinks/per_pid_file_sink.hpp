@@ -5,7 +5,6 @@
 
 #include "core/perfetto/sinks/trace_sink.hpp"
 
-#include <functional>
 #include <span>
 #include <vector>
 
@@ -13,8 +12,6 @@
 
 namespace rocprofsys
 {
-class output_file_registry;
-
 namespace core
 {
 // Cached-mode sink: writes per-pid bytes to one .proto file per pid.
@@ -23,14 +20,13 @@ namespace core
 class per_pid_file_sink : public trace_sink_interface
 {
 public:
-    per_pid_file_sink(pid_t parent_pid, output_file_registry& registry);
+    explicit per_pid_file_sink(pid_t parent_pid);
 
     void on_source_drained(int source_id, std::span<const char> bytes) override;
     void finalize() override;
 
 private:
-    pid_t                                        m_parent_pid{ 0 };
-    std::reference_wrapper<output_file_registry> m_registry;
+    pid_t m_parent_pid{ 0 };
 };
 }  // namespace core
 }  // namespace rocprofsys
