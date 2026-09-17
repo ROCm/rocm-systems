@@ -8,9 +8,13 @@
 
 #include <gtest/gtest.h>
 
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
 #include "fakes/scheduler_fakes.h"
 
 // Local to this TU only: struct ncclComm is never shared across a TU boundary here, so no ABI mismatch.
@@ -31,9 +35,30 @@ uint64_t ConvertSymTaskDevOp_ExpectedReciprocalScalar(int nRanks) {
   u.f32 = float(1.0 / nRanks);
   return u.u64;
 }
+
+// Minimal ncclComm/ncclKernelPlan/planner.peers scaffold for ncclScheduleBcastTasksToPlan.
+class ScheduleBcastTasksToPlan_Scene {
+ public:
+  explicit ScheduleBcastTasksToPlan_Scene(int numPeers)
+      : comm(new ncclComm{}), plan(new ncclKernelPlan{}), peers(new ncclKernelPlanner::Peer[numPeers]{}) {
+    comm->nChannels = 1;
+    comm->planner.nTasksBcast = 1;
+    comm->planner.peers = peers.get();
+    comm->planner.bcast_info.minBcastPeer = 0;
+    comm->planner.bcast_info.maxBcastPeer = numPeers - 1;
+  }
+  std::unique_ptr<ncclComm> comm;
+  std::unique_ptr<ncclKernelPlan> plan;
+  std::unique_ptr<ncclKernelPlanner::Peer[]> peers;
+};
 }  // namespace
 
-TEST(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
+class SchedulerMicrotest : public ::testing::Test {
+ protected:
+  void TearDown() override { ResetSchedulerFakes(); }
+};
+
+TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->warpSpeedChannelMultiplier = 1;
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_COLL);
@@ -44,7 +69,7 @@ TEST(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsU
   EXPECT_FALSE(RcclUnitTesting::LogHas(log, "AllGatherV: WarpSpeed not supported"));
 }
 
-TEST(SchedulerMicrotest, AgvChannelCount_MultiplierAbove1_DividesTunedChannels) {
+TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAbove1_DividesTunedChannels) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->warpSpeedChannelMultiplier = 2;
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_COLL);
@@ -55,24 +80,24 @@ TEST(SchedulerMicrotest, AgvChannelCount_MultiplierAbove1_DividesTunedChannels) 
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "AllGatherV: WarpSpeed not supported"));
 }
 
-TEST(SchedulerMicrotest, AgvChannelCount_MultiplierAbove1_FloorsResultAtOne) {
+TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAbove1_FloorsResultAtOne) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->warpSpeedChannelMultiplier = 8;
   EXPECT_EQ(agvChannelCount(comm.get(), /*tunedChannels=*/1), 1);
 }
 
-TEST(SchedulerMicrotest, SymkRedOp_Avg_ReturnsDevSumPostDivRegardlessOfInputDevOp) {
+TEST_F(SchedulerMicrotest, SymkRedOp_Avg_ReturnsDevSumPostDivRegardlessOfInputDevOp) {
   EXPECT_EQ(symkRedOp(ncclAvg, ncclDevSum), ncclDevSumPostDiv);
   EXPECT_EQ(symkRedOp(ncclAvg, ncclDevMinMax), ncclDevSumPostDiv);
 }
 
-TEST(SchedulerMicrotest, SymkRedOp_NonAvg_ReturnsDevRedOpUnchanged) {
+TEST_F(SchedulerMicrotest, SymkRedOp_NonAvg_ReturnsDevRedOpUnchanged) {
   EXPECT_EQ(symkRedOp(ncclSum, ncclDevSum), ncclDevSum);
   EXPECT_EQ(symkRedOp(ncclMax, ncclDevMinMax), ncclDevMinMax);
   EXPECT_EQ(symkRedOp(ncclProd, ncclDevProd), ncclDevProd);
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_NonAvgPassthrough_LeavesScalarArgUntouched) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_NonAvgPassthrough_LeavesScalarArgUntouched) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -86,7 +111,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_NonAvgPassthrough_LeavesScalarArgUn
   EXPECT_EQ(task.opDev.scalarArg, kPoison);
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_ReduceScatterLdmc_ReturnsEarlyWithoutPackingScalar) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_ReduceScatterLdmc_ReturnsEarlyWithoutPackingScalar) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -100,7 +125,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_ReduceScatterLdmc_ReturnsEarlyWitho
   EXPECT_EQ(task.opDev.scalarArg, kPoison);
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float16_PacksReciprocalNRanksScalar) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_Float16_PacksReciprocalNRanksScalar) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -114,7 +139,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float16_PacksReciprocalNRanksScalar
   EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Bfloat16_PacksReciprocalNRanksScalar) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_Bfloat16_PacksReciprocalNRanksScalar) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -127,7 +152,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Bfloat16_PacksReciprocalNRanksScala
   EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e4m3_PacksReciprocalNRanksScalar) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e4m3_PacksReciprocalNRanksScalar) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -140,7 +165,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e4m3_PacksReciprocalNRanksSca
   EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e5m2_PacksReciprocalNRanksScalar) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e5m2_PacksReciprocalNRanksScalar) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -153,7 +178,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e5m2_PacksReciprocalNRanksSca
   EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
 }
 
-TEST(SchedulerMicrotest, ConvertSymTaskDevOp_DefaultDatatype_LeavesScalarArgUntouched) {
+TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_DefaultDatatype_LeavesScalarArgUntouched) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   comm->nRanks = 4;
   ncclTaskColl task{};
@@ -167,7 +192,7 @@ TEST(SchedulerMicrotest, ConvertSymTaskDevOp_DefaultDatatype_LeavesScalarArgUnto
   EXPECT_EQ(task.opDev.scalarArg, kPoison);
 }
 
-TEST(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsAligned_ReturnsTrue) {
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsAligned_ReturnsTrue) {
   ncclTaskColl t{};
   t.sendbuff = reinterpret_cast<void*>(0x1030);
   t.recvbuff = reinterpret_cast<void*>(0x1020);
@@ -175,7 +200,7 @@ TEST(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsAligned_ReturnsTr
   EXPECT_TRUE(symBatchAligned16B(&t));
 }
 
-TEST(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_ReturnsFalse) {
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_ReturnsFalse) {
   ncclTaskColl t{};
   t.sendbuff = reinterpret_cast<void*>(0x1028);  // offset 8: a multiple of 8 but not of 16
   t.recvbuff = reinterpret_cast<void*>(0x1020);
@@ -183,7 +208,7 @@ TEST(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_Return
   EXPECT_FALSE(symBatchAligned16B(&t));
 }
 
-TEST(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_TraversesAndReturnsFalse) {
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_TraversesAndReturnsFalse) {
   ncclTaskColl second{};
   second.sendbuff = reinterpret_cast<void*>(0x2031);
   second.recvbuff = reinterpret_cast<void*>(0x2020);
@@ -196,7 +221,7 @@ TEST(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_Travers
   EXPECT_FALSE(symBatchAligned16B(&first));
 }
 
-TEST(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseWithoutTraversing) {
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseWithoutTraversing) {
   ncclTaskColl first{};
   first.sendbuff = reinterpret_cast<void*>(0x1031);
   first.recvbuff = reinterpret_cast<void*>(0x1020);
@@ -205,7 +230,7 @@ TEST(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseW
   EXPECT_FALSE(symBatchAligned16B(&first));
 }
 
-TEST(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisaligned_ReturnsTrue) {
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisaligned_ReturnsTrue) {
   ncclDevrWindow sendWin{};
   sendWin.userPtr = reinterpret_cast<void*>(0x1003);
   ncclDevrWindow recvWin{};
@@ -219,7 +244,7 @@ TEST(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisal
   EXPECT_TRUE(symBatchAligned16B(&t));
 }
 
-TEST(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetForSend_ReturnsTrue) {
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetForSend_ReturnsTrue) {
   ncclDevrWindow sendWin{};
   sendWin.userPtr = reinterpret_cast<void*>(0x1003);
   ncclTaskColl t{};
@@ -229,4 +254,93 @@ TEST(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetForSe
   t.recvbuff = reinterpret_cast<void*>(0x2000);  // outputOff (raw, no window) = 0x2000
   t.isSymLast = 1;
   EXPECT_TRUE(symBatchAligned16B(&t));
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_NoBcastTasks_ReturnsSuccessWithoutTouchingPeers) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  scene.comm->planner.nTasksBcast = 0;
+  scene.comm->planner.peers = nullptr;  // would crash if the loop were ever reached
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_WorkBatchesAlreadyPresent_ReturnsSuccessImmediately) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  scene.plan->nWorkBatches = 1;
+  scene.comm->planner.peers = nullptr;  // would crash if the loop were ever reached
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_AllPeersEmpty_SkipsEachAndReturnsSuccess) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/3);
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+  EXPECT_EQ(g_testBudgetCalls, 0);  // never reached: every peer was skipped
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_BudgetDeniesFirstPeer_StopsBeforeAccumulating) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  ncclTaskBcast task{};
+  task.count = 100;
+  scene.peers[0].bcastQueue.head = &task;
+
+  int recordedNWorkBatches = -1;
+  ssize_t recordedNWorkBytes = -1;
+  ScopedHook budgetHook(g_testBudget, [&](struct ncclKernelPlanBudget*, int nWorkBatches, ssize_t nWorkBytes) {
+    recordedNWorkBatches = nWorkBatches;
+    recordedNWorkBytes = nWorkBytes;
+    return false;
+  });
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+  EXPECT_EQ(budgetHook.calls, 1);
+  EXPECT_EQ(recordedNWorkBatches, 1);
+  EXPECT_EQ(recordedNWorkBytes, static_cast<ssize_t>(sizeof(ncclDevWorkBcast)));
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TwoPeersAccumulate_ProceedsPastBatchCheck) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/2);
+  ncclTaskBcast task0{};
+  task0.count = 111;
+  ncclTaskBcast task1{};
+  task1.count = 222;
+  scene.peers[0].bcastQueue.head = &task0;
+  scene.peers[1].bcastQueue.head = &task1;
+
+  EXPECT_EXIT(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr),
+              ::testing::KilledBySignal(SIGABRT), "unfaked call: ncclGetAlgoInfo");
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_SkipThenAccumulate_ContinuesLoopPastNullPeer) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/3);
+  ncclTaskBcast task1{};
+  task1.count = 50;
+  ncclTaskBcast task2{};
+  task2.count = 60;
+  scene.peers[1].bcastQueue.head = &task1;
+  scene.peers[2].bcastQueue.head = &task2;
+
+  EXPECT_EXIT(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr),
+              ::testing::KilledBySignal(SIGABRT), "unfaked call: ncclGetAlgoInfo");
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_MaxItemBoundary_StopsWithoutBudgetDenial) {
+  const int maxitem = ncclMaxDevWorkBatchBytes(/*cudaArch=*/0) / static_cast<int>(sizeof(ncclDevWorkBcast));
+  const int numPeers = maxitem + 3;
+  ScheduleBcastTasksToPlan_Scene scene(numPeers);
+  ncclTaskBcast sharedTask{};
+  sharedTask.count = 1;
+  for (int i = 0; i < numPeers; i++) scene.peers[i].bcastQueue.head = &sharedTask;
+
+  int calls = 0;
+  ScopedHook budgetHook(g_testBudget, [&](struct ncclKernelPlanBudget*, int, ssize_t) {
+    ++calls;
+    if (calls > maxitem) {
+      std::fprintf(stderr, "budget queried more than maxitem times\n");
+      std::fflush(stderr);
+      std::abort();
+    }
+    return true;
+  });
+
+  EXPECT_EXIT(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr),
+              ::testing::KilledBySignal(SIGABRT), "unfaked call: ncclGetAlgoInfo");
 }

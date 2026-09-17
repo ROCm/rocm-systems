@@ -9,4 +9,14 @@
 #ifndef RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
 #define RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
 
+#include <functional>
+
+struct ncclKernelPlanBudget;
+
+// enqueue.cc's ncclTestBudget (real seam: tests drive the batch-size stopping condition directly).
+extern std::function<bool(struct ncclKernelPlanBudget*, int, ssize_t)> g_testBudget;
+extern int g_testBudgetCalls;  // UNDRIVEN
+
+void ResetSchedulerFakes();
+
 #endif  // RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_

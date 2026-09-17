@@ -6,6 +6,7 @@
 
 // See scheduler_fakes.h.
 
+#include <functional>
 #include <unordered_map>
 
 #include "comm.h"
@@ -18,10 +19,22 @@
 
 #include "fail_loud.h"
 
-// src/enqueue/enqueue.cc
-bool ncclTestBudget(struct ncclKernelPlanBudget*, int, ssize_t) {
-  FailLoudUnfaked("scheduler_fakes", "ncclTestBudget");
+// Generous default: a deny-everything default would make even a single small task look over budget.
+static bool DefaultTestBudget(struct ncclKernelPlanBudget*, int, ssize_t) { return true; }
+std::function<bool(struct ncclKernelPlanBudget*, int, ssize_t)> g_testBudget = DefaultTestBudget;
+int g_testBudgetCalls = 0;
+
+bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes) {
+  ++g_testBudgetCalls;
+  return g_testBudget(budget, nWorkBatches, nWorkBytes);
 }
+
+void ResetSchedulerFakes() {
+  g_testBudget = DefaultTestBudget;
+  g_testBudgetCalls = 0;
+}
+
+// src/enqueue/enqueue.cc
 ncclResult_t ncclGetAlgoInfo(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*) {
   FailLoudUnfaked("scheduler_fakes", "ncclGetAlgoInfo");
 }
