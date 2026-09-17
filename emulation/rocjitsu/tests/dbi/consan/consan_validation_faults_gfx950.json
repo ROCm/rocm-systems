@@ -24,14 +24,6 @@
               "environment": {
                 "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN59MmtKernel_256t_MSxNS_amdgcn_mfma_f32_16x16x16f16_shared_Kx2ILi8ELi8EE3runEPKvS2_PvS3_iii"
               }
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN59MmtKernel_256t_MSxNS_amdgcn_mfma_f32_16x16x16f16_shared_Kx2ILi8ELi8EE3runEPKvS2_PvS3_iii"
-              }
             }
           }
         }
@@ -52,13 +44,6 @@
           },
           "profiles": {
             "supercollider": {
-              "detector": "not_detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z8micro_tk13micro_globalsiii"
-              }
-            },
-            "inline-shadow": {
               "detector": "not_detected",
               "oracle": "any",
               "environment": {
@@ -89,14 +74,6 @@
               "environment": {
                 "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z13matmul_deviceILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_I14__hip_bfloat16Li1ELi1EXT_EXT0_EJEEE"
               }
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z13matmul_deviceILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_I14__hip_bfloat16Li1ELi1EXT_EXT0_EJEEE"
-              }
             }
           }
         }
@@ -120,14 +97,6 @@
               "detector": "not_detected",
               "oracle": "any",
               "environment": {
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_IfLi1ELi1EXT_EXT0_EJEEEPKjS7_"
-              }
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
                 "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z23mxfp8_gemm_4wave_kernelILi256ELi256ELi256EEvN7kittens2glI14__hip_fp8_e4m3Li1ELi1EXT_EXT1_EJEEENS1_IS2_Li1ELi1EXT0_EXT1_EJEEENS1_IfLi1ELi1EXT_EXT0_EJEEEPKjS7_"
               }
             }
@@ -186,55 +155,10 @@
       ]
     },
     "qwen-prefill": {
-      "faults": [
-        {
-          "id": "barrier-drop-matmul-publication",
-          "family": "barrier-drop",
-          "reach_witness": {
-            "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected s_barrier is the unconditional publication edge in the executed main$async_dispatch_14_matmul_like_5x1024x2048_f32 stage loop. Replacement-tile LDS stores at .text+0x7d44 through .text+0x7dac precede it, and peer LDS reads begin at .text+0x7dc0 immediately after it. Dropping this exact barrier therefore exposes the intended cross-wave write/read hazard."
-          },
-          "environment": {
-            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:aef252021cc529ba|kernel=main$async_dispatch_14_matmul_like_5x1024x2048_f32|kind=barrier|pc=0x0000000000007dbc|mnemonic=s_barrier|occurrence=2"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "main$async_dispatch_14_matmul_like_5x1024x2048_f32"
-              }
-            }
-          }
-        }
-      ]
+      "faults": []
     },
     "pytorch-torch-mode": {
-      "faults": [
-        {
-          "id": "barrier-drop-bitonic-stage",
-          "family": "barrier-drop",
-          "reach_witness": {
-            "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected s_barrier is the first non-redundant synchronization edge in the bitonic-sort loop of the executed int32, Power2Size=128 compute_mode specialization. Peer LDS writes at .text+0x6a8c4 through .text+0x6a8dc precede it, and peer LDS reads begin immediately after it at .text+0x6a908. The workload launches this specialization for its one-row, 128-column int32 input, and the retained run installs this exact mutation once. The deterministic emulator schedule may preserve the exact result without producing a conflict, so this is prospectively classified as a qualified miss rather than changing selectors after observation."
-          },
-          "environment": {
-            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:682f8f2029495ec4|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|kind=barrier|pc=0x000000000006a904|mnemonic=s_barrier|occurrence=2"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "not_detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll"
-              }
-            }
-          }
-        }
-      ]
+      "faults": []
     },
     "pytorch-torch-sort": {
       "faults": [
@@ -250,20 +174,12 @@
             "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:ba3d6ae2c8bf0257|kernel=_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b|kind=barrier|pc=0x000000000027f1ac|mnemonic=s_barrier|occurrence=0"
           },
           "profiles": {
-            "sampled": {
+            "default": {
               "detector": "not_detected",
               "oracle": "pass",
               "environment": {
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "1",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b"
-              }
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE": "1",
+                "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET": "0",
                 "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at6native18radixSortKVInPlaceILi2ELin1ELi128ELi8EfljEEvNS_4cuda6detail10TensorInfoIT3_T5_EES6_S6_S6_NS4_IT4_S6_EES6_b"
               }
             }
@@ -272,120 +188,19 @@
       ]
     },
     "pytorch-torch-histc": {
-      "faults": [
-        {
-          "id": "barrier-drop-shared-bin-initialization",
-          "family": "barrier-drop",
-          "reach_witness": {
-            "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected first s_barrier is the unconditional publication edge after all waves zero the shared histogram bins and before they begin atomic accumulation in the executed unweighted float32 shared-memory kernelHistogram1D specialization. The 64-bin float32 workload necessarily selects shared memory and launches this specialization, so dropping the edge exposes cross-wave initialization/atomic-update races."
-          },
-          "environment": {
-            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:ea885f80f648cce1|kernel=_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_|kind=barrier|pc=0x0000000000038fc0|mnemonic=s_barrier|occurrence=0"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "not_detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_"
-              }
-            }
-          }
-        }
-      ]
+      "faults": []
     },
     "d128-pressure": {
-      "faults": [
-        {
-          "id": "barrier-drop-redundant-fast-context",
-          "family": "barrier-drop",
-          "reach_witness": {
-            "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected site is the first of two consecutive s_barrier instructions in the unconditional FullKvDoubleBuffered16Key FastContext loop executed by the fault command. The adjacent second barrier at occurrence 2 remains, so this distinct exact-one mutation is prospectively expected to be a semantically redundant qualified miss."
-          },
-          "environment": {
-            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:1cc23eaceeb81f21|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv4_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001c394|mnemonic=s_barrier|occurrence=1"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            }
-          }
-        }
-      ]
+      "faults": []
     },
     "wmma-attention": {
-      "faults": [
-        {
-          "id": "barrier-drop-redundant-score-publication",
-          "family": "barrier-drop",
-          "reach_witness": {
-            "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected first score-publication barrier is in the unconditional ExactContext attention loop executed by the only launched kernel. The following source-level publication barrier remains, so this exact-one mutation is prospectively expected to be a semantically redundant qualified miss with the exact result preserved."
-          },
-          "environment": {
-            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:4329a1f90ba40311|kernel=_ZN12_GLOBAL__N_127mfma_attention_block_kernelINS_18ExactContextPolicyEEEvPKDv4_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000001f88|mnemonic=s_barrier|occurrence=3"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            }
-          }
-        }
-      ]
+      "faults": []
     },
     "jakub-attention": {
-      "faults": [
-        {
-          "id": "barrier-drop-pipelined-reader-retirement-inline",
-          "family": "barrier-drop",
-          "reach_witness": {
-            "kind": "reviewed-unconditional-final-isa",
-            "evidence": "The selected site is a distinct reader-retirement barrier in the unconditional PipelinedProd16x8 loop. Peer LDS reads and their lgkm wait precede it, and stores for the replacement stage immediately follow it. The separately precommitted later publication-edge trial demonstrated that this loop exposes Inline Shadow conflicts while preserving all four numeric oracles, so this exact-one reuse-edge mutation is prospectively required to diagnose and pass the oracle."
-          },
-          "environment": {
-            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:120a833f9c345de1|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4ELb0EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000ddc|mnemonic=s_barrier|occurrence=2"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
-            }
-          }
-        }
-      ]
+      "faults": []
     },
     "tree-atomic-or": {
-      "faults": [
-        {
-          "id": "atomic-weaken-producer-release",
-          "family": "atomic-weaken-order",
-          "environment": {
-            "RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE": "release",
-            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:59f4280a6d20c4de|kernel=_ZN12_GLOBAL__N_134mfma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv4_DF16_S7_PiPf|kind=atomic|pc=0x00000000000185c8|mnemonic=global_atomic_or|occurrence=208"
-          },
-          "profiles": {
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
-            }
-          }
-        }
-      ]
+      "faults": []
     }
   }
 }

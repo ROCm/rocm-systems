@@ -15,15 +15,15 @@
 #include <ranges>
 #include <string_view>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Semantic direction of an access decoded from an LDS or FLAT instruction.
 ///
 /// This classification describes what the original instruction does. It does
-/// not imply that a particular ConSan engine supports instrumenting the
+/// not imply that a particular ConSan mode supports instrumenting the
 /// instruction. `Other` preserves decoded instructions that are not ordinary
 /// reads, writes, or read-modify-write atomics without misclassifying them.
-enum class ConSanLdsAccessKind : uint8_t {
+enum class LdsAccessKind : uint8_t {
   Read,
   Write,
   Atomic,
@@ -32,19 +32,19 @@ enum class ConSanLdsAccessKind : uint8_t {
 
 /// Target operation that may consume one normalized access form.
 ///
-/// These names describe mechanisms rather than ConSan engines. All MOI
+/// These names describe mechanisms rather than ConSan engines. All ConSan
 /// engines replay the guest access, while SuperCollider compares the value
 /// observed by a redundant access. Keeping those operations distinct lets one
 /// target classifier publish both exact contracts without introducing an
-/// engine-by-target matrix.
-enum class ConSanAccessLoweringOperation : uint8_t {
+/// mode-by-target matrix.
+enum class AccessLoweringOperation : uint8_t {
   ReplayGuestAccess,
   CompareObservedValue,
   Count,
 };
 
 /// Architecture-normalized encoding family for one decoded access.
-enum class ConSanAccessLoweringFormKind : uint8_t {
+enum class AccessLoweringFormKind : uint8_t {
   NativeSingleRange,
   NativeTwoRange,
   FlatVectorAddress,
@@ -60,7 +60,7 @@ enum class ConSanAccessLoweringFormKind : uint8_t {
 /// Emitters use the normalized value when they must isolate a compared byte or
 /// halfword; `WholeRegister` also covers instructions that extend a narrow
 /// memory value to a complete register result.
-enum class ConSanAccessRegisterValuePlacement : uint8_t {
+enum class AccessRegisterValuePlacement : uint8_t {
   WholeRegister,
   Low16,
   High16,
@@ -71,7 +71,7 @@ enum class ConSanAccessRegisterValuePlacement : uint8_t {
 /// Semantic relevance, provenance policy, resource pressure, and placement do
 /// not belong here. This enum is solely about exact decoded form and operand
 /// lowerability.
-enum class ConSanAccessClassifierReason : uint8_t {
+enum class AccessClassifierReason : uint8_t {
   None,
   NonAccessInstruction,
   InvalidInstructionSize,
@@ -95,9 +95,9 @@ enum class ConSanAccessClassifierReason : uint8_t {
 /// Raw instruction spellings remain in semantic inventory for diagnostics,
 /// but consumers should use this value for range geometry, operand shape, and
 /// target-address form instead of classifying the mnemonic again.
-struct ConSanAccessLoweringForm {
-  ConSanAccessLoweringFormKind kind = ConSanAccessLoweringFormKind::Count;
-  ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
+struct AccessLoweringForm {
+  AccessLoweringFormKind kind = AccessLoweringFormKind::Count;
+  LdsAccessKind access_kind = LdsAccessKind::Other;
   uint32_t instruction_size = 0;
   uint32_t element_width_bits = 0;
   uint32_t range_count = 0;
@@ -108,8 +108,8 @@ struct ConSanAccessLoweringForm {
   uint16_t address_vgpr_count = 0;
   uint16_t data_register_alignment = 1;
   uint16_t destination_allocation_headroom = 0;
-  ConSanAccessRegisterValuePlacement register_value_placement =
-      ConSanAccessRegisterValuePlacement::WholeRegister;
+  AccessRegisterValuePlacement register_value_placement =
+      AccessRegisterValuePlacement::WholeRegister;
   bool destination_preserves_unwritten_bits = false;
   std::optional<uint16_t> address_vgpr;
   std::optional<uint16_t> direct_memory_address_vgpr;
@@ -123,41 +123,39 @@ struct ConSanAccessLoweringForm {
   std::optional<int32_t> immediate_byte_offset;
   bool scale_immediate = false;
 
-  bool operator==(const ConSanAccessLoweringForm &) const = default;
+  bool operator==(const AccessLoweringForm &) const = default;
 };
 
 /// Exact classifier result for one target access operation.
-struct ConSanAccessOperationSupport {
-  ConSanAccessClassifierReason reason = ConSanAccessClassifierReason::TargetUnavailable;
+struct AccessOperationSupport {
+  AccessClassifierReason reason = AccessClassifierReason::TargetUnavailable;
 
-  [[nodiscard]] bool available() const { return reason == ConSanAccessClassifierReason::None; }
+  [[nodiscard]] bool available() const { return reason == AccessClassifierReason::None; }
 
-  bool operator==(const ConSanAccessOperationSupport &) const = default;
+  bool operator==(const AccessOperationSupport &) const = default;
 };
 
 /// One authoritative classification of a decoded access for every current
 /// access-lowering mechanism.
-struct ConSanAccessLoweringClassification {
-  std::optional<ConSanAccessLoweringForm> form;
-  ConSanAccessClassifierReason normalization_reason =
-      ConSanAccessClassifierReason::TargetUnavailable;
-  ConSanAccessOperationSupport replay_guest_access;
-  ConSanAccessOperationSupport compare_observed_value;
+struct AccessLoweringClassification {
+  std::optional<AccessLoweringForm> form;
+  AccessClassifierReason normalization_reason = AccessClassifierReason::TargetUnavailable;
+  AccessOperationSupport replay_guest_access;
+  AccessOperationSupport compare_observed_value;
 
-  [[nodiscard]] const ConSanAccessOperationSupport &
-  operation(ConSanAccessLoweringOperation value) const {
-    return value == ConSanAccessLoweringOperation::CompareObservedValue ? compare_observed_value
-                                                                        : replay_guest_access;
+  [[nodiscard]] const AccessOperationSupport &operation(AccessLoweringOperation value) const {
+    return value == AccessLoweringOperation::CompareObservedValue ? compare_observed_value
+                                                                  : replay_guest_access;
   }
 
   [[nodiscard]] bool normalized() const {
-    return form.has_value() && normalization_reason == ConSanAccessClassifierReason::None;
+    return form.has_value() && normalization_reason == AccessClassifierReason::None;
   }
 
-  bool operator==(const ConSanAccessLoweringClassification &) const = default;
+  bool operator==(const AccessLoweringClassification &) const = default;
 };
 
-namespace consan_detail {
+namespace detail {
 
 /// Decoder-owned static shape of one native LDS instruction carrying two
 /// addresses.
@@ -168,7 +166,7 @@ namespace consan_detail {
 /// ranges are read or written. This record only describes decoded instruction
 /// geometry; it does not admit the instruction for any ConSan mechanism.
 struct DecodedNativeLdsTwoRangeShape {
-  ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
+  LdsAccessKind kind = LdsAccessKind::Other;
   uint32_t element_width_bits = 0;
   uint32_t offset_scale_bytes = 0;
 
@@ -183,27 +181,27 @@ decode_native_lds_two_range_shape(std::string_view mnemonic) {
     DecodedNativeLdsTwoRangeShape shape;
   };
   constexpr std::array forms = {
-      NamedForm{"ds_load_2addr_b32", {ConSanLdsAccessKind::Read, 32u, 4u}},
-      NamedForm{"ds_store_2addr_b32", {ConSanLdsAccessKind::Write, 32u, 4u}},
-      NamedForm{"ds_read2_b32", {ConSanLdsAccessKind::Read, 32u, 4u}},
-      NamedForm{"ds_write2_b32", {ConSanLdsAccessKind::Write, 32u, 4u}},
-      NamedForm{"ds_load_2addr_b64", {ConSanLdsAccessKind::Read, 64u, 8u}},
-      NamedForm{"ds_store_2addr_b64", {ConSanLdsAccessKind::Write, 64u, 8u}},
-      NamedForm{"ds_read2_b64", {ConSanLdsAccessKind::Read, 64u, 8u}},
-      NamedForm{"ds_write2_b64", {ConSanLdsAccessKind::Write, 64u, 8u}},
-      NamedForm{"ds_load_2addr_stride64_b32", {ConSanLdsAccessKind::Read, 32u, 256u}},
-      NamedForm{"ds_store_2addr_stride64_b32", {ConSanLdsAccessKind::Write, 32u, 256u}},
-      NamedForm{"ds_read2st64_b32", {ConSanLdsAccessKind::Read, 32u, 256u}},
-      NamedForm{"ds_write2st64_b32", {ConSanLdsAccessKind::Write, 32u, 256u}},
-      NamedForm{"ds_load_2addr_stride64_b64", {ConSanLdsAccessKind::Read, 64u, 512u}},
-      NamedForm{"ds_store_2addr_stride64_b64", {ConSanLdsAccessKind::Write, 64u, 512u}},
-      NamedForm{"ds_read2st64_b64", {ConSanLdsAccessKind::Read, 64u, 512u}},
-      NamedForm{"ds_write2st64_b64", {ConSanLdsAccessKind::Write, 64u, 512u}},
+      NamedForm{"ds_load_2addr_b32", {LdsAccessKind::Read, 32u, 4u}},
+      NamedForm{"ds_store_2addr_b32", {LdsAccessKind::Write, 32u, 4u}},
+      NamedForm{"ds_read2_b32", {LdsAccessKind::Read, 32u, 4u}},
+      NamedForm{"ds_write2_b32", {LdsAccessKind::Write, 32u, 4u}},
+      NamedForm{"ds_load_2addr_b64", {LdsAccessKind::Read, 64u, 8u}},
+      NamedForm{"ds_store_2addr_b64", {LdsAccessKind::Write, 64u, 8u}},
+      NamedForm{"ds_read2_b64", {LdsAccessKind::Read, 64u, 8u}},
+      NamedForm{"ds_write2_b64", {LdsAccessKind::Write, 64u, 8u}},
+      NamedForm{"ds_load_2addr_stride64_b32", {LdsAccessKind::Read, 32u, 256u}},
+      NamedForm{"ds_store_2addr_stride64_b32", {LdsAccessKind::Write, 32u, 256u}},
+      NamedForm{"ds_read2st64_b32", {LdsAccessKind::Read, 32u, 256u}},
+      NamedForm{"ds_write2st64_b32", {LdsAccessKind::Write, 32u, 256u}},
+      NamedForm{"ds_load_2addr_stride64_b64", {LdsAccessKind::Read, 64u, 512u}},
+      NamedForm{"ds_store_2addr_stride64_b64", {LdsAccessKind::Write, 64u, 512u}},
+      NamedForm{"ds_read2st64_b64", {LdsAccessKind::Read, 64u, 512u}},
+      NamedForm{"ds_write2st64_b64", {LdsAccessKind::Write, 64u, 512u}},
   };
   const auto form = std::ranges::find(forms, mnemonic, &NamedForm::mnemonic);
   return form == forms.end() ? std::nullopt
                              : std::optional<DecodedNativeLdsTwoRangeShape>(form->shape);
 }
 
-} // namespace consan_detail
-} // namespace rocjitsu
+} // namespace detail
+} // namespace rocjitsu::consan

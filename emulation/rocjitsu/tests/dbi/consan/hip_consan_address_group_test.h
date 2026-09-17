@@ -9,8 +9,7 @@
 /// second, and every later lane selects its own word. The only multi-lane
 /// address group is therefore reached after the producer removes the first
 /// group from its pending EXEC mask.
-__launch_bounds__(64) __global__
-    void moi_second_address_group_race_for_instrumentation(uint32_t *out) {
+__launch_bounds__(64) __global__ void second_address_group_race_for_instrumentation(uint32_t *out) {
   __shared__ volatile uint32_t lds[64];
   const uint32_t lane = static_cast<uint32_t>(threadIdx.x) % warpSize;
   const uint32_t index = lane == 0u ? 0u : (lane <= 2u ? 1u : lane - 1u);
@@ -27,11 +26,10 @@ __launch_bounds__(64) __global__
 }
 
 /// Every lane writes a distinct 16-byte LDS region with the same native B128
-/// instruction. Record/Replay must retain the per-lane effective addresses:
+/// instruction. ConSan must preserve the effective ranges it observes:
 /// grouping the whole wave by the instruction's coarse static range would
 /// manufacture a same-wave write/write conflict.
-__launch_bounds__(32) __global__
-    void moi_disjoint_lane_b128_stores_for_instrumentation(uint32_t *out) {
+__launch_bounds__(32) __global__ void disjoint_lane_b128_stores_for_instrumentation(uint32_t *out) {
   __shared__ alignas(16) uint8_t lds[32 * 16];
   const uint32_t lane = static_cast<uint32_t>(threadIdx.x);
   const auto lds_address =

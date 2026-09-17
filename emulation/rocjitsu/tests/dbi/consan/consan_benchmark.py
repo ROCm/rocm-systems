@@ -37,9 +37,7 @@ RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 SUPPORTED_TARGETS = ("gfx950", "gfx1201")
 MODE_LABELS = {
     "supercollider": "SuperCollider",
-    "record-replay": "RecordReplay",
-    "sampled": "Sampled",
-    "inline-shadow": "InlineShadow",
+    "default": "ConSan",
 }
 
 
@@ -159,22 +157,42 @@ WORKLOADS = (
 GFX950_ADDITIONS = tuple(
     Workload(id, description, "latency_ms", config, payload="tokenspeed")
     for id, description, config in (
-        ("tokenspeed-bf16-gemm-mediumm", "TokenSpeed Gluon BF16 GEMM medium-M (128×4096×4096)",
-         {"operation": "gemm", "variant": "mediumm", "m": 128, "n": 4096, "k": 4096}),
-        ("tokenspeed-bf16-gemm-largem", "TokenSpeed Gluon BF16 GEMM large-M (4096×4096×4096)",
-         {"operation": "gemm", "variant": "largem", "m": 4096, "n": 4096, "k": 4096}),
-        ("tokenspeed-attention-prefill", "TokenSpeed Gluon attention prefill",
-         {"operation": "attention-prefill"}),
-        ("tokenspeed-attention-decode", "TokenSpeed Gluon attention decode",
-         {"operation": "attention-decode"}),
-        ("tokenspeed-qwen-prefill", "TokenSpeed Qwen3-0.6B prefill",
-         {"operation": "qwen-prefill"}),
-        ("tokenspeed-qwen-decode", "TokenSpeed Qwen3-0.6B real cached decode",
-         {"operation": "qwen-decode"}),
-        ("tokenspeed-fp8-blockscale-gemm", "TokenSpeed Triton FP8 block-scaled GEMM",
-         {"operation": "fp8-gemm", "m": 16, "n": 256, "k": 256}),
-        ("tokenspeed-bf16-moe", "TokenSpeed Gluon BF16 MoE",
-         {"operation": "moe"}),
+        (
+            "tokenspeed-bf16-gemm-mediumm",
+            "TokenSpeed Gluon BF16 GEMM medium-M (128×4096×4096)",
+            {"operation": "gemm", "variant": "mediumm", "m": 128, "n": 4096, "k": 4096},
+        ),
+        (
+            "tokenspeed-bf16-gemm-largem",
+            "TokenSpeed Gluon BF16 GEMM large-M (4096×4096×4096)",
+            {"operation": "gemm", "variant": "largem", "m": 4096, "n": 4096, "k": 4096},
+        ),
+        (
+            "tokenspeed-attention-prefill",
+            "TokenSpeed Gluon attention prefill",
+            {"operation": "attention-prefill"},
+        ),
+        (
+            "tokenspeed-attention-decode",
+            "TokenSpeed Gluon attention decode",
+            {"operation": "attention-decode"},
+        ),
+        (
+            "tokenspeed-qwen-prefill",
+            "TokenSpeed Qwen3-0.6B prefill",
+            {"operation": "qwen-prefill"},
+        ),
+        (
+            "tokenspeed-qwen-decode",
+            "TokenSpeed Qwen3-0.6B real cached decode",
+            {"operation": "qwen-decode"},
+        ),
+        (
+            "tokenspeed-fp8-blockscale-gemm",
+            "TokenSpeed Triton FP8 block-scaled GEMM",
+            {"operation": "fp8-gemm", "m": 16, "n": 256, "k": 256},
+        ),
+        ("tokenspeed-bf16-moe", "TokenSpeed Gluon BF16 MoE", {"operation": "moe"}),
     )
 )
 
@@ -220,9 +238,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--qwen-model", type=Path,
-                        default=os.environ.get("CONSAN_BENCHMARK_QWEN_MODEL"),
-                        help="local Qwen3-0.6B checkpoint for the two Qwen rows")
+    parser.add_argument(
+        "--qwen-model",
+        type=Path,
+        default=os.environ.get("CONSAN_BENCHMARK_QWEN_MODEL"),
+        help="local Qwen3-0.6B checkpoint for the two Qwen rows",
+    )
     parser.add_argument("--status", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument(
@@ -236,7 +257,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=True,
         help=argparse.SUPPRESS,
     )
-    parser.add_argument("--no-audit-sites", dest="audit_sites", action="store_false", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--no-audit-sites",
+        dest="audit_sites",
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--workload",
         choices=tuple(workload.id for workload in WORKLOADS + GFX950_ADDITIONS),
@@ -271,16 +297,28 @@ def _git_identity(checkout: Path) -> dict[str, Any]:
         if not path.exists() and not path.is_symlink():
             entries.pop(name, None)
         elif path.is_file() or path.is_symlink():
-            content = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
-            blob = hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
-            mode = "120000" if path.is_symlink() else ("100755" if path.stat().st_mode & 0o111 else "100644")
+            content = (
+                os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+            )
+            blob = hashlib.sha1(
+                b"blob " + str(len(content)).encode() + b"\0" + content
+            ).hexdigest()
+            mode = (
+                "120000"
+                if path.is_symlink()
+                else ("100755" if path.stat().st_mode & 0o111 else "100644")
+            )
             entries[name] = [mode, blob]
     return {
         "path": str(checkout.resolve()),
         "commit": git("rev-parse", "HEAD"),
         "dirty": bool(git("status", "--porcelain")),
-        "execution_tree_sha256": hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest(),
-        "diff_sha256": hashlib.sha256(git("diff", "--binary", "HEAD").encode()).hexdigest(),
+        "execution_tree_sha256": hashlib.sha256(
+            json.dumps(entries, sort_keys=True).encode()
+        ).hexdigest(),
+        "diff_sha256": hashlib.sha256(
+            git("diff", "--binary", "HEAD").encode()
+        ).hexdigest(),
         "untracked_sha256": {
             name: _sha256(checkout / name)
             for name in git("ls-files", "--others", "--exclude-standard").splitlines()
@@ -306,9 +344,13 @@ def _workload_identity(identity: dict[str, Any], workload: Workload) -> dict[str
     """
     result = dict(identity)
     if "source" in result:
-        result["source"] = {"execution_tree_sha256": result["source"]["execution_tree_sha256"]}
+        result["source"] = {
+            "execution_tree_sha256": result["source"]["execution_tree_sha256"]
+        }
     if "payload_sha256" in result:
-        result["payload_sha256"] = {workload.payload: result["payload_sha256"][workload.payload]}
+        result["payload_sha256"] = {
+            workload.payload: result["payload_sha256"][workload.payload]
+        }
     if workload.payload != "aorta":
         result.pop("aorta", None)
     if workload.payload != "hipblaslt":
@@ -328,7 +370,9 @@ for dist in importlib.metadata.distributions():
     packages[name] = {'version': dist.version, 'record_sha256': hashlib.sha256(record.encode()).hexdigest()}
 print(json.dumps({'executable': sys.executable, 'version': sys.version, 'packages': packages}))
 """
-    result = subprocess.run((str(python), "-c", script), check=True, capture_output=True, text=True)
+    result = subprocess.run(
+        (str(python), "-c", script), check=True, capture_output=True, text=True
+    )
     return json.loads(result.stdout)
 
 
@@ -358,9 +402,9 @@ def _clean_environment(
     # measured process.
     profile_environment.update(
         {
-            "RJ_CONSAN_MOI_REQUIRE_RECORDS": "0",
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "0",
-            "RJ_CONSAN_MOI_FORBID_OVERFLOW": "0",
+            "RJ_CONSAN_REQUIRE_RECORDS": "0",
+            "RJ_CONSAN_FORBID_DIAGNOSTICS": "0",
+            "RJ_CONSAN_FORBID_OVERFLOW": "0",
         }
     )
     environment.update(profile_environment)
@@ -374,7 +418,7 @@ def _clean_environment(
     if kernel_allowlist_file is not None:
         environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"] = str(kernel_allowlist_file)
     if epoch_analysis is not None and mode != "supercollider":
-        environment["RJ_CONSAN_MOI_EPOCH_ANALYSIS"] = epoch_analysis
+        environment["RJ_CONSAN_EPOCH_ANALYSIS"] = epoch_analysis
     return environment
 
 
@@ -403,9 +447,7 @@ def _coverage_summary(output: str) -> dict[str, Any]:
     except CoverageParseError as error:
         raise BenchmarkError(f"site audit evidence is invalid: {error}") from error
     verdict = evidence.verdict
-    applicable = tuple(
-        record for record in evidence.coverage if record.applicable
-    )
+    applicable = tuple(record for record in evidence.coverage if record.applicable)
     reasons: list[str] = []
     if not verdict.applicable:
         reasons.append("verdict applicable=false")
@@ -414,14 +456,10 @@ def _coverage_summary(output: str) -> dict[str, Any]:
     if verdict.applicable_code_objects == 0:
         reasons.append("no applicable code objects")
     if verdict.incomplete_code_objects != 0:
-        reasons.append(
-            f"incomplete code objects: {verdict.incomplete_code_objects}"
-        )
+        reasons.append(f"incomplete code objects: {verdict.incomplete_code_objects}")
     for record in applicable:
         if record.expert_limit:
-            reasons.append(
-                f"reader {record.reader} used an expert patch limit"
-            )
+            reasons.append(f"reader {record.reader} used an expert patch limit")
         if not record.analysis_complete:
             reasons.append(f"reader {record.reader} static analysis incomplete")
         for kind in SITE_KINDS:
@@ -440,9 +478,7 @@ def _coverage_summary(output: str) -> dict[str, Any]:
             ):
                 count = record.counts[f"{kind}_{category}"]
                 if count:
-                    reasons.append(
-                        f"reader {record.reader} {kind} {category}: {count}"
-                    )
+                    reasons.append(f"reader {record.reader} {kind} {category}: {count}")
     if reasons:
         raise BenchmarkError("site audit failed: " + "; ".join(reasons))
     counts: dict[str, int] = {}
@@ -534,7 +570,9 @@ def _run_one_impl(
         audit_sites,
         kernel_allowlist_file,
         epoch_analysis=(
-            "manual" if workload.payload in ("aorta", "gluon", "tokenspeed") else "nth:1"
+            "manual"
+            if workload.payload in ("aorta", "gluon", "tokenspeed")
+            else "nth:1"
         ),
     )
     log_path = args.output_dir / f"{workload.id}--{label}.log"
@@ -626,8 +664,16 @@ def _run_one_impl(
         result["coverage"] = _coverage_summary(output)
     _atomic_write(
         checkpoint_path,
-        json.dumps({"fingerprint": fingerprint, "inputs": fingerprint_payload,
-                    "provenance": args.run_identity, "result": result}, indent=2) + "\n",
+        json.dumps(
+            {
+                "fingerprint": fingerprint,
+                "inputs": fingerprint_payload,
+                "provenance": args.run_identity,
+                "result": result,
+            },
+            indent=2,
+        )
+        + "\n",
     )
     print(f"pass {workload.id} {label} wall_ms={wall_ms:.1f}", flush=True)
     _cell_progress(args, workload, label, mode, "accepted", result)
@@ -639,8 +685,12 @@ def _run_one(**kwargs: Any) -> dict[str, Any]:
         return _run_one_impl(**kwargs)
     except (BenchmarkError, OSError, subprocess.SubprocessError) as error:
         _cell_progress(
-            kwargs["args"], kwargs["workload"], kwargs["label"],
-            kwargs["mode"], "failed", error=str(error),
+            kwargs["args"],
+            kwargs["workload"],
+            kwargs["label"],
+            kwargs["mode"],
+            "failed",
+            error=str(error),
         )
         raise
 
@@ -651,15 +701,24 @@ def _write_progress(args: argparse.Namespace) -> None:
         return
     _atomic_write(
         args.output_dir / "progress.json",
-        json.dumps({"run_identity": args.run_identity, "projection": projection}, indent=2) + "\n",
+        json.dumps(
+            {"run_identity": args.run_identity, "projection": projection}, indent=2
+        )
+        + "\n",
     )
     if args.status is not None:
         _atomic_write(args.status, _render_status(projection))
 
 
 def _cell_progress(
-    args: argparse.Namespace, workload: Workload, label: str, mode: str | None,
-    state: str, result: dict[str, Any] | None = None, *, error: str | None = None,
+    args: argparse.Namespace,
+    workload: Workload,
+    label: str,
+    mode: str | None,
+    state: str,
+    result: dict[str, Any] | None = None,
+    *,
+    error: str | None = None,
 ) -> None:
     projection = getattr(args, "status_projection", None)
     if projection is None:
@@ -671,7 +730,9 @@ def _cell_progress(
     if mode is not None:
         row["modes"].pop(mode, None)
         if result is not None:
-            row["modes"][mode] = _summarize_mode(result, tuple(row["native"]["runtime_ms"]))
+            row["modes"][mode] = _summarize_mode(
+                result, tuple(row["native"]["runtime_ms"])
+            )
     _write_progress(args)
 
 
@@ -886,7 +947,11 @@ def _render_status(summary: dict[str, Any]) -> str:
         if not isinstance(native_runtime, (list, tuple)) or len(native_runtime) != 2:
             state = workload.get("cell_states", {}).get("native", "pending")
             # A single accepted native sample is not yet a baseline median.
-            state = state if state in ("running", "failed", "invalidated", "blocked") else "pending"
+            state = (
+                state
+                if state in ("running", "failed", "invalidated", "blocked")
+                else "pending"
+            )
             native_cells = [state, state]
         else:
             native_cells = [
@@ -946,18 +1011,31 @@ def _main(argv: list[str]) -> int:
         raise BenchmarkError("no workloads selected")
     if args.workload and set(args.workload) - {workload.id for workload in selected}:
         raise BenchmarkError("selected workload is not supported on this target")
-    if args.qwen_model is not None or any(w.config.get("operation", "").startswith("qwen-") for w in selected):
+    if args.qwen_model is not None or any(
+        w.config.get("operation", "").startswith("qwen-") for w in selected
+    ):
         if args.qwen_model is None or not args.qwen_model.is_dir():
             raise BenchmarkError("pass --qwen-model with a local Qwen3-0.6B checkpoint")
         model = args.qwen_model.resolve()
-        model_hashes = {str(path.relative_to(model)): _sha256(path)
-                        for path in sorted(model.rglob("*"))
-                        if path.is_file() and ".cache" not in path.relative_to(model).parts}
-        available = [Workload(w.id, w.description, w.primary_metric,
-                            {**w.config, "model": str(model), "model_sha256": model_hashes},
-                            w.payload)
-                    if w.config.get("operation", "").startswith("qwen-") else w
-                    for w in available]
+        model_hashes = {
+            str(path.relative_to(model)): _sha256(path)
+            for path in sorted(model.rglob("*"))
+            if path.is_file() and ".cache" not in path.relative_to(model).parts
+        }
+        available = [
+            (
+                Workload(
+                    w.id,
+                    w.description,
+                    w.primary_metric,
+                    {**w.config, "model": str(model), "model_sha256": model_hashes},
+                    w.payload,
+                )
+                if w.config.get("operation", "").startswith("qwen-")
+                else w
+            )
+            for w in available
+        ]
         selected_ids = {w.id for w in selected}
         selected = [w for w in available if w.id in selected_ids]
     if args.hipblaslt_bench is not None:
@@ -994,17 +1072,29 @@ def _main(argv: list[str]) -> int:
         "converter_sha256": _sha256(converter),
         "python_environment": _python_environment_identity(args.python),
         "runtime_environment": {
-            name: value for name, value in os.environ.items()
-            if name in ("PATH", "LD_LIBRARY_PATH", "LD_PRELOAD", "ROCM_PATH", "HIP_PATH",
-                        "TRITON_LIBHIP_PATH", "HSA_OVERRIDE_GFX_VERSION", "HIP_VISIBLE_DEVICES",
-                        "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
+            name: value
+            for name, value in os.environ.items()
+            if name
+            in (
+                "PATH",
+                "LD_LIBRARY_PATH",
+                "LD_PRELOAD",
+                "ROCM_PATH",
+                "HIP_PATH",
+                "TRITON_LIBHIP_PATH",
+                "HSA_OVERRIDE_GFX_VERSION",
+                "HIP_VISIBLE_DEVICES",
+                "ROCR_VISIBLE_DEVICES",
+                "CUDA_VISIBLE_DEVICES",
+            )
         },
         "payload_sha256": {
             workload.payload: _sha256(_payload_program(workload))
             for workload in _target_workloads(args.target)
         },
         "python_support_sha256": {
-            path.name: _sha256(path) for path in sorted(Path(__file__).parent.glob("*.py"))
+            path.name: _sha256(path)
+            for path in sorted(Path(__file__).parent.glob("*.py"))
         },
     }
     if args.hipblaslt_bench is not None:
@@ -1018,7 +1108,12 @@ def _main(argv: list[str]) -> int:
     status_projection = {
         "target": args.target,
         "workloads": [
-            {"id": workload.id, "description": workload.description, "modes": {}, "progress": {}}
+            {
+                "id": workload.id,
+                "description": workload.description,
+                "modes": {},
+                "progress": {},
+            }
             for workload in _target_workloads(args.target)
         ],
     }
@@ -1030,7 +1125,9 @@ def _main(argv: list[str]) -> int:
         for index, row in enumerate(status_projection["workloads"]):
             old = previous_rows.get(row["id"])
             workload = current_workloads[row["id"]]
-            if old and old.get("identity") == _workload_identity(args.run_identity, workload):
+            if old and old.get("identity") == _workload_identity(
+                args.run_identity, workload
+            ):
                 status_projection["workloads"][index] = old
     for row in status_projection["workloads"]:
         workload = next((w for w in selected if w.id == row["id"]), None)
@@ -1125,8 +1222,9 @@ def _main(argv: list[str]) -> int:
                 "sha256": args.run_identity["rocprofv3_sha256"],
             },
         },
-        "workloads": [row["summary"] for row in status_projection["workloads"]
-                      if "summary" in row],
+        "workloads": [
+            row["summary"] for row in status_projection["workloads"] if "summary" in row
+        ],
     }
     _atomic_write(
         args.output_dir / "summary.json", json.dumps(summary, indent=2) + "\n"

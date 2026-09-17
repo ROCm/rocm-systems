@@ -3,7 +3,7 @@
 
 #include "consan_test_support.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 struct AtomicTargetCase {
@@ -20,8 +20,8 @@ constexpr std::array kAtomicTargets = {
     AtomicTargetCase{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu},
 };
 
-ConSanAtomicSite exact_flat_atomic(const AtomicTargetCase &target) {
-  ConSanAtomicSite site;
+AtomicSite exact_flat_atomic(const AtomicTargetCase &target) {
+  AtomicSite site;
   site.size = target.instruction_size;
   site.width_bits = 32u;
   site.destination_vgpr = 9u;
@@ -32,7 +32,7 @@ ConSanAtomicSite exact_flat_atomic(const AtomicTargetCase &target) {
     site.raw_scale_offset = false;
   site.raw_vaddr = 3u;
   site.raw_ioffset = 0;
-  site.scope = ConSanMemoryScope::Workgroup;
+  site.scope = MemoryScope::Workgroup;
   site.raw_th = 0u;
   site.returns_old_value = true;
   site.mnemonic = "flat_atomic_add";
@@ -42,12 +42,12 @@ ConSanAtomicSite exact_flat_atomic(const AtomicTargetCase &target) {
 TEST(ConSanAtomicClassifier, ExactFlatOrderingNormalizesOnAllFiveTargets) {
   for (const AtomicTargetCase &target : kAtomicTargets) {
     SCOPED_TRACE(static_cast<uint32_t>(target.arch));
-    const ConSanAtomicLoweringClassification classification =
-        classify_consan_atomic_lowering(exact_flat_atomic(target), target.arch);
+    const AtomicLoweringClassification classification =
+        classify_atomic_lowering(exact_flat_atomic(target), target.arch);
     ASSERT_TRUE(classification.normalized());
     ASSERT_TRUE(classification.exact_ordering_available());
     ASSERT_TRUE(classification.form);
-    EXPECT_EQ(classification.form->kind, ConSanAtomicLoweringFormKind::FlatVectorAddress);
+    EXPECT_EQ(classification.form->kind, AtomicLoweringFormKind::FlatVectorAddress);
     EXPECT_EQ(classification.form->instruction_size, target.instruction_size);
     EXPECT_EQ(classification.form->value_width_bits, 32u);
     EXPECT_EQ(classification.form->address_vgpr, 3u);
@@ -62,13 +62,12 @@ TEST(ConSanAtomicClassifier, ExactFlatOrderingNormalizesOnAllFiveTargets) {
 TEST(ConSanAtomicClassifier, Exact64BitFlatOrderingNormalizesOnAllFiveTargets) {
   for (const AtomicTargetCase &target : kAtomicTargets) {
     SCOPED_TRACE(static_cast<uint32_t>(target.arch));
-    ConSanAtomicSite site = exact_flat_atomic(target);
+    AtomicSite site = exact_flat_atomic(target);
     site.mnemonic = "flat_atomic_cmpswap_b64";
     site.width_bits = 64u;
     site.destination_vgpr = 9u;
     site.data_vgpr = 12u;
-    const ConSanAtomicLoweringClassification classification =
-        classify_consan_atomic_lowering(site, target.arch);
+    const AtomicLoweringClassification classification = classify_atomic_lowering(site, target.arch);
     ASSERT_TRUE(classification.normalized());
     ASSERT_TRUE(classification.exact_ordering_available());
     ASSERT_TRUE(classification.form);
@@ -81,24 +80,24 @@ TEST(ConSanAtomicClassifier, Exact64BitFlatOrderingNormalizesOnAllFiveTargets) {
 
 TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
   const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
-  ConSanAtomicSite load = exact_flat_atomic(target);
+  AtomicSite load = exact_flat_atomic(target);
   load.mnemonic = "flat_load_dword";
   load.data_vgpr = load.destination_vgpr;
   load.returns_old_value = false;
-  const ConSanAtomicLoweringClassification load_classification =
-      classify_consan_atomic_lowering(load, target.arch, /*is_rmw=*/false);
+  const AtomicLoweringClassification load_classification =
+      classify_atomic_lowering(load, target.arch, /*is_rmw=*/false);
   ASSERT_TRUE(load_classification.normalized());
   ASSERT_TRUE(load_classification.form);
   EXPECT_FALSE(load_classification.form->is_rmw);
   EXPECT_EQ(load_classification.form->destination_vgpr, 9u);
   EXPECT_EQ(load_classification.form->destination_register_count, 1u);
 
-  ConSanAtomicSite store = load;
+  AtomicSite store = load;
   store.mnemonic = "flat_store_dword";
   store.destination_vgpr.reset();
   store.data_vgpr = 7u;
-  const ConSanAtomicLoweringClassification store_classification =
-      classify_consan_atomic_lowering(store, target.arch, /*is_rmw=*/false);
+  const AtomicLoweringClassification store_classification =
+      classify_atomic_lowering(store, target.arch, /*is_rmw=*/false);
   ASSERT_TRUE(store_classification.normalized());
   ASSERT_TRUE(store_classification.form);
   EXPECT_EQ(store_classification.form->destination_vgpr, std::nullopt);
@@ -108,15 +107,14 @@ TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
 TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     AtomicTargetCase target{arch, 12u, 8u};
-    ConSanAtomicSite site = exact_flat_atomic(target);
+    AtomicSite site = exact_flat_atomic(target);
     site.scalar_address_sgpr = 8u;
     site.destination_vgpr.reset();
     site.returns_old_value = false;
-    const ConSanAtomicLoweringClassification classification =
-        classify_consan_atomic_lowering(site, arch);
+    const AtomicLoweringClassification classification = classify_atomic_lowering(site, arch);
     ASSERT_TRUE(classification.exact_ordering_available());
     ASSERT_TRUE(classification.form);
-    EXPECT_EQ(classification.form->kind, ConSanAtomicLoweringFormKind::FlatScalarVectorAddress);
+    EXPECT_EQ(classification.form->kind, AtomicLoweringFormKind::FlatScalarVectorAddress);
     EXPECT_EQ(classification.form->address_vgpr_count, 1u);
     EXPECT_EQ(classification.form->scalar_base_sgpr, 8u);
   }
@@ -124,43 +122,38 @@ TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) 
 
 TEST(ConSanAtomicClassifier, ExactOperationRejectionsRemainTypedAfterNormalization) {
   const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
-  ConSanAtomicSite site = exact_flat_atomic(target);
+  AtomicSite site = exact_flat_atomic(target);
   site.mnemonic = "flat_atomic_cmpswap";
   site.returns_old_value = false;
   site.destination_vgpr.reset();
-  const ConSanAtomicLoweringClassification no_outcome =
-      classify_consan_atomic_lowering(site, target.arch);
+  const AtomicLoweringClassification no_outcome = classify_atomic_lowering(site, target.arch);
   ASSERT_TRUE(no_outcome.normalized());
   EXPECT_EQ(no_outcome.exact_ordering_reason,
-            ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable);
+            AtomicClassifierReason::CompareExchangeOutcomeUnavailable);
 
   site = exact_flat_atomic(target);
-  site.scope = ConSanMemoryScope::Wavefront;
-  const ConSanAtomicLoweringClassification wave_scope =
-      classify_consan_atomic_lowering(site, target.arch);
+  site.scope = MemoryScope::Wavefront;
+  const AtomicLoweringClassification wave_scope = classify_atomic_lowering(site, target.arch);
   ASSERT_TRUE(wave_scope.normalized());
-  EXPECT_EQ(wave_scope.exact_ordering_reason, ConSanAtomicClassifierReason::UnsupportedScope);
+  EXPECT_EQ(wave_scope.exact_ordering_reason, AtomicClassifierReason::UnsupportedScope);
 
   site = exact_flat_atomic(target);
   site.raw_ioffset = 4;
-  const ConSanAtomicLoweringClassification nonzero =
-      classify_consan_atomic_lowering(site, target.arch);
+  const AtomicLoweringClassification nonzero = classify_atomic_lowering(site, target.arch);
   EXPECT_FALSE(nonzero.normalized());
-  EXPECT_EQ(nonzero.normalization_reason, ConSanAtomicClassifierReason::UnsupportedOffset);
+  EXPECT_EQ(nonzero.normalization_reason, AtomicClassifierReason::UnsupportedOffset);
 
   site = exact_flat_atomic(target);
   site.mnemonic = "flat_atomic_cmpswap";
   site.width_bits = 64u;
   site.data_vgpr = 254u;
-  const ConSanAtomicLoweringClassification overflowing_data =
-      classify_consan_atomic_lowering(site, target.arch);
+  const AtomicLoweringClassification overflowing_data = classify_atomic_lowering(site, target.arch);
   EXPECT_FALSE(overflowing_data.normalized());
-  EXPECT_EQ(overflowing_data.normalization_reason,
-            ConSanAtomicClassifierReason::UnsupportedInputWidth);
+  EXPECT_EQ(overflowing_data.normalization_reason, AtomicClassifierReason::UnsupportedInputWidth);
 }
 
 TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalAddresses) {
-  ConSanAtomicSite lds;
+  AtomicSite lds;
   lds.size = 8u;
   lds.width_bits = 32u;
   lds.destination_vgpr = 9u;
@@ -169,19 +162,19 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   lds.raw_addr = 3u;
   lds.raw_data0 = 7u;
   lds.raw_ioffset = 12;
-  lds.scope = ConSanMemoryScope::Workgroup;
+  lds.scope = MemoryScope::Workgroup;
   lds.returns_old_value = true;
   lds.mnemonic = "ds_add_u32";
-  const ConSanAtomicLoweringClassification lds_form =
-      classify_consan_atomic_lowering(lds, ROCJITSU_CODE_ARCH_CDNA5);
+  const AtomicLoweringClassification lds_form =
+      classify_atomic_lowering(lds, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(lds_form.address_available());
   EXPECT_TRUE(lds_form.causal_ordering_available());
   EXPECT_FALSE(lds_form.exact_ordering_available());
   ASSERT_TRUE(lds_form.form);
-  EXPECT_EQ(lds_form.form->kind, ConSanAtomicLoweringFormKind::LdsVectorOffset);
+  EXPECT_EQ(lds_form.form->kind, AtomicLoweringFormKind::LdsVectorOffset);
   EXPECT_EQ(lds_form.form->signed_byte_offset, 12);
 
-  ConSanAtomicSite buffer;
+  AtomicSite buffer;
   buffer.size = 12u;
   buffer.width_bits = 32u;
   buffer.destination_vgpr = 11u;
@@ -194,51 +187,48 @@ TEST(ConSanAtomicClassifier, CausalTargetFormsNormalizeLdsBufferAndSignedGlobalA
   buffer.raw_ioffset = -16;
   buffer.raw_offen = true;
   buffer.raw_idxen = false;
-  buffer.scope = ConSanMemoryScope::Agent;
+  buffer.scope = MemoryScope::Agent;
   buffer.returns_old_value = true;
   buffer.mnemonic = "buffer_atomic_add_u32";
-  const ConSanAtomicLoweringClassification buffer_form =
-      classify_consan_atomic_lowering(buffer, ROCJITSU_CODE_ARCH_CDNA5);
+  const AtomicLoweringClassification buffer_form =
+      classify_atomic_lowering(buffer, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(buffer_form.address_available());
   EXPECT_TRUE(buffer_form.causal_ordering_available());
   EXPECT_FALSE(buffer_form.exact_ordering_available());
   ASSERT_TRUE(buffer_form.form);
-  EXPECT_EQ(buffer_form.form->kind, ConSanAtomicLoweringFormKind::BufferResourceVectorOffset);
+  EXPECT_EQ(buffer_form.form->kind, AtomicLoweringFormKind::BufferResourceVectorOffset);
   EXPECT_EQ(buffer_form.form->scalar_base_sgpr, 24u);
   EXPECT_EQ(buffer_form.form->scalar_offset_sgpr, 10u);
-  EXPECT_EQ(classify_consan_atomic_lowering(buffer, ROCJITSU_CODE_ARCH_RDNA4).normalization_reason,
-            ConSanAtomicClassifierReason::UnsupportedAddressSource);
+  EXPECT_EQ(classify_atomic_lowering(buffer, ROCJITSU_CODE_ARCH_RDNA4).normalization_reason,
+            AtomicClassifierReason::UnsupportedAddressSource);
 
   AtomicTargetCase cdna4{ROCJITSU_CODE_ARCH_CDNA4, 8u, 8u};
-  ConSanAtomicSite global = exact_flat_atomic(cdna4);
+  AtomicSite global = exact_flat_atomic(cdna4);
   global.mnemonic = "global_atomic_add_u32";
   global.scalar_address_sgpr = 8u;
-  const ConSanAtomicLoweringClassification global_form =
-      classify_consan_atomic_lowering(global, cdna4.arch);
+  const AtomicLoweringClassification global_form = classify_atomic_lowering(global, cdna4.arch);
   ASSERT_TRUE(global_form.address_available());
   ASSERT_TRUE(global_form.form);
-  EXPECT_EQ(global_form.form->kind, ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress);
+  EXPECT_EQ(global_form.form->kind, AtomicLoweringFormKind::GlobalScalarVectorAddress);
   EXPECT_TRUE(global_form.form->sign_extend_vector_offset);
 }
 
 TEST(ConSanAtomicClassifier, AddressPlannerConsumesTheNormalizedFormWithoutReclassification) {
   const AtomicTargetCase target{ROCJITSU_CODE_ARCH_RDNA4, 12u, 0x7cu};
-  ConSanAtomicSite site = exact_flat_atomic(target);
-  const ConSanAtomicLoweringClassification classification =
-      classify_consan_atomic_lowering(site, target.arch);
+  AtomicSite site = exact_flat_atomic(target);
+  const AtomicLoweringClassification classification = classify_atomic_lowering(site, target.arch);
   ASSERT_TRUE(classification.address_available());
   ASSERT_TRUE(classification.form);
 
   site.raw_saddr.reset();
-  EXPECT_EQ(plan_consan_moi_atomic_address(
-                site, 20u, 3u, ConSanRegisterAllocationSource::LivenessDead, target.arch)
+  EXPECT_EQ(plan_atomic_address(site, 20u, 3u, RegisterAllocationSource::LivenessDead, target.arch)
                 .support,
-            ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
-  const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
-      *classification.form, 20u, 3u, ConSanRegisterAllocationSource::LivenessDead);
+            AtomicAddressSupport::UnsupportedEncoding);
+  const AtomicAddressPlan plan =
+      plan_atomic_address(*classification.form, 20u, 3u, RegisterAllocationSource::LivenessDead);
   EXPECT_TRUE(plan.supported());
-  EXPECT_EQ(plan.kind, ConSanMoiAtomicAddressKind::FlatGuestPair);
+  EXPECT_EQ(plan.kind, AtomicAddressKind::FlatGuestPair);
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

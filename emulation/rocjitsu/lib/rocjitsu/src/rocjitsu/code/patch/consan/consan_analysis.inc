@@ -16,13 +16,13 @@ enum class PointerHalfHint : uint8_t {
 };
 
 struct PointerComponentHint {
-  ConSanFlatAddressSpaceHint space = ConSanFlatAddressSpaceHint::Unknown;
+  FlatAddressSpaceHint space = FlatAddressSpaceHint::Unknown;
   PointerHalfHint half = PointerHalfHint::Unknown;
   bool maybe = false;
 };
 
 struct FlatPointerPairHint {
-  ConSanFlatAddressSpaceHint space = ConSanFlatAddressSpaceHint::Unknown;
+  FlatAddressSpaceHint space = FlatAddressSpaceHint::Unknown;
   bool maybe = false;
 };
 
@@ -72,35 +72,34 @@ struct FlatPointerTracker {
       private_components;
 };
 
-[[nodiscard]] bool is_known_flat_space(ConSanFlatAddressSpaceHint space) {
-  return space == ConSanFlatAddressSpaceHint::Group ||
-         space == ConSanFlatAddressSpaceHint::Private ||
-         space == ConSanFlatAddressSpaceHint::Global;
+[[nodiscard]] bool is_known_flat_space(FlatAddressSpaceHint space) {
+  return space == FlatAddressSpaceHint::Group || space == FlatAddressSpaceHint::Private ||
+         space == FlatAddressSpaceHint::Global;
 }
 
 [[nodiscard]] bool is_known_component(const PointerComponentHint &component) {
   return is_known_flat_space(component.space) && component.half != PointerHalfHint::Unknown;
 }
 
-[[nodiscard]] ConSanFlatAddressSpaceHint maybe_flat_space(ConSanFlatAddressSpaceHint space) {
+[[nodiscard]] FlatAddressSpaceHint maybe_flat_space(FlatAddressSpaceHint space) {
   switch (space) {
-  case ConSanFlatAddressSpaceHint::Group:
-    return ConSanFlatAddressSpaceHint::MaybeGroup;
-  case ConSanFlatAddressSpaceHint::Private:
-    return ConSanFlatAddressSpaceHint::MaybePrivate;
-  case ConSanFlatAddressSpaceHint::Global:
-    return ConSanFlatAddressSpaceHint::Global;
-  case ConSanFlatAddressSpaceHint::Unknown:
-  case ConSanFlatAddressSpaceHint::MaybeGroup:
-  case ConSanFlatAddressSpaceHint::MaybePrivate:
-    return ConSanFlatAddressSpaceHint::Unknown;
+  case FlatAddressSpaceHint::Group:
+    return FlatAddressSpaceHint::MaybeGroup;
+  case FlatAddressSpaceHint::Private:
+    return FlatAddressSpaceHint::MaybePrivate;
+  case FlatAddressSpaceHint::Global:
+    return FlatAddressSpaceHint::Global;
+  case FlatAddressSpaceHint::Unknown:
+  case FlatAddressSpaceHint::MaybeGroup:
+  case FlatAddressSpaceHint::MaybePrivate:
+    return FlatAddressSpaceHint::Unknown;
   }
-  return ConSanFlatAddressSpaceHint::Unknown;
+  return FlatAddressSpaceHint::Unknown;
 }
 
-[[nodiscard]] ConSanFlatAddressSpaceHint flat_pair_hint_to_public(FlatPointerPairHint hint) {
+[[nodiscard]] FlatAddressSpaceHint flat_pair_hint_to_public(FlatPointerPairHint hint) {
   if (!is_known_flat_space(hint.space))
-    return ConSanFlatAddressSpaceHint::Unknown;
+    return FlatAddressSpaceHint::Unknown;
   return hint.maybe ? maybe_flat_space(hint.space) : hint.space;
 }
 
@@ -124,7 +123,7 @@ struct FlatPointerTracker {
   return ref->index;
 }
 
-[[nodiscard]] std::optional<ConSanFlatAddressSpaceHint>
+[[nodiscard]] std::optional<FlatAddressSpaceHint>
 special_pointer_base_space(const Operand *operand) {
   if (operand == nullptr)
     return std::nullopt;
@@ -137,9 +136,9 @@ special_pointer_base_space(const Operand *operand) {
            });
   };
   if (ascii_case_equal("src_shared_base"))
-    return ConSanFlatAddressSpaceHint::Group;
+    return FlatAddressSpaceHint::Group;
   if (ascii_case_equal("src_private_base"))
-    return ConSanFlatAddressSpaceHint::Private;
+    return FlatAddressSpaceHint::Private;
   return std::nullopt;
 }
 
@@ -251,7 +250,7 @@ source_component_hint(const Operand *operand, const FlatPointerTracker &tracker)
 
 template <size_t N>
 void set_pair_components(std::array<PointerComponentHint, N> &components, uint16_t index,
-                         ConSanFlatAddressSpaceHint space, bool maybe) {
+                         FlatAddressSpaceHint space, bool maybe) {
   if (index >= N || static_cast<size_t>(index) + 1 >= N)
     return;
   components[index] = PointerComponentHint{space, PointerHalfHint::Low, maybe};
@@ -259,7 +258,7 @@ void set_pair_components(std::array<PointerComponentHint, N> &components, uint16
 }
 
 void set_sgpr_pair_components(FlatPointerTracker &tracker, uint16_t index,
-                              ConSanFlatAddressSpaceHint space, bool maybe) {
+                              FlatAddressSpaceHint space, bool maybe) {
   set_pair_components(tracker.sgprs, index, space, maybe);
 }
 
@@ -271,7 +270,7 @@ void set_vgpr_component(FlatPointerTracker &tracker, uint16_t index,
 }
 
 void set_vgpr_pair_components(FlatPointerTracker &tracker, uint16_t index,
-                              ConSanFlatAddressSpaceHint space, bool maybe) {
+                              FlatAddressSpaceHint space, bool maybe) {
   set_pair_components(tracker.vgprs, index, space, maybe);
 }
 
@@ -358,7 +357,7 @@ merge_arithmetic_components(std::optional<PointerComponentHint> lhs,
 
 [[nodiscard]] std::optional<PointerComponentHint>
 merge_source_component_hints(const Instruction &inst, const FlatPointerTracker &tracker) {
-  std::optional<ConSanFlatAddressSpaceHint> space;
+  std::optional<FlatAddressSpaceHint> space;
   bool saw_high = false;
   bool maybe = false;
   for (int i = 0; i < inst.num_src_operands(); ++i) {
@@ -467,7 +466,7 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
   if (!load && !store)
     return false;
 
-  const auto encoding = decode_consan_scratch_component_encoding(instruction_bytes, arch);
+  const auto encoding = decode_scratch_component_encoding(instruction_bytes, arch);
   if (!encoding)
     return false;
 
@@ -524,14 +523,14 @@ private_component_key(const FlatPointerTracker &tracker, uint16_t address_vgpr,
   if (!load && !store)
     return false;
 
-  const auto encoding = decode_consan_private_component_encoding(instruction_bytes, arch);
+  const auto encoding = decode_private_component_encoding(instruction_bytes, arch);
   if (!encoding)
     return false;
   const uint16_t address_vgpr = encoding->address_vgpr;
   const uint16_t data_vgpr = load ? encoding->load_data_vgpr : encoding->store_data_vgpr;
 
   const auto address_hint = pair_hint_at(tracker.vgprs, static_cast<uint16_t>(address_vgpr));
-  if (!address_hint || address_hint->space != ConSanFlatAddressSpaceHint::Private)
+  if (!address_hint || address_hint->space != FlatAddressSpaceHint::Private)
     return false;
 
   const uint32_t width = mnemonic.ends_with("b64") || mnemonic.ends_with("dwordx2") ? 2u : 1u;
@@ -576,7 +575,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     return;
 
   if (mnemonic == "v_writelane_b32" || mnemonic == "v_readlane_b32") {
-    const auto encoding = decode_consan_lane_transfer_encoding(instruction_bytes, arch);
+    const auto encoding = decode_lane_transfer_encoding(instruction_bytes, arch);
     if (!encoding)
       return;
     const std::optional<uint32_t> lane =
@@ -628,7 +627,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     std::optional<RegisterRef> source = register_ref(inst.src_operand(0));
     const bool write_accumulator = mnemonic == "v_accvgpr_write";
     if (const auto encoding =
-            decode_consan_accvgpr_transfer_index(instruction_bytes, arch, write_accumulator)) {
+            decode_accvgpr_transfer_index(instruction_bytes, arch, write_accumulator)) {
       if (encoding->accumulator_vgpr) {
         if (write_accumulator)
           dst = RegisterRef{RegClass::ACC_VGPR, *encoding->accumulator_vgpr, 1u};
@@ -920,8 +919,8 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
   clear_destination_components(inst, tracker);
 }
 
-[[nodiscard]] ConSanFlatAddressSpaceHint
-flat_address_space_hint(const Instruction &inst, const FlatPointerTracker &tracker) {
+[[nodiscard]] FlatAddressSpaceHint flat_address_space_hint(const Instruction &inst,
+                                                           const FlatPointerTracker &tracker) {
   // CDNA5 VFLAT can split a generic address into a vector offset and a scalar
   // 64-bit base. The scalar pair is the aperture-bearing component; treating
   // only src0 as a complete vector pointer loses the `src_shared_base`
@@ -935,71 +934,70 @@ flat_address_space_hint(const Instruction &inst, const FlatPointerTracker &track
   }
   const std::optional<uint16_t> addr = vgpr_index(inst.src_operand(0));
   if (!addr)
-    return ConSanFlatAddressSpaceHint::Unknown;
+    return FlatAddressSpaceHint::Unknown;
   const auto hint = pair_hint_at(tracker.vgprs, *addr);
   if (!hint)
-    return ConSanFlatAddressSpaceHint::Unknown;
+    return FlatAddressSpaceHint::Unknown;
   return flat_pair_hint_to_public(*hint);
 }
 
-void count_flat_address_space_hint(ConSanKernelStats &stats, ConSanFlatAddressSpaceHint hint) {
+void count_flat_address_space_hint(KernelStats &stats, FlatAddressSpaceHint hint) {
   switch (hint) {
-  case ConSanFlatAddressSpaceHint::Group:
+  case FlatAddressSpaceHint::Group:
     ++stats.flat_group_hint_count;
     break;
-  case ConSanFlatAddressSpaceHint::Private:
+  case FlatAddressSpaceHint::Private:
     ++stats.flat_private_hint_count;
     break;
-  case ConSanFlatAddressSpaceHint::MaybeGroup:
+  case FlatAddressSpaceHint::MaybeGroup:
     ++stats.flat_maybe_group_hint_count;
     break;
-  case ConSanFlatAddressSpaceHint::MaybePrivate:
+  case FlatAddressSpaceHint::MaybePrivate:
     ++stats.flat_maybe_private_hint_count;
     break;
-  case ConSanFlatAddressSpaceHint::Global:
+  case FlatAddressSpaceHint::Global:
     ++stats.flat_global_hint_count;
     break;
-  case ConSanFlatAddressSpaceHint::Unknown:
+  case FlatAddressSpaceHint::Unknown:
     ++stats.flat_unknown_hint_count;
     break;
   }
 }
 
-[[nodiscard]] ConSanAtomicAddressSpaceHint
-flat_hint_to_atomic_hint(ConSanFlatAddressSpaceHint hint) {
+[[nodiscard]] AtomicAddressSpaceHint flat_hint_to_atomic_hint(FlatAddressSpaceHint hint) {
   switch (hint) {
-  case ConSanFlatAddressSpaceHint::Group:
-    return ConSanAtomicAddressSpaceHint::FlatGroup;
-  case ConSanFlatAddressSpaceHint::Private:
-    return ConSanAtomicAddressSpaceHint::FlatPrivate;
-  case ConSanFlatAddressSpaceHint::MaybeGroup:
-    return ConSanAtomicAddressSpaceHint::FlatMaybeGroup;
-  case ConSanFlatAddressSpaceHint::MaybePrivate:
-    return ConSanAtomicAddressSpaceHint::FlatMaybePrivate;
-  case ConSanFlatAddressSpaceHint::Global:
-    return ConSanAtomicAddressSpaceHint::FlatGlobal;
-  case ConSanFlatAddressSpaceHint::Unknown:
-    return ConSanAtomicAddressSpaceHint::FlatUnknown;
+  case FlatAddressSpaceHint::Group:
+    return AtomicAddressSpaceHint::FlatGroup;
+  case FlatAddressSpaceHint::Private:
+    return AtomicAddressSpaceHint::FlatPrivate;
+  case FlatAddressSpaceHint::MaybeGroup:
+    return AtomicAddressSpaceHint::FlatMaybeGroup;
+  case FlatAddressSpaceHint::MaybePrivate:
+    return AtomicAddressSpaceHint::FlatMaybePrivate;
+  case FlatAddressSpaceHint::Global:
+    return AtomicAddressSpaceHint::FlatGlobal;
+  case FlatAddressSpaceHint::Unknown:
+    return AtomicAddressSpaceHint::FlatUnknown;
   }
-  return ConSanAtomicAddressSpaceHint::Unknown;
+  return AtomicAddressSpaceHint::Unknown;
 }
 
-[[nodiscard]] ConSanAtomicAddressSpaceHint
-atomic_address_space_hint(const Instruction &inst, const FlatPointerTracker &tracker) {
+[[nodiscard]] AtomicAddressSpaceHint atomic_address_space_hint(const Instruction &inst,
+                                                               const FlatPointerTracker &tracker) {
   const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic.starts_with("ds_") && lds_access_kind(mnemonic) == ConSanLdsAccessKind::Atomic)
-    return ConSanAtomicAddressSpaceHint::Lds;
+  if (mnemonic.starts_with("ds_") && lds_access_kind(mnemonic) == LdsAccessKind::Atomic)
+    return AtomicAddressSpaceHint::Lds;
   if (mnemonic.starts_with("flat_atomic"))
     return flat_hint_to_atomic_hint(flat_address_space_hint(inst, tracker));
   if (mnemonic.starts_with("global_atomic"))
-    return ConSanAtomicAddressSpaceHint::Global;
+    return AtomicAddressSpaceHint::Global;
   if (mnemonic.starts_with("scratch_atomic"))
-    return ConSanAtomicAddressSpaceHint::Scratch;
+    return AtomicAddressSpaceHint::Scratch;
   if (mnemonic.starts_with("buffer_atomic"))
-    return ConSanAtomicAddressSpaceHint::Buffer;
+    return AtomicAddressSpaceHint::Buffer;
   if (mnemonic.starts_with("s_atomic"))
-    return ConSanAtomicAddressSpaceHint::Scalar;
-  return ConSanAtomicAddressSpaceHint::Unknown;
+    return AtomicAddressSpaceHint::Scalar;
+  return AtomicAddressSpaceHint::Unknown;
 }
 
 [[nodiscard]] std::optional<bool> atomic_returns_from_mnemonic(std::string_view mnemonic) {
@@ -1011,21 +1009,21 @@ atomic_address_space_hint(const Instruction &inst, const FlatPointerTracker &tra
   return std::nullopt;
 }
 
-void classify_instruction(const Instruction &inst, ConSanKernelStats &stats) {
+void classify_instruction(const Instruction &inst, KernelStats &stats) {
   const std::string_view mnemonic = inst.mnemonic();
 
   if (mnemonic.starts_with("ds_") && !is_ds_register_lane_operation(mnemonic)) {
     switch (lds_access_kind(mnemonic)) {
-    case ConSanLdsAccessKind::Atomic:
+    case LdsAccessKind::Atomic:
       ++stats.lds_atomic_count;
       break;
-    case ConSanLdsAccessKind::Read:
+    case LdsAccessKind::Read:
       ++stats.lds_read_count;
       break;
-    case ConSanLdsAccessKind::Write:
+    case LdsAccessKind::Write:
       ++stats.lds_write_count;
       break;
-    case ConSanLdsAccessKind::Other:
+    case LdsAccessKind::Other:
       ++stats.ds_other_count;
       break;
     }
@@ -1052,29 +1050,29 @@ void classify_instruction(const Instruction &inst, ConSanKernelStats &stats) {
     ++stats.fence_like_count;
 }
 
-void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
-                     ConSanProgramSiteArena &sites, uint64_t instruction_text_offset) {
+void record_lds_site(const Instruction &inst, ProgramContainer &kernel, ProgramSiteArena &sites,
+                     uint64_t instruction_text_offset) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!mnemonic.starts_with("ds_") || is_ds_register_lane_operation(mnemonic))
     return;
 
-  ConSanProgramSite site;
-  site.origin = ConSanAccessOrigin::NativeLds;
+  ProgramSite site;
+  site.origin = AccessOrigin::NativeLds;
   site.kind = lds_access_kind(mnemonic);
   site.physical_id.original_text_offset = instruction_text_offset;
   site.decoded_site().text_offset = instruction_text_offset;
   site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
   site.decoded_site().size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
-  if (site.kind == ConSanLdsAccessKind::Read) {
+  if (site.kind == LdsAccessKind::Read) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.operands.destination_accvgpr = register_index(inst.dst_operand(0), RegClass::ACC_VGPR);
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
-  } else if (site.kind == ConSanLdsAccessKind::Write) {
+  } else if (site.kind == LdsAccessKind::Write) {
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
     site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
     site.operands.second_data_vgpr = vgpr_index(inst.src_operand(2));
-  } else if (site.kind == ConSanLdsAccessKind::Atomic) {
+  } else if (site.kind == LdsAccessKind::Atomic) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
     site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
@@ -1085,19 +1083,19 @@ void record_lds_site(const Instruction &inst, ConSanProgramContainer &kernel,
   sites.add_access(std::move(site));
 }
 
-[[nodiscard]] std::optional<ConSanLdsAccessKind>
+[[nodiscard]] std::optional<LdsAccessKind>
 record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t> instruction_bytes,
-                                ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
+                                ProgramContainer &kernel, ProgramSiteArena &sites,
                                 uint64_t instruction_text_offset, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  const std::optional<ConSanDirectLdsTransferEncoding> encoding =
-      decode_consan_direct_lds_transfer_encoding(mnemonic, instruction_bytes, arch);
+  const std::optional<DirectLdsTransferEncoding> encoding =
+      decode_direct_lds_transfer_encoding(mnemonic, instruction_bytes, arch);
   if (!encoding)
     return std::nullopt;
 
-  ConSanProgramSite site;
-  site.kind = encoding->writes_lds ? ConSanLdsAccessKind::Write : ConSanLdsAccessKind::Read;
-  site.origin = ConSanAccessOrigin::DirectToLds;
+  ProgramSite site;
+  site.kind = encoding->writes_lds ? LdsAccessKind::Write : LdsAccessKind::Read;
+  site.origin = AccessOrigin::DirectToLds;
   site.physical_id.original_text_offset = instruction_text_offset;
   site.decoded_site().text_offset = instruction_text_offset;
   site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
@@ -1117,14 +1115,14 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   return sites.access_sites().back().kind;
 }
 
-void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel,
-                         ConSanProgramSiteArena &sites, uint64_t instruction_text_offset,
+void record_barrier_site(const Instruction &inst, ProgramContainer &kernel, ProgramSiteArena &sites,
+                         uint64_t instruction_text_offset,
                          std::span<const uint8_t> instruction_bytes, uint64_t previous_text_offset,
                          std::span<const uint8_t> previous_instruction_bytes, rj_code_arch_t arch) {
   if (!is_barrier_instruction(inst))
     return;
 
-  ConSanBarrierSite site;
+  BarrierSite site;
   site.text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
@@ -1132,29 +1130,29 @@ void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel
   if (instruction_bytes.size() >= sizeof(site.raw_encoding))
     std::memcpy(&site.raw_encoding, instruction_bytes.data(), sizeof(site.raw_encoding));
   if (site.mnemonic == "s_barrier_signal" || site.mnemonic == "s_barrier_signal_isfirst")
-    site.operation = ConSanBarrierSite::Operation::Signal;
+    site.operation = BarrierSite::Operation::Signal;
   else if (site.mnemonic == "s_barrier_wait")
-    site.operation = ConSanBarrierSite::Operation::Wait;
+    site.operation = BarrierSite::Operation::Wait;
   else if (site.mnemonic == "s_barrier")
-    site.operation = ConSanBarrierSite::Operation::Full;
+    site.operation = BarrierSite::Operation::Full;
   else if (site.mnemonic == "s_barrier_init")
-    site.operation = ConSanBarrierSite::Operation::Init;
+    site.operation = BarrierSite::Operation::Init;
   else if (site.mnemonic == "s_barrier_join")
-    site.operation = ConSanBarrierSite::Operation::Join;
+    site.operation = BarrierSite::Operation::Join;
   else if (site.mnemonic == "s_barrier_leave")
-    site.operation = ConSanBarrierSite::Operation::Leave;
+    site.operation = BarrierSite::Operation::Leave;
   else if (site.mnemonic == "s_wakeup_barrier")
-    site.operation = ConSanBarrierSite::Operation::Wakeup;
+    site.operation = BarrierSite::Operation::Wakeup;
   else if (site.mnemonic == "s_get_barrier_state")
-    site.operation = ConSanBarrierSite::Operation::StateQuery;
+    site.operation = BarrierSite::Operation::StateQuery;
   decode_barrier_operand(inst, instruction_bytes, site);
   // LLVM lowers a uniform named-barrier init count into M0[21:16] and the
   // barrier ID into M0[5:0]. Only accept the immediately preceding literal
   // s_mov_b32 m0 materialization: arbitrary M0 dataflow is not proof.
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  const TargetProfile *profile = target_profile(arch);
   if (profile && profile->has_cluster_facilities &&
-      site.operation == ConSanBarrierSite::Operation::Init &&
-      site.operand_source == ConSanBarrierSite::OperandSource::DynamicM0 &&
+      site.operation == BarrierSite::Operation::Init &&
+      site.operand_source == BarrierSite::OperandSource::DynamicM0 &&
       previous_instruction_bytes.size() == 2u * sizeof(uint32_t)) {
     uint32_t setup_word = 0;
     uint32_t setup_literal = 0;
@@ -1171,37 +1169,36 @@ void record_barrier_site(const Instruction &inst, ConSanProgramContainer &kernel
         barrier_id <= 16u && participant_count >= 1u &&
         (setup_literal & ~(kBarrierIdMask | kParticipantCountMask)) == 0u) {
       site.barrier_id = static_cast<int32_t>(barrier_id);
-      site.operand_source = ConSanBarrierSite::OperandSource::StaticM0Literal32;
-      site.scope = ConSanBarrierSite::Scope::Workgroup;
-      site.participant_encoding = ConSanBarrierSite::ParticipantEncoding::M0Literal32;
+      site.operand_source = BarrierSite::OperandSource::StaticM0Literal32;
+      site.scope = BarrierSite::Scope::Workgroup;
+      site.participant_encoding = BarrierSite::ParticipantEncoding::M0Literal32;
       site.participant_count = participant_count;
       site.participant_setup_text_offset = previous_text_offset;
       site.participant_setup_file_offset = kernel.text_file_offset + previous_text_offset;
       site.participant_setup_literal = setup_literal;
     }
   }
-  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
+  sites.add_semantic(make_program_site(kernel.id, std::move(site)));
 }
 
-void record_fence_site(const Instruction &inst, ConSanProgramContainer &kernel,
-                       ConSanProgramSiteArena &sites, uint64_t instruction_text_offset,
-                       rj_code_arch_t arch) {
+void record_fence_site(const Instruction &inst, ProgramContainer &kernel, ProgramSiteArena &sites,
+                       uint64_t instruction_text_offset, rj_code_arch_t arch) {
   if (!is_fence_like(inst.mnemonic()))
     return;
 
-  ConSanFenceSite site;
+  FenceSite site;
   site.text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.mnemonic = std::string(inst.mnemonic());
-  const ConSanCacheOperationEncoding cache = classify_consan_cache_operation(inst.mnemonic(), arch);
+  const CacheOperationEncoding cache = classify_cache_operation(inst.mnemonic(), arch);
   site.cache_operation = cache.operation;
   site.ordinary_acquire_mutation_supported = cache.ordinary_acquire_mutation_supported;
-  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
+  sites.add_semantic(make_program_site(kernel.id, std::move(site)));
 }
 
-void apply_common_vector_memory_encoding(ConSanDecodedMemoryOperands &operands,
-                                         const ConSanVectorMemoryEncoding &encoding) {
+void apply_common_vector_memory_encoding(DecodedMemoryOperands &operands,
+                                         const VectorMemoryEncoding &encoding) {
   operands.raw_saddr = encoding.raw_saddr;
   operands.raw_scale_offset = encoding.raw_scale_offset;
   operands.raw_vaddr = encoding.raw_vaddr;
@@ -1213,15 +1210,15 @@ void apply_common_vector_memory_encoding(ConSanDecodedMemoryOperands &operands,
   operands.scalar_address_sgpr = encoding.scalar_provenance_sgpr;
 }
 
-void apply_flat_memory_encoding(ConSanProgramSite &site, const ConSanVectorMemoryEncoding &encoding,
+void apply_flat_memory_encoding(ProgramSite &site, const VectorMemoryEncoding &encoding,
                                 const FlatPointerTracker &tracker) {
   apply_common_vector_memory_encoding(site.operands, encoding);
   site.operands.raw_op = encoding.raw_op;
   site.operands.raw_segment = encoding.raw_segment;
-  if (encoding.encoded_segment == ConSanEncodedFlatSegment::Private)
-    site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Private;
-  else if (encoding.encoded_segment == ConSanEncodedFlatSegment::Global)
-    site.flat_address_space_hint = ConSanFlatAddressSpaceHint::Global;
+  if (encoding.encoded_segment == EncodedFlatSegment::Private)
+    site.flat_address_space_hint = FlatAddressSpaceHint::Private;
+  else if (encoding.encoded_segment == EncodedFlatSegment::Global)
+    site.flat_address_space_hint = FlatAddressSpaceHint::Global;
   if (encoding.scalar_provenance_sgpr) {
     if (const auto hint = pair_hint_at(tracker.sgprs, *encoding.scalar_provenance_sgpr))
       site.flat_address_space_hint = flat_pair_hint_to_public(*hint);
@@ -1229,34 +1226,34 @@ void apply_flat_memory_encoding(ConSanProgramSite &site, const ConSanVectorMemor
 }
 
 void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                      ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
+                      ProgramContainer &kernel, ProgramSiteArena &sites,
                       uint64_t instruction_text_offset, rj_code_arch_t arch,
                       std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!mnemonic.starts_with("flat_"))
     return;
 
-  ConSanProgramSite site;
-  site.origin = ConSanAccessOrigin::Flat;
+  ProgramSite site;
+  site.origin = AccessOrigin::Flat;
   site.kind = flat_access_kind(mnemonic);
   site.physical_id.original_text_offset = instruction_text_offset;
   site.decoded_site().text_offset = instruction_text_offset;
   site.decoded_site().file_offset = kernel.text_file_offset + instruction_text_offset;
   site.decoded_site().size = static_cast<uint32_t>(inst.size());
-  site.decoded_width_bits = classify_consan_atomic_width_bits(mnemonic, arch);
+  site.decoded_width_bits = classify_atomic_width_bits(mnemonic, arch);
   site.flat_address_space_hint = flat_address_space_hint(inst, tracker);
-  if (site.kind == ConSanLdsAccessKind::Read) {
+  if (site.kind == LdsAccessKind::Read) {
     site.operands.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
-  } else if (site.kind == ConSanLdsAccessKind::Write) {
+  } else if (site.kind == LdsAccessKind::Write) {
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
     site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
-  } else if (site.kind == ConSanLdsAccessKind::Atomic) {
+  } else if (site.kind == LdsAccessKind::Atomic) {
     site.operands.address_vgpr = vgpr_index(inst.src_operand(0));
     site.operands.data_vgpr = vgpr_index(inst.src_operand(1));
   }
-  const ConSanVectorMemoryDecode raw = decode_consan_flat_memory_encoding(instruction_bytes, arch);
-  if (raw.status == ConSanTargetDecodeStatus::Decoded)
+  const VectorMemoryDecode raw = decode_flat_memory_encoding(instruction_bytes, arch);
+  if (raw.status == TargetDecodeStatus::Decoded)
     apply_flat_memory_encoding(site, raw.encoding, tracker);
   count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
   site.decoded_site().mnemonic = std::string(mnemonic);
@@ -1284,21 +1281,20 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   return 32u;
 }
 
-void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
-                                  const ConSanVectorMemoryEncoding &encoding) {
+void apply_vector_memory_encoding(OrdinaryMemorySite &site, const VectorMemoryEncoding &encoding) {
   apply_common_vector_memory_encoding(site, encoding);
   site.raw_nv = encoding.raw_nv;
   site.raw_sve = encoding.raw_sve;
-  site.scope = encoding.scope_follows_address_space
-                   ? (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group
-                          ? ConSanMemoryScope::Workgroup
-                          : ConSanMemoryScope::Agent)
-                   : encoding.scope;
+  site.scope =
+      encoding.scope_follows_address_space
+          ? (site.flat_address_space_hint == FlatAddressSpaceHint::Group ? MemoryScope::Workgroup
+                                                                         : MemoryScope::Agent)
+          : encoding.scope;
   site.workgroup_acquire_ordering = encoding.workgroup_acquire_ordering;
   site.address_vgpr = static_cast<uint16_t>(encoding.raw_vaddr);
   if (encoding.scalar_provenance_sgpr)
     site.scalar_address_sgpr = encoding.scalar_provenance_sgpr;
-  if (site.operation == ConSanOrdinaryMemoryOperation::Load) {
+  if (site.operation == OrdinaryMemoryOperation::Load) {
     site.destination_vgpr = static_cast<uint16_t>(encoding.raw_vdst);
     site.data_vgpr = site.destination_vgpr;
     site.raw_vdata = encoding.raw_vdst;
@@ -1308,45 +1304,43 @@ void apply_vector_memory_encoding(ConSanOrdinaryMemorySite &site,
   }
 }
 
-void apply_vector_memory_decode(ConSanOrdinaryMemorySite &site,
-                                const ConSanVectorMemoryDecode &raw) {
-  if (raw.status == ConSanTargetDecodeStatus::UnsupportedArchitecture) {
-    site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
+void apply_vector_memory_decode(OrdinaryMemorySite &site, const VectorMemoryDecode &raw) {
+  if (raw.status == TargetDecodeStatus::UnsupportedArchitecture) {
+    site.support_reason = OrdinaryMemorySupportReason::UnsupportedArchitecture;
     return;
   }
-  if (raw.status == ConSanTargetDecodeStatus::UnsupportedEncodingSize || !raw.encoding.exact_size) {
-    site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
+  if (raw.status == TargetDecodeStatus::UnsupportedEncodingSize || !raw.encoding.exact_size) {
+    site.support_reason = OrdinaryMemorySupportReason::UnsupportedEncodingSize;
     return;
   }
   apply_vector_memory_encoding(site, raw.encoding);
   if (!raw.encoding.ordinary_well_formed)
-    site.support_reason = ConSanOrdinaryMemorySupportReason::MalformedEncoding;
+    site.support_reason = OrdinaryMemorySupportReason::MalformedEncoding;
   else if (raw.encoding.ordinary_requires_complete_registers && !site.address_vgpr)
-    site.support_reason = ConSanOrdinaryMemorySupportReason::MissingAddressVgpr;
+    site.support_reason = OrdinaryMemorySupportReason::MissingAddressVgpr;
   else if (raw.encoding.ordinary_requires_complete_registers &&
-           site.operation == ConSanOrdinaryMemoryOperation::Load && !site.destination_vgpr)
-    site.support_reason = ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr;
+           site.operation == OrdinaryMemoryOperation::Load && !site.destination_vgpr)
+    site.support_reason = OrdinaryMemorySupportReason::MissingDestinationVgpr;
   else if (raw.encoding.ordinary_requires_complete_registers &&
-           site.operation == ConSanOrdinaryMemoryOperation::Store && !site.data_vgpr)
-    site.support_reason = ConSanOrdinaryMemorySupportReason::MissingValueVgpr;
+           site.operation == OrdinaryMemoryOperation::Store && !site.data_vgpr)
+    site.support_reason = OrdinaryMemorySupportReason::MissingValueVgpr;
   else
     site.support_reason = raw.encoding.ordinary_mutation_supported
-                              ? ConSanOrdinaryMemorySupportReason::Supported
-                              : ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
+                              ? OrdinaryMemorySupportReason::Supported
+                              : OrdinaryMemorySupportReason::SupportedSynchronizationOnly;
 }
 
 void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                                 ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
+                                 ProgramContainer &kernel, ProgramSiteArena &sites,
                                  uint64_t instruction_text_offset, rj_code_arch_t arch,
                                  std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!is_bounded_ordinary_memory_instruction(mnemonic))
     return;
 
-  ConSanOrdinaryMemorySite site;
-  site.operation = mnemonic.find("load") != std::string_view::npos
-                       ? ConSanOrdinaryMemoryOperation::Load
-                       : ConSanOrdinaryMemoryOperation::Store;
+  OrdinaryMemorySite site;
+  site.operation = mnemonic.find("load") != std::string_view::npos ? OrdinaryMemoryOperation::Load
+                                                                   : OrdinaryMemoryOperation::Store;
   site.text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
@@ -1358,12 +1352,11 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
   // Operand objects remain useful on unsupported architectures, while target
   // operations provide the authoritative bounded decode.
   if (mnemonic.starts_with("buffer_")) {
-    const ConSanBufferMemoryDecode raw =
-        decode_consan_buffer_memory_encoding(instruction_bytes, arch);
-    if (raw.status == ConSanTargetDecodeStatus::UnsupportedArchitecture) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
-    } else if (raw.status == ConSanTargetDecodeStatus::UnsupportedEncodingSize) {
-      site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
+    const BufferMemoryDecode raw = decode_buffer_memory_encoding(instruction_bytes, arch);
+    if (raw.status == TargetDecodeStatus::UnsupportedArchitecture) {
+      site.support_reason = OrdinaryMemorySupportReason::UnsupportedArchitecture;
+    } else if (raw.status == TargetDecodeStatus::UnsupportedEncodingSize) {
+      site.support_reason = OrdinaryMemorySupportReason::UnsupportedEncodingSize;
     } else {
       site.raw_ioffset = raw.encoding.raw_ioffset;
       site.raw_scope = raw.encoding.raw_scope;
@@ -1376,7 +1369,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
       site.raw_vaddr = raw.encoding.raw_vaddr;
       site.scalar_address_sgpr = raw.encoding.address_sgpr;
       site.address_vgpr = raw.encoding.address_vgpr;
-      if (site.operation == ConSanOrdinaryMemoryOperation::Load) {
+      if (site.operation == OrdinaryMemoryOperation::Load) {
         site.destination_vgpr = raw.encoding.data_vgpr;
         site.data_vgpr = site.destination_vgpr;
       } else {
@@ -1384,14 +1377,14 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
       }
       site.raw_vdata = raw.encoding.data_vgpr;
       site.support_reason = raw.encoding.well_formed
-                                ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
-                                : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
+                                ? OrdinaryMemorySupportReason::SupportedSynchronizationOnly
+                                : OrdinaryMemorySupportReason::MalformedEncoding;
     }
-    sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
+    sites.add_semantic(make_program_site(kernel.id, std::move(site)));
     return;
   }
 
-  if (site.operation == ConSanOrdinaryMemoryOperation::Load) {
+  if (site.operation == OrdinaryMemoryOperation::Load) {
     site.destination_vgpr = vgpr_index(inst.dst_operand(0));
     site.address_vgpr = vgpr_index(inst.src_operand(0));
     if (mnemonic.starts_with("global_") && inst.num_src_operands() > 1)
@@ -1405,29 +1398,29 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
   }
 
   if (mnemonic.starts_with("flat_")) {
-    apply_vector_memory_decode(site, decode_consan_flat_memory_encoding(instruction_bytes, arch));
-    sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
+    apply_vector_memory_decode(site, decode_flat_memory_encoding(instruction_bytes, arch));
+    sites.add_semantic(make_program_site(kernel.id, std::move(site)));
     return;
   }
 
-  apply_vector_memory_decode(site, decode_consan_global_memory_encoding(instruction_bytes, arch));
-  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
+  apply_vector_memory_decode(site, decode_global_memory_encoding(instruction_bytes, arch));
+  sites.add_semantic(make_program_site(kernel.id, std::move(site)));
 }
 
 void record_atomic_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                        ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
+                        ProgramContainer &kernel, ProgramSiteArena &sites,
                         uint64_t instruction_text_offset, rj_code_arch_t arch,
                         std::span<const uint8_t> instruction_bytes) {
   if (!is_atomic_instruction(inst))
     return;
 
   const std::string_view mnemonic = inst.mnemonic();
-  ConSanAtomicSite site;
+  AtomicSite site;
   site.address_space_hint = atomic_address_space_hint(inst, tracker);
   site.text_offset = instruction_text_offset;
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
-  site.width_bits = classify_consan_atomic_width_bits(mnemonic, arch);
+  site.width_bits = classify_atomic_width_bits(mnemonic, arch);
   site.destination_vgpr = vgpr_index(inst.dst_operand(0));
   site.address_vgpr = vgpr_index(inst.src_operand(0));
   site.data_vgpr = vgpr_index(inst.src_operand(1));
@@ -1439,7 +1432,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   }
   site.returns_old_value = atomic_returns_from_mnemonic(mnemonic);
 
-  static_cast<void>(decode_consan_atomic_site_encoding(site, mnemonic, instruction_bytes, arch));
+  static_cast<void>(decode_atomic_site_encoding(site, mnemonic, instruction_bytes, arch));
 
   // Some generated decoder profiles model a returning atomic's encoded VDST
   // only as an in/out source operand. The raw target-native field is still the
@@ -1451,13 +1444,13 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   }
 
   site.mnemonic = std::string(mnemonic);
-  sites.add_semantic(make_consan_program_site(kernel.id, std::move(site)));
+  sites.add_semantic(make_program_site(kernel.id, std::move(site)));
 }
 
 void decode_container_stats(
     std::span<const uint8_t> code_object_bytes, Decoder &decoder, rj_code_arch_t arch,
-    ConSanProgramContainer &kernel, ConSanProgramSiteArena &sites,
-    std::vector<std::string> &warnings, const FlatPointerTracker *entry_tracker = nullptr,
+    ProgramContainer &kernel, ProgramSiteArena &sites, std::vector<std::string> &warnings,
+    const FlatPointerTracker *entry_tracker = nullptr,
     const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
     std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
   const size_t first_access_site = sites.access_sites().size();
@@ -1555,7 +1548,7 @@ void decode_container_stats(
     }
 
     ++kernel.stats.instruction_count;
-    const ConSanTargetProfile *profile = consan_target_profile(arch);
+    const TargetProfile *profile = target_profile(arch);
     if (profile && profile->has_cluster_facilities) {
       for (int operand_index = 0; operand_index < inst->num_src_operands(); ++operand_index) {
         const Operand *operand = inst->src_operand(operand_index);
@@ -1579,9 +1572,9 @@ void decode_container_stats(
     if (const auto direct_lds_kind = record_direct_lds_transfer_site(
             *inst, instruction_bytes, kernel, sites,
             kernel.entry_text_offset + static_cast<uint64_t>(offset), arch)) {
-      if (*direct_lds_kind == ConSanLdsAccessKind::Read)
+      if (*direct_lds_kind == LdsAccessKind::Read)
         ++kernel.stats.lds_read_count;
-      else if (*direct_lds_kind == ConSanLdsAccessKind::Write)
+      else if (*direct_lds_kind == LdsAccessKind::Write)
         ++kernel.stats.lds_write_count;
     }
     record_lds_site(*inst, kernel, sites, kernel.entry_text_offset + static_cast<uint64_t>(offset));
@@ -1615,25 +1608,24 @@ void decode_container_stats(
   const bool lds_load_api = kernel.name.find("lds_load_at") != std::string::npos;
   const bool lds_store_api = kernel.name.find("lds_store_at") != std::string::npos;
   if (lds_load_api || lds_store_api) {
-    const ConSanLdsAccessKind expected_kind =
-        lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
+    const LdsAccessKind expected_kind = lds_load_api ? LdsAccessKind::Read : LdsAccessKind::Write;
     const auto terminal = std::ranges::find_if(
         sites.access_sites().rbegin(), sites.access_sites().rend(), [&](const auto &site) {
-          return site.container == kernel.id && site.origin == ConSanAccessOrigin::Flat &&
+          return site.container == kernel.id && site.origin == AccessOrigin::Flat &&
                  site.kind == expected_kind;
         });
     const auto first = sites.access_sites().begin() + first_access_site;
     if (terminal.base() > first &&
-        (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
-         terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
-      if (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
+        (terminal->flat_address_space_hint == FlatAddressSpaceHint::Unknown ||
+         terminal->flat_address_space_hint == FlatAddressSpaceHint::MaybePrivate)) {
+      if (terminal->flat_address_space_hint == FlatAddressSpaceHint::Unknown)
         --kernel.stats.flat_unknown_hint_count;
       else
         --kernel.stats.flat_maybe_private_hint_count;
       // Symbolized hip-moi helpers carry an explicit API contract: their
       // terminal load/store is the source-level `*ptr` LDS access. Treat only
       // that dereference as likely-group; strict provenance still excludes it.
-      terminal->flat_address_space_hint = ConSanFlatAddressSpaceHint::MaybeGroup;
+      terminal->flat_address_space_hint = FlatAddressSpaceHint::MaybeGroup;
       ++kernel.stats.flat_maybe_group_hint_count;
     }
   }
@@ -1648,9 +1640,9 @@ void decode_container_stats(
 // validated kernel CFG owner.
 void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                        rj_code_arch_t arch,
-                                       std::span<const ConSanPreappliedCodeRange> preapplied_ranges,
+                                       std::span<const PreappliedCodeRange> preapplied_ranges,
                                        ProgramInventoryBuilder &inventory) {
-  const std::span<ConSanProgramContainer> containers = inventory.containers();
+  const std::span<ProgramContainer> containers = inventory.containers();
   const bool needs_pruning = std::ranges::any_of(containers, [](const auto &container) {
     return container.decoded && container.code_size_inferred_from_zero;
   });
@@ -1659,11 +1651,11 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
 
   const bool has_undecoded_container =
       std::ranges::any_of(containers, [](const auto &container) { return !container.decoded; });
-  consan_detail::ConSanCfgBuildInputs cfg;
+  detail::CfgBuildInputs cfg;
   if (!has_undecoded_container) {
     // Preserve the established whole-program proof exactly for an unscoped
     // inventory, including aliased function-symbol range semantics.
-    cfg = consan_detail::build_consan_cfg_inputs(code_object, containers, preapplied_ranges);
+    cfg = detail::build_cfg_inputs(code_object, containers, preapplied_ranges);
   } else {
     // An allowlist deliberately leaves sibling kernel containers undecoded.
     // They have no sites to prune, so including their inferred symbol ranges
@@ -1673,7 +1665,7 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
     cfg.leaders.reserve(containers.size() + 2u * preapplied_ranges.size());
     cfg.kernel_entries.reserve(containers.size());
     cfg.code_ranges.reserve(containers.size() + preapplied_ranges.size());
-    for (const ConSanProgramContainer &container : containers) {
+    for (const ProgramContainer &container : containers) {
       if (container.is_kernel() && container.has_text_range)
         cfg.kernel_entries.push_back(container.entry_text_offset);
       if (!container.decoded || !container.has_text_range)
@@ -1683,7 +1675,7 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
         cfg.code_ranges.push_back(
             {.start_offset = container.entry_text_offset, .size = container.code_size});
     }
-    for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+    for (const PreappliedCodeRange &range : preapplied_ranges) {
       cfg.leaders.push_back(range.text_offset);
       if (range.continuation_text_offset)
         cfg.leaders.push_back(*range.continuation_text_offset);
@@ -1702,13 +1694,13 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_set<const BasicBlock *> owned_blocks;
-  for (const ConSanProgramContainer &kernel : containers) {
+  for (const ProgramContainer &kernel : containers) {
     if (!kernel.is_kernel() || (has_undecoded_container && !kernel.decoded))
       continue;
     if (!kernel.has_text_range)
       continue;
     std::vector<uint64_t> additional_entries;
-    for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+    for (const PreappliedCodeRange &range : preapplied_ranges) {
       if (range.kernel_name != kernel.name)
         continue;
       if (block_for_offset(block_index, range.text_offset) != nullptr)
@@ -1732,11 +1724,11 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   // decoded site is dead. Preserve the previous conservative inventory.
   if (owned_blocks.empty())
     return;
-  const auto inferred_container_range = [&](const ConSanProgramContainerId &reference) {
+  const auto inferred_container_range = [&](const ProgramContainerId &reference) {
     return reference.valid() && reference.ordinal < containers.size() &&
            containers[reference.ordinal].code_size_inferred_from_zero;
   };
-  inventory.erase_sites_if([&](const ConSanProgramSite &site) {
+  inventory.erase_sites_if([&](const ProgramSite &site) {
     if (!inferred_container_range(site.container))
       return false;
     const BasicBlock *block = block_for_offset(block_index, site.text_offset());
@@ -1757,13 +1749,10 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   return {};
 }
 
-void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_object_bytes,
-                                                const AmdGpuCodeObject &code_object,
-                                                rj_code_arch_t arch,
-                                                std::span<ConSanProgramContainer> kernels,
-                                                std::span<ConSanProgramContainer> functions,
-                                                ConSanProgramSiteArena &sites,
-                                                std::vector<std::string> &warnings) {
+void relay_flat_pointer_provenance_across_calls(
+    std::span<const uint8_t> code_object_bytes, const AmdGpuCodeObject &code_object,
+    rj_code_arch_t arch, std::span<ProgramContainer> kernels, std::span<ProgramContainer> functions,
+    ProgramSiteArena &sites, std::vector<std::string> &warnings) {
   // This refinement only re-decodes and replaces function-site inventory;
   // kernel sites remain owned by the primary decode. With no non-kernel
   // function container there is consequently no output this relay can
@@ -1806,18 +1795,18 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
   if (call_targets.empty())
     return;
 
-  const std::vector<ConSanProgramContainer> original_functions(functions.begin(), functions.end());
-  const ConSanProgramSiteArena original_sites = sites;
+  const std::vector<ProgramContainer> original_functions(functions.begin(), functions.end());
+  const ProgramSiteArena original_sites = sites;
   std::unordered_map<uint64_t, FlatPointerTracker> entry_trackers;
   constexpr uint32_t kMaxRelayPasses = 6u;
   for (uint32_t pass = 0; pass < kMaxRelayPasses; ++pass) {
     std::unordered_map<uint64_t, FlatPointerTracker> call_states;
     std::vector<std::string> pass_warnings;
-    ConSanProgramSiteArena pass_sites;
-    for (const ConSanProgramContainer &kernel : kernels) {
-      ConSanProgramContainer decoded;
-      decoded.kind = ConSanProgramContainerKind::Kernel;
-      ConSanProgramSiteArena ignored_sites;
+    ProgramSiteArena pass_sites;
+    for (const ProgramContainer &kernel : kernels) {
+      ProgramContainer decoded;
+      decoded.kind = ProgramContainerKind::Kernel;
+      ProgramSiteArena ignored_sites;
       decoded.name = kernel.name;
       decoded.entry_text_offset = kernel.entry_text_offset;
       decoded.text_file_offset = kernel.text_file_offset;
@@ -1832,10 +1821,10 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
         return;
       }
     }
-    for (ConSanProgramContainer &function : functions) {
-      ConSanProgramContainer decoded;
+    for (ProgramContainer &function : functions) {
+      ProgramContainer decoded;
       decoded.id = function.id;
-      decoded.kind = ConSanProgramContainerKind::Function;
+      decoded.kind = ProgramContainerKind::Function;
       decoded.name = function.name;
       decoded.entry_text_offset = function.entry_text_offset;
       decoded.text_file_offset = function.text_file_offset;
@@ -1890,7 +1879,7 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
   return std::string(label) + ": " + std::to_string(count);
 }
 
-[[nodiscard]] std::string preflight_summary(const ConSanProgramContainer &kernel) {
+[[nodiscard]] std::string preflight_summary(const ProgramContainer &kernel) {
   std::string summary;
   for (const std::string &reason : kernel.preflight_reasons) {
     if (!summary.empty())
@@ -1900,7 +1889,7 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
   return summary;
 }
 
-void preflight_kernel(ConSanProgramContainer &kernel, std::vector<std::string> &warnings) {
+void preflight_kernel(ProgramContainer &kernel, std::vector<std::string> &warnings) {
   std::vector<std::string> blockers;
   if (!kernel.has_text_range)
     blockers.emplace_back("function text range unavailable");
@@ -1916,7 +1905,7 @@ void preflight_kernel(ConSanProgramContainer &kernel, std::vector<std::string> &
         count_reason("unsupported or unclassified ds_* instructions", kernel.stats.ds_other_count));
   const uint64_t supported_lds_sites = kernel.stats.lds_read_count + kernel.stats.lds_write_count;
   if (!blockers.empty()) {
-    kernel.preflight_action = ConSanPreflightAction::Blocked;
+    kernel.preflight_action = PreflightAction::Blocked;
     kernel.preflight_reasons = std::move(blockers);
     warnings.emplace_back("ConSan preflight blocked kernel '" + kernel.name +
                           "': " + preflight_summary(kernel));
@@ -1924,7 +1913,7 @@ void preflight_kernel(ConSanProgramContainer &kernel, std::vector<std::string> &
   }
 
   if (supported_lds_sites == 0) {
-    kernel.preflight_action = ConSanPreflightAction::Skip;
+    kernel.preflight_action = PreflightAction::Skip;
     kernel.preflight_reasons.emplace_back("no supported non-atomic LDS reads or writes");
     if (kernel.stats.lds_atomic_count > 0)
       kernel.preflight_reasons.push_back(
@@ -1946,7 +1935,7 @@ void preflight_kernel(ConSanProgramContainer &kernel, std::vector<std::string> &
     return;
   }
 
-  kernel.preflight_action = ConSanPreflightAction::Candidate;
+  kernel.preflight_action = PreflightAction::Candidate;
   kernel.preflight_reasons.push_back(
       count_reason("supported LDS reads", kernel.stats.lds_read_count));
   kernel.preflight_reasons.push_back(

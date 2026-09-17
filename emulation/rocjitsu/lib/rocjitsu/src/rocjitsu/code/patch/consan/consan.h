@@ -34,9 +34,8 @@
 #include "rocjitsu/code/patch/consan/consan_access_shape.h"
 #include "rocjitsu/code/patch/consan/consan_atomic_classifier.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
-#include "rocjitsu/code/patch/consan/consan_moi_dispatch_identity_source.h"
-#include "rocjitsu/code/patch/consan/consan_moi_dispatch_prologue_effect.h"
-#include "rocjitsu/code/patch/consan/consan_moi_entry_scalar_backup.h"
+#include "rocjitsu/code/patch/consan/consan_dispatch_prologue_effect.h"
+#include "rocjitsu/code/patch/consan/consan_entry_scalar_backup.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis_encoding.h"
 #include "rocjitsu/code/patch/consan/consan_scalar_vcc_spill.h"
 #include "rocjitsu/code/rj_code.h"
@@ -45,13 +44,11 @@
 
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_vgpr_state_effect.h.inc"
+#include "rocjitsu/code/patch/consan/consan_vgpr_state_effect.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_private_state_layout.h.inc"
+#include "rocjitsu/code/patch/consan/consan_private_state_layout.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_request_contract.h.inc"
-
-#include "rocjitsu/code/patch/consan/consan_moi_workgroup_shadow_layout.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_code_object_types.h.inc"
 
@@ -67,27 +64,4 @@
 
 #include "rocjitsu/code/patch/consan/consan_result.h.inc"
 
-/// Bridge runtime option identities to the flattened public capability
-/// matrix. Invalid or disabled option combinations are outside that contract.
-[[nodiscard]] constexpr std::optional<ConSanCapabilityEngine>
-consan_capability_engine(ConSanFlavor flavor, ConSanMoiEngine moi_engine) {
-  switch (flavor) {
-  case ConSanFlavor::SuperCollider:
-    return ConSanCapabilityEngine::SuperCollider;
-  case ConSanFlavor::Moi:
-    switch (moi_engine) {
-    case ConSanMoiEngine::RecordReplay:
-      return ConSanCapabilityEngine::RecordReplay;
-    case ConSanMoiEngine::Sampled:
-      return ConSanCapabilityEngine::Sampled;
-    case ConSanMoiEngine::InlineShadow:
-      return ConSanCapabilityEngine::InlineShadow;
-    }
-    return std::nullopt;
-  case ConSanFlavor::None:
-    return std::nullopt;
-  }
-  return std::nullopt;
-}
-
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

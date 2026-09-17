@@ -1,0 +1,396 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file consan_target_address.cpp
+/// @brief Target-aware planning and emission of normalized ConSan atomic addresses.
+
+#include "rocjitsu/code/patch/consan/consan_instrumentation.h"
+#include "rocjitsu/code/patch/consan/consan_report_common_contract.h"
+
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
+
+#include <bit>
+#include <cstdint>
+#include <optional>
+#include <string_view>
+#include <vector>
+
+namespace rocjitsu::consan {
+
+namespace {
+
+constexpr auto kAtomicAddressSupports = make_enum_vocabulary(
+    "unknown", enum_entry(AtomicAddressSupport::Supported, "supported"),
+    enum_entry(AtomicAddressSupport::UnsupportedArchitecture, "unsupported-architecture"),
+    enum_entry(AtomicAddressSupport::UnsupportedAddressKind, "unsupported-address-kind"),
+    enum_entry(AtomicAddressSupport::UnsupportedWidth, "unsupported-width"),
+    enum_entry(AtomicAddressSupport::UnsupportedEncoding, "unsupported-encoding"),
+    enum_entry(AtomicAddressSupport::MissingAddressOperands, "missing-address-operands"),
+    enum_entry(AtomicAddressSupport::UnsupportedInputWidth, "unsupported-input-width"),
+    enum_entry(AtomicAddressSupport::UnsupportedOffset, "unsupported-offset"),
+    enum_entry(AtomicAddressSupport::UnsupportedScope, "unsupported-scope"),
+    enum_entry(AtomicAddressSupport::UnsupportedResourcePlan, "unsupported-resource-plan"),
+    enum_entry(AtomicAddressSupport::UnsupportedScratchShape, "unsupported-scratch-shape"),
+    enum_entry(AtomicAddressSupport::ResultAddressAlias, "result-address-alias"),
+    enum_entry(AtomicAddressSupport::ScratchOperandAlias, "scratch-operand-alias"));
+
+} // namespace
+
+std::string_view atomic_address_support_name(AtomicAddressSupport support) {
+  return kAtomicAddressSupports.name(support);
+}
+
+AtomicAddressPlan plan_atomic_address(const AtomicLoweringForm &form, uint16_t scratch_vgpr,
+                                      uint16_t scratch_vgpr_count,
+                                      RegisterAllocationSource resource_source,
+                                      bool allow_post_guest_spill_operand_overlap) {
+  AtomicAddressPlan plan;
+  plan.scratch_vgpr = scratch_vgpr;
+  plan.scratch_vgpr_count = scratch_vgpr_count;
+  plan.resource_source = resource_source;
+  const auto reject = [&](AtomicAddressSupport support) {
+    plan.kind = AtomicAddressKind::Unsupported;
+    plan.support = support;
+    return plan;
+  };
+  const auto overlaps = [](uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
+                           uint16_t rhs_count) {
+    return static_cast<uint32_t>(lhs_base) + lhs_count > rhs_base &&
+           static_cast<uint32_t>(rhs_base) + rhs_count > lhs_base;
+  };
+  const auto usable_resource_source = [](RegisterAllocationSource source) {
+    return source == RegisterAllocationSource::Explicit ||
+           source == RegisterAllocationSource::LivenessDead ||
+           source == RegisterAllocationSource::DescriptorGrowth ||
+           source == RegisterAllocationSource::SpillRequired;
+  };
+  if (!usable_resource_source(resource_source))
+    return reject(AtomicAddressSupport::UnsupportedResourcePlan);
+  if (form.kind == AtomicLoweringFormKind::Count || form.value_width_bits == 0u ||
+      form.value_register_count == 0u || form.data_register_count == 0u ||
+      form.address_vgpr_count == 0u)
+    return reject(AtomicAddressSupport::UnsupportedEncoding);
+
+  const auto valid_scratch = [&](uint16_t compact_count) {
+    return (scratch_vgpr_count == compact_count || scratch_vgpr_count >= 7u) &&
+           static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count <= 256u;
+  };
+  const auto result_tail = [&] {
+    return static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u);
+  };
+  const auto overlaps_operands = [&](uint16_t checked_scratch_count, bool include_address) {
+    return (include_address && overlaps(scratch_vgpr, checked_scratch_count, form.address_vgpr,
+                                        form.address_vgpr_count)) ||
+           overlaps(scratch_vgpr, scratch_vgpr_count, form.data_vgpr, form.data_register_count) ||
+           (form.destination_vgpr && form.destination_register_count != 0u &&
+            overlaps(scratch_vgpr, scratch_vgpr_count, *form.destination_vgpr,
+                     form.destination_register_count));
+  };
+  const bool returned_value_aliases_address =
+      form.returns_old_value && form.destination_vgpr &&
+      overlaps(form.address_vgpr, form.address_vgpr_count, *form.destination_vgpr,
+               form.destination_register_count);
+
+  if (form.kind == AtomicLoweringFormKind::LdsVectorOffset) {
+    if ((scratch_vgpr_count != 5u && scratch_vgpr_count < 7u) ||
+        static_cast<uint32_t>(scratch_vgpr) + scratch_vgpr_count > 256u)
+      return reject(AtomicAddressSupport::UnsupportedScratchShape);
+    const uint16_t result_address_vgpr = result_tail();
+    if (overlaps(result_address_vgpr, 2u, form.address_vgpr, form.address_vgpr_count))
+      return reject(AtomicAddressSupport::ResultAddressAlias);
+    if (!allow_post_guest_spill_operand_overlap &&
+        overlaps_operands(static_cast<uint16_t>(scratch_vgpr_count - 2u), true))
+      return reject(AtomicAddressSupport::ScratchOperandAlias);
+    plan.kind = AtomicAddressKind::LdsByteOffsetToken;
+    plan.support = AtomicAddressSupport::Supported;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.signed_byte_offset = form.signed_byte_offset;
+    plan.result_address_vgpr = result_address_vgpr;
+    plan.result_address_vgpr_count = 2u;
+    return plan;
+  }
+  if (form.kind == AtomicLoweringFormKind::BufferResourceVectorOffset) {
+    if (!form.scalar_base_sgpr)
+      return reject(AtomicAddressSupport::MissingAddressOperands);
+    if (!valid_scratch(5u))
+      return reject(AtomicAddressSupport::UnsupportedScratchShape);
+    const uint16_t result_address_vgpr = result_tail();
+    if (!allow_post_guest_spill_operand_overlap && overlaps_operands(0u, false))
+      return reject(AtomicAddressSupport::ScratchOperandAlias);
+    plan.kind = AtomicAddressKind::BufferResourceMaterialized;
+    plan.support = AtomicAddressSupport::Supported;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.scalar_base_sgpr = form.scalar_base_sgpr;
+    plan.scalar_offset_sgpr = form.scalar_offset_sgpr;
+    plan.signed_byte_offset = form.signed_byte_offset;
+    plan.result_address_vgpr = result_address_vgpr;
+    plan.result_address_vgpr_count = 2u;
+    return plan;
+  }
+  if (form.kind == AtomicLoweringFormKind::FlatScalarVectorAddress ||
+      form.kind == AtomicLoweringFormKind::GlobalScalarVectorAddress) {
+    if (!form.scalar_base_sgpr)
+      return reject(AtomicAddressSupport::MissingAddressOperands);
+    if (form.kind == AtomicLoweringFormKind::FlatScalarVectorAddress && form.returns_old_value)
+      return reject(AtomicAddressSupport::ResultAddressAlias);
+    if (!valid_scratch(5u))
+      return reject(AtomicAddressSupport::UnsupportedScratchShape);
+    const uint16_t result_address_vgpr = result_tail();
+    if (overlaps(result_address_vgpr, 2u, form.address_vgpr, form.address_vgpr_count))
+      return reject(AtomicAddressSupport::ResultAddressAlias);
+    if (!allow_post_guest_spill_operand_overlap &&
+        overlaps_operands(static_cast<uint16_t>(scratch_vgpr_count - 2u), true))
+      return reject(AtomicAddressSupport::ScratchOperandAlias);
+    plan.kind = AtomicAddressKind::VglobalMaterialized;
+    plan.support = AtomicAddressSupport::Supported;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    if (form.scale_vector_offset)
+      plan.input_address_scale = static_cast<uint16_t>(form.value_width_bits / 8u);
+    plan.sign_extend_vector_offset = form.sign_extend_vector_offset;
+    plan.scalar_base_sgpr = form.scalar_base_sgpr;
+    plan.signed_byte_offset = form.signed_byte_offset;
+    plan.result_address_vgpr = result_address_vgpr;
+    plan.result_address_vgpr_count = 2u;
+    return plan;
+  }
+
+  if (form.kind == AtomicLoweringFormKind::FlatVectorAddress) {
+    const uint16_t minimum_scratch_count = returned_value_aliases_address ? 5u : 3u;
+    if (!valid_scratch(minimum_scratch_count))
+      return reject(AtomicAddressSupport::UnsupportedScratchShape);
+    if (!allow_post_guest_spill_operand_overlap && overlaps_operands(scratch_vgpr_count, true))
+      return reject(AtomicAddressSupport::ScratchOperandAlias);
+    plan.kind = returned_value_aliases_address ? AtomicAddressKind::FlatGuestPairMaterialized
+                                               : AtomicAddressKind::FlatGuestPair;
+    plan.support = AtomicAddressSupport::Supported;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.signed_byte_offset = 0;
+    plan.result_address_vgpr = returned_value_aliases_address
+                                   ? static_cast<uint16_t>(scratch_vgpr + scratch_vgpr_count - 2u)
+                                   : form.address_vgpr;
+    plan.result_address_vgpr_count = 2u;
+    return plan;
+  }
+
+  if (form.kind == AtomicLoweringFormKind::GlobalVectorAddress) {
+    const bool requires_materialization =
+        form.signed_byte_offset != 0 || returned_value_aliases_address;
+    const uint16_t minimum_scratch_count = requires_materialization ? 5u : 3u;
+    if (!valid_scratch(minimum_scratch_count))
+      return reject(AtomicAddressSupport::UnsupportedScratchShape);
+    if (!requires_materialization) {
+      if (!allow_post_guest_spill_operand_overlap && overlaps_operands(scratch_vgpr_count, true))
+        return reject(AtomicAddressSupport::ScratchOperandAlias);
+      plan.kind = AtomicAddressKind::VglobalGuestPair;
+      plan.support = AtomicAddressSupport::Supported;
+      plan.input_address_vgpr = form.address_vgpr;
+      plan.input_address_vgpr_count = form.address_vgpr_count;
+      plan.signed_byte_offset = 0;
+      plan.result_address_vgpr = form.address_vgpr;
+      plan.result_address_vgpr_count = 2u;
+      return plan;
+    }
+    const uint16_t result_address_vgpr = result_tail();
+    if (overlaps(result_address_vgpr, 2u, form.address_vgpr, form.address_vgpr_count))
+      return reject(AtomicAddressSupport::ResultAddressAlias);
+    if (!allow_post_guest_spill_operand_overlap &&
+        overlaps_operands(static_cast<uint16_t>(scratch_vgpr_count - 2u), true))
+      return reject(AtomicAddressSupport::ScratchOperandAlias);
+    plan.kind = AtomicAddressKind::VglobalGuestPairMaterialized;
+    plan.support = AtomicAddressSupport::Supported;
+    plan.input_address_vgpr = form.address_vgpr;
+    plan.input_address_vgpr_count = form.address_vgpr_count;
+    plan.signed_byte_offset = form.signed_byte_offset;
+    plan.result_address_vgpr = result_address_vgpr;
+    plan.result_address_vgpr_count = 2u;
+    return plan;
+  }
+  return reject(AtomicAddressSupport::UnsupportedAddressKind);
+}
+
+std::optional<std::vector<uint32_t>>
+build_atomic_address_materialization(const AtomicAddressPlan &plan, uint16_t vcc_save_sgpr,
+                                     uint16_t scc_save_sgpr, rj_code_arch_t arch) {
+  const TargetProfile *target = target_profile(arch);
+  if (target == nullptr)
+    return std::nullopt;
+  const AtomicAddressMaterializationCapability &capability = target->atomic_address_materialization;
+  if (!plan.supported())
+    return std::nullopt;
+  if (!plan.requires_materialization())
+    return std::vector<uint32_t>{};
+  // Every current recipe returns its materialized address inside the declared
+  // scratch allocation. Validate that shared layout before per-kind emission.
+  const uint32_t scratch_end = static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count;
+  const uint32_t result_end =
+      static_cast<uint32_t>(plan.result_address_vgpr) + plan.result_address_vgpr_count;
+  if (scratch_end > 256u || plan.result_address_vgpr < plan.scratch_vgpr ||
+      result_end > scratch_end)
+    return std::nullopt;
+  if (plan.kind == AtomicAddressKind::LdsByteOffsetToken) {
+    if (!capability.lds_byte_offset_token || plan.input_address_vgpr_count != 1u ||
+        plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
+        plan.signed_byte_offset < 0 || plan.signed_byte_offset > 0xff)
+      return std::nullopt;
+    std::vector<uint32_t> words;
+    words.push_back(build_v_mov_b32_e32(plan.result_address_vgpr,
+                                        vector_source_vgpr(plan.input_address_vgpr), arch));
+    if (plan.signed_byte_offset != 0) {
+      const auto add = instrumentation::build_v_add_u32_literal(
+          plan.result_address_vgpr, static_cast<uint32_t>(plan.signed_byte_offset),
+          plan.result_address_vgpr, arch);
+      if (!add)
+        return std::nullopt;
+      words.insert(words.end(), add->begin(), add->end());
+    }
+    const auto tag = build_v_mov_b32_e64_literal(
+        static_cast<uint16_t>(plan.result_address_vgpr + 1u), kLdsAddressTokenTag, arch);
+    if (!tag)
+      return std::nullopt;
+    words.insert(words.end(), tag->begin(), tag->end());
+    return words;
+  }
+  const bool buffer_resource = plan.kind == AtomicAddressKind::BufferResourceMaterialized;
+  const bool scalar_vector = plan.kind == AtomicAddressKind::VglobalMaterialized || buffer_resource;
+  const bool vector_pair = plan.kind == AtomicAddressKind::FlatGuestPairMaterialized ||
+                           plan.kind == AtomicAddressKind::VglobalGuestPairMaterialized;
+  const bool supported_scaled_vglobal =
+      capability.scaled_vglobal && plan.kind == AtomicAddressKind::VglobalMaterialized &&
+      (plan.input_address_scale == 4u || plan.input_address_scale == 8u);
+  if ((!scalar_vector && !vector_pair) || !capability.flat_and_global ||
+      (buffer_resource && !capability.buffer_resource) ||
+      plan.input_address_vgpr_count != (scalar_vector ? 1u : 2u) ||
+      (plan.input_address_scale != 1u && !supported_scaled_vglobal) ||
+      plan.result_address_vgpr_count != 2u || plan.result_address_vgpr >= 255u ||
+      vcc_save_sgpr >= 105u || scc_save_sgpr >= 106u || scc_save_sgpr == vcc_save_sgpr ||
+      scc_save_sgpr == vcc_save_sgpr + 1u || (scalar_vector && !plan.scalar_base_sgpr))
+    return std::nullopt;
+
+  constexpr uint16_t kVccLo = 106u;
+  const auto save_scc = instrumentation::build_s_cselect_b32(
+      scc_save_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
+  const auto save_vcc = instrumentation::build_s_mov_b64(vcc_save_sgpr, kVccLo, arch);
+  const auto restore_vcc = instrumentation::build_s_mov_b64(kVccLo, vcc_save_sgpr, arch);
+  const auto restore_scc =
+      instrumentation::build_s_cmp_lg_u32(scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+  if (!save_scc || !save_vcc || !restore_vcc || !restore_scc)
+    return std::nullopt;
+
+  std::vector<uint32_t> words;
+  words.reserve(16u);
+  std::optional<uint16_t> buffered_vector_offset_vgpr;
+  std::optional<uint16_t> buffered_scalar_offset_vgpr;
+  if (scalar_vector) {
+    // Snapshot every scalar address input before borrowing any SGPR for SCC
+    // or VCC preservation. A spill-backed Inline probe may intentionally use
+    // a window containing these inputs after reconstructing them from its
+    // already-committed spill transaction.
+    if (buffer_resource && plan.input_address_vgpr >= plan.result_address_vgpr &&
+        plan.input_address_vgpr < plan.result_address_vgpr + 2u) {
+      for (uint16_t candidate = plan.scratch_vgpr; candidate < plan.result_address_vgpr;
+           ++candidate) {
+        if (candidate != plan.input_address_vgpr) {
+          buffered_vector_offset_vgpr = candidate;
+          break;
+        }
+      }
+      if (!buffered_vector_offset_vgpr)
+        return std::nullopt;
+      words.push_back(build_v_mov_b32_e32(*buffered_vector_offset_vgpr,
+                                          vector_source_vgpr(plan.input_address_vgpr), arch));
+    }
+    if (buffer_resource && plan.scalar_offset_sgpr) {
+      for (uint16_t candidate = plan.scratch_vgpr; candidate < plan.result_address_vgpr;
+           ++candidate) {
+        if ((!buffered_vector_offset_vgpr || candidate != *buffered_vector_offset_vgpr) &&
+            candidate != plan.input_address_vgpr) {
+          buffered_scalar_offset_vgpr = candidate;
+          break;
+        }
+      }
+      if (!buffered_scalar_offset_vgpr)
+        return std::nullopt;
+      words.push_back(
+          build_v_mov_b32_e32(*buffered_scalar_offset_vgpr, *plan.scalar_offset_sgpr, arch));
+    }
+    words.push_back(build_v_mov_b32_e32(plan.result_address_vgpr, *plan.scalar_base_sgpr, arch));
+    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(plan.result_address_vgpr + 1u),
+                                        static_cast<uint16_t>(*plan.scalar_base_sgpr + 1u), arch));
+  }
+  words.push_back(*save_scc);
+  words.push_back(*save_vcc);
+  if (scalar_vector) {
+    uint16_t offset_vgpr = buffered_vector_offset_vgpr.value_or(plan.input_address_vgpr);
+    if (plan.input_address_scale != 1u) {
+      const uint16_t scaled_offset_vgpr = plan.scratch_vgpr;
+      if (scaled_offset_vgpr >= plan.result_address_vgpr)
+        return std::nullopt;
+      const auto scale = instrumentation::build_v_lshlrev_b32(
+          scaled_offset_vgpr,
+          scalar_positive_inline_u32(std::countr_zero(plan.input_address_scale)),
+          plan.input_address_vgpr, arch);
+      if (!scale)
+        return std::nullopt;
+      words.push_back(*scale);
+      offset_vgpr = scaled_offset_vgpr;
+    }
+    std::optional<std::vector<uint32_t>> add_vaddr;
+    if (plan.sign_extend_vector_offset) {
+      // The sign scratch needs two scratch words before the result pair. Keep
+      // a defensive check for externally constructed plans.
+      if (plan.result_address_vgpr <= plan.scratch_vgpr + 1u)
+        return std::nullopt;
+      uint16_t sign_vgpr = plan.scratch_vgpr;
+      if (sign_vgpr == offset_vgpr)
+        ++sign_vgpr;
+      // The spacing check and shared window invariant keep this temporary
+      // inside the allocation and below the result pair.
+      add_vaddr = instrumentation::build_v_add_u64_signed_vgpr_offset(plan.result_address_vgpr,
+                                                                      offset_vgpr, sign_vgpr, arch);
+    } else {
+      add_vaddr =
+          instrumentation::build_v_add_u64_vgpr_offset(plan.result_address_vgpr, offset_vgpr, arch);
+    }
+    if (!add_vaddr)
+      return std::nullopt;
+    words.insert(words.end(), add_vaddr->begin(), add_vaddr->end());
+    if (buffer_resource && plan.scalar_offset_sgpr) {
+      if (!buffered_scalar_offset_vgpr)
+        return std::nullopt;
+      const uint16_t scalar_offset_vgpr = *buffered_scalar_offset_vgpr;
+      if (scalar_offset_vgpr == plan.result_address_vgpr ||
+          scalar_offset_vgpr == plan.result_address_vgpr + 1u)
+        return std::nullopt;
+      const auto add_scalar_offset = instrumentation::build_v_add_u64_vgpr_offset(
+          plan.result_address_vgpr, scalar_offset_vgpr, arch);
+      if (!add_scalar_offset)
+        return std::nullopt;
+      words.insert(words.end(), add_scalar_offset->begin(), add_scalar_offset->end());
+    }
+  } else {
+    words.push_back(build_v_mov_b32_e32(plan.result_address_vgpr,
+                                        vector_source_vgpr(plan.input_address_vgpr), arch));
+    words.push_back(build_v_mov_b32_e32(
+        static_cast<uint16_t>(plan.result_address_vgpr + 1u),
+        vector_source_vgpr(static_cast<uint16_t>(plan.input_address_vgpr + 1u)), arch));
+  }
+  if (plan.signed_byte_offset != 0) {
+    const auto add_displacement = instrumentation::build_v_add_u64_signed_i24(
+        plan.result_address_vgpr, plan.signed_byte_offset, arch);
+    if (!add_displacement)
+      return std::nullopt;
+    words.insert(words.end(), add_displacement->begin(), add_displacement->end());
+  }
+  words.push_back(*restore_vcc);
+  // Keep SCC restoration last: scalar comparisons after this point would
+  // overwrite the guest condition code again.
+  words.push_back(*restore_scc);
+  return words;
+}
+
+} // namespace rocjitsu::consan

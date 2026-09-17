@@ -12,11 +12,11 @@
 #include <optional>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Target-neutral operands for splitting one two-address LDS operation into
 /// two single-address operations after relocation changes its address base.
-struct ConSanSplitTwoAddressLdsRequest {
+struct SplitTwoAddressLdsRequest {
   uint32_t first_byte_offset = 0;
   uint32_t second_byte_offset = 0;
   uint16_t element_dwords = 0;
@@ -30,7 +30,6 @@ struct ConSanSplitTwoAddressLdsRequest {
 /// Build the target's normalized split-access sequence, or no value when the
 /// target has no such recipe or the operands cannot be represented.
 [[nodiscard]] std::optional<std::vector<uint32_t>>
-consan_build_split_two_address_lds_pair(const ConSanSplitTwoAddressLdsRequest &request,
-                                        rj_code_arch_t arch);
+build_split_two_address_lds_pair(const SplitTwoAddressLdsRequest &request, rj_code_arch_t arch);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -13,14 +13,12 @@ ninja -C /tmp/rocjitsu-consan-fuzz -j4 \
   consan_transform_fuzz consan_placement_fuzz
 ```
 
-`consan_transform_fuzz` is a build umbrella for four binaries:
-`consan_transform_supercollider_fuzz`,
-`consan_transform_record_replay_fuzz`,
-`consan_transform_inline_shadow_fuzz`, and
-`consan_transform_sampled_fuzz`. Each sends every input through one public
+`consan_transform_fuzz` is a build umbrella for two binaries:
+`consan_transform_supercollider_fuzz` and
+`consan_transform_default_fuzz`. Each sends every input through one public
 ConSan profile and asserts the same transactional install contract as the
 loader. Run the full budget against every binary; one libFuzzer callback is one
-public transform deadline. Seed all four with the same retained AMDGPU code
+public transform deadline. Seed both with the same retained AMDGPU code
 objects and prior malformed inputs. Run large production objects as fixed
 replay inputs; use a compact valid gfx1201 object with a real instrumentable
 site plus minimized malformed regressions as the evolving mutation corpus.
@@ -38,7 +36,7 @@ mkdir -p /tmp/consan-transform-replay /tmp/consan-transform-mutation \
 cp retained-production-code-objects/*.hsaco /tmp/consan-transform-replay/
 cp compact-padded-lds-store.hsaco minimized-regressions/* \
   /tmp/consan-transform-mutation/
-for profile in supercollider record_replay inline_shadow sampled; do
+for profile in supercollider default; do
   mkdir -p "/tmp/consan-transform-artifacts/${profile}"
   /tmp/rocjitsu-consan-fuzz/tests/consan_transform_${profile}_fuzz \
     /tmp/consan-transform-replay/* -runs=1 -timeout=10

@@ -17,16 +17,16 @@
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_instrumentation.h"
+#include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_inventory_diagnostics.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
-#include "rocjitsu/code/patch/consan/consan_moi.h"
-#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
-#include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_validation_inventory.h"
+#include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
@@ -60,15 +60,15 @@ RJ_DIAGNOSTIC_POP
 #include <unordered_set>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 namespace kd = rocr::llvm::amdhsa;
 
 namespace {
 
-using consan_validation_detail::ConSanFinalValidationInput;
-using consan_validation_detail::FinalValidationEnvironment;
-using consan_validation_detail::has_consan_patch_phase;
+using validation_detail::FinalValidationEnvironment;
+using validation_detail::FinalValidationInput;
+using validation_detail::has_patch_phase;
 
 struct ValidationByteRange {
   uint64_t begin = 0;
@@ -80,8 +80,8 @@ struct ValidationByteRange {
 }
 
 [[nodiscard]] bool has_blocked_kernel(const ProgramInventory &inventory) {
-  return std::ranges::any_of(inventory.kernels(), [](const ConSanProgramContainer &kernel) {
-    return kernel.preflight_action == ConSanPreflightAction::Blocked;
+  return std::ranges::any_of(inventory.kernels(), [](const ProgramContainer &kernel) {
+    return kernel.preflight_action == PreflightAction::Blocked;
   });
 }
 
@@ -117,8 +117,8 @@ text_section_identities(const AmdGpuCodeObject &code_object) {
 
 struct InventoryRange {
   ValidationByteRange bytes;
-  ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
-  ConSanPatchKind kind = ConSanPatchKind::LdsLoadCheckTrap;
+  PatchPhase phase = PatchPhase::Instrumentation;
+  PatchKind kind = PatchKind::LdsLoadCheckTrap;
   bool must_be_original = false;
   bool is_trampoline = false;
   size_t patch_index = 0;
@@ -127,9 +127,9 @@ struct InventoryRange {
 };
 
 void validate_patch_byte_accounting(const FinalValidationEnvironment &environment,
-                                    const ConSanFinalValidationInput &result,
+                                    const FinalValidationInput &result,
                                     std::vector<std::string> &errors,
-                                    std::optional<ConSanTransformFailureCause> *failure_cause) {
+                                    std::optional<TransformFailureCause> *failure_cause) {
   const size_t initial_error_count = errors.size();
   if (!environment.original_text.available || !environment.replacement_text.available) {
     errors.emplace_back(
@@ -142,7 +142,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
   std::vector<bool> accounted(replacement_bytes.size(), false);
 
   if (result.text_relocation) {
-    const ConSanTextRelocationProof &relocation = *result.text_relocation;
+    const TextRelocationProof &relocation = *result.text_relocation;
     if (relocation.source_text_size < original_bytes.size() ||
         relocation.source_text_size > replacement_bytes.size()) {
       errors.emplace_back("ConSan final validation found invalid whole-text relocation geometry");
@@ -152,10 +152,9 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
               accounted.end(), true);
   }
 
-  const auto add_range = [&](uint64_t begin, uint32_t size, ConSanPatchPhase phase,
-                             ConSanPatchKind kind, bool must_be_original, bool is_trampoline,
-                             size_t patch_index, uint64_t source_anchor,
-                             uint64_t source_trampoline) {
+  const auto add_range = [&](uint64_t begin, uint32_t size, PatchPhase phase, PatchKind kind,
+                             bool must_be_original, bool is_trampoline, size_t patch_index,
+                             uint64_t source_anchor, uint64_t source_trampoline) {
     if (errors.size() != initial_error_count)
       return;
     if (size == 0)
@@ -176,7 +175,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
   };
 
   for (size_t patch_index = 0; patch_index < result.patches.size(); ++patch_index) {
-    const ConSanPatchInfo &patch = result.patches[patch_index];
+    const PatchInfo &patch = result.patches[patch_index];
     add_range(patch.anchor_offset, patch.original_size, patch.phase, patch.kind,
               /*must_be_original=*/true, /*is_trampoline=*/false, patch_index, patch.anchor_offset,
               patch.trampoline_offset);
@@ -192,7 +191,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
       return lhs.bytes.begin < rhs.bytes.begin;
     if (lhs.bytes.end != rhs.bytes.end)
       return lhs.bytes.end > rhs.bytes.end;
-    return lhs.phase == ConSanPatchPhase::Mutation && rhs.phase != ConSanPatchPhase::Mutation;
+    return lhs.phase == PatchPhase::Mutation && rhs.phase != PatchPhase::Mutation;
   });
   std::vector<const InventoryRange *> active;
   for (const InventoryRange &next : ranges) {
@@ -200,8 +199,8 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
       return existing->bytes.end <= next.bytes.begin;
     });
     const bool nested_in_mutation = std::ranges::any_of(active, [&](const auto *existing) {
-      return existing->phase == ConSanPatchPhase::Mutation &&
-             existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end;
+      return existing->phase == PatchPhase::Mutation && existing->bytes.begin <= next.bytes.begin &&
+             next.bytes.end <= existing->bytes.end;
     });
     const uint64_t size = next.bytes.end - next.bytes.begin;
     if (next.must_be_original &&
@@ -221,28 +220,18 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
           (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end);
       const bool nested_cross_phase = existing->phase != next.phase && nested;
       const bool nested_composed_access_atomic =
-          existing->phase == ConSanPatchPhase::Instrumentation &&
-          next.phase == ConSanPatchPhase::Instrumentation && nested &&
-          (((existing->kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-             existing->kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
-            next.kind == ConSanPatchKind::TrampolineMoiAtomicRecord) ||
-           ((next.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-             next.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
-            existing->kind == ConSanPatchKind::TrampolineMoiAtomicRecord));
-      const bool nested_composed_sampled_access_atomic =
-          existing->phase == ConSanPatchPhase::Instrumentation &&
-          next.phase == ConSanPatchPhase::Instrumentation && nested &&
+          existing->phase == PatchPhase::Instrumentation &&
+          next.phase == PatchPhase::Instrumentation && nested &&
           existing->source_anchor == next.source_anchor &&
-          (((existing->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-             existing->kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
-            next.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) ||
-           ((next.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-             next.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
-            existing->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata));
-      if (!exact_alias && !nested_cross_phase && !nested_composed_access_atomic &&
-          !nested_composed_sampled_access_atomic) {
+          (((existing->kind == PatchKind::InlineWatchpointStore ||
+             existing->kind == PatchKind::TrampolineWatchpointStore) &&
+            next.kind == PatchKind::TrampolineSyncMetadata) ||
+           ((next.kind == PatchKind::InlineWatchpointStore ||
+             next.kind == PatchKind::TrampolineWatchpointStore) &&
+            existing->kind == PatchKind::TrampolineSyncMetadata));
+      if (!exact_alias && !nested_cross_phase && !nested_composed_access_atomic) {
         if (failure_cause)
-          *failure_cause = ConSanTransformFailureCause::OverlappingPatchRanges;
+          *failure_cause = TransformFailureCause::OverlappingPatchRanges;
         errors.emplace_back(
             "ConSan final validation found partially overlapping patch ranges: existing=" +
             std::to_string(existing->bytes.begin) + "-" + std::to_string(existing->bytes.end) +
@@ -365,7 +354,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
         begin + offset);
     if (!instruction) {
       error = "decoder rejected instruction at text byte " + std::to_string(begin + offset) +
-              " (encoding=0x" + consan_fixed_hex(words.front(), 8u) + ")";
+              " (encoding=0x" + fixed_hex(words.front(), 8u) + ")";
       const size_t context_begin =
           offset > 4u * sizeof(uint32_t) ? offset - 4u * sizeof(uint32_t) : 0u;
       const size_t context_end =
@@ -377,7 +366,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
         std::memcpy(&encoding, text.data() + begin + context_offset, sizeof(encoding));
         if (context_offset != context_begin)
           error += ",";
-        error += "0x" + consan_fixed_hex(encoding, 8u);
+        error += "0x" + fixed_hex(encoding, 8u);
       }
       return false;
     }
@@ -399,8 +388,7 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
 }
 
 void validate_patch_decoding(const FinalValidationEnvironment &environment,
-                             const ConSanFinalValidationInput &result,
-                             std::vector<std::string> &errors) {
+                             const FinalValidationInput &result, std::vector<std::string> &errors) {
   if (!environment.replacement_text.available)
     return;
   if (!environment.require_target(
@@ -408,7 +396,7 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
           "ConSan final validation could not create a replacement decoder"))
     return;
   const std::span<const uint8_t> text = environment.replacement_text.bytes;
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const PatchInfo &patch : result.patches) {
     std::string error;
     if (!decode_inventory_range(text, patch.anchor_offset, patch.original_size,
                                 *environment.decoder, error)) {
@@ -444,18 +432,18 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
 }
 
 void validate_mutation_semantics(const FinalValidationEnvironment &environment,
-                                 const ConSanFinalValidationInput &result,
-                                 const ConSanPristineValidationInventory *pristine_inventory,
+                                 const FinalValidationInput &result,
+                                 const PristineValidationInventory *pristine_inventory,
                                  std::vector<std::string> &errors) {
   // Instrumentation-only transforms have no mutation semantics to rederive.
   // Avoid rebuilding the entire pristine synchronization/CFG inventory here:
   // final validation calls this function once internally and callers may
   // independently validate the same result again. On large code objects that
   // otherwise turned one transform into three identical whole-image analyses.
-  if (!has_consan_patch_phase(result, ConSanPatchPhase::Mutation)) {
+  if (!has_patch_phase(result, PatchPhase::Mutation)) {
     return;
   }
-  const bool staged_composition = has_consan_patch_phase(result, ConSanPatchPhase::Instrumentation);
+  const bool staged_composition = has_patch_phase(result, PatchPhase::Instrumentation);
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
   const std::span<const uint8_t> original_text = environment.original_text.bytes;
@@ -469,35 +457,31 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     errors.emplace_back("ConSan mutation proof found no pristine validation inventory");
     return;
   }
-  const ConSanFaultSelectionView pristine_faults = pristine_inventory->fault_selection();
-  std::vector<const ConSanPatchInfo *> markerless_sources;
-  const ConSanPatchInfo *markerless_target = nullptr;
-  std::vector<ConSanBarrierSite> barrier_id_scope_originals;
-  std::vector<ConSanBarrierSite> barrier_id_scope_rewrites;
-  std::vector<const ConSanPatchInfo *> barrier_id_scope_patches;
-  std::vector<const ConSanPatchInfo *> exact_barrier_drop_patches;
+  const FaultSelectionView pristine_faults = pristine_inventory->fault_selection();
+  std::vector<const PatchInfo *> markerless_sources;
+  const PatchInfo *markerless_target = nullptr;
+  std::vector<BarrierSite> barrier_id_scope_originals;
+  std::vector<BarrierSite> barrier_id_scope_rewrites;
+  std::vector<const PatchInfo *> barrier_id_scope_patches;
+  std::vector<const PatchInfo *> exact_barrier_drop_patches;
   bool barrier_id_scope_reinstrumented = false;
   const auto composed_atomic_bytes =
-      [&](const ConSanPatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
+      [&](const PatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
     if (!staged_composition)
       return std::nullopt;
-    const ConSanPatchInfo *match = nullptr;
-    for (const ConSanPatchInfo &candidate : result.patches) {
-      if (candidate.phase != ConSanPatchPhase::Instrumentation ||
+    const PatchInfo *match = nullptr;
+    for (const PatchInfo &candidate : result.patches) {
+      if (candidate.phase != PatchPhase::Instrumentation ||
           candidate.anchor_offset != mutation.anchor_offset ||
           candidate.original_size != mutation.original_size)
         continue;
-      const bool sc_relocation = candidate.kind == ConSanPatchKind::TrampolineScPerturbation &&
-                                 candidate.perturbation_composite_atomic_overlap &&
-                                 candidate.perturbation_edge;
-      const bool moi_atomic_relocation =
-          (candidate.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
-           candidate.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata) &&
-          candidate.relocated_guest_instruction_offset;
-      const bool inline_shadow_relocation =
-          candidate.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering &&
-          candidate.relocated_guest_instruction_offset;
-      if (!sc_relocation && !moi_atomic_relocation && !inline_shadow_relocation)
+      const bool supercollider_relocation =
+          candidate.kind == PatchKind::TrampolineSuperColliderPerturbation &&
+          candidate.supercollider_perturbation_composite_atomic_overlap &&
+          candidate.supercollider_perturbation_edge;
+      const bool atomic_relocation = candidate.kind == PatchKind::TrampolineSyncMetadata &&
+                                     candidate.relocated_guest_instruction_offset;
+      if (!supercollider_relocation && !atomic_relocation)
         continue;
       if (match != nullptr)
         return std::nullopt;
@@ -506,9 +490,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     if (match == nullptr)
       return std::nullopt;
     uint64_t body_offset = 0;
-    if (match->kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
-        match->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata ||
-        match->kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering) {
+    if (match->kind == PatchKind::TrampolineSyncMetadata) {
       body_offset = *match->relocated_guest_instruction_offset;
       if (match->trampoline_offset > replacement_text.size() ||
           match->trampoline_size > replacement_text.size() - match->trampoline_offset)
@@ -518,9 +500,10 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           mutation.original_size > trampoline_end - body_offset)
         return std::nullopt;
     } else {
-      body_offset =
-          match->trampoline_offset +
-          (*match->perturbation_edge == ConSanPerturbationEdge::Release ? sizeof(uint32_t) : 0u);
+      body_offset = match->trampoline_offset + (*match->supercollider_perturbation_edge ==
+                                                        SuperColliderPerturbationEdge::Release
+                                                    ? sizeof(uint32_t)
+                                                    : 0u);
     }
     if (body_offset > replacement_text.size() ||
         mutation.original_size > replacement_text.size() - body_offset)
@@ -528,12 +511,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     return replacement_text.subspan(body_offset, mutation.original_size);
   };
   const auto composed_lds_bytes =
-      [&](const ConSanPatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
+      [&](const PatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
     if (!staged_composition)
       return std::nullopt;
-    const ConSanPatchInfo *match = nullptr;
-    for (const ConSanPatchInfo &candidate : result.patches) {
-      if (candidate.phase != ConSanPatchPhase::Instrumentation ||
+    const PatchInfo *match = nullptr;
+    for (const PatchInfo &candidate : result.patches) {
+      if (candidate.phase != PatchPhase::Instrumentation ||
           candidate.anchor_offset != mutation.anchor_offset ||
           !candidate.relocated_guest_instruction_offset)
         continue;
@@ -555,30 +538,9 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       return std::nullopt;
     return replacement_text.subspan(relocated, mutation.original_size);
   };
-  const auto composed_inline_barrier = [&](const ConSanPatchInfo &mutation) {
-    const ConSanPatchInfo *match = nullptr;
-    for (const ConSanPatchInfo &candidate : result.patches) {
-      if (candidate.phase != ConSanPatchPhase::Instrumentation ||
-          candidate.kind != ConSanPatchKind::TrampolineMoiInlineEpochBarrier ||
-          candidate.anchor_offset != mutation.anchor_offset ||
-          candidate.original_size != mutation.original_size ||
-          !candidate.relocated_guest_instruction_offset)
-        continue;
-      if (match != nullptr)
-        return false;
-      match = &candidate;
-    }
-    if (match == nullptr || match->trampoline_offset > replacement_text.size() ||
-        match->trampoline_size > replacement_text.size() - match->trampoline_offset)
-      return false;
-    const uint64_t trampoline_end = match->trampoline_offset + match->trampoline_size;
-    const uint64_t relocated = *match->relocated_guest_instruction_offset;
-    return relocated >= match->trampoline_offset && relocated < trampoline_end &&
-           decodes_as_barrier(replacement_text, relocated, *environment.decoder);
-  };
 
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.phase != ConSanPatchPhase::Mutation)
+  for (const PatchInfo &patch : result.patches) {
+    if (patch.phase != PatchPhase::Mutation)
       continue;
     if (patch.anchor_offset > original_text.size() ||
         patch.original_size > original_text.size() - patch.anchor_offset ||
@@ -588,13 +550,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       continue;
     }
 
-    if (patch.kind == ConSanPatchKind::InlineBarrierNopRewrite ||
-        patch.kind == ConSanPatchKind::InlineBarrierMoveSourceRewrite) {
-      if (patch.kind == ConSanPatchKind::InlineBarrierNopRewrite &&
+    if (patch.kind == PatchKind::InlineBarrierNopRewrite ||
+        patch.kind == PatchKind::InlineBarrierMoveSourceRewrite) {
+      if (patch.kind == PatchKind::InlineBarrierNopRewrite &&
           !patch.fault_sequence_identity.empty())
         exact_barrier_drop_patches.push_back(&patch);
-      if (patch.kind == ConSanPatchKind::InlineBarrierMoveSourceRewrite &&
-          patch.barrier_move_direction)
+      if (patch.kind == PatchKind::InlineBarrierMoveSourceRewrite && patch.barrier_move_direction)
         markerless_sources.push_back(&patch);
       uint32_t replacement_word = 0;
       std::memcpy(&replacement_word, replacement_text.data() + patch.anchor_offset,
@@ -609,7 +570,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       continue;
     }
-    if (patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite) {
+    if (patch.kind == PatchKind::InlineBarrierMoveTargetRewrite) {
       if (patch.trampoline_size != 0) {
         if (markerless_target != nullptr) {
           errors.emplace_back(
@@ -619,17 +580,16 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         }
         continue;
       }
-      if (!decodes_as_barrier(replacement_text, patch.anchor_offset, *environment.decoder) &&
-          !composed_inline_barrier(patch)) {
+      if (!decodes_as_barrier(replacement_text, patch.anchor_offset, *environment.decoder)) {
         errors.emplace_back(
             "ConSan mutation proof did not place a barrier at the relocation target");
       }
       continue;
     }
-    if (patch.kind == ConSanPatchKind::InlineOrdinaryAddressRewrite ||
-        patch.kind == ConSanPatchKind::InlineOrdinaryOrderRewrite ||
-        patch.kind == ConSanPatchKind::InlineOrdinaryScopeRewrite) {
-      const ConSanFaultSelection selection{
+    if (patch.kind == PatchKind::InlineOrdinaryAddressRewrite ||
+        patch.kind == PatchKind::InlineOrdinaryOrderRewrite ||
+        patch.kind == PatchKind::InlineOrdinaryScopeRewrite) {
+      const FaultSelection selection{
           .primary_site_identity = patch.fault_primary_identity,
           .primary_sequence_identity = {},
           .companion_site_identity = {},
@@ -638,11 +598,10 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           .ordinal = 0,
       };
       const auto target = select_ordinary_acquire_mutation_target(pristine_faults, selection);
-      const ConSanProgramSite *target_source =
-          target ? pristine_faults.source(*target->site) : nullptr;
-      const std::span<const ConSanExecutionOwner> target_owners =
+      const ProgramSite *target_source = target ? pristine_faults.source(*target->site) : nullptr;
+      const std::span<const ExecutionOwner> target_owners =
           target ? pristine_faults.execution_owners(*target->site)
-                 : std::span<const ConSanExecutionOwner>{};
+                 : std::span<const ExecutionOwner>{};
       const std::vector<uint64_t> target_owner_descriptors =
           pristine_faults.program_inventory.execution_owner_descriptors(target_owners);
       const bool identities_match =
@@ -656,31 +615,30 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
             "owners");
         continue;
       }
-      if (patch.kind == ConSanPatchKind::InlineOrdinaryAddressRewrite) {
+      if (patch.kind == PatchKind::InlineOrdinaryAddressRewrite) {
         if (!patch.fault_companion_identity.empty() ||
             patch.anchor_offset != target_source->text_offset()) {
           errors.emplace_back(
               "ConSan mutation proof found stale ordinary acquire address metadata");
           continue;
         }
-        const auto validation = validate_consan_encoded_mutation(
-            arch, ConSanEncodedMutationKind::OrdinaryGlobalAddress,
+        const auto validation = validate_encoded_mutation(
+            arch, EncodedMutationKind::OrdinaryGlobalAddress,
             original_text.subspan(patch.anchor_offset, patch.original_size),
             replacement_text.subspan(patch.anchor_offset, patch.original_size));
-        if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
-            validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+        if (validation == EncodedMutationValidation::UnexpectedInstructionSize ||
+            validation == EncodedMutationValidation::UnsupportedInstructionEncoding) {
           errors.emplace_back(
               "ConSan mutation proof found stale ordinary acquire address metadata");
-        } else if (validation != ConSanEncodedMutationValidation::Valid) {
+        } else if (validation != EncodedMutationValidation::Valid) {
           errors.emplace_back(
               "ConSan mutation proof changed fields other than the ordinary load ioffset");
         }
         continue;
       }
-      if (patch.kind == ConSanPatchKind::InlineOrdinaryOrderRewrite) {
-        const ConSanFenceSite *cache_source =
-            pristine_faults.program_inventory.program_site<ConSanFenceSite>(
-                target->cache->source_site);
+      if (patch.kind == PatchKind::InlineOrdinaryOrderRewrite) {
+        const FenceSite *cache_source =
+            pristine_faults.program_inventory.program_site<FenceSite>(target->cache->source_site);
         if (patch.fault_companion_identity != target->cache->identity ||
             patch.anchor_offset != target->cache->text_offset() || cache_source == nullptr ||
             patch.original_size != cache_source->size) {
@@ -706,21 +664,21 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         errors.emplace_back("ConSan mutation proof found stale ordinary acquire scope metadata");
         continue;
       }
-      const auto validation = validate_consan_encoded_mutation(
-          arch, ConSanEncodedMutationKind::OrdinaryGlobalScope,
+      const auto validation = validate_encoded_mutation(
+          arch, EncodedMutationKind::OrdinaryGlobalScope,
           original_text.subspan(patch.anchor_offset, patch.original_size),
           replacement_text.subspan(patch.anchor_offset, patch.original_size));
-      if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
-          validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+      if (validation == EncodedMutationValidation::UnexpectedInstructionSize ||
+          validation == EncodedMutationValidation::UnsupportedInstructionEncoding) {
         errors.emplace_back("ConSan mutation proof found stale ordinary acquire scope metadata");
-      } else if (validation != ConSanEncodedMutationValidation::Valid) {
+      } else if (validation != EncodedMutationValidation::Valid) {
         errors.emplace_back(
             "ConSan mutation proof changed fields other than the exact ordinary load scope");
       }
       continue;
     }
-    if (patch.kind == ConSanPatchKind::InlineLdsAddressRewrite) {
-      const ConSanFaultSelection selection{
+    if (patch.kind == PatchKind::InlineLdsAddressRewrite) {
+      const FaultSelection selection{
           .primary_site_identity = patch.fault_primary_identity,
           .primary_sequence_identity = {},
           .companion_site_identity = {},
@@ -728,12 +686,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           .kernel_name_filter = {},
           .ordinal = 0,
       };
-      const ConSanFaultSite *target =
-          select_fault_site_for_plan(pristine_faults, selection, ConSanFaultSiteKind::LdsAccess);
-      const ConSanProgramSite *target_source =
+      const FaultSite *target =
+          select_fault_site_for_plan(pristine_faults, selection, FaultSiteKind::LdsAccess);
+      const ProgramSite *target_source =
           target == nullptr ? nullptr : pristine_faults.source(*target);
-      const std::span<const ConSanExecutionOwner> target_owners =
-          target == nullptr ? std::span<const ConSanExecutionOwner>{}
+      const std::span<const ExecutionOwner> target_owners =
+          target == nullptr ? std::span<const ExecutionOwner>{}
                             : pristine_faults.execution_owners(*target);
       const std::vector<uint64_t> target_owner_descriptors =
           pristine_faults.program_inventory.execution_owner_descriptors(target_owners);
@@ -785,7 +743,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       continue;
     }
-    if (patch.kind == ConSanPatchKind::InlineBarrierParticipantCountRewrite) {
+    if (patch.kind == PatchKind::InlineBarrierParticipantCountRewrite) {
       if (patch.original_size != 2u * sizeof(uint32_t) || !patch.original_participant_count ||
           !patch.target_participant_count ||
           *patch.original_participant_count == *patch.target_participant_count ||
@@ -839,7 +797,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       continue;
     }
-    if (patch.kind == ConSanPatchKind::InlineBarrierIdScopeRewrite) {
+    if (patch.kind == PatchKind::InlineBarrierIdScopeRewrite) {
       std::array<uint32_t, 4> before_words{};
       std::array<uint32_t, 4> after_words{};
       if (patch.original_size == 0 || patch.original_size > sizeof(before_words) ||
@@ -862,8 +820,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       }
       const bool reinstrumented =
           staged_composition &&
-          std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &candidate) {
-            return candidate.phase == ConSanPatchPhase::Instrumentation &&
+          std::ranges::any_of(result.patches, [&](const PatchInfo &candidate) {
+            return candidate.phase == PatchPhase::Instrumentation &&
                    candidate.anchor_offset <= patch.anchor_offset &&
                    patch.anchor_offset + patch.original_size <=
                        candidate.anchor_offset + candidate.original_size;
@@ -875,13 +833,13 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
               "ConSan mutation proof changed the pristine shape of a composed barrier member");
           continue;
         }
-        ConSanBarrierSite before_site;
+        BarrierSite before_site;
         before_site.mnemonic = std::string(before_instruction->mnemonic());
         decode_barrier_operand(
             *before_instruction,
             original_text.subspan(patch.anchor_offset, static_cast<size_t>(patch.original_size)),
             before_site);
-        if (!before_site.barrier_id || before_site.scope == ConSanBarrierSite::Scope::Unknown) {
+        if (!before_site.barrier_id || before_site.scope == BarrierSite::Scope::Unknown) {
           errors.emplace_back(
               "ConSan mutation proof found an unsupported pristine composed barrier member");
           continue;
@@ -906,8 +864,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         errors.emplace_back("ConSan mutation proof changed the shape of a barrier ID/scope member");
         continue;
       }
-      ConSanBarrierSite before_site;
-      ConSanBarrierSite after_site;
+      BarrierSite before_site;
+      BarrierSite after_site;
       before_site.mnemonic = std::string(before_instruction->mnemonic());
       after_site.mnemonic = std::string(after_instruction->mnemonic());
       decode_barrier_operand(
@@ -921,13 +879,13 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       bool preserved = before_site.barrier_id && after_site.barrier_id &&
                        before_site.barrier_id != after_site.barrier_id &&
                        before_site.operand_source == after_site.operand_source &&
-                       after_site.scope != ConSanBarrierSite::Scope::Unknown;
+                       after_site.scope != BarrierSite::Scope::Unknown;
       if (before_site.mnemonic == "s_barrier_init" || before_site.mnemonic == "s_barrier_join" ||
           before_site.mnemonic == "s_barrier_signal" ||
           before_site.mnemonic == "s_barrier_signal_isfirst") {
-        if (before_site.operand_source == ConSanBarrierSite::OperandSource::Immediate) {
+        if (before_site.operand_source == BarrierSite::OperandSource::Immediate) {
           preserved &= (before_words[0] & ~0xffu) == (after_words[0] & ~0xffu);
-        } else if (before_site.operand_source == ConSanBarrierSite::OperandSource::Literal32) {
+        } else if (before_site.operand_source == BarrierSite::OperandSource::Literal32) {
           preserved &= before_words[0] == after_words[0];
         } else {
           preserved = false;
@@ -948,12 +906,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       barrier_id_scope_patches.push_back(&patch);
       continue;
     }
-    if (patch.kind != ConSanPatchKind::InlineAtomicAddressRewrite &&
-        patch.kind != ConSanPatchKind::InlineAtomicOrderRewrite &&
-        patch.kind != ConSanPatchKind::InlineAtomicScopeRewrite) {
+    if (patch.kind != PatchKind::InlineAtomicAddressRewrite &&
+        patch.kind != PatchKind::InlineAtomicOrderRewrite &&
+        patch.kind != PatchKind::InlineAtomicScopeRewrite) {
       continue;
     }
-    if (patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite) {
+    if (patch.kind == PatchKind::InlineAtomicOrderRewrite) {
       if (patch.original_size == 0 || patch.original_size % sizeof(uint32_t) != 0) {
         errors.emplace_back(
             "ConSan mutation proof found an unexpected atomic cache-operation size");
@@ -980,28 +938,28 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         staged.value_or(replacement_text.subspan(patch.anchor_offset, patch.original_size));
     const std::span<const uint8_t> before_bytes =
         original_text.subspan(patch.anchor_offset, patch.original_size);
-    if (patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite) {
-      const auto validation = validate_consan_encoded_mutation(
-          arch, ConSanEncodedMutationKind::AtomicAddress, before_bytes, after_bytes);
-      if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize ||
-          validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+    if (patch.kind == PatchKind::InlineAtomicAddressRewrite) {
+      const auto validation = validate_encoded_mutation(arch, EncodedMutationKind::AtomicAddress,
+                                                        before_bytes, after_bytes);
+      if (validation == EncodedMutationValidation::UnexpectedInstructionSize ||
+          validation == EncodedMutationValidation::UnsupportedInstructionEncoding) {
         errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
-      } else if (validation != ConSanEncodedMutationValidation::Valid) {
+      } else if (validation != EncodedMutationValidation::Valid) {
         errors.emplace_back("ConSan mutation proof found the wrong atomic address displacement");
       }
     } else {
-      const auto validation = validate_consan_encoded_mutation(
-          arch, ConSanEncodedMutationKind::AtomicScope, before_bytes, after_bytes);
-      if (validation == ConSanEncodedMutationValidation::UnexpectedInstructionSize) {
+      const auto validation = validate_encoded_mutation(arch, EncodedMutationKind::AtomicScope,
+                                                        before_bytes, after_bytes);
+      if (validation == EncodedMutationValidation::UnexpectedInstructionSize) {
         errors.emplace_back("ConSan mutation proof found an unexpected atomic instruction size");
         continue;
       }
-      if (validation == ConSanEncodedMutationValidation::UnsupportedInstructionEncoding) {
+      if (validation == EncodedMutationValidation::UnsupportedInstructionEncoding) {
         errors.emplace_back(
             "ConSan mutation proof found scope mutation on an unsupported atomic encoding");
         continue;
       }
-      if (validation != ConSanEncodedMutationValidation::Valid) {
+      if (validation != EncodedMutationValidation::Valid) {
         errors.emplace_back(
             "ConSan mutation proof changed fields other than the selected atomic scope");
       }
@@ -1010,13 +968,13 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
 
   if (!barrier_id_scope_originals.empty()) {
     const bool consistent_original_id_and_scope =
-        std::ranges::all_of(barrier_id_scope_originals, [&](const ConSanBarrierSite &site) {
+        std::ranges::all_of(barrier_id_scope_originals, [&](const BarrierSite &site) {
           return barrier_id_scope_originals.front().barrier_id && site.barrier_id &&
                  site.barrier_id == barrier_id_scope_originals.front().barrier_id &&
                  site.scope == barrier_id_scope_originals.front().scope;
         });
     const bool consistent_target_id_and_scope =
-        std::ranges::all_of(barrier_id_scope_rewrites, [&](const ConSanBarrierSite &site) {
+        std::ranges::all_of(barrier_id_scope_rewrites, [&](const BarrierSite &site) {
           return barrier_id_scope_rewrites.front().barrier_id && site.barrier_id &&
                  site.barrier_id == barrier_id_scope_rewrites.front().barrier_id &&
                  site.scope == barrier_id_scope_rewrites.front().scope &&
@@ -1043,8 +1001,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       // patch anchors. Do not use result.program_inventory.sync().sync_sequences or
       // lifecycle groups: they are mutable transform output, not validation evidence.
       for (size_t i = 1; i < barrier_id_scope_patches.size(); ++i) {
-        const ConSanPatchInfo &previous = *barrier_id_scope_patches[i - 1u];
-        const ConSanPatchInfo &current = *barrier_id_scope_patches[i];
+        const PatchInfo &previous = *barrier_id_scope_patches[i - 1u];
+        const PatchInfo &current = *barrier_id_scope_patches[i];
         const uint64_t gap_begin = previous.anchor_offset + previous.original_size;
         if (gap_begin > current.anchor_offset) {
           errors.emplace_back(
@@ -1067,7 +1025,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         }
       }
       if (lifecycle_shape) {
-        const ConSanPatchInfo &wait_patch = *barrier_id_scope_patches.back();
+        const PatchInfo &wait_patch = *barrier_id_scope_patches.back();
         const uint64_t leave_offset = wait_patch.anchor_offset + wait_patch.original_size;
         if (leave_offset > original_text.size() ||
             sizeof(uint32_t) > original_text.size() - leave_offset ||
@@ -1087,8 +1045,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
                       sizeof(replacement_leave));
           const bool leave_reinstrumented =
               staged_composition &&
-              std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &candidate) {
-                return candidate.phase == ConSanPatchPhase::Instrumentation &&
+              std::ranges::any_of(result.patches, [&](const PatchInfo &candidate) {
+                return candidate.phase == PatchPhase::Instrumentation &&
                        candidate.anchor_offset <= leave_offset &&
                        leave_offset + sizeof(uint32_t) <=
                            candidate.anchor_offset + candidate.original_size &&
@@ -1107,7 +1065,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           if (!barrier_id_scope_reinstrumented &&
               (*barrier_id_scope_rewrites.front().barrier_id < 1 ||
                *barrier_id_scope_rewrites.front().barrier_id > 16 ||
-               barrier_id_scope_rewrites.front().scope != ConSanBarrierSite::Scope::Workgroup)) {
+               barrier_id_scope_rewrites.front().scope != BarrierSite::Scope::Workgroup)) {
             errors.emplace_back(
                 "ConSan mutation proof found invalid lifecycle target ID/scope metadata");
           }
@@ -1120,7 +1078,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
 
   if (!exact_barrier_drop_patches.empty()) {
     std::vector<std::string> sequence_identities;
-    for (const ConSanPatchInfo *patch : exact_barrier_drop_patches) {
+    for (const PatchInfo *patch : exact_barrier_drop_patches) {
       if (std::ranges::find(sequence_identities, patch->fault_sequence_identity) ==
           sequence_identities.end())
         sequence_identities.push_back(patch->fault_sequence_identity);
@@ -1128,7 +1086,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     std::ranges::sort(sequence_identities, [&](const std::string &left, const std::string &right) {
       const auto first_anchor = [&](const std::string &identity) {
         uint64_t value = std::numeric_limits<uint64_t>::max();
-        for (const ConSanPatchInfo *patch : exact_barrier_drop_patches)
+        for (const PatchInfo *patch : exact_barrier_drop_patches)
           if (patch->fault_sequence_identity == identity)
             value = std::min(value, patch->anchor_offset);
         return value;
@@ -1141,7 +1099,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       const auto member = std::ranges::find_if(exact_barrier_drop_patches, [&](const auto *patch) {
         return patch->fault_sequence_identity == sequence_identity;
       });
-      const ConSanFaultSelection selection{
+      const FaultSelection selection{
           .primary_site_identity = (*member)->fault_primary_identity,
           .primary_sequence_identity = sequence_identity,
           .companion_site_identity = {},
@@ -1158,14 +1116,14 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       metadata_matches &= pair.has_value() && member_count == 2u;
       if (!pair)
         continue;
-      const ConSanProgramSite *primary_source = pristine_faults.source(*pair->primary);
-      const ConSanProgramSite *companion_source = pristine_faults.source(*pair->companion);
+      const ProgramSite *primary_source = pristine_faults.source(*pair->primary);
+      const ProgramSite *companion_source = pristine_faults.source(*pair->companion);
       metadata_matches &= primary_source != nullptr && companion_source != nullptr;
       if (primary_source == nullptr || companion_source == nullptr)
         continue;
       bool found_primary = false;
       bool found_companion = false;
-      for (const ConSanPatchInfo *patch : exact_barrier_drop_patches) {
+      for (const PatchInfo *patch : exact_barrier_drop_patches) {
         if (patch->fault_sequence_identity != sequence_identity)
           continue;
         metadata_matches &= patch->fault_primary_identity == pair->primary->identity &&
@@ -1182,7 +1140,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
           exact_barrier_drop_patches.size() == 2u &&
           result.mutation.applied_fault_logical_identity == pairs.front().sequence->identity;
     } else if (pairs.size() == 2u) {
-      const ConSanFaultSelection selection{
+      const FaultSelection selection{
           .primary_site_identity = pairs[0].primary->identity,
           .primary_sequence_identity = pairs[0].sequence->identity,
           .companion_site_identity = pairs[1].primary->identity,
@@ -1207,16 +1165,16 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
   if (markerless_target != nullptr || !markerless_sources.empty()) {
     if (markerless_target == nullptr || markerless_sources.size() != 2u ||
         !markerless_target->barrier_move_direction ||
-        (*markerless_target->barrier_move_direction != ConSanBarrierMoveDirection::Earlier &&
-         *markerless_target->barrier_move_direction != ConSanBarrierMoveDirection::Later)) {
+        (*markerless_target->barrier_move_direction != BarrierMoveDirection::Earlier &&
+         *markerless_target->barrier_move_direction != BarrierMoveDirection::Later)) {
       errors.emplace_back(
           "ConSan mutation proof found an incomplete markerless barrier relocation record");
       return;
     }
-    std::ranges::sort(markerless_sources, {}, &ConSanPatchInfo::anchor_offset);
-    const ConSanPatchInfo &first = *markerless_sources[0];
-    const ConSanPatchInfo &second = *markerless_sources[1];
-    const ConSanPatchInfo &target = *markerless_target;
+    std::ranges::sort(markerless_sources, {}, &PatchInfo::anchor_offset);
+    const PatchInfo &first = *markerless_sources[0];
+    const PatchInfo &second = *markerless_sources[1];
+    const PatchInfo &target = *markerless_target;
     if (first.original_size != sizeof(uint32_t) || second.original_size != sizeof(uint32_t) ||
         first.anchor_offset + sizeof(uint32_t) != second.anchor_offset) {
       errors.emplace_back(
@@ -1237,17 +1195,17 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       return;
     }
 
-    const ConSanBarrierMoveDirection direction = *target.barrier_move_direction;
-    if ((direction == ConSanBarrierMoveDirection::Earlier &&
+    const BarrierMoveDirection direction = *target.barrier_move_direction;
+    if ((direction == BarrierMoveDirection::Earlier &&
          target.anchor_offset + target.original_size > first.anchor_offset) ||
-        (direction == ConSanBarrierMoveDirection::Later &&
+        (direction == BarrierMoveDirection::Later &&
          target.anchor_offset < second.anchor_offset + second.original_size)) {
       errors.emplace_back(
           "ConSan mutation proof found the relocation target on the wrong side of the pair");
       return;
     }
     const bool has_structured_proof =
-        target.barrier_move_cfg_contract != ConSanBarrierMoveCfgContract::SameBlock ||
+        target.barrier_move_cfg_contract != BarrierMoveCfgContract::SameBlock ||
         target.structured_guard_block_index.has_value() ||
         target.structured_destination_block_index.has_value() ||
         target.structured_source_block_index.has_value() ||
@@ -1280,7 +1238,7 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
       if (!target.structured_guard_block_index || !target.structured_destination_block_index ||
           !target.structured_source_block_index || !target.structured_guard_offset ||
           !target.structured_destination_offset || !target.structured_source_offset ||
-          direction != ConSanBarrierMoveDirection::Earlier ||
+          direction != BarrierMoveDirection::Earlier ||
           *target.structured_destination_offset != target.anchor_offset ||
           *target.structured_source_block_index == *target.structured_destination_block_index) {
         errors.emplace_back("ConSan mutation proof found incomplete structured CFG metadata");
@@ -1294,13 +1252,12 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
         return;
       }
       std::optional<StructuredExecDiamondProof> rederived;
-      if (target.barrier_move_cfg_contract ==
-          ConSanBarrierMoveCfgContract::CompletingStructuredDiamond) {
+      if (target.barrier_move_cfg_contract == BarrierMoveCfgContract::CompletingStructuredDiamond) {
         rederived = prove_completing_structured_diamond(
             original_blocks, *target.structured_source_block_index,
             *target.structured_destination_block_index, first.anchor_offset, target.anchor_offset);
       } else if (target.barrier_move_cfg_contract ==
-                 ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond) {
+                 BarrierMoveCfgContract::DestructiveStructuredExecDiamond) {
         rederived = prove_structured_exec_diamond(
             original_blocks, *target.structured_source_block_index,
             *target.structured_destination_block_index, first.anchor_offset);
@@ -1343,8 +1300,8 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     const ValidationByteRange mutation_body{target.trampoline_offset,
                                             target.trampoline_offset + target.trampoline_size};
     const bool body_reinstrumented =
-        std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-          if (patch.phase != ConSanPatchPhase::Instrumentation || patch.original_size == 0)
+        std::ranges::any_of(result.patches, [&](const PatchInfo &patch) {
+          if (patch.phase != PatchPhase::Instrumentation || patch.original_size == 0)
             return false;
           const ValidationByteRange anchor{patch.anchor_offset,
                                            patch.anchor_offset + patch.original_size};
@@ -1360,9 +1317,9 @@ void validate_mutation_semantics(const FinalValidationEnvironment &environment,
     if (body_reinstrumented && staged_composition)
       return;
     const uint64_t barrier_body_offset =
-        direction == ConSanBarrierMoveDirection::Earlier ? 0u : target.original_size;
+        direction == BarrierMoveDirection::Earlier ? 0u : target.original_size;
     const uint64_t destination_body_offset =
-        direction == ConSanBarrierMoveDirection::Earlier ? 2u * sizeof(uint32_t) : 0u;
+        direction == BarrierMoveDirection::Earlier ? 2u * sizeof(uint32_t) : 0u;
     const uint8_t *body = replacement_text.data() + target.trampoline_offset;
     if (std::memcmp(body + barrier_body_offset, original_barriers.data(),
                     sizeof(original_barriers)) != 0) {
@@ -1398,7 +1355,7 @@ struct DescriptorRequirement {
   bool allow_resource_delta = false;
   bool allow_entry_delta = false;
   bool require_full_workgroup_id = false;
-  std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_id_preload;
+  std::optional<DispatchIdPreloadPlan> dispatch_id_preload;
   uint16_t required_vgpr_count = 0;
   uint16_t required_sgpr_count = 0;
   uint32_t required_private_bytes = 0;
@@ -1406,20 +1363,20 @@ struct DescriptorRequirement {
 };
 
 void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &environment,
-                                            const ConSanFinalValidationInput &result,
+                                            const FinalValidationInput &result,
                                             std::vector<std::string> &errors) {
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
   const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
   const rj_code_arch_t arch = environment.arch();
 
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const PatchInfo &patch : result.patches) {
     if (!patch.entry_scalar_backup)
       continue;
-    const ConSanMoiEntryScalarBackup &backup = *patch.entry_scalar_backup;
-    if ((patch.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
-         patch.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) ||
-        !backup.is_well_formed(kConSanOrdinaryVgprLimit, REGISTER_SET_ALLOCATABLE_SGPRS)) {
+    const EntryScalarBackup &backup = *patch.entry_scalar_backup;
+    if ((patch.kind != PatchKind::KernelEntryOwnerEpochPrologue &&
+         patch.kind != PatchKind::KernelEntryPrivateEpochPrologue) ||
+        !backup.is_well_formed(kOrdinaryVgprLimit, REGISTER_SET_ALLOCATABLE_SGPRS)) {
       errors.emplace_back("ConSan final validation found invalid entry scalar backup resources");
       continue;
     }
@@ -1524,21 +1481,21 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
 }
 
 void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &environment,
-                                             const ConSanFinalValidationInput &result,
+                                             const FinalValidationInput &result,
                                              std::vector<std::string> &errors) {
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
   const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
   const rj_code_arch_t arch = environment.arch();
-  const auto validate_entry = [&](const ConSanPatchInfo &patch, uint64_t entry_offset,
+  const auto validate_entry = [&](const PatchInfo &patch, uint64_t entry_offset,
                                   std::string_view kernel_name,
                                   bool has_semantic_system_sgpr_restore) {
     if (!patch.dispatch_id_prologue) {
       errors.emplace_back("ConSan final validation found missing dispatch-ID prologue proof");
       return;
     }
-    const ConSanMoiDispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;
-    const ConSanMoiDispatchIdPreloadPlan &preload = dispatch.preload;
+    const DispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;
+    const DispatchIdPreloadPlan &preload = dispatch.preload;
     const std::optional<uint16_t> capture_sgpr = dispatch.capture.sgpr();
     const std::optional<uint16_t> capture_vgpr = dispatch.capture.vgpr();
     const bool captures_sgpr = capture_sgpr.has_value();
@@ -1705,7 +1662,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     }
   };
 
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const PatchInfo &patch : result.patches) {
     if (!patch.dispatch_id_prologue)
       continue;
     const auto owner =
@@ -1716,9 +1673,8 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       errors.emplace_back("ConSan final validation could not resolve a dispatch-ID prologue owner");
       continue;
     }
-    const bool has_semantic_system_sgpr_restore =
-        consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan().engine,
-                                                                arch, patch);
+    const bool has_semantic_system_sgpr_restore = detail::patch_requires_full_workgroup_id_payload(
+        result.observation_plan().mode, arch, patch);
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
                    owner->name, has_semantic_system_sgpr_restore);
@@ -1733,7 +1689,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
 }
 
 void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &environment,
-                                           const ConSanFinalValidationInput &result,
+                                           const FinalValidationInput &result,
                                            std::vector<std::string> &errors) {
   using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
   const size_t initial_error_count = errors.size();
@@ -1750,7 +1706,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   for (const AmdGpuKernelInfo &kernel : replacement.kernels())
     owner_names.emplace(kernel.descriptor_file_offset, kernel.name);
   std::vector<uint64_t> referenced_owner_offsets;
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  for (const CandidateResourcePlan &plan : result.resource_plans) {
     const auto descriptors = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
     if (!descriptors) {
       errors.emplace_back("ConSan final validation found a stale resource-plan kernel owner");
@@ -1759,7 +1715,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     referenced_owner_offsets.insert(referenced_owner_offsets.end(), descriptors->begin(),
                                     descriptors->end());
   }
-  for (const ConSanPatchInfo &patch : result.patches)
+  for (const PatchInfo &patch : result.patches)
     referenced_owner_offsets.insert(referenced_owner_offsets.end(),
                                     patch.owner_descriptor_file_offsets.begin(),
                                     patch.owner_descriptor_file_offsets.end());
@@ -1819,13 +1775,13 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     }
     apply(requirements[owner->second]);
   };
-  const auto plan_has_emitted_patch = [&](const ConSanCandidateResourcePlan &plan) {
-    return std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.phase == ConSanPatchPhase::Instrumentation &&
+  const auto plan_has_emitted_patch = [&](const CandidateResourcePlan &plan) {
+    return std::ranges::any_of(result.patches, [&](const PatchInfo &patch) {
+      return patch.phase == PatchPhase::Instrumentation &&
              patch.anchor_offset == plan.text_offset && patch.scratch_vgpr.has_value();
     });
   };
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  for (const CandidateResourcePlan &plan : result.resource_plans) {
     if (!plan_has_emitted_patch(plan))
       continue;
     const auto descriptors = result.program_inventory.kernel_descriptors(plan.owner_kernel_ids);
@@ -1841,9 +1797,9 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       });
     }
   }
-  for (const ConSanPatchInfo &patch : result.patches) {
-    const bool requires_full_workgroup_id = consan_detail::patch_requires_full_workgroup_id_payload(
-        result.observation_plan().engine, arch, patch);
+  for (const PatchInfo &patch : result.patches) {
+    const bool requires_full_workgroup_id = detail::patch_requires_full_workgroup_id_payload(
+        result.observation_plan().mode, arch, patch);
     if (patch.private_state_layout) {
       if (!patch.private_state_layout->is_well_formed()) {
         errors.emplace_back("ConSan final validation found an invalid private-state layout");
@@ -1854,14 +1810,14 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
             "requirement");
       }
     }
-    if (patch.moi_vgpr_state && !patch.moi_vgpr_state->is_well_formed()) {
-      errors.emplace_back("ConSan final validation found an invalid MOI VGPR-state effect");
+    if (patch.vgpr_state && !patch.vgpr_state->is_well_formed()) {
+      errors.emplace_back("ConSan final validation found an invalid ConSan VGPR-state effect");
     }
     if (patch.scalar_vcc_spill && !patch.scalar_vcc_spill->is_well_formed()) {
       errors.emplace_back(
           "ConSan final validation found an invalid SuperCollider scalar-VCC spill effect");
     }
-    if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue && !patch.moi_vgpr_state) {
+    if (patch.kind == PatchKind::KernelEntryOwnerEpochPrologue && !patch.vgpr_state) {
       errors.emplace_back("ConSan final validation found an owner/epoch prologue without its "
                           "VGPR-state effect");
     }
@@ -1895,18 +1851,15 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
         requirement.require_full_workgroup_id |= requires_full_workgroup_id;
         requirement.required_private_bytes =
             std::max(requirement.required_private_bytes, patch.required_private_segment_size);
-        requirement.required_group_bytes =
-            std::max(requirement.required_group_bytes, patch.required_group_segment_size());
         requirement.required_sgpr_count =
             std::max(requirement.required_sgpr_count, patch.required_sgpr_count);
-        requirement.allow_entry_delta |=
-            patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
-            patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
-        if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue) {
-          if (patch.moi_vgpr_state && patch.moi_vgpr_state->is_well_formed())
-            requirement.required_vgpr_count = std::max<uint16_t>(
-                requirement.required_vgpr_count,
-                static_cast<uint16_t>(patch.moi_vgpr_state->required_vgpr_count()));
+        requirement.allow_entry_delta |= patch.kind == PatchKind::KernelEntryOwnerEpochPrologue ||
+                                         patch.kind == PatchKind::KernelEntryPrivateEpochPrologue;
+        if (patch.kind == PatchKind::KernelEntryOwnerEpochPrologue) {
+          if (patch.vgpr_state && patch.vgpr_state->is_well_formed())
+            requirement.required_vgpr_count =
+                std::max<uint16_t>(requirement.required_vgpr_count,
+                                   static_cast<uint16_t>(patch.vgpr_state->required_vgpr_count()));
         }
         // Both register-backed and private-state entry prologues may preserve
         // borrowed guest SGPRs in a lane-backed VGPR.  The proof is also a
@@ -1917,7 +1870,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
                                  static_cast<uint16_t>(patch.entry_scalar_backup->vgpr + 1u));
         }
         if (patch.dispatch_id_prologue) {
-          const ConSanMoiDispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;
+          const DispatchIdPrologueEffect &dispatch = *patch.dispatch_id_prologue;
           requirement.dispatch_id_preload = dispatch.preload;
           requirement.required_sgpr_count =
               std::max(requirement.required_sgpr_count, dispatch.required_sgpr_count());
@@ -1934,11 +1887,11 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
 
   uint16_t unscoped_required_vgprs = 0;
   uint32_t unscoped_required_private_bytes = 0;
-  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+  for (const CandidateResourcePlan &plan : result.resource_plans) {
     if (plan.owner_kernel_ids.empty() && plan_has_emitted_patch(plan))
       unscoped_required_vgprs = std::max(unscoped_required_vgprs, plan.required_vgpr_count);
   }
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const PatchInfo &patch : result.patches) {
     if (patch.owner_descriptor_file_offsets.empty()) {
       unscoped_required_private_bytes =
           std::max(unscoped_required_private_bytes, patch.required_private_segment_size);
@@ -1960,13 +1913,12 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   // large library's kernel and patch counts.
   const bool has_unscoped_resource_growth =
       std::ranges::any_of(result.resource_plans,
-                          [&](const ConSanCandidateResourcePlan &plan) {
+                          [&](const CandidateResourcePlan &plan) {
                             return plan.owner_kernel_ids.empty() && plan_has_emitted_patch(plan) &&
-                                   (plan.source ==
-                                        ConSanRegisterAllocationSource::DescriptorGrowth ||
-                                    plan.source == ConSanRegisterAllocationSource::SpillRequired);
+                                   (plan.source == RegisterAllocationSource::DescriptorGrowth ||
+                                    plan.source == RegisterAllocationSource::SpillRequired);
                           }) ||
-      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+      std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
         return patch.owner_descriptor_file_offsets.empty() && patch.scratch_vgpr.has_value();
       });
   for (const AmdGpuKernelInfo &original_kernel : original.kernels()) {
@@ -2033,7 +1985,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       normalize_workgroup_id_payload(normalized.compute_pgm_rsrc2);
     }
     if (requirement.dispatch_id_preload) {
-      const ConSanMoiDispatchIdPreloadPlan &preload = *requirement.dispatch_id_preload;
+      const DispatchIdPreloadPlan &preload = *requirement.dispatch_id_preload;
       const uint32_t original_user_count = AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
                                                            kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
       const uint32_t replacement_user_count = AMDHSA_BITS_GET(
@@ -2128,8 +2080,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
         descriptor_rebased_around_unchanged_entry) {
       normalized.kernel_code_entry_byte_offset = original_descriptor.kernel_code_entry_byte_offset;
     }
-    const ConSanDescriptorResourceDeltaValidation target_resource_validation =
-        validate_consan_descriptor_resource_delta(
+    const DescriptorResourceDeltaValidation target_resource_validation =
+        validate_descriptor_resource_delta(
             arch, {
                       .original_rsrc1 = original_descriptor.compute_pgm_rsrc1,
                       .replacement_rsrc1 = replacement_descriptor.compute_pgm_rsrc1,
@@ -2157,7 +2109,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       const auto &descriptor_deltas = result.text_relocation->descriptor_rsrc1_deltas;
       const auto delta =
           std::ranges::find(descriptor_deltas, original_kernel.descriptor_file_offset,
-                            &ConSanTextRelocationDescriptorDelta::descriptor_file_offset);
+                            &TextRelocationDescriptorDelta::descriptor_file_offset);
       if (delta != descriptor_deltas.end()) {
         uint32_t normalized_rsrc1 = delta->replacement_compute_pgm_rsrc1;
         AMDHSA_BITS_SET(normalized_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -2244,10 +2196,8 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
 }
 
 [[nodiscard]] std::vector<std::string>
-validate_final_consan_elf(std::span<const uint8_t> original_bytes,
-                          const ConSanFinalValidationInput &result,
-                          uint64_t expected_moi_report_dispatch_id,
-                          std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
+validate_final_elf(std::span<const uint8_t> original_bytes, const FinalValidationInput &result,
+                   std::optional<TransformFailureCause> *failure_cause = nullptr) {
   std::vector<std::string> errors;
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
@@ -2258,12 +2208,11 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes,
     return errors;
   }
 
-  const bool redirects_entry =
-      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
-               patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
-      });
-  errors = validate_consan_input_layout(replacement, redirects_entry || result.text_relocation);
+  const bool redirects_entry = std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::KernelEntryOwnerEpochPrologue ||
+           patch.kind == PatchKind::KernelEntryPrivateEpochPrologue;
+  });
+  errors = validate_input_layout(replacement, redirects_entry || result.text_relocation);
   for (std::string &error : errors)
     error = "ConSan final validation: " + error;
 
@@ -2308,34 +2257,30 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes,
   if (result.patches.empty())
     errors.emplace_back("ConSan final validation found no patch inventory for a modified result");
   FinalValidationEnvironment environment(original, replacement);
-  const bool validates_mutation = has_consan_patch_phase(result, ConSanPatchPhase::Mutation);
-  const bool validates_perturbation =
-      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+  const bool validates_mutation = has_patch_phase(result, PatchPhase::Mutation);
+  const bool validates_supercollider_perturbation =
+      std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+        return patch.kind == PatchKind::TrampolineSuperColliderPerturbation;
       });
-  std::optional<ConSanPristineValidationInventory> pristine_inventory;
-  if (validates_mutation || validates_perturbation) {
+  std::optional<PristineValidationInventory> pristine_inventory;
+  if (validates_mutation || validates_supercollider_perturbation) {
     pristine_inventory.emplace(
-        rederive_consan_pristine_validation_inventory(original_bytes, validates_mutation));
+        rederive_pristine_validation_inventory(original_bytes, validates_mutation));
   }
   validate_patch_byte_accounting(environment, result, errors, failure_cause);
   validate_patch_decoding(environment, result, errors);
   validate_mutation_semantics(environment, result,
                               pristine_inventory ? &*pristine_inventory : nullptr, errors);
-  consan_validation_detail::validate_supercollider_final_semantics(
+  validation_detail::validate_supercollider_final_semantics(
       environment, result, pristine_inventory ? &*pristine_inventory : nullptr, errors);
   validate_resource_and_metadata_deltas(environment, result, errors);
   validate_entry_scalar_backup_semantics(environment, result, errors);
   validate_dispatch_id_prologue_semantics(environment, result, errors);
-  consan_validation_detail::validate_inline_shadow_final_semantics(
-      environment, result, expected_moi_report_dispatch_id, errors);
   return errors;
 }
 
-[[nodiscard]] ConSanTransformArtifacts
-finalize_consan_result_impl(ConSanTransformArtifacts result,
-                            std::span<const uint8_t> original_bytes,
-                            uint64_t expected_moi_report_dispatch_id) {
+[[nodiscard]] TransformArtifacts finalize_result_impl(TransformArtifacts result,
+                                                      std::span<const uint8_t> original_bytes) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   if (result.program_inventory.empty()) {
@@ -2343,13 +2288,13 @@ finalize_consan_result_impl(ConSanTransformArtifacts result,
     result.program_inventory = inventory_builder.view();
   }
   if (has_blocked_kernel(result.program_inventory)) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.outcome = TransformOutcome::Unsupported;
     result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
   if (!result.errors.empty()) {
-    result.outcome = ConSanTransformOutcome::Invalid;
+    result.outcome = TransformOutcome::Invalid;
     result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
@@ -2358,7 +2303,7 @@ finalize_consan_result_impl(ConSanTransformArtifacts result,
   // discover an architectural resource boundary after earlier probes have
   // already produced a replacement image. Never allow those partial probes
   // to turn an Unsupported result back into ModifiedValid.
-  if (result.outcome == ConSanTransformOutcome::Unsupported) {
+  if (result.outcome == TransformOutcome::Unsupported) {
     result.discard_candidate_modification();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
@@ -2366,49 +2311,43 @@ finalize_consan_result_impl(ConSanTransformArtifacts result,
   if (result.modified()) {
     if (result.replacement.empty()) {
       result.errors.emplace_back("ConSan modified result has no replacement ELF bytes");
-      result.outcome = ConSanTransformOutcome::Invalid;
+      result.outcome = TransformOutcome::Invalid;
       result.mutation.applied_fault_logical_identity.reset();
     } else {
-      std::vector<std::string> validation_errors = validate_final_consan_elf(
-          original_bytes, ConSanFinalValidationInput(result), expected_moi_report_dispatch_id,
-          &result.transform_failure_cause);
+      std::vector<std::string> validation_errors = validate_final_elf(
+          original_bytes, FinalValidationInput(result), &result.transform_failure_cause);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {
-        result.outcome = ConSanTransformOutcome::ModifiedValid;
+        result.outcome = TransformOutcome::ModifiedValid;
       } else {
-        result.outcome = ConSanTransformOutcome::Invalid;
+        result.outcome = TransformOutcome::Invalid;
         result.mutation.applied_fault_logical_identity.reset();
         result.discard_candidate_modification();
       }
     }
     return result;
   }
-  if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      summarize_consan_resource_plans(result.resource_plans).unsupported_plans != 0) {
-    result.outcome = ConSanTransformOutcome::Unsupported;
+  if (result.outcome == TransformOutcome::Unsupported ||
+      summarize_resource_plans(result.resource_plans).unsupported_plans != 0) {
+    result.outcome = TransformOutcome::Unsupported;
     result.mutation.applied_fault_logical_identity.reset();
   } else {
-    result.outcome = ConSanTransformOutcome::Unchanged;
+    result.outcome = TransformOutcome::Unchanged;
   }
   return result;
 }
 
 } // namespace
 
-ConSanTransformArtifacts finalize_consan_result(ConSanTransformArtifacts result,
-                                                std::span<const uint8_t> original_bytes,
-                                                uint64_t expected_moi_report_dispatch_id) {
-  return finalize_consan_result_impl(std::move(result), original_bytes,
-                                     expected_moi_report_dispatch_id);
+TransformArtifacts finalize_result(TransformArtifacts result,
+                                   std::span<const uint8_t> original_bytes) {
+  return finalize_result_impl(std::move(result), original_bytes);
 }
 
-std::vector<std::string>
-validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
-                             const ConSanTransformArtifacts &modified_result,
-                             uint64_t expected_moi_report_dispatch_id) {
-  return validate_final_consan_elf(original_bytes, ConSanFinalValidationInput(modified_result),
-                                   expected_moi_report_dispatch_id);
+std::vector<std::string> validate_modified_elf(std::span<const uint8_t> original_bytes,
+                                               const TransformArtifacts &modified_result) {
+  return validate_final_elf(original_bytes, FinalValidationInput(modified_result));
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

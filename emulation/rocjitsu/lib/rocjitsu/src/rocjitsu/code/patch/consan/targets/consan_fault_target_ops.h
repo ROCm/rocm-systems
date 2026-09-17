@@ -13,9 +13,9 @@
 #include <span>
 #include <string_view>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-enum class ConSanAtomicFaultEncoding : uint8_t {
+enum class AtomicFaultEncoding : uint8_t {
   Unsupported,
   CdnaFlat,
   FlatLike,
@@ -23,17 +23,17 @@ enum class ConSanAtomicFaultEncoding : uint8_t {
   Ds,
 };
 
-struct ConSanOrdinaryGlobalFaultEncoding {
+struct OrdinaryGlobalFaultEncoding {
   int32_t byte_offset = 0;
   uint32_t scope = 0;
 };
 
 /// Target-owned outcome from rewriting one normalized atomic operand.
 ///
-/// The common fault engine renders policy diagnostics from this vocabulary;
+/// The common fault mode renders policy diagnostics from this vocabulary;
 /// concrete target packages retain ownership of instruction layout and range
 /// checks.
-enum class ConSanAtomicFaultRewriteStatus : uint8_t {
+enum class AtomicFaultRewriteStatus : uint8_t {
   Rewritten,
   InvalidEncoding,
   OffsetOverflow,
@@ -41,42 +41,35 @@ enum class ConSanAtomicFaultRewriteStatus : uint8_t {
   AlreadyWaveScope,
 };
 
-struct ConSanAtomicFaultRewriteResult {
-  ConSanAtomicFaultRewriteStatus status = ConSanAtomicFaultRewriteStatus::InvalidEncoding;
+struct AtomicFaultRewriteResult {
+  AtomicFaultRewriteStatus status = AtomicFaultRewriteStatus::InvalidEncoding;
   /// Previous target value when a rewrite succeeds. Scope rewriting uses this
   /// to render the semantic before/after diagnostic without exposing raw bits.
   uint32_t previous_value = 0;
 
-  [[nodiscard]] bool rewritten() const {
-    return status == ConSanAtomicFaultRewriteStatus::Rewritten;
-  }
+  [[nodiscard]] bool rewritten() const { return status == AtomicFaultRewriteStatus::Rewritten; }
 };
 
-[[nodiscard]] bool consan_lds_address_fault_arch_supported(rj_code_arch_t arch);
+[[nodiscard]] bool lds_address_fault_arch_supported(rj_code_arch_t arch);
 
-[[nodiscard]] ConSanAtomicFaultEncoding
-classify_consan_atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
-                                      rj_code_arch_t arch);
-[[nodiscard]] bool consan_atomic_fault_supports_scope(ConSanAtomicFaultEncoding encoding);
-[[nodiscard]] bool consan_atomic_fault_supports_order(ConSanAtomicFaultEncoding encoding);
-[[nodiscard]] bool consan_atomic_fault_supports_address(ConSanAtomicFaultEncoding encoding);
+[[nodiscard]] AtomicFaultEncoding
+classify_atomic_fault_encoding(std::string_view mnemonic, uint32_t size, rj_code_arch_t arch);
+[[nodiscard]] bool atomic_fault_supports_scope(AtomicFaultEncoding encoding);
+[[nodiscard]] bool atomic_fault_supports_order(AtomicFaultEncoding encoding);
+[[nodiscard]] bool atomic_fault_supports_address(AtomicFaultEncoding encoding);
 
-[[nodiscard]] ConSanAtomicFaultRewriteResult
-rewrite_consan_atomic_fault_address(std::span<uint8_t> instruction,
-                                    ConSanAtomicFaultEncoding encoding, uint32_t width_bits,
-                                    uint32_t address_delta);
-[[nodiscard]] ConSanAtomicFaultRewriteResult
-rewrite_consan_atomic_fault_scope_to_wave(std::span<uint8_t> instruction,
-                                          ConSanAtomicFaultEncoding encoding);
+[[nodiscard]] AtomicFaultRewriteResult rewrite_atomic_fault_address(std::span<uint8_t> instruction,
+                                                                    AtomicFaultEncoding encoding,
+                                                                    uint32_t width_bits,
+                                                                    uint32_t address_delta);
+[[nodiscard]] AtomicFaultRewriteResult
+rewrite_atomic_fault_scope_to_wave(std::span<uint8_t> instruction, AtomicFaultEncoding encoding);
 
-[[nodiscard]] std::optional<ConSanOrdinaryGlobalFaultEncoding>
-decode_consan_ordinary_global_fault_encoding(std::span<const uint8_t> instruction);
-[[nodiscard]] bool rewrite_consan_ordinary_global_fault_offset(std::span<uint8_t> instruction,
-                                                               int32_t byte_offset);
-[[nodiscard]] bool rewrite_consan_ordinary_global_fault_scope(std::span<uint8_t> instruction,
-                                                              uint32_t scope);
+[[nodiscard]] std::optional<OrdinaryGlobalFaultEncoding>
+decode_ordinary_global_fault_encoding(std::span<const uint8_t> instruction);
+[[nodiscard]] bool rewrite_ordinary_global_fault_offset(std::span<uint8_t> instruction,
+                                                        int32_t byte_offset);
+[[nodiscard]] bool rewrite_ordinary_global_fault_scope(std::span<uint8_t> instruction,
+                                                       uint32_t scope);
 
-// Concise internal type vocabulary retained at fault-planning call sites.
-using AtomicFaultEncoding = ConSanAtomicFaultEncoding;
-
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

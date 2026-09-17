@@ -14,7 +14,7 @@
 #include <string>
 #include <utility>
 
-namespace rocjitsu::consan_hook {
+namespace rocjitsu::consan::hook {
 
 [[nodiscard]] bool ascii_iequals(std::string_view lhs, std::string_view rhs) {
   if (lhs.size() != rhs.size())
@@ -80,8 +80,8 @@ struct BoolEnvBinding {
   return true;
 }
 
-[[nodiscard]] bool parse_moi_epoch_analysis_env(HookConfig::MoiEpochAnalysisPolicy *policy) {
-  const char *raw = std::getenv("RJ_CONSAN_MOI_EPOCH_ANALYSIS");
+[[nodiscard]] bool parse_epoch_analysis_env(HookConfig::EpochAnalysisPolicy *policy) {
+  const char *raw = std::getenv("RJ_CONSAN_EPOCH_ANALYSIS");
   if (raw == nullptr || *raw == '\0') {
     *policy = {};
     return true;
@@ -92,7 +92,7 @@ struct BoolEnvBinding {
     return true;
   }
   if (ascii_iequals(value, "manual")) {
-    policy->kind = HookConfig::MoiEpochAnalysisKind::Manual;
+    policy->kind = HookConfig::EpochAnalysisKind::Manual;
     policy->value = 1;
     policy->offset = 1;
     return true;
@@ -106,7 +106,7 @@ struct BoolEnvBinding {
     uint64_t epoch = 0;
     if (arguments.find(':') == std::string_view::npos &&
         parse_positive_decimal(arguments, &epoch)) {
-      policy->kind = HookConfig::MoiEpochAnalysisKind::Nth;
+      policy->kind = HookConfig::EpochAnalysisKind::Nth;
       policy->value = epoch;
       policy->offset = epoch;
       return true;
@@ -124,7 +124,7 @@ struct BoolEnvBinding {
         (has_explicit_offset ? parse_positive_decimal(offset_text, &offset)
                              : (offset = period, true)) &&
         offset <= period) {
-      policy->kind = HookConfig::MoiEpochAnalysisKind::Periodic;
+      policy->kind = HookConfig::EpochAnalysisKind::Periodic;
       policy->value = period;
       policy->offset = offset;
       return true;
@@ -132,7 +132,7 @@ struct BoolEnvBinding {
   }
 
   std::fprintf(stderr,
-               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_EPOCH_ANALYSIS='%s'; expected "
+               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_EPOCH_ANALYSIS='%s'; expected "
                "every, nth:N, periodic:N, periodic:N:OFFSET, or manual\n",
                raw);
   return false;
@@ -336,9 +336,9 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
   return false;
 }
 
-[[nodiscard]] bool parse_delay_mode_env(rocjitsu::ConSanDelayMode *out) {
-  using E = rocjitsu::ConSanDelayMode;
-  return parse_enum_env("RJ_CONSAN_DELAY_MODE", E::Nop, out,
+[[nodiscard]] bool parse_supercollider_delay_mode_env(SuperColliderDelayMode *out) {
+  using E = SuperColliderDelayMode;
+  return parse_enum_env("RJ_CONSAN_SC_DELAY_MODE", E::Nop, out,
                         {{"nop", E::Nop},
                          {"sleep", E::Sleep},
                          {"sleep_var", E::SleepVar},
@@ -346,8 +346,8 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
                         "nop|sleep|sleep_var");
 }
 
-[[nodiscard]] bool parse_barrier_move_direction_env(rocjitsu::ConSanBarrierMoveDirection *out) {
-  using E = rocjitsu::ConSanBarrierMoveDirection;
+[[nodiscard]] bool parse_barrier_move_direction_env(BarrierMoveDirection *out) {
+  using E = BarrierMoveDirection;
   return parse_enum_env("RJ_CONSAN_FAULT_BARRIER_MOVE_DIRECTION", E::LegacyMarker, out,
                         {{"legacy-marker", E::LegacyMarker},
                          {"legacy_marker", E::LegacyMarker},
@@ -356,29 +356,29 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
                         "legacy-marker, earlier, or later", false);
 }
 
-[[nodiscard]] bool parse_sc_perturb_kind_env(rocjitsu::ConSanPerturbationKind *out) {
-  using E = rocjitsu::ConSanPerturbationKind;
+[[nodiscard]] bool parse_supercollider_perturb_kind_env(SuperColliderPerturbationKind *out) {
+  using E = SuperColliderPerturbationKind;
   return parse_enum_env("RJ_CONSAN_SC_PERTURB_KIND", E::None, out,
                         {{"none", E::None}, {"barrier", E::Barrier}, {"atomic", E::Atomic}},
                         "none, barrier, or atomic");
 }
 
-[[nodiscard]] bool parse_sc_perturb_edge_env(rocjitsu::ConSanPerturbationEdge *out) {
-  using E = rocjitsu::ConSanPerturbationEdge;
+[[nodiscard]] bool parse_supercollider_perturb_edge_env(SuperColliderPerturbationEdge *out) {
+  using E = SuperColliderPerturbationEdge;
   return parse_enum_env("RJ_CONSAN_SC_PERTURB_EDGE", E::Release, out,
                         {{"release", E::Release}, {"acquire", E::Acquire}}, "release or acquire");
 }
 
-[[nodiscard]] bool parse_atomic_order_edge_env(rocjitsu::ConSanAtomicOrderEdge *out) {
-  using E = rocjitsu::ConSanAtomicOrderEdge;
+[[nodiscard]] bool parse_atomic_order_edge_env(AtomicOrderEdge *out) {
+  using E = AtomicOrderEdge;
   return parse_enum_env("RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE", E::Any, out,
                         {{"any", E::Any}, {"release", E::Release}, {"acquire", E::Acquire}},
                         "any, release, or acquire");
 }
 
-[[nodiscard]] bool parse_moi_owner_source_env(rocjitsu::ConSanMoiOwnerSource *out) {
-  using E = rocjitsu::ConSanMoiOwnerSource;
-  return parse_enum_env("RJ_CONSAN_MOI_OWNER_SOURCE", E::Automatic, out,
+[[nodiscard]] bool parse_owner_source_env(OwnerSource *out) {
+  using E = OwnerSource;
+  return parse_enum_env("RJ_CONSAN_OWNER_SOURCE", E::Automatic, out,
                         {{"automatic", E::Automatic},
                          {"auto", E::Automatic},
                          {"workitem_id", E::WorkitemId},
@@ -388,8 +388,8 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
                         "automatic|workitem_id|hw_id", false);
 }
 
-[[nodiscard]] bool parse_flat_provenance_mode_env(rocjitsu::ConSanFlatProvenanceMode *out) {
-  using E = rocjitsu::ConSanFlatProvenanceMode;
+[[nodiscard]] bool parse_flat_provenance_mode_env(FlatProvenanceMode *out) {
+  using E = FlatProvenanceMode;
   return parse_enum_env(
       "RJ_CONSAN_FLAT_PROVENANCE", E::Likely, out,
       {{"likely", E::Likely}, {"default", E::Likely}, {"strict", E::Strict}, {"group", E::Strict}},
@@ -410,11 +410,12 @@ parse_enum_env(const char *name, Enum default_value, Enum *out,
                         "all|lds|flat");
 }
 
-[[nodiscard]] bool parse_sc_report_mode_env(ScReportMode *out) {
-  return parse_enum_env(
-      "RJ_CONSAN_SC_REPORT_MODE", ScReportMode::Auto, out,
-      {{"auto", ScReportMode::Auto}, {"default", ScReportMode::Auto}, {"trap", ScReportMode::Trap}},
-      "auto|trap");
+[[nodiscard]] bool parse_supercollider_report_mode_env(SuperColliderReportMode *out) {
+  return parse_enum_env("RJ_CONSAN_SC_REPORT_MODE", SuperColliderReportMode::Auto, out,
+                        {{"auto", SuperColliderReportMode::Auto},
+                         {"default", SuperColliderReportMode::Auto},
+                         {"trap", SuperColliderReportMode::Trap}},
+                        "auto|trap");
 }
 
 [[nodiscard]] bool parse_log_level(int *out) {
@@ -463,35 +464,22 @@ void warn_env(const char *name, const char *message) {
 [[nodiscard]] bool parse_mode_env(HookConfig *config) {
   const char *value = std::getenv("RJ_CONSAN_MODE");
   if (value == nullptr || *value == '\0') {
-    config->flavor = rocjitsu::ConSanFlavor::Moi;
-    config->moi_engine = rocjitsu::ConSanMoiEngine::Sampled;
+    config->mode = Mode::Default;
     return true;
   }
 
-  if (ascii_iequals(value, "record-replay") || ascii_iequals(value, "record_replay")) {
-    config->flavor = rocjitsu::ConSanFlavor::Moi;
-    config->moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
-    return true;
-  }
-  if (ascii_iequals(value, "inline-shadow") || ascii_iequals(value, "inline_shadow")) {
-    config->flavor = rocjitsu::ConSanFlavor::Moi;
-    config->moi_engine = rocjitsu::ConSanMoiEngine::InlineShadow;
-    return true;
-  }
-  if (ascii_iequals(value, "sampled")) {
-    config->flavor = rocjitsu::ConSanFlavor::Moi;
-    config->moi_engine = rocjitsu::ConSanMoiEngine::Sampled;
+  if (ascii_iequals(value, "default")) {
+    config->mode = Mode::Default;
     return true;
   }
   if (ascii_iequals(value, "supercollider")) {
-    config->flavor = rocjitsu::ConSanFlavor::SuperCollider;
-    config->moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+    config->mode = Mode::SuperCollider;
     return true;
   }
 
   std::fprintf(stderr,
                "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MODE='%s'; expected "
-               "record-replay|inline-shadow|sampled|supercollider\n",
+               "default|supercollider\n",
                value);
   return false;
 }
@@ -504,8 +492,8 @@ void warn_env(const char *name, const char *message) {
 
 void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (config.process_concurrent_transform_limit_bytes) {
-    const std::optional<ConSanTransformReservationEstimate> minimum_reservation =
-        consan_transform_major_image_reservation(1, config.patched_image_growth_limit);
+    const std::optional<TransformReservationEstimate> minimum_reservation =
+        transform_major_image_reservation(1, config.patched_image_growth_limit);
     if (!minimum_reservation) {
       std::fprintf(
           stderr,
@@ -531,76 +519,47 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     }
   }
 
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi) {
+  if (config.mode == Mode::Default) {
     if (env_has_value("RJ_CONSAN_SC_REPORT_MODE"))
       warn_ignored_env("RJ_CONSAN_SC_REPORT_MODE", "only applies to RJ_CONSAN_MODE=supercollider");
-    if (config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled) {
-      constexpr const char *kSampledOnlyKnobs[] = {
-          "RJ_CONSAN_MOI_SAMPLE_STRIDE",
-          "RJ_CONSAN_MOI_SAMPLE_OFFSET",
-          "RJ_CONSAN_MOI_SAMPLED_CHECK",
-          "RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT",
-          "RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT",
-      };
-      for (const char *name : kSampledOnlyKnobs) {
-        if (env_has_value(name))
-          warn_ignored_env(name, "only applies to RJ_CONSAN_MODE=sampled");
-      }
-    }
-    if (config.moi_engine != rocjitsu::ConSanMoiEngine::RecordReplay &&
-        (env_has_value("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS") ||
-         env_has_value("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"))) {
-      if (env_has_value("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS"))
-        warn_ignored_env("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS",
-                         "only applies to RJ_CONSAN_MODE=record-replay");
-      if (env_has_value("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"))
-        warn_ignored_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT",
-                         "only applies to RJ_CONSAN_MODE=record-replay");
-    }
-    const auto mode_policy = rocjitsu::consan_moi_mode_policy(config.moi_engine);
-    if (!config.moi_init_owner_epoch && !mode_policy.owner_source_applies_without_initialization &&
-        (env_has_value("RJ_CONSAN_MOI_OWNER_SOURCE") ||
-         env_has_value("RJ_CONSAN_MOI_OWNER_SGPR"))) {
-      if (env_has_value("RJ_CONSAN_MOI_OWNER_SOURCE"))
-        warn_ignored_env("RJ_CONSAN_MOI_OWNER_SOURCE",
-                         "only affects RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1");
-      if (env_has_value("RJ_CONSAN_MOI_OWNER_SGPR"))
-        warn_ignored_env("RJ_CONSAN_MOI_OWNER_SGPR",
-                         "only affects RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1");
+    if (!config.init_owner_epoch &&
+        (env_has_value("RJ_CONSAN_OWNER_SOURCE") || env_has_value("RJ_CONSAN_OWNER_SGPR"))) {
+      if (env_has_value("RJ_CONSAN_OWNER_SOURCE"))
+        warn_ignored_env("RJ_CONSAN_OWNER_SOURCE", "only affects RJ_CONSAN_INIT_OWNER_EPOCH=1");
+      if (env_has_value("RJ_CONSAN_OWNER_SGPR"))
+        warn_ignored_env("RJ_CONSAN_OWNER_SGPR", "only affects RJ_CONSAN_INIT_OWNER_EPOCH=1");
     }
     return;
   }
 
-  constexpr const char *kMoiOnlyKnobs[] = {
-      "RJ_CONSAN_MOI_REPORT_BUFFER",
-      "RJ_CONSAN_MOI_REPORT_BUFFER_SIZE",
-      "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE",
-      "RJ_CONSAN_MOI_REQUIRE_RECORDS",
-      "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS",
-      "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS",
-      "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT",
-      "RJ_CONSAN_MOI_FORBID_OVERFLOW",
-      "RJ_CONSAN_MOI_INIT_OWNER_EPOCH",
-      "RJ_CONSAN_MOI_TRACK_BARRIERS",
-      "RJ_CONSAN_MOI_TRACK_ATOMICS",
-      "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS",
-      "RJ_CONSAN_MOI_EXEC_SAVE_SGPR",
-      "RJ_CONSAN_MOI_OWNER_SOURCE",
-      "RJ_CONSAN_MOI_OWNER_SGPR",
-      "RJ_CONSAN_MOI_OWNER_VGPR",
-      "RJ_CONSAN_MOI_EPOCH_VGPR",
-      "RJ_CONSAN_MOI_SAMPLE_STRIDE",
-      "RJ_CONSAN_MOI_SAMPLE_OFFSET",
-      "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
-      "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
-      "RJ_CONSAN_MOI_SAMPLED_CHECK",
-      "RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT",
-      "RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT",
-      "RJ_CONSAN_MOI_EPOCH_ANALYSIS",
+  constexpr const char *kOnlyKnobs[] = {
+      "RJ_CONSAN_REPORT_BUFFER",
+      "RJ_CONSAN_REPORT_BUFFER_SIZE",
+      "RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE",
+      "RJ_CONSAN_REQUIRE_RECORDS",
+      "RJ_CONSAN_REQUIRE_DIAGNOSTICS",
+      "RJ_CONSAN_FORBID_DIAGNOSTICS",
+      "RJ_CONSAN_FORBID_OVERFLOW",
+      "RJ_CONSAN_INIT_OWNER_EPOCH",
+      "RJ_CONSAN_TRACK_BARRIERS",
+      "RJ_CONSAN_TRACK_ATOMICS",
+      "RJ_CONSAN_EXEC_SAVE_SGPR",
+      "RJ_CONSAN_OWNER_SOURCE",
+      "RJ_CONSAN_OWNER_SGPR",
+      "RJ_CONSAN_OWNER_VGPR",
+      "RJ_CONSAN_EPOCH_VGPR",
+      "RJ_CONSAN_SAMPLE_STRIDE",
+      "RJ_CONSAN_SAMPLE_OFFSET",
+      "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
+      "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
+      "RJ_CONSAN_DEVICE_CONFLICT_CHECK",
+      "RJ_CONSAN_CONFLICT_LIMIT",
+      "RJ_CONSAN_TOTAL_CONFLICT_LIMIT",
+      "RJ_CONSAN_EPOCH_ANALYSIS",
   };
-  for (const char *name : kMoiOnlyKnobs) {
+  for (const char *name : kOnlyKnobs) {
     if (env_has_value(name))
-      warn_ignored_env(name, "RJ_CONSAN_MODE does not select an MOI engine");
+      warn_ignored_env(name, "RJ_CONSAN_MODE does not select the default mode");
   }
 }
 
@@ -618,25 +577,22 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   config.enabled = true;
   if (!parse_flat_provenance_mode_env(&config.flat_provenance_mode))
     return std::nullopt;
-  if (!parse_moi_owner_source_env(&config.moi_owner_source))
+  if (!parse_owner_source_env(&config.owner_source))
     return std::nullopt;
   const bool strict_policy = config.policy == HookPolicy::Strict;
   if (!parse_check_trap_mode_env(&config.check_trap_mode))
     return std::nullopt;
-  if (!parse_sc_report_mode_env(&config.sc_report_mode))
+  if (!parse_supercollider_report_mode_env(&config.supercollider_report_mode))
     return std::nullopt;
   config.supercollider_evidence_mode =
-      config.sc_report_mode == ScReportMode::Trap
-          ? rocjitsu::ConSanSuperColliderEvidenceMode::TrapOnly
-          : rocjitsu::ConSanSuperColliderEvidenceMode::StickyMarker;
-  const auto moi_mode_policy = rocjitsu::consan_moi_mode_policy(config.moi_engine);
-  // Synchronization implemented by an MOI engine is part of its ordinary
+      config.supercollider_report_mode == SuperColliderReportMode::Trap
+          ? SuperColliderEvidenceMode::TrapOnly
+          : SuperColliderEvidenceMode::StickyMarker;
+  // ConSan synchronization is part of its ordinary
   // profile, not an expert opt-in. Explicit false values remain useful for
   // focused compatibility and bring-up tests.
-  const bool persistent_owner_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi &&
-                                         moi_mode_policy.initialize_owner_epoch_by_default;
-  const bool ordinary_moi_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi;
-  const bool strict_moi_policy = strict_policy && ordinary_moi_defaults;
+  const bool ordinary_defaults = config.mode == Mode::Default;
+  const bool strict_report_policy = strict_policy && ordinary_defaults;
   if (!parse_bool_envs({
           {"RJ_CONSAN_FAIL_CLOSED", strict_policy, &config.fail_closed},
           {"RJ_CONSAN_REQUIRE_PATCH", strict_policy, &config.require_patch},
@@ -663,37 +619,33 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           {"RJ_CONSAN_FAULT_ORDINARY_WRONG_ADDRESS", false, &config.fault_ordinary_wrong_address},
           {"RJ_CONSAN_FAULT_DRY_RUN", false, &config.fault_dry_run},
           {"RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", false, &config.fault_require_exactly_one},
-          {"RJ_CONSAN_MOI_INIT_OWNER_EPOCH", persistent_owner_defaults,
-           &config.moi_init_owner_epoch},
-          {"RJ_CONSAN_MOI_TRACK_BARRIERS", ordinary_moi_defaults, &config.moi_track_barriers},
-          {"RJ_CONSAN_MOI_TRACK_ATOMICS", ordinary_moi_defaults, &config.moi_track_atomics},
-          {"RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", false, &config.moi_dynamic_access_records},
-          {"RJ_CONSAN_MOI_SAMPLED_CHECK", false, &config.moi_sampled_check},
-          {"RJ_CONSAN_MOI_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES", false,
-           &config.moi_allow_uniform_lds_stores},
+          {"RJ_CONSAN_INIT_OWNER_EPOCH", ordinary_defaults, &config.init_owner_epoch},
+          {"RJ_CONSAN_TRACK_BARRIERS", ordinary_defaults, &config.track_barriers},
+          {"RJ_CONSAN_TRACK_ATOMICS", ordinary_defaults, &config.track_atomics},
+          {"RJ_CONSAN_DEVICE_CONFLICT_CHECK", false, &config.device_conflict_check},
+          {"RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES", false,
+           &config.allow_uniform_lds_stores},
           // Deliberately test-only: these are not part of the public ConSan knob set.
           {"RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill},
           {"RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH", false, &config.test_force_private_epoch},
-          {"RJ_CONSAN_TEST_SEED_INLINE_EXACT_ODD", false, &config.test_seed_inline_exact_odd},
-          {"RJ_CONSAN_MOI_REQUIRE_RECORDS", strict_moi_policy, &config.moi_require_records},
-          {"RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS", false, &config.moi_require_diagnostics},
-          {"RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", false, &config.moi_forbid_diagnostics},
-          {"RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT", false, &config.moi_require_replay_conflict},
-          {"RJ_CONSAN_MOI_FORBID_OVERFLOW", strict_moi_policy, &config.moi_forbid_overflow},
+          {"RJ_CONSAN_REQUIRE_RECORDS", strict_report_policy, &config.require_records},
+          {"RJ_CONSAN_REQUIRE_DIAGNOSTICS", false, &config.require_diagnostics},
+          {"RJ_CONSAN_FORBID_DIAGNOSTICS", false, &config.forbid_diagnostics},
+          {"RJ_CONSAN_FORBID_OVERFLOW", strict_report_policy, &config.forbid_overflow},
       }))
     return std::nullopt;
-  if (!parse_sc_perturb_kind_env(&config.sc_perturb_kind) ||
-      !parse_sc_perturb_edge_env(&config.sc_perturb_edge) ||
-      !parse_u32_env("RJ_CONSAN_SC_PERTURB_INDEX", 0, &config.sc_perturb_index) ||
-      !parse_u32_env("RJ_CONSAN_SC_PERTURB_MAX", 1, &config.sc_perturb_max) ||
-      !parse_u32_env("RJ_CONSAN_SC_PERTURB_SLEEP", 1, &config.sc_perturb_sleep) ||
-      !parse_u32_env("RJ_CONSAN_SC_PERTURB_REQUIRED_COUNT", 0, &config.sc_perturb_required_count))
+  if (!parse_supercollider_perturb_kind_env(&config.supercollider_perturb_kind) ||
+      !parse_supercollider_perturb_edge_env(&config.supercollider_perturb_edge) ||
+      !parse_u32_env("RJ_CONSAN_SC_PERTURB_INDEX", 0, &config.supercollider_perturb_index) ||
+      !parse_u32_env("RJ_CONSAN_SC_PERTURB_MAX", 1, &config.supercollider_perturb_max) ||
+      !parse_u32_env("RJ_CONSAN_SC_PERTURB_SLEEP", 1, &config.supercollider_perturb_sleep) ||
+      !parse_u32_env("RJ_CONSAN_SC_PERTURB_REQUIRED_COUNT", 0,
+                     &config.supercollider_perturb_required_count))
     return std::nullopt;
   if (const char *identity = std::getenv("RJ_CONSAN_SC_PERTURB_IDENTITY"))
-    config.sc_perturb_identity = identity;
-  if (config.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
-      !has_explicit_primary_probe(config) &&
-      config.sc_perturb_kind == rocjitsu::ConSanPerturbationKind::None) {
+    config.supercollider_perturb_identity = identity;
+  if (config.mode == Mode::SuperCollider && !has_explicit_primary_probe(config) &&
+      config.supercollider_perturb_kind == SuperColliderPerturbationKind::None) {
     config.probe_lds_check_trap = config.check_trap_mode == CheckTrapMode::All ||
                                   config.check_trap_mode == CheckTrapMode::Lds;
     config.probe_flat_check_trap = config.check_trap_mode == CheckTrapMode::All ||
@@ -774,16 +726,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     }
   }
-  if (!parse_u32_env("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS",
-                     kConSanDefaultFaultReservationTimeoutMs, &config.fault_reservation_timeout_ms))
+  if (!parse_u32_env("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", kDefaultFaultReservationTimeoutMs,
+                     &config.fault_reservation_timeout_ms))
     return std::nullopt;
-  if (config.test_seed_inline_exact_odd &&
-      (config.flavor != rocjitsu::ConSanFlavor::Moi ||
-       config.moi_engine != rocjitsu::ConSanMoiEngine::InlineShadow)) {
-    std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_TEST_SEED_INLINE_EXACT_ODD requires "
-                         "MOI inline_shadow\n");
-    return std::nullopt;
-  }
   if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
     config.test_kernel_name_filter = test_filter;
   if (!parse_kernel_allowlist_env(&config.kernel_name_allowlist))
@@ -815,9 +760,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     }
     config.fault_load_occurrence = occurrence;
   }
-  if (!parse_delay_mode_env(&config.delay_mode))
+  if (!parse_supercollider_delay_mode_env(&config.supercollider_delay_mode))
     return std::nullopt;
-  if (!parse_u32_env("RJ_CONSAN_DELAY", 0, &config.delay_nops))
+  if (!parse_u32_env("RJ_CONSAN_SC_DELAY", 0, &config.supercollider_delay_nops))
     return std::nullopt;
   const bool absolute_growth_limit = env_has_value("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES");
   const bool relative_growth_limit = env_has_value("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT");
@@ -827,16 +772,14 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   }
   if (absolute_growth_limit) {
-    config.patched_image_growth_limit.kind =
-        rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes;
+    config.patched_image_growth_limit.kind = PatchedImageGrowthLimitKind::AbsoluteBytes;
     if (!parse_u64_env("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
-                       rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+                       kDefaultMaxPatchedImageGrowthBytes,
                        &config.patched_image_growth_limit.absolute_bytes, 10)) {
       return std::nullopt;
     }
   } else if (relative_growth_limit) {
-    config.patched_image_growth_limit.kind =
-        rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
+    config.patched_image_growth_limit.kind = PatchedImageGrowthLimitKind::InputPercent;
     if (!parse_u32_env("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", 0,
                        &config.patched_image_growth_limit.input_percent)) {
       return std::nullopt;
@@ -861,105 +804,98 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     config.process_concurrent_transform_limit_bytes = process_limit;
   }
   config.max_patches_explicit = env_has_value("RJ_CONSAN_MAX_PATCHES");
-  if (!parse_u32_env("RJ_CONSAN_MAX_PATCHES", kConSanAllSupportedPatchBudget, &config.max_patches))
+  if (!parse_u32_env("RJ_CONSAN_MAX_PATCHES", kAllSupportedPatchBudget, &config.max_patches))
     return std::nullopt;
-  if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLE_STRIDE", 1, &config.moi_sample_stride))
+  if (!parse_u32_env("RJ_CONSAN_SAMPLE_STRIDE", 1, &config.sample_stride))
     return std::nullopt;
-  if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLE_OFFSET", 0, &config.moi_sample_offset))
+  if (!parse_u32_env("RJ_CONSAN_SAMPLE_OFFSET", 0, &config.sample_offset))
     return std::nullopt;
   // Presets supply selector defaults only. Explicit selectors keep their
   // existing precedence and validation; the default preset preserves coupled
   // selection exactly, including legacy offset overrides.
-  uint32_t workgroup_default = moi_mode_policy.default_runtime_sample_stride;
+  uint32_t workgroup_default = kDefaultRuntimeSampleStride;
   uint32_t cell_default = workgroup_default;
-  if (const char *preset = std::getenv("RJ_CONSAN_MOI_SAMPLED_PRESET");
-      preset != nullptr && *preset != '\0') {
-    if (config.flavor != rocjitsu::ConSanFlavor::Moi ||
-        config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled) {
-      std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_SAMPLED_PRESET requires Sampled\n");
+  if (const char *preset = std::getenv("RJ_CONSAN_PRESET"); preset != nullptr && *preset != '\0') {
+    if (config.mode != Mode::Default) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_PRESET requires ConSan\n");
       return std::nullopt;
     }
     if (ascii_iequals(preset, "default")) {
-      config.moi_sampled_preset = "default";
+      config.preset = "default";
     } else if (ascii_iequals(preset, "low")) {
-      config.moi_sampled_preset = "low";
+      config.preset = "low";
       workgroup_default = cell_default = 1024;
     } else if (ascii_iequals(preset, "high")) {
-      config.moi_sampled_preset = "high";
+      config.preset = "high";
       workgroup_default = 1;
       cell_default = 4;
     } else if (ascii_iequals(preset, "max")) {
-      config.moi_sampled_preset = "max";
+      config.preset = "max";
       workgroup_default = cell_default = 1;
     } else {
       std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_SAMPLED_PRESET='%s'; "
+                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_PRESET='%s'; "
                    "expected low|default|high|max\n",
                    preset);
       return std::nullopt;
     }
   }
-  const bool legacy_sample_selection = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE") ||
-                                       env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET");
-  const bool explicit_independent_selection =
-      env_has_value("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE") ||
-      env_has_value("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET") ||
-      env_has_value("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE") ||
-      env_has_value("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET");
-  config.moi_runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE");
+  const bool legacy_sample_selection = env_has_value("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE") ||
+                                       env_has_value("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET");
+  const bool explicit_independent_selection = env_has_value("RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE") ||
+                                              env_has_value("RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET") ||
+                                              env_has_value("RJ_CONSAN_CELL_SAMPLE_STRIDE") ||
+                                              env_has_value("RJ_CONSAN_CELL_SAMPLE_OFFSET");
+  config.runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE");
   const uint32_t runtime_sample_stride_default =
-      config.flavor == rocjitsu::ConSanFlavor::Moi ? workgroup_default : 1u;
-  if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,
-                     &config.moi_runtime_sample_stride) ||
-      !parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", 0, &config.moi_runtime_sample_offset))
+      config.mode == Mode::Default ? workgroup_default : 1u;
+  if (!parse_u32_env("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,
+                     &config.runtime_sample_stride) ||
+      !parse_u32_env("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET", 0, &config.runtime_sample_offset))
     return std::nullopt;
   const bool independent_sample_selection =
       explicit_independent_selection ||
       (!legacy_sample_selection && workgroup_default != cell_default);
   if (independent_sample_selection) {
-    if (config.flavor != rocjitsu::ConSanFlavor::Moi ||
-        config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled || legacy_sample_selection) {
+    if (config.mode != Mode::Default || legacy_sample_selection) {
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] independent workgroup/cell selectors require "
-                           "Sampled and cannot be combined with legacy runtime selectors\n");
+                           "ConSan and cannot be combined with legacy runtime selectors\n");
       return std::nullopt;
     }
-    rocjitsu::ConSanSampleSelector cell;
-    if (!parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", workgroup_default,
-                       &config.moi_runtime_sample_stride) ||
-        !parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET", 0,
-                       &config.moi_runtime_sample_offset) ||
-        !parse_u32_env("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", cell_default, &cell.stride) ||
-        !parse_u32_env("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", 0, &cell.offset))
+    SampleSelector cell;
+    if (!parse_u32_env("RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE", workgroup_default,
+                       &config.runtime_sample_stride) ||
+        !parse_u32_env("RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET", 0, &config.runtime_sample_offset) ||
+        !parse_u32_env("RJ_CONSAN_CELL_SAMPLE_STRIDE", cell_default, &cell.stride) ||
+        !parse_u32_env("RJ_CONSAN_CELL_SAMPLE_OFFSET", 0, &cell.offset))
       return std::nullopt;
-    config.moi_sampled_cell_selection = cell;
-    config.moi_runtime_sample_stride_explicit = explicit_independent_selection;
+    config.cell_selection = cell;
+    config.runtime_sample_stride_explicit = explicit_independent_selection;
   }
-  if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLED_BANKS", 0, &config.moi_sampled_banks))
+  if (!parse_u32_env("RJ_CONSAN_WATCHPOINT_BANKS", 0, &config.watchpoint_banks))
     return std::nullopt;
-  if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", 8,
-                     &config.moi_sampled_conflict_limit) ||
-      !parse_u32_env("RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT", 64,
-                     &config.moi_sampled_total_conflict_limit))
+  if (!parse_u32_env("RJ_CONSAN_CONFLICT_LIMIT", 8, &config.conflict_limit) ||
+      !parse_u32_env("RJ_CONSAN_TOTAL_CONFLICT_LIMIT", 64, &config.total_conflict_limit))
     return std::nullopt;
-  if (config.moi_sampled_conflict_limit > 1024 || config.moi_sampled_total_conflict_limit > 65536) {
+  if (config.conflict_limit > 1024 || config.total_conflict_limit > 65536) {
     std::fprintf(stderr, "[rocjitsu-dbi-hooks] sampled conflict limits exceed bounds "
                          "(per report: 1024, per hook session: 65536)\n");
     return std::nullopt;
   }
-  if (!parse_moi_epoch_analysis_env(&config.moi_epoch_analysis))
+  if (!parse_epoch_analysis_env(&config.epoch_analysis))
     return std::nullopt;
   if (!refresh_report_config_from_env(&config))
     return std::nullopt;
-  uint32_t delay_var_ssrc = 106;
-  if (!parse_u32_env("RJ_CONSAN_DELAY_VAR_SSRC", 106, &delay_var_ssrc))
+  uint32_t supercollider_delay_var_ssrc = 106;
+  if (!parse_u32_env("RJ_CONSAN_SC_DELAY_VAR_SSRC", 106, &supercollider_delay_var_ssrc))
     return std::nullopt;
-  if (delay_var_ssrc > 255) {
+  if (supercollider_delay_var_ssrc > 255) {
     std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_DELAY_VAR_SSRC='%s'; expected 0..255\n",
-                 std::getenv("RJ_CONSAN_DELAY_VAR_SSRC"));
+                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_SC_DELAY_VAR_SSRC='%s'; expected 0..255\n",
+                 std::getenv("RJ_CONSAN_SC_DELAY_VAR_SSRC"));
     return std::nullopt;
   }
-  config.delay_var_ssrc = static_cast<uint16_t>(delay_var_ssrc);
+  config.supercollider_delay_var_ssrc = static_cast<uint16_t>(supercollider_delay_var_ssrc);
   if (const char *value = std::getenv("RJ_CONSAN_DUMP_DIR"); value != nullptr && *value != '\0')
     config.dump_dir = value;
   uint32_t scratch_vgpr = 0;
@@ -973,22 +909,20 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     }
     config.scratch_vgpr = static_cast<uint16_t>(scratch_vgpr);
   }
-  if (!parse_optional_vgpr_env("RJ_CONSAN_MOI_OWNER_VGPR", &config.requested_moi_owner_vgpr))
+  if (!parse_optional_vgpr_env("RJ_CONSAN_OWNER_VGPR", &config.requested_owner_vgpr))
     return std::nullopt;
-  if (!parse_optional_vgpr_env("RJ_CONSAN_MOI_EPOCH_VGPR", &config.requested_moi_epoch_vgpr))
+  if (!parse_optional_vgpr_env("RJ_CONSAN_EPOCH_VGPR", &config.requested_epoch_vgpr))
     return std::nullopt;
-  if (!parse_optional_sgpr_env("RJ_CONSAN_MOI_OWNER_SGPR", &config.requested_moi_owner_sgpr))
+  if (!parse_optional_sgpr_env("RJ_CONSAN_OWNER_SGPR", &config.requested_owner_sgpr))
     return std::nullopt;
-  if (!parse_optional_sgpr_pair_env("RJ_CONSAN_MOI_EXEC_SAVE_SGPR",
-                                    &config.requested_moi_exec_save_sgpr))
+  if (!parse_optional_sgpr_pair_env("RJ_CONSAN_EXEC_SAVE_SGPR", &config.requested_exec_save_sgpr))
     return std::nullopt;
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_auto_report_buffer_size == 0) {
+  if (config.mode == Mode::Default && config.auto_report_buffer_size == 0) {
     const std::pair<bool, const char *> report_guards[] = {
-        {config.moi_require_records, "RJ_CONSAN_MOI_REQUIRE_RECORDS"},
-        {config.moi_require_replay_conflict, "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT"},
-        {config.moi_require_diagnostics, "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"},
-        {config.moi_forbid_diagnostics, "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"},
-        {config.moi_forbid_overflow, "RJ_CONSAN_MOI_FORBID_OVERFLOW"},
+        {config.require_records, "RJ_CONSAN_REQUIRE_RECORDS"},
+        {config.require_diagnostics, "RJ_CONSAN_REQUIRE_DIAGNOSTICS"},
+        {config.forbid_diagnostics, "RJ_CONSAN_FORBID_DIAGNOSTICS"},
+        {config.forbid_overflow, "RJ_CONSAN_FORBID_OVERFLOW"},
     };
     for (const auto &[enabled, name] : report_guards) {
       if (enabled)
@@ -999,16 +933,15 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   // Keep this parser responsible for environment syntax and hook-only
   // provenance constraints. Cross-field semantics belong to the typed
   // contracts so every configuration source observes the same rules.
-  const auto reject_contract = [](rocjitsu::ConSanContractIssue issue) {
-    if (issue == rocjitsu::ConSanContractIssue::None)
+  const auto reject_contract = [](ContractIssue issue) {
+    if (issue == ContractIssue::None)
       return false;
-    const std::string_view name = rocjitsu::consan_contract_issue_name(issue);
+    const std::string_view name = contract_issue_name(issue);
     std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid ConSan typed configuration: %.*s\n",
                  static_cast<int>(name.size()), name.data());
     return true;
   };
-  if (reject_contract(rocjitsu::validate_consan_configuration(config, config, config, config,
-                                                              config, config))) {
+  if (reject_contract(validate_configuration(config, config, config, config, config, config))) {
     return std::nullopt;
   }
   warn_irrelevant_env_combinations(config);
@@ -1016,74 +949,69 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
 }
 
 [[nodiscard]] bool refresh_report_config_from_env(HookConfig *config) {
+  uint64_t supercollider_report_buffer_address = 0;
+  if (const char *value = std::getenv("RJ_CONSAN_SC_REPORT_BUFFER");
+      value != nullptr && *value != '\0') {
+    if (!parse_u64_env("RJ_CONSAN_SC_REPORT_BUFFER", 0, &supercollider_report_buffer_address))
+      return false;
+    if (supercollider_report_buffer_address == 0) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_SC_REPORT_BUFFER='0'; expected nonzero "
+                   "device-visible address\n");
+      return false;
+    }
+    config->supercollider_report_buffer_address = supercollider_report_buffer_address;
+  } else {
+    config->supercollider_report_buffer_address.reset();
+  }
+
   uint64_t report_buffer_address = 0;
   if (const char *value = std::getenv("RJ_CONSAN_REPORT_BUFFER");
       value != nullptr && *value != '\0') {
     if (!parse_u64_env("RJ_CONSAN_REPORT_BUFFER", 0, &report_buffer_address))
       return false;
     if (report_buffer_address == 0) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_REPORT_BUFFER='0'; expected nonzero "
-                   "device-visible address\n");
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_REPORT_BUFFER='0'; expected "
+                           "nonzero device-visible address\n");
       return false;
     }
     config->report_buffer_address = report_buffer_address;
   } else {
     config->report_buffer_address.reset();
   }
-
-  uint64_t moi_report_buffer_address = 0;
-  if (const char *value = std::getenv("RJ_CONSAN_MOI_REPORT_BUFFER");
-      value != nullptr && *value != '\0') {
-    if (!parse_u64_env("RJ_CONSAN_MOI_REPORT_BUFFER", 0, &moi_report_buffer_address))
-      return false;
-    if (moi_report_buffer_address == 0) {
-      std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_REPORT_BUFFER='0'; expected "
-                           "nonzero device-visible address\n");
-      return false;
-    }
-    config->moi_report_buffer_address = moi_report_buffer_address;
-  } else {
-    config->moi_report_buffer_address.reset();
-  }
-  if (!parse_u64_env("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", 0, &config->moi_report_buffer_size))
+  if (!parse_u64_env("RJ_CONSAN_REPORT_BUFFER_SIZE", 0, &config->report_buffer_size))
     return false;
-  config->moi_auto_report_buffer_size_explicit =
-      env_has_value("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE");
-  if (config->moi_auto_report_buffer_size_explicit) {
-    if (!parse_u64_env("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", 0,
-                       &config->moi_auto_report_buffer_size))
+  config->auto_report_buffer_size_explicit = env_has_value("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE");
+  if (config->auto_report_buffer_size_explicit) {
+    if (!parse_u64_env("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", 0, &config->auto_report_buffer_size))
       return false;
   } else {
-    config->moi_auto_report_buffer_size =
-        config->flavor == rocjitsu::ConSanFlavor::Moi && !config->moi_report_buffer_address
-            ? rocjitsu::consan_moi_mode_policy(config->moi_engine).auto_report_buffer_ceiling_bytes
+    config->auto_report_buffer_size =
+        config->mode == Mode::Default && !config->report_buffer_address
+            ? kOrdinaryAutoReportBufferCeilingBytes
             : 0;
   }
-  if (config->moi_auto_report_buffer_size != 0 &&
-      config->moi_auto_report_buffer_size <
-          rocjitsu::consan_moi_report_buffer_min_bytes(1, 0, 0, 0)) {
+  if (config->auto_report_buffer_size != 0 &&
+      config->auto_report_buffer_size < sizeof(ReportHeader)) {
     std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE='%s'; "
+                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE='%s'; "
                  "expected 0 or at least %zu bytes\n",
-                 std::getenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE"),
-                 rocjitsu::consan_moi_report_buffer_min_bytes(1, 0, 0, 0));
+                 std::getenv("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"), sizeof(ReportHeader));
     return false;
   }
-  const uint64_t auto_report_buffer_ceiling =
-      rocjitsu::consan_moi_mode_policy(config->moi_engine).auto_report_buffer_ceiling_bytes;
-  if (config->moi_auto_report_buffer_size > auto_report_buffer_ceiling) {
+  const uint64_t auto_report_buffer_ceiling = kOrdinaryAutoReportBufferCeilingBytes;
+  if (config->auto_report_buffer_size > auto_report_buffer_ceiling) {
     std::fprintf(stderr,
-                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE='%s'; "
+                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE='%s'; "
                  "maximum auto-report cap is %llu bytes\n",
-                 std::getenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE"),
+                 std::getenv("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE"),
                  static_cast<unsigned long long>(auto_report_buffer_ceiling));
     return false;
   }
 
-  config->scope = config->bound() ? rocjitsu::ConSanRuntimeResourceScope::CodeObject
-                                  : rocjitsu::ConSanRuntimeResourceScope::Unbound;
-  return parse_u32_env("RJ_CONSAN_REPORT_MARKER", 1, &config->report_marker);
+  config->scope =
+      config->bound() ? RuntimeResourceScope::CodeObject : RuntimeResourceScope::Unbound;
+  return parse_u32_env("RJ_CONSAN_SC_REPORT_MARKER", 1, &config->supercollider_report_marker);
 }
 
-} // namespace rocjitsu::consan_hook
+} // namespace rocjitsu::consan::hook

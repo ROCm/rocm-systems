@@ -12,17 +12,17 @@
 #include <span>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Exact immutable facts rederived once from the pristine code object for
 /// mutation and perturbation proof.
-struct ConSanPristineValidationInventory {
+struct PristineValidationInventory {
   ProgramInventory program_inventory;
-  std::vector<ConSanFaultSite> fault_sites;
-  std::vector<ConSanPerturbationCandidate> perturbation_candidates;
+  std::vector<FaultSite> fault_sites;
+  std::vector<SuperColliderPerturbationCandidate> supercollider_perturbation_candidates;
   bool analysis_succeeded = false;
 
-  [[nodiscard]] ConSanFaultSelectionView fault_selection() const {
+  [[nodiscard]] FaultSelectionView fault_selection() const {
     return {.program_inventory = program_inventory, .fault_sites = fault_sites};
   }
 };
@@ -31,7 +31,8 @@ struct ConSanPristineValidationInventory {
 /// perturbation proof. Extended barrier pairing is enabled when mutation
 /// semantics must be reproduced. No mutation bytes are applied and no
 /// perturbation plan is selected.
-[[nodiscard]] ConSanPristineValidationInventory rederive_consan_pristine_validation_inventory(
-    std::span<const uint8_t> original_image, bool require_mutation_semantics);
+[[nodiscard]] PristineValidationInventory
+rederive_pristine_validation_inventory(std::span<const uint8_t> original_image,
+                                       bool require_mutation_semantics);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

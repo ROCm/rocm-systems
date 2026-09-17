@@ -5,7 +5,7 @@
 /// distilled from the MXF4 TDM Tensile kernels. The guest DS instruction names
 /// v286 through encoded v30 while the instrumentation scratch bank remains
 /// below v256. The correct path also retains the workload's adjacent split
-/// barriers separated by a DS wait. Record/Replay must preserve both the
+/// barriers separated by a DS wait. ConSan must preserve both the
 /// physical address-bank distinction and the synchronization contract.
 
 #include "consan_device_test_support.h"

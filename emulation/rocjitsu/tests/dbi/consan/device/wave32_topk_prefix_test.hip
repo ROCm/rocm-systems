@@ -24,7 +24,7 @@ constexpr uint32_t kWaveCount = kThreadCount / kWaveSize;
 constexpr uint32_t kTileWordsPerLane = 64u;
 constexpr uint32_t kTileResultWordsPerLane = 8u;
 // Keep the same permuted threshold-selection idiom as PyTorch TopK, but select
-// enough lanes that Sampled observes the missing-barrier conflict reliably.
+// enough lanes that ConSan observes the missing-barrier conflict reliably.
 constexpr uint32_t kTopKThreshold = 512u;
 
 struct DeviceState {
@@ -49,7 +49,7 @@ __host__ __device__ constexpr bool topk_candidate(uint32_t tid) {
 #if defined(RJ_CONSAN_TOPK_WAVE64)
   // Retain a sparse, permuted TopK tail while filling the first eight waves.
   // The full prefix makes producer slots land on later wave boundaries, so
-  // every deterministic Sampled bank has cross-owner producer/consumer
+  // every deterministic ConSan bank has cross-owner producer/consumer
   // overlap rather than relying on an accidental sparse-rank intersection.
   if (tid < 8u * kWaveSize)
     return true;

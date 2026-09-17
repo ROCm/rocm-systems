@@ -1,17 +1,17 @@
 /// Temporary lowering state for one access admitted by semantic policy.
 ///
-/// The referenced `ConSanProgramSite` is the exact immutable arena record
+/// The referenced `ProgramSite` is the exact immutable arena record
 /// selected by the observation plan. The candidate owns only facts created
 /// after admission: coalesced policy intents and target execution state.
 /// Retaining the arena record by identity prevents lowering from creating a
 /// second access representation that can drift from program inventory.
-struct ConSanMoiCandidate {
-  explicit ConSanMoiCandidate(const ConSanProgramSite &site) : site_(&site) {}
+struct Candidate {
+  explicit Candidate(const ProgramSite &site) : site_(&site) {}
 
-  [[nodiscard]] const ConSanProgramSite &site() const { return *site_; }
+  [[nodiscard]] const ProgramSite &site() const { return *site_; }
 
   /// Every observation intent coalesced onto this physical access.
-  std::vector<ConSanProbeIntentId> intent_ids;
+  std::vector<ProbeIntentId> intent_ids;
   /// Return the original-text instruction offset used as this lowering
   /// operation's physical insertion anchor.
   [[nodiscard]] uint64_t anchor() const { return site().physical_id.original_text_offset; }
@@ -26,26 +26,25 @@ struct ConSanMoiCandidate {
   /// operation. Lowering must not recover this fact from the mnemonic.
   [[nodiscard]] bool is_native_two_range() const {
     return site().lowering.form &&
-           site().lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange;
+           site().lowering.form->kind == AccessLoweringFormKind::NativeTwoRange;
   }
   /// Return whether the classifier normalized this as any native LDS form.
   [[nodiscard]] bool is_native_lds() const {
     return site().lowering.form &&
-           (site().lowering.form->kind == ConSanAccessLoweringFormKind::NativeSingleRange ||
-            site().lowering.form->kind == ConSanAccessLoweringFormKind::NativeTwoRange);
+           (site().lowering.form->kind == AccessLoweringFormKind::NativeSingleRange ||
+            site().lowering.form->kind == AccessLoweringFormKind::NativeTwoRange);
   }
   /// Return whether the classifier normalized this as any FLAT address form.
   [[nodiscard]] bool is_flat() const {
     return site().lowering.form &&
-           (site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
-            site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatScalarVectorAddress);
+           (site().lowering.form->kind == AccessLoweringFormKind::FlatVectorAddress ||
+            site().lowering.form->kind == AccessLoweringFormKind::FlatScalarVectorAddress);
   }
   /// Return whether the classifier normalized this as any direct-to-LDS form.
   [[nodiscard]] bool is_direct_to_lds() const {
     return site().lowering.form &&
-           (site().lowering.form->kind ==
-                ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress ||
-            site().lowering.form->kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed);
+           (site().lowering.form->kind == AccessLoweringFormKind::DirectToLdsExplicitAddress ||
+            site().lowering.form->kind == AccessLoweringFormKind::DirectToLdsLaneAddressed);
   }
   /// Return the classifier-owned encoded offset scale.
   [[nodiscard]] uint32_t encoded_offset_scale_bytes() const {
@@ -55,11 +54,10 @@ struct ConSanMoiCandidate {
   /// lowering first materializes its complete effective address, so its
   /// inventory displacement must not be applied a second time. Admitted
   /// native sites always carry a representable decoded displacement.
-  [[nodiscard]] uint32_t lowering_offset(const ConSanAccessRange &range) const {
+  [[nodiscard]] uint32_t lowering_offset(const AccessRange &range) const {
     return site().lowering.form &&
-                   (site().lowering.form->kind == ConSanAccessLoweringFormKind::FlatVectorAddress ||
-                    site().lowering.form->kind ==
-                        ConSanAccessLoweringFormKind::FlatScalarVectorAddress)
+                   (site().lowering.form->kind == AccessLoweringFormKind::FlatVectorAddress ||
+                    site().lowering.form->kind == AccessLoweringFormKind::FlatScalarVectorAddress)
                ? 0u
                : static_cast<uint32_t>(range.static_byte_offset.value());
   }
@@ -71,12 +69,12 @@ struct ConSanMoiCandidate {
   std::optional<uint16_t> incoming_vgpr_bank_mode;
 
 private:
-  const ConSanProgramSite *site_ = nullptr;
+  const ProgramSite *site_ = nullptr;
 };
 
 /// Stable policy reason crossing from perturbation admission into planning
 /// and final proof rederivation. Rendering remains a separate concern.
-enum class ConSanPerturbationRejectionReason : uint8_t {
+enum class SuperColliderPerturbationRejectionReason : uint8_t {
   None,
   MissingExactBasicBlock,
   CyclicCfgComponent,
@@ -101,13 +99,14 @@ enum class ConSanPerturbationRejectionReason : uint8_t {
 /// inventory. They are temporary evidence for selecting a perturbation, not a
 /// transform result: emitted patches retain the stable semantic identity and
 /// source coordinates required by final validation.
-struct ConSanPerturbationCandidate {
-  ConSanPerturbationKind kind = ConSanPerturbationKind::None;
-  ConSanPerturbationEdge edge = ConSanPerturbationEdge::Release;
-  ConSanSyncSequenceId sequence;
-  ConSanSyncEventId anchor_event;
+struct SuperColliderPerturbationCandidate {
+  SuperColliderPerturbationKind kind = SuperColliderPerturbationKind::None;
+  SuperColliderPerturbationEdge edge = SuperColliderPerturbationEdge::Release;
+  SyncSequenceId sequence;
+  SyncEventId anchor_event;
   bool eligible = false;
-  ConSanPerturbationRejectionReason rejection_reason = ConSanPerturbationRejectionReason::None;
+  SuperColliderPerturbationRejectionReason rejection_reason =
+      SuperColliderPerturbationRejectionReason::None;
 };
 
 /// One admitted scheduling perturbation ready for byte-level lowering.
@@ -116,11 +115,11 @@ struct ConSanPerturbationCandidate {
 /// policy. Composite fault/perturbation lowering also records the pristine
 /// identity and its translated anchor. This is temporary planner-to-emitter
 /// input; mutation tallies and patch metadata are the durable output.
-struct ConSanPerturbationPlan {
+struct SuperColliderPerturbationPlan {
   /// Complete admitted candidate. Selection consumes a temporary inventory
   /// entry into the plan once; composition and emission do not reconstruct
   /// that relationship through copied strings and offsets.
-  ConSanPerturbationCandidate candidate;
+  SuperColliderPerturbationCandidate candidate;
   /// Materialized lowering coordinates and stable current-revision identity.
   /// Candidate inventories retain only arena handles; at most two admitted
   /// plans pay for this durable selection boundary.
@@ -141,32 +140,31 @@ struct ConSanPerturbationPlan {
 /// Temporary workspace shared only by perturbation analysis, selection, and
 /// emission during one lowering attempt.
 ///
-/// Keeping this state outside `ConSanTransformArtifacts` prevents callers and
+/// Keeping this state outside `TransformArtifacts` prevents callers and
 /// later pipeline stages from treating candidates or pre-emission plans as a
 /// lasting behavioral result. The optional inspection path used by unit tests
 /// observes this workspace without extending its production lifetime.
-struct ConSanPerturbationPlanningState {
+struct SuperColliderPerturbationPlanningState {
   /// All release and acquire edges derived from synchronization sequences,
   /// including rejected edges whose reason is useful to planner unit tests.
-  std::vector<ConSanPerturbationCandidate> candidates;
+  std::vector<SuperColliderPerturbationCandidate> candidates;
   /// The bounded subset selected for emission under the current options.
-  std::vector<ConSanPerturbationPlan> plans;
+  std::vector<SuperColliderPerturbationPlan> plans;
 };
 
 /// Stable root cause for a failed transform that reaches the loader hook.
 /// This is deliberately separate from human-readable errors so structured
 /// rejection diagnostics never depend on prose matching.
-enum class ConSanTransformFailureCause : uint8_t {
+enum class TransformFailureCause : uint8_t {
   PatchedImageGrowthLimit,
   OverlappingPatchRanges,
 };
 
-[[nodiscard]] constexpr std::string_view
-consan_transform_failure_cause_name(ConSanTransformFailureCause cause) {
-  using E = ConSanTransformFailureCause;
-  constexpr auto vocabulary = make_consan_enum_vocabulary(
-      "unknown", consan_enum(E::PatchedImageGrowthLimit, "patched-image-growth-limit"),
-      consan_enum(E::OverlappingPatchRanges, "overlapping-patch-ranges"));
+[[nodiscard]] constexpr std::string_view transform_failure_cause_name(TransformFailureCause cause) {
+  using E = TransformFailureCause;
+  constexpr auto vocabulary = make_enum_vocabulary(
+      "unknown", enum_entry(E::PatchedImageGrowthLimit, "patched-image-growth-limit"),
+      enum_entry(E::OverlappingPatchRanges, "overlapping-patch-ranges"));
   return vocabulary.name(cause);
 }
 
@@ -178,7 +176,7 @@ consan_transform_failure_cause_name(ConSanTransformFailureCause cause) {
 /// reason, and fault-injection tests deliberately model multiple applied
 /// mutations. This tally reports transform facts only. It does not claim that
 /// a replacement code object was installed by a runtime.
-struct ConSanMutationTally {
+struct MutationTally {
   /// Number of mutations requested by the validated mutation policy.
   size_t requested = 0;
   /// Number of concrete semantic mutations selected by planning.
@@ -194,7 +192,7 @@ struct ConSanMutationTally {
   /// domain, independently of whether a runtime later installed that image.
   [[nodiscard]] bool has_application() const { return applied != 0u; }
 
-  bool operator==(const ConSanMutationTally &) const = default;
+  bool operator==(const MutationTally &) const = default;
 };
 
 /// Typed transform output for validation-only fault mutation and perturbation.
@@ -207,17 +205,17 @@ struct ConSanMutationTally {
 /// of inspecting lowering patches. Runtime installation state and process-wide
 /// reservation state are deliberately owned by the runtime coordinator and do
 /// not appear here.
-struct ConSanMutationOutcome {
+struct MutationOutcome {
   /// Destructive fault-mutation request, plan, and emission counts.
-  ConSanMutationTally fault;
+  MutationTally fault;
   /// Non-destructive scheduling-perturbation request, plan, and emission
   /// counts.
-  ConSanMutationTally perturbation;
+  MutationTally supercollider_perturbation;
   /// Stable semantic identity of the applied fault, when the selected fault
   /// form defines one and its bytes were emitted.
   std::optional<std::string> applied_fault_logical_identity;
 
-  bool operator==(const ConSanMutationOutcome &) const = default;
+  bool operator==(const MutationOutcome &) const = default;
 };
 
 /// Semantic effect of one validation mutation on a synchronization event.
@@ -226,16 +224,16 @@ struct ConSanMutationOutcome {
 /// own the pristine program arena. Composite perturbation lowering consumes
 /// it before reinventorying the mutated image, avoiding a reverse join from
 /// byte-oriented patch kinds and ranges back to synchronization semantics.
-enum class ConSanSyncEventMutationKind : uint8_t {
+enum class SyncEventMutationKind : uint8_t {
   Destroyed,
   Relocated,
   AtomicRewrite,
   AtomicBoundaryRemoval,
 };
 
-struct ConSanSyncEventMutation {
-  ConSanSyncEventId source_event;
-  ConSanSyncEventMutationKind kind = ConSanSyncEventMutationKind::Destroyed;
+struct SyncEventMutation {
+  SyncEventId source_event;
+  SyncEventMutationKind kind = SyncEventMutationKind::Destroyed;
   /// Current-image anchor, interpreted only for `Relocated`.
   uint64_t relocated_text_offset = 0;
 };
@@ -244,15 +242,15 @@ struct ConSanSyncEventMutation {
 /// This is transaction state rather than durable patch proof: composition
 /// consumes it before publishing an artifact whose inventory belongs to the
 /// mutated image.
-struct ConSanSynchronizationMutation {
-  std::vector<ConSanSyncEventMutation> events;
+struct SynchronizationMutation {
+  std::vector<SyncEventMutation> events;
   /// Atomic scope mutation can weaken the one selected sequence even when
   /// staged reinventory no longer admits it.
-  std::optional<ConSanSyncSequenceId> weakened_sequence;
+  std::optional<SyncSequenceId> weakened_sequence;
 };
 
 /// How one position-independent fragment composes at its source instruction.
-enum class ConSanTextFragmentKind : uint8_t {
+enum class TextFragmentKind : uint8_t {
   /// Execute client words in the translator-owned hardware launch stub.
   EntryPrefix,
   /// Execute client words before the translator-owned source instruction.
@@ -263,7 +261,7 @@ enum class ConSanTextFragmentKind : uint8_t {
   Replacement,
 };
 
-enum class ConSanTextFragmentBranchTarget : uint8_t {
+enum class TextFragmentBranchTarget : uint8_t {
   /// The ordinary guest boundary within this fragment's nested program.
   Guest,
   /// A transaction-owned copy of the base operation after all instrumentation.
@@ -273,16 +271,16 @@ enum class ConSanTextFragmentBranchTarget : uint8_t {
 };
 
 /// One unconditional branch in `before_words` resolved after fragment nesting.
-struct ConSanTextFragmentBranchFixup {
+struct TextFragmentBranchFixup {
   uint32_t word_index = 0;
-  ConSanTextFragmentBranchTarget target = ConSanTextFragmentBranchTarget::Guest;
+  TextFragmentBranchTarget target = TextFragmentBranchTarget::Guest;
 };
 
 /// A synchronization event carried by a fragment to its final text location.
 /// The producer retains semantic identity and a fragment-relative coordinate;
 /// the text transaction supplies destination geometry after placement.
-struct ConSanTextFragmentSyncRelocation {
-  ConSanSyncEventId source_event;
+struct TextFragmentSyncRelocation {
+  SyncEventId source_event;
   uint32_t fragment_relative_offset = 0;
 };
 
@@ -291,22 +289,20 @@ struct ConSanTextFragmentSyncRelocation {
 /// Fragments retain semantic source coordinates and owner scope but no destination geometry.
 /// Staging order defines nesting: earlier Around fragments are outermost, so access followed by
 /// atomic staging produces access-before, atomic-before, guest, atomic-after, access-after.
-struct ConSanTextFragment {
-  [[nodiscard]] static ConSanTextFragment
-  replacement(std::vector<uint32_t> words, ConSanPatchInfo patch,
-              std::vector<ConSanProbeIntentId> intents = {}) {
-    ConSanTextFragment result;
-    result.kind = ConSanTextFragmentKind::Replacement;
+struct TextFragment {
+  [[nodiscard]] static TextFragment replacement(std::vector<uint32_t> words, PatchInfo patch,
+                                                std::vector<ProbeIntentId> intents = {}) {
+    TextFragment result;
+    result.kind = TextFragmentKind::Replacement;
     result.intent_ids = std::move(intents);
     result.replacement_words = std::move(words);
     result.patch = std::move(patch);
     return result;
   }
 
-  [[nodiscard]] static ConSanTextFragment entry_prefix(std::vector<uint32_t> words,
-                                                       ConSanPatchInfo patch) {
-    ConSanTextFragment result;
-    result.kind = ConSanTextFragmentKind::EntryPrefix;
+  [[nodiscard]] static TextFragment entry_prefix(std::vector<uint32_t> words, PatchInfo patch) {
+    TextFragment result;
+    result.kind = TextFragmentKind::EntryPrefix;
     result.before_words = std::move(words);
     result.patch = std::move(patch);
     return result;
@@ -314,10 +310,10 @@ struct ConSanTextFragment {
 
   /// Transaction-local stable identity assigned when the fragment is staged.
   uint64_t id = 0;
-  ConSanTextFragmentKind kind = ConSanTextFragmentKind::Replacement;
-  std::vector<ConSanProbeIntentId> intent_ids;
+  TextFragmentKind kind = TextFragmentKind::Replacement;
+  std::vector<ProbeIntentId> intent_ids;
   /// Mode-owned runtime interpretation retained until final placement is known.
-  ConSanRuntimeStaticMapping runtime_mapping;
+  RuntimeStaticMapping runtime_mapping;
   std::vector<uint32_t> before_words;
   std::vector<uint32_t> replacement_words;
   /// The replacement contains one byte-identical copy of the complete owned
@@ -325,9 +321,9 @@ struct ConSanTextFragment {
   /// region, including internal direct branches, to remain translator-owned.
   bool replacement_preserves_source_span = false;
   std::vector<uint32_t> after_words;
-  std::vector<ConSanTextFragmentBranchFixup> branch_fixups;
-  std::vector<ConSanTextFragmentSyncRelocation> sync_relocations;
-  ConSanPatchInfo patch;
+  std::vector<TextFragmentBranchFixup> branch_fixups;
+  std::vector<TextFragmentSyncRelocation> sync_relocations;
+  PatchInfo patch;
 };
 
 /// Semantic and lowering artifacts owned by one static ConSan transformation.
@@ -337,45 +333,45 @@ struct ConSanTextFragment {
 /// `TransformResult`, and retains lowerer proof state only in private/debug
 /// storage. Runtime evidence, installation state, and private working
 /// candidates deliberately live elsewhere.
-struct ConSanTransformArtifacts {
+struct TransformArtifacts {
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
   /// Sole ownership of immutable semantic policy and its joined lowering
   /// state, independent of current candidates and patch telemetry.
-  ConSanCoverageLedger coverage_ledger;
+  CoverageLedger coverage_ledger;
 
-  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+  [[nodiscard]] const ObservationPlan &observation_plan() const {
     return coverage_ledger.observation_plan();
   }
   /// Stable semantic sites eligible for validation-only fault selection.
-  std::vector<ConSanFaultSite> fault_sites;
+  std::vector<FaultSite> fault_sites;
   /// Candidate destinations for a barrier-move validation mutation.
-  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
+  std::vector<BarrierMoveDestination> barrier_move_destinations;
   /// Concrete validation-only fault plans selected from semantic sites.
-  std::vector<ConSanFaultMutationPlan> fault_plans;
+  std::vector<FaultMutationPlan> fault_plans;
   /// Validation-only mutation facts produced by this static transform.
-  ConSanMutationOutcome mutation;
+  MutationOutcome mutation;
   /// Inventory-local synchronization effects retained only while a pristine
   /// fault image is being composed with scheduling perturbation.
-  ConSanSynchronizationMutation synchronization_mutation;
+  SynchronizationMutation synchronization_mutation;
   /// Resource alternatives considered by lowering.
-  std::vector<ConSanCandidateResourcePlan> resource_plans;
-  /// Accepted MOI operating point consumed by emitted mechanisms and final
-  /// semantic validation. Non-MOI transforms leave this value empty.
-  ConSanMoiOperatingPoint moi_operating_point;
+  std::vector<CandidateResourcePlan> resource_plans;
+  /// Accepted ConSan operating point consumed by emitted mechanisms and final
+  /// semantic validation. Non-ConSan transforms leave this value empty.
+  OperatingPoint operating_point;
   /// Validated byte-level changes emitted by lowering.
-  std::vector<ConSanPatchInfo> patches;
+  std::vector<PatchInfo> patches;
   /// Optional image-level executable relocation enclosing active bodies.
-  std::optional<ConSanTextRelocationProof> text_relocation;
+  std::optional<TextRelocationProof> text_relocation;
   /// Site-local programs awaiting one shared executable relocation.
-  std::vector<ConSanTextFragment> staged_text_fragments;
+  std::vector<TextFragment> staged_text_fragments;
   /// Complete validated code-object replacement, or empty when none is installable.
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
-  ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
+  TransformOutcome outcome = TransformOutcome::Unchanged;
   /// Machine-readable cause paired with transform errors at the loader
   /// boundary. Empty for failures that do not yet have a stable taxonomy.
-  std::optional<ConSanTransformFailureCause> transform_failure_cause;
+  std::optional<TransformFailureCause> transform_failure_cause;
   /// Non-fatal diagnostics retained from analysis and lowering.
   std::vector<std::string> warnings;
   /// Fatal static-transform diagnostics emitted by lowering or final
@@ -386,7 +382,7 @@ struct ConSanTransformArtifacts {
   /// Whether lowering has staged changes that finalization must validate or
   /// discard, derived from its outcome and emitted patch telemetry.
   [[nodiscard]] bool modified() const {
-    return outcome == ConSanTransformOutcome::ModifiedValid || !patches.empty();
+    return outcome == TransformOutcome::ModifiedValid || !patches.empty();
   }
   /// Return the current candidate image after any committed mutation.
   [[nodiscard]] std::span<const uint8_t> active_bytes(std::span<const uint8_t> original) const {
@@ -394,8 +390,8 @@ struct ConSanTransformArtifacts {
   }
   /// Mark a candidate image without overwriting a prior failure outcome.
   void mark_modified() {
-    if (outcome == ConSanTransformOutcome::Unchanged)
-      outcome = ConSanTransformOutcome::ModifiedValid;
+    if (outcome == TransformOutcome::Unchanged)
+      outcome = TransformOutcome::ModifiedValid;
   }
   /// Discard the candidate image and its patch telemetry without changing the
   /// caller-owned outcome, diagnostics, semantic inventory, or mutation facts.
@@ -411,27 +407,22 @@ struct ConSanTransformArtifacts {
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a
 /// consumer explicitly accepts.
-[[nodiscard]] constexpr bool
-consan_sync_confidence_meets(ConSanSemanticConfidence actual,
-                             ConSanSemanticConfidence weakest_accepted) {
+[[nodiscard]] constexpr bool sync_confidence_meets(SemanticConfidence actual,
+                                                   SemanticConfidence weakest_accepted) {
   return static_cast<uint8_t>(actual) <= static_cast<uint8_t>(weakest_accepted);
 }
 
-[[nodiscard]] const char *consan_flavor_name(ConSanFlavor flavor);
-[[nodiscard]] const char *consan_moi_engine_name(ConSanMoiEngine engine);
-[[nodiscard]] const char *consan_transform_outcome_name(ConSanTransformOutcome outcome);
-[[nodiscard]] const char *consan_resource_site_kind_name(ConSanResourceSiteKind kind);
+[[nodiscard]] const char *mode_name(Mode mode);
+[[nodiscard]] const char *transform_outcome_name(TransformOutcome outcome);
+[[nodiscard]] const char *resource_site_kind_name(ResourceSiteKind kind);
+[[nodiscard]] const char *register_allocation_source_name(RegisterAllocationSource source);
+[[nodiscard]] const char *register_plan_reason_name(RegisterPlanReason reason);
+[[nodiscard]] ResourcePlanAlternativeOutcome
+resource_plan_alternative_outcome(const CandidateResourcePlan &plan,
+                                  const ResourcePlanAlternative &alternative);
+[[nodiscard]] const char *resource_plan_alternative_kind_name(ResourcePlanAlternativeKind kind);
 [[nodiscard]] const char *
-consan_register_allocation_source_name(ConSanRegisterAllocationSource source);
-[[nodiscard]] const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason);
-[[nodiscard]] ConSanResourcePlanAlternativeOutcome
-consan_resource_plan_alternative_outcome(const ConSanCandidateResourcePlan &plan,
-                                         const ConSanResourcePlanAlternative &alternative);
-[[nodiscard]] const char *
-consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlternativeKind kind);
-[[nodiscard]] const char *
-consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome outcome);
-[[nodiscard]] const char *consan_delay_mode_name(ConSanDelayMode mode);
-[[nodiscard]] const char *
-consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
-[[nodiscard]] const char *consan_barrier_scope_name(ConSanBarrierSite::Scope scope);
+resource_plan_alternative_outcome_name(ResourcePlanAlternativeOutcome outcome);
+[[nodiscard]] const char *delay_mode_name(SuperColliderDelayMode mode);
+[[nodiscard]] const char *barrier_operand_source_name(BarrierSite::OperandSource source);
+[[nodiscard]] const char *barrier_scope_name(BarrierSite::Scope scope);

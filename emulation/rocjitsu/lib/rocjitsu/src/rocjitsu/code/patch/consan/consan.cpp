@@ -7,151 +7,142 @@
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/consan/consan_composition.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
+#include "rocjitsu/code/patch/consan/consan_instrumentation.h"
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
-#include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_unmatched_barrier_abort.h"
 
 #include <exception>
 #include <string>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-[[nodiscard]] static ConSanTransformArtifacts
-finalize_consan_exception(std::span<const uint8_t> code_object_bytes, std::string error) {
-  ConSanTransformArtifacts result;
+[[nodiscard]] static TransformArtifacts
+finalize_exception(std::span<const uint8_t> code_object_bytes, std::string error) {
+  TransformArtifacts result;
   result.errors.push_back(std::move(error));
-  return finalize_consan_result(std::move(result), code_object_bytes);
+  return finalize_result(std::move(result), code_object_bytes);
 }
 
-ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
-    ConSanMoiRetryInventory retry_inventory, ConSanOptions options,
-    std::span<const uint8_t> code_object_bytes, const ConSanLoweringObservation *observation) {
+TransformArtifacts retry_patch_from_inventory(RetryInventory retry_inventory, Options options,
+                                              std::span<const uint8_t> code_object_bytes,
+                                              const LoweringObservation *observation) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
-    const ConSanMoiOperatingPoint initial_operating_point =
-        initial_consan_moi_operating_point(options, options);
-    ConSanTransformArtifacts inventory;
+    const OperatingPoint initial_operating_point =
+        consan::initial_operating_point(options, options);
+    TransformArtifacts inventory;
     inventory.program_inventory = std::move(retry_inventory.program_inventory);
     inventory.coverage_ledger = std::move(retry_inventory.coverage_ledger);
     inventory.fault_sites = std::move(retry_inventory.fault_sites);
     inventory.barrier_move_destinations = std::move(retry_inventory.barrier_move_destinations);
-    if (options.flavor != ConSanFlavor::Moi)
-      inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
-    if (inventory.observation_plan().engine !=
-        consan_capability_engine(ConSanFlavor::Moi, options.moi_engine)) {
-      inventory.errors.emplace_back(
-          "ConSan MOI inventory retry does not match the requested engine");
+    if (options.mode != Mode::Default)
+      inventory.errors.emplace_back("ConSan inventory retry requires the ConSan mode");
+    if (inventory.observation_plan().mode != enabled_mode(Mode::Default)) {
+      inventory.errors.emplace_back("ConSan inventory retry does not match the requested mode");
     }
-    const ConSanCodeObjectId &inventory_id = inventory.program_inventory.code_object_id();
+    const CodeObjectId &inventory_id = inventory.program_inventory.code_object_id();
     if (inventory_id.byte_size != code_object_bytes.size())
       inventory.errors.emplace_back(
-          "ConSan MOI inventory retry does not match the original code-object size");
-    if (!inventory_id.valid() || inventory_id != make_consan_code_object_id(code_object_bytes)) {
+          "ConSan inventory retry does not match the original code-object size");
+    if (!inventory_id.valid() || inventory_id != make_code_object_id(code_object_bytes)) {
       inventory.errors.emplace_back(
-          "ConSan MOI inventory retry does not match the original code-object bytes");
+          "ConSan inventory retry does not match the original code-object bytes");
     }
     if (!inventory.errors.empty()) {
-      inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes);
+      inventory.outcome = TransformOutcome::Invalid;
+      return finalize_result(std::move(inventory), code_object_bytes);
     }
 
     AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-    const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
+    const rj_code_arch_t arch = arch_for_target(code_object.target_id());
     if (arch == ROCJITSU_CODE_ARCH_INVALID ||
         inventory.program_inventory.target() != code_object.target_id()) {
       inventory.errors.emplace_back(
-          "ConSan MOI inventory retry does not match the original code-object target");
+          "ConSan inventory retry does not match the original code-object target");
     }
     if (inventory.program_inventory.arch() != arch) {
       inventory.errors.emplace_back(
-          "ConSan MOI inventory retry does not match the original code-object architecture");
+          "ConSan inventory retry does not match the original code-object architecture");
     }
     if (!inventory.errors.empty()) {
-      inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes);
+      inventory.outcome = TransformOutcome::Invalid;
+      return finalize_result(std::move(inventory), code_object_bytes);
     }
 
     const bool has_late_fault = options.has_fault_mutation();
     if (has_late_fault && options.fault_dry_run) {
       inventory.errors.emplace_back(
-          "ConSan MOI inventory retry accepts only a live late-bound fault selection");
-      inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes);
+          "ConSan inventory retry accepts only a live late-bound fault selection");
+      inventory.outcome = TransformOutcome::Invalid;
+      return finalize_result(std::move(inventory), code_object_bytes);
     }
     if (has_late_fault) {
       // A pristine report-sizing inventory deliberately excludes the live
       // mutation. Rebuild for the rare late-fault path instead of coupling
       // the retained inventory to every mutation-specific analysis choice.
-      ConSanTransformArtifacts result =
-          compose_consan_lowering(code_object_bytes, options, initial_operating_point, nullptr, {},
-                                  ConSanLoweringExtent::Complete, nullptr);
+      TransformArtifacts result =
+          compose_lowering(code_object_bytes, options, initial_operating_point, nullptr, {},
+                           LoweringExtent::Complete, nullptr);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, options, options, options,
                                              result);
-      return finalize_consan_result(std::move(result), code_object_bytes,
-                                    options.moi_report_dispatch_id);
+      return finalize_result(std::move(result), code_object_bytes);
     }
-    if (!compose_consan_observation(options, inventory, observation)) {
-      inventory.outcome = ConSanTransformOutcome::Invalid;
-      return finalize_consan_result(std::move(inventory), code_object_bytes,
-                                    options.moi_report_dispatch_id);
+    if (!compose_observation(options, inventory, observation)) {
+      inventory.outcome = TransformOutcome::Invalid;
+      return finalize_result(std::move(inventory), code_object_bytes);
     }
-    ConSanTransformArtifacts result = try_patch_consan_moi(
-        std::move(inventory), options, initial_operating_point, code_object_bytes, arch);
+    TransformArtifacts result =
+        try_patch(std::move(inventory), options, initial_operating_point, code_object_bytes, arch);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, options, options, options,
                                            result);
-    return finalize_consan_result(std::move(result), code_object_bytes,
-                                  options.moi_report_dispatch_id);
+    return finalize_result(std::move(result), code_object_bytes);
   } catch (const std::exception &error) {
-    return finalize_consan_exception(
-        code_object_bytes,
-        std::string("ConSan MOI inventory retry threw an exception: ") + error.what());
+    return finalize_exception(code_object_bytes,
+                              std::string("ConSan inventory retry threw an exception: ") +
+                                  error.what());
   } catch (...) {
-    return finalize_consan_exception(code_object_bytes,
-                                     "ConSan MOI inventory retry threw a non-standard exception");
+    return finalize_exception(code_object_bytes,
+                              "ConSan inventory retry threw a non-standard exception");
   }
 }
 
-[[nodiscard]] ConSanTransformArtifacts complete_consan_lowering_with_operating_point(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-    const ConSanMoiOperatingPoint &initial_operating_point,
-    ConSanPerturbationPlanningState *inspected_perturbation,
-    const ConSanPreappliedMutationLayout &preapplied_mutation, ConSanLoweringExtent extent,
-    const ConSanLoweringObservation *observation) {
+[[nodiscard]] TransformArtifacts complete_lowering_with_operating_point(
+    std::span<const uint8_t> code_object_bytes, const Options &options,
+    const OperatingPoint &initial_operating_point,
+    SuperColliderPerturbationPlanningState *inspected_supercollider_perturbation,
+    const PreappliedMutationLayout &preapplied_mutation, LoweringExtent extent,
+    const LoweringObservation *observation) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
-    ConSanTransformArtifacts result =
-        compose_consan_lowering(code_object_bytes, options, initial_operating_point,
-                                inspected_perturbation, preapplied_mutation, extent, observation);
-    if (extent != ConSanLoweringExtent::Complete) {
+    TransformArtifacts result = compose_lowering(
+        code_object_bytes, options, initial_operating_point, inspected_supercollider_perturbation,
+        preapplied_mutation, extent, observation);
+    if (extent != LoweringExtent::Complete) {
       if (!result.errors.empty())
-        result.outcome = ConSanTransformOutcome::Invalid;
+        result.outcome = TransformOutcome::Invalid;
       return result;
     }
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, options, options, options,
                                            result);
-    return finalize_consan_result(std::move(result), code_object_bytes,
-                                  options.moi_report_dispatch_id);
+    return finalize_result(std::move(result), code_object_bytes);
   } catch (const std::exception &error) {
-    return finalize_consan_exception(
-        code_object_bytes, std::string("ConSan transform threw an exception: ") + error.what());
+    return finalize_exception(code_object_bytes,
+                              std::string("ConSan transform threw an exception: ") + error.what());
   } catch (...) {
-    return finalize_consan_exception(code_object_bytes,
-                                     "ConSan transform threw a non-standard exception");
+    return finalize_exception(code_object_bytes, "ConSan transform threw a non-standard exception");
   }
 }
 
-ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes,
-                                      const ConSanOptions &options, ConSanLoweringExtent extent,
-                                      const ConSanLoweringObservation *observation) {
-  return complete_consan_lowering_with_operating_point(code_object_bytes, options,
-                                                       initial_consan_moi_operating_point(options,
-                                                                                       options),
-                                                       nullptr, {}, extent, observation);
+TransformArtifacts lower(std::span<const uint8_t> code_object_bytes, const Options &options,
+                         LoweringExtent extent, const LoweringObservation *observation) {
+  return complete_lowering_with_operating_point(code_object_bytes, options,
+                                                initial_operating_point(options, options), nullptr,
+                                                {}, extent, observation);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

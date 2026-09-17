@@ -11,12 +11,12 @@
 #include <cstdint>
 #include <optional>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-struct ConSanAtomicSite;
+struct AtomicSite;
 
 /// Architecture-normalized address family for one ordered atomic operation.
-enum class ConSanAtomicLoweringFormKind : uint8_t {
+enum class AtomicLoweringFormKind : uint8_t {
   FlatVectorAddress,
   FlatScalarVectorAddress,
   GlobalVectorAddress,
@@ -27,8 +27,8 @@ enum class ConSanAtomicLoweringFormKind : uint8_t {
 };
 
 /// Exact normalized facts consumed by ordered-atomic target mechanisms.
-struct ConSanAtomicLoweringForm {
-  ConSanAtomicLoweringFormKind kind = ConSanAtomicLoweringFormKind::Count;
+struct AtomicLoweringForm {
+  AtomicLoweringFormKind kind = AtomicLoweringFormKind::Count;
   uint32_t instruction_size = 0;
   uint32_t value_width_bits = 0;
   uint16_t value_register_count = 0;
@@ -49,16 +49,16 @@ struct ConSanAtomicLoweringForm {
 
   /// Verify the target-normalized shape without reinterpreting raw encoding.
   [[nodiscard]] constexpr bool is_well_formed() const {
-    return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanAtomicLoweringFormKind::Count) &&
+    return static_cast<uint8_t>(kind) < static_cast<uint8_t>(AtomicLoweringFormKind::Count) &&
            instruction_size != 0u && value_width_bits != 0u && value_register_count != 0u &&
            data_register_count != 0u && address_vgpr_count != 0u;
   }
 
-  bool operator==(const ConSanAtomicLoweringForm &) const = default;
+  bool operator==(const AtomicLoweringForm &) const = default;
 };
 
 /// Typed reason why an ordered-atomic target mechanism cannot consume a site.
-enum class ConSanAtomicClassifierReason : uint8_t {
+enum class AtomicClassifierReason : uint8_t {
   None,
   UnsupportedAddressSource,
   InvalidAccessWidth,
@@ -75,38 +75,34 @@ enum class ConSanAtomicClassifierReason : uint8_t {
   Count,
 };
 
-struct ConSanAtomicLoweringClassification {
-  std::optional<ConSanAtomicLoweringForm> form;
-  ConSanAtomicClassifierReason normalization_reason =
-      ConSanAtomicClassifierReason::TargetUnavailable;
-  ConSanAtomicClassifierReason address_reason = ConSanAtomicClassifierReason::TargetUnavailable;
-  ConSanAtomicClassifierReason exact_ordering_reason =
-      ConSanAtomicClassifierReason::TargetUnavailable;
-  ConSanAtomicClassifierReason causal_ordering_reason =
-      ConSanAtomicClassifierReason::TargetUnavailable;
+struct AtomicLoweringClassification {
+  std::optional<AtomicLoweringForm> form;
+  AtomicClassifierReason normalization_reason = AtomicClassifierReason::TargetUnavailable;
+  AtomicClassifierReason address_reason = AtomicClassifierReason::TargetUnavailable;
+  AtomicClassifierReason exact_ordering_reason = AtomicClassifierReason::TargetUnavailable;
+  AtomicClassifierReason causal_ordering_reason = AtomicClassifierReason::TargetUnavailable;
 
   [[nodiscard]] bool normalized() const {
-    return form.has_value() && normalization_reason == ConSanAtomicClassifierReason::None;
+    return form.has_value() && normalization_reason == AtomicClassifierReason::None;
   }
   [[nodiscard]] bool address_available() const {
-    return normalized() && address_reason == ConSanAtomicClassifierReason::None;
+    return normalized() && address_reason == AtomicClassifierReason::None;
   }
   [[nodiscard]] bool exact_ordering_available() const {
-    return exact_ordering_reason == ConSanAtomicClassifierReason::None;
+    return exact_ordering_reason == AtomicClassifierReason::None;
   }
   [[nodiscard]] bool causal_ordering_available() const {
-    return causal_ordering_reason == ConSanAtomicClassifierReason::None;
+    return causal_ordering_reason == AtomicClassifierReason::None;
   }
 
-  bool operator==(const ConSanAtomicLoweringClassification &) const = default;
+  bool operator==(const AtomicLoweringClassification &) const = default;
 };
 
 /// Normalize one operand-rich atomic or ordered ordinary-memory decode and
 /// classify its address, causal-ordering, and exact-ordering operations. This
 /// is the sole authority for raw target encoding admission shared by policy
 /// and native lowerers.
-[[nodiscard]] ConSanAtomicLoweringClassification
-classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arch,
-                                bool is_rmw = true);
+[[nodiscard]] AtomicLoweringClassification
+classify_atomic_lowering(const AtomicSite &site, rj_code_arch_t arch, bool is_rmw = true);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

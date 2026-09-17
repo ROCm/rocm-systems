@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 /// Stable identifier of one target-neutral instrumentation request in a
-/// `ConSanObservationPlan`.
+/// `ObservationPlan`.
 ///
 /// The identifier is an index into the plan's immutable intent sequence, not a
 /// machine-code address or patch ordinal. Several semantic range decisions can
 /// intentionally cite the same intent when one physical probe observes them
 /// together. The maximum 32-bit value is reserved as the invalid default so a
 /// zero-initialized identifier cannot silently select the first intent.
-struct ConSanProbeIntentId {
+struct ProbeIntentId {
   /// Reserved value used by the default constructor and rejected by plans.
   static constexpr uint32_t invalid_value = std::numeric_limits<uint32_t>::max();
 
@@ -20,18 +20,18 @@ struct ConSanProbeIntentId {
   /// The owning plan must still perform the upper-bound check.
   [[nodiscard]] constexpr bool valid() const { return value != invalid_value; }
 
-  auto operator<=>(const ConSanProbeIntentId &) const = default;
+  auto operator<=>(const ProbeIntentId &) const = default;
 };
 
 /// Policy answer for one semantic site before register or placement planning.
 ///
-/// `NotApplicable` is an intentional exclusion from the selected engine's
+/// `NotApplicable` is an intentional exclusion from the selected mode's
 /// contract. `Unsupported` belongs to that contract but lacks a required
 /// decoded fact or qualified implementation. `Admitted` requests one or more
 /// probe intents. Lowering is not permitted to rewrite any of these answers;
-/// its independent outcome is recorded by `ConSanCoverageLedger`.
-enum class ConSanSiteDecisionKind : uint8_t {
-  /// The semantic site is outside the selected engine/request contract.
+/// its independent outcome is recorded by `CoverageLedger`.
+enum class SiteDecisionKind : uint8_t {
+  /// The semantic site is outside the selected mode/request contract.
   NotApplicable,
   /// The semantic site is relevant but cannot currently be instrumented.
   Unsupported,
@@ -48,18 +48,18 @@ enum class ConSanSiteDecisionKind : uint8_t {
 /// later lowering facts and deliberately cannot be represented here. `None`
 /// is valid only for `Admitted`; every other decision must retain the reason
 /// that excluded it.
-enum class ConSanAccessPolicyReason : uint8_t {
+enum class AccessPolicyReason : uint8_t {
   /// The access was admitted and therefore needs no rejection reason.
   None,
   /// The selected request disabled this access family.
   AccessFamilyDisabled,
-  /// The decoded operation kind is not an access observed by this engine.
+  /// The decoded operation kind is not an access observed by this mode.
   OperationKindExcluded,
   /// A later synchronization policy owns this ordinary-memory operation.
   ReservedForSynchronizationPolicy,
   /// A diagnostic-only container filter excluded every alias of the site.
   ContainerFilterExcluded,
-  /// The selected target/engine capability contract excludes this form.
+  /// The selected target/mode capability contract excludes this form.
   TargetCapabilityUnavailable,
   /// Inventory classified the instruction outside ConSan's access kinds.
   NonAccessInstruction,
@@ -75,7 +75,7 @@ enum class ConSanAccessPolicyReason : uint8_t {
   InstructionOutOfBounds,
   /// The semantic operation is relevant but its exact mnemonic is unsupported.
   UnsupportedMnemonic,
-  /// A group-FLAT operation uses an instruction layout this engine cannot lower.
+  /// A group-FLAT operation uses an instruction layout this mode cannot lower.
   UnsupportedFlatEncoding,
   /// The selected target cannot preserve this encoded FLAT immediate offset.
   NonzeroFlatOffset,
@@ -91,56 +91,55 @@ enum class ConSanAccessPolicyReason : uint8_t {
   Count,
 };
 
-inline constexpr auto kConSanAccessPolicyReasons = [] {
-  using E = ConSanAccessPolicyReason;
-  return make_consan_enum_vocabulary(
-      "invalid-access-policy-reason", consan_enum(E::None, "none"),
-      consan_enum(E::AccessFamilyDisabled, "access-family-disabled"),
-      consan_enum(E::OperationKindExcluded, "operation-kind-excluded"),
-      consan_enum(E::ReservedForSynchronizationPolicy, "reserved-for-synchronization-policy"),
-      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
-      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
-      consan_enum(E::NonAccessInstruction, "non-access-instruction"),
-      consan_enum(E::InvalidInstructionSize, "invalid-instruction-size"),
-      consan_enum(E::InvalidAccessWidth, "invalid-access-width"),
-      consan_enum(E::MissingAddressOperand, "missing-address-operand"),
-      consan_enum(E::RangeEncodingUnavailable, "range-encoding-unavailable"),
-      consan_enum(E::InstructionOutOfBounds, "instruction-out-of-bounds"),
-      consan_enum(E::UnsupportedMnemonic, "unsupported-mnemonic"),
-      consan_enum(E::UnsupportedFlatEncoding, "unsupported-flat-encoding"),
-      consan_enum(E::NonzeroFlatOffset, "nonzero-flat-offset"),
-      consan_enum(E::ReservedFlatAddressRegister, "reserved-flat-address-register"),
-      consan_enum(E::NonGroupAddressSpace, "non-group-address-space"),
-      consan_enum(E::FlatProvenancePolicyExcluded, "flat-provenance-policy-excluded"),
-      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+inline constexpr auto kAccessPolicyReasons = [] {
+  using E = AccessPolicyReason;
+  return make_enum_vocabulary(
+      "invalid-access-policy-reason", enum_entry(E::None, "none"),
+      enum_entry(E::AccessFamilyDisabled, "access-family-disabled"),
+      enum_entry(E::OperationKindExcluded, "operation-kind-excluded"),
+      enum_entry(E::ReservedForSynchronizationPolicy, "reserved-for-synchronization-policy"),
+      enum_entry(E::ContainerFilterExcluded, "container-filter-excluded"),
+      enum_entry(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      enum_entry(E::NonAccessInstruction, "non-access-instruction"),
+      enum_entry(E::InvalidInstructionSize, "invalid-instruction-size"),
+      enum_entry(E::InvalidAccessWidth, "invalid-access-width"),
+      enum_entry(E::MissingAddressOperand, "missing-address-operand"),
+      enum_entry(E::RangeEncodingUnavailable, "range-encoding-unavailable"),
+      enum_entry(E::InstructionOutOfBounds, "instruction-out-of-bounds"),
+      enum_entry(E::UnsupportedMnemonic, "unsupported-mnemonic"),
+      enum_entry(E::UnsupportedFlatEncoding, "unsupported-flat-encoding"),
+      enum_entry(E::NonzeroFlatOffset, "nonzero-flat-offset"),
+      enum_entry(E::ReservedFlatAddressRegister, "reserved-flat-address-register"),
+      enum_entry(E::NonGroupAddressSpace, "non-group-address-space"),
+      enum_entry(E::FlatProvenancePolicyExcluded, "flat-provenance-policy-excluded"),
+      enum_entry(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
-[[nodiscard]] constexpr std::string_view
-consan_access_policy_reason_name(ConSanAccessPolicyReason reason) {
-  return kConSanAccessPolicyReasons.name(reason);
+[[nodiscard]] constexpr std::string_view access_policy_reason_name(AccessPolicyReason reason) {
+  return kAccessPolicyReasons.name(reason);
 }
 
 /// Machine-readable reason for a barrier-policy decision.
 ///
 /// Barrier policy owns only whether a decoded barrier event belongs to the
-/// selected engine contract and whether inventory has enough semantic facts to
+/// selected mode contract and whether inventory has enough semantic facts to
 /// request an observation. Register ownership, report capacity, trampoline
 /// reachability, and emitted patch shape are intentionally absent: those are
-/// later mechanism outcomes recorded by `ConSanCoverageLedger`.
-enum class ConSanBarrierPolicyReason : uint8_t {
+/// later mechanism outcomes recorded by `CoverageLedger`.
+enum class BarrierPolicyReason : uint8_t {
   /// The event was admitted and therefore needs no exclusion reason.
   None,
   /// Barrier tracking was disabled for this request.
   TrackingDisabled,
-  /// The selected engine mutates barriers but does not observe their epochs.
-  EngineMutationOnly,
+  /// The selected mode mutates barriers but does not observe their epochs.
+  ModeMutationOnly,
   /// A diagnostic-only container filter excluded every alias of the event.
   ContainerFilterExcluded,
   /// The event belongs only to a ROCclr runtime kernel excluded by policy.
   RuntimeKernelExcluded,
-  /// The selected target/engine contract does not support this barrier scope.
+  /// The selected target/mode contract does not support this barrier scope.
   TargetCapabilityUnavailable,
-  /// The barrier instruction is not the encoding width required by its engine.
+  /// The barrier instruction is not the encoding width required by its mode.
   InvalidBarrierEncoding,
   /// Shared synchronization analysis did not produce a qualified sequence.
   UnqualifiedSyncSequence,
@@ -156,50 +155,49 @@ enum class ConSanBarrierPolicyReason : uint8_t {
   Count,
 };
 
-inline constexpr auto kConSanBarrierPolicyReasons = [] {
-  using E = ConSanBarrierPolicyReason;
-  return make_consan_enum_vocabulary(
-      "invalid-barrier-policy-reason", consan_enum(E::None, "none"),
-      consan_enum(E::TrackingDisabled, "tracking-disabled"),
-      consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
-      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
-      consan_enum(E::RuntimeKernelExcluded, "runtime-kernel-excluded"),
-      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
-      consan_enum(E::InvalidBarrierEncoding, "invalid-barrier-encoding"),
-      consan_enum(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
-      consan_enum(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
-      consan_enum(E::MissingCompletingEvent, "missing-completing-event"),
-      consan_enum(E::RedundantAdjacentFullBarrier, "redundant-adjacent-full-barrier"),
-      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+inline constexpr auto kBarrierPolicyReasons = [] {
+  using E = BarrierPolicyReason;
+  return make_enum_vocabulary(
+      "invalid-barrier-policy-reason", enum_entry(E::None, "none"),
+      enum_entry(E::TrackingDisabled, "tracking-disabled"),
+      enum_entry(E::ModeMutationOnly, "mode-mutation-only"),
+      enum_entry(E::ContainerFilterExcluded, "container-filter-excluded"),
+      enum_entry(E::RuntimeKernelExcluded, "runtime-kernel-excluded"),
+      enum_entry(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      enum_entry(E::InvalidBarrierEncoding, "invalid-barrier-encoding"),
+      enum_entry(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
+      enum_entry(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
+      enum_entry(E::MissingCompletingEvent, "missing-completing-event"),
+      enum_entry(E::RedundantAdjacentFullBarrier, "redundant-adjacent-full-barrier"),
+      enum_entry(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
-[[nodiscard]] constexpr std::string_view
-consan_barrier_policy_reason_name(ConSanBarrierPolicyReason reason) {
-  return kConSanBarrierPolicyReasons.name(reason);
+[[nodiscard]] constexpr std::string_view barrier_policy_reason_name(BarrierPolicyReason reason) {
+  return kBarrierPolicyReasons.name(reason);
 }
 
 /// Machine-readable reason for an atomic-policy decision.
 ///
-/// Atomic policy owns semantic sequence qualification, target/engine
+/// Atomic policy owns semantic sequence qualification, target/mode
 /// capability, the availability of address and dynamic-result facts, and
 /// whether an ordinary-memory sequence is represented by an associated fence.
 /// Register allocation, report capacity, instruction placement, and emitted
 /// target words remain later lowering responsibilities. `None` is valid only
 /// for an admitted atomic observation.
-enum class ConSanAtomicPolicyReason : uint8_t {
+enum class AtomicPolicyReason : uint8_t {
   /// The atomic or ordered ordinary-memory operation was admitted.
   None,
   /// Atomic synchronization tracking was disabled by the request.
   TrackingDisabled,
-  /// The selected engine can mutate this operation but does not observe it.
-  EngineMutationOnly,
+  /// The selected mode can mutate this operation but does not observe it.
+  ModeMutationOnly,
   /// A diagnostic-only container filter excluded the operation.
   ContainerFilterExcluded,
   /// No inventoried kernel can execute the operation.
   MissingExecutionOwner,
-  /// The engine has no admitted directional access window that can consume ordering.
+  /// The mode has no admitted directional access window that can consume ordering.
   MissingDirectionalAccessWindow,
-  /// The target/engine capability contract excludes this atomic form.
+  /// The target/mode capability contract excludes this atomic form.
   TargetCapabilityUnavailable,
   /// No unique qualified synchronization sequence owns this event.
   UnqualifiedSyncSequence,
@@ -211,7 +209,7 @@ enum class ConSanAtomicPolicyReason : uint8_t {
   MissingScope,
   /// The decoded scope cannot communicate between modeled owners.
   UnsupportedScope,
-  /// The communication width is zero, non-byte-aligned, or engine-unsupported.
+  /// The communication width is zero, non-byte-aligned, or mode-unsupported.
   InvalidAccessWidth,
   /// The sequence uses an address source outside the supported contract.
   UnsupportedAddressSource,
@@ -230,63 +228,61 @@ enum class ConSanAtomicPolicyReason : uint8_t {
 };
 
 /// Complete iterable set of atomic-policy reasons, including `None`.
-inline constexpr auto kConSanAtomicPolicyReasons = [] {
-  using E = ConSanAtomicPolicyReason;
-  return make_consan_enum_vocabulary(
-      "invalid-atomic-policy-reason", consan_enum(E::None, "none"),
-      consan_enum(E::TrackingDisabled, "tracking-disabled"),
-      consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
-      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
-      consan_enum(E::MissingExecutionOwner, "missing-execution-owner"),
-      consan_enum(E::MissingDirectionalAccessWindow, "missing-directional-access-window"),
-      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
-      consan_enum(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
-      consan_enum(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
-      consan_enum(E::UnsupportedMemoryRole, "unsupported-memory-role"),
-      consan_enum(E::MissingScope, "missing-scope"),
-      consan_enum(E::UnsupportedScope, "unsupported-scope"),
-      consan_enum(E::InvalidAccessWidth, "invalid-access-width"),
-      consan_enum(E::UnsupportedAddressSource, "unsupported-address-source"),
-      consan_enum(E::MissingOperands, "missing-operands"),
-      consan_enum(E::CompareExchangeOutcomeUnavailable, "compare-exchange-outcome-unavailable"),
-      consan_enum(E::UnsupportedDynamicOutcome, "unsupported-dynamic-outcome"),
-      consan_enum(E::UnsupportedEncoding, "unsupported-encoding"),
-      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+inline constexpr auto kAtomicPolicyReasons = [] {
+  using E = AtomicPolicyReason;
+  return make_enum_vocabulary(
+      "invalid-atomic-policy-reason", enum_entry(E::None, "none"),
+      enum_entry(E::TrackingDisabled, "tracking-disabled"),
+      enum_entry(E::ModeMutationOnly, "mode-mutation-only"),
+      enum_entry(E::ContainerFilterExcluded, "container-filter-excluded"),
+      enum_entry(E::MissingExecutionOwner, "missing-execution-owner"),
+      enum_entry(E::MissingDirectionalAccessWindow, "missing-directional-access-window"),
+      enum_entry(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      enum_entry(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
+      enum_entry(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
+      enum_entry(E::UnsupportedMemoryRole, "unsupported-memory-role"),
+      enum_entry(E::MissingScope, "missing-scope"),
+      enum_entry(E::UnsupportedScope, "unsupported-scope"),
+      enum_entry(E::InvalidAccessWidth, "invalid-access-width"),
+      enum_entry(E::UnsupportedAddressSource, "unsupported-address-source"),
+      enum_entry(E::MissingOperands, "missing-operands"),
+      enum_entry(E::CompareExchangeOutcomeUnavailable, "compare-exchange-outcome-unavailable"),
+      enum_entry(E::UnsupportedDynamicOutcome, "unsupported-dynamic-outcome"),
+      enum_entry(E::UnsupportedEncoding, "unsupported-encoding"),
+      enum_entry(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
 /// Return the stable diagnostic spelling of an atomic-policy reason.
-[[nodiscard]] constexpr std::string_view
-consan_atomic_policy_reason_name(ConSanAtomicPolicyReason reason) {
-  return kConSanAtomicPolicyReasons.name(reason);
+[[nodiscard]] constexpr std::string_view atomic_policy_reason_name(AtomicPolicyReason reason) {
+  return kAtomicPolicyReasons.name(reason);
 }
 
-static_assert(kConSanAtomicPolicyReasons.size() ==
-              static_cast<size_t>(ConSanAtomicPolicyReason::Count));
+static_assert(kAtomicPolicyReasons.size() == static_cast<size_t>(AtomicPolicyReason::Count));
 
 /// Machine-readable reason for a fence-policy decision.
 ///
 /// Shared synchronization analysis owns the detailed association outcome;
-/// this enum records how that fact participates in the selected engine's
-/// observation contract. A qualified fence can be independently recorded by
-/// Record/Replay or associated with another engine's atomic observation.
-enum class ConSanFencePolicyReason : uint8_t {
+/// this enum records how that fact participates in the selected mode's
+/// observation contract. A qualified fence contributes ordering metadata to
+/// its associated atomic observation.
+enum class FencePolicyReason : uint8_t {
   /// The fence was admitted or associated and needs no exclusion reason.
   None,
   /// Atomic/fence synchronization tracking was disabled by the request.
   TrackingDisabled,
-  /// The selected engine can mutate fences but does not observe them.
-  EngineMutationOnly,
+  /// The selected mode can mutate fences but does not observe them.
+  ModeMutationOnly,
   /// A diagnostic-only container filter excluded the fence.
   ContainerFilterExcluded,
   /// No inventoried kernel can execute the fence or communication event.
   MissingExecutionOwner,
   /// Shared analysis rejected the addressed communication association.
   AssociationUnavailable,
-  /// Sampled excluded the associated communication as causally irrelevant.
+  /// ConSan excluded the associated communication as causally irrelevant.
   CommunicationNotApplicable,
   /// The associated communication identity no longer names a unique event.
   MissingCommunicationEvent,
-  /// The target/engine capability contract excludes the addressed fence.
+  /// The target/mode capability contract excludes the addressed fence.
   TargetCapabilityUnavailable,
   /// Physical aliases expose incompatible semantics for one fence.
   ConflictingPhysicalAliases,
@@ -294,24 +290,23 @@ enum class ConSanFencePolicyReason : uint8_t {
   Count,
 };
 
-inline constexpr auto kConSanFencePolicyReasons = [] {
-  using E = ConSanFencePolicyReason;
-  return make_consan_enum_vocabulary(
-      "invalid-fence-policy-reason", consan_enum(E::None, "none"),
-      consan_enum(E::TrackingDisabled, "tracking-disabled"),
-      consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
-      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
-      consan_enum(E::MissingExecutionOwner, "missing-execution-owner"),
-      consan_enum(E::AssociationUnavailable, "association-unavailable"),
-      consan_enum(E::CommunicationNotApplicable, "communication-not-applicable"),
-      consan_enum(E::MissingCommunicationEvent, "missing-communication-event"),
-      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
-      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+inline constexpr auto kFencePolicyReasons = [] {
+  using E = FencePolicyReason;
+  return make_enum_vocabulary(
+      "invalid-fence-policy-reason", enum_entry(E::None, "none"),
+      enum_entry(E::TrackingDisabled, "tracking-disabled"),
+      enum_entry(E::ModeMutationOnly, "mode-mutation-only"),
+      enum_entry(E::ContainerFilterExcluded, "container-filter-excluded"),
+      enum_entry(E::MissingExecutionOwner, "missing-execution-owner"),
+      enum_entry(E::AssociationUnavailable, "association-unavailable"),
+      enum_entry(E::CommunicationNotApplicable, "communication-not-applicable"),
+      enum_entry(E::MissingCommunicationEvent, "missing-communication-event"),
+      enum_entry(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      enum_entry(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
 }();
 
-[[nodiscard]] constexpr std::string_view
-consan_fence_policy_reason_name(ConSanFencePolicyReason reason) {
-  return kConSanFencePolicyReasons.name(reason);
+[[nodiscard]] constexpr std::string_view fence_policy_reason_name(FencePolicyReason reason) {
+  return kFencePolicyReasons.name(reason);
 }
 
 /// Stable identity of one synchronization association inside a code object.
@@ -321,14 +316,14 @@ consan_fence_policy_reason_name(ConSanFencePolicyReason reason) {
 /// before-instruction address-capture intent and an after-sequence evidence
 /// intent state that they implement one logical operation. Empty values are
 /// invalid and are used only as the default construction sentinel.
-struct ConSanSynchronizationAssociationId {
+struct SynchronizationAssociationId {
   /// Stable inventory identity of the complete synchronization sequence.
   std::string value;
 
   /// Return whether this value can identify a published sequence.
   [[nodiscard]] bool valid() const { return !value.empty(); }
 
-  auto operator<=>(const ConSanSynchronizationAssociationId &) const = default;
+  auto operator<=>(const SynchronizationAssociationId &) const = default;
 };
 
 /// Dynamic guest result that an atomic observation must preserve or derive.
@@ -338,7 +333,7 @@ struct ConSanSynchronizationAssociationId {
 /// no-return operations need none, return-form RMWs preserve the old value,
 /// and compare-and-swap must derive whether the exchange succeeded. A lowerer
 /// may not silently weaken a stronger requirement.
-enum class ConSanDynamicResultRequirement : uint8_t {
+enum class DynamicResultRequirement : uint8_t {
   /// No post-guest dynamic result is needed.
   None,
   /// Preserve the atomic value returned by the guest instruction.
@@ -354,47 +349,32 @@ enum class ConSanDynamicResultRequirement : uint8_t {
 /// The kinds deliberately name the semantic observation rather than an ISA
 /// sequence, report offset, or patch kind. This lets all targets share policy
 /// while their lowerers remain free to implement the same intent differently.
-enum class ConSanProbeIntentKind : uint8_t {
+enum class ProbeIntentKind : uint8_t {
   /// SuperCollider observes whether a redundant access agrees with the guest.
   RedundantAccessObservation,
-  /// Record/Replay appends an exact access record for later host processing.
-  AccessRecord,
-  /// Sampled conditionally records the access selected by its sampling policy.
-  SampledAccess,
-  /// InlineShadow updates and checks exact on-device shadow state.
-  ExactShadowAccess,
-  /// Record/Replay appends one exact barrier event for later host processing.
-  BarrierRecord,
-  /// Sampled closes one selected causal window at a logical barrier sequence.
-  SampledBarrierEpoch,
-  /// InlineShadow advances exact on-device epoch state at barrier completion.
-  ExactBarrierEpoch,
+  /// ConSan conditionally records the access selected by its sampling policy.
+  Access,
+  /// ConSan closes one selected causal window at a logical barrier sequence.
+  BarrierEpoch,
   /// Preserve an addressed synchronization operation's effective address
   /// before the guest instruction can overwrite any input register.
   AtomicAddressCapture,
-  /// Record/Replay appends one ordered atomic event after guest execution.
-  AtomicRecord,
-  /// Sampled publishes atomic ordering into the selected causal window.
-  SampledAtomicOrdering,
-  /// InlineShadow applies exact release/acquire ordering around the guest.
-  ExactAtomicOrdering,
-  /// Record/Replay records an associated addressed fence after completion.
-  FenceRecord,
+  /// ConSan publishes atomic ordering into the selected causal window.
+  AtomicOrdering,
   /// One-past-the-end iteration bound; never an observation intent.
   Count,
 };
 
-/// One engine's target-neutral probe and report-facing evidence vocabulary.
+/// One mode's target-neutral probe and report-facing evidence vocabulary.
 ///
 /// Semantic policy publishes these probe kinds; report planning consumes the
 /// same row rather than reconstructing a parallel mode matrix. `Count` marks
-/// an operation that the engine does not support.
-struct ConSanEngineProbeVocabulary {
-  ConSanCapabilityEngine engine;
-  ConSanProbeIntentKind access;
-  ConSanProbeIntentKind barrier;
-  ConSanProbeIntentKind atomic;
-  ConSanProbeIntentKind fence;
+/// an operation that the mode does not support.
+struct ModeProbeVocabulary {
+  Mode mode;
+  ProbeIntentKind access;
+  ProbeIntentKind barrier;
+  ProbeIntentKind atomic;
   bool sticky_access_evidence;
   bool address_capture;
   /// Ordered communication is meaningful only when one admitted access probe
@@ -403,37 +383,26 @@ struct ConSanEngineProbeVocabulary {
   bool barrier_elements_per_semantic_site;
 };
 
-inline constexpr std::array<ConSanEngineProbeVocabulary,
-                            static_cast<size_t>(ConSanCapabilityEngine::Count)>
-    kConSanEngineProbeVocabularies = {{
-        {ConSanCapabilityEngine::SuperCollider, ConSanProbeIntentKind::RedundantAccessObservation,
-         ConSanProbeIntentKind::Count, ConSanProbeIntentKind::Count, ConSanProbeIntentKind::Count,
-         true, false, false, false},
-        {ConSanCapabilityEngine::RecordReplay, ConSanProbeIntentKind::AccessRecord,
-         ConSanProbeIntentKind::BarrierRecord, ConSanProbeIntentKind::AtomicRecord,
-         ConSanProbeIntentKind::FenceRecord, false, true, false, false},
-        {ConSanCapabilityEngine::Sampled, ConSanProbeIntentKind::SampledAccess,
-         ConSanProbeIntentKind::SampledBarrierEpoch, ConSanProbeIntentKind::SampledAtomicOrdering,
-         ConSanProbeIntentKind::Count, false, true, true, true},
-        {ConSanCapabilityEngine::InlineShadow, ConSanProbeIntentKind::ExactShadowAccess,
-         ConSanProbeIntentKind::ExactBarrierEpoch, ConSanProbeIntentKind::ExactAtomicOrdering,
-         ConSanProbeIntentKind::Count, false, true, false, true},
-    }};
+inline constexpr std::array<ModeProbeVocabulary, kEnabledModes.size()> kModeProbeVocabularies = {{
+    {Mode::SuperCollider, ProbeIntentKind::RedundantAccessObservation, ProbeIntentKind::Count,
+     ProbeIntentKind::Count, true, false, false, false},
+    {Mode::Default, ProbeIntentKind::Access, ProbeIntentKind::BarrierEpoch,
+     ProbeIntentKind::AtomicOrdering, false, true, true, true},
+}};
 
-[[nodiscard]] constexpr const ConSanEngineProbeVocabulary *
-consan_engine_probe_vocabulary(ConSanCapabilityEngine engine) {
-  const size_t index = static_cast<size_t>(engine);
-  if (index >= kConSanEngineProbeVocabularies.size())
-    return nullptr;
-  const ConSanEngineProbeVocabulary &vocabulary = kConSanEngineProbeVocabularies[index];
-  return vocabulary.engine == engine ? &vocabulary : nullptr;
+[[nodiscard]] constexpr const ModeProbeVocabulary *mode_probe_vocabulary(Mode mode) {
+  for (const auto &vocabulary : kModeProbeVocabularies) {
+    if (vocabulary.mode == mode)
+      return &vocabulary;
+  }
+  return nullptr;
 }
 
 /// Required ordering of a probe relative to the pristine guest instruction.
 ///
 /// This is a semantic placement constraint. It does not choose inline versus
 /// trampoline lowering or prescribe how a target preserves clobbered operands.
-enum class ConSanProbePosition : uint8_t {
+enum class ProbePosition : uint8_t {
   /// Complete the observation before executing the guest instruction.
   Before,
   /// Complete the observation after executing the guest instruction.
@@ -442,74 +411,74 @@ enum class ConSanProbePosition : uint8_t {
   Count,
 };
 
-/// One engine-policy decision for one normalized semantic access range.
+/// One mode-policy decision for one normalized semantic access range.
 ///
 /// Container aliases are attribution only and are retained as names for
 /// diagnostics. The semantic identity is authoritative. Probe intents are the
 /// independent, authoritative lowering contract.
-struct ConSanSiteDecision {
+struct SiteDecision {
   /// Stable identity of the logical access range being decided.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
-  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
+  SiteDecisionKind kind = SiteDecisionKind::NotApplicable;
   /// Typed explanation; `None` is reserved for admitted decisions.
-  ConSanAccessPolicyReason reason = ConSanAccessPolicyReason::AccessFamilyDisabled;
-  bool operator==(const ConSanSiteDecision &) const = default;
+  AccessPolicyReason reason = AccessPolicyReason::AccessFamilyDisabled;
+  bool operator==(const SiteDecision &) const = default;
 };
 
-/// One engine-policy decision for one decoded barrier event.
+/// One mode-policy decision for one decoded barrier event.
 ///
 /// The decision is about original-program meaning, not a patch. A paired
 /// signal and wait may therefore share one completion intent. `semantic_site`
 /// remains the authoritative diagnostic identity; source aliases are derived
 /// from the program inventory when diagnostics need them.
-struct ConSanBarrierSiteDecision {
+struct BarrierSiteDecision {
   /// Stable identity of the original synchronization event being decided.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
-  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
+  SiteDecisionKind kind = SiteDecisionKind::NotApplicable;
   /// Typed explanation; `None` is reserved for admitted decisions.
-  ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
-  bool operator==(const ConSanBarrierSiteDecision &) const = default;
+  BarrierPolicyReason reason = BarrierPolicyReason::TrackingDisabled;
+  bool operator==(const BarrierSiteDecision &) const = default;
 };
 
-/// One engine-policy decision for an ordered atomic communication event.
+/// One mode-policy decision for an ordered atomic communication event.
 ///
 /// The event may be a target-native RMW or the address-bearing load/store in a
 /// qualified language-level atomic sequence. `capability` preserves the public
-/// target/engine contract, while `reason` records the more specific decoded
+/// target/mode contract, while `reason` records the more specific decoded
 /// decision. The corresponding before-address and after-operation contracts
 /// live only in the plan's probe intents.
-struct ConSanAtomicSiteDecision {
+struct AtomicSiteDecision {
   /// Stable identity of the address-bearing synchronization event.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
-  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
-  /// Public target/engine capability disposition for this operation form.
-  ConSanCapabilityDisposition capability = ConSanCapabilityDisposition::OutOfContract;
+  SiteDecisionKind kind = SiteDecisionKind::NotApplicable;
+  /// Public target/mode capability disposition for this operation form.
+  CapabilityDisposition capability = CapabilityDisposition::OutOfContract;
   /// Typed explanation; `None` is reserved for admitted decisions.
-  ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
-  bool operator==(const ConSanAtomicSiteDecision &) const = default;
+  AtomicPolicyReason reason = AtomicPolicyReason::TrackingDisabled;
+  bool operator==(const AtomicSiteDecision &) const = default;
 };
 
-/// One engine-policy decision for a decoded cache/fence event.
+/// One mode-policy decision for a decoded cache/fence event.
 ///
-/// `inventory_association` is the engine-independent analysis result and is
+/// `inventory_association` is the mode-independent analysis result and is
 /// retained even when policy excludes the event. `AssociatedOnly` makes modes
 /// without an independent fence probe explicit without copying intent links
 /// into diagnostic decisions.
-struct ConSanFenceSiteDecision {
+struct FenceSiteDecision {
   /// Stable identity of the original cache/fence instruction.
   SemanticSiteId semantic_site;
   /// Applicability/admission result that lowering cannot change.
-  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
-  /// Public target/engine capability disposition for addressed fences.
-  ConSanCapabilityDisposition capability = ConSanCapabilityDisposition::OutOfContract;
+  SiteDecisionKind kind = SiteDecisionKind::NotApplicable;
+  /// Public target/mode capability disposition for addressed fences.
+  CapabilityDisposition capability = CapabilityDisposition::OutOfContract;
   /// Typed policy explanation; `None` is reserved for admitted decisions.
-  ConSanFencePolicyReason reason = ConSanFencePolicyReason::TrackingDisabled;
+  FencePolicyReason reason = FencePolicyReason::TrackingDisabled;
   /// Detailed shared-analysis association outcome, never inferred from prose.
-  ConSanFenceAssociation inventory_association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
-  bool operator==(const ConSanFenceSiteDecision &) const = default;
+  FenceAssociation inventory_association = FenceAssociation::MissingOrAmbiguousSequence;
+  bool operator==(const FenceSiteDecision &) const = default;
 };
 
 /// One target-neutral observation requested at a physical instruction.
@@ -519,93 +488,93 @@ struct ConSanFenceSiteDecision {
 /// is explicit and keeps placement capacity at one insertion point. The intent
 /// contains no chosen registers, report addresses, machine words, branch route,
 /// or patch kind. Every intent observes every lane active at the guest
-/// instruction; no engine may silently narrow that execution mask. Every
-/// admitted intent is part of the requested engine contract, so losing any
+/// instruction; no mode may silently narrow that execution mask. Every
+/// admitted intent is part of the requested mode contract, so losing any
 /// intent during lowering is a coverage gap.
-struct ConSanProbeIntent {
+struct ProbeIntent {
   /// Stable plan-local identifier cited by semantic decisions.
-  ConSanProbeIntentId id;
-  /// Engine whose evidence semantics this intent implements.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  ProbeIntentId id;
+  /// Mode whose evidence semantics this intent implements.
+  Mode mode = Mode::None;
   /// Exact decoded site at which lowering must place this probe.
-  ConSanProgramSiteId source_site;
+  ProgramSiteId source_site;
   /// Physical instruction at which lowering must place the coalesced probe.
   PhysicalSiteId physical_site;
   /// All logical access ranges or synchronization events observed by the probe.
   std::vector<SemanticSiteId> covered_semantic_sites;
   /// Semantic evidence operation requested from target lowering.
-  ConSanProbeIntentKind kind = ConSanProbeIntentKind::Count;
+  ProbeIntentKind kind = ProbeIntentKind::Count;
   /// Required ordering relative to the guest instruction.
-  ConSanProbePosition position = ConSanProbePosition::Count;
+  ProbePosition position = ProbePosition::Count;
   /// Complete synchronization sequence implemented by this probe, if any.
   /// Access and barrier intents leave this absent; atomic/fence intents use it
   /// to join before- and after-operation work without relying on patch order.
-  std::optional<ConSanSynchronizationAssociationId> synchronization_association;
+  std::optional<SynchronizationAssociationId> synchronization_association;
   /// Dynamic post-guest value the lowerer must preserve or derive.
-  ConSanDynamicResultRequirement dynamic_result = ConSanDynamicResultRequirement::None;
+  DynamicResultRequirement dynamic_result = DynamicResultRequirement::None;
   /// Exact target-normalized address-bearing form selected by policy. This is
   /// present only on `AtomicAddressCapture`: every after-operation intent for
   /// the same association consumes that one captured address contract instead
   /// of retaining a second copy on atomic and fence decisions.
-  std::optional<ConSanAtomicLoweringForm> atomic_lowering_form;
+  std::optional<AtomicLoweringForm> atomic_lowering_form;
 
-  bool operator==(const ConSanProbeIntent &) const = default;
+  bool operator==(const ProbeIntent &) const = default;
 };
 
-/// Complete target-normalized semantic-policy output for one engine request.
+/// Complete target-normalized semantic-policy output for one mode request.
 ///
 /// Separate decision sequences cover semantic access ranges, barriers, ordered
 /// communication events, and fences; their shared intents cover physical
 /// insertion points and complete synchronization associations. The plan is a
 /// value object and contains no borrowed inventory references, so a result may
 /// safely retain it across retries and image moves.
-struct ConSanObservationPlan {
-  /// Selected engine shared by every decision and intent in this plan.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+struct ObservationPlan {
+  /// Selected mode shared by every decision and intent in this plan.
+  Mode mode = Mode::None;
   /// Deterministically ordered semantic access decisions.
-  std::vector<ConSanSiteDecision> site_decisions;
+  std::vector<SiteDecision> site_decisions;
   /// Deterministically ordered semantic barrier-event decisions.
-  std::vector<ConSanBarrierSiteDecision> barrier_site_decisions;
+  std::vector<BarrierSiteDecision> barrier_site_decisions;
   /// Deterministically ordered ordered-communication decisions.
-  std::vector<ConSanAtomicSiteDecision> atomic_site_decisions;
+  std::vector<AtomicSiteDecision> atomic_site_decisions;
   /// Deterministically ordered cache/fence decisions.
-  std::vector<ConSanFenceSiteDecision> fence_site_decisions;
+  std::vector<FenceSiteDecision> fence_site_decisions;
   /// Deterministically ordered coalesced physical probe intents.
-  std::vector<ConSanProbeIntent> probe_intents;
+  std::vector<ProbeIntent> probe_intents;
 
   /// Verify plan-local identities and the decision/intent relationship.
   [[nodiscard]] bool valid() const;
 
   /// Resolve one plan-local intent identifier, rejecting invalid or stale IDs.
-  [[nodiscard]] const ConSanProbeIntent *intent(ConSanProbeIntentId id) const;
+  [[nodiscard]] const ProbeIntent *intent(ProbeIntentId id) const;
 
-  /// Transactionally append a valid same-engine policy fragment.
+  /// Transactionally append a valid same-mode policy fragment.
   ///
   /// Plan-local intent identifiers in the fragment are rebased and every
-  /// decision reference is rewritten. On invalid input or an engine mismatch,
+  /// decision reference is rewritten. On invalid input or an mode mismatch,
   /// this plan is unchanged and the function returns false.
-  [[nodiscard]] bool append(const ConSanObservationPlan &fragment);
+  [[nodiscard]] bool append(const ObservationPlan &fragment);
 
-  bool operator==(const ConSanObservationPlan &) const = default;
+  bool operator==(const ObservationPlan &) const = default;
 };
 
 /// Mutable request parameters consumed by pure access policy.
 ///
 /// The borrowed spans and filter are read only during the policy call; no
 /// output retains them. Production requests normally enable both access
-/// families for MOI, while SuperCollider reflects its two explicit probe
+/// families for ConSan, while SuperCollider reflects its two explicit probe
 /// switches. `reserved_for_synchronization` prevents an ordinary memory event
 /// from being double-counted before Slice 4C takes ownership of its ordering
 /// semantics.
-struct ConSanAccessPolicyRequest {
-  /// Engine whose access contract should be evaluated.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+struct AccessPolicyRequest {
+  /// Mode whose access contract should be evaluated.
+  Mode mode = Mode::None;
   /// Whether native LDS and direct-to-LDS sites belong to this request.
   bool native_lds_enabled = false;
   /// Whether group-FLAT sites belong to this request.
   bool group_flat_enabled = false;
   /// Confidence threshold for conservatively inferred group-FLAT provenance.
-  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  FlatProvenanceMode flat_provenance_mode = FlatProvenanceMode::Strict;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
   /// Production exact kernel-entry allowlist. A shared physical site remains
@@ -620,16 +589,16 @@ struct ConSanAccessPolicyRequest {
 /// A conflicting physical alias is represented both as unsupported decisions
 /// and in `errors`, allowing unit tests and adapters to reject the transform
 /// without parsing prose. No warning or error is emitted as a side effect.
-struct ConSanAccessPolicyResult {
+struct AccessPolicyResult {
   /// Complete plan, including explicit non-admission decisions.
-  ConSanObservationPlan plan;
+  ObservationPlan plan;
   /// Typed fatal policy-construction failures.
-  std::vector<ConSanAccessPolicyReason> errors;
+  std::vector<AccessPolicyReason> errors;
 
   /// Return whether policy produced a usable, internally valid plan.
   [[nodiscard]] bool valid() const { return errors.empty() && plan.valid(); }
 
-  bool operator==(const ConSanAccessPolicyResult &) const = default;
+  bool operator==(const AccessPolicyResult &) const = default;
 };
 
 /// Immutable request parameters consumed by pure barrier policy.
@@ -637,9 +606,9 @@ struct ConSanAccessPolicyResult {
 /// The request selects semantic applicability only. It contains no report
 /// address, register assignment, code-cave budget, or mutable result object, so
 /// the same inventory/request pair always yields the same plan fragment.
-struct ConSanBarrierPolicyRequest {
-  /// Engine whose barrier-observation contract should be evaluated.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+struct BarrierPolicyRequest {
+  /// Mode whose barrier-observation contract should be evaluated.
+  Mode mode = Mode::None;
   /// Whether decoded barrier events belong to this request.
   bool tracking_enabled = false;
   /// Optional diagnostic-only container substring filter.
@@ -653,44 +622,44 @@ struct ConSanBarrierPolicyRequest {
 /// Ordinary exclusions remain explicit decisions and do not enter `errors`.
 /// Only contradictions such as incompatible physical aliases make the result
 /// unusable, allowing callers to fail closed without parsing diagnostics.
-struct ConSanBarrierPolicyResult {
+struct BarrierPolicyResult {
   /// Barrier-only observation-plan fragment, ready for transactional append.
-  ConSanObservationPlan plan;
+  ObservationPlan plan;
   /// Typed fatal policy-construction failures.
-  std::vector<ConSanBarrierPolicyReason> errors;
+  std::vector<BarrierPolicyReason> errors;
 
   /// Return whether policy produced a usable, internally valid fragment.
   [[nodiscard]] bool valid() const { return errors.empty() && plan.valid(); }
 
-  bool operator==(const ConSanBarrierPolicyResult &) const = default;
+  bool operator==(const BarrierPolicyResult &) const = default;
 };
 
 /// Immutable request parameters consumed by pure atomic/fence policy.
 ///
 /// `tracking_enabled` selects the atomic-ordering feature as a whole.
 /// `directional_access_windows` is a generic coupling between ordered
-/// communication and admitted access evidence. An engine vocabulary may
+/// communication and admitted access evidence. An mode vocabulary may
 /// require an owner-local read window for acquire or write window for release.
 /// The request contains no report address, register assignment, capacity, or
 /// mutable result state.
-struct ConSanDirectionalAccessAvailability {
+struct DirectionalAccessAvailability {
   /// Kernel that can execute the admitted access window.
-  ConSanProgramContainerId owner;
+  ProgramContainerId owner;
   /// At least one selected read window exists for this owner.
   bool read = false;
   /// At least one selected write window exists for this owner.
   bool write = false;
 
-  bool operator==(const ConSanDirectionalAccessAvailability &) const = default;
+  bool operator==(const DirectionalAccessAvailability &) const = default;
 };
 
-struct ConSanAtomicFencePolicyRequest {
-  /// Engine whose ordered-communication contract should be evaluated.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+struct AtomicFencePolicyRequest {
+  /// Mode whose ordered-communication contract should be evaluated.
+  Mode mode = Mode::None;
   /// Whether atomic and associated-fence tracking belongs to this request.
   bool tracking_enabled = false;
   /// Directional, owner-local access windows able to consume ordering metadata.
-  std::span<const ConSanDirectionalAccessAvailability> directional_access_windows;
+  std::span<const DirectionalAccessAvailability> directional_access_windows;
   /// Optional diagnostic-only container substring filter.
   std::string_view container_filter;
   /// Production exact kernel-entry allowlist.
@@ -703,35 +672,34 @@ struct ConSanAtomicFencePolicyRequest {
 /// before/after intents. Ordinary exclusions remain usable output. Only
 /// contradictions such as incompatible physical aliases enter the error
 /// vectors and make the fragment invalid.
-struct ConSanAtomicFencePolicyResult {
+struct AtomicFencePolicyResult {
   /// Atomic/fence-only observation-plan fragment, ready for append.
-  ConSanObservationPlan plan;
+  ObservationPlan plan;
   /// Typed fatal atomic-policy construction failures.
-  std::vector<ConSanAtomicPolicyReason> atomic_errors;
+  std::vector<AtomicPolicyReason> atomic_errors;
   /// Typed fatal fence-policy construction failures.
-  std::vector<ConSanFencePolicyReason> fence_errors;
+  std::vector<FencePolicyReason> fence_errors;
 
   /// Return whether policy produced a usable, internally valid fragment.
   [[nodiscard]] bool valid() const {
     return atomic_errors.empty() && fence_errors.empty() && plan.valid();
   }
 
-  bool operator==(const ConSanAtomicFencePolicyResult &) const = default;
+  bool operator==(const AtomicFencePolicyResult &) const = default;
 };
 
 /// Return whether shared synchronization analysis proved every fact required
-/// by the current Sampled barrier-epoch contract. The predicate is declared at
+/// by the current ConSan barrier-epoch contract. The predicate is declared at
 /// the policy boundary because both pure admission and the temporary legacy
 /// lowerer must agree during incremental migration.
-[[nodiscard]] bool consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence,
-                                                                 bool owner_proven);
+[[nodiscard]] bool qualifies_barrier_sequence(const SyncSequence &sequence, bool owner_proven);
 
 /// Final mechanism state of one admitted probe intent.
 ///
 /// The outcome is independent of semantic admission: a target lowerer can
 /// reject resources or placement, but cannot convert an unsupported decision
 /// into an instrumented one.
-enum class ConSanLoweringOutcomeKind : uint8_t {
+enum class LoweringOutcomeKind : uint8_t {
   /// No lowerer has yet published a final result for the admitted intent.
   Pending,
   /// Every required machine-code operation for the intent was emitted.
@@ -750,35 +718,27 @@ enum class ConSanLoweringOutcomeKind : uint8_t {
 /// than a later offset join. `original_site` and `original_semantic_sites`
 /// retain pristine identities, while execution-owner handles state the
 /// complete static kernel scope only when `owner_provenance_complete` is true.
-struct ConSanStaticAccessAttribution {
-  std::vector<ConSanProbeIntentId> intent_ids;
+struct StaticAccessAttribution {
+  std::vector<ProbeIntentId> intent_ids;
   PhysicalSiteId original_site;
   std::vector<SemanticSiteId> original_semantic_sites;
-  std::vector<ConSanProgramContainerId> execution_owner_kernel_ids;
+  std::vector<ProgramContainerId> execution_owner_kernel_ids;
   bool owner_provenance_complete = false;
   /// Proven identical-value, identical-address lanes of one store instruction.
   bool uniform_lds_store = false;
 
-  bool operator==(const ConSanStaticAccessAttribution &) const = default;
+  bool operator==(const StaticAccessAttribution &) const = default;
 };
 
-/// Static attribution used to suppress impossible cross-kernel conflicts
-/// while replaying Record/Replay access evidence.
-struct ConSanRecordReplayStaticAccessMapping {
-  ConSanStaticAccessAttribution access;
-
-  bool operator==(const ConSanRecordReplayStaticAccessMapping &) const = default;
-};
-
-/// Static attribution of one Sampled access to its report slots and emitted
+/// Static attribution of one ConSan access to its report slots and emitted
 /// guest/probe locations.
 ///
-/// These are named runtime facts, not a projection of `ConSanPatchInfo`.
+/// These are named runtime facts, not a projection of `PatchInfo`.
 /// Report decoding uses the slot window; stable diagnostics use the emitted
 /// probe, relocated guest, and scratch-register values.
-struct ConSanSampledStaticAccessMapping {
-  ConSanStaticAccessAttribution access;
-  ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
+struct StaticAccessMapping {
+  StaticAccessAttribution access;
+  LdsAccessKind access_kind = LdsAccessKind::Other;
   uint32_t first_slot = 0;
   uint32_t range_count = 0;
   uint32_t bank_count = 0;
@@ -786,101 +746,31 @@ struct ConSanSampledStaticAccessMapping {
   std::optional<uint64_t> relocated_guest_text_offset;
   std::optional<uint16_t> scratch_vgpr;
 
-  bool operator==(const ConSanSampledStaticAccessMapping &) const = default;
+  bool operator==(const StaticAccessMapping &) const = default;
 };
 
-/// Validated single-mode static transform product consumed by runtime evidence
-/// analysis.
-///
-/// A transform selects one evidence protocol, so parallel mode vectors would
-/// make an impossible mixed-mode state representable. The discriminated
-/// payload carries only protocols that need host-side attribution, without
-/// making every producer and consumer carry the other modes' empty containers.
-/// Every mapping is also retained by the intent-bound lowering commit that
-/// created it.
-struct ConSanRuntimeStaticMapping {
-  using RecordReplay = std::vector<ConSanRecordReplayStaticAccessMapping>;
-  using Sampled = std::vector<ConSanSampledStaticAccessMapping>;
+/// Static ConSan access mappings produced by intent-bound lowering.
+struct RuntimeStaticMapping {
+  using AccessMappings = std::vector<StaticAccessMapping>;
 
-  enum class Kind : uint8_t {
-    None,
-    RecordReplay,
-    Sampled,
-  };
-
-  ConSanRuntimeStaticMapping() = default;
-
-  static ConSanRuntimeStaticMapping record_replay(ConSanRecordReplayStaticAccessMapping mapping) {
-    return ConSanRuntimeStaticMapping(RecordReplay{std::move(mapping)});
+  RuntimeStaticMapping() = default;
+  static RuntimeStaticMapping from_access(StaticAccessMapping mapping) {
+    RuntimeStaticMapping result;
+    result.mappings_.push_back(std::move(mapping));
+    return result;
   }
-  static ConSanRuntimeStaticMapping sampled(ConSanSampledStaticAccessMapping mapping) {
-    return ConSanRuntimeStaticMapping(Sampled{std::move(mapping)});
+  [[nodiscard]] AccessMappings *accesses() { return &mappings_; }
+  [[nodiscard]] const AccessMappings *accesses() const { return &mappings_; }
+  [[nodiscard]] bool empty() const { return mappings_.empty(); }
+  [[nodiscard]] bool append(RuntimeStaticMapping mapping) {
+    mappings_.insert(mappings_.end(), std::make_move_iterator(mapping.mappings_.begin()),
+                     std::make_move_iterator(mapping.mappings_.end()));
+    return true;
   }
-  [[nodiscard]] Kind kind() const {
-    return std::visit(
-        [](const auto &payload) {
-          using Payload = std::decay_t<decltype(payload)>;
-          if constexpr (std::is_same_v<Payload, std::monostate>)
-            return Kind::None;
-          else if constexpr (std::is_same_v<Payload, RecordReplay>)
-            return Kind::RecordReplay;
-          else {
-            static_assert(std::is_same_v<Payload, Sampled>);
-            return Kind::Sampled;
-          }
-        },
-        payload_);
-  }
-  [[nodiscard]] RecordReplay *record_replay() { return std::get_if<RecordReplay>(&payload_); }
-  [[nodiscard]] const RecordReplay *record_replay() const {
-    return std::get_if<RecordReplay>(&payload_);
-  }
-  [[nodiscard]] Sampled *sampled() { return std::get_if<Sampled>(&payload_); }
-  [[nodiscard]] const Sampled *sampled() const { return std::get_if<Sampled>(&payload_); }
-  [[nodiscard]] bool empty() const {
-    return std::visit(
-        [](const auto &payload) {
-          using Payload = std::decay_t<decltype(payload)>;
-          if constexpr (std::is_same_v<Payload, std::monostate>)
-            return true;
-          else
-            return payload.empty();
-        },
-        payload_);
-  }
-
-  [[nodiscard]] bool append(ConSanRuntimeStaticMapping mapping) {
-    if (mapping.empty())
-      return true;
-    if (empty()) {
-      payload_ = std::move(mapping.payload_);
-      return true;
-    }
-    return std::visit(
-        [&](auto &destination) {
-          using Payload = std::decay_t<decltype(destination)>;
-          if constexpr (std::is_same_v<Payload, std::monostate>) {
-            return false;
-          } else {
-            auto *source = std::get_if<Payload>(&mapping.payload_);
-            if (source == nullptr)
-              return false;
-            destination.insert(destination.end(), std::make_move_iterator(source->begin()),
-                               std::make_move_iterator(source->end()));
-            return true;
-          }
-        },
-        payload_);
-  }
-
-  bool operator==(const ConSanRuntimeStaticMapping &) const = default;
+  bool operator==(const RuntimeStaticMapping &) const = default;
 
 private:
-  using Payload = std::variant<std::monostate, RecordReplay, Sampled>;
-
-  explicit ConSanRuntimeStaticMapping(Payload payload) : payload_(std::move(payload)) {}
-
-  Payload payload_;
+  AccessMappings mappings_;
 };
 
 /// One machine-code location emitted as part of an intent-bound lowering.
@@ -889,7 +779,7 @@ private:
 /// names the original physical site whose lowering owns the emitted bytes and
 /// records enough geometry for later static mapping without exposing the
 /// lowerer's patch representation.
-struct ConSanCommittedLoweringLocation {
+struct CommittedLoweringLocation {
   /// Original physical instruction implemented by this emitted operation.
   PhysicalSiteId original_site;
   /// Text-relative location of the committed machine-code operation.
@@ -899,7 +789,7 @@ struct ConSanCommittedLoweringLocation {
   /// Relocated guest instruction, when this operation displaced the guest.
   std::optional<uint64_t> relocated_guest_text_offset;
 
-  bool operator==(const ConSanCommittedLoweringLocation &) const = default;
+  bool operator==(const CommittedLoweringLocation &) const = default;
 };
 
 /// Authoritative result of one intent-bound lowering transaction.
@@ -909,32 +799,33 @@ struct ConSanCommittedLoweringLocation {
 /// intent. Original sites remain authoritative on the ledger-owned observation
 /// plan and are resolved through `intent_ids`; the transaction does not copy a
 /// second identity projection from that plan.
-struct ConSanCommittedLowering {
+struct CommittedLowering {
   /// Every admitted intent completed or rejected by this transaction.
-  std::vector<ConSanProbeIntentId> intent_ids;
+  std::vector<ProbeIntentId> intent_ids;
   /// One or more committed locations, empty for a rejected transaction.
-  std::vector<ConSanCommittedLoweringLocation> locations;
+  std::vector<CommittedLoweringLocation> locations;
   /// Runtime-facing semantic/static mapping created by this same transaction.
-  ConSanRuntimeStaticMapping runtime_mapping;
+  RuntimeStaticMapping runtime_mapping;
   /// Explicit final mechanism outcome shared by every bound intent.
-  ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::Pending;
+  LoweringOutcomeKind outcome = LoweringOutcomeKind::Pending;
   /// Typed resource-planner rejection, when that component rejected the
   /// transaction. Other rejection domains leave this absent.
-  std::optional<ConSanRegisterPlanReason> resource_rejection_reason;
+  std::optional<RegisterPlanReason> resource_rejection_reason;
   /// Optional mechanism detail with no semantic-policy meaning.
   std::string detail;
 
-  bool operator==(const ConSanCommittedLowering &) const = default;
+  bool operator==(const CommittedLowering &) const = default;
 };
 
 /// Prepare one authoritative lowering result from immutable intent identity.
 /// Returns no value for stale/duplicate intent IDs, inconsistent locations,
 /// pending outcomes, or emitted locations attached to a rejection.
-[[nodiscard]] std::optional<ConSanCommittedLowering> make_consan_committed_lowering(
-    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
-    std::span<const ConSanCommittedLoweringLocation> locations, ConSanLoweringOutcomeKind outcome,
-    std::string detail = {}, ConSanRuntimeStaticMapping runtime_mapping = {},
-    std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
+[[nodiscard]] std::optional<CommittedLowering>
+make_committed_lowering(const ObservationPlan &plan, std::span<const ProbeIntentId> intent_ids,
+                        std::span<const CommittedLoweringLocation> locations,
+                        LoweringOutcomeKind outcome, std::string detail = {},
+                        RuntimeStaticMapping runtime_mapping = {},
+                        std::optional<RegisterPlanReason> resource_rejection_reason = std::nullopt);
 
 /// Lowering state for one plan-owned admitted intent.
 ///
@@ -942,17 +833,17 @@ struct ConSanCommittedLowering {
 /// this entry stores only its stable plan-local identity and mutable lowering
 /// state. `detail` is diagnostic context only; control flow and trust
 /// evaluation use the typed outcome.
-struct ConSanIntentCoverageEntry {
+struct IntentCoverageEntry {
   /// Plan-local intent whose mechanism status is being tracked.
-  ConSanProbeIntentId intent_id;
+  ProbeIntentId intent_id;
   /// Current finalization state for that intent.
-  ConSanLoweringOutcomeKind lowering = ConSanLoweringOutcomeKind::Pending;
+  LoweringOutcomeKind lowering = LoweringOutcomeKind::Pending;
   /// Resource-planner reason published by the same lowering transaction.
-  std::optional<ConSanRegisterPlanReason> resource_rejection_reason;
+  std::optional<RegisterPlanReason> resource_rejection_reason;
   /// Optional human-readable mechanism detail with no policy meaning.
   std::string detail;
 
-  bool operator==(const ConSanIntentCoverageEntry &) const = default;
+  bool operator==(const IntentCoverageEntry &) const = default;
 };
 
 /// Joined semantic coverage state without conflating policy and lowering.
@@ -961,57 +852,56 @@ struct ConSanIntentCoverageEntry {
 /// lowering state joined to its admitted intents. Callers may update only a
 /// known admitted intent, and queries never infer success from a patch kind or
 /// warning string.
-class ConSanCoverageLedger {
+class CoverageLedger {
 public:
-  ConSanCoverageLedger() = default;
-  explicit ConSanCoverageLedger(ConSanObservationPlan plan);
+  CoverageLedger() = default;
+  explicit CoverageLedger(ObservationPlan plan);
 
   /// Return the one immutable semantic plan owned by this ledger.
-  [[nodiscard]] const ConSanObservationPlan &observation_plan() const { return observation_plan_; }
+  [[nodiscard]] const ObservationPlan &observation_plan() const { return observation_plan_; }
 
   /// Resolve one admitted intent from the immutable owned plan.
-  [[nodiscard]] const ConSanProbeIntent *intent(ConSanProbeIntentId id) const {
+  [[nodiscard]] const ProbeIntent *intent(ProbeIntentId id) const {
     return observation_plan_.intent(id);
   }
 
   /// Return immutable semantic decisions from the owned observation plan.
-  [[nodiscard]] std::span<const ConSanSiteDecision> site_decisions() const {
+  [[nodiscard]] std::span<const SiteDecision> site_decisions() const {
     return observation_plan_.site_decisions;
   }
 
   /// Return immutable barrier-event decisions from the owned plan.
-  [[nodiscard]] std::span<const ConSanBarrierSiteDecision> barrier_site_decisions() const {
+  [[nodiscard]] std::span<const BarrierSiteDecision> barrier_site_decisions() const {
     return observation_plan_.barrier_site_decisions;
   }
 
   /// Return immutable ordered-communication decisions from the owned plan.
-  [[nodiscard]] std::span<const ConSanAtomicSiteDecision> atomic_site_decisions() const {
+  [[nodiscard]] std::span<const AtomicSiteDecision> atomic_site_decisions() const {
     return observation_plan_.atomic_site_decisions;
   }
 
   /// Return immutable fence decisions from the owned observation plan.
-  [[nodiscard]] std::span<const ConSanFenceSiteDecision> fence_site_decisions() const {
+  [[nodiscard]] std::span<const FenceSiteDecision> fence_site_decisions() const {
     return observation_plan_.fence_site_decisions;
   }
 
   /// Return immutable joined intent/lowering entries.
-  [[nodiscard]] std::span<const ConSanIntentCoverageEntry> intent_entries() const {
+  [[nodiscard]] std::span<const IntentCoverageEntry> intent_entries() const {
     return intent_entries_;
   }
 
   /// Resolve one admitted intent entry by its plan-local identifier.
-  [[nodiscard]] const ConSanIntentCoverageEntry *intent_entry(ConSanProbeIntentId id) const;
+  [[nodiscard]] const IntentCoverageEntry *intent_entry(ProbeIntentId id) const;
 
   /// Return intents that explicitly cover one original semantic site.
-  [[nodiscard]] std::vector<ConSanProbeIntentId>
-  intent_ids_covering(const SemanticSiteId &site) const {
-    std::vector<ConSanProbeIntentId> ids;
+  [[nodiscard]] std::vector<ProbeIntentId> intent_ids_covering(const SemanticSiteId &site) const {
+    std::vector<ProbeIntentId> ids;
     const auto candidates =
         intent_ids_by_semantic_text_offset_.find(site.physical.original_text_offset);
     if (candidates == intent_ids_by_semantic_text_offset_.end())
       return ids;
-    for (ConSanProbeIntentId id : candidates->second) {
-      const ConSanProbeIntent *candidate = intent(id);
+    for (ProbeIntentId id : candidates->second) {
+      const ProbeIntent *candidate = intent(id);
       if (candidate != nullptr && std::ranges::find(candidate->covered_semantic_sites, site) !=
                                       candidate->covered_semantic_sites.end()) {
         ids.push_back(id);
@@ -1021,9 +911,9 @@ public:
   }
 
   /// Return pending intents of one semantic kind at one physical site.
-  [[nodiscard]] std::vector<ConSanProbeIntentId>
-  pending_intent_ids(ConSanProbeIntentKind kind, const PhysicalSiteId &site) const {
-    std::vector<ConSanProbeIntentId> ids;
+  [[nodiscard]] std::vector<ProbeIntentId> pending_intent_ids(ProbeIntentKind kind,
+                                                              const PhysicalSiteId &site) const {
+    std::vector<ProbeIntentId> ids;
     const size_t kind_index = static_cast<size_t>(kind);
     if (kind_index >= intent_ids_by_kind_and_text_offset_.size())
       return ids;
@@ -1031,11 +921,11 @@ public:
     const auto candidates = by_offset.find(site.original_text_offset);
     if (candidates == by_offset.end())
       return ids;
-    for (ConSanProbeIntentId id : candidates->second) {
-      const ConSanProbeIntent *candidate = intent(id);
-      const ConSanIntentCoverageEntry *entry = intent_entry(id);
+    for (ProbeIntentId id : candidates->second) {
+      const ProbeIntent *candidate = intent(id);
+      const IntentCoverageEntry *entry = intent_entry(id);
       if (candidate != nullptr && candidate->physical_site == site && entry != nullptr &&
-          entry->lowering == ConSanLoweringOutcomeKind::Pending)
+          entry->lowering == LoweringOutcomeKind::Pending)
         ids.push_back(id);
     }
     return ids;
@@ -1046,19 +936,19 @@ public:
   /// and refuses to overwrite an already finalized intent. Accepted commits
   /// remain owned by this ledger so coverage, proof, and runtime attribution
   /// cannot diverge into independently mutable representations.
-  [[nodiscard]] bool publish_lowering_commit(ConSanCommittedLowering commit);
+  [[nodiscard]] bool publish_lowering_commit(CommittedLowering commit);
 
   /// Construct and publish one non-instrumented outcome against exact
   /// plan-owned intent identity. Rejection clients supply semantic identity
   /// and outcome only; empty location/runtime proof is owned by the ledger.
   [[nodiscard]] bool publish_lowering_rejection(
-      std::span<const ConSanProbeIntentId> intent_ids, ConSanLoweringOutcomeKind outcome,
+      std::span<const ProbeIntentId> intent_ids, LoweringOutcomeKind outcome,
       std::string detail = {},
-      std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt);
+      std::optional<RegisterPlanReason> resource_rejection_reason = std::nullopt);
 
   /// Atomically publish a complete group of lowering transactions. No entry
   /// changes when any transaction is stale or malformed.
-  [[nodiscard]] bool publish_lowering_commits(std::vector<ConSanCommittedLowering> commits);
+  [[nodiscard]] bool publish_lowering_commits(std::vector<CommittedLowering> commits);
 
   /// Atomically publish instrumented synchronization transactions, merging
   /// accepted transactions that share an intent. One semantic synchronization
@@ -1066,57 +956,55 @@ public:
   /// transaction remains owned by this ledger rather than a caller-side
   /// staging inventory.
   [[nodiscard]] bool
-  publish_coalescing_instrumented_commits(std::vector<ConSanCommittedLowering> commits);
+  publish_coalescing_instrumented_commits(std::vector<CommittedLowering> commits);
 
   /// Atomically replace already-published geometry for the intents covered by
   /// a completed whole-text transaction. Every intent in an overlapping old
   /// commit must be present in the replacement batch; this prevents a partial
   /// relocation from silently discarding another semantic obligation.
-  [[nodiscard]] bool
-  publish_replacing_instrumented_commits(std::vector<ConSanCommittedLowering> commits);
+  [[nodiscard]] bool publish_replacing_instrumented_commits(std::vector<CommittedLowering> commits);
 
   /// Return the authoritative lowering transactions in publication order.
-  [[nodiscard]] std::span<const ConSanCommittedLowering> lowering_commits() const {
+  [[nodiscard]] std::span<const CommittedLowering> lowering_commits() const {
     return lowering_commits_;
   }
 
   /// Project runtime attribution from the authoritative lowering transactions.
-  [[nodiscard]] ConSanRuntimeStaticMapping runtime_static_mapping() const;
+  [[nodiscard]] RuntimeStaticMapping runtime_static_mapping() const;
 
   /// Forget emitted transactions while retaining explicit rejections. This is
   /// the one rollback operation used when candidate bytes are discarded.
   void discard_instrumented_lowerings();
 
-  bool operator==(const ConSanCoverageLedger &) const = default;
+  bool operator==(const CoverageLedger &) const = default;
 
 private:
-  ConSanObservationPlan observation_plan_;
-  std::vector<ConSanIntentCoverageEntry> intent_entries_;
-  std::vector<ConSanCommittedLowering> lowering_commits_;
-  std::array<std::unordered_map<uint64_t, std::vector<ConSanProbeIntentId>>,
-             static_cast<size_t>(ConSanProbeIntentKind::Count)>
+  ObservationPlan observation_plan_;
+  std::vector<IntentCoverageEntry> intent_entries_;
+  std::vector<CommittedLowering> lowering_commits_;
+  std::array<std::unordered_map<uint64_t, std::vector<ProbeIntentId>>,
+             static_cast<size_t>(ProbeIntentKind::Count)>
       intent_ids_by_kind_and_text_offset_;
-  std::unordered_map<uint64_t, std::vector<ConSanProbeIntentId>>
-      intent_ids_by_semantic_text_offset_;
+  std::unordered_map<uint64_t, std::vector<ProbeIntentId>> intent_ids_by_semantic_text_offset_;
 };
 
-/// Complete engine-policy request consumed by observation assembly.
+/// Complete mode-policy request consumed by observation assembly.
 ///
 /// This is the only production request that composes access, barrier, and
 /// optional atomic/fence policy. Borrowed filters and site reservations are
 /// consumed during the call and are never retained by the resulting value.
-struct ConSanObservationPolicyRequest {
-  /// Engine whose complete observation contract should be assembled.
-  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+struct ObservationPolicyRequest {
+  /// Mode whose complete observation contract should be assembled.
+  Mode mode = Mode::None;
   /// Whether native LDS and direct-to-LDS accesses belong to this request.
   bool native_lds_enabled = false;
   /// Whether group-FLAT accesses belong to this request.
   bool group_flat_enabled = false;
   /// Confidence threshold for conservatively inferred group-FLAT provenance.
-  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  FlatProvenanceMode flat_provenance_mode = FlatProvenanceMode::Strict;
   /// Whether decoded barrier events should be observed.
   bool barrier_tracking_enabled = false;
-  /// Whether this engine participates in atomic/fence policy assembly.
+  /// Whether this mode participates in atomic/fence policy assembly.
   ///
   /// SuperCollider currently has no atomic/fence observation contract and
   /// therefore leaves the fragment absent instead of manufacturing excluded
@@ -1137,37 +1025,35 @@ struct ConSanObservationPolicyRequest {
 /// fallback supports legacy kernel-local inventory that predates ownership
 /// analysis without permitting substring matches.
 [[nodiscard]] bool
-consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
-                                     std::span<const uint64_t> owner_descriptor_file_offsets,
-                                     std::span<const std::string> source_containers,
-                                     std::span<const std::string> kernel_name_allowlist);
+site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                              std::span<const uint64_t> owner_descriptor_file_offsets,
+                              std::span<const std::string> source_containers,
+                              std::span<const std::string> kernel_name_allowlist);
 
 [[nodiscard]] bool
-consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
-                                     std::span<const ConSanExecutionOwner> execution_owners,
-                                     std::span<const std::string> source_containers,
-                                     std::span<const std::string> kernel_name_allowlist);
+site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                              std::span<const ExecutionOwner> execution_owners,
+                              std::span<const std::string> source_containers,
+                              std::span<const std::string> kernel_name_allowlist);
 
-/// Validated composition of every semantic policy fragment for one engine.
+/// Validated composition of every semantic policy fragment for one mode.
 ///
-/// The initial ledger owns the one composed plan so engine lowerers cannot
+/// The initial ledger owns the one composed plan so mode lowerers cannot
 /// append another policy fragment or initialize parallel policy state.
 /// Typed fragment failures remain available for invariant tests; diagnostics
 /// are rendered once at this boundary for transform consumers.
-struct ConSanObservationProduct {
-  ConSanCoverageLedger initial_coverage;
-  std::vector<ConSanAccessPolicyReason> access_errors;
-  std::vector<ConSanBarrierPolicyReason> barrier_errors;
-  std::vector<ConSanAtomicPolicyReason> atomic_errors;
-  std::vector<ConSanFencePolicyReason> fence_errors;
+struct ObservationProduct {
+  CoverageLedger initial_coverage;
+  std::vector<AccessPolicyReason> access_errors;
+  std::vector<BarrierPolicyReason> barrier_errors;
+  std::vector<AtomicPolicyReason> atomic_errors;
+  std::vector<FencePolicyReason> fence_errors;
   bool barrier_fragment_appended = false;
   bool atomic_fence_fragment_appended = false;
   bool atomic_fence_fragment_required = false;
   std::vector<std::string> diagnostics;
 
-  [[nodiscard]] const ConSanObservationPlan &plan() const {
-    return initial_coverage.observation_plan();
-  }
+  [[nodiscard]] const ObservationPlan &plan() const { return initial_coverage.observation_plan(); }
 
   /// Return whether every requested fragment composed into one valid plan and
   /// the initial ledger is exactly the projection of that plan.
@@ -1175,42 +1061,40 @@ struct ConSanObservationProduct {
     return access_errors.empty() && barrier_errors.empty() && atomic_errors.empty() &&
            fence_errors.empty() && barrier_fragment_appended &&
            (!atomic_fence_fragment_required || atomic_fence_fragment_appended) && plan().valid() &&
-           initial_coverage == ConSanCoverageLedger(plan()) && diagnostics.empty();
+           initial_coverage == CoverageLedger(plan()) && diagnostics.empty();
   }
 
-  bool operator==(const ConSanObservationProduct &) const = default;
+  bool operator==(const ObservationProduct &) const = default;
 };
 
 /// Evaluate target-neutral access applicability and admission without mutating
 /// inventory, options, diagnostics, candidates, resource plans, or patches.
-[[nodiscard]] ConSanAccessPolicyResult
-plan_consan_access_observation(const ProgramInventory &inventory,
-                               const ConSanAccessPolicyRequest &request);
+[[nodiscard]] AccessPolicyResult plan_access_observation(const ProgramInventory &inventory,
+                                                         const AccessPolicyRequest &request);
 
 /// Evaluate target-neutral barrier applicability and sequence admission without
 /// mutating inventory, options, diagnostics, candidates, resource plans, or
 /// patches.
-[[nodiscard]] ConSanBarrierPolicyResult
-plan_consan_barrier_observation(const ProgramInventory &inventory,
-                                const ConSanBarrierPolicyRequest &request);
+[[nodiscard]] BarrierPolicyResult plan_barrier_observation(const ProgramInventory &inventory,
+                                                           const BarrierPolicyRequest &request);
 
 /// Evaluate target-neutral ordered atomic and associated-fence applicability
 /// without mutating inventory, options, diagnostics, candidates, resources, or
 /// patches.
-[[nodiscard]] ConSanAtomicFencePolicyResult
-plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
-                                     const ConSanAtomicFencePolicyRequest &request);
+[[nodiscard]] AtomicFencePolicyResult
+plan_atomic_fence_observation(const ProgramInventory &inventory,
+                              const AtomicFencePolicyRequest &request);
 
-/// Assemble the sole engine observation product in dependency order: access,
+/// Assemble the sole mode observation product in dependency order: access,
 /// barrier, then optional atomic/fence policy, followed by its initial ledger.
-[[nodiscard]] ConSanObservationProduct
-assemble_consan_observation_product(const ProgramInventory &inventory,
-                                    const ConSanObservationPolicyRequest &request);
+[[nodiscard]] ObservationProduct
+assemble_observation_product(const ProgramInventory &inventory,
+                             const ObservationPolicyRequest &request);
 
 /// Translate the complete typed caller request into the one observation
 /// policy request and assemble its validated product. This is the sole
-/// production authority for engine-specific domain selection, diagnostic
+/// production authority for mode-specific domain selection, diagnostic
 /// filtering, and ordinary-memory synchronization reservations.
-[[nodiscard]] ConSanObservationProduct
-assemble_consan_observation_product(const ProgramInventory &inventory, const ConSanRequest &request,
-                                    const ConSanDebugOverrides &debug);
+[[nodiscard]] ObservationProduct assemble_observation_product(const ProgramInventory &inventory,
+                                                              const Request &request,
+                                                              const DebugOverrides &debug);

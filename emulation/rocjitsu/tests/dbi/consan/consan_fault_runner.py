@@ -41,7 +41,6 @@ from consan_validation_support import (
 MAX_GPU_JOBS = 4
 MAX_RESOURCE_PLAN_ALTERNATIVES = 4096
 MAX_RESOURCE_PLAN_ALTERNATIVE_ERRORS = 16
-MAX_RECORD_REPLAY_PRESSURE_RECORDS = 4096
 UINT64_MAX = (1 << 64) - 1
 QUARANTINE_FILE = ".gpu-quarantine.json"
 GLOBAL_DESTRUCTIVE_LOCK_ENV = "CONSAN_DESTRUCTIVE_GPU_LOCK"
@@ -94,20 +93,16 @@ _RESOURCE_PLAN_ALTERNATIVE_OUTCOMES = (
 )
 
 _MODE_SELECTIONS = {
-    "record-replay": ("moi", "record_replay"),
-    "record_replay": ("moi", "record_replay"),
-    "inline-shadow": ("moi", "inline_shadow"),
-    "inline_shadow": ("moi", "inline_shadow"),
-    "sampled": ("moi", "sampled"),
-    "supercollider": ("supercollider", "supercollider"),
+    "default": "default",
+    "supercollider": "supercollider",
 }
 
 
-def _selection_from_environment(environment: dict[str, str]) -> tuple[str, str]:
+def _selection_from_environment(environment: dict[str, str]) -> str:
     mode = environment.get("RJ_CONSAN_MODE", "").strip().lower()
     if mode in _MODE_SELECTIONS:
         return _MODE_SELECTIONS[mode]
-    return UNSPECIFIED, UNSPECIFIED
+    return UNSPECIFIED
 
 
 def _key_values(text: str) -> dict[str, str]:
@@ -135,139 +130,6 @@ def _required_integer(fields: dict[str, str], name: str) -> int | None:
 def _append_resource_plan_error(errors: list[str], message: str) -> None:
     if len(errors) < MAX_RESOURCE_PLAN_ALTERNATIVE_ERRORS:
         errors.append(message)
-
-
-def _parse_inline_release_evidence(fields: dict[str, str]) -> dict[str, object] | None:
-    """Parses one complete, stable Inline release plus causal snapshot."""
-    names = (
-        "index",
-        "version",
-        "owner",
-        "epoch_plus_one",
-        "workgroup",
-        "address",
-        "dispatch",
-        "snapshot_count",
-        "snapshot_flags",
-    )
-    values = {name: _required_integer(fields, name) for name in names}
-    if any(value is None for value in values.values()):
-        return None
-    index = values["index"]
-    version = values["version"]
-    owner = values["owner"]
-    epoch = values["epoch_plus_one"]
-    workgroup = values["workgroup"]
-    address = values["address"]
-    dispatch = values["dispatch"]
-    snapshot_count = values["snapshot_count"]
-    snapshot_flags = values["snapshot_flags"]
-    if (
-        index < 0
-        or version == 0
-        or version & 1
-        or owner == 0
-        or epoch <= 0
-        or epoch > 1023
-        or workgroup == 0
-        or address == 0
-        or dispatch == 0
-        or snapshot_count < 0
-        or snapshot_count > 4
-        or snapshot_flags != 0
-    ):
-        return None
-    snapshot = []
-    prior_owner = 0
-    for entry_index in range(snapshot_count):
-        ancestor_owner = _required_integer(fields, f"snapshot{entry_index}_owner")
-        ancestor_epoch = _required_integer(
-            fields, f"snapshot{entry_index}_epoch_plus_one"
-        )
-        if (
-            ancestor_owner is None
-            or ancestor_epoch is None
-            or ancestor_owner <= prior_owner
-            or ancestor_owner == owner
-            or ancestor_epoch <= 0
-            or ancestor_epoch > 1023
-        ):
-            return None
-        snapshot.append(
-            {
-                "owner": ancestor_owner,
-                "epoch_plus_one": ancestor_epoch,
-            }
-        )
-        prior_owner = ancestor_owner
-    for entry_index in range(snapshot_count, 4):
-        extra_owner = _required_integer(fields, f"snapshot{entry_index}_owner")
-        extra_epoch = _required_integer(fields, f"snapshot{entry_index}_epoch_plus_one")
-        if (extra_owner is None) != (extra_epoch is None):
-            return None
-        if extra_owner not in {None, 0} or extra_epoch not in {None, 0}:
-            return None
-    return {
-        "index": index,
-        "version": version,
-        "owner": owner,
-        "epoch_plus_one": epoch,
-        "workgroup": workgroup,
-        "address": address,
-        "dispatch": dispatch,
-        "snapshot_flags": snapshot_flags,
-        "snapshot": snapshot,
-    }
-
-
-def _parse_inline_token_evidence(fields: dict[str, str]) -> dict[str, object] | None:
-    """Parses one complete, stable direct or inherited Inline token."""
-    names = (
-        "index",
-        "version",
-        "consumer",
-        "producer",
-        "epoch_plus_one",
-        "workgroup",
-        "dispatch",
-        "source_address",
-        "source_version",
-    )
-    values = {name: _required_integer(fields, name) for name in names}
-    kind = fields.get("kind")
-    if any(value is None for value in values.values()) or kind not in {
-        "direct",
-        "inherited",
-    }:
-        return None
-    if (
-        values["index"] < 0
-        or values["version"] == 0
-        or values["version"] & 1
-        or values["consumer"] == 0
-        or values["producer"] == 0
-        or values["consumer"] == values["producer"]
-        or values["epoch_plus_one"] <= 0
-        or values["epoch_plus_one"] > 1023
-        or values["workgroup"] == 0
-        or values["dispatch"] == 0
-        or values["source_address"] == 0
-        or values["source_version"] == 0
-        or values["source_version"] & 1
-    ):
-        return None
-    return {
-        "index": values["index"],
-        "version": values["version"],
-        "kind": kind,
-        "consumer": values["consumer"],
-        "producer": values["producer"],
-        "epoch_plus_one": values["epoch_plus_one"],
-        "workgroup": values["workgroup"],
-        "dispatch": values["dispatch"],
-        "source_address": values["source_address"],
-        "source_version": values["source_version"],
-    }
 
 
 def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
@@ -342,101 +204,27 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     report_capacity_failures = 0
     report_cleanup_failures = 0
     report_region_capacity_entries = {
-        "access": 0,
-        "barrier": 0,
-        "atomic": 0,
-        "fence": 0,
-        "diagnostic": 0,
-        "exact_shadow": 0,
-        "inline_atomic_release": 0,
-        "inline_acquired_token": 0,
-        "inline_causal_snapshot": 0,
-        "sampled_watchpoint": 0,
-        "sampled_causal_window": 0,
-        "sampled_sync_metadata": 0,
-        "sampled_pending_acquire": 0,
+        "watchpoint": 0,
+        "causal_window": 0,
+        "sync_metadata": 0,
+        "pending_acquire": 0,
     }
     report_plans: list[dict[str, object]] = []
     report_memory_summaries: list[dict[str, int]] = []
-    shadow_capacity_entries = 0
-    diagnostic_capacity_entries = 0
-    inline_atomic_release_capacity_entries = 0
-    inline_acquired_token_capacity_entries = 0
-    inline_causal_snapshot_capacity_entries = 0
     report_buffers = 0
-    event_counts = {
-        "access": 0,
-        "barrier": 0,
-        "atomic": 0,
-        "diagnostic": 0,
-        "exact_shadow": 0,
-        "inline_atomic_release": 0,
-        "inline_acquired_token": 0,
-        "sampled": 0,
-    }
-    overflow_counts = {
-        "access": 0,
-        "barrier": 0,
-        "atomic": 0,
-        "diagnostic": 0,
-        "sampled": 0,
-    }
-    sampled_snapshot_counts = {
+    event_counts = {"access": 0, "sync": 0}
+    overflow_counts = {"windows": 0}
+    snapshot_counts = {
         "stale": 0,
         "incomplete": 0,
         "changed": 0,
         "malformed": 0,
     }
-    exact_snapshot_counts = {"incomplete": 0, "changed": 0, "malformed": 0}
-    inline_release_snapshot_counts = {
-        "incomplete": 0,
-        "changed": 0,
-        "overflow": 0,
-        "source_incomplete": 0,
-        "malformed": 0,
-    }
-    inline_token_snapshot_counts = {"incomplete": 0, "changed": 0, "malformed": 0}
-    inline_evidence_counts = {
-        "release_records": 0,
-        "token_records": 0,
-        "malformed_records": 0,
-        "duplicate_records": 0,
-        "count_mismatches": 0,
-        "capacity_violations": 0,
-        "state_mismatches": 0,
-    }
-    inline_release_evidence: list[dict[str, object]] = []
-    inline_token_evidence: list[dict[str, object]] = []
-    inline_release_keys: set[tuple[str, int]] = set()
-    inline_token_keys: set[tuple[str, int]] = set()
-    inline_coverage_counts = {
-        "undercoverage": 0,
-        "overflow": 0,
-        "unsupported": 0,
-        "malformed": 0,
-    }
-    inline_diagnostics = 0
-    replay_diagnostics = 0
-    record_replay_pressure_records: list[dict[str, object]] = []
-    record_replay_pressure_record_count = 0
-    record_replay_pressure_status_counts = {
-        "available": 0,
-        "unavailable": 0,
-        "missing": 0,
-    }
-    record_replay_pressure_unavailable_reason_counts: dict[str, int] = {}
-    record_replay_saturated_report_count = 0
-    record_replay_access_table_occupied_total = 0
-    record_replay_access_table_capacity_total = 0
-    record_replay_max_site_owner_address_groups = 0
-    record_replay_max_site_token = 0
-    record_replay_max_address_group_headroom = 0
-    record_replay_invalid_site_token_total = 0
-    sampled_conflicts = 0
-    sampled_immediate_conflicts = 0
-    sampled_claimed_windows = 0
-    sampled_reader_access_events = 0
-    sampled_writer_access_events = 0
+    conflicts = 0
+    immediate_conflicts = 0
+    claimed_windows = 0
+    reader_access_events = 0
+    writer_access_events = 0
     supercollider_mismatches = 0
     sc_report_buffer_count = 0
     sc_report_allocation_failures = 0
@@ -460,28 +248,10 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 "report_buffer_count": 0,
                 "event_counts": {key: 0 for key in event_counts},
                 "overflow_counts": {key: 0 for key in overflow_counts},
-                "exact_snapshot_counts": {key: 0 for key in exact_snapshot_counts},
-                "inline_release_snapshot_counts": {
-                    key: 0 for key in inline_release_snapshot_counts
-                },
-                "inline_token_snapshot_counts": {
-                    key: 0 for key in inline_token_snapshot_counts
-                },
-                "inline_coverage_counts": {key: 0 for key in inline_coverage_counts},
-                "inline_evidence_counts": {key: 0 for key in inline_evidence_counts},
-                "inline_release_evidence": [],
-                "inline_token_evidence": [],
-                "inline_release_capacity": 0,
-                "inline_token_capacity": 0,
-                "inline_snapshot_capacity": 0,
-                "inline_summary_records": 0,
-                "inline_summary_complete": True,
-                "record_replay_pressure": [],
                 "report_plans": [],
                 "report_buffers": [],
                 "spilled_vgpr_count": 0,
                 "private_segment_bytes": 0,
-                "workgroup_shadow_bytes": 0,
                 "group_segment_bytes": 0,
             },
         )
@@ -527,10 +297,6 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                         per_reader["private_segment_bytes"],
                         _integer(fields, "private_bytes"),
                     )
-                    per_reader["workgroup_shadow_bytes"] = max(
-                        per_reader["workgroup_shadow_bytes"],
-                        _integer(fields, "workgroup_shadow_bytes"),
-                    )
                     per_reader["group_segment_bytes"] = max(
                         per_reader["group_segment_bytes"],
                         _integer(fields, "group_bytes"),
@@ -554,7 +320,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             supported_sites += _integer(fields, "function_supported_lds_sites")
             skipped_sites += _integer(fields, "skips")
             rejected_sites += _integer(fields, "blocked")
-        elif record.startswith("MOI resources "):
+        elif record.startswith("resources "):
             spill_patch_count += _integer(fields, "emitted_spill_patches")
             spill_slot_bytes += _integer(fields, "emitted_spill_slot_bytes")
             for key, field in (
@@ -573,7 +339,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                     )
                 else:
                     resource_plan_alternative_counts[key] += value
-        elif record.startswith("MOI resource-alternative "):
+        elif record.startswith("resource-alternative "):
             resource_plan_alternative_record_count += 1
             reader = fields.get("reader", "")
             site = fields.get("site", "")
@@ -658,7 +424,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 resource_plan_alternatives.append(parsed_alternative)
             else:
                 resource_plan_alternatives_truncated += 1
-        elif record.startswith("MOI auto report plan "):
+        elif record.startswith("auto report plan "):
             plan = {
                 "reader": fields.get("reader", ""),
                 "outcome": fields.get("outcome", "unknown"),
@@ -670,60 +436,28 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                 "access_ranges": _integer(fields, "access_ranges"),
                 "barriers": _integer(fields, "barriers"),
                 "atomics": _integer(fields, "atomics"),
-                "fences": _integer(fields, "fences"),
-                "diagnostics": _integer(fields, "diagnostics"),
-                "sampled_banks": _integer(fields, "sampled_banks"),
-                "sampled_watchpoints": _integer(fields, "sampled_watchpoints"),
-                "inline_lds_bytes": _integer(fields, "inline_lds_bytes"),
-                "inline_releases": _integer(fields, "inline_releases"),
-                "inline_snapshots": _integer(fields, "inline_snapshots"),
-                "inline_tokens": _integer(fields, "inline_tokens"),
+                "watchpoint_banks": _integer(fields, "watchpoint_banks"),
+                "watchpoints": _integer(fields, "watchpoints"),
             }
             report_plans.append(plan)
             report_plan_count += 1
             per_reader = reader_record(fields)
             if per_reader is not None:
                 per_reader["report_plans"].append(plan)
-        elif record.startswith("MOI auto report buffer "):
+        elif record.startswith("auto report buffer "):
             if fields.get("allocation_outcome") != "allocated":
                 continue
             report_buffer_bytes += _integer(fields, "bytes")
-            shadow_capacity_entries += _integer(fields, "exact_shadow_entry_capacity")
-            diagnostic_capacity_entries += _integer(fields, "diagnostic_capacity")
-            inline_atomic_release_capacity_entries += _integer(
-                fields, "inline_atomic_release_capacity"
-            )
-            inline_acquired_token_capacity_entries += _integer(
-                fields, "inline_acquired_epoch_token_capacity"
-            )
-            inline_causal_snapshot_capacity_entries += _integer(
-                fields, "inline_causal_snapshot_capacity"
-            )
             capacities = {
-                "access": _integer(fields, "access_record_capacity"),
-                "barrier": _integer(fields, "barrier_record_capacity"),
-                "atomic": _integer(fields, "atomic_record_capacity"),
-                "fence": _integer(fields, "fence_record_capacity"),
-                "diagnostic": _integer(fields, "diagnostic_capacity"),
-                "exact_shadow": _integer(fields, "exact_shadow_entry_capacity"),
-                "inline_atomic_release": _integer(
-                    fields, "inline_atomic_release_capacity"
+                "watchpoint": _integer(fields, "watchpoint_capacity"),
+                "causal_window": _integer(
+                    fields, "causal_window_capacity"
                 ),
-                "inline_acquired_token": _integer(
-                    fields, "inline_acquired_epoch_token_capacity"
+                "sync_metadata": _integer(
+                    fields, "sync_metadata_capacity"
                 ),
-                "inline_causal_snapshot": _integer(
-                    fields, "inline_causal_snapshot_capacity"
-                ),
-                "sampled_watchpoint": _integer(fields, "sampled_watchpoint_capacity"),
-                "sampled_causal_window": _integer(
-                    fields, "sampled_causal_window_capacity"
-                ),
-                "sampled_sync_metadata": _integer(
-                    fields, "sampled_sync_metadata_capacity"
-                ),
-                "sampled_pending_acquire": _integer(
-                    fields, "sampled_pending_acquire_capacity"
+                "pending_acquire": _integer(
+                    fields, "pending_acquire_capacity"
                 ),
             }
             for kind, capacity in capacities.items():
@@ -751,16 +485,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
                         "capacities": capacities,
                     }
                 )
-                per_reader["inline_release_capacity"] += _integer(
-                    fields, "inline_atomic_release_capacity"
-                )
-                per_reader["inline_token_capacity"] += _integer(
-                    fields, "inline_acquired_epoch_token_capacity"
-                )
-                per_reader["inline_snapshot_capacity"] += _integer(
-                    fields, "inline_causal_snapshot_capacity"
-                )
-        elif record.startswith("MOI report memory "):
+        elif record.startswith("report memory "):
             summary: dict[str, int] = {
                 "required_bytes": _integer(fields, "required_bytes"),
                 "allocated_bytes": _integer(fields, "allocated_bytes"),
@@ -785,353 +510,52 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             report_allocation_failures += summary["allocation_failures"]
             report_capacity_failures += summary["capacity_failures"]
             report_cleanup_failures += summary["cleanup_failures"]
-        elif record.startswith("MOI auto report reader="):
-            required_inline_summary_fields = (
-                "visible_inline_atomic_releases",
-                "visible_inline_acquired_tokens",
-                "release_incomplete_snapshots",
-                "release_changed_snapshots",
-                "release_overflow_snapshots",
-                "release_source_incomplete_snapshots",
-                "release_malformed_snapshots",
-                "token_incomplete_snapshots",
-                "token_changed_snapshots",
-                "token_malformed_snapshots",
+        elif record.startswith("auto report reader="):
+            conflicts += _integer(fields, "conflicts")
+            immediate_conflicts += _integer(
+                fields, "immediate_conflicts"
             )
-            inline_diagnostics += _integer(fields, "visible_diagnostics")
-            pressure_available = fields.get("record_replay_pressure_available")
-            pressure_status = (
-                "missing"
-                if pressure_available is None
-                else "available" if pressure_available == "true" else "unavailable"
+            claimed_windows += _integer(fields, "claimed_windows")
+            snapshot_counts["stale"] += _integer(
+                fields, "stale_snapshots"
             )
-            pressure = {
-                "reader": fields.get("reader", ""),
-                "status": pressure_status,
-                "unavailable_reason": fields.get(
-                    "record_replay_pressure_unavailable_reason",
-                    "missing" if pressure_available is None else "unspecified",
-                ),
-                "saturated": fields.get("record_replay_bank_saturated") == "true",
-                "access_table_occupied": _integer(
-                    fields, "record_replay_access_table_occupied"
-                ),
-                "access_table_capacity": _integer(
-                    fields, "record_replay_access_table_capacity"
-                ),
-                "observed_sites": _integer(fields, "record_replay_observed_sites"),
-                "max_site_owner_address_groups": _integer(
-                    fields, "record_replay_max_site_owner_address_groups"
-                ),
-                "address_group_headroom": _integer(
-                    fields, "record_replay_address_group_headroom"
-                ),
-                "logical_access_ranges": _integer(
-                    fields, "record_replay_logical_access_ranges"
-                ),
-                "max_site_token": _integer(fields, "record_replay_max_site_token"),
-                "invalid_site_tokens": _integer(
-                    fields, "record_replay_invalid_site_tokens"
-                ),
-            }
-            record_replay_pressure_record_count += 1
-            record_replay_pressure_status_counts[pressure_status] += 1
-            if pressure_status == "unavailable":
-                unavailable_reason = str(pressure["unavailable_reason"])
-                record_replay_pressure_unavailable_reason_counts[unavailable_reason] = (
-                    record_replay_pressure_unavailable_reason_counts.get(
-                        unavailable_reason, 0
-                    )
-                    + 1
-                )
-            record_replay_saturated_report_count += int(bool(pressure["saturated"]))
-            record_replay_access_table_occupied_total += int(
-                pressure["access_table_occupied"]
+            snapshot_counts["incomplete"] += _integer(
+                fields, "incomplete_snapshots"
             )
-            record_replay_access_table_capacity_total += int(
-                pressure["access_table_capacity"]
+            snapshot_counts["changed"] += _integer(
+                fields, "changed_snapshots"
             )
-            pressure_fanout = int(pressure["max_site_owner_address_groups"])
-            if pressure_fanout > record_replay_max_site_owner_address_groups:
-                record_replay_max_site_owner_address_groups = pressure_fanout
-                record_replay_max_site_token = int(pressure["max_site_token"])
-                record_replay_max_address_group_headroom = int(
-                    pressure["address_group_headroom"]
-                )
-            record_replay_invalid_site_token_total += int(
-                pressure["invalid_site_tokens"]
+            snapshot_counts["malformed"] += _integer(
+                fields, "malformed_snapshots"
             )
-            retain_pressure = (
-                len(record_replay_pressure_records) < MAX_RECORD_REPLAY_PRESSURE_RECORDS
-            )
-            if retain_pressure:
-                record_replay_pressure_records.append(pressure)
-            sampled_conflicts += _integer(fields, "sampled_conflicts")
-            sampled_immediate_conflicts += _integer(
-                fields, "sampled_immediate_conflicts"
-            )
-            sampled_claimed_windows += _integer(fields, "sampled_claimed_windows")
-            sampled_snapshot_counts["stale"] += _integer(
-                fields, "sampled_stale_snapshots"
-            )
-            sampled_snapshot_counts["incomplete"] += _integer(
-                fields, "sampled_incomplete_snapshots"
-            )
-            sampled_snapshot_counts["changed"] += _integer(
-                fields, "sampled_changed_snapshots"
-            )
-            sampled_snapshot_counts["malformed"] += _integer(
-                fields, "sampled_malformed_snapshots"
-            )
-            exact_snapshot_counts["incomplete"] += _integer(
-                fields, "exact_incomplete_snapshots"
-            )
-            exact_snapshot_counts["changed"] += _integer(
-                fields, "exact_changed_snapshots"
-            )
-            exact_snapshot_counts["malformed"] += _integer(
-                fields, "exact_malformed_snapshots"
-            )
-            for key, field in (
-                ("incomplete", "release_incomplete_snapshots"),
-                ("changed", "release_changed_snapshots"),
-                ("overflow", "release_overflow_snapshots"),
-                ("source_incomplete", "release_source_incomplete_snapshots"),
-                ("malformed", "release_malformed_snapshots"),
-            ):
-                inline_release_snapshot_counts[key] += _integer(fields, field)
-            for key, field in (
-                ("incomplete", "token_incomplete_snapshots"),
-                ("changed", "token_changed_snapshots"),
-                ("malformed", "token_malformed_snapshots"),
-            ):
-                inline_token_snapshot_counts[key] += _integer(fields, field)
-            inline_undercoverage_field = (
-                "inline_undercoverage"
-                if "inline_undercoverage" in fields
-                else "inline_unsupported_workgroups"
-            )
-            inline_coverage_counts["undercoverage"] += _integer(
-                fields, inline_undercoverage_field
-            )
-            inline_coverage_counts["overflow"] += _integer(fields, "inline_overflow")
-            inline_coverage_counts["unsupported"] += _integer(
-                fields, "inline_unsupported"
-            )
-            inline_coverage_counts["malformed"] += _integer(fields, "inline_malformed")
-            event_counts["access"] += _integer(fields, "visible_records")
-            event_counts["barrier"] += _integer(fields, "visible_barriers")
-            event_counts["atomic"] += _integer(fields, "visible_atomics")
-            event_counts["diagnostic"] += _integer(fields, "visible_diagnostics")
-            event_counts["exact_shadow"] += _integer(fields, "visible_exact_shadow")
-            event_counts["inline_atomic_release"] += _integer(
-                fields, "visible_inline_atomic_releases"
-            )
-            event_counts["inline_acquired_token"] += _integer(
-                fields, "visible_inline_acquired_tokens"
-            )
-            event_counts["sampled"] += _integer(fields, "visible_sampled")
-            overflow_counts["access"] += _integer(fields, "dropped_records")
-            overflow_counts["barrier"] += _integer(fields, "dropped_barriers")
-            overflow_counts["atomic"] += _integer(fields, "dropped_atomics")
-            overflow_counts["diagnostic"] += _integer(fields, "dropped_diagnostics")
-            overflow_counts["sampled"] += _integer(fields, "sampled_dropped_windows")
+            event_counts["access"] += _integer(fields, "visible")
+            event_counts["sync"] += _integer(fields, "visible_sync")
+            overflow_counts["windows"] += _integer(fields, "dropped_windows")
             saw_instrumentation_evidence = True
             per_reader = reader_record(fields)
             if per_reader is not None:
-                per_reader["inline_summary_records"] += 1
-                if retain_pressure:
-                    per_reader["record_replay_pressure"].append(dict(pressure))
-                per_reader["inline_summary_complete"] &= all(
-                    _required_integer(fields, field) is not None
-                    for field in required_inline_summary_fields
-                )
                 per_events = per_reader["event_counts"]
                 per_overflow = per_reader["overflow_counts"]
-                per_exact_snapshots = per_reader["exact_snapshot_counts"]
-                per_inline_coverage = per_reader["inline_coverage_counts"]
-                for key, field in (
-                    ("access", "visible_records"),
-                    ("barrier", "visible_barriers"),
-                    ("atomic", "visible_atomics"),
-                    ("diagnostic", "visible_diagnostics"),
-                    ("exact_shadow", "visible_exact_shadow"),
-                    ("inline_atomic_release", "visible_inline_atomic_releases"),
-                    ("inline_acquired_token", "visible_inline_acquired_tokens"),
-                    ("sampled", "visible_sampled"),
-                ):
-                    per_events[key] += _integer(fields, field)
-                for key, field in (
-                    ("access", "dropped_records"),
-                    ("barrier", "dropped_barriers"),
-                    ("atomic", "dropped_atomics"),
-                    ("diagnostic", "dropped_diagnostics"),
-                    ("sampled", "sampled_dropped_windows"),
-                ):
-                    per_overflow[key] += _integer(fields, field)
-                for key, field in (
-                    ("incomplete", "exact_incomplete_snapshots"),
-                    ("changed", "exact_changed_snapshots"),
-                    ("malformed", "exact_malformed_snapshots"),
-                ):
-                    per_exact_snapshots[key] += _integer(fields, field)
-                for key, field in (
-                    ("incomplete", "release_incomplete_snapshots"),
-                    ("changed", "release_changed_snapshots"),
-                    ("overflow", "release_overflow_snapshots"),
-                    ("source_incomplete", "release_source_incomplete_snapshots"),
-                    ("malformed", "release_malformed_snapshots"),
-                ):
-                    per_reader["inline_release_snapshot_counts"][key] += _integer(
-                        fields, field
-                    )
-                for key, field in (
-                    ("incomplete", "token_incomplete_snapshots"),
-                    ("changed", "token_changed_snapshots"),
-                    ("malformed", "token_malformed_snapshots"),
-                ):
-                    per_reader["inline_token_snapshot_counts"][key] += _integer(
-                        fields, field
-                    )
-                for key, field in (
-                    ("undercoverage", inline_undercoverage_field),
-                    ("overflow", "inline_overflow"),
-                    ("unsupported", "inline_unsupported"),
-                    ("malformed", "inline_malformed"),
-                ):
-                    per_inline_coverage[key] += _integer(fields, field)
-        elif record.startswith("MOI auto replay "):
-            replay_diagnostics += _integer(fields, "diagnostics")
-            saw_instrumentation_evidence = True
-        elif record.startswith("MOI auto sampled "):
+                per_events["access"] += _integer(fields, "visible")
+                per_events["sync"] += _integer(fields, "visible_sync")
+                per_overflow["windows"] += _integer(fields, "dropped_windows")
+        elif record.startswith("access "):
             kind = _integer(fields, "kind")
-            sampled_reader_access_events += int(kind in {1, 3})
-            sampled_writer_access_events += int(kind in {2, 3})
+            reader_access_events += int(kind in {1, 3})
+            writer_access_events += int(kind in {2, 3})
             saw_instrumentation_evidence = True
-        elif record.startswith("SC auto report "):
+        elif record.startswith("SuperCollider auto report "):
             per_reader = reader_record(fields)
             if per_reader is not None:
                 per_reader["supercollider_mismatch"] = fields.get("mismatch") == "true"
             saw_instrumentation_evidence = True
-        elif record.startswith("SC report summary "):
+        elif record.startswith("SuperCollider report summary "):
             sc_report_buffer_count += _integer(fields, "buffers")
             supercollider_mismatches += _integer(fields, "mismatches")
             sc_report_allocation_failures += _integer(fields, "allocation_failures")
             sc_report_read_failures += _integer(fields, "read_failures")
             sc_report_cleanup_failures += _integer(fields, "cleanup_failures")
             saw_instrumentation_evidence |= _integer(fields, "buffers") != 0
-        elif record.startswith("MOI auto inline-atomic-release "):
-            per_reader = reader_record(fields)
-            parsed = _parse_inline_release_evidence(fields)
-            if per_reader is None or parsed is None:
-                inline_evidence_counts["malformed_records"] += 1
-                if per_reader is not None:
-                    per_reader["inline_evidence_counts"]["malformed_records"] += 1
-                continue
-            key = (str(fields["reader"]), int(parsed["index"]))
-            if key in inline_release_keys:
-                inline_evidence_counts["duplicate_records"] += 1
-                per_reader["inline_evidence_counts"]["duplicate_records"] += 1
-                continue
-            inline_release_keys.add(key)
-            evidence = {"reader": fields["reader"], **parsed}
-            inline_release_evidence.append(evidence)
-            per_reader["inline_release_evidence"].append(parsed)
-            inline_evidence_counts["release_records"] += 1
-            per_reader["inline_evidence_counts"]["release_records"] += 1
-            saw_instrumentation_evidence = True
-        elif record.startswith("MOI auto inline-acquired-token "):
-            per_reader = reader_record(fields)
-            parsed = _parse_inline_token_evidence(fields)
-            if per_reader is None or parsed is None:
-                inline_evidence_counts["malformed_records"] += 1
-                if per_reader is not None:
-                    per_reader["inline_evidence_counts"]["malformed_records"] += 1
-                continue
-            key = (str(fields["reader"]), int(parsed["index"]))
-            if key in inline_token_keys:
-                inline_evidence_counts["duplicate_records"] += 1
-                per_reader["inline_evidence_counts"]["duplicate_records"] += 1
-                continue
-            inline_token_keys.add(key)
-            evidence = {"reader": fields["reader"], **parsed}
-            inline_token_evidence.append(evidence)
-            per_reader["inline_token_evidence"].append(parsed)
-            inline_evidence_counts["token_records"] += 1
-            per_reader["inline_evidence_counts"]["token_records"] += 1
-            saw_instrumentation_evidence = True
-
-    def reject_reader_evidence(record: dict[str, object], reason: str) -> None:
-        inline_evidence_counts[reason] += 1
-        record["inline_evidence_counts"][reason] += 1
-
-    for record in readers.values():
-        releases = record["inline_release_evidence"]
-        tokens = record["inline_token_evidence"]
-        if record["event_counts"]["inline_atomic_release"] != len(releases):
-            reject_reader_evidence(record, "count_mismatches")
-        if record["event_counts"]["inline_acquired_token"] != len(tokens):
-            reject_reader_evidence(record, "count_mismatches")
-        release_capacity = min(
-            record["inline_release_capacity"], record["inline_snapshot_capacity"]
-        )
-        for release in releases:
-            if release_capacity == 0 or release["index"] >= release_capacity:
-                reject_reader_evidence(record, "capacity_violations")
-        for token in tokens:
-            if (
-                record["inline_token_capacity"] == 0
-                or token["index"] >= record["inline_token_capacity"]
-            ):
-                reject_reader_evidence(record, "capacity_violations")
-            sources = [
-                release
-                for release in releases
-                if (
-                    release["dispatch"] == token["dispatch"]
-                    and release["workgroup"] == token["workgroup"]
-                    and release["address"] == token["source_address"]
-                    and release["version"] == token["source_version"]
-                )
-            ]
-            if len(sources) != 1:
-                reject_reader_evidence(record, "malformed_records")
-                continue
-            source = sources[0]
-            if token["kind"] == "direct":
-                valid_source = (
-                    token["producer"] == source["owner"]
-                    and token["epoch_plus_one"] == source["epoch_plus_one"]
-                )
-            else:
-                valid_source = any(
-                    ancestor["owner"] == token["producer"]
-                    and ancestor["epoch_plus_one"] == token["epoch_plus_one"]
-                    for ancestor in source["snapshot"]
-                )
-            if not valid_source:
-                reject_reader_evidence(record, "malformed_records")
-
-        release_states = sum(record["inline_release_snapshot_counts"].values())
-        token_states = sum(record["inline_token_snapshot_counts"].values())
-        has_inline_capacity = (
-            record["inline_release_capacity"]
-            or record["inline_snapshot_capacity"]
-            or record["inline_token_capacity"]
-        )
-        if has_inline_capacity and (
-            record["inline_summary_records"] == 0
-            or not record["inline_summary_complete"]
-        ):
-            reject_reader_evidence(record, "state_mismatches")
-        if (
-            record["event_counts"]["inline_atomic_release"] + release_states
-            > release_capacity
-            or record["event_counts"]["inline_acquired_token"] + token_states
-            > record["inline_token_capacity"]
-        ):
-            reject_reader_evidence(record, "state_mismatches")
-
     mutation_reader_map: dict[tuple[str, str], dict[str, object]] = {}
     for fields in fault_summaries:
         process = fields.get("process", UNSPECIFIED)
@@ -1513,10 +937,8 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     # genuine redundant-access mismatch impossible to qualify as detection.
     supercollider_diagnostics = supercollider_mismatches
     diagnostic_count = (
-        inline_diagnostics
-        + replay_diagnostics
-        + sampled_conflicts
-        + sampled_immediate_conflicts
+        conflicts
+        + immediate_conflicts
         + static_diagnostics
         + supercollider_diagnostics
     )
@@ -1535,30 +957,7 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
     )
     reader_coverage = []
     for record in readers.values():
-        record["inline_release_evidence"].sort(key=lambda value: value["index"])
-        record["inline_token_evidence"].sort(key=lambda value: value["index"])
-        record["inline_evidence_capacities"] = {
-            "release": record.pop("inline_release_capacity"),
-            "snapshot": record.pop("inline_snapshot_capacity"),
-            "token": record.pop("inline_token_capacity"),
-        }
-        record["overflowed"] = (
-            any(record["overflow_counts"].values())
-            or any(record["exact_snapshot_counts"].values())
-            or any(record["inline_release_snapshot_counts"].values())
-            or any(record["inline_token_snapshot_counts"].values())
-            or any(record["inline_coverage_counts"].values())
-            or any(
-                record["inline_evidence_counts"][key]
-                for key in (
-                    "malformed_records",
-                    "duplicate_records",
-                    "count_mismatches",
-                    "capacity_violations",
-                    "state_mismatches",
-                )
-            )
-        )
+        record["overflowed"] = any(record["overflow_counts"].values())
         reader_coverage.append(record)
     reader_coverage.sort(key=lambda record: record["reader"])
     return {
@@ -1596,10 +995,8 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
         },
         "sanitizer": {
             "outcome": sanitizer_outcome,
-            "inline_diagnostics": inline_diagnostics,
-            "replay_diagnostics": replay_diagnostics,
-            "sampled_conflicts": sampled_conflicts,
-            "sampled_immediate_conflicts": sampled_immediate_conflicts,
+            "conflicts": conflicts,
+            "immediate_conflicts": immediate_conflicts,
             "supercollider_mismatches": supercollider_mismatches,
             "supercollider_diagnostics": supercollider_diagnostics,
             "measured_instability_count": supercollider_mismatches,
@@ -1631,42 +1028,15 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "instrumentation_patches": instrumentation_patch_count,
             "redundant_access_patches": redundant_access_patch_count,
             "instrumentation_patch_kinds": instrumentation_patch_kinds,
-            "selected_watchpoints": event_counts["sampled"],
-            "sampled_claimed_windows": sampled_claimed_windows,
-            "reader_access_events": sampled_reader_access_events,
-            "writer_access_events": sampled_writer_access_events,
+            "selected_watchpoints": event_counts["access"],
+            "claimed_windows": claimed_windows,
+            "reader_access_events": reader_access_events,
+            "writer_access_events": writer_access_events,
             "event_counts": event_counts,
             "overflow_counts": overflow_counts,
-            "sampled_snapshot_counts": sampled_snapshot_counts,
-            "exact_snapshot_counts": exact_snapshot_counts,
-            "inline_release_snapshot_counts": inline_release_snapshot_counts,
-            "inline_token_snapshot_counts": inline_token_snapshot_counts,
-            "inline_coverage_counts": inline_coverage_counts,
-            "inline_evidence_counts": inline_evidence_counts,
-            "inline_release_evidence": sorted(
-                inline_release_evidence,
-                key=lambda value: (value["reader"], value["index"]),
-            ),
-            "inline_token_evidence": sorted(
-                inline_token_evidence,
-                key=lambda value: (value["reader"], value["index"]),
-            ),
+            "snapshot_counts": snapshot_counts,
             "overflowed": any(overflow_counts.values())
-            or any(sampled_snapshot_counts.values())
-            or any(exact_snapshot_counts.values())
-            or any(inline_release_snapshot_counts.values())
-            or any(inline_token_snapshot_counts.values())
-            or any(inline_coverage_counts.values())
-            or any(
-                inline_evidence_counts[key]
-                for key in (
-                    "malformed_records",
-                    "duplicate_records",
-                    "count_mismatches",
-                    "capacity_violations",
-                    "state_mismatches",
-                )
-            ),
+            or any(snapshot_counts.values()),
             "readers": reader_coverage,
         },
         "metrics": {
@@ -1690,42 +1060,6 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             "sc_report_allocation_failures": sc_report_allocation_failures,
             "sc_report_read_failures": sc_report_read_failures,
             "sc_report_cleanup_failures": sc_report_cleanup_failures,
-            "shadow_capacity_entries": shadow_capacity_entries,
-            "diagnostic_capacity_entries": diagnostic_capacity_entries,
-            "inline_atomic_release_capacity_entries": inline_atomic_release_capacity_entries,
-            "inline_acquired_token_capacity_entries": inline_acquired_token_capacity_entries,
-            "inline_causal_snapshot_capacity_entries": inline_causal_snapshot_capacity_entries,
-            "record_replay_pressure": {
-                "records": record_replay_pressure_records,
-                "record_count": record_replay_pressure_record_count,
-                "records_truncated": (
-                    record_replay_pressure_record_count
-                    > len(record_replay_pressure_records)
-                ),
-                "available_reports": record_replay_pressure_status_counts["available"],
-                "unavailable_reports": record_replay_pressure_status_counts[
-                    "unavailable"
-                ],
-                "missing_reports": record_replay_pressure_status_counts["missing"],
-                "unavailable_reason_counts": (
-                    record_replay_pressure_unavailable_reason_counts
-                ),
-                "saturated_reports": record_replay_saturated_report_count,
-                "access_table_occupied_total": (
-                    record_replay_access_table_occupied_total
-                ),
-                "access_table_capacity_total": (
-                    record_replay_access_table_capacity_total
-                ),
-                "max_site_owner_address_groups": (
-                    record_replay_max_site_owner_address_groups
-                ),
-                "max_site_token": record_replay_max_site_token,
-                "max_address_group_headroom": (
-                    record_replay_max_address_group_headroom
-                ),
-                "invalid_site_token_total": record_replay_invalid_site_token_total,
-            },
             "spill_patch_count": spill_patch_count,
             "spill_slot_bytes": spill_slot_bytes,
             "resource_plan_alternative_counts": resource_plan_alternative_counts,
@@ -1744,9 +1078,6 @@ def _parse_consan_log(log_text: str) -> dict[str, dict[str, object]]:
             ),
             "private_segment_bytes": sum(
                 record["private_segment_bytes"] for record in reader_coverage
-            ),
-            "workgroup_shadow_bytes": sum(
-                record["workgroup_shadow_bytes"] for record in reader_coverage
             ),
             "group_segment_bytes": sum(
                 record["group_segment_bytes"] for record in reader_coverage
@@ -2104,8 +1435,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--corpus", default=UNSPECIFIED)
     parser.add_argument("--workload", default=UNSPECIFIED)
-    parser.add_argument("--flavor")
-    parser.add_argument("--engine")
+    parser.add_argument("--mode")
     parser.add_argument("--fault-family", default=UNSPECIFIED)
     parser.add_argument("--timeout", type=float, required=True)
     parser.add_argument("--cwd", type=Path, default=Path.cwd())
@@ -2189,8 +1519,7 @@ def _normalized_spec(manifest: dict[str, object]) -> dict[str, str]:
             "row_role",
             "corpus",
             "workload",
-            "flavor",
-            "engine",
+            "mode",
             "fault_family",
         )
     }
@@ -2376,8 +1705,7 @@ def _summarize(args: argparse.Namespace) -> int:
         "pair_id",
         "corpus",
         "workload",
-        "flavor",
-        "engine",
+        "mode",
         "fault_family",
     )
     for path, manifest, spec in manifests:
@@ -2441,8 +1769,7 @@ def _summarize(args: argparse.Namespace) -> int:
             "pair_id",
             "corpus",
             "workload",
-            "flavor",
-            "engine",
+            "mode",
             "fault_family",
             "classification",
             "clean_oracle_outcome",
@@ -2590,8 +1917,7 @@ def _replay_to_run_args(args: argparse.Namespace) -> list[str]:
             "row_role",
             "corpus",
             "workload",
-            "flavor",
-            "engine",
+            "mode",
             "fault_family",
         )
         for key in spec_keys:
@@ -2769,14 +2095,13 @@ def main(argv: list[str] | None = None) -> int:
     explicit_environment.add(ROW_RESULT_ENV)
     cwd = args.cwd.resolve()
 
-    environment_flavor, environment_engine = _selection_from_environment(environment)
+    environment_mode = _selection_from_environment(environment)
     spec = {
         "pair_id": args.pair_id,
         "row_role": args.row_role,
         "corpus": args.corpus,
         "workload": args.workload,
-        "flavor": args.flavor or environment_flavor,
-        "engine": args.engine or environment_engine,
+        "mode": args.mode or environment_mode,
         "fault_family": args.fault_family,
     }
 

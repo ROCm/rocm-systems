@@ -11,22 +11,22 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_program_analysis_target_detail {
+namespace rocjitsu::consan::program_analysis_target_detail {
 
-ConSanCacheOperationEncoding classify_cdna3_cdna4_cache_operation(std::string_view mnemonic) {
+CacheOperationEncoding classify_cdna3_cdna4_cache_operation(std::string_view mnemonic) {
   if (mnemonic == "buffer_wbl2")
-    return {.operation = ConSanCacheOperation::Release};
+    return {.operation = CacheOperation::Release};
   if (mnemonic == "buffer_inv" || mnemonic == "s_dcache_inv")
-    return {.operation = ConSanCacheOperation::Acquire};
+    return {.operation = CacheOperation::Acquire};
   return {};
 }
 
-ConSanWaitInstructionEncoding classify_cdna3_cdna4_wait_instruction(std::string_view, uint32_t word,
-                                                                    rj_code_arch_t arch) {
+WaitInstructionEncoding classify_cdna3_cdna4_wait_instruction(std::string_view, uint32_t word,
+                                                              rj_code_arch_t arch) {
   return classify_target_wait_instruction(word, arch, std::nullopt, false, false);
 }
 
-std::optional<ConSanScratchComponentEncoding>
+std::optional<ScratchComponentEncoding>
 decode_cdna3_cdna4_scratch_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna4::FlatScratchMachineInst))
     return std::nullopt;
@@ -34,7 +34,7 @@ decode_cdna3_cdna4_scratch_component(std::span<const uint8_t> instruction) {
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   if (raw.encoding != 0x37u || raw.addr != 0u)
     return std::nullopt;
-  return ConSanScratchComponentEncoding{
+  return ScratchComponentEncoding{
       .vector_address_vgpr = static_cast<uint16_t>(raw.addr),
       .load_data_vgpr = static_cast<uint16_t>(raw.vdst),
       .store_data_vgpr = static_cast<uint16_t>(raw.data),
@@ -43,7 +43,7 @@ decode_cdna3_cdna4_scratch_component(std::span<const uint8_t> instruction) {
   };
 }
 
-std::optional<ConSanPrivateComponentEncoding>
+std::optional<PrivateComponentEncoding>
 decode_cdna3_cdna4_private_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna4::FlatMachineInst))
     return std::nullopt;
@@ -51,7 +51,7 @@ decode_cdna3_cdna4_private_component(std::span<const uint8_t> instruction) {
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   if (raw.encoding != 0x37u)
     return std::nullopt;
-  return ConSanPrivateComponentEncoding{
+  return PrivateComponentEncoding{
       .address_vgpr = static_cast<uint16_t>(raw.addr),
       .load_data_vgpr = static_cast<uint16_t>(raw.vdst),
       .store_data_vgpr = static_cast<uint16_t>(raw.data),
@@ -59,41 +59,41 @@ decode_cdna3_cdna4_private_component(std::span<const uint8_t> instruction) {
   };
 }
 
-std::optional<ConSanLaneTransferEncoding>
+std::optional<LaneTransferEncoding>
 decode_cdna3_cdna4_lane_transfer(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna4::Vop3MachineInst))
     return std::nullopt;
   cdna4::Vop3MachineInst raw{};
   std::memcpy(&raw, instruction.data(), sizeof(raw));
-  return ConSanLaneTransferEncoding{
+  return LaneTransferEncoding{
       .lane_selector = static_cast<uint32_t>(raw.src1),
       .value_source_operand = 1,
   };
 }
 
-std::optional<ConSanAccvgprTransferEncoding>
+std::optional<AccvgprTransferEncoding>
 decode_cdna3_cdna4_accvgpr_transfer(std::span<const uint8_t> instruction, bool write_accumulator) {
   if (instruction.size() != sizeof(cdna4::Vop3MachineInst))
     return std::nullopt;
   cdna4::Vop3MachineInst raw{};
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   if (write_accumulator)
-    return ConSanAccvgprTransferEncoding{.accumulator_vgpr = static_cast<uint16_t>(raw.vdst)};
+    return AccvgprTransferEncoding{.accumulator_vgpr = static_cast<uint16_t>(raw.vdst)};
   if (raw.src0 < 256u || raw.src0 >= 512u)
-    return ConSanAccvgprTransferEncoding{.accumulator_vgpr = std::nullopt};
-  return ConSanAccvgprTransferEncoding{.accumulator_vgpr = static_cast<uint16_t>(raw.src0 - 256u)};
+    return AccvgprTransferEncoding{.accumulator_vgpr = std::nullopt};
+  return AccvgprTransferEncoding{.accumulator_vgpr = static_cast<uint16_t>(raw.src0 - 256u)};
 }
 
-ConSanVectorMemoryDecode decode_cdna3_cdna4_flat_memory(std::span<const uint8_t> instruction) {
+VectorMemoryDecode decode_cdna3_cdna4_flat_memory(std::span<const uint8_t> instruction) {
   return decode_cdna3_cdna4_rdna3_vector_memory<cdna4::FlatMachineInst>(instruction, false, 0u);
 }
 
-ConSanVectorMemoryDecode decode_cdna3_cdna4_global_memory(std::span<const uint8_t> instruction) {
+VectorMemoryDecode decode_cdna3_cdna4_global_memory(std::span<const uint8_t> instruction) {
   return decode_cdna3_cdna4_rdna3_vector_memory<cdna4::FlatGlblMachineInst>(
       instruction, true, kCdnaGlobalNoSaddrEncoding);
 }
 
-std::optional<ConSanDirectLdsTransferEncoding>
+std::optional<DirectLdsTransferEncoding>
 decode_cdna3_cdna4_direct_lds_transfer(std::string_view mnemonic,
                                        std::span<const uint8_t> instruction) {
   if ((mnemonic == "global_load_lds_dwordx3" || mnemonic == "global_load_lds_dwordx4") &&
@@ -102,7 +102,7 @@ decode_cdna3_cdna4_direct_lds_transfer(std::string_view mnemonic,
     std::memcpy(&raw, instruction.data(), sizeof(raw));
     if (raw.seg != 2u || raw.vdst != 0u)
       return std::nullopt;
-    return ConSanDirectLdsTransferEncoding{
+    return DirectLdsTransferEncoding{
         .writes_lds = true,
         .address_source_operand = std::nullopt,
         .memory_address_vgpr = static_cast<uint16_t>(raw.addr),
@@ -121,41 +121,40 @@ decode_cdna3_cdna4_direct_lds_transfer(std::string_view mnemonic,
   // yet admitted by the instrumentation contract.
   if (raw.lds == 0u || raw.vdata != 0u || mnemonic == "buffer_load_dwordx2")
     return std::nullopt;
-  return ConSanDirectLdsTransferEncoding{.writes_lds = true,
-                                         .address_source_operand = std::nullopt,
-                                         .memory_address_vgpr = static_cast<uint16_t>(raw.vaddr),
-                                         .m0_address_mask = 0x3ffffu};
+  return DirectLdsTransferEncoding{.writes_lds = true,
+                                   .address_source_operand = std::nullopt,
+                                   .memory_address_vgpr = static_cast<uint16_t>(raw.vaddr),
+                                   .m0_address_mask = 0x3ffffu};
 }
 
-bool decode_cdna3_cdna4_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+bool decode_cdna3_cdna4_atomic_site(AtomicSite &site, std::string_view mnemonic,
                                     std::span<const uint8_t> instruction) {
   return decode_cdna3_cdna4_rdna3_atomic_site<cdna4::FlatMachineInst, cdna4::FlatGlblMachineInst>(
       site, mnemonic, instruction, kCdnaGlobalNoSaddrEncoding);
 }
 
-} // namespace rocjitsu::consan_program_analysis_target_detail
+} // namespace rocjitsu::consan::program_analysis_target_detail
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-extern const ConSanProgramAnalysisTargetOperations kConSanCdna3Cdna4ProgramAnalysisOperations = {
+extern const ProgramAnalysisTargetOperations kCdna3Cdna4ProgramAnalysisOperations = {
     .implicit_atomic_width_bits =
-        consan_program_analysis_target_detail::implicit_cdna3_cdna4_rdna3_atomic_width_bits,
+        program_analysis_target_detail::implicit_cdna3_cdna4_rdna3_atomic_width_bits,
     .classify_cache_operation =
-        consan_program_analysis_target_detail::classify_cdna3_cdna4_cache_operation,
+        program_analysis_target_detail::classify_cdna3_cdna4_cache_operation,
     .classify_wait_instruction =
-        consan_program_analysis_target_detail::classify_cdna3_cdna4_wait_instruction,
+        program_analysis_target_detail::classify_cdna3_cdna4_wait_instruction,
     .decode_scratch_component =
-        consan_program_analysis_target_detail::decode_cdna3_cdna4_scratch_component,
+        program_analysis_target_detail::decode_cdna3_cdna4_scratch_component,
     .decode_private_component =
-        consan_program_analysis_target_detail::decode_cdna3_cdna4_private_component,
-    .decode_lane_transfer = consan_program_analysis_target_detail::decode_cdna3_cdna4_lane_transfer,
-    .decode_accvgpr_transfer =
-        consan_program_analysis_target_detail::decode_cdna3_cdna4_accvgpr_transfer,
-    .decode_flat_memory = consan_program_analysis_target_detail::decode_cdna3_cdna4_flat_memory,
-    .decode_global_memory = consan_program_analysis_target_detail::decode_cdna3_cdna4_global_memory,
+        program_analysis_target_detail::decode_cdna3_cdna4_private_component,
+    .decode_lane_transfer = program_analysis_target_detail::decode_cdna3_cdna4_lane_transfer,
+    .decode_accvgpr_transfer = program_analysis_target_detail::decode_cdna3_cdna4_accvgpr_transfer,
+    .decode_flat_memory = program_analysis_target_detail::decode_cdna3_cdna4_flat_memory,
+    .decode_global_memory = program_analysis_target_detail::decode_cdna3_cdna4_global_memory,
     .decode_direct_lds_transfer =
-        consan_program_analysis_target_detail::decode_cdna3_cdna4_direct_lds_transfer,
-    .decode_atomic_site = consan_program_analysis_target_detail::decode_cdna3_cdna4_atomic_site,
+        program_analysis_target_detail::decode_cdna3_cdna4_direct_lds_transfer,
+    .decode_atomic_site = program_analysis_target_detail::decode_cdna3_cdna4_atomic_site,
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

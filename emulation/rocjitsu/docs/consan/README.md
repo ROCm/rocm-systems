@@ -11,23 +11,19 @@ does not assume a fixed architectural size. Simulator and offline validation
 use the selected RocJITsu JSON configuration as the source of truth for that
 capacity.
 
-ConSan exposes the SuperCollider flavor and three MOI engines. MOI stands for
-**Memory-Ordering Instrumentation**.
+By default, ConSan samples memory accesses and collects bounded causal evidence
+to diagnose races. Its alternative **SuperCollider** mode checks redundant
+observations for value instability.
 
+- `RJ_CONSAN_MODE=default`: sampled causal windows and conflict diagnostics;
 - `RJ_CONSAN_MODE=supercollider`: redundant-access/read-back checking with an
-  automatic non-trapping mismatch marker;
-- `RJ_CONSAN_MODE=record-replay`: bounded
-  records plus host replay;
-- `RJ_CONSAN_MODE=sampled`: bounded statistical
-  causal windows; and
-- `RJ_CONSAN_MODE=inline-shadow`: supported-form
-  exact GPU shadowing and attributed diagnostics.
+  automatic non-trapping mismatch marker.
 
-The flavor and all three engines select every relevant site they support and
-manage registers and reporting automatically. MOI barriers and atomics are on
-by default. Sampled chooses its runtime sampling parameters automatically.
-Users do not choose a patch count, register, report size, synchronization
-switch, or sampling residue for ordinary runs.
+Both modes select every relevant static site they support and manage registers
+and reporting automatically. ConSan barriers and atomics are on by default.
+ConSan chooses its runtime sampling parameters automatically. Users do not
+choose a patch count, register, report size, synchronization switch, or sampling
+residue for ordinary runs.
 
 ## Quick start
 
@@ -40,7 +36,7 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" ./application
 ```
 
 Loading the hook is itself the activation action; no separate enable variable
-is required. It selects MOI Sampled by default. Add `RJ_CONSAN_LOG=1` for
+is required. It selects ConSan by default. Add `RJ_CONSAN_LOG=1` for
 instrumentation and completeness summaries.
 
 For code objects not excluded by the kernel allowlist, the same hook runs
@@ -51,7 +47,7 @@ waitcheck environment settings are needed for a ConSan run.
 
 For a focused program known to contain supported sites,
 `RJ_CONSAN_POLICY=strict` defaults fail-closed and require-patch checks on; for
-MOI it also defaults automatic-record and forbid-overflow checks on. It does
+ConSan it also defaults automatic-record and forbid-overflow checks on. It does
 not make race diagnostics fatal or replace inspection of the static coverage
 summary.
 
@@ -68,21 +64,20 @@ If the program's own correctness checks pass, ConSan preserved its result for
 that run; this does not prove the program race-free. A failure, timeout, signal,
 or GPU reset is not by itself a ConSan diagnostic.
 
-For small repros, use `RJ_CONSAN_MOI_SAMPLED_PRESET=high`; use `max` to remove
+For small repros, use `RJ_CONSAN_PRESET=high`; use `max` to remove
 workgroup and cell sampling. `low` trades coverage for lower recording overhead,
-and `default` preserves standard behavior. See [Sampled presets](USAGE.md#sampled-presets)
+and `default` preserves standard behavior. See [ConSan presets](USAGE.md#presets)
 for exact settings, overrides, and bounded-retention limitations.
 
 ## Documents
 
-- [FLAVORS.md](FLAVORS.md): conceptual, phase-by-phase comparison of what the
-  flavor and three engines do on the device, defer for later, and do on the
-  host.
+- [MODES.md](MODES.md): conceptual, phase-by-phase comparison of what the
+  two modes do on the device, defer for later, and do on the host.
 - [TUTORIAL.md](TUTORIAL.md): getting started on your own program.
 - [USAGE.md](USAGE.md): public controls, defaults, coverage, and diagnostics.
 - [DESIGN.md](DESIGN.md): architecture, implemented behavior, and semantic
   boundaries.
-- [CAPABILITIES.md](CAPABILITIES.md): normative target-by-engine access,
+- [CAPABILITIES.md](CAPABILITIES.md): normative target-by-mode access,
   barrier, atomic, fence, and typed-exclusion matrix.
 - Target qualification ledgers: [CDNA3 / gfx942](validation/STATUS_CDNA3.md),
   [CDNA4 / gfx950](validation/STATUS_CDNA4.md),

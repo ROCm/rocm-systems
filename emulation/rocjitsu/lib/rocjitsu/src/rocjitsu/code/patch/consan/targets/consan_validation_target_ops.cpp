@@ -9,35 +9,30 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 
-namespace rocjitsu::consan_validation_target_detail {
-[[nodiscard]] ConSanEncodedMutationValidation
-validate_rdna4_cdna5_encoded_mutation(ConSanEncodedMutationKind kind,
-                                      std::span<const uint8_t> before,
+namespace rocjitsu::consan::validation_target_detail {
+[[nodiscard]] EncodedMutationValidation
+validate_rdna4_cdna5_encoded_mutation(EncodedMutationKind kind, std::span<const uint8_t> before,
                                       std::span<const uint8_t> after);
-[[nodiscard]] ConSanDescriptorResourceDeltaValidation
-validate_cdna3_cdna4_descriptor_resource_delta(const ConSanTargetProfile &target,
-                                               const ConSanDescriptorResourceDeltaInput &input);
-} // namespace rocjitsu::consan_validation_target_detail
+[[nodiscard]] DescriptorResourceDeltaValidation
+validate_cdna3_cdna4_descriptor_resource_delta(const TargetProfile &target,
+                                               const DescriptorResourceDeltaInput &input);
+} // namespace rocjitsu::consan::validation_target_detail
 
-namespace rocjitsu {
-ConSanEncodedMutationValidation validate_consan_encoded_mutation(rj_code_arch_t arch,
-                                                                 ConSanEncodedMutationKind kind,
-                                                                 std::span<const uint8_t> before,
-                                                                 std::span<const uint8_t> after) {
-  if (consan_arch_is_rdna4_or_cdna5(arch))
-    return consan_validation_target_detail::validate_rdna4_cdna5_encoded_mutation(kind, before,
-                                                                                  after);
-  return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
+namespace rocjitsu::consan {
+EncodedMutationValidation validate_encoded_mutation(rj_code_arch_t arch, EncodedMutationKind kind,
+                                                    std::span<const uint8_t> before,
+                                                    std::span<const uint8_t> after) {
+  if (arch_is_rdna4_or_cdna5(arch))
+    return validation_target_detail::validate_rdna4_cdna5_encoded_mutation(kind, before, after);
+  return EncodedMutationValidation::UnsupportedInstructionEncoding;
 }
 
-ConSanDescriptorResourceDeltaValidation
-validate_consan_descriptor_resource_delta(rj_code_arch_t arch,
-                                          const ConSanDescriptorResourceDeltaInput &input) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (target && consan_arch_is_cdna3_or_cdna4(arch))
-    return consan_validation_target_detail::validate_cdna3_cdna4_descriptor_resource_delta(*target,
-                                                                                           input);
+DescriptorResourceDeltaValidation
+validate_descriptor_resource_delta(rj_code_arch_t arch, const DescriptorResourceDeltaInput &input) {
+  const TargetProfile *target = target_profile(arch);
+  if (target && arch_is_cdna3_or_cdna4(arch))
+    return validation_target_detail::validate_cdna3_cdna4_descriptor_resource_delta(*target, input);
   return {.valid = true, .normalized_rsrc3 = input.replacement_rsrc3};
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

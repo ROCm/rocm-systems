@@ -5,7 +5,7 @@
 
 #include <functional>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 const std::vector<uint8_t> &barrier_policy_bytes() {
@@ -13,92 +13,90 @@ const std::vector<uint8_t> &barrier_policy_bytes() {
   return bytes;
 }
 
-ConSanSyncEvent make_barrier_event(
-    uint64_t offset, ConSanSyncOperation operation = ConSanSyncOperation::BarrierFull,
-    [[maybe_unused]] ConSanBarrierSite::Scope scope = ConSanBarrierSite::Scope::Workgroup,
-    std::string container = "barrier_kernel") {
-  ConSanSyncEvent event;
+SyncEvent
+make_barrier_event(uint64_t offset, SyncOperation operation = SyncOperation::BarrierFull,
+                   [[maybe_unused]] BarrierSite::Scope scope = BarrierSite::Scope::Workgroup,
+                   std::string container = "barrier_kernel") {
+  SyncEvent event;
   event.semantic_id = {
       .physical =
           {
-              .code_object = make_consan_code_object_id(barrier_policy_bytes()),
+              .code_object = make_code_object_id(barrier_policy_bytes()),
               .original_text_offset = offset,
           },
-      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+      .domain = SemanticSiteDomain::SynchronizationEvent,
       .member_ordinal = 0,
       .range_ordinal = 0,
   };
-  event.kind = ConSanSyncKind::Barrier;
+  event.kind = SyncKind::Barrier;
   event.operation = operation;
-  event.memory_role =
-      operation == ConSanSyncOperation::BarrierSignal ? ConSanSyncMemoryRole::Release
-      : operation == ConSanSyncOperation::BarrierWait ? ConSanSyncMemoryRole::Acquire
-                                                      : ConSanSyncMemoryRole::AcquireRelease;
-  event.confidence = ConSanSemanticConfidence::Exact;
-  event.memory_role_confidence = ConSanSemanticConfidence::Exact;
+  event.memory_role = operation == SyncOperation::BarrierSignal ? SyncMemoryRole::Release
+                      : operation == SyncOperation::BarrierWait ? SyncMemoryRole::Acquire
+                                                                : SyncMemoryRole::AcquireRelease;
+  event.confidence = SemanticConfidence::Exact;
+  event.memory_role_confidence = SemanticConfidence::Exact;
   event.identity = container + "|barrier=" + std::to_string(offset);
   return event;
 }
 
-ConSanSyncSequence
-make_barrier_sequence(std::span<const ConSanSyncEvent> events,
-                      ConSanBarrierSite::Scope scope = ConSanBarrierSite::Scope::Workgroup) {
-  ConSanSyncSequence sequence;
-  sequence.kind = ConSanSyncKind::Barrier;
-  sequence.operation = ConSanSyncOperation::BarrierFull;
-  sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
-  sequence.confidence = ConSanSemanticConfidence::Exact;
-  sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
+SyncSequence make_barrier_sequence(std::span<const SyncEvent> events,
+                                   BarrierSite::Scope scope = BarrierSite::Scope::Workgroup) {
+  SyncSequence sequence;
+  sequence.kind = SyncKind::Barrier;
+  sequence.operation = SyncOperation::BarrierFull;
+  sequence.memory_role = SyncMemoryRole::AcquireRelease;
+  sequence.confidence = SemanticConfidence::Exact;
+  sequence.memory_role_confidence = SemanticConfidence::Exact;
   sequence.identity = "barrier-sequence";
   sequence.begin_text_offset = events.front().text_offset();
   sequence.end_text_offset = events.back().text_offset() + sizeof(uint32_t);
   sequence.basic_block_index = 0;
   sequence.barrier_id = 0;
-  sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
+  sequence.barrier_operand_source = BarrierSite::OperandSource::Immediate;
   sequence.barrier_scope = scope;
   for (size_t index = 0; index < events.size(); ++index)
     sequence.member_event_ids.push_back({static_cast<uint32_t>(index)});
   return sequence;
 }
 
-ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
-                                         std::vector<ConSanSyncSequence> sequences,
+ProgramInventory build_barrier_inventory(std::vector<SyncEvent> events,
+                                         std::vector<SyncSequence> sequences,
                                          rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
                                          rj_code_target_id_t target = ROCJITSU_CODE_TARGET_GFX1201,
                                          std::span<const uint32_t> source_sizes = {}) {
   ProgramInventoryBuilder builder(barrier_policy_bytes());
   builder.set_code_object_facts(true, 0, arch, target);
-  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
+  ProgramContainer kernel{ProgramContainerKind::Kernel};
   kernel.name = "barrier_kernel";
   kernel.descriptor_file_offset = 192;
   kernel.entry_text_offset = 0;
   builder.add_kernel(std::move(kernel));
-  for (const ConSanSyncEvent &event : events) {
+  for (const SyncEvent &event : events) {
     const std::string name = event.identity.substr(0, event.identity.find('|'));
-    if (std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name) !=
+    if (std::ranges::find(builder.kernels(), name, &ProgramContainer::name) !=
         builder.kernels().end())
       continue;
-    ConSanProgramContainer event_kernel{ConSanProgramContainerKind::Kernel};
+    ProgramContainer event_kernel{ProgramContainerKind::Kernel};
     event_kernel.name = name;
     event_kernel.descriptor_file_offset = 192u + 64u * builder.kernels().size();
     event_kernel.entry_text_offset = 0;
     builder.add_kernel(std::move(event_kernel));
   }
   for (size_t index = 0; index < events.size(); ++index) {
-    ConSanSyncEvent &event = events[index];
-    ConSanBarrierSite site;
-    site.operation =
-        event.operation == ConSanSyncOperation::BarrierSignal ? ConSanBarrierSite::Operation::Signal
-        : event.operation == ConSanSyncOperation::BarrierWait ? ConSanBarrierSite::Operation::Wait
-                                                              : ConSanBarrierSite::Operation::Full;
+    SyncEvent &event = events[index];
+    BarrierSite site;
+    site.operation = event.operation == SyncOperation::BarrierSignal
+                         ? BarrierSite::Operation::Signal
+                     : event.operation == SyncOperation::BarrierWait ? BarrierSite::Operation::Wait
+                                                                     : BarrierSite::Operation::Full;
     site.text_offset = event.text_offset();
     site.file_offset = event.text_offset();
     site.size = index < source_sizes.size() ? source_sizes[index] : sizeof(uint32_t);
     site.barrier_id = 0;
-    site.operand_source = ConSanBarrierSite::OperandSource::Immediate;
-    site.scope = ConSanBarrierSite::Scope::Workgroup;
-    for (const ConSanSyncSequence &sequence : sequences) {
-      const ConSanSyncEventId member{static_cast<uint32_t>(index)};
+    site.operand_source = BarrierSite::OperandSource::Immediate;
+    site.scope = BarrierSite::Scope::Workgroup;
+    for (const SyncSequence &sequence : sequences) {
+      const SyncEventId member{static_cast<uint32_t>(index)};
       if (std::ranges::find(sequence.member_event_ids, member) != sequence.member_event_ids.end()) {
         site.scope = sequence.barrier_scope;
         break;
@@ -109,7 +107,7 @@ ProgramInventory build_barrier_inventory(std::vector<ConSanSyncEvent> events,
     const std::string_view container_name =
         std::string_view(event.identity).substr(0, event.identity.find('|'));
     const auto container =
-        std::ranges::find(builder.kernels(), container_name, &ConSanProgramContainer::name);
+        std::ranges::find(builder.kernels(), container_name, &ProgramContainer::name);
     EXPECT_NE(container, builder.kernels().end());
     stage_decoded_site(
         builder, container == builder.kernels().end() ? builder.kernels().front() : *container,
@@ -130,79 +128,67 @@ one_full_barrier_inventory(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
   return build_barrier_inventory(std::move(events), std::move(sequences), arch, target);
 }
 
-ConSanBarrierPolicyRequest barrier_request(ConSanCapabilityEngine engine) {
+BarrierPolicyRequest barrier_request(Mode mode) {
   return {
-      .engine = engine,
+      .mode = mode,
       .tracking_enabled = true,
       .container_filter = {},
       .kernel_name_allowlist = {},
   };
 }
 
-TEST(ConSanBarrierPolicy, InvalidEngineFailsValidationButEmptyInventoryIsAValidEmptyPlan) {
-  const ConSanBarrierPolicyResult invalid = plan_consan_barrier_observation(
-      one_full_barrier_inventory(), barrier_request(ConSanCapabilityEngine::Count));
+TEST(ConSanBarrierPolicy, InvalidModeFailsValidationButEmptyInventoryIsAValidEmptyPlan) {
+  const BarrierPolicyResult invalid =
+      plan_barrier_observation(one_full_barrier_inventory(), barrier_request(Mode::None));
   EXPECT_FALSE(invalid.valid());
   EXPECT_FALSE(invalid.plan.valid());
 
-  const ConSanBarrierPolicyResult empty = plan_consan_barrier_observation(
-      ProgramInventory{}, barrier_request(ConSanCapabilityEngine::RecordReplay));
+  const BarrierPolicyResult empty =
+      plan_barrier_observation(ProgramInventory{}, barrier_request(Mode::Default));
   EXPECT_TRUE(empty.valid());
   EXPECT_TRUE(empty.plan.barrier_site_decisions.empty());
   EXPECT_TRUE(empty.plan.probe_intents.empty());
 }
 
-TEST(ConSanBarrierPolicy, AllEnginesExpressTheirBarrierContract) {
+TEST(ConSanBarrierPolicy, AllModesExpressTheirBarrierContract) {
   const ProgramInventory inventory = one_full_barrier_inventory();
-  const ConSanBarrierPolicyResult supercollider = plan_consan_barrier_observation(
-      inventory, barrier_request(ConSanCapabilityEngine::SuperCollider));
+  const BarrierPolicyResult supercollider =
+      plan_barrier_observation(inventory, barrier_request(Mode::SuperCollider));
   ASSERT_TRUE(supercollider.valid());
   ASSERT_EQ(supercollider.plan.barrier_site_decisions.size(), 1u);
   EXPECT_EQ(supercollider.plan.barrier_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+            SiteDecisionKind::NotApplicable);
   EXPECT_EQ(supercollider.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::EngineMutationOnly);
+            BarrierPolicyReason::ModeMutationOnly);
   EXPECT_TRUE(supercollider.plan.probe_intents.empty());
 
   constexpr std::array expected = {
-      std::pair{ConSanCapabilityEngine::RecordReplay, ConSanProbeIntentKind::BarrierRecord},
-      std::pair{ConSanCapabilityEngine::Sampled, ConSanProbeIntentKind::SampledBarrierEpoch},
-      std::pair{ConSanCapabilityEngine::InlineShadow, ConSanProbeIntentKind::ExactBarrierEpoch},
+      std::pair{Mode::Default, ProbeIntentKind::BarrierEpoch},
   };
-  for (const auto &[engine, intent_kind] : expected) {
-    SCOPED_TRACE(consan_capability_engine_name(engine));
-    const ConSanBarrierPolicyResult policy =
-        plan_consan_barrier_observation(inventory, barrier_request(engine));
+  for (const auto &[mode, intent_kind] : expected) {
+    SCOPED_TRACE(mode_label(mode));
+    const BarrierPolicyResult policy = plan_barrier_observation(inventory, barrier_request(mode));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.barrier_site_decisions.size(), 1u);
     ASSERT_EQ(policy.plan.probe_intents.size(), 1u);
-    EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
-    EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason, ConSanBarrierPolicyReason::None);
+    EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Admitted);
+    EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason, BarrierPolicyReason::None);
     EXPECT_EQ(policy.plan.probe_intents.front().kind, intent_kind);
-    EXPECT_EQ(policy.plan.probe_intents.front().position, ConSanProbePosition::After);
+    EXPECT_EQ(policy.plan.probe_intents.front().position, ProbePosition::After);
   }
 }
 
-TEST(ConSanBarrierPolicy, PairedSequenceHasPerEventRecordsButOneEpochIntent) {
+TEST(ConSanBarrierPolicy, PairedSequenceHasOneEpochIntent) {
   std::vector events{
-      make_barrier_event(32, ConSanSyncOperation::BarrierSignal),
-      make_barrier_event(48, ConSanSyncOperation::BarrierWait),
+      make_barrier_event(32, SyncOperation::BarrierSignal),
+      make_barrier_event(48, SyncOperation::BarrierWait),
   };
   std::vector sequences{make_barrier_sequence(events)};
   const ProgramInventory inventory = build_barrier_inventory(events, sequences);
 
-  const ConSanBarrierPolicyResult record = plan_consan_barrier_observation(
-      inventory, barrier_request(ConSanCapabilityEngine::RecordReplay));
-  ASSERT_TRUE(record.valid());
-  ASSERT_EQ(record.plan.barrier_site_decisions.size(), 2u);
-  ASSERT_EQ(record.plan.probe_intents.size(), 2u);
-  EXPECT_NE(record.plan.probe_intents[0].physical_site, record.plan.probe_intents[1].physical_site);
-
-  for (ConSanCapabilityEngine engine :
-       {ConSanCapabilityEngine::Sampled, ConSanCapabilityEngine::InlineShadow}) {
-    SCOPED_TRACE(consan_capability_engine_name(engine));
-    const ConSanBarrierPolicyResult epoch =
-        plan_consan_barrier_observation(inventory, barrier_request(engine));
+  for (Mode mode : {Mode::Default}) {
+    SCOPED_TRACE(mode_label(mode));
+    const BarrierPolicyResult epoch = plan_barrier_observation(inventory, barrier_request(mode));
     ASSERT_TRUE(epoch.valid());
     ASSERT_EQ(epoch.plan.barrier_site_decisions.size(), 2u);
     ASSERT_EQ(epoch.plan.probe_intents.size(), 1u);
@@ -211,116 +197,110 @@ TEST(ConSanBarrierPolicy, PairedSequenceHasPerEventRecordsButOneEpochIntent) {
   }
 }
 
-TEST(ConSanBarrierPolicy, InlineSignalWithoutACompletionIsExplicitlyNotApplicable) {
-  std::vector events{make_barrier_event(32, ConSanSyncOperation::BarrierSignal)};
-  ConSanSyncSequence sequence = make_barrier_sequence(events);
-  sequence.operation = ConSanSyncOperation::BarrierSignal;
-  sequence.memory_role = ConSanSyncMemoryRole::Release;
-  const ConSanBarrierPolicyResult policy = plan_consan_barrier_observation(
-      build_barrier_inventory(std::move(events), {std::move(sequence)}),
-      barrier_request(ConSanCapabilityEngine::InlineShadow));
+TEST(ConSanBarrierPolicy, SignalWithoutACompletionIsUnsupported) {
+  std::vector events{make_barrier_event(32, SyncOperation::BarrierSignal)};
+  SyncSequence sequence = make_barrier_sequence(events);
+  sequence.operation = SyncOperation::BarrierSignal;
+  sequence.memory_role = SyncMemoryRole::Release;
+  const BarrierPolicyResult policy =
+      plan_barrier_observation(build_barrier_inventory(std::move(events), {std::move(sequence)}),
+                               barrier_request(Mode::Default));
   ASSERT_TRUE(policy.valid());
   ASSERT_EQ(policy.plan.barrier_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Unsupported);
   EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::UnqualifiedSyncSequence);
+            BarrierPolicyReason::UnqualifiedSyncSequence);
   EXPECT_TRUE(policy.plan.probe_intents.empty());
 }
 
 TEST(ConSanBarrierPolicy, DisabledFilteredAndRuntimeEventsRemainExplicitlyOutsideContract) {
   const ProgramInventory inventory = one_full_barrier_inventory();
-  ConSanBarrierPolicyRequest disabled = barrier_request(ConSanCapabilityEngine::RecordReplay);
+  BarrierPolicyRequest disabled = barrier_request(Mode::Default);
   disabled.tracking_enabled = false;
-  EXPECT_EQ(plan_consan_barrier_observation(inventory, disabled)
-                .plan.barrier_site_decisions.front()
-                .reason,
-            ConSanBarrierPolicyReason::TrackingDisabled);
+  EXPECT_EQ(
+      plan_barrier_observation(inventory, disabled).plan.barrier_site_decisions.front().reason,
+      BarrierPolicyReason::TrackingDisabled);
 
-  ConSanBarrierPolicyRequest filtered = barrier_request(ConSanCapabilityEngine::RecordReplay);
+  BarrierPolicyRequest filtered = barrier_request(Mode::Default);
   filtered.container_filter = "different";
-  EXPECT_EQ(plan_consan_barrier_observation(inventory, filtered)
-                .plan.barrier_site_decisions.front()
-                .reason,
-            ConSanBarrierPolicyReason::ContainerFilterExcluded);
+  EXPECT_EQ(
+      plan_barrier_observation(inventory, filtered).plan.barrier_site_decisions.front().reason,
+      BarrierPolicyReason::ContainerFilterExcluded);
 
-  std::vector runtime_events{make_barrier_event(32, ConSanSyncOperation::BarrierFull,
-                                                ConSanBarrierSite::Scope::Workgroup,
-                                                "__amd_rocclr_runtime")};
+  std::vector runtime_events{make_barrier_event(
+      32, SyncOperation::BarrierFull, BarrierSite::Scope::Workgroup, "__amd_rocclr_runtime")};
   const ProgramInventory runtime =
       build_barrier_inventory(runtime_events, {make_barrier_sequence(runtime_events)});
-  EXPECT_EQ(plan_consan_barrier_observation(runtime,
-                                            barrier_request(ConSanCapabilityEngine::RecordReplay))
+  EXPECT_EQ(plan_barrier_observation(runtime, barrier_request(Mode::Default))
                 .plan.barrier_site_decisions.front()
                 .reason,
-            ConSanBarrierPolicyReason::RuntimeKernelExcluded);
+            BarrierPolicyReason::RuntimeKernelExcluded);
 }
 
 TEST(ConSanBarrierPolicy, ClusterScopeUsesTheTargetCapabilityContract) {
   std::vector events{
-      make_barrier_event(32, ConSanSyncOperation::BarrierFull, ConSanBarrierSite::Scope::Cluster),
+      make_barrier_event(32, SyncOperation::BarrierFull, BarrierSite::Scope::Cluster),
   };
-  std::vector sequences{make_barrier_sequence(events, ConSanBarrierSite::Scope::Cluster)};
-  const ConSanBarrierPolicyResult gfx1201 =
-      plan_consan_barrier_observation(build_barrier_inventory(events, sequences),
-                                      barrier_request(ConSanCapabilityEngine::RecordReplay));
+  std::vector sequences{make_barrier_sequence(events, BarrierSite::Scope::Cluster)};
+  const BarrierPolicyResult gfx1201 = plan_barrier_observation(
+      build_barrier_inventory(events, sequences), barrier_request(Mode::Default));
   ASSERT_TRUE(gfx1201.valid());
-  EXPECT_EQ(gfx1201.plan.barrier_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(gfx1201.plan.barrier_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(gfx1201.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::TargetCapabilityUnavailable);
+            BarrierPolicyReason::TargetCapabilityUnavailable);
 
-  const ConSanBarrierPolicyResult gfx1250 = plan_consan_barrier_observation(
+  const BarrierPolicyResult gfx1250 = plan_barrier_observation(
       build_barrier_inventory(std::move(events), std::move(sequences), ROCJITSU_CODE_ARCH_CDNA5,
                               ROCJITSU_CODE_TARGET_GFX1250),
-      barrier_request(ConSanCapabilityEngine::RecordReplay));
+      barrier_request(Mode::Default));
   ASSERT_TRUE(gfx1250.valid());
-  EXPECT_EQ(gfx1250.plan.barrier_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(gfx1250.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Admitted);
 }
 
-TEST(ConSanBarrierPolicy, InvalidEncodingAndRedundantFullBarrierHaveTypedReasons) {
+TEST(ConSanBarrierPolicy, MismatchedCompletionAndRedundantFullBarrierHaveTypedReasons) {
   std::vector invalid_events{make_barrier_event(32)};
   std::vector invalid_sequences{make_barrier_sequence(invalid_events)};
-  const ConSanBarrierPolicyResult invalid = plan_consan_barrier_observation(
+  const BarrierPolicyResult invalid = plan_barrier_observation(
       build_barrier_inventory(std::move(invalid_events), std::move(invalid_sequences),
                               ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
                               std::array<uint32_t, 1>{8u}),
-      barrier_request(ConSanCapabilityEngine::RecordReplay));
+      barrier_request(Mode::Default));
   ASSERT_TRUE(invalid.valid());
-  EXPECT_EQ(invalid.plan.barrier_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(invalid.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Unsupported);
   EXPECT_EQ(invalid.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::InvalidBarrierEncoding);
+            BarrierPolicyReason::MissingCompletingEvent);
 
   std::vector adjacent_events{make_barrier_event(32), make_barrier_event(36)};
   std::vector adjacent_sequences{
-      make_barrier_sequence(std::span<const ConSanSyncEvent>(adjacent_events).first(1))};
+      make_barrier_sequence(std::span<const SyncEvent>(adjacent_events).first(1))};
   adjacent_sequences.push_back(
-      make_barrier_sequence(std::span<const ConSanSyncEvent>(adjacent_events).subspan(1)));
+      make_barrier_sequence(std::span<const SyncEvent>(adjacent_events).subspan(1)));
   adjacent_sequences.back().member_event_ids = {{1}};
-  const ConSanBarrierPolicyResult adjacent = plan_consan_barrier_observation(
+  const BarrierPolicyResult adjacent = plan_barrier_observation(
       build_barrier_inventory(std::move(adjacent_events), std::move(adjacent_sequences)),
-      barrier_request(ConSanCapabilityEngine::RecordReplay));
+      barrier_request(Mode::Default));
   ASSERT_TRUE(adjacent.valid());
   ASSERT_EQ(adjacent.plan.barrier_site_decisions.size(), 2u);
-  EXPECT_EQ(adjacent.plan.barrier_site_decisions[0].kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(adjacent.plan.barrier_site_decisions[0].kind, SiteDecisionKind::Admitted);
   EXPECT_EQ(adjacent.plan.barrier_site_decisions[1].reason,
-            ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier);
+            BarrierPolicyReason::RedundantAdjacentFullBarrier);
 }
 
-TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) {
-  using Mutation = std::function<void(ConSanSyncSequence &)>;
+TEST(ConSanBarrierPolicy, QualificationRejectsEveryRequiredSemanticFact) {
+  using Mutation = std::function<void(SyncSequence &)>;
   const std::vector<std::pair<std::string_view, Mutation>> cases = {
-      {"kind", [](auto &s) { s.kind = ConSanSyncKind::Fence; }},
-      {"operation", [](auto &s) { s.operation = ConSanSyncOperation::BarrierWait; }},
-      {"role", [](auto &s) { s.memory_role = ConSanSyncMemoryRole::Acquire; }},
-      {"confidence", [](auto &s) { s.confidence = ConSanSemanticConfidence::Unsupported; }},
+      {"kind", [](auto &s) { s.kind = SyncKind::Fence; }},
+      {"operation", [](auto &s) { s.operation = SyncOperation::BarrierWait; }},
+      {"role", [](auto &s) { s.memory_role = SyncMemoryRole::Acquire; }},
+      {"confidence", [](auto &s) { s.confidence = SemanticConfidence::Unsupported; }},
       {"role-confidence",
-       [](auto &s) { s.memory_role_confidence = ConSanSemanticConfidence::Unsupported; }},
+       [](auto &s) { s.memory_role_confidence = SemanticConfidence::Unsupported; }},
       {"block", [](auto &s) { s.basic_block_index.reset(); }},
       {"clause", [](auto &s) { s.inside_scalar_clause = true; }},
       {"static-id",
-       [](auto &s) { s.barrier_operand_source = ConSanBarrierSite::OperandSource::DynamicM0; }},
+       [](auto &s) { s.barrier_operand_source = BarrierSite::OperandSource::DynamicM0; }},
       {"id", [](auto &s) { s.barrier_id.reset(); }},
-      {"scope", [](auto &s) { s.barrier_scope = ConSanBarrierSite::Scope::Unknown; }},
+      {"scope", [](auto &s) { s.barrier_scope = BarrierSite::Scope::Unknown; }},
       {"members", [](auto &s) { s.member_event_ids.clear(); }},
       {"bounds", [](auto &s) { s.end_text_offset = s.begin_text_offset; }},
   };
@@ -329,14 +309,14 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
     std::vector events{make_barrier_event(32)};
     std::vector sequences{make_barrier_sequence(events)};
     mutate(sequences.front());
-    const ConSanBarrierPolicyResult policy = plan_consan_barrier_observation(
-        build_barrier_inventory(std::move(events), std::move(sequences)),
-        barrier_request(ConSanCapabilityEngine::Sampled));
+    const BarrierPolicyResult policy =
+        plan_barrier_observation(build_barrier_inventory(std::move(events), std::move(sequences)),
+                                 barrier_request(Mode::Default));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.barrier_site_decisions.size(), 1u);
-    EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Unsupported);
     EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason,
-              ConSanBarrierPolicyReason::UnqualifiedSyncSequence);
+              BarrierPolicyReason::UnqualifiedSyncSequence);
     EXPECT_TRUE(policy.plan.probe_intents.empty());
   }
 
@@ -345,47 +325,49 @@ TEST(ConSanBarrierPolicy, SampledQualificationRejectsEveryRequiredSemanticFact) 
   ProgramInventoryBuilder ownerless(
       build_barrier_inventory(std::move(ownerless_events), std::move(ownerless_sequences)));
   ownerless.program_sites().front().execution_owners.clear();
-  const ConSanBarrierPolicyResult ownerless_policy = plan_consan_barrier_observation(
-      ownerless.view(), barrier_request(ConSanCapabilityEngine::Sampled));
+  const BarrierPolicyResult ownerless_policy =
+      plan_barrier_observation(ownerless.view(), barrier_request(Mode::Default));
   ASSERT_TRUE(ownerless_policy.valid());
   ASSERT_EQ(ownerless_policy.plan.barrier_site_decisions.size(), 1u);
   EXPECT_EQ(ownerless_policy.plan.barrier_site_decisions.front().kind,
-            ConSanSiteDecisionKind::Unsupported);
+            SiteDecisionKind::Unsupported);
   EXPECT_EQ(ownerless_policy.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::UnqualifiedSyncSequence);
+            BarrierPolicyReason::UnqualifiedSyncSequence);
   EXPECT_TRUE(ownerless_policy.plan.probe_intents.empty());
 }
 
 TEST(ConSanBarrierPolicy, AmbiguousAndIncompleteSequencesFailClosedWithDistinctReasons) {
   std::vector events{make_barrier_event(32), make_barrier_event(48)};
   std::vector sequences{
-      make_barrier_sequence(std::span<const ConSanSyncEvent>(events).first(1)),
+      make_barrier_sequence(std::span<const SyncEvent>(events).first(1)),
       make_barrier_sequence(events),
   };
-  const ConSanBarrierPolicyResult ambiguous = plan_consan_barrier_observation(
-      build_barrier_inventory(events, sequences), barrier_request(ConSanCapabilityEngine::Sampled));
+  const BarrierPolicyResult ambiguous = plan_barrier_observation(
+      build_barrier_inventory(events, sequences), barrier_request(Mode::Default));
   ASSERT_TRUE(ambiguous.valid());
   EXPECT_EQ(ambiguous.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::AmbiguousSequenceMembership);
+            BarrierPolicyReason::AmbiguousSequenceMembership);
 
   std::vector incomplete_events{make_barrier_event(32)};
   std::vector incomplete_sequences{make_barrier_sequence(incomplete_events)};
   incomplete_sequences.front().end_text_offset = 40;
-  const ConSanBarrierPolicyResult incomplete = plan_consan_barrier_observation(
+  const BarrierPolicyResult incomplete = plan_barrier_observation(
       build_barrier_inventory(std::move(incomplete_events), std::move(incomplete_sequences)),
-      barrier_request(ConSanCapabilityEngine::Sampled));
+      barrier_request(Mode::Default));
   ASSERT_TRUE(incomplete.valid());
   EXPECT_EQ(incomplete.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::MissingCompletingEvent);
+            BarrierPolicyReason::MissingCompletingEvent);
 }
 
 TEST(ConSanBarrierPolicy, IdenticalAliasesCoalesceAndConflictingAliasesAreFatal) {
-  ConSanSyncEvent first = make_barrier_event(32);
-  ConSanSyncEvent second = first;
+  SyncEvent first = make_barrier_event(32);
+  SyncEvent second = first;
   second.identity = "shared_alias|barrier=32";
-  const ProgramInventory coalesced_inventory = build_barrier_inventory({first, second}, {});
-  const ConSanBarrierPolicyResult coalesced = plan_consan_barrier_observation(
-      coalesced_inventory, barrier_request(ConSanCapabilityEngine::RecordReplay));
+  const std::array alias_events{first, second};
+  const ProgramInventory coalesced_inventory =
+      build_barrier_inventory({first, second}, {make_barrier_sequence(alias_events)});
+  const BarrierPolicyResult coalesced =
+      plan_barrier_observation(coalesced_inventory, barrier_request(Mode::Default));
   ASSERT_TRUE(coalesced.valid());
   ASSERT_EQ(coalesced.plan.barrier_site_decisions.size(), 1u);
   EXPECT_EQ(coalesced_inventory.source_container_names(
@@ -393,26 +375,24 @@ TEST(ConSanBarrierPolicy, IdenticalAliasesCoalesceAndConflictingAliasesAreFatal)
             (std::vector<std::string>{"barrier_kernel", "shared_alias"}));
   EXPECT_EQ(coalesced.plan.probe_intents.size(), 1u);
 
-  const ConSanBarrierPolicyResult conflicting = plan_consan_barrier_observation(
+  const BarrierPolicyResult conflicting = plan_barrier_observation(
       build_barrier_inventory({first, second}, {}, ROCJITSU_CODE_ARCH_RDNA4,
                               ROCJITSU_CODE_TARGET_GFX1201, std::array<uint32_t, 2>{4u, 8u}),
-      barrier_request(ConSanCapabilityEngine::RecordReplay));
+      barrier_request(Mode::Default));
   EXPECT_FALSE(conflicting.valid());
-  EXPECT_EQ(conflicting.errors,
-            (std::vector{ConSanBarrierPolicyReason::ConflictingPhysicalAliases}));
+  EXPECT_EQ(conflicting.errors, (std::vector{BarrierPolicyReason::ConflictingPhysicalAliases}));
   EXPECT_EQ(conflicting.plan.barrier_site_decisions.front().reason,
-            ConSanBarrierPolicyReason::ConflictingPhysicalAliases);
+            BarrierPolicyReason::ConflictingPhysicalAliases);
 }
 
 TEST(ConSanBarrierPolicy, PolicyIsDeterministicAndDoesNotMutateInventory) {
   const ProgramInventory inventory = one_full_barrier_inventory();
   const SynchronizationInventoryView view = inventory.sync();
-  const std::vector<ConSanSyncEvent> events(view.sync_events.begin(), view.sync_events.end());
-  const std::vector<ConSanSyncSequence> sequences(view.sync_sequences.begin(),
-                                                  view.sync_sequences.end());
-  const ConSanBarrierPolicyRequest request = barrier_request(ConSanCapabilityEngine::InlineShadow);
-  EXPECT_EQ(plan_consan_barrier_observation(inventory, request),
-            plan_consan_barrier_observation(inventory, request));
+  const std::vector<SyncEvent> events(view.sync_events.begin(), view.sync_events.end());
+  const std::vector<SyncSequence> sequences(view.sync_sequences.begin(), view.sync_sequences.end());
+  const BarrierPolicyRequest request = barrier_request(Mode::Default);
+  EXPECT_EQ(plan_barrier_observation(inventory, request),
+            plan_barrier_observation(inventory, request));
   ASSERT_EQ(view.sync_events.size(), events.size());
   ASSERT_EQ(view.sync_sequences.size(), sequences.size());
   EXPECT_EQ(view.sync_events.front().identity, events.front().identity);
@@ -424,4 +404,4 @@ TEST(ConSanBarrierPolicy, PolicyIsDeterministicAndDoesNotMutateInventory) {
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

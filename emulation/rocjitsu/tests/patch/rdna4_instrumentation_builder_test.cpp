@@ -567,7 +567,7 @@ TEST(InstructionBuilder, BuildRdna4WaveUniformControlFlow) {
   EXPECT_FALSE(build_s_cbranch_scc1(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
-TEST(InstructionBuilder, BuildGfx1250MoiBarrierRecordRecipeEncodings) {
+TEST(InstructionBuilder, BuildGfx1250ConSanBarrierRecordRecipeEncodings) {
   constexpr auto kArch = ROCJITSU_CODE_ARCH_CDNA5;
 
   const auto mbcnt_low = build_v_mbcnt_lo_u32_b32(
@@ -734,7 +734,7 @@ TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
   EXPECT_EQ(inst->size(), 12u);
 }
 
-TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
+TEST(InstructionBuilder, BuildGfx1250ConSanPublicationOperations) {
   constexpr auto expected_cmpswap = cdna5::build_vflat(
       cdna5::kFlatAtomicCmpswapB32Vflat, {.saddr = static_cast<uint8_t>(cdna5::OPR_SREG_NULL),
                                           .vdst = 10,

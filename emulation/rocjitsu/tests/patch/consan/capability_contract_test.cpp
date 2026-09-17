@@ -4,7 +4,7 @@
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_register_allocation.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_profiles.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -16,13 +16,12 @@
 #include <optional>
 #include <string_view>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 inline constexpr uint16_t kExpectedCdna5SemanticFormMask =
-    kConSanCdnaSemanticFormMask |
-    consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier) |
-    consan_capability_form_bit(ConSanCapabilityForm::OrderedLdsAtomic);
+    kCdnaSemanticFormMask | capability_form_bit(CapabilityForm::ClusterBarrier) |
+    capability_form_bit(CapabilityForm::OrderedLdsAtomic);
 
 /// Independent expected values for one target-wide architectural contract.
 ///
@@ -32,23 +31,21 @@ inline constexpr uint16_t kExpectedCdna5SemanticFormMask =
 struct ExpectedTargetProfile {
   rj_code_target_id_t target;
   rj_code_arch_t arch;
-  ConSanAccumulatorModel accumulator_model;
-  ConSanScalarPlacementModel scalar_placement_model;
-  ConSanDispatchIdentitySource dispatch_identity;
-  std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
-  ConSanDirectCallForm direct_call_form;
-  ConSanDeviceCacheRefreshForm device_cache_refresh;
-  ConSanCodeTransportModel code_transport;
-  ConSanResidentWaveIdentityEncoding resident_wave_identity;
-  ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
-  ConSanAtomicAddressMaterializationCapability atomic_address_materialization;
-  ConSanVectorMemoryCapability vector_memory;
-  ConSanNativeLdsCapability native_lds;
-  ConSanMoiAccessCapability moi_access;
-  ConSanSynchronizationCapability synchronization;
-  ConSanMoiPlacementCapability moi_placement;
-  ConSanMoiDispatchIdentityPlacement moi_dispatch_identity_placement;
-  bool moi_access_reports_need_explicit_dispatch_identity;
+  AccumulatorModel accumulator_model;
+  ScalarPlacementModel scalar_placement_model;
+  DispatchIdentitySource dispatch_identity;
+  std::optional<CommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
+  DirectCallForm direct_call_form;
+  DeviceCacheRefreshForm device_cache_refresh;
+  CodeTransportModel code_transport;
+  ResidentWaveIdentityEncoding resident_wave_identity;
+  AtomicAddressMaterializationCapability atomic_address_materialization;
+  VectorMemoryCapability vector_memory;
+  NativeLdsCapability native_lds;
+  AccessCapability access;
+  SynchronizationCapability synchronization;
+  PlacementCapability placement;
+  bool access_reports_need_explicit_dispatch_identity;
   uint8_t vgpr_allocation_granularity_wave64;
   uint8_t sgpr_allocation_granularity;
   uint8_t accumulator_offset_granularity;
@@ -68,375 +65,340 @@ struct ExpectedTargetProfile {
   uint8_t flat_compare_swap_data_pair_alignment;
   bool requires_split_two_address_lds_relocation;
   uint16_t semantic_form_mask;
-  bool requires_sc_runtime_flat_group_gate;
+  bool requires_supercollider_runtime_flat_group_gate;
   bool requires_raw_memory_order_qualifier;
 };
 
-constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
+constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {
     {
-        .target = ROCJITSU_CODE_TARGET_GFX942,
-        .arch = ROCJITSU_CODE_ARCH_CDNA3,
-        .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
-        .scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned,
-        .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
-        .command_processor_workgroup_identity = std::nullopt,
-        .direct_call_form = ConSanDirectCallForm::SCallB64,
-        .device_cache_refresh = ConSanDeviceCacheRefreshForm::Cdna3BufferInvSc1,
-        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
-        .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
-        .workgroup_shadow_clear =
-            {
-                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
-                .maximum_lanes = 32,
-            },
-        .atomic_address_materialization = {.flat_and_global = true},
-        .vector_memory =
-            {
-                .instruction_word_count = 2,
-                .immediate_offset_bits = 13,
-                .flat_vector_only_saddr = 0,
-                .global_vector_only_saddr = 0x7fu,
-                .supports_flat_scalar_base = false,
-                .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
-                .scale_offset = ConSanScaleOffsetCapability::Absent,
-            },
-        .native_lds =
-            {
-                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::ReadWrite,
-                .single_range_atomic_offset_bits = 8,
-            },
-        .moi_access =
-            {
-                .native_lds_spill_recovery = true,
-                .clobbered_address_spill_reload = true,
-            },
-        .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
-        .moi_placement =
-            {
-                .scratch_vgpr_alignment = 2,
-                .branch_only_spill_embeds_setup_state = true,
-                .automatic_dispatch_sgpr_requires_owner_admission = true,
-                .full_workgroup_payload_consumption =
-                    ConSanMoiWorkgroupPayloadConsumption::EntryCapture,
-            },
-        .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
-        .moi_access_reports_need_explicit_dispatch_identity = true,
-        .vgpr_allocation_granularity_wave64 = 8,
-        .sgpr_allocation_granularity = 8,
-        .accumulator_offset_granularity = 4,
-        .ordinary_sgpr_limit = 102,
-        .reserved_ordinary_sgpr_base = 0,
-        .reserved_ordinary_sgpr_count = 0,
-        .user_sgpr_initialization_limit = 16,
-        .address_free_private_limit_bytes = 0x1000u,
-        .private_allocation_granularity_bytes = 16,
-        .max_group_segment_bytes = 64u * 1024u,
-        .direct_branch_min_displacement_bytes = -131068,
-        .direct_branch_max_displacement_bytes = 131072,
-        .supports_kernarg_preload_overflow_recovery = true,
-        .has_cluster_facilities = false,
-        .has_selectable_vgpr_bank = false,
-        .requires_even_vgpr_tuples = true,
-        .flat_compare_swap_data_pair_alignment = 2,
-        .requires_split_two_address_lds_relocation = false,
-        .semantic_form_mask = kConSanCdnaSemanticFormMask,
-        .requires_sc_runtime_flat_group_gate = false,
-        .requires_raw_memory_order_qualifier = false,
-    },
-    {
-        .target = ROCJITSU_CODE_TARGET_GFX950,
-        .arch = ROCJITSU_CODE_ARCH_CDNA4,
-        .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
-        .scalar_placement_model = ConSanScalarPlacementModel::DescriptorPartitioned,
-        .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
-        .command_processor_workgroup_identity = std::nullopt,
-        .direct_call_form = ConSanDirectCallForm::SCallB64,
-        .device_cache_refresh = ConSanDeviceCacheRefreshForm::Cdna4BufferInvSc1,
-        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
-        .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
-        .workgroup_shadow_clear =
-            {
-                .encoding = ConSanWorkgroupShadowClearEncoding::SplitB32Pair,
-                .maximum_lanes = 32,
-            },
-        .atomic_address_materialization = {.flat_and_global = true},
-        .vector_memory =
-            {
-                .instruction_word_count = 2,
-                .immediate_offset_bits = 13,
-                .flat_vector_only_saddr = 0,
-                .global_vector_only_saddr = 0x7fu,
-                .supports_flat_scalar_base = false,
-                .vector_offset_extension = ConSanVectorOffsetExtension::Sign,
-                .scale_offset = ConSanScaleOffsetCapability::Absent,
-            },
-        .native_lds =
-            {
-                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::ReadWrite,
-                .single_range_atomic_offset_bits = 8,
-            },
-        .moi_access =
-            {
-                .native_lds_spill_recovery = true,
-                .clobbered_address_spill_reload = true,
-            },
-        .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
-        .moi_placement =
-            {
-                .scratch_vgpr_alignment = 2,
-                .branch_only_spill_embeds_setup_state = true,
-                .automatic_dispatch_sgpr_requires_owner_admission = true,
-                .full_workgroup_payload_consumption =
-                    ConSanMoiWorkgroupPayloadConsumption::EntryCapture,
-            },
-        .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar,
-        .moi_access_reports_need_explicit_dispatch_identity = true,
-        .vgpr_allocation_granularity_wave64 = 8,
-        .sgpr_allocation_granularity = 8,
-        .accumulator_offset_granularity = 4,
-        .ordinary_sgpr_limit = 102,
-        .reserved_ordinary_sgpr_base = 0,
-        .reserved_ordinary_sgpr_count = 0,
-        .user_sgpr_initialization_limit = 16,
-        .address_free_private_limit_bytes = 0x1000u,
-        .private_allocation_granularity_bytes = 16,
-        .max_group_segment_bytes = 64u * 1024u,
-        .direct_branch_min_displacement_bytes = -131068,
-        .direct_branch_max_displacement_bytes = 131072,
-        .supports_kernarg_preload_overflow_recovery = true,
-        .has_cluster_facilities = false,
-        .has_selectable_vgpr_bank = false,
-        .requires_even_vgpr_tuples = true,
-        .flat_compare_swap_data_pair_alignment = 2,
-        .requires_split_two_address_lds_relocation = false,
-        .semantic_form_mask = kConSanCdnaSemanticFormMask,
-        .requires_sc_runtime_flat_group_gate = false,
-        .requires_raw_memory_order_qualifier = false,
-    },
-    {
-        .target = ROCJITSU_CODE_TARGET_GFX1100,
-        .arch = ROCJITSU_CODE_ARCH_RDNA3,
-        .accumulator_model = ConSanAccumulatorModel::None,
-        .scalar_placement_model = ConSanScalarPlacementModel::LivenessOnly,
-        .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
-        .command_processor_workgroup_identity = std::nullopt,
-        .direct_call_form = ConSanDirectCallForm::SCallB64,
-        .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
-        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
-        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
-        .workgroup_shadow_clear =
-            {
-                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
-                .maximum_lanes = 32,
-            },
-        .atomic_address_materialization = {.flat_and_global = true},
-        .vector_memory =
-            {
-                .instruction_word_count = 2,
-                .immediate_offset_bits = 13,
-                .flat_vector_only_saddr = 0x7cu,
-                .global_vector_only_saddr = 0x7cu,
-                .supports_flat_scalar_base = false,
-                .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
-                .scale_offset = ConSanScaleOffsetCapability::Absent,
-            },
-        .native_lds =
-            {
-                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore,
-                .single_range_atomic_offset_bits = 16,
-            },
-        .moi_access = {.native_lds_spill_recovery = true},
-        .synchronization = {},
-        .moi_placement =
-            {
-                .scratch_vgpr_alignment = 1,
-            },
-        .moi_dispatch_identity_placement =
-            ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred,
-        .moi_access_reports_need_explicit_dispatch_identity = true,
-        .vgpr_allocation_granularity_wave64 = 4,
-        .sgpr_allocation_granularity = 8,
-        .accumulator_offset_granularity = 0,
-        .ordinary_sgpr_limit = 106,
-        .reserved_ordinary_sgpr_base = 0,
-        .reserved_ordinary_sgpr_count = 0,
-        .user_sgpr_initialization_limit = 16,
-        .address_free_private_limit_bytes = 0x1000u,
-        .private_allocation_granularity_bytes = 16,
-        .max_group_segment_bytes = 64u * 1024u,
-        .direct_branch_min_displacement_bytes = -131068,
-        .direct_branch_max_displacement_bytes = 131072,
-        .supports_kernarg_preload_overflow_recovery = true,
-        .has_cluster_facilities = false,
-        .has_selectable_vgpr_bank = false,
-        .requires_even_vgpr_tuples = false,
-        .flat_compare_swap_data_pair_alignment = 1,
-        .requires_split_two_address_lds_relocation = false,
-        .semantic_form_mask = kConSanCommonSemanticFormMask,
-        .requires_sc_runtime_flat_group_gate = false,
-        .requires_raw_memory_order_qualifier = true,
-    },
-    {
-        .target = ROCJITSU_CODE_TARGET_GFX1201,
-        .arch = ROCJITSU_CODE_ARCH_RDNA4,
-        .accumulator_model = ConSanAccumulatorModel::None,
-        .scalar_placement_model = ConSanScalarPlacementModel::SpillBacked,
-        .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
-        .command_processor_workgroup_identity =
-            ConSanCommandProcessorWorkgroupIdentity{
-                .grid_x_ttmp = 9u,
-                .grid_yz_ttmp = 7u,
-                .cluster_workgroup_id_ttmp = std::nullopt,
-            },
-        .direct_call_form = ConSanDirectCallForm::SCallB64,
-        .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
-        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
-        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
-        .workgroup_shadow_clear =
-            {
-                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
-                .maximum_lanes = 32,
-            },
-        .atomic_address_materialization =
-            {
-                .flat_and_global = true,
-                .buffer_resource = true,
-            },
-        .vector_memory =
-            {
-                .instruction_word_count = 3,
-                .immediate_offset_bits = 24,
-                .flat_vector_only_saddr = 0x7cu,
-                .global_vector_only_saddr = 0x7cu,
-                .supports_flat_scalar_base = true,
-                .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
-                .scale_offset = ConSanScaleOffsetCapability::Disabled,
-            },
-        .native_lds =
-            {
-                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore,
-                .single_range_atomic_offset_bits = 16,
-            },
-        .moi_access =
-            {
-                .dynamic_stack_uses_scalar_reservoir = true,
-                .native_lds_spill_recovery = true,
-                .lazy_workgroup_shadow = true,
-            },
-        .synchronization = {},
-        .moi_placement =
-            {
-                .scratch_vgpr_alignment = 1,
-            },
-        .moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral,
-        .moi_access_reports_need_explicit_dispatch_identity = true,
-        .vgpr_allocation_granularity_wave64 = 4,
-        .sgpr_allocation_granularity = 8,
-        .accumulator_offset_granularity = 0,
-        .ordinary_sgpr_limit = 106,
-        .reserved_ordinary_sgpr_base = 0,
-        .reserved_ordinary_sgpr_count = 0,
-        .user_sgpr_initialization_limit = 16,
-        .address_free_private_limit_bytes = 0x800000u,
-        .private_allocation_granularity_bytes = 1,
-        .max_group_segment_bytes = 64u * 1024u,
-        .direct_branch_min_displacement_bytes = -131068,
-        .direct_branch_max_displacement_bytes = 131072,
-        .supports_kernarg_preload_overflow_recovery = false,
-        .has_cluster_facilities = false,
-        .has_selectable_vgpr_bank = false,
-        .requires_even_vgpr_tuples = false,
-        .flat_compare_swap_data_pair_alignment = 1,
-        .requires_split_two_address_lds_relocation = false,
-        .semantic_form_mask = kConSanCommonSemanticFormMask,
-        .requires_sc_runtime_flat_group_gate = false,
-        .requires_raw_memory_order_qualifier = true,
-    },
-    {
-        .target = ROCJITSU_CODE_TARGET_GFX1250,
-        .arch = ROCJITSU_CODE_ARCH_CDNA5,
-        .accumulator_model = ConSanAccumulatorModel::SelectableVgprBank,
-        .scalar_placement_model = ConSanScalarPlacementModel::SpillBacked,
-        .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
-        .command_processor_workgroup_identity =
-            ConSanCommandProcessorWorkgroupIdentity{
-                .grid_x_ttmp = 9u,
-                .grid_yz_ttmp = 7u,
-                .cluster_workgroup_id_ttmp = 6u,
-                .cluster_workgroup_id_low_bit_count = 12u,
-            },
-        .direct_call_form = ConSanDirectCallForm::SCallI64,
-        .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
-        .code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation,
-        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
-        .workgroup_shadow_clear =
-            {
-                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB128,
-                .maximum_lanes = 64,
-            },
-        .atomic_address_materialization =
-            {
-                .flat_and_global = true,
-                .buffer_resource = true,
-                .lds_byte_offset_token = true,
-                .scaled_vglobal = true,
-            },
-        .vector_memory =
-            {
-                .instruction_word_count = 3,
-                .immediate_offset_bits = 24,
-                .flat_vector_only_saddr = 0x7cu,
-                .global_vector_only_saddr = 0x7cu,
-                .supports_flat_scalar_base = true,
-                .vector_offset_extension = ConSanVectorOffsetExtension::Zero,
-                .scale_offset = ConSanScaleOffsetCapability::Supported,
-            },
-        .native_lds =
-            {
-                .mnemonic_dialect = ConSanNativeLdsMnemonicDialect::LoadStore,
-                .single_range_atomic_offset_bits = 16,
-            },
-        .moi_access =
-            {
-                .dynamic_stack_uses_scalar_reservoir = true,
-                .lazy_workgroup_shadow = true,
-            },
-        .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
-        .moi_placement =
-            {
-                .scratch_vgpr_alignment = 2,
-                .branch_only_spill_embeds_setup_state = true,
-                .automatic_dispatch_sgpr_requires_owner_admission = true,
-            },
-        .moi_dispatch_identity_placement =
-            ConSanMoiDispatchIdentityPlacement::ScalarThenPersistentVector,
-        .moi_access_reports_need_explicit_dispatch_identity = false,
-        .vgpr_allocation_granularity_wave64 = 8,
-        .sgpr_allocation_granularity = 8,
-        .accumulator_offset_granularity = 0,
-        .ordinary_sgpr_limit = 106,
-        .reserved_ordinary_sgpr_base = 102,
-        .reserved_ordinary_sgpr_count = 4,
-        .user_sgpr_initialization_limit = 32,
-        .address_free_private_limit_bytes = 0x800000u,
-        .private_allocation_granularity_bytes = 1,
-        .max_group_segment_bytes = static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u,
-        .direct_branch_min_displacement_bytes = -131068,
-        .direct_branch_max_displacement_bytes = 131072,
-        .supports_kernarg_preload_overflow_recovery = false,
-        .has_cluster_facilities = true,
-        .has_selectable_vgpr_bank = true,
-        .requires_even_vgpr_tuples = true,
-        .flat_compare_swap_data_pair_alignment = 1,
-        .requires_split_two_address_lds_relocation = true,
-        .semantic_form_mask = kExpectedCdna5SemanticFormMask,
-        .requires_sc_runtime_flat_group_gate = true,
-        .requires_raw_memory_order_qualifier = true,
-    },
-}};
+        {
+            .target = ROCJITSU_CODE_TARGET_GFX942,
+            .arch = ROCJITSU_CODE_ARCH_CDNA3,
+            .accumulator_model = AccumulatorModel::DescriptorPartitioned,
+            .scalar_placement_model = ScalarPlacementModel::DescriptorPartitioned,
+            .dispatch_identity = DispatchIdentitySource::PreloadedSgprPair,
+            .command_processor_workgroup_identity = std::nullopt,
+            .direct_call_form = DirectCallForm::SCallB64,
+            .device_cache_refresh = DeviceCacheRefreshForm::Cdna3BufferInvSc1,
+            .code_transport = CodeTransportModel::DirectCodeObject,
+            .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
+            .atomic_address_materialization = {.flat_and_global = true},
+            .vector_memory =
+                {
+                    .instruction_word_count = 2,
+                    .immediate_offset_bits = 13,
+                    .flat_vector_only_saddr = 0,
+                    .global_vector_only_saddr = 0x7fu,
+                    .supports_flat_scalar_base = false,
+                    .vector_offset_extension = VectorOffsetExtension::Sign,
+                    .scale_offset = ScaleOffsetCapability::Absent,
+                },
+            .native_lds =
+                {
+                    .mnemonic_dialect = NativeLdsMnemonicDialect::ReadWrite,
+                    .single_range_atomic_offset_bits = 8,
+                },
+            .access =
+                {
+                    .native_lds_spill_recovery = true,
+                    .clobbered_address_spill_reload = true,
+                },
+            .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
+            .placement =
+                {
+                    .scratch_vgpr_alignment = 2,
+                    .branch_only_spill_embeds_setup_state = true,
+                    .automatic_dispatch_sgpr_requires_owner_admission = true,
+                    .full_workgroup_payload_consumption = WorkgroupPayloadConsumption::EntryCapture,
+                },
+            .access_reports_need_explicit_dispatch_identity = true,
+            .vgpr_allocation_granularity_wave64 = 8,
+            .sgpr_allocation_granularity = 8,
+            .accumulator_offset_granularity = 4,
+            .ordinary_sgpr_limit = 102,
+            .reserved_ordinary_sgpr_base = 0,
+            .reserved_ordinary_sgpr_count = 0,
+            .user_sgpr_initialization_limit = 16,
+            .address_free_private_limit_bytes = 0x1000u,
+            .private_allocation_granularity_bytes = 16,
+            .max_group_segment_bytes = 64u * 1024u,
+            .direct_branch_min_displacement_bytes = -131068,
+            .direct_branch_max_displacement_bytes = 131072,
+            .supports_kernarg_preload_overflow_recovery = true,
+            .has_cluster_facilities = false,
+            .has_selectable_vgpr_bank = false,
+            .requires_even_vgpr_tuples = true,
+            .flat_compare_swap_data_pair_alignment = 2,
+            .requires_split_two_address_lds_relocation = false,
+            .semantic_form_mask = kCdnaSemanticFormMask,
+            .requires_supercollider_runtime_flat_group_gate = false,
+            .requires_raw_memory_order_qualifier = false,
+        },
+        {
+            .target = ROCJITSU_CODE_TARGET_GFX950,
+            .arch = ROCJITSU_CODE_ARCH_CDNA4,
+            .accumulator_model = AccumulatorModel::DescriptorPartitioned,
+            .scalar_placement_model = ScalarPlacementModel::DescriptorPartitioned,
+            .dispatch_identity = DispatchIdentitySource::PreloadedSgprPair,
+            .command_processor_workgroup_identity = std::nullopt,
+            .direct_call_form = DirectCallForm::SCallB64,
+            .device_cache_refresh = DeviceCacheRefreshForm::Cdna4BufferInvSc1,
+            .code_transport = CodeTransportModel::DirectCodeObject,
+            .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
+            .atomic_address_materialization = {.flat_and_global = true},
+            .vector_memory =
+                {
+                    .instruction_word_count = 2,
+                    .immediate_offset_bits = 13,
+                    .flat_vector_only_saddr = 0,
+                    .global_vector_only_saddr = 0x7fu,
+                    .supports_flat_scalar_base = false,
+                    .vector_offset_extension = VectorOffsetExtension::Sign,
+                    .scale_offset = ScaleOffsetCapability::Absent,
+                },
+            .native_lds =
+                {
+                    .mnemonic_dialect = NativeLdsMnemonicDialect::ReadWrite,
+                    .single_range_atomic_offset_bits = 8,
+                },
+            .access =
+                {
+                    .native_lds_spill_recovery = true,
+                    .clobbered_address_spill_reload = true,
+                },
+            .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
+            .placement =
+                {
+                    .scratch_vgpr_alignment = 2,
+                    .branch_only_spill_embeds_setup_state = true,
+                    .automatic_dispatch_sgpr_requires_owner_admission = true,
+                    .full_workgroup_payload_consumption = WorkgroupPayloadConsumption::EntryCapture,
+                },
+            .access_reports_need_explicit_dispatch_identity = true,
+            .vgpr_allocation_granularity_wave64 = 8,
+            .sgpr_allocation_granularity = 8,
+            .accumulator_offset_granularity = 4,
+            .ordinary_sgpr_limit = 102,
+            .reserved_ordinary_sgpr_base = 0,
+            .reserved_ordinary_sgpr_count = 0,
+            .user_sgpr_initialization_limit = 16,
+            .address_free_private_limit_bytes = 0x1000u,
+            .private_allocation_granularity_bytes = 16,
+            .max_group_segment_bytes = 64u * 1024u,
+            .direct_branch_min_displacement_bytes = -131068,
+            .direct_branch_max_displacement_bytes = 131072,
+            .supports_kernarg_preload_overflow_recovery = true,
+            .has_cluster_facilities = false,
+            .has_selectable_vgpr_bank = false,
+            .requires_even_vgpr_tuples = true,
+            .flat_compare_swap_data_pair_alignment = 2,
+            .requires_split_two_address_lds_relocation = false,
+            .semantic_form_mask = kCdnaSemanticFormMask,
+            .requires_supercollider_runtime_flat_group_gate = false,
+            .requires_raw_memory_order_qualifier = false,
+        },
+        {
+            .target = ROCJITSU_CODE_TARGET_GFX1100,
+            .arch = ROCJITSU_CODE_ARCH_RDNA3,
+            .accumulator_model = AccumulatorModel::None,
+            .scalar_placement_model = ScalarPlacementModel::LivenessOnly,
+            .dispatch_identity = DispatchIdentitySource::CodeObjectLiteral,
+            .command_processor_workgroup_identity = std::nullopt,
+            .direct_call_form = DirectCallForm::SCallB64,
+            .device_cache_refresh = DeviceCacheRefreshForm::None,
+            .code_transport = CodeTransportModel::DirectCodeObject,
+            .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+            .atomic_address_materialization = {.flat_and_global = true},
+            .vector_memory =
+                {
+                    .instruction_word_count = 2,
+                    .immediate_offset_bits = 13,
+                    .flat_vector_only_saddr = 0x7cu,
+                    .global_vector_only_saddr = 0x7cu,
+                    .supports_flat_scalar_base = false,
+                    .vector_offset_extension = VectorOffsetExtension::Zero,
+                    .scale_offset = ScaleOffsetCapability::Absent,
+                },
+            .native_lds =
+                {
+                    .mnemonic_dialect = NativeLdsMnemonicDialect::LoadStore,
+                    .single_range_atomic_offset_bits = 16,
+                },
+            .access = {.native_lds_spill_recovery = true},
+            .synchronization = {},
+            .placement =
+                {
+                    .scratch_vgpr_alignment = 1,
+                    .prefer_literal_dispatch_identity = true,
+                },
+            .access_reports_need_explicit_dispatch_identity = true,
+            .vgpr_allocation_granularity_wave64 = 4,
+            .sgpr_allocation_granularity = 8,
+            .accumulator_offset_granularity = 0,
+            .ordinary_sgpr_limit = 106,
+            .reserved_ordinary_sgpr_base = 0,
+            .reserved_ordinary_sgpr_count = 0,
+            .user_sgpr_initialization_limit = 16,
+            .address_free_private_limit_bytes = 0x1000u,
+            .private_allocation_granularity_bytes = 16,
+            .max_group_segment_bytes = 64u * 1024u,
+            .direct_branch_min_displacement_bytes = -131068,
+            .direct_branch_max_displacement_bytes = 131072,
+            .supports_kernarg_preload_overflow_recovery = true,
+            .has_cluster_facilities = false,
+            .has_selectable_vgpr_bank = false,
+            .requires_even_vgpr_tuples = false,
+            .flat_compare_swap_data_pair_alignment = 1,
+            .requires_split_two_address_lds_relocation = false,
+            .semantic_form_mask = kCommonSemanticFormMask,
+            .requires_supercollider_runtime_flat_group_gate = false,
+            .requires_raw_memory_order_qualifier = true,
+        },
+        {
+            .target = ROCJITSU_CODE_TARGET_GFX1201,
+            .arch = ROCJITSU_CODE_ARCH_RDNA4,
+            .accumulator_model = AccumulatorModel::None,
+            .scalar_placement_model = ScalarPlacementModel::SpillBacked,
+            .dispatch_identity = DispatchIdentitySource::CodeObjectLiteral,
+            .command_processor_workgroup_identity =
+                CommandProcessorWorkgroupIdentity{
+                    .grid_x_ttmp = 9u,
+                    .grid_yz_ttmp = 7u,
+                    .cluster_workgroup_id_ttmp = std::nullopt,
+                },
+            .direct_call_form = DirectCallForm::SCallB64,
+            .device_cache_refresh = DeviceCacheRefreshForm::None,
+            .code_transport = CodeTransportModel::DirectCodeObject,
+            .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+            .atomic_address_materialization =
+                {
+                    .flat_and_global = true,
+                    .buffer_resource = true,
+                },
+            .vector_memory =
+                {
+                    .instruction_word_count = 3,
+                    .immediate_offset_bits = 24,
+                    .flat_vector_only_saddr = 0x7cu,
+                    .global_vector_only_saddr = 0x7cu,
+                    .supports_flat_scalar_base = true,
+                    .vector_offset_extension = VectorOffsetExtension::Zero,
+                    .scale_offset = ScaleOffsetCapability::Disabled,
+                },
+            .native_lds =
+                {
+                    .mnemonic_dialect = NativeLdsMnemonicDialect::LoadStore,
+                    .single_range_atomic_offset_bits = 16,
+                },
+            .access =
+                {
+                    .dynamic_stack_uses_scalar_reservoir = true,
+                    .native_lds_spill_recovery = true,
+                },
+            .synchronization = {},
+            .placement =
+                {
+                    .scratch_vgpr_alignment = 1,
+                },
+            .access_reports_need_explicit_dispatch_identity = true,
+            .vgpr_allocation_granularity_wave64 = 4,
+            .sgpr_allocation_granularity = 8,
+            .accumulator_offset_granularity = 0,
+            .ordinary_sgpr_limit = 106,
+            .reserved_ordinary_sgpr_base = 0,
+            .reserved_ordinary_sgpr_count = 0,
+            .user_sgpr_initialization_limit = 16,
+            .address_free_private_limit_bytes = 0x800000u,
+            .private_allocation_granularity_bytes = 1,
+            .max_group_segment_bytes = 64u * 1024u,
+            .direct_branch_min_displacement_bytes = -131068,
+            .direct_branch_max_displacement_bytes = 131072,
+            .supports_kernarg_preload_overflow_recovery = false,
+            .has_cluster_facilities = false,
+            .has_selectable_vgpr_bank = false,
+            .requires_even_vgpr_tuples = false,
+            .flat_compare_swap_data_pair_alignment = 1,
+            .requires_split_two_address_lds_relocation = false,
+            .semantic_form_mask = kCommonSemanticFormMask,
+            .requires_supercollider_runtime_flat_group_gate = false,
+            .requires_raw_memory_order_qualifier = true,
+        },
+        {
+            .target = ROCJITSU_CODE_TARGET_GFX1250,
+            .arch = ROCJITSU_CODE_ARCH_CDNA5,
+            .accumulator_model = AccumulatorModel::SelectableVgprBank,
+            .scalar_placement_model = ScalarPlacementModel::SpillBacked,
+            .dispatch_identity = DispatchIdentitySource::CodeObjectLiteral,
+            .command_processor_workgroup_identity =
+                CommandProcessorWorkgroupIdentity{
+                    .grid_x_ttmp = 9u,
+                    .grid_yz_ttmp = 7u,
+                    .cluster_workgroup_id_ttmp = 6u,
+                    .cluster_workgroup_id_low_bit_count = 12u,
+                },
+            .direct_call_form = DirectCallForm::SCallI64,
+            .device_cache_refresh = DeviceCacheRefreshForm::None,
+            .code_transport = CodeTransportModel::PerKernelOwnerTranslation,
+            .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+            .atomic_address_materialization =
+                {
+                    .flat_and_global = true,
+                    .buffer_resource = true,
+                    .lds_byte_offset_token = true,
+                    .scaled_vglobal = true,
+                },
+            .vector_memory =
+                {
+                    .instruction_word_count = 3,
+                    .immediate_offset_bits = 24,
+                    .flat_vector_only_saddr = 0x7cu,
+                    .global_vector_only_saddr = 0x7cu,
+                    .supports_flat_scalar_base = true,
+                    .vector_offset_extension = VectorOffsetExtension::Zero,
+                    .scale_offset = ScaleOffsetCapability::Supported,
+                },
+            .native_lds =
+                {
+                    .mnemonic_dialect = NativeLdsMnemonicDialect::LoadStore,
+                    .single_range_atomic_offset_bits = 16,
+                },
+            .access =
+                {
+                    .dynamic_stack_uses_scalar_reservoir = true,
+                },
+            .synchronization = {.workgroup_flat_acquire_wait_fallback = true},
+            .placement =
+                {
+                    .scratch_vgpr_alignment = 2,
+                    .branch_only_spill_embeds_setup_state = true,
+                    .automatic_dispatch_sgpr_requires_owner_admission = true,
+                },
+            .access_reports_need_explicit_dispatch_identity = false,
+            .vgpr_allocation_granularity_wave64 = 8,
+            .sgpr_allocation_granularity = 8,
+            .accumulator_offset_granularity = 0,
+            .ordinary_sgpr_limit = 106,
+            .reserved_ordinary_sgpr_base = 102,
+            .reserved_ordinary_sgpr_count = 4,
+            .user_sgpr_initialization_limit = 32,
+            .address_free_private_limit_bytes = 0x800000u,
+            .private_allocation_granularity_bytes = 1,
+            .max_group_segment_bytes = static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u,
+            .direct_branch_min_displacement_bytes = -131068,
+            .direct_branch_max_displacement_bytes = 131072,
+            .supports_kernarg_preload_overflow_recovery = false,
+            .has_cluster_facilities = true,
+            .has_selectable_vgpr_bank = true,
+            .requires_even_vgpr_tuples = true,
+            .flat_compare_swap_data_pair_alignment = 1,
+            .requires_split_two_address_lds_relocation = true,
+            .semantic_form_mask = kExpectedCdna5SemanticFormMask,
+            .requires_supercollider_runtime_flat_group_gate = true,
+            .requires_raw_memory_order_qualifier = true,
+        },
+    }};
 
-void expect_profile_matches(const ConSanTargetProfile &actual,
-                            const ExpectedTargetProfile &expected) {
+void expect_profile_matches(const TargetProfile &actual, const ExpectedTargetProfile &expected) {
   EXPECT_EQ(actual.target, expected.target);
   EXPECT_EQ(actual.arch, expected.arch);
   EXPECT_EQ(actual.accumulator_model, expected.accumulator_model);
@@ -448,16 +410,14 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.device_cache_refresh, expected.device_cache_refresh);
   EXPECT_EQ(actual.code_transport, expected.code_transport);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
-  EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
   EXPECT_EQ(actual.atomic_address_materialization, expected.atomic_address_materialization);
   EXPECT_EQ(actual.vector_memory, expected.vector_memory);
   EXPECT_EQ(actual.native_lds, expected.native_lds);
-  EXPECT_EQ(actual.moi_access, expected.moi_access);
+  EXPECT_EQ(actual.access, expected.access);
   EXPECT_EQ(actual.synchronization, expected.synchronization);
-  EXPECT_EQ(actual.moi_placement, expected.moi_placement);
-  EXPECT_EQ(actual.moi_dispatch_identity_placement, expected.moi_dispatch_identity_placement);
-  EXPECT_EQ(actual.moi_access_reports_need_explicit_dispatch_identity,
-            expected.moi_access_reports_need_explicit_dispatch_identity);
+  EXPECT_EQ(actual.placement, expected.placement);
+  EXPECT_EQ(actual.access_reports_need_explicit_dispatch_identity,
+            expected.access_reports_need_explicit_dispatch_identity);
   EXPECT_EQ(actual.vgpr_allocation_granularity_wave64, expected.vgpr_allocation_granularity_wave64);
   EXPECT_EQ(actual.sgpr_allocation_granularity, expected.sgpr_allocation_granularity);
   EXPECT_EQ(actual.accumulator_offset_granularity, expected.accumulator_offset_granularity);
@@ -479,30 +439,30 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.requires_split_two_address_lds_relocation,
             expected.requires_split_two_address_lds_relocation);
   EXPECT_EQ(actual.semantic_form_mask, expected.semantic_form_mask);
-  EXPECT_EQ(actual.requires_sc_runtime_flat_group_gate,
-            expected.requires_sc_runtime_flat_group_gate);
+  EXPECT_EQ(actual.requires_supercollider_runtime_flat_group_gate,
+            expected.requires_supercollider_runtime_flat_group_gate);
   EXPECT_EQ(actual.requires_raw_memory_order_qualifier,
             expected.requires_raw_memory_order_qualifier);
 }
 
 TEST(ConSanCapabilityContract, TargetProfileRowsDeclareEveryArchitecturalFact) {
-  ASSERT_EQ(kConSanTargetProfiles.size(), kExpectedTargetProfiles.size());
-  EXPECT_TRUE(consan_target_profiles_are_valid());
+  ASSERT_EQ(kTargetProfiles.size(), kExpectedTargetProfiles.size());
+  EXPECT_TRUE(target_profiles_are_valid());
   for (size_t index = 0; index < kExpectedTargetProfiles.size(); ++index) {
     SCOPED_TRACE(rj_code_target_name(kExpectedTargetProfiles[index].target));
-    expect_profile_matches(kConSanTargetProfiles[index], kExpectedTargetProfiles[index]);
+    expect_profile_matches(kTargetProfiles[index], kExpectedTargetProfiles[index]);
   }
 }
 
 TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvariant) {
-  constexpr std::array<ConSanTargetProfile, 0> empty_profiles = {};
-  EXPECT_FALSE(consan_target_profiles_are_valid(empty_profiles));
+  constexpr std::array<TargetProfile, 0> empty_profiles = {};
+  EXPECT_FALSE(target_profiles_are_valid(empty_profiles));
 
   const auto expect_invalid = [](std::string_view reason, auto mutate) {
     SCOPED_TRACE(reason);
-    auto profiles = kConSanTargetProfiles;
+    auto profiles = kTargetProfiles;
     mutate(profiles);
-    EXPECT_FALSE(consan_target_profiles_are_valid(profiles));
+    EXPECT_FALSE(target_profiles_are_valid(profiles));
   };
 
   expect_invalid("invalid target",
@@ -521,19 +481,14 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].address_free_private_limit_bytes = 0u; });
   expect_invalid("missing private granularity",
                  [](auto &profiles) { profiles[0].private_allocation_granularity_bytes = 0u; });
-  expect_invalid("unknown dispatch placement strategy", [](auto &profiles) {
-    profiles[2].moi_dispatch_identity_placement =
-        static_cast<ConSanMoiDispatchIdentityPlacement>(255u);
+  expect_invalid("unknown dispatch identity source", [](auto &profiles) {
+    profiles[2].dispatch_identity = static_cast<DispatchIdentitySource>(255u);
   });
-  expect_invalid("unsupported dispatch placement strategy", [](auto &profiles) {
-    profiles[2].moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::Unsupported;
-  });
-  expect_invalid("preloaded scalar strategy on a literal target", [](auto &profiles) {
-    profiles[2].moi_dispatch_identity_placement =
-        ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
+  expect_invalid("literal preference without literal support", [](auto &profiles) {
+    profiles[0].placement.prefer_literal_dispatch_identity = true;
   });
   expect_invalid("implicit access identity without literal support", [](auto &profiles) {
-    profiles[0].moi_access_reports_need_explicit_dispatch_identity = false;
+    profiles[0].access_reports_need_explicit_dispatch_identity = false;
   });
   expect_invalid("missing group segment limit",
                  [](auto &profiles) { profiles[0].max_group_segment_bytes = 0u; });
@@ -547,32 +502,31 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("vector-only scalar selector outside encoding",
                  [](auto &profiles) { profiles[0].vector_memory.global_vector_only_saddr = 128u; });
   expect_invalid("scale-offset capability on a two-word encoding", [](auto &profiles) {
-    profiles[0].vector_memory.scale_offset = ConSanScaleOffsetCapability::Supported;
+    profiles[0].vector_memory.scale_offset = ScaleOffsetCapability::Supported;
   });
   expect_invalid("unsupported native LDS atomic offset width", [](auto &profiles) {
     profiles[0].native_lds.single_range_atomic_offset_bits = 12u;
   });
   expect_invalid("unknown native LDS mnemonic dialect", [](auto &profiles) {
-    profiles[0].native_lds.mnemonic_dialect =
-        static_cast<ConSanNativeLdsMnemonicDialect>(255u);
+    profiles[0].native_lds.mnemonic_dialect = static_cast<NativeLdsMnemonicDialect>(255u);
   });
   expect_invalid("clobbered-address reload without native spill recovery",
-                 [](auto &profiles) { profiles[0].moi_access.native_lds_spill_recovery = false; });
+                 [](auto &profiles) { profiles[0].access.native_lds_spill_recovery = false; });
   expect_invalid("unsupported scalar placement model", [](auto &profiles) {
-    profiles[0].scalar_placement_model = ConSanScalarPlacementModel::Unsupported;
+    profiles[0].scalar_placement_model = ScalarPlacementModel::Unsupported;
   });
   expect_invalid("unknown scalar placement model", [](auto &profiles) {
-    profiles[0].scalar_placement_model = static_cast<ConSanScalarPlacementModel>(255u);
+    profiles[0].scalar_placement_model = static_cast<ScalarPlacementModel>(255u);
   });
   expect_invalid("unsupported scratch VGPR alignment",
-                 [](auto &profiles) { profiles[0].moi_placement.scratch_vgpr_alignment = 4u; });
+                 [](auto &profiles) { profiles[0].placement.scratch_vgpr_alignment = 4u; });
   expect_invalid("even tuple target with unaligned scratch VGPR pairs", [](auto &profiles) {
     profiles[0].requires_even_vgpr_tuples = true;
-    profiles[0].moi_placement.scratch_vgpr_alignment = 1u;
+    profiles[0].placement.scratch_vgpr_alignment = 1u;
   });
   expect_invalid("unknown workgroup payload consumption", [](auto &profiles) {
-    profiles[0].moi_placement.full_workgroup_payload_consumption =
-        static_cast<ConSanMoiWorkgroupPayloadConsumption>(255u);
+    profiles[0].placement.full_workgroup_payload_consumption =
+        static_cast<WorkgroupPayloadConsumption>(255u);
   });
   expect_invalid("unsupported FLAT compare-swap data-pair alignment",
                  [](auto &profiles) { profiles[0].flat_compare_swap_data_pair_alignment = 4u; });
@@ -588,20 +542,15 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
     profiles[0].resident_wave_identity.bit_offset = 31u;
     profiles[0].resident_wave_identity.bit_width = 2u;
   });
-  expect_invalid("unknown workgroup-shadow clear encoding", [](auto &profiles) {
-    profiles[0].workgroup_shadow_clear.encoding =
-        static_cast<ConSanWorkgroupShadowClearEncoding>(255u);
-  });
-  expect_invalid("unsupported workgroup-shadow clear lane limit",
-                 [](auto &profiles) { profiles[0].workgroup_shadow_clear.maximum_lanes = 48u; });
   expect_invalid("unknown post-instrumentation transport model", [](auto &profiles) {
-    profiles[0].code_transport = static_cast<ConSanCodeTransportModel>(255u);
+    profiles[0].code_transport = static_cast<CodeTransportModel>(255u);
   });
-  expect_invalid("SC runtime group gate without selectable VGPR banks",
-                 [](auto &profiles) { profiles[0].requires_sc_runtime_flat_group_gate = true; });
+  expect_invalid("SC runtime group gate without selectable VGPR banks", [](auto &profiles) {
+    profiles[0].requires_supercollider_runtime_flat_group_gate = true;
+  });
   expect_invalid("semantic form bit outside the enum", [](auto &profiles) {
     profiles[0].semantic_form_mask = static_cast<uint16_t>(
-        profiles[0].semantic_form_mask | (1u << static_cast<uint8_t>(ConSanCapabilityForm::Count)));
+        profiles[0].semantic_form_mask | (1u << static_cast<uint8_t>(CapabilityForm::Count)));
   });
   expect_invalid("empty semantic form mask",
                  [](auto &profiles) { profiles[0].semantic_form_mask = 0u; });
@@ -610,9 +559,8 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("selectable-bank accumulator model without selectable bank",
                  [](auto &profiles) { profiles[4].has_selectable_vgpr_bank = false; });
   expect_invalid("cluster facility without cluster semantic form", [](auto &profiles) {
-    profiles[4].semantic_form_mask =
-        static_cast<uint16_t>(profiles[4].semantic_form_mask &
-                              ~consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier));
+    profiles[4].semantic_form_mask = static_cast<uint16_t>(
+        profiles[4].semantic_form_mask & ~capability_form_bit(CapabilityForm::ClusterBarrier));
   });
   expect_invalid("workgroup grid-x TTMP outside the scalar temporary range", [](auto &profiles) {
     profiles[3].command_processor_workgroup_identity->grid_x_ttmp = 16u;
@@ -661,17 +609,17 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
 TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsupportedValues) {
   for (size_t index = 0; index < kExpectedTargetProfiles.size(); ++index) {
     const ExpectedTargetProfile &expected = kExpectedTargetProfiles[index];
-    const ConSanTargetProfile &profile = kConSanTargetProfiles[index];
+    const TargetProfile &profile = kTargetProfiles[index];
     SCOPED_TRACE(rj_code_target_name(expected.target));
-    EXPECT_EQ(consan_target_profile(expected.target), &profile);
-    EXPECT_EQ(consan_target_profile(expected.arch), &profile);
-    EXPECT_EQ(consan_arch_for_target(expected.target), expected.arch);
-    EXPECT_TRUE(consan_is_capability_arch(expected.arch));
-    EXPECT_EQ(consan_arch_supports_kernarg_preload_overflow_recovery(expected.arch),
+    EXPECT_EQ(target_profile(expected.target), &profile);
+    EXPECT_EQ(target_profile(expected.arch), &profile);
+    EXPECT_EQ(arch_for_target(expected.target), expected.arch);
+    EXPECT_TRUE(is_capability_arch(expected.arch));
+    EXPECT_EQ(arch_supports_kernarg_preload_overflow_recovery(expected.arch),
               expected.supports_kernarg_preload_overflow_recovery);
-    for (size_t other = index + 1; other < kConSanTargetProfiles.size(); ++other) {
-      EXPECT_NE(profile.target, kConSanTargetProfiles[other].target);
-      EXPECT_NE(profile.arch, kConSanTargetProfiles[other].arch);
+    for (size_t other = index + 1; other < kTargetProfiles.size(); ++other) {
+      EXPECT_NE(profile.target, kTargetProfiles[other].target);
+      EXPECT_NE(profile.arch, kTargetProfiles[other].arch);
     }
   }
 
@@ -681,8 +629,8 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
       ROCJITSU_CODE_TARGET_GFX1200,
   };
   for (rj_code_target_id_t target : unsupported_targets) {
-    EXPECT_EQ(consan_target_profile(target), nullptr);
-    EXPECT_EQ(consan_arch_for_target(target), ROCJITSU_CODE_ARCH_INVALID);
+    EXPECT_EQ(target_profile(target), nullptr);
+    EXPECT_EQ(arch_for_target(target), ROCJITSU_CODE_ARCH_INVALID);
   }
   constexpr std::array unsupported_arches = {
       ROCJITSU_CODE_ARCH_INVALID,
@@ -690,16 +638,16 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
       ROCJITSU_CODE_ARCH_RDNA3_5,
   };
   for (rj_code_arch_t arch : unsupported_arches) {
-    EXPECT_EQ(consan_target_profile(arch), nullptr);
-    EXPECT_FALSE(consan_is_capability_arch(arch));
-    EXPECT_FALSE(consan_arch_supports_kernarg_preload_overflow_recovery(arch));
+    EXPECT_EQ(target_profile(arch), nullptr);
+    EXPECT_FALSE(is_capability_arch(arch));
+    EXPECT_FALSE(arch_supports_kernarg_preload_overflow_recovery(arch));
   }
 }
 
 TEST(ConSanCapabilityContract, TargetProfileOwnsWave64AllocationGranularity) {
   for (size_t index = 0; index < kExpectedTargetProfiles.size(); ++index) {
     const ExpectedTargetProfile &expected = kExpectedTargetProfiles[index];
-    const ConSanTargetProfile &profile = kConSanTargetProfiles[index];
+    const TargetProfile &profile = kTargetProfiles[index];
     SCOPED_TRACE(rj_code_target_name(expected.target));
 
     EXPECT_EQ(profile.vgpr_allocation_granularity_wave64,
@@ -708,98 +656,92 @@ TEST(ConSanCapabilityContract, TargetProfileOwnsWave64AllocationGranularity) {
 }
 
 TEST(ConSanCapabilityContract, ReservedSgprOverlapUsesHalfOpenRanges) {
-  using namespace consan_moi_impl;
-  const ConSanTargetProfile *gfx1250 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA5);
+  const TargetProfile *gfx1250 = target_profile(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(gfx1250, nullptr);
   ASSERT_EQ(gfx1250->reserved_ordinary_sgpr_base, 102u);
   ASSERT_EQ(gfx1250->reserved_ordinary_sgpr_count, 4u);
 
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 0u, 0u));
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 0u, 102u));
-  EXPECT_TRUE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 0u, 103u));
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 101u, 1u));
-  EXPECT_TRUE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 101u, 2u));
-  EXPECT_TRUE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 102u, 1u));
-  EXPECT_TRUE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 105u, 1u));
-  EXPECT_TRUE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 105u, 2u));
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx1250, 106u, 1u));
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(
-      *gfx1250, std::numeric_limits<uint16_t>::max(), std::numeric_limits<uint16_t>::max()));
-  EXPECT_TRUE(
-      persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
-  EXPECT_TRUE(
-      persistent_sgpr_range_overlaps_reserved_ordinary_range(104u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
-  EXPECT_FALSE(
-      persistent_sgpr_range_overlaps_reserved_ordinary_range(106u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
-  EXPECT_EQ(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5), 106u);
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx1250, 0u, 0u));
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx1250, 0u, 102u));
+  EXPECT_TRUE(profile_reserved_sgpr_range_overlaps(*gfx1250, 0u, 103u));
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx1250, 101u, 1u));
+  EXPECT_TRUE(profile_reserved_sgpr_range_overlaps(*gfx1250, 101u, 2u));
+  EXPECT_TRUE(profile_reserved_sgpr_range_overlaps(*gfx1250, 102u, 1u));
+  EXPECT_TRUE(profile_reserved_sgpr_range_overlaps(*gfx1250, 105u, 1u));
+  EXPECT_TRUE(profile_reserved_sgpr_range_overlaps(*gfx1250, 105u, 2u));
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx1250, 106u, 1u));
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx1250, std::numeric_limits<uint16_t>::max(),
+                                                    std::numeric_limits<uint16_t>::max()));
+  EXPECT_TRUE(detail::persistent_sgpr_range_overlaps_reserved_ordinary_range(
+      102u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_TRUE(detail::persistent_sgpr_range_overlaps_reserved_ordinary_range(
+      104u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(detail::persistent_sgpr_range_overlaps_reserved_ordinary_range(
+      106u, 2u, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_EQ(detail::ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5), 106u);
 
-  const ConSanTargetProfile *gfx950 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA4);
+  const TargetProfile *gfx950 = target_profile(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(gfx950, nullptr);
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx950, 0u, 106u));
-  EXPECT_FALSE(consan_profile_reserved_sgpr_range_overlaps(*gfx950, 102u, 4u));
-  EXPECT_FALSE(
-      persistent_sgpr_range_overlaps_reserved_ordinary_range(102u, 2u, ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_EQ(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4), 102u);
-  EXPECT_EQ(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA3), 102u);
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx950, 0u, 106u));
+  EXPECT_FALSE(profile_reserved_sgpr_range_overlaps(*gfx950, 102u, 4u));
+  EXPECT_FALSE(detail::persistent_sgpr_range_overlaps_reserved_ordinary_range(
+      102u, 2u, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(detail::ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA4), 102u);
+  EXPECT_EQ(detail::ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA3), 102u);
 }
 
 TEST(ConSanCapabilityContract, PrivateSizeNormalizationCoversGranularityLimitAndOverflow) {
-  const ConSanTargetProfile *gfx950 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA4);
+  const TargetProfile *gfx950 = target_profile(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(gfx950, nullptr);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 0u), 0u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 1u), 16u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 15u), 16u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 16u), 16u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 17u), 32u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 0xfffu), 0x1000u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx950, 0x1000u), 0x1000u);
-  EXPECT_FALSE(consan_profile_normalize_private_size(*gfx950, 0x1001u));
-  EXPECT_FALSE(
-      consan_profile_normalize_private_size(*gfx950, std::numeric_limits<uint32_t>::max()));
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 0u), 0u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 1u), 16u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 15u), 16u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 16u), 16u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 17u), 32u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 0xfffu), 0x1000u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx950, 0x1000u), 0x1000u);
+  EXPECT_FALSE(profile_normalize_private_size(*gfx950, 0x1001u));
+  EXPECT_FALSE(profile_normalize_private_size(*gfx950, std::numeric_limits<uint32_t>::max()));
 
-  const ConSanTargetProfile *gfx1201 = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  const TargetProfile *gfx1201 = target_profile(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(gfx1201, nullptr);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx1201, 0u), 0u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx1201, 1u), 1u);
-  EXPECT_EQ(consan_profile_normalize_private_size(*gfx1201, 0x800000u), 0x800000u);
-  EXPECT_FALSE(consan_profile_normalize_private_size(*gfx1201, 0x800001u));
+  EXPECT_EQ(profile_normalize_private_size(*gfx1201, 0u), 0u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx1201, 1u), 1u);
+  EXPECT_EQ(profile_normalize_private_size(*gfx1201, 0x800000u), 0x800000u);
+  EXPECT_FALSE(profile_normalize_private_size(*gfx1201, 0x800001u));
 
   for (const ExpectedTargetProfile &expected : kExpectedTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(expected.target));
-    EXPECT_EQ(consan_address_free_private_limit(expected.arch),
-              expected.address_free_private_limit_bytes);
-    EXPECT_EQ(consan_normalize_address_free_private_size(expected.arch, 1u),
+    EXPECT_EQ(address_free_private_limit(expected.arch), expected.address_free_private_limit_bytes);
+    EXPECT_EQ(normalize_address_free_private_size(expected.arch, 1u),
               expected.private_allocation_granularity_bytes);
-    EXPECT_FALSE(consan_normalize_address_free_private_size(
+    EXPECT_FALSE(normalize_address_free_private_size(
         expected.arch, expected.address_free_private_limit_bytes + 1u));
   }
-  EXPECT_FALSE(consan_address_free_private_limit(ROCJITSU_CODE_ARCH_CDNA2));
-  EXPECT_FALSE(consan_normalize_address_free_private_size(ROCJITSU_CODE_ARCH_CDNA2, 1u));
+  EXPECT_FALSE(address_free_private_limit(ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(normalize_address_free_private_size(ROCJITSU_CODE_ARCH_CDNA2, 1u));
 }
 
 TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirTypedFacts) {
   for (const ExpectedTargetProfile &expected : kExpectedTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(expected.target));
-    EXPECT_EQ(consan_arch_is_cdna3_or_cdna4(expected.arch),
-              expected.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                  expected.arch == ROCJITSU_CODE_ARCH_CDNA4);
-    EXPECT_EQ(consan_arch_is_rdna3(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_RDNA3);
-    EXPECT_EQ(consan_arch_is_rdna4_or_cdna5(expected.arch),
-              expected.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                  expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
-    EXPECT_EQ(consan_arch_is_cdna5(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
-    EXPECT_EQ(consan_arch_has_cluster_facilities(expected.arch), expected.has_cluster_facilities);
-    EXPECT_EQ(consan_arch_has_selectable_vgpr_bank(expected.arch),
-              expected.has_selectable_vgpr_bank);
+    EXPECT_EQ(arch_is_cdna3_or_cdna4(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                                                         expected.arch == ROCJITSU_CODE_ARCH_CDNA4);
+    EXPECT_EQ(arch_is_rdna3(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_RDNA3);
+    EXPECT_EQ(arch_is_rdna4_or_cdna5(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                                                         expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(arch_is_cdna5(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(arch_has_cluster_facilities(expected.arch), expected.has_cluster_facilities);
+    EXPECT_EQ(arch_has_selectable_vgpr_bank(expected.arch), expected.has_selectable_vgpr_bank);
   }
 
   constexpr rj_code_arch_t unsupported = ROCJITSU_CODE_ARCH_CDNA2;
-  EXPECT_FALSE(consan_arch_is_cdna3_or_cdna4(unsupported));
-  EXPECT_FALSE(consan_arch_is_rdna3(unsupported));
-  EXPECT_FALSE(consan_arch_is_rdna4_or_cdna5(unsupported));
-  EXPECT_FALSE(consan_arch_is_cdna5(unsupported));
-  EXPECT_FALSE(consan_arch_has_cluster_facilities(unsupported));
-  EXPECT_FALSE(consan_arch_has_selectable_vgpr_bank(unsupported));
+  EXPECT_FALSE(arch_is_cdna3_or_cdna4(unsupported));
+  EXPECT_FALSE(arch_is_rdna3(unsupported));
+  EXPECT_FALSE(arch_is_rdna4_or_cdna5(unsupported));
+  EXPECT_FALSE(arch_is_cdna5(unsupported));
+  EXPECT_FALSE(arch_has_cluster_facilities(unsupported));
+  EXPECT_FALSE(arch_has_selectable_vgpr_bank(unsupported));
 }
 
 TEST(ConSanCapabilityContract, ProfileResourceAndCallFactsAgreeWithSharedBuilders) {
@@ -811,7 +753,7 @@ TEST(ConSanCapabilityContract, ProfileResourceAndCallFactsAgreeWithSharedBuilder
     EXPECT_EQ(normalize_address_free_scratch_private_size(expected.arch, 1u),
               expected.private_allocation_granularity_bytes);
     EXPECT_EQ(instrumentation::build_s_call_i64(0u, 0, expected.arch).has_value(),
-              expected.direct_call_form == ConSanDirectCallForm::SCallI64);
+              expected.direct_call_form == DirectCallForm::SCallI64);
 
     const int64_t minimum_target =
         static_cast<int64_t>(branch_pc) + expected.direct_branch_min_displacement_bytes;
@@ -826,140 +768,121 @@ TEST(ConSanCapabilityContract, ProfileResourceAndCallFactsAgreeWithSharedBuilder
 }
 
 TEST(ConSanCapabilityContract, EnumIterationTablesAreCompleteAndRejectMalformedTables) {
-  constexpr std::array expected_engines = {
-      ConSanCapabilityEngine::SuperCollider,
-      ConSanCapabilityEngine::RecordReplay,
-      ConSanCapabilityEngine::Sampled,
-      ConSanCapabilityEngine::InlineShadow,
+  constexpr std::array expected_modes = {
+      Mode::SuperCollider,
+      Mode::Default,
   };
   constexpr std::array expected_domains = {
-      ConSanCapabilityDomain::Access,
-      ConSanCapabilityDomain::Barrier,
-      ConSanCapabilityDomain::Atomic,
-      ConSanCapabilityDomain::Fence,
+      CapabilityDomain::Access,
+      CapabilityDomain::Barrier,
+      CapabilityDomain::Atomic,
+      CapabilityDomain::Fence,
   };
   constexpr std::array expected_forms = {
-      ConSanCapabilityForm::NativeLdsAccess,        ConSanCapabilityForm::GroupFlatAccess,
-      ConSanCapabilityForm::WorkgroupBarrier,       ConSanCapabilityForm::ClusterBarrier,
-      ConSanCapabilityForm::OrderedFlatAtomic,      ConSanCapabilityForm::OrderedVglobalAtomic,
-      ConSanCapabilityForm::OrderedLdsAtomic,       ConSanCapabilityForm::RelaxedLdsAtomicAccess,
-      ConSanCapabilityForm::AddressedOrdinaryFence,
+      CapabilityForm::NativeLdsAccess,        CapabilityForm::GroupFlatAccess,
+      CapabilityForm::WorkgroupBarrier,       CapabilityForm::ClusterBarrier,
+      CapabilityForm::OrderedFlatAtomic,      CapabilityForm::OrderedVglobalAtomic,
+      CapabilityForm::OrderedLdsAtomic,       CapabilityForm::RelaxedLdsAtomicAccess,
+      CapabilityForm::AddressedOrdinaryFence,
   };
   const auto expect_values_equal = []<typename Lhs, typename Rhs>(const Lhs &lhs, const Rhs &rhs) {
     ASSERT_EQ(lhs.size(), rhs.size());
     for (size_t i = 0; i < lhs.size(); ++i)
       EXPECT_EQ(lhs[i], rhs[i]);
   };
-  expect_values_equal(kConSanCapabilityEngines, expected_engines);
-  EXPECT_EQ(kConSanCapabilityDomains, expected_domains);
-  expect_values_equal(kConSanCapabilityForms, expected_forms);
-  EXPECT_TRUE(consan_capability_enum_is_complete(kConSanCapabilityEngines));
-  EXPECT_TRUE(consan_capability_enum_is_complete(kConSanCapabilityDomains));
-  EXPECT_TRUE(consan_capability_enum_is_complete(kConSanCapabilityForms));
+  expect_values_equal(kEnabledModes, expected_modes);
+  EXPECT_EQ(kCapabilityDomains, expected_domains);
+  expect_values_equal(kCapabilityForms, expected_forms);
+  EXPECT_TRUE(enabled_modes_are_complete(kEnabledModes));
+  EXPECT_TRUE(capability_enum_is_complete(kCapabilityDomains));
+  EXPECT_TRUE(capability_enum_is_complete(kCapabilityForms));
 
-  constexpr std::array duplicate_engines = {
-      ConSanCapabilityEngine::SuperCollider,
-      ConSanCapabilityEngine::RecordReplay,
-      ConSanCapabilityEngine::Sampled,
-      ConSanCapabilityEngine::Sampled,
+  constexpr std::array duplicate_modes = {
+      Mode::SuperCollider,
+      Mode::SuperCollider,
   };
-  constexpr std::array short_engines = {
-      ConSanCapabilityEngine::SuperCollider,
-      ConSanCapabilityEngine::RecordReplay,
-      ConSanCapabilityEngine::Sampled,
+  constexpr std::array short_modes = {Mode::SuperCollider};
+  constexpr std::array out_of_range_modes = {
+      Mode::SuperCollider,
+      static_cast<Mode>(255),
   };
-  constexpr std::array out_of_range_engines = {
-      ConSanCapabilityEngine::SuperCollider,
-      ConSanCapabilityEngine::RecordReplay,
-      ConSanCapabilityEngine::Sampled,
-      static_cast<ConSanCapabilityEngine>(255),
-  };
-  EXPECT_FALSE(consan_capability_enum_is_complete(duplicate_engines));
-  EXPECT_FALSE(consan_capability_enum_is_complete(short_engines));
-  EXPECT_FALSE(consan_capability_enum_is_complete(out_of_range_engines));
+  EXPECT_FALSE(enabled_modes_are_complete(duplicate_modes));
+  EXPECT_FALSE(enabled_modes_are_complete(short_modes));
+  EXPECT_FALSE(enabled_modes_are_complete(out_of_range_modes));
 }
 
 TEST(ConSanCapabilityContract, CapabilityFormBitsAreUniqueBoundedAndComposeDeclaredMasks) {
   uint16_t seen = 0u;
-  for (size_t index = 0; index < kConSanCapabilityForms.size(); ++index) {
-    const ConSanCapabilityForm form = kConSanCapabilityForms[index];
-    const uint16_t bit = consan_capability_form_bit(form);
+  for (size_t index = 0; index < kCapabilityForms.size(); ++index) {
+    const CapabilityForm form = kCapabilityForms[index];
+    const uint16_t bit = capability_form_bit(form);
     EXPECT_EQ(bit, static_cast<uint16_t>(1u << index));
     EXPECT_EQ(seen & bit, 0u);
     seen = static_cast<uint16_t>(seen | bit);
   }
-  EXPECT_EQ(seen,
-            static_cast<uint16_t>((1u << static_cast<uint8_t>(ConSanCapabilityForm::Count)) - 1u));
-  EXPECT_EQ(consan_capability_form_bit(ConSanCapabilityForm::Count), 0u);
-  EXPECT_EQ(consan_capability_form_bit(static_cast<ConSanCapabilityForm>(255)), 0u);
+  EXPECT_EQ(seen, static_cast<uint16_t>((1u << static_cast<uint8_t>(CapabilityForm::Count)) - 1u));
+  EXPECT_EQ(capability_form_bit(CapabilityForm::Count), 0u);
+  EXPECT_EQ(capability_form_bit(static_cast<CapabilityForm>(255)), 0u);
 
-  const uint16_t expected_common =
-      consan_capability_form_bit(ConSanCapabilityForm::NativeLdsAccess) |
-      consan_capability_form_bit(ConSanCapabilityForm::GroupFlatAccess) |
-      consan_capability_form_bit(ConSanCapabilityForm::WorkgroupBarrier) |
-      consan_capability_form_bit(ConSanCapabilityForm::OrderedFlatAtomic) |
-      consan_capability_form_bit(ConSanCapabilityForm::OrderedVglobalAtomic) |
-      consan_capability_form_bit(ConSanCapabilityForm::AddressedOrdinaryFence);
-  EXPECT_EQ(kConSanCommonSemanticFormMask, expected_common);
-  EXPECT_EQ(kConSanCdnaSemanticFormMask,
-            static_cast<uint16_t>(
-                expected_common |
-                consan_capability_form_bit(ConSanCapabilityForm::RelaxedLdsAtomicAccess)));
-  EXPECT_EQ(
-      kExpectedCdna5SemanticFormMask,
-      static_cast<uint16_t>(kConSanCdnaSemanticFormMask |
-                            consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier) |
-                            consan_capability_form_bit(ConSanCapabilityForm::OrderedLdsAtomic)));
+  const uint16_t expected_common = capability_form_bit(CapabilityForm::NativeLdsAccess) |
+                                   capability_form_bit(CapabilityForm::GroupFlatAccess) |
+                                   capability_form_bit(CapabilityForm::WorkgroupBarrier) |
+                                   capability_form_bit(CapabilityForm::OrderedFlatAtomic) |
+                                   capability_form_bit(CapabilityForm::OrderedVglobalAtomic) |
+                                   capability_form_bit(CapabilityForm::AddressedOrdinaryFence);
+  EXPECT_EQ(kCommonSemanticFormMask, expected_common);
+  EXPECT_EQ(kCdnaSemanticFormMask,
+            static_cast<uint16_t>(expected_common |
+                                  capability_form_bit(CapabilityForm::RelaxedLdsAtomicAccess)));
+  EXPECT_EQ(kExpectedCdna5SemanticFormMask,
+            static_cast<uint16_t>(kCdnaSemanticFormMask |
+                                  capability_form_bit(CapabilityForm::ClusterBarrier) |
+                                  capability_form_bit(CapabilityForm::OrderedLdsAtomic)));
 }
 
 TEST(ConSanCapabilityContract, CapabilityDomainsMapEveryFormAndRejectSentinels) {
   constexpr std::array expected_domains = {
-      ConSanCapabilityDomain::Access,  ConSanCapabilityDomain::Access,
-      ConSanCapabilityDomain::Barrier, ConSanCapabilityDomain::Barrier,
-      ConSanCapabilityDomain::Atomic,  ConSanCapabilityDomain::Atomic,
-      ConSanCapabilityDomain::Atomic,  ConSanCapabilityDomain::Atomic,
-      ConSanCapabilityDomain::Fence,
+      CapabilityDomain::Access,  CapabilityDomain::Access, CapabilityDomain::Barrier,
+      CapabilityDomain::Barrier, CapabilityDomain::Atomic, CapabilityDomain::Atomic,
+      CapabilityDomain::Atomic,  CapabilityDomain::Atomic, CapabilityDomain::Fence,
   };
-  static_assert(expected_domains.size() == kConSanCapabilityForms.size());
-  for (size_t index = 0; index < kConSanCapabilityForms.size(); ++index) {
+  static_assert(expected_domains.size() == kCapabilityForms.size());
+  for (size_t index = 0; index < kCapabilityForms.size(); ++index) {
     SCOPED_TRACE(index);
-    EXPECT_EQ(consan_capability_domain(kConSanCapabilityForms[index]), expected_domains[index]);
+    EXPECT_EQ(capability_domain(kCapabilityForms[index]), expected_domains[index]);
   }
-  EXPECT_EQ(consan_capability_domain(ConSanCapabilityForm::Count), ConSanCapabilityDomain::Count);
-  EXPECT_EQ(consan_capability_domain(static_cast<ConSanCapabilityForm>(255)),
-            ConSanCapabilityDomain::Count);
+  EXPECT_EQ(capability_domain(CapabilityForm::Count), CapabilityDomain::Count);
+  EXPECT_EQ(capability_domain(static_cast<CapabilityForm>(255)), CapabilityDomain::Count);
 }
 
 TEST(ConSanCapabilityContract, CapabilityNamesCoverEveryValueAndRejectSentinels) {
-  constexpr std::array<std::string_view, 4> engine_names = {
+  constexpr std::array<std::string_view, 2> mode_names = {
       "SuperCollider",
-      "Record/Replay",
-      "Sampled",
-      "Inline Shadow",
+      "ConSan",
   };
-  for (size_t index = 0; index < kConSanCapabilityEngines.size(); ++index) {
+  for (size_t index = 0; index < kEnabledModes.size(); ++index) {
     SCOPED_TRACE(index);
-    EXPECT_EQ(consan_capability_engine_name(kConSanCapabilityEngines[index]), engine_names[index]);
+    EXPECT_EQ(mode_label(kEnabledModes[index]), mode_names[index]);
   }
-  EXPECT_EQ(consan_capability_engine_name(ConSanCapabilityEngine::Count), "unknown");
-  EXPECT_EQ(consan_capability_engine_name(static_cast<ConSanCapabilityEngine>(255)), "unknown");
+  EXPECT_EQ(mode_label(Mode::None), "unknown");
+  EXPECT_EQ(mode_label(static_cast<Mode>(255)), "unknown");
 
   constexpr std::array<std::string_view, 9> form_names = {
       "native LDS",  "group FLAT",      "workgroup",
       "cluster",     "ordered FLAT",    "ordered VGLOBAL",
       "ordered LDS", "relaxed LDS RMW", "addressed ordinary",
   };
-  for (size_t index = 0; index < kConSanCapabilityForms.size(); ++index) {
+  for (size_t index = 0; index < kCapabilityForms.size(); ++index) {
     SCOPED_TRACE(index);
-    EXPECT_EQ(consan_capability_form_name(kConSanCapabilityForms[index]), form_names[index]);
+    EXPECT_EQ(capability_form_name(kCapabilityForms[index]), form_names[index]);
   }
-  EXPECT_EQ(consan_capability_form_name(ConSanCapabilityForm::Count), "unknown");
-  EXPECT_EQ(consan_capability_form_name(static_cast<ConSanCapabilityForm>(255)), "unknown");
+  EXPECT_EQ(capability_form_name(CapabilityForm::Count), "unknown");
+  EXPECT_EQ(capability_form_name(static_cast<CapabilityForm>(255)), "unknown");
 
   constexpr std::array dispositions = {
-      ConSanCapabilityDisposition::OutOfContract, ConSanCapabilityDisposition::NotApplicable,
-      ConSanCapabilityDisposition::Supported,     ConSanCapabilityDisposition::MutationOnly,
-      ConSanCapabilityDisposition::AccessOnly,    ConSanCapabilityDisposition::AssociatedOnly,
+      CapabilityDisposition::OutOfContract, CapabilityDisposition::NotApplicable,
+      CapabilityDisposition::Supported,     CapabilityDisposition::MutationOnly,
+      CapabilityDisposition::AccessOnly,    CapabilityDisposition::AssociatedOnly,
   };
   constexpr std::array<std::string_view, 6> disposition_names = {
       "out of contract", "not applicable", "supported",
@@ -967,76 +890,63 @@ TEST(ConSanCapabilityContract, CapabilityNamesCoverEveryValueAndRejectSentinels)
   };
   for (size_t index = 0; index < dispositions.size(); ++index) {
     SCOPED_TRACE(index);
-    EXPECT_EQ(consan_capability_disposition_name(dispositions[index]), disposition_names[index]);
+    EXPECT_EQ(capability_disposition_name(dispositions[index]), disposition_names[index]);
   }
-  EXPECT_EQ(consan_capability_disposition_name(static_cast<ConSanCapabilityDisposition>(255)),
-            "unknown");
+  EXPECT_EQ(capability_disposition_name(static_cast<CapabilityDisposition>(255)), "unknown");
 }
 
 TEST(ConSanCapabilityContract, CapabilityFormAvailabilityMatchesEveryTargetMask) {
   for (const ExpectedTargetProfile &expected : kExpectedTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(expected.target));
-    for (ConSanCapabilityForm form : kConSanCapabilityForms) {
-      const uint16_t bit = consan_capability_form_bit(form);
-      EXPECT_EQ(consan_arch_supports_capability_form(expected.arch, form),
+    for (CapabilityForm form : kCapabilityForms) {
+      const uint16_t bit = capability_form_bit(form);
+      EXPECT_EQ(arch_supports_capability_form(expected.arch, form),
                 (expected.semantic_form_mask & bit) != 0u);
     }
-    EXPECT_FALSE(consan_arch_supports_capability_form(expected.arch, ConSanCapabilityForm::Count));
-    EXPECT_FALSE(consan_arch_supports_capability_form(expected.arch,
-                                                      static_cast<ConSanCapabilityForm>(255)));
+    EXPECT_FALSE(arch_supports_capability_form(expected.arch, CapabilityForm::Count));
+    EXPECT_FALSE(arch_supports_capability_form(expected.arch, static_cast<CapabilityForm>(255)));
   }
-  for (ConSanCapabilityForm form : kConSanCapabilityForms)
-    EXPECT_FALSE(consan_arch_supports_capability_form(ROCJITSU_CODE_ARCH_CDNA2, form));
+  for (CapabilityForm form : kCapabilityForms)
+    EXPECT_FALSE(arch_supports_capability_form(ROCJITSU_CODE_ARCH_CDNA2, form));
 }
 
-TEST(ConSanCapabilityContract, CapabilityDispositionExhaustsTargetEngineAndFormContract) {
-  /// Expected engine-specific dispositions after target-form availability has
+TEST(ConSanCapabilityContract, CapabilityDispositionExhaustsTargetModeAndFormContract) {
+  /// Expected mode-specific dispositions after target-form availability has
   /// admitted a form. Target-specific `NotApplicable` is applied separately so
-  /// this table remains an independent statement of engine semantics.
+  /// this table remains an independent statement of mode semantics.
   struct ExpectedFormDisposition {
-    ConSanCapabilityForm form;
-    std::array<ConSanCapabilityDisposition, 4> by_engine;
+    CapabilityForm form;
+    std::array<CapabilityDisposition, 2> by_mode;
   };
-  constexpr auto supported = ConSanCapabilityDisposition::Supported;
-  constexpr auto mutation = ConSanCapabilityDisposition::MutationOnly;
-  constexpr auto not_applicable = ConSanCapabilityDisposition::NotApplicable;
-  constexpr auto access_only = ConSanCapabilityDisposition::AccessOnly;
-  constexpr auto associated_only = ConSanCapabilityDisposition::AssociatedOnly;
+  constexpr auto supported = CapabilityDisposition::Supported;
+  constexpr auto mutation = CapabilityDisposition::MutationOnly;
+  constexpr auto not_applicable = CapabilityDisposition::NotApplicable;
+  constexpr auto access_only = CapabilityDisposition::AccessOnly;
+  constexpr auto associated_only = CapabilityDisposition::AssociatedOnly;
   constexpr std::array expected_forms = {
-      ExpectedFormDisposition{ConSanCapabilityForm::NativeLdsAccess,
-                              {supported, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::GroupFlatAccess,
-                              {supported, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::WorkgroupBarrier,
-                              {mutation, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::ClusterBarrier,
-                              {mutation, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::OrderedFlatAtomic,
-                              {mutation, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::OrderedVglobalAtomic,
-                              {mutation, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::OrderedLdsAtomic,
-                              {mutation, supported, supported, supported}},
-      ExpectedFormDisposition{ConSanCapabilityForm::RelaxedLdsAtomicAccess,
-                              {not_applicable, access_only, access_only, access_only}},
-      ExpectedFormDisposition{ConSanCapabilityForm::AddressedOrdinaryFence,
-                              {mutation, supported, associated_only, associated_only}},
+      ExpectedFormDisposition{CapabilityForm::NativeLdsAccess, {supported, supported}},
+      ExpectedFormDisposition{CapabilityForm::GroupFlatAccess, {supported, supported}},
+      ExpectedFormDisposition{CapabilityForm::WorkgroupBarrier, {mutation, supported}},
+      ExpectedFormDisposition{CapabilityForm::ClusterBarrier, {mutation, supported}},
+      ExpectedFormDisposition{CapabilityForm::OrderedFlatAtomic, {mutation, supported}},
+      ExpectedFormDisposition{CapabilityForm::OrderedVglobalAtomic, {mutation, supported}},
+      ExpectedFormDisposition{CapabilityForm::OrderedLdsAtomic, {mutation, supported}},
+      ExpectedFormDisposition{CapabilityForm::RelaxedLdsAtomicAccess,
+                              {not_applicable, access_only}},
+      ExpectedFormDisposition{CapabilityForm::AddressedOrdinaryFence, {mutation, associated_only}},
   };
-  static_assert(expected_forms.size() == kConSanCapabilityForms.size());
+  static_assert(expected_forms.size() == kCapabilityForms.size());
 
   for (const ExpectedTargetProfile &target : kExpectedTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     for (const ExpectedFormDisposition &form : expected_forms) {
-      const bool available =
-          (target.semantic_form_mask & consan_capability_form_bit(form.form)) != 0;
-      for (size_t engine_index = 0; engine_index < kConSanCapabilityEngines.size();
-           ++engine_index) {
-        SCOPED_TRACE(consan_capability_engine_name(kConSanCapabilityEngines[engine_index]));
-        SCOPED_TRACE(consan_capability_form_name(form.form));
-        const ConSanCapabilityDisposition expected =
-            available ? form.by_engine[engine_index] : not_applicable;
-        EXPECT_EQ(consan_capability_disposition(target.target,
-                                                kConSanCapabilityEngines[engine_index], form.form),
+      const bool available = (target.semantic_form_mask & capability_form_bit(form.form)) != 0;
+      for (size_t mode_index = 0; mode_index < kEnabledModes.size(); ++mode_index) {
+        SCOPED_TRACE(mode_label(kEnabledModes[mode_index]));
+        SCOPED_TRACE(capability_form_name(form.form));
+        const CapabilityDisposition expected =
+            available ? form.by_mode[mode_index] : not_applicable;
+        EXPECT_EQ(capability_disposition(target.target, kEnabledModes[mode_index], form.form),
                   expected);
       }
     }
@@ -1045,23 +955,21 @@ TEST(ConSanCapabilityContract, CapabilityDispositionExhaustsTargetEngineAndFormC
 
 TEST(ConSanCapabilityContract, CapabilityDispositionFailsClosedForInvalidTypedInputs) {
   constexpr rj_code_target_id_t valid_target = ROCJITSU_CODE_TARGET_GFX950;
-  constexpr ConSanCapabilityEngine valid_engine = ConSanCapabilityEngine::RecordReplay;
-  constexpr ConSanCapabilityForm valid_form = ConSanCapabilityForm::NativeLdsAccess;
-  EXPECT_EQ(consan_capability_disposition(ROCJITSU_CODE_TARGET_INVALID, valid_engine, valid_form),
-            ConSanCapabilityDisposition::OutOfContract);
-  EXPECT_EQ(consan_capability_disposition(ROCJITSU_CODE_TARGET_GFX90A, valid_engine, valid_form),
-            ConSanCapabilityDisposition::OutOfContract);
-  EXPECT_EQ(consan_capability_disposition(valid_target, ConSanCapabilityEngine::Count, valid_form),
-            ConSanCapabilityDisposition::OutOfContract);
-  EXPECT_EQ(consan_capability_disposition(valid_target, static_cast<ConSanCapabilityEngine>(255),
-                                          valid_form),
-            ConSanCapabilityDisposition::OutOfContract);
-  EXPECT_EQ(consan_capability_disposition(valid_target, valid_engine, ConSanCapabilityForm::Count),
-            ConSanCapabilityDisposition::OutOfContract);
-  EXPECT_EQ(consan_capability_disposition(valid_target, valid_engine,
-                                          static_cast<ConSanCapabilityForm>(255)),
-            ConSanCapabilityDisposition::OutOfContract);
+  constexpr Mode valid_mode = Mode::Default;
+  constexpr CapabilityForm valid_form = CapabilityForm::NativeLdsAccess;
+  EXPECT_EQ(capability_disposition(ROCJITSU_CODE_TARGET_INVALID, valid_mode, valid_form),
+            CapabilityDisposition::OutOfContract);
+  EXPECT_EQ(capability_disposition(ROCJITSU_CODE_TARGET_GFX90A, valid_mode, valid_form),
+            CapabilityDisposition::OutOfContract);
+  EXPECT_EQ(capability_disposition(valid_target, Mode::None, valid_form),
+            CapabilityDisposition::OutOfContract);
+  EXPECT_EQ(capability_disposition(valid_target, static_cast<Mode>(255), valid_form),
+            CapabilityDisposition::OutOfContract);
+  EXPECT_EQ(capability_disposition(valid_target, valid_mode, CapabilityForm::Count),
+            CapabilityDisposition::OutOfContract);
+  EXPECT_EQ(capability_disposition(valid_target, valid_mode, static_cast<CapabilityForm>(255)),
+            CapabilityDisposition::OutOfContract);
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

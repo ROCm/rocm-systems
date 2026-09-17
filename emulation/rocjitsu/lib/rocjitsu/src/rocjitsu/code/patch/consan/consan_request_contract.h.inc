@@ -28,7 +28,7 @@ struct RuntimePolicy {
 
 /// Disable every live fault-transform switch while retaining exact selection,
 /// proof, and perturbation data.
-inline void clear_consan_fault_mutations(MutationRequest &request) {
+inline void clear_fault_mutations(MutationRequest &request) {
   request.fault_drop_barrier = false;
   request.fault_move_barrier = false;
   request.fault_mutate_barrier_id_scope = false;
@@ -43,10 +43,9 @@ inline void clear_consan_fault_mutations(MutationRequest &request) {
 }
 
 /// Return a copy suitable for pristine semantic inventory sizing.
-[[nodiscard]] inline MutationRequest
-without_consan_fault_mutations(const MutationRequest &request) {
+[[nodiscard]] inline MutationRequest without_fault_mutations(const MutationRequest &request) {
   MutationRequest result = request;
-  clear_consan_fault_mutations(result);
+  clear_fault_mutations(result);
   result.fault_require_exactly_one = false;
   return result;
 }
@@ -54,17 +53,15 @@ without_consan_fault_mutations(const MutationRequest &request) {
 /// Return whether semantic inventory must retain extended barrier pairs.
 ///
 /// Extended pairs are needed by barrier mutations, unmatched-barrier abort
-/// diagnostics, and Sampled barrier observation. This query deliberately uses
+/// diagnostics, and ConSan barrier observation. This query deliberately uses
 /// only typed semantic inputs: runtime bindings, target mechanics, and legacy
 /// lowering options cannot change the inventory shape.
-[[nodiscard]] constexpr bool
-consan_requires_extended_barrier_pairs(const ConSanRequest &request,
-                                       const ConSanDebugOverrides &debug,
-                                       const MutationRequest &mutation) {
+[[nodiscard]] constexpr bool requires_extended_barrier_pairs(const Request &request,
+                                                             const DebugOverrides &debug,
+                                                             const MutationRequest &mutation) {
   return mutation.fault_drop_barrier || mutation.fault_move_barrier ||
          mutation.fault_mutate_barrier_id_scope || mutation.fault_mutate_barrier_participants ||
-         debug.abort_unmatched_barrier_wait ||
-         (request.moi_engine == ConSanMoiEngine::Sampled && request.moi_track_barriers);
+         debug.abort_unmatched_barrier_wait || request.track_barriers;
 }
 
 /// Subset of runtime properties required by one prospective operation.
@@ -91,12 +88,12 @@ struct RuntimeCapabilityRequirements {
 /// satisfy a consumer. The enum is intentionally shared by the pure validation
 /// functions so parsers and runtime adapters can use one machine-readable
 /// vocabulary while rendering their own contextual messages.
-enum class ConSanContractIssue : uint8_t {
+enum class ContractIssue : uint8_t {
   /// The contract is valid and all requested runtime facts are present.
   None,
-  /// Request construction ended without selecting a sanitizer flavor.
-  MissingFlavor,
-  /// A typed flavor or engine value lies outside its declared enum.
+  /// Request construction ended without selecting a sanitizer mode.
+  MissingMode,
+  /// A typed mode or mode value lies outside its declared enum.
   InvalidMode,
   /// A sampling stride is zero or outside the supported bounded range.
   InvalidSampleStride,
@@ -136,7 +133,7 @@ enum class ConSanContractIssue : uint8_t {
   InvalidResourceScope,
   /// A concrete report address is the reserved null address.
   InvalidResourceAddress,
-  /// A concrete MOI address and its byte size disagree.
+  /// A concrete ConSan address and its byte size disagree.
   InvalidResourceSize,
   /// One past the last declared issue. This is an iteration bound and never a
   /// validation result.
@@ -146,140 +143,124 @@ enum class ConSanContractIssue : uint8_t {
 /// Every validation result that may be returned by a contract validator. The
 /// one-past-the-end bound is excluded so callers cannot mistake it for an
 /// actionable issue.
-inline constexpr auto kConSanContractIssues = [] {
-  using E = ConSanContractIssue;
-  return make_consan_enum_vocabulary(
-      "invalid-contract-issue", consan_enum(E::None, "none"),
-      consan_enum(E::MissingFlavor, "missing-flavor"), consan_enum(E::InvalidMode, "invalid-mode"),
-      consan_enum(E::InvalidSampleStride, "invalid-sample-stride"),
-      consan_enum(E::InvalidSampleOffset, "invalid-sample-offset"),
-      consan_enum(E::InvalidPatchBudget, "invalid-patch-budget"),
-      consan_enum(E::InvalidDebugRegister, "invalid-debug-register"),
-      consan_enum(E::InvalidMutationDependency, "invalid-mutation-dependency"),
-      consan_enum(E::InvalidMutationAddressDelta, "invalid-mutation-address-delta"),
-      consan_enum(E::InvalidPerturbationBounds, "invalid-perturbation-bounds"),
-      consan_enum(E::ModeConflict, "mode-conflict"),
-      consan_enum(E::ConflictingRuntimeAssertions, "conflicting-runtime-assertions"),
-      consan_enum(E::MissingRuntimeBackend, "missing-runtime-backend"),
-      consan_enum(E::MissingVisibleMemory, "missing-visible-memory"),
-      consan_enum(E::MissingCoherentMemory, "missing-coherent-memory"),
-      consan_enum(E::MissingAtomicPublication, "missing-atomic-publication"),
-      consan_enum(E::InsufficientReportAllocation, "insufficient-report-allocation"),
-      consan_enum(E::MissingWorkgroupLdsLimit, "missing-workgroup-lds-limit"),
-      consan_enum(E::MissingExecutableBinding, "missing-executable-binding"),
-      consan_enum(E::MissingDispatchSegmentBinding, "missing-dispatch-segment-binding"),
-      consan_enum(E::InvalidResourceScope, "invalid-resource-scope"),
-      consan_enum(E::InvalidResourceAddress, "invalid-resource-address"),
-      consan_enum(E::InvalidResourceSize, "invalid-resource-size"));
+inline constexpr auto kContractIssues = [] {
+  using E = ContractIssue;
+  return make_enum_vocabulary(
+      "invalid-contract-issue", enum_entry(E::None, "none"),
+      enum_entry(E::MissingMode, "missing-mode"), enum_entry(E::InvalidMode, "invalid-mode"),
+      enum_entry(E::InvalidSampleStride, "invalid-sample-stride"),
+      enum_entry(E::InvalidSampleOffset, "invalid-sample-offset"),
+      enum_entry(E::InvalidPatchBudget, "invalid-patch-budget"),
+      enum_entry(E::InvalidDebugRegister, "invalid-debug-register"),
+      enum_entry(E::InvalidMutationDependency, "invalid-mutation-dependency"),
+      enum_entry(E::InvalidMutationAddressDelta, "invalid-mutation-address-delta"),
+      enum_entry(E::InvalidPerturbationBounds, "invalid-perturbation-bounds"),
+      enum_entry(E::ModeConflict, "mode-conflict"),
+      enum_entry(E::ConflictingRuntimeAssertions, "conflicting-runtime-assertions"),
+      enum_entry(E::MissingRuntimeBackend, "missing-runtime-backend"),
+      enum_entry(E::MissingVisibleMemory, "missing-visible-memory"),
+      enum_entry(E::MissingCoherentMemory, "missing-coherent-memory"),
+      enum_entry(E::MissingAtomicPublication, "missing-atomic-publication"),
+      enum_entry(E::InsufficientReportAllocation, "insufficient-report-allocation"),
+      enum_entry(E::MissingWorkgroupLdsLimit, "missing-workgroup-lds-limit"),
+      enum_entry(E::MissingExecutableBinding, "missing-executable-binding"),
+      enum_entry(E::MissingDispatchSegmentBinding, "missing-dispatch-segment-binding"),
+      enum_entry(E::InvalidResourceScope, "invalid-resource-scope"),
+      enum_entry(E::InvalidResourceAddress, "invalid-resource-address"),
+      enum_entry(E::InvalidResourceSize, "invalid-resource-size"));
 }();
 
-static_assert(kConSanContractIssues.size() == static_cast<size_t>(ConSanContractIssue::Count));
+static_assert(kContractIssues.size() == static_cast<size_t>(ContractIssue::Count));
 
-[[nodiscard]] constexpr std::string_view consan_contract_issue_name(ConSanContractIssue issue) {
-  return kConSanContractIssues.name(issue);
+[[nodiscard]] constexpr std::string_view contract_issue_name(ContractIssue issue) {
+  return kContractIssues.name(issue);
 }
 
-[[nodiscard]] constexpr ConSanContractIssue validate_consan_request(const ConSanRequest &request) {
-  if (!request.flavor)
-    return ConSanContractIssue::MissingFlavor;
-  switch (*request.flavor) {
-  case ConSanFlavor::None:
-  case ConSanFlavor::SuperCollider:
-  case ConSanFlavor::Moi:
+[[nodiscard]] constexpr ContractIssue validate_request(const Request &request) {
+  if (!request.mode)
+    return ContractIssue::MissingMode;
+  switch (*request.mode) {
+  case Mode::None:
+  case Mode::SuperCollider:
+  case Mode::Default:
     break;
   default:
-    return ConSanContractIssue::InvalidMode;
-  }
-  switch (request.moi_engine) {
-  case ConSanMoiEngine::RecordReplay:
-  case ConSanMoiEngine::InlineShadow:
-  case ConSanMoiEngine::Sampled:
-    break;
-  default:
-    return ConSanContractIssue::InvalidMode;
+    return ContractIssue::InvalidMode;
   }
   switch (request.supercollider_evidence_mode) {
-  case ConSanSuperColliderEvidenceMode::TrapOnly:
-  case ConSanSuperColliderEvidenceMode::StickyMarker:
+  case SuperColliderEvidenceMode::TrapOnly:
+  case SuperColliderEvidenceMode::StickyMarker:
     break;
   default:
-    return ConSanContractIssue::InvalidMode;
+    return ContractIssue::InvalidMode;
   }
-  if (request.moi_sample_stride == 0 || request.moi_runtime_sample_stride == 0 ||
-      request.moi_runtime_sample_stride > (1u << 24u) ||
-      (request.moi_runtime_sample_stride & (request.moi_runtime_sample_stride - 1u)) != 0) {
-    return ConSanContractIssue::InvalidSampleStride;
+  if (request.sample_stride == 0 || request.runtime_sample_stride == 0 ||
+      request.runtime_sample_stride > (1u << 24u) ||
+      (request.runtime_sample_stride & (request.runtime_sample_stride - 1u)) != 0) {
+    return ContractIssue::InvalidSampleStride;
   }
-  if (request.moi_sample_offset >= request.moi_sample_stride ||
-      request.moi_runtime_sample_offset >= request.moi_runtime_sample_stride) {
-    return ConSanContractIssue::InvalidSampleOffset;
+  if (request.sample_offset >= request.sample_stride ||
+      request.runtime_sample_offset >= request.runtime_sample_stride) {
+    return ContractIssue::InvalidSampleOffset;
   }
-  if (request.moi_sampled_cell_selection || request.moi_sampled_banks != 0) {
-    if (*request.flavor != ConSanFlavor::Moi || request.moi_engine != ConSanMoiEngine::Sampled)
-      return ConSanContractIssue::ModeConflict;
-    const auto cell = request.sampled_cell_selection();
+  if (request.cell_selection || request.watchpoint_banks != 0) {
+    if (*request.mode != Mode::Default)
+      return ContractIssue::ModeConflict;
+    const auto cell = request.cell_selector();
     if (cell.stride == 0 || cell.stride > (1u << 24u) || (cell.stride & (cell.stride - 1u)) != 0)
-      return ConSanContractIssue::InvalidSampleStride;
+      return ContractIssue::InvalidSampleStride;
     if (cell.offset >= cell.stride)
-      return ConSanContractIssue::InvalidSampleOffset;
-    if (request.moi_sampled_banks > 8 ||
-        (request.moi_sampled_banks & (request.moi_sampled_banks - 1u)) != 0)
-      return ConSanContractIssue::InvalidMode;
+      return ContractIssue::InvalidSampleOffset;
+    if (request.watchpoint_banks > 1024 ||
+        (request.watchpoint_banks & (request.watchpoint_banks - 1u)) != 0)
+      return ContractIssue::InvalidMode;
   }
-  if (request.moi_dynamic_access_records && (*request.flavor != ConSanFlavor::Moi ||
-                                             request.moi_engine != ConSanMoiEngine::RecordReplay)) {
-    return ConSanContractIssue::ModeConflict;
+  if (request.device_conflict_check && (*request.mode != Mode::Default)) {
+    return ContractIssue::ModeConflict;
   }
-  if (request.moi_sampled_check &&
-      (*request.flavor != ConSanFlavor::Moi || request.moi_engine != ConSanMoiEngine::Sampled)) {
-    return ConSanContractIssue::ModeConflict;
-  }
-  return ConSanContractIssue::None;
+  return ContractIssue::None;
 }
 
-[[nodiscard]] constexpr ConSanContractIssue
-validate_transform_policy(const TransformPolicy &policy) {
-  if (!consan_patched_image_growth_limit_bytes(policy.patched_image_growth_limit, 1u))
-    return ConSanContractIssue::InvalidMode;
-  return policy.max_patches == 0 ? ConSanContractIssue::InvalidPatchBudget
-                                 : ConSanContractIssue::None;
+[[nodiscard]] constexpr ContractIssue validate_transform_policy(const TransformPolicy &policy) {
+  if (!patched_image_growth_limit_bytes(policy.patched_image_growth_limit, 1u))
+    return ContractIssue::InvalidMode;
+  return policy.max_patches == 0 ? ContractIssue::InvalidPatchBudget : ContractIssue::None;
 }
 
 /// Validate runtime policy independently of any code-object or device facts.
 /// Process ceilings intentionally permit zero: that is a valid policy which
 /// admits no corresponding live storage. Requiring installation while the
 /// runtime path is disabled is the sole intrinsic conflict.
-[[nodiscard]] constexpr ConSanContractIssue validate_runtime_policy(const RuntimePolicy &policy) {
+[[nodiscard]] constexpr ContractIssue validate_runtime_policy(const RuntimePolicy &policy) {
   return !policy.enabled && (policy.fail_closed || policy.require_patch)
-             ? ConSanContractIssue::ModeConflict
-             : ConSanContractIssue::None;
+             ? ContractIssue::ModeConflict
+             : ContractIssue::None;
 }
 
-[[nodiscard]] constexpr ConSanContractIssue
-validate_consan_debug_overrides(const ConSanDebugOverrides &debug) {
+[[nodiscard]] constexpr ContractIssue validate_debug_overrides(const DebugOverrides &debug) {
   if ((debug.scratch_vgpr && *debug.scratch_vgpr > 255) ||
-      (debug.requested_moi_owner_vgpr && *debug.requested_moi_owner_vgpr > 255) ||
-      (debug.requested_moi_epoch_vgpr && *debug.requested_moi_epoch_vgpr > 255) ||
-      (debug.requested_moi_owner_sgpr && *debug.requested_moi_owner_sgpr > 105) ||
-      (debug.requested_moi_exec_save_sgpr && (*debug.requested_moi_exec_save_sgpr > 104 ||
-                                              *debug.requested_moi_exec_save_sgpr % 2 != 0))) {
-    return ConSanContractIssue::InvalidDebugRegister;
+      (debug.requested_owner_vgpr && *debug.requested_owner_vgpr > 255) ||
+      (debug.requested_epoch_vgpr && *debug.requested_epoch_vgpr > 255) ||
+      (debug.requested_owner_sgpr && *debug.requested_owner_sgpr > 105) ||
+      (debug.requested_exec_save_sgpr &&
+       (*debug.requested_exec_save_sgpr > 104 || *debug.requested_exec_save_sgpr % 2 != 0))) {
+    return ContractIssue::InvalidDebugRegister;
   }
-  if (debug.moi_require_diagnostics && debug.moi_forbid_diagnostics)
-    return ConSanContractIssue::ConflictingRuntimeAssertions;
-  return ConSanContractIssue::None;
+  if (debug.require_diagnostics && debug.forbid_diagnostics)
+    return ContractIssue::ConflictingRuntimeAssertions;
+  return ContractIssue::None;
 }
 
-[[nodiscard]] constexpr ConSanContractIssue
-validate_mutation_request(const MutationRequest &mutation, const ConSanRequest &request) {
+[[nodiscard]] constexpr ContractIssue validate_mutation_request(const MutationRequest &mutation,
+                                                                const Request &request) {
   if (mutation.fault_allow_destructive_incomplete_barrier_drop && !mutation.fault_drop_barrier) {
-    return ConSanContractIssue::InvalidMutationDependency;
+    return ContractIssue::InvalidMutationDependency;
   }
   if ((mutation.fault_allow_completing_conditional_barrier_move ||
        mutation.fault_allow_destructive_divergent_barrier_move) &&
       (!mutation.fault_move_barrier ||
-       mutation.fault_barrier_move_direction != ConSanBarrierMoveDirection::Earlier)) {
-    return ConSanContractIssue::InvalidMutationDependency;
+       mutation.fault_barrier_move_direction != BarrierMoveDirection::Earlier)) {
+    return ContractIssue::InvalidMutationDependency;
   }
   const auto invalid_delta = [](uint32_t delta) {
     return delta == 0 || delta % 4u != 0 || delta > 0x7fffffu;
@@ -287,109 +268,107 @@ validate_mutation_request(const MutationRequest &mutation, const ConSanRequest &
   if ((mutation.fault_atomic_wrong_address && invalid_delta(mutation.fault_atomic_address_delta)) ||
       (mutation.fault_ordinary_wrong_address &&
        invalid_delta(mutation.fault_ordinary_address_delta))) {
-    return ConSanContractIssue::InvalidMutationAddressDelta;
+    return ContractIssue::InvalidMutationAddressDelta;
   }
   if (mutation.fault_lds_wrong_address && !mutation.fault_lds_address_vgpr)
-    return ConSanContractIssue::InvalidMutationDependency;
-  if (mutation.sc_perturb_max == 0 || mutation.sc_perturb_max > 2 ||
-      mutation.sc_perturb_sleep == 0 || mutation.sc_perturb_sleep > 15 ||
-      mutation.sc_perturb_required_count > mutation.sc_perturb_max) {
-    return ConSanContractIssue::InvalidPerturbationBounds;
+    return ContractIssue::InvalidMutationDependency;
+  if (mutation.supercollider_perturb_max == 0 || mutation.supercollider_perturb_max > 2 ||
+      mutation.supercollider_perturb_sleep == 0 || mutation.supercollider_perturb_sleep > 15 ||
+      mutation.supercollider_perturb_required_count > mutation.supercollider_perturb_max) {
+    return ContractIssue::InvalidPerturbationBounds;
   }
-  if (mutation.sc_perturb_kind != ConSanPerturbationKind::None &&
-      request.flavor != ConSanFlavor::SuperCollider) {
-    return ConSanContractIssue::ModeConflict;
+  if (mutation.supercollider_perturb_kind != SuperColliderPerturbationKind::None &&
+      request.mode != Mode::SuperCollider) {
+    return ContractIssue::ModeConflict;
   }
   if (mutation.fault_reservation_timeout_ms == 0)
-    return ConSanContractIssue::InvalidMutationDependency;
+    return ContractIssue::InvalidMutationDependency;
   if (mutation.fault_load_occurrence &&
       (mutation.fault_site_identity.empty() || !mutation.fault_require_exactly_one ||
        mutation.fault_dry_run)) {
-    return ConSanContractIssue::InvalidMutationDependency;
+    return ContractIssue::InvalidMutationDependency;
   }
-  return ConSanContractIssue::None;
+  return ContractIssue::None;
 }
 
-[[nodiscard]] constexpr ConSanContractIssue
+[[nodiscard]] constexpr ContractIssue
 validate_runtime_capabilities(const RuntimeCapabilities &capabilities,
                               const RuntimeCapabilityRequirements &requirements = {}) {
   switch (capabilities.backend) {
-  case ConSanRuntimeBackend::PhysicalHsa:
-  case ConSanRuntimeBackend::RocJitsuSimulator:
+  case RuntimeBackend::PhysicalHsa:
+  case RuntimeBackend::RocJitsuSimulator:
     break;
-  case ConSanRuntimeBackend::Unknown:
-  case ConSanRuntimeBackend::Count:
+  case RuntimeBackend::Unknown:
+  case RuntimeBackend::Count:
   default:
-    return ConSanContractIssue::MissingRuntimeBackend;
+    return ContractIssue::MissingRuntimeBackend;
   }
   if (requirements.host_device_visible_memory && !capabilities.host_device_visible_memory)
-    return ConSanContractIssue::MissingVisibleMemory;
+    return ContractIssue::MissingVisibleMemory;
   if (requirements.host_device_coherent_memory && !capabilities.host_device_coherent_memory)
-    return ConSanContractIssue::MissingCoherentMemory;
+    return ContractIssue::MissingCoherentMemory;
   if (requirements.device_atomic_publication && !capabilities.device_atomic_publication)
-    return ConSanContractIssue::MissingAtomicPublication;
+    return ContractIssue::MissingAtomicPublication;
   if (requirements.minimum_report_allocation_bytes &&
       (!capabilities.max_report_allocation_bytes ||
        *capabilities.max_report_allocation_bytes < *requirements.minimum_report_allocation_bytes)) {
-    return ConSanContractIssue::InsufficientReportAllocation;
+    return ContractIssue::InsufficientReportAllocation;
   }
   if (requirements.max_workgroup_lds_bytes && !capabilities.max_workgroup_lds_bytes)
-    return ConSanContractIssue::MissingWorkgroupLdsLimit;
+    return ContractIssue::MissingWorkgroupLdsLimit;
   if (requirements.executable_binding && !capabilities.executable_binding)
-    return ConSanContractIssue::MissingExecutableBinding;
+    return ContractIssue::MissingExecutableBinding;
   if (requirements.dispatch_segment_binding && !capabilities.dispatch_segment_binding)
-    return ConSanContractIssue::MissingDispatchSegmentBinding;
-  return ConSanContractIssue::None;
+    return ContractIssue::MissingDispatchSegmentBinding;
+  return ContractIssue::None;
 }
 
-[[nodiscard]] constexpr ConSanContractIssue
+[[nodiscard]] constexpr ContractIssue
 validate_bound_runtime_resources(const BoundRuntimeResources &resources) {
   switch (resources.scope) {
-  case ConSanRuntimeResourceScope::Unbound:
-  case ConSanRuntimeResourceScope::CodeObject:
-  case ConSanRuntimeResourceScope::Executable:
-  case ConSanRuntimeResourceScope::Dispatch:
+  case RuntimeResourceScope::Unbound:
+  case RuntimeResourceScope::CodeObject:
+  case RuntimeResourceScope::Executable:
+  case RuntimeResourceScope::Dispatch:
     break;
-  case ConSanRuntimeResourceScope::Count:
+  case RuntimeResourceScope::Count:
   default:
-    return ConSanContractIssue::InvalidResourceScope;
+    return ContractIssue::InvalidResourceScope;
   }
-  if ((resources.report_buffer_address && *resources.report_buffer_address == 0) ||
-      (resources.moi_report_buffer_address && *resources.moi_report_buffer_address == 0)) {
-    return ConSanContractIssue::InvalidResourceAddress;
+  if ((resources.supercollider_report_buffer_address &&
+       *resources.supercollider_report_buffer_address == 0) ||
+      (resources.report_buffer_address && *resources.report_buffer_address == 0)) {
+    return ContractIssue::InvalidResourceAddress;
   }
-  if (resources.bound() == (resources.scope == ConSanRuntimeResourceScope::Unbound))
-    return ConSanContractIssue::InvalidResourceScope;
-  if (resources.moi_report_buffer_address.has_value() != (resources.moi_report_buffer_size != 0))
-    return ConSanContractIssue::InvalidResourceSize;
-  return ConSanContractIssue::None;
+  if (resources.bound() == (resources.scope == RuntimeResourceScope::Unbound))
+    return ContractIssue::InvalidResourceScope;
+  if (resources.report_buffer_address.has_value() != (resources.report_buffer_size != 0))
+    return ContractIssue::InvalidResourceSize;
+  return ContractIssue::None;
 }
 
 /// Validate all configuration-source outputs in one deterministic order.
 /// Runtime capability satisfaction is intentionally separate because those
 /// facts are discovered only after the parser has selected an HSA/simulator
 /// backend and agent.
-[[nodiscard]] constexpr ConSanContractIssue
-validate_consan_configuration(const ConSanRequest &request, const TransformPolicy &transform_policy,
-                              const RuntimePolicy &runtime_policy,
-                              const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                              const BoundRuntimeResources &resources) {
-  if (const auto issue = validate_consan_request(request); issue != ConSanContractIssue::None)
+[[nodiscard]] constexpr ContractIssue
+validate_configuration(const Request &request, const TransformPolicy &transform_policy,
+                       const RuntimePolicy &runtime_policy, const DebugOverrides &debug,
+                       const MutationRequest &mutation, const BoundRuntimeResources &resources) {
+  if (const auto issue = validate_request(request); issue != ContractIssue::None)
     return issue;
   if (const auto issue = validate_transform_policy(transform_policy);
-      issue != ConSanContractIssue::None) {
+      issue != ContractIssue::None) {
     return issue;
   }
-  if (const auto issue = validate_runtime_policy(runtime_policy);
-      issue != ConSanContractIssue::None) {
+  if (const auto issue = validate_runtime_policy(runtime_policy); issue != ContractIssue::None) {
     return issue;
   }
-  if (const auto issue = validate_consan_debug_overrides(debug);
-      issue != ConSanContractIssue::None) {
+  if (const auto issue = validate_debug_overrides(debug); issue != ContractIssue::None) {
     return issue;
   }
   if (const auto issue = validate_mutation_request(mutation, request);
-      issue != ConSanContractIssue::None) {
+      issue != ContractIssue::None) {
     return issue;
   }
   return validate_bound_runtime_resources(resources);

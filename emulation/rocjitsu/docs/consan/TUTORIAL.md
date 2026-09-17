@@ -24,7 +24,7 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-Loading the hook selects ConSan's default, MOI Sampled, and
+Loading the hook selects the default ConSan detector and
 its standard settings. ConSan discovers relevant sites and manages registers,
 report memory, synchronization tracking, and other instrumentation resources
 automatically.
@@ -38,9 +38,9 @@ before running it:
 export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-For small repros, use `RJ_CONSAN_MOI_SAMPLED_PRESET=high`; use `max` to remove
+For small repros, use `RJ_CONSAN_PRESET=high`; use `max` to remove
 workgroup and cell sampling. `low` trades coverage for lower recording overhead,
-and `default` preserves standard behavior. See [Sampled presets](USAGE.md#sampled-presets)
+and `default` preserves standard behavior. See [ConSan presets](USAGE.md#presets)
 for exact settings, overrides, and bounded-retention limitations.
 
 ## 3. Read the result
@@ -56,68 +56,45 @@ ConSan analysis verdict ... static_complete=... dynamic_complete=...
 The default analysis reports retained sampled evidence and conflict counts:
 
 ```text
-ConSan MOI auto report ... visible_sampled=N ... sampled_conflicts=N ...
-ConSan MOI auto sampled conflict ... first_instruction=... second_instruction=...
+ConSan auto report ... visible=N ... conflicts=N ...
+ConSan conflict ... first_instruction=... second_instruction=...
 ```
 
-This default is called **MOI Sampled**. It instruments admitted memory and
+This default is called **ConSan**. It instruments admitted memory and
 synchronization sites, retains bounded causal windows selected at runtime, and
 checks their ordering on the host. Its standard runtime sampling stride is 256
 with offset zero; the workgroup and LDS-cell selectors can also be configured
-independently (see [USAGE.md](USAGE.md#moi-event-and-sampling-controls)).
+independently (see [USAGE.md](USAGE.md#consan-event-and-sampling-controls)).
 
-A nonzero `sampled_conflicts` count with an attributed diagnostic is positive
+A nonzero `conflicts` count with an attributed diagnostic is positive
 ConSan evidence. Zero means only that the retained samples exposed no conflict;
 unsampled accesses and bounded retention can hide races. Complete static-site
 instrumentation does not guarantee complete dynamic evidence.
 
 If the application's own correctness checks still pass, ConSan preserved the
-result for that run. That does not make a clean ConSan report proof of race
+result for that run. That does not make a clea ConSan report proof of race
 freedom. A timeout, signal, GPU reset, or application failure is not by itself
 a ConSan diagnostic.
 
 ## 4. Choose a different analysis when useful
 
-(Full document: [FLAVORS.md](FLAVORS.md))
+(Full document: [MODES.md](MODES.md))
 
-The default favors lower overhead and bounded evidence. Select another mode when
-its evidence model better matches the investigation; ConSan offers two other
-MOI engines and the complementary SuperCollider flavor.
+ConSan favors lower overhead and bounded causal evidence. SuperCollider offers
+a complementary value-instability signal.
 
-| Flavor | Engine | Useful positive evidence | Main tradeoff |
-| --- | --- | --- | --- |
-| MOI (default) | **Record/Replay** | Host replay emits an attributed conflict from its retained snapshot. | Clear, inspectable model, but runtime history is bounded. |
-| MOI (default) | **Inline Shadow** | The GPU emits an immediate diagnostic for a supported access. | Strong device-side attribution with more device work. |
-| MOI (default) | **Sampled (default)** | A retained statistical campaign emits sampled conflicts. | Lower retained state with probabilistic detection. |
-| **SuperCollider** | — | A delayed redundant observation changes the automatic mismatch marker. | Complementary instability signal, not a happens-before diagnosis. |
+| Mode | Useful positive evidence | Main tradeoff |
+| --- | --- | --- |
+| **ConSan (default)** | Host analysis attributes conflicts between retained accesses. | Bounded state and probabilistic detection. |
+| **SuperCollider** | A delayed redundant observation changes the mismatch marker. | Instability signal rather than a happens-before diagnosis. |
 
-### Other MOI engines
+For a small testcase, raise ConSan coverage with `RJ_CONSAN_PRESET=high` or
+`max`; see [sampling controls](USAGE.md) for the precise settings and remaining
+limits. Neither setting proves race freedom when it reports no conflict.
 
-Select an alternative analysis with the single `RJ_CONSAN_MODE` variable.
+### Different mode: SuperCollider
 
-Use Inline Shadow when immediate supported-form device-side attribution is
-worth more device work:
-
-```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=inline-shadow \
-  RJ_CONSAN_LOG=1 \
-  ./application
-```
-
-Use Record/Replay when inspecting retained synchronization history and the
-host replay model is central:
-
-```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=record-replay \
-  RJ_CONSAN_LOG=1 \
-  ./application
-```
-
-### Different flavor: SuperCollider
-
-SuperCollider is a separate ConSan flavor. Select it with the same mode
+SuperCollider is a separate ConSan mode. Select it with the same mode
 variable and use it for its complementary delayed redundant-observation signal:
 
 ```sh
@@ -128,8 +105,8 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
 ```
 
 All ordinary selections automatically instrument every relevant site they
-support and allocate registers and reports. The MOI engines also enable
-supported barrier and atomic tracking; Sampled chooses its runtime sampling
+support and allocate registers and reports. ConSan also enables
+supported barrier and atomic tracking; ConSan chooses its runtime sampling
 parameters automatically.
 
 ## 5. Require effective instrumentation
@@ -140,7 +117,7 @@ test, ConSan can turn several ineffective-run conditions into failures:
 `RJ_CONSAN_POLICY=strict` defaults the usual instrumentation-health checks on:
 fail closed for unsupported or invalid transforms, require real
 instrumentation patches, require visible evidence from HSA-tool-owned
-automatic MOI reports, and forbid report overflow. Individual controls can
+automatic ConSan reports, and forbid report overflow. Individual controls can
 still override those defaults. Enable it alongside the default analysis:
 
 ```sh
@@ -158,7 +135,7 @@ known-correct test should also produce no ConSan diagnostic, add this expert
 expected-result assertion before `./application`:
 
 ```sh
-  RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1 \
+  RJ_CONSAN_FORBID_DIAGNOSTICS=1 \
 ```
 
 Apply strict policy first to a focused test or kernel. It applies to every code
@@ -240,13 +217,13 @@ No ConSan logs:
   placement failure; and
 - try a smaller test that isolates the kernel you expected ConSan to instrument.
 
-MOI reports no visible records:
+ConSan reports no visible records:
 
 - confirm an automatic report was planned and allocated;
 - inspect the logged required and allocated byte counts;
-- remember that automatic Sampled selection can retain no event in a short run;
+- remember that automatic ConSan selection can retain no event in a short run;
   and
-- use `RJ_CONSAN_MOI_REQUIRE_RECORDS=1` only when the program is expected to
+- use `RJ_CONSAN_REQUIRE_RECORDS=1` only when the program is expected to
   execute an instrumented site.
 
 The GPU becomes unhealthy:
@@ -259,7 +236,7 @@ The GPU becomes unhealthy:
 ## Next documents
 
 - [USAGE.md](USAGE.md): complete public controls and result interpretation.
-- [FLAVORS.md](FLAVORS.md): detailed comparison of the available analyses.
+- [MODES.md](MODES.md): detailed comparison of the available analyses.
 - [MALFORMED_INPUT.md](MALFORMED_INPUT.md): the optional malformed-barrier
   guard and its safety boundary.
 - [DESIGN.md](DESIGN.md): implementation details for readers who want to go

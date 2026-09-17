@@ -153,8 +153,9 @@ void run_two_queue_dispatch(bool correct, bool reuse_kernarg) {
   const std::vector<uint8_t> image = read_fixture();
   ASSERT_FALSE(image.empty());
   Resources resources;
-  ASSERT_EQ(hsa_code_object_reader_create_from_memory(image.data(), image.size(), &resources.reader_),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_code_object_reader_create_from_memory(image.data(), image.size(), &resources.reader_),
+      HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
                                       nullptr, &resources.executable_),
             HSA_STATUS_SUCCESS);
@@ -166,9 +167,9 @@ void run_two_queue_dispatch(bool correct, bool reuse_kernarg) {
   const char *kernel_name = correct ? "consan_gfx950_two_queue_dispatch_correct.kd"
                                     : "consan_gfx950_two_queue_dispatch_incorrect.kd";
   hsa_executable_symbol_t symbol{};
-  ASSERT_EQ(hsa_executable_get_symbol_by_name(resources.executable_, kernel_name, &agents.gpu,
-                                              &symbol),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_executable_get_symbol_by_name(resources.executable_, kernel_name, &agents.gpu, &symbol),
+      HSA_STATUS_SUCCESS);
   uint64_t kernel_object = 0u;
   uint32_t private_bytes = 0u;
   uint32_t group_bytes = 0u;
@@ -189,8 +190,7 @@ void run_two_queue_dispatch(bool correct, bool reuse_kernarg) {
   ASSERT_GE(kernarg_bytes, sizeof(TwoQueueState *));
 
   const hsa_amd_memory_pool_t gpu_pool = find_pool(agents.gpu, HSA_AMD_SEGMENT_GLOBAL);
-  const hsa_amd_memory_pool_t kernarg_pool =
-      find_pool(agents.cpu, HSA_AMD_SEGMENT_GLOBAL, true);
+  const hsa_amd_memory_pool_t kernarg_pool = find_pool(agents.cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   ASSERT_NE(gpu_pool.handle, 0u);
   ASSERT_NE(kernarg_pool.handle, 0u);
 
@@ -209,8 +209,7 @@ void run_two_queue_dispatch(bool correct, bool reuse_kernarg) {
   }
   if (reuse_kernarg)
     kernargs[1] = kernargs[0];
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(TwoQueueState), 0,
-                                         &state_staging),
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(TwoQueueState), 0, &state_staging),
             HSA_STATUS_SUCCESS);
   resources.remember(state_staging);
   const hsa_agent_t both[] = {agents.cpu, agents.gpu};
@@ -281,15 +280,14 @@ void run_two_queue_dispatch(bool correct, bool reuse_kernarg) {
                  static_cast<unsigned long long>(resources.queues_[0]->id),
                  static_cast<unsigned long long>(resources.queues_[1]->id),
                  static_cast<unsigned long long>(packet_ids[0]),
-                 static_cast<unsigned long long>(packet_ids[1]), reuse_kernarg ? 1u : 0u,
-                 round);
+                 static_cast<unsigned long long>(packet_ids[1]), reuse_kernarg ? 1u : 0u, round);
 
     for (uint32_t i = 0u; i < kQueueCount; ++i)
       hsa_signal_store_relaxed(resources.queues_[i]->doorbell_signal, packet_ids[i]);
     for (uint32_t i = 0u; i < kQueueCount; ++i) {
-      const hsa_signal_value_t completion = hsa_signal_wait_scacquire(
-          resources.signals_[i], HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL,
-          HSA_WAIT_STATE_BLOCKED);
+      const hsa_signal_value_t completion =
+          hsa_signal_wait_scacquire(resources.signals_[i], HSA_SIGNAL_CONDITION_LT, 1,
+                                    5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
       ASSERT_EQ(completion, 0) << "round=" << round << " queue=" << i
                                << " dispatch timed out or failed";
     }

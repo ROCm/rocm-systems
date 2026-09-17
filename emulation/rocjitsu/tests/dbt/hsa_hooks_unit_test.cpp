@@ -33,9 +33,7 @@
 #include <dlfcn.h>
 
 #include "hsa/hsa_api_trace_minimal.h"
-#include "patch/consan/consan_record_replay_model_test_support.h"
-#include "patch/consan/consan_report_test_support.h"
-#include "patch/consan/consan_sampled_model_test_support.h"
+#include "patch/consan/consan_model_test_support.h"
 #include "patch/consan/lowering_commit_test_support.h"
 #include "patch/consan/transform_result_test_access.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -43,12 +41,11 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
-#include "rocjitsu/hooks/consan/modes/record_replay/rj_hsa_dbi_replay_provenance.h"
-#include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_renderer.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_registry_lifecycle.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_renderer.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "scoped_temp.h"
@@ -65,6 +62,7 @@ extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t fa
 extern "C" void OnUnload();
 extern "C" void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root);
 
+namespace rocjitsu::consan::hook {
 namespace {
 
 template <typename Vocabulary, typename NameFunction>
@@ -109,29 +107,27 @@ static_assert(
     std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_create_fn), ExpectedAmdQueueCreate>);
 
 template <typename Configure>
-void install_consan_test_program_inventory(rocjitsu::ConSanTransformArtifacts &result,
-                                           Configure configure) {
-  rocjitsu::ProgramInventoryBuilder builder =
-      result.program_inventory.code_object_id().valid()
-          ? rocjitsu::ProgramInventoryBuilder(result.program_inventory)
-          : rocjitsu::ProgramInventoryBuilder(std::span<const uint8_t>{});
+void install_consan_test_program_inventory(TransformArtifacts &result, Configure configure) {
+  ProgramInventoryBuilder builder = result.program_inventory.code_object_id().valid()
+                                        ? ProgramInventoryBuilder(result.program_inventory)
+                                        : ProgramInventoryBuilder(std::span<const uint8_t>{});
   configure(builder);
   builder.publish_decoded_accesses({});
   result.program_inventory = builder.view();
 }
 
-void install_consan_test_program_identity(rocjitsu::ConSanTransformArtifacts &result,
-                                          rj_code_arch_t arch, rj_code_target_id_t target,
+void install_consan_test_program_identity(TransformArtifacts &result, rj_code_arch_t arch,
+                                          rj_code_target_id_t target,
                                           bool semantic_arch_required = false) {
-  install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+  install_consan_test_program_inventory(result, [&](ProgramInventoryBuilder &builder) {
     builder.set_code_object_facts(false, 0u, arch, target);
     builder.set_semantic_arch_required(semantic_arch_required);
   });
 }
 
-[[nodiscard]] rocjitsu::RuntimeCapabilities complete_consan_runtime_capabilities() {
+[[nodiscard]] RuntimeCapabilities complete_consan_runtime_capabilities() {
   return {
-      .backend = rocjitsu::ConSanRuntimeBackend::PhysicalHsa,
+      .backend = RuntimeBackend::PhysicalHsa,
       .host_device_visible_memory = true,
       .host_device_coherent_memory = true,
       .device_atomic_publication = true,
@@ -142,19 +138,18 @@ void install_consan_test_program_identity(rocjitsu::ConSanTransformArtifacts &re
   };
 }
 
-[[nodiscard]] rocjitsu::RuntimePolicy enabled_consan_runtime_policy() {
-  rocjitsu::RuntimePolicy policy;
+[[nodiscard]] RuntimePolicy enabled_consan_runtime_policy() {
+  RuntimePolicy policy;
   policy.enabled = true;
   return policy;
 }
 
-static_assert(std::is_base_of_v<rocjitsu::ConSanRequest, rocjitsu::consan_hook::HookConfig>);
-static_assert(std::is_base_of_v<rocjitsu::TransformPolicy, rocjitsu::consan_hook::HookConfig>);
-static_assert(std::is_base_of_v<rocjitsu::RuntimePolicy, rocjitsu::consan_hook::HookConfig>);
-static_assert(std::is_base_of_v<rocjitsu::ConSanDebugOverrides, rocjitsu::consan_hook::HookConfig>);
-static_assert(std::is_base_of_v<rocjitsu::MutationRequest, rocjitsu::consan_hook::HookConfig>);
-static_assert(
-    std::is_base_of_v<rocjitsu::BoundRuntimeResources, rocjitsu::consan_hook::HookConfig>);
+static_assert(std::is_base_of_v<Request, rocjitsu::consan::hook::HookConfig>);
+static_assert(std::is_base_of_v<TransformPolicy, rocjitsu::consan::hook::HookConfig>);
+static_assert(std::is_base_of_v<RuntimePolicy, rocjitsu::consan::hook::HookConfig>);
+static_assert(std::is_base_of_v<DebugOverrides, rocjitsu::consan::hook::HookConfig>);
+static_assert(std::is_base_of_v<MutationRequest, rocjitsu::consan::hook::HookConfig>);
+static_assert(std::is_base_of_v<BoundRuntimeResources, rocjitsu::consan::hook::HookConfig>);
 
 TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
   EXPECT_TRUE((std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn),
@@ -166,18 +161,18 @@ TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
 }
 
 TEST(HsaHooksUnitTest, ConSanHookConfigConstructsSeparatedSlice2Contracts) {
-  const rocjitsu::consan_hook::HookConfig config;
-  EXPECT_FALSE(static_cast<const rocjitsu::RuntimePolicy &>(config).enabled);
-  EXPECT_FALSE(static_cast<const rocjitsu::ConSanRequest &>(config).flavor.has_value());
-  EXPECT_EQ(static_cast<const rocjitsu::TransformPolicy &>(config).max_patches,
-            rocjitsu::consan_hook::kConSanAllSupportedPatchBudget);
-  EXPECT_FALSE(static_cast<const rocjitsu::TransformPolicy &>(config).max_patches_is_expert_limit);
-  EXPECT_FALSE(static_cast<const rocjitsu::MutationRequest &>(config).has_mutation());
-  EXPECT_FALSE(static_cast<const rocjitsu::BoundRuntimeResources &>(config).bound());
+  const rocjitsu::consan::hook::HookConfig config;
+  EXPECT_FALSE(static_cast<const RuntimePolicy &>(config).enabled);
+  EXPECT_FALSE(static_cast<const Request &>(config).mode.has_value());
+  EXPECT_EQ(static_cast<const TransformPolicy &>(config).max_patches,
+            rocjitsu::consan::hook::kAllSupportedPatchBudget);
+  EXPECT_FALSE(static_cast<const TransformPolicy &>(config).max_patches_is_expert_limit);
+  EXPECT_FALSE(static_cast<const MutationRequest &>(config).has_mutation());
+  EXPECT_FALSE(static_cast<const BoundRuntimeResources &>(config).bound());
 }
 
 TEST(HsaHooksUnitTest, ConSanHookDiagnosticVocabulariesPreserveEveryStableSpelling) {
-  using namespace rocjitsu::consan_hook;
+
   expect_hook_vocabulary(kFaultSiteKinds, fault_site_kind_name,
                          {"barrier", "atomic", "lds-access", "ordinary-memory"});
   expect_hook_vocabulary(kOrdinaryMemorySupportReasons, ordinary_memory_support_reason_name,
@@ -223,7 +218,7 @@ TEST(HsaHooksUnitTest, ConSanHookDiagnosticVocabulariesPreserveEveryStableSpelli
 }
 
 TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
-  rocjitsu::consan_hook::ProcessByteBudget budget;
+  rocjitsu::consan::hook::ProcessByteBudget budget;
 
   const auto first = budget.plan_charge(4, 8);
   ASSERT_TRUE(first);
@@ -233,7 +228,7 @@ TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
 
   const auto rejected = budget.plan_charge(5, 8);
   EXPECT_EQ(rejected.outcome,
-            rocjitsu::consan_hook::ProcessByteBudget::ChargeOutcome::LimitExceeded);
+            rocjitsu::consan::hook::ProcessByteBudget::ChargeOutcome::LimitExceeded);
   EXPECT_EQ(rejected.live_bytes, 4u);
   EXPECT_EQ(rejected.required_bytes, 9u);
   EXPECT_TRUE(budget.refund(4));
@@ -250,14 +245,14 @@ TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
 }
 
 TEST(ProcessByteBudgetTest, ReportsOverflowAndRecoversFromInvalidRefund) {
-  rocjitsu::consan_hook::ProcessByteBudget budget;
+  rocjitsu::consan::hook::ProcessByteBudget budget;
   const auto maximum = budget.plan_charge(std::numeric_limits<uint64_t>::max(), std::nullopt);
   ASSERT_TRUE(maximum);
   budget.commit_charge(maximum);
 
   const auto overflow = budget.plan_charge(1, std::nullopt);
   EXPECT_EQ(overflow.outcome,
-            rocjitsu::consan_hook::ProcessByteBudget::ChargeOutcome::AccountingOverflow);
+            rocjitsu::consan::hook::ProcessByteBudget::ChargeOutcome::AccountingOverflow);
   EXPECT_FALSE(overflow.required_bytes);
 
   EXPECT_TRUE(budget.refund(std::numeric_limits<uint64_t>::max()));
@@ -269,85 +264,81 @@ TEST(ProcessByteBudgetTest, ReportsOverflowAndRecoversFromInvalidRefund) {
 }
 
 TEST(ConSanTransformMemoryTest, ReportsGoverningFinalValidationPhase) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit absolute = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit absolute = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = 4,
   };
-  const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, absolute);
+  const auto estimate = rocjitsu::consan::hook::transform_major_image_reservation(8, absolute);
   ASSERT_TRUE(estimate);
   ASSERT_TRUE(estimate->ownership);
   EXPECT_EQ(estimate->reservation_bytes, 172u);
   EXPECT_EQ(estimate->maximum_image_bytes, 12u);
   EXPECT_EQ(estimate->ownership->phase,
-            rocjitsu::consan_hook::ConSanTransformOwnershipPhase::FinalValidation);
+            rocjitsu::consan::hook::TransformOwnershipPhase::FinalValidation);
   EXPECT_EQ(estimate->ownership->input_image_copies, 8u);
   EXPECT_EQ(estimate->ownership->maximum_image_copies, 9u);
-  EXPECT_STREQ(
-      rocjitsu::consan_hook::consan_transform_ownership_phase_name(estimate->ownership->phase),
-      "final-validation");
+  EXPECT_STREQ(rocjitsu::consan::hook::transform_ownership_phase_name(estimate->ownership->phase),
+               "final-validation");
 }
 
 TEST(ConSanTransformMemoryTest, MatchesAbsoluteReservationUnderEquivalentInputPercent) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit relative = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
+  const PatchedImageGrowthLimit relative = {
+      .kind = PatchedImageGrowthLimitKind::InputPercent,
       .input_percent = 50,
   };
-  const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, relative);
+  const auto estimate = rocjitsu::consan::hook::transform_major_image_reservation(8, relative);
   ASSERT_TRUE(estimate);
   EXPECT_EQ(estimate->reservation_bytes, 172u);
 }
 
 TEST(ConSanTransformMemoryTest, PinsDefaultPolicyReservationMagnitude) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit default_policy = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
-      .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+  const PatchedImageGrowthLimit default_policy = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = kDefaultMaxPatchedImageGrowthBytes,
   };
   const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, default_policy);
+      rocjitsu::consan::hook::transform_major_image_reservation(8, default_policy);
   ASSERT_TRUE(estimate);
   EXPECT_EQ(estimate->reservation_bytes, 11274289256u);
 }
 
 TEST(ConSanTransformMemoryTest, ReportsGoverningCompositePhaseForDefaultGrowth) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit default_policy = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
-      .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+  const PatchedImageGrowthLimit default_policy = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = kDefaultMaxPatchedImageGrowthBytes,
   };
   const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, default_policy);
+      rocjitsu::consan::hook::transform_major_image_reservation(8, default_policy);
   ASSERT_TRUE(estimate);
   ASSERT_TRUE(estimate->ownership);
   EXPECT_EQ(estimate->ownership->phase,
-            rocjitsu::consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch);
+            rocjitsu::consan::hook::TransformOwnershipPhase::CompositeIncrementalPatch);
   EXPECT_EQ(estimate->ownership->input_image_copies, 1u);
   EXPECT_EQ(estimate->ownership->maximum_image_copies, 12u);
 }
 
 TEST(ConSanTransformMemoryTest, PinsParserAndPhaseOwnershipCoefficients) {
-  using rocjitsu::consan_hook::ConSanTransformOwnershipPhase;
-  const auto &phases = rocjitsu::consan_hook::kConSanTransformOwnershipPhases;
+  using rocjitsu::consan::hook::TransformOwnershipPhase;
+  const auto &phases = rocjitsu::consan::hook::kTransformOwnershipPhases;
 
   EXPECT_EQ(rocjitsu::kAmdGpuCodeObjectRetainedMajorImageUnits, 7u);
-  EXPECT_EQ(phases[0].phase, ConSanTransformOwnershipPhase::IncrementalPatch);
-  EXPECT_EQ(phases[1].phase, ConSanTransformOwnershipPhase::CompositeIncrementalPatch);
-  EXPECT_EQ(phases[2].phase, ConSanTransformOwnershipPhase::FinalValidation);
+  EXPECT_EQ(phases[0].phase, TransformOwnershipPhase::IncrementalPatch);
+  EXPECT_EQ(phases[1].phase, TransformOwnershipPhase::CompositeIncrementalPatch);
+  EXPECT_EQ(phases[2].phase, TransformOwnershipPhase::FinalValidation);
   EXPECT_EQ(phases[0].input_image_copies, 1u);
   EXPECT_EQ(phases[0].maximum_image_copies, 11u);
-  EXPECT_EQ(rocjitsu::consan_hook::consan_transform_max_maximum_image_copies(), 12u);
-  EXPECT_EQ(rocjitsu::consan_hook::consan_transform_max_total_copies(), 17u);
+  EXPECT_EQ(rocjitsu::consan::hook::transform_max_maximum_image_copies(), 12u);
+  EXPECT_EQ(rocjitsu::consan::hook::transform_max_total_copies(), 17u);
 }
 
 TEST(ConSanTransformMemoryTest, FloorsSubUnitPercentGrowthToZeroExtraBytes) {
   // Any percentage below 100 floors to zero extra bytes for a one-byte image.
   for (const uint32_t percent : {1u, 37u, 99u}) {
-    const rocjitsu::ConSanPatchedImageGrowthLimit policy = {
-        .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
+    const PatchedImageGrowthLimit policy = {
+        .kind = PatchedImageGrowthLimitKind::InputPercent,
         .input_percent = percent,
     };
-    const auto estimate =
-        rocjitsu::consan_hook::consan_transform_major_image_reservation(1, policy);
+    const auto estimate = rocjitsu::consan::hook::transform_major_image_reservation(1, policy);
     ASSERT_TRUE(estimate);
     EXPECT_EQ(estimate->maximum_image_bytes, 1u);
     EXPECT_EQ(estimate->reservation_bytes, 17u);
@@ -355,12 +346,11 @@ TEST(ConSanTransformMemoryTest, FloorsSubUnitPercentGrowthToZeroExtraBytes) {
 }
 
 TEST(ConSanTransformMemoryTest, ReportsNoGoverningPhaseForZeroReservation) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit no_growth = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit no_growth = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = 0,
   };
-  const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(0, no_growth);
+  const auto estimate = rocjitsu::consan::hook::transform_major_image_reservation(0, no_growth);
   ASSERT_TRUE(estimate);
   EXPECT_EQ(estimate->maximum_image_bytes, 0u);
   EXPECT_EQ(estimate->reservation_bytes, 0u);
@@ -368,63 +358,59 @@ TEST(ConSanTransformMemoryTest, ReportsNoGoverningPhaseForZeroReservation) {
 }
 
 TEST(ConSanTransformMemoryTest, RejectsInputPlusGrowthOverflow) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit sum_overflow = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit sum_overflow = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = std::numeric_limits<uint64_t>::max(),
   };
-  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation(8, sum_overflow));
+  EXPECT_FALSE(rocjitsu::consan::hook::transform_major_image_reservation(8, sum_overflow));
 }
 
 TEST(ConSanTransformMemoryTest, RejectsMaximumImagePhaseMultiplyOverflow) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit multiply_overflow = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit multiply_overflow = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = std::numeric_limits<uint64_t>::max() /
-                        rocjitsu::consan_hook::consan_transform_max_maximum_image_copies(),
+                        rocjitsu::consan::hook::transform_max_maximum_image_copies(),
   };
-  EXPECT_FALSE(
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, multiply_overflow));
+  EXPECT_FALSE(rocjitsu::consan::hook::transform_major_image_reservation(8, multiply_overflow));
 }
 
 TEST(ConSanTransformMemoryTest, RejectsInputImagePhaseMultiplyOverflow) {
-  constexpr rocjitsu::consan_hook::ConSanTransformOwnership final_validation =
-      rocjitsu::consan_hook::kConSanTransformOwnershipPhases[2];
+  constexpr rocjitsu::consan::hook::TransformOwnership final_validation =
+      rocjitsu::consan::hook::kTransformOwnershipPhases[2];
   static_assert(final_validation.phase ==
-                rocjitsu::consan_hook::ConSanTransformOwnershipPhase::FinalValidation);
-  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_phase_reservation_bytes(
+                rocjitsu::consan::hook::TransformOwnershipPhase::FinalValidation);
+  EXPECT_FALSE(rocjitsu::consan::hook::transform_phase_reservation_bytes(
       final_validation,
       std::numeric_limits<uint64_t>::max() / final_validation.input_image_copies + 1, 0));
 }
 
 TEST(ConSanTransformMemoryTest, RejectsPhaseReservationSumOverflow) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit no_growth = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit no_growth = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = 0,
   };
-  constexpr uint64_t maximum_total_copies =
-      rocjitsu::consan_hook::consan_transform_max_total_copies();
-  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation(
+  constexpr uint64_t maximum_total_copies = rocjitsu::consan::hook::transform_max_total_copies();
+  EXPECT_FALSE(rocjitsu::consan::hook::transform_major_image_reservation(
       std::numeric_limits<uint64_t>::max() / maximum_total_copies + 1, no_growth));
 }
 
 TEST(ConSanTransformMemoryTest, ReturnsExactLargestNoGrowthReservation) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit no_growth = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit no_growth = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = 0,
   };
-  constexpr uint64_t maximum_total_copies =
-      rocjitsu::consan_hook::consan_transform_max_total_copies();
+  constexpr uint64_t maximum_total_copies = rocjitsu::consan::hook::transform_max_total_copies();
   const uint64_t input = std::numeric_limits<uint64_t>::max() / maximum_total_copies;
-  const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(input, no_growth);
+  const auto estimate = rocjitsu::consan::hook::transform_major_image_reservation(input, no_growth);
   ASSERT_TRUE(estimate);
   EXPECT_EQ(estimate->reservation_bytes, input * maximum_total_copies);
 }
 
 TEST(ConSanTransformMemoryTest, RejectsUnknownGrowthPolicyKind) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit invalid = {
-      .kind = static_cast<rocjitsu::ConSanPatchedImageGrowthLimitKind>(255),
+  const PatchedImageGrowthLimit invalid = {
+      .kind = static_cast<PatchedImageGrowthLimitKind>(255),
   };
-  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation(8, invalid));
+  EXPECT_FALSE(rocjitsu::consan::hook::transform_major_image_reservation(8, invalid));
 }
 
 constexpr hsa_agent_t kGuestAgent{1};
@@ -492,7 +478,7 @@ int g_core_memory_runtime_reclaim_calls = 0;
 std::vector<size_t> g_core_memory_allocation_sizes;
 std::vector<uint64_t> g_core_memory_allocation_regions;
 std::vector<void *> g_core_memory_allocations;
-std::vector<rocjitsu::ConSanMoiReportHeader> g_core_memory_headers_at_free;
+std::vector<ReportHeader> g_core_memory_headers_at_free;
 std::vector<uint32_t> g_sc_markers_at_free;
 std::vector<std::vector<uint8_t>> g_code_object_reader_inputs;
 struct FakeMemoryReader {
@@ -507,14 +493,13 @@ std::vector<uint64_t> g_destroyed_executables;
 std::vector<std::pair<uint64_t, bool>> g_replacement_storage_valid_by_executable;
 std::vector<uint64_t> g_loaded_code_object_readers;
 std::vector<std::pair<uint64_t, uint64_t>> g_loaded_executable_readers;
-rocjitsu::ConSanTransformArtifacts g_transform_override_result;
-std::deque<rocjitsu::ConSanTransformArtifacts> g_transform_override_results;
+TransformArtifacts g_transform_override_result;
+std::deque<TransformArtifacts> g_transform_override_results;
 size_t g_log_sink_write_count = 0;
 size_t g_log_sink_max_write_size = 0;
 bool g_log_sink_writes_end_in_newline = true;
 std::string g_log_sink_bytes;
-std::vector<rocjitsu::ConSanFlavor> g_transform_override_flavors;
-std::vector<rocjitsu::ConSanMoiEngine> g_transform_override_engines;
+std::vector<Mode> g_transform_override_flavors;
 std::vector<std::vector<std::string>> g_transform_override_kernel_allowlists;
 std::vector<bool> g_transform_override_abort_unmatched_waits;
 std::vector<bool> g_transform_override_track_barriers;
@@ -522,11 +507,10 @@ std::vector<bool> g_transform_override_track_atomics;
 std::vector<bool> g_transform_override_fault_drop_barriers;
 std::vector<bool> g_transform_override_fault_mutations;
 std::vector<bool> g_transform_override_fault_dry_runs;
-std::vector<rocjitsu::ConSanPatchedImageGrowthLimit>
-    g_transform_override_patched_image_growth_limits;
+std::vector<PatchedImageGrowthLimit> g_transform_override_patched_image_growth_limits;
 bool g_transform_override_models_fault_application = false;
 size_t g_transform_override_actual_fault_applications = 1;
-std::optional<rocjitsu::ConSanTransformArtifacts> g_transform_override_live_fault_result;
+std::optional<TransformArtifacts> g_transform_override_live_fault_result;
 std::mutex g_transform_observation_mutex;
 std::mutex g_transform_block_mutex;
 std::condition_variable g_transform_block_cv;
@@ -538,7 +522,7 @@ std::condition_variable g_fault_application_block_cv;
 bool g_block_first_fault_application = false;
 bool g_first_fault_application_entered = false;
 bool g_release_first_fault_application = false;
-std::optional<rocjitsu::ConSanTransformArtifacts> g_first_fault_application_result;
+std::optional<TransformArtifacts> g_first_fault_application_result;
 std::mutex g_loader_block_mutex;
 std::condition_variable g_loader_block_cv;
 bool g_block_first_loader_call = false;
@@ -551,20 +535,14 @@ std::optional<hsa_status_t> g_reentrant_fault_load_status;
 std::vector<uint32_t> g_transform_override_runtime_sample_strides;
 std::vector<uint64_t> g_transform_override_report_sizes;
 std::vector<std::optional<uint64_t>> g_transform_override_sc_report_addresses;
-std::vector<std::optional<rocjitsu::ConSanMoiReportBufferLayout>>
-    g_transform_override_report_layouts;
-bool g_seed_auto_replay_report_on_load = false;
-bool g_seed_auto_replay_report_succeeded = false;
-bool g_seed_auto_replay_invalid_site_token = false;
-bool g_seed_auto_replay_sparse_capacity = false;
-bool g_seed_auto_replay_overlimit_range = false;
-bool g_seed_auto_sampled_report_on_load = false;
-bool g_seed_auto_sampled_report_succeeded = false;
-bool g_seed_auto_sampled_pending_release_scale = false;
-bool g_seed_auto_sampled_pending_identity_collision = false;
-bool g_seed_auto_sampled_conflict_pair = false;
-bool g_seed_auto_sampled_distinct_dispatches = false;
-bool g_seed_auto_sampled_distinct_clusters = false;
+std::vector<std::optional<ReportBufferLayout>> g_transform_override_report_layouts;
+bool g_seed_auto_report_on_load = false;
+bool g_seed_auto_report_succeeded = false;
+bool g_seed_auto_pending_release_scale = false;
+bool g_seed_auto_pending_identity_collision = false;
+bool g_seed_auto_conflict_pair = false;
+bool g_seed_auto_distinct_dispatches = false;
+bool g_seed_auto_distinct_clusters = false;
 std::vector<std::vector<uint8_t>> g_fake_allocations;
 std::vector<hsa_amd_memory_pool_t> g_fake_allocation_pools;
 std::vector<size_t> g_fake_allocation_sizes;
@@ -1020,7 +998,7 @@ hsa_status_t HSA_API fake_region_get_info(hsa_region_t region, hsa_region_info_t
     *static_cast<bool *>(value) = true;
     return HSA_STATUS_SUCCESS;
   case HSA_REGION_INFO_ALLOC_MAX_SIZE:
-    *static_cast<size_t *>(value) = rocjitsu::kConSanMoiAutoReportProcessCeilingBytes;
+    *static_cast<size_t *>(value) = kAutoReportProcessCeilingBytes;
     return HSA_STATUS_SUCCESS;
   case HSA_REGION_INFO_GLOBAL_FLAGS:
     *static_cast<uint32_t *>(value) = region.handle == 30 ? HSA_REGION_GLOBAL_FLAG_FINE_GRAINED
@@ -1055,9 +1033,8 @@ hsa_status_t HSA_API fake_core_memory_free(void *ptr) {
   if (it == g_core_memory_allocations.end())
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   const size_t index = static_cast<size_t>(it - g_core_memory_allocations.begin());
-  if (g_core_memory_allocation_sizes[index] >= sizeof(rocjitsu::ConSanMoiReportHeader))
-    g_core_memory_headers_at_free.push_back(
-        *static_cast<const rocjitsu::ConSanMoiReportHeader *>(ptr));
+  if (g_core_memory_allocation_sizes[index] >= sizeof(ReportHeader))
+    g_core_memory_headers_at_free.push_back(*static_cast<const ReportHeader *>(ptr));
   else
     g_sc_markers_at_free.push_back(*static_cast<const uint32_t *>(ptr));
   g_core_memory_allocation_sizes.erase(g_core_memory_allocation_sizes.begin() + index);
@@ -1079,33 +1056,31 @@ hsa_status_t HSA_API fake_memory_assign_agent(void *, hsa_agent_t agent, hsa_acc
   return agent.handle == kHostAgent.handle ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
-rocjitsu::TransformResult transform_override(std::span<const uint8_t> bytes,
-                                             const rocjitsu::ConSanRequest &request,
-                                             const rocjitsu::TransformPolicy &transform_policy,
-                                             const rocjitsu::RuntimePolicy &runtime_policy,
-                                             const rocjitsu::ConSanDebugOverrides &debug,
-                                             const rocjitsu::MutationRequest &mutation,
-                                             const rocjitsu::RuntimeCapabilities &capabilities,
-                                             const rocjitsu::BoundRuntimeResources &resources) {
+TransformResult transform_override(std::span<const uint8_t> bytes, const Request &request,
+                                   const TransformPolicy &transform_policy,
+                                   const RuntimePolicy &runtime_policy, const DebugOverrides &debug,
+                                   const MutationRequest &mutation,
+                                   const RuntimeCapabilities &capabilities,
+                                   const BoundRuntimeResources &resources) {
   const bool fault_mutation_enabled = mutation.has_fault_mutation();
-  std::optional<rocjitsu::ConSanTransformArtifacts> queued_result;
+  std::optional<TransformArtifacts> queued_result;
   {
     std::lock_guard lock(g_transform_observation_mutex);
-    g_transform_override_flavors.push_back(*request.flavor);
-    g_transform_override_engines.push_back(request.moi_engine);
+    g_transform_override_flavors.push_back(*request.mode);
     g_transform_override_kernel_allowlists.push_back(request.kernel_name_allowlist);
     g_transform_override_abort_unmatched_waits.push_back(debug.abort_unmatched_barrier_wait);
-    g_transform_override_track_barriers.push_back(request.moi_track_barriers);
-    g_transform_override_track_atomics.push_back(request.moi_track_atomics);
+    g_transform_override_track_barriers.push_back(request.track_barriers);
+    g_transform_override_track_atomics.push_back(request.track_atomics);
     g_transform_override_fault_drop_barriers.push_back(mutation.fault_drop_barrier);
     g_transform_override_fault_mutations.push_back(fault_mutation_enabled);
     g_transform_override_fault_dry_runs.push_back(mutation.fault_dry_run);
     g_transform_override_patched_image_growth_limits.push_back(
         transform_policy.patched_image_growth_limit);
-    g_transform_override_runtime_sample_strides.push_back(request.moi_runtime_sample_stride);
-    g_transform_override_sc_report_addresses.push_back(resources.report_buffer_address);
-    g_transform_override_report_sizes.push_back(resources.moi_report_buffer_size);
-    g_transform_override_report_layouts.push_back(resources.moi_report_layout);
+    g_transform_override_runtime_sample_strides.push_back(request.runtime_sample_stride);
+    g_transform_override_sc_report_addresses.push_back(
+        resources.supercollider_report_buffer_address);
+    g_transform_override_report_sizes.push_back(resources.report_buffer_size);
+    g_transform_override_report_layouts.push_back(resources.report_layout);
     if (!g_transform_override_results.empty()) {
       queued_result = std::move(g_transform_override_results.front());
       g_transform_override_results.pop_front();
@@ -1119,7 +1094,7 @@ rocjitsu::TransformResult transform_override(std::span<const uint8_t> bytes,
       g_transform_block_cv.wait(lock, [] { return g_release_first_transform; });
     }
   }
-  rocjitsu::ConSanTransformArtifacts result =
+  TransformArtifacts result =
       queued_result ? std::move(*queued_result) : g_transform_override_result;
   if (g_transform_override_models_fault_application && fault_mutation_enabled &&
       !mutation.fault_dry_run) {
@@ -1145,9 +1120,8 @@ rocjitsu::TransformResult transform_override(std::span<const uint8_t> bytes,
                                         ? g_transform_override_actual_fault_applications
                                         : 0u;
   }
-  return rocjitsu::TransformResultTestAccess::publish(bytes, request, transform_policy,
-                                                      runtime_policy, debug, mutation, capabilities,
-                                                      resources, std::move(result));
+  return TransformResultTestAccess::publish(bytes, request, transform_policy, runtime_policy, debug,
+                                            mutation, capabilities, resources, std::move(result));
 }
 
 hsa_status_t HSA_API fake_executable_load_agent_code_object(
@@ -1175,132 +1149,68 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
     g_fail_loader_once_for_reader.reset();
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  if (g_seed_auto_replay_report_on_load) {
-    g_seed_auto_replay_report_on_load = false;
+
+  if (g_seed_auto_report_on_load) {
+    g_seed_auto_report_on_load = false;
     if (g_core_memory_allocations.empty() || g_transform_override_report_layouts.empty() ||
         !g_transform_override_report_layouts.back()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
-    const rocjitsu::ConSanMoiReportBufferLayout &layout =
-        *g_transform_override_report_layouts.back();
-    if (layout.access_record_capacity < 2u)
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-    auto *const report = static_cast<uint8_t *>(g_core_memory_allocations.back());
-    auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(report);
-    const uint32_t second_record_index =
-        g_seed_auto_replay_sparse_capacity ? layout.access_record_capacity - 1u : 1u;
-    header->access_record_count =
-        g_seed_auto_replay_sparse_capacity ? layout.access_record_capacity : 2u;
-    auto *const records =
-        reinterpret_cast<rocjitsu::ConSanMoiAccessRecord *>(report + layout.access_records_offset);
-    records[0] = {
-        .generation = header->generation,
-        .workgroup_x = 0,
-        .wave_id = 1,
-        .lane_mask = 0x1,
-        .instruction_offset = 0xfe96c,
-        .access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write),
-        .lds_byte_offset = 16,
-        .lds_byte_count = 4,
-        .start_cell = 4,
-        .cell_count = 1,
-        .epoch = 3,
-        .event_index = 1,
-    };
-    records[second_record_index] = {
-        .generation = header->generation,
-        .workgroup_x = 0,
-        .wave_id = 2,
-        .lane_mask = 0x2,
-        .instruction_offset = 0xfe974,
-        .access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write),
-        .lds_byte_offset = 16,
-        .lds_byte_count = 4,
-        .start_cell = 4,
-        .cell_count = 1,
-        .epoch = 3,
-        .event_index = 2,
-    };
-    if (g_seed_auto_replay_invalid_site_token) {
-      records[0].site_token = layout.record_replay_logical_access_range_count;
-      records[second_record_index].site_token = layout.record_replay_logical_access_range_count;
-    }
-    if (g_seed_auto_replay_overlimit_range) {
-      constexpr uint32_t kOverlimitCell = (1u << 20u) + 1u;
-      records[second_record_index].lds_byte_offset =
-          kOverlimitCell * rocjitsu::consan_moi_shadow_cell::granule_bytes;
-      records[second_record_index].start_cell = kOverlimitCell;
-    }
-    g_seed_auto_replay_report_succeeded = true;
-  }
-  if (g_seed_auto_sampled_report_on_load) {
-    g_seed_auto_sampled_report_on_load = false;
-    if (g_core_memory_allocations.empty() || g_transform_override_report_layouts.empty() ||
-        !g_transform_override_report_layouts.back()) {
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    }
-    const rocjitsu::ConSanMoiReportBufferLayout &layout =
-        *g_transform_override_report_layouts.back();
-    const uint32_t visible_sampled_count =
-        g_seed_auto_sampled_pending_release_scale || g_seed_auto_sampled_conflict_pair ? 2u : 1u;
-    if (layout.sampled_watchpoint_capacity < visible_sampled_count ||
-        layout.sampled_causal_window_capacity < visible_sampled_count) {
+    const ReportBufferLayout &layout = *g_transform_override_report_layouts.back();
+    const uint32_t visible_count =
+        g_seed_auto_pending_release_scale || g_seed_auto_conflict_pair ? 2u : 1u;
+    if (layout.watchpoint_capacity < visible_count ||
+        layout.causal_window_capacity < visible_count) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     auto *const report = static_cast<uint8_t *>(g_core_memory_allocations.back());
-    auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(report);
-    header->sampled_causal_window_count = visible_sampled_count;
-    auto *const windows = reinterpret_cast<rocjitsu::ConSanMoiSampledCausalWindow *>(
-        report + layout.sampled_causal_windows_offset);
-    auto *const watchpoints =
-        reinterpret_cast<uint64_t *>(report + layout.sampled_watchpoints_offset);
-    for (uint32_t index = 0; index < visible_sampled_count; ++index) {
+    auto *const header = reinterpret_cast<ReportHeader *>(report);
+    header->causal_window_count = visible_count;
+    auto *const windows = reinterpret_cast<CausalWindow *>(report + layout.causal_windows_offset);
+    auto *const watchpoints = reinterpret_cast<uint64_t *>(report + layout.watchpoints_offset);
+    for (uint32_t index = 0; index < visible_count; ++index) {
       windows[index] = {
           .generation = header->generation,
-          .dispatch_id =
-              0x1122334455667788ull + (g_seed_auto_sampled_distinct_dispatches ? index : 0u),
+          .dispatch_id = 0x1122334455667788ull + (g_seed_auto_distinct_dispatches ? index : 0u),
           .workgroup_x = 3u,
           .workgroup_y = 4u,
           .workgroup_z = 5u,
           .epoch = 2u,
           .first_entry = index,
           .entry_count = 1u,
-          .publication_state =
-              static_cast<uint32_t>(rocjitsu::ConSanMoiSampledCausalPublicationState::Ready),
-          .cluster_workgroup_id = g_seed_auto_sampled_distinct_clusters ? index : 0u,
+          .publication_state = static_cast<uint32_t>(CausalPublicationState::Ready),
+          .cluster_workgroup_id = g_seed_auto_distinct_clusters ? index : 0u,
       };
-      watchpoints[index] = rocjitsu::pack_consan_moi_sampled_watchpoint_entry(
-          rocjitsu::ConSanMoiShadowAccessKind::Write,
-          /*owner_id=*/7u + (g_seed_auto_sampled_conflict_pair ? index : 0u), /*epoch=*/2u,
+      watchpoints[index] = pack_watchpoint_entry(
+          ShadowAccessKind::Write,
+          /*owner_id=*/7u + (g_seed_auto_conflict_pair ? index : 0u), /*epoch=*/2u,
           static_cast<uint32_t>(header->generation), /*start_cell=*/9u, /*cell_count=*/2u);
     }
-    if (g_seed_auto_sampled_pending_release_scale) {
-      const uint32_t owner_bank_count =
-          rocjitsu::consan_moi_sampled_pending_acquire_owner_bank_count(
-              layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
+    if (g_seed_auto_pending_release_scale) {
+      const uint32_t owner_bank_count = pending_acquire_owner_bank_count(
+          layout.pending_acquire_capacity, layout.causal_window_capacity);
       constexpr uint32_t kAcquireSlot = 1u;
       if (owner_bank_count == 0u)
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       const uint32_t pending_index =
           kAcquireSlot * owner_bank_count + (7u & (owner_bank_count - 1u));
-      if (pending_index >= layout.sampled_pending_acquire_capacity)
+      if (pending_index >= layout.pending_acquire_capacity)
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      const auto encoded = rocjitsu::encode_consan_moi_sampled_sync_metadata({
+      const auto encoded = encode_sync_metadata({
           .address = 0x123456780000ull,
           .byte_count = 4u,
-          .kind = rocjitsu::ConSanMoiSampledSyncKind::Atomic,
-          .role = rocjitsu::ConSanMoiSampledSyncRole::RmwAcquireRelease,
-          .scope = rocjitsu::ConSanMoiSampledSyncScope::Agent,
-          .outcome = rocjitsu::ConSanMoiSampledSyncOutcome::RmwReturnsOld,
+          .kind = SyncMetadataKind::Atomic,
+          .role = SyncRole::RmwAcquireRelease,
+          .scope = SyncScope::Agent,
+          .outcome = SyncOutcome::RmwReturnsOld,
           .epoch_before = 2u,
           .epoch_after = 2u,
       });
-      if (encoded.classification != rocjitsu::ConSanMoiSampledSyncClassification::Valid)
+      if (encoded.classification != SyncClassification::Valid)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      auto *const pending = reinterpret_cast<rocjitsu::ConSanMoiSampledPendingAcquireSlot *>(
-          report + layout.sampled_pending_acquires_offset);
+      auto *const pending =
+          reinterpret_cast<PendingAcquireSlot *>(report + layout.pending_acquires_offset);
       pending[pending_index] = {
           .version = 2u,
           .selected_slot = kAcquireSlot,
@@ -1314,31 +1224,30 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
           .reserved = 1u,
           .metadata = encoded.packed,
       };
-      header->sampled_pending_acquire_count = 1u;
+      header->pending_acquire_count = 1u;
     }
-    if (g_seed_auto_sampled_pending_identity_collision) {
-      const uint32_t owner_bank_count =
-          rocjitsu::consan_moi_sampled_pending_acquire_owner_bank_count(
-              layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
+    if (g_seed_auto_pending_identity_collision) {
+      const uint32_t owner_bank_count = pending_acquire_owner_bank_count(
+          layout.pending_acquire_capacity, layout.causal_window_capacity);
       if (owner_bank_count == 0u)
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       const uint32_t pending_index = 7u & (owner_bank_count - 1u);
-      if (pending_index >= layout.sampled_pending_acquire_capacity)
+      if (pending_index >= layout.pending_acquire_capacity)
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      const auto encoded = rocjitsu::encode_consan_moi_sampled_sync_metadata({
+      const auto encoded = encode_sync_metadata({
           .address = 0x123456780000ull,
           .byte_count = 4u,
-          .kind = rocjitsu::ConSanMoiSampledSyncKind::Atomic,
-          .role = rocjitsu::ConSanMoiSampledSyncRole::RmwAcquire,
-          .scope = rocjitsu::ConSanMoiSampledSyncScope::Agent,
-          .outcome = rocjitsu::ConSanMoiSampledSyncOutcome::RmwReturnsOld,
+          .kind = SyncMetadataKind::Atomic,
+          .role = SyncRole::RmwAcquire,
+          .scope = SyncScope::Agent,
+          .outcome = SyncOutcome::RmwReturnsOld,
           .epoch_before = 2u,
           .epoch_after = 2u,
       });
-      if (encoded.classification != rocjitsu::ConSanMoiSampledSyncClassification::Valid)
+      if (encoded.classification != SyncClassification::Valid)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      auto *const pending = reinterpret_cast<rocjitsu::ConSanMoiSampledPendingAcquireSlot *>(
-          report + layout.sampled_pending_acquires_offset);
+      auto *const pending =
+          reinterpret_cast<PendingAcquireSlot *>(report + layout.pending_acquires_offset);
       pending[pending_index] = {
           .version = 2u,
           .selected_slot = 0u,
@@ -1353,9 +1262,9 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
           .source_epoch = 2u,
           .metadata = encoded.packed,
       };
-      header->sampled_pending_acquire_count = 1u;
+      header->pending_acquire_count = 1u;
     }
-    g_seed_auto_sampled_report_succeeded = true;
+    g_seed_auto_report_succeeded = true;
   }
   if (loaded_code_object != nullptr)
     loaded_code_object->handle = 77;
@@ -1702,9 +1611,9 @@ TEST(HsaHooksUnitTest, SharedAutoReportAllocationReleasesFailedAgentAssignment) 
   FakeApiTable api;
   api.core.hsa_agent_iterate_regions_fn = fake_guest_agent_iterate_regions;
 
-  const rocjitsu::consan_hook::detail::AutoReportAllocation allocation =
-      rocjitsu::consan_hook::detail::allocate_auto_report_memory(api.table.core_, kGuestAgent,
-                                                                 sizeof(uint32_t));
+  const rocjitsu::consan::hook::detail::AutoReportAllocation allocation =
+      rocjitsu::consan::hook::detail::allocate_auto_report_memory(api.table.core_, kGuestAgent,
+                                                                  sizeof(uint32_t));
 
   EXPECT_FALSE(allocation);
   EXPECT_STREQ(allocation.failure_reason, "hsa_memory_assign_agent");
@@ -1793,8 +1702,8 @@ public:
         dlsym(library_, "rj_dbi_test_set_consan_transform_override"));
     set_log_sink_override_ = reinterpret_cast<SetLogSinkOverrideFn>(
         dlsym(library_, "rj_dbi_test_set_log_sink_override"));
-    moi_retry_count_ =
-        reinterpret_cast<MoiRetryCountFn>(dlsym(library_, "rj_dbi_test_consan_moi_retry_count"));
+    retry_count_ =
+        reinterpret_cast<RetryCountFn>(dlsym(library_, "rj_dbi_test_consan_retry_count"));
     instrumentation_nanoseconds_ = reinterpret_cast<InstrumentationNanosecondsFn>(
         dlsym(library_, "rj_dbi_consan_instrumentation_nanoseconds"));
     checkpoint_after_device_synchronize_ = reinterpret_cast<CheckpointAfterDeviceSynchronizeFn>(
@@ -1804,7 +1713,7 @@ public:
     end_epoch_analysis_window_ = reinterpret_cast<EpochAnalysisWindowFn>(
         dlsym(library_, "rj_dbi_consan_end_epoch_analysis_window"));
     if (on_load_ == nullptr || on_unload_ == nullptr || set_override_ == nullptr ||
-        set_log_sink_override_ == nullptr || moi_retry_count_ == nullptr ||
+        set_log_sink_override_ == nullptr || retry_count_ == nullptr ||
         instrumentation_nanoseconds_ == nullptr ||
         checkpoint_after_device_synchronize_ == nullptr ||
         begin_epoch_analysis_window_ == nullptr || end_epoch_analysis_window_ == nullptr) {
@@ -1831,7 +1740,7 @@ public:
 
   [[nodiscard]] bool installed() const { return installed_; }
   [[nodiscard]] const std::string &error() const { return error_; }
-  [[nodiscard]] size_t moi_retry_count() const { return moi_retry_count_(); }
+  [[nodiscard]] size_t retry_count() const { return retry_count_(); }
   [[nodiscard]] uint64_t instrumentation_nanoseconds() const {
     return instrumentation_nanoseconds_();
   }
@@ -1843,7 +1752,7 @@ public:
   }
   [[nodiscard]] uint32_t end_epoch_analysis_window() const { return end_epoch_analysis_window_(); }
   void use_production_transform() { set_override_(nullptr); }
-  void set_log_sink_override(rocjitsu::consan_hook::LogSinkOverride sink) {
+  void set_log_sink_override(rocjitsu::consan::hook::LogSinkOverride sink) {
     set_log_sink_override_(sink);
   }
   void unload() {
@@ -1876,9 +1785,9 @@ public:
 private:
   using OnLoadFn = bool (*)(HsaApiTable *, uint64_t, uint64_t, const char *const *);
   using OnUnloadFn = void (*)();
-  using SetOverrideFn = void (*)(rocjitsu::consan_hook::ConSanTransformOverride);
-  using SetLogSinkOverrideFn = void (*)(rocjitsu::consan_hook::LogSinkOverride);
-  using MoiRetryCountFn = size_t (*)();
+  using SetOverrideFn = void (*)(rocjitsu::consan::hook::TransformOverride);
+  using SetLogSinkOverrideFn = void (*)(rocjitsu::consan::hook::LogSinkOverride);
+  using RetryCountFn = size_t (*)();
   using InstrumentationNanosecondsFn = uint64_t (*)();
   using CheckpointAfterDeviceSynchronizeFn = uint32_t (*)();
   using EpochAnalysisWindowFn = uint32_t (*)();
@@ -1888,7 +1797,7 @@ private:
   OnUnloadFn on_unload_ = nullptr;
   SetOverrideFn set_override_ = nullptr;
   SetLogSinkOverrideFn set_log_sink_override_ = nullptr;
-  MoiRetryCountFn moi_retry_count_ = nullptr;
+  RetryCountFn retry_count_ = nullptr;
   InstrumentationNanosecondsFn instrumentation_nanoseconds_ = nullptr;
   CheckpointAfterDeviceSynchronizeFn checkpoint_after_device_synchronize_ = nullptr;
   EpochAnalysisWindowFn begin_epoch_analysis_window_ = nullptr;
@@ -1901,19 +1810,12 @@ private:
 struct ConSanHookProfile {
   const char *name;
   const char *mode;
-  rocjitsu::ConSanFlavor expected_flavor;
-  rocjitsu::ConSanMoiEngine expected_engine;
+  Mode expected_flavor;
 };
 
 constexpr std::array kConSanHookProfiles = {
-    ConSanHookProfile{"supercollider", "supercollider", rocjitsu::ConSanFlavor::SuperCollider,
-                      rocjitsu::ConSanMoiEngine::RecordReplay},
-    ConSanHookProfile{"record_replay", "record-replay", rocjitsu::ConSanFlavor::Moi,
-                      rocjitsu::ConSanMoiEngine::RecordReplay},
-    ConSanHookProfile{"inline_shadow", "inline-shadow", rocjitsu::ConSanFlavor::Moi,
-                      rocjitsu::ConSanMoiEngine::InlineShadow},
-    ConSanHookProfile{"sampled", "sampled", rocjitsu::ConSanFlavor::Moi,
-                      rocjitsu::ConSanMoiEngine::Sampled},
+    ConSanHookProfile{"supercollider", "supercollider", Mode::SuperCollider},
+    ConSanHookProfile{"default", "default", Mode::Default},
 };
 
 void expect_transform_profile(const ConSanHookProfile &profile, size_t expected_calls = 1u);
@@ -1929,7 +1831,6 @@ void reset_code_object_observations() {
   g_loaded_code_object_readers.clear();
   g_loaded_executable_readers.clear();
   g_transform_override_flavors.clear();
-  g_transform_override_engines.clear();
   g_transform_override_kernel_allowlists.clear();
   g_transform_override_abort_unmatched_waits.clear();
   g_transform_override_track_barriers.clear();
@@ -1969,18 +1870,13 @@ void reset_code_object_observations() {
   g_transform_override_report_sizes.clear();
   g_transform_override_report_layouts.clear();
   g_transform_override_results.clear();
-  g_seed_auto_replay_report_on_load = false;
-  g_seed_auto_replay_report_succeeded = false;
-  g_seed_auto_replay_invalid_site_token = false;
-  g_seed_auto_replay_sparse_capacity = false;
-  g_seed_auto_replay_overlimit_range = false;
-  g_seed_auto_sampled_report_on_load = false;
-  g_seed_auto_sampled_report_succeeded = false;
-  g_seed_auto_sampled_pending_release_scale = false;
-  g_seed_auto_sampled_pending_identity_collision = false;
-  g_seed_auto_sampled_conflict_pair = false;
-  g_seed_auto_sampled_distinct_dispatches = false;
-  g_seed_auto_sampled_distinct_clusters = false;
+  g_seed_auto_report_on_load = false;
+  g_seed_auto_report_succeeded = false;
+  g_seed_auto_pending_release_scale = false;
+  g_seed_auto_pending_identity_collision = false;
+  g_seed_auto_conflict_pair = false;
+  g_seed_auto_distinct_dispatches = false;
+  g_seed_auto_distinct_clusters = false;
   g_transform_override_result = {};
 }
 
@@ -2004,31 +1900,30 @@ void configure_consan_profile(const ConSanHookProfile &profile, bool fail_closed
   unsetenv("RJ_CONSAN_POLICY");
   setenv("RJ_CONSAN_FAIL_CLOSED", fail_closed ? "1" : "0", 1);
   unsetenv("RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT");
-  unsetenv("RJ_CONSAN_MOI_TRACK_BARRIERS");
-  unsetenv("RJ_CONSAN_MOI_TRACK_ATOMICS");
+  unsetenv("RJ_CONSAN_TRACK_BARRIERS");
+  unsetenv("RJ_CONSAN_TRACK_ATOMICS");
   unsetenv("RJ_CONSAN_SC_REPORT_MODE");
-  unsetenv("RJ_CONSAN_REPORT_BUFFER");
+  unsetenv("RJ_CONSAN_SC_REPORT_BUFFER");
   unsetenv("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES");
   unsetenv("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT");
   unsetenv("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES");
   unsetenv("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES");
   unsetenv("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES");
-  if (profile.expected_flavor == rocjitsu::ConSanFlavor::Moi) {
-    setenv("RJ_CONSAN_MOI_REPORT_BUFFER", "4096", 1);
-    setenv("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", "65536", 1);
-    setenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0", 1);
+  if (profile.expected_flavor == Mode::Default) {
+    setenv("RJ_CONSAN_REPORT_BUFFER", "4096", 1);
+    setenv("RJ_CONSAN_REPORT_BUFFER_SIZE", "65536", 1);
+    setenv("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "0", 1);
   } else {
-    unsetenv("RJ_CONSAN_MOI_REPORT_BUFFER");
-    unsetenv("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE");
-    unsetenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE");
+    unsetenv("RJ_CONSAN_REPORT_BUFFER");
+    unsetenv("RJ_CONSAN_REPORT_BUFFER_SIZE");
+    unsetenv("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE");
   }
 }
 
-uint64_t
-transform_test_reservation_bytes(uint64_t input_bytes,
-                                 const rocjitsu::ConSanPatchedImageGrowthLimit &growth_limit) {
+uint64_t transform_test_reservation_bytes(uint64_t input_bytes,
+                                          const PatchedImageGrowthLimit &growth_limit) {
   const auto estimate =
-      rocjitsu::consan_hook::consan_transform_major_image_reservation(input_bytes, growth_limit);
+      rocjitsu::consan::hook::transform_major_image_reservation(input_bytes, growth_limit);
   if (!estimate) {
     ADD_FAILURE() << "test transform reservation unexpectedly overflowed";
     return 0;
@@ -2037,47 +1932,46 @@ transform_test_reservation_bytes(uint64_t input_bytes,
 }
 
 uint64_t absolute_transform_test_reservation_bytes(uint64_t input_bytes, uint64_t growth_bytes) {
-  const rocjitsu::ConSanPatchedImageGrowthLimit growth_limit = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+  const PatchedImageGrowthLimit growth_limit = {
+      .kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = growth_bytes,
   };
   return transform_test_reservation_bytes(input_bytes, growth_limit);
 }
 
-void install_test_access_coverage(
-    rocjitsu::ConSanTransformArtifacts &result, size_t site_count,
-    rocjitsu::ConSanSiteDecisionKind decision_kind, rocjitsu::ConSanAccessPolicyReason reason,
-    rocjitsu::ConSanLoweringOutcomeKind lowering = rocjitsu::ConSanLoweringOutcomeKind::Pending,
-    rocjitsu::ConSanCapabilityEngine engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
-    rocjitsu::ConSanProbeIntentKind intent_kind = rocjitsu::ConSanProbeIntentKind::AccessRecord) {
-  rocjitsu::ConSanObservationPlan plan;
-  plan.engine = engine;
+void install_test_access_coverage(TransformArtifacts &result, size_t site_count,
+                                  SiteDecisionKind decision_kind, AccessPolicyReason reason,
+                                  LoweringOutcomeKind lowering = LoweringOutcomeKind::Pending,
+                                  Mode mode = Mode::Default,
+                                  ProbeIntentKind intent_kind = ProbeIntentKind::Access) {
+  ObservationPlan plan;
+  plan.mode = mode;
   plan.site_decisions.reserve(site_count);
-  if (decision_kind == rocjitsu::ConSanSiteDecisionKind::Admitted)
+  if (decision_kind == SiteDecisionKind::Admitted)
     plan.probe_intents.reserve(site_count);
   for (size_t index = 0; index < site_count; ++index) {
-    const rocjitsu::PhysicalSiteId physical{
+    const PhysicalSiteId physical{
         .code_object = result.program_inventory.code_object_id(),
         .original_text_offset = index * sizeof(uint32_t),
     };
-    const rocjitsu::SemanticSiteId semantic{
+    const SemanticSiteId semantic{
         .physical = physical,
-        .domain = rocjitsu::ConSanSemanticSiteDomain::Access,
+        .domain = SemanticSiteDomain::Access,
         .member_ordinal = 0u,
         .range_ordinal = 0u,
     };
-    if (decision_kind == rocjitsu::ConSanSiteDecisionKind::Admitted) {
-      const rocjitsu::ConSanProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
+    if (decision_kind == SiteDecisionKind::Admitted) {
+      const ProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
       plan.probe_intents.push_back({
           .id = id,
-          .engine = engine,
+          .mode = mode,
           .source_site = {static_cast<uint32_t>(index)},
           .physical_site = physical,
           .covered_semantic_sites = {semantic},
           .kind = intent_kind,
-          .position = rocjitsu::ConSanProbePosition::Before,
+          .position = ProbePosition::Before,
           .synchronization_association = std::nullopt,
-          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .dynamic_result = DynamicResultRequirement::None,
           .atomic_lowering_form = std::nullopt,
       });
     }
@@ -2088,25 +1982,24 @@ void install_test_access_coverage(
     });
   }
   ASSERT_TRUE(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
-  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
-    ASSERT_TRUE(
-        rocjitsu::publish_test_lowering_outcome(result.coverage_ledger, intent.id, lowering));
+  result.coverage_ledger = CoverageLedger(std::move(plan));
+  for (const ProbeIntent &intent : result.observation_plan().probe_intents) {
+    ASSERT_TRUE(publish_test_lowering_outcome(result.coverage_ledger, intent.id, lowering));
   }
 }
 
-rocjitsu::ConSanTransformArtifacts process_growth_replacement_result(size_t replacement_size = 12) {
+TransformArtifacts process_growth_replacement_result(size_t replacement_size = 12) {
   assert(replacement_size >= 4);
-  rocjitsu::ConSanTransformArtifacts result;
+  TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_CDNA3,
                                        ROCJITSU_CODE_TARGET_GFX942);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = TransformOutcome::ModifiedValid;
   result.replacement.resize(replacement_size);
   std::ranges::copy(std::array<uint8_t, 4>{0x7f, 'E', 'L', 'F'}, result.replacement.begin());
-  rocjitsu::ConSanObservationPlan plan;
-  plan.engine = rocjitsu::ConSanCapabilityEngine::RecordReplay;
+  ObservationPlan plan;
+  plan.mode = Mode::Default;
   assert(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
+  result.coverage_ledger = CoverageLedger(std::move(plan));
   return result;
 }
 
@@ -2175,16 +2068,15 @@ TEST(HsaHooksUnitTest, ConSanRepeatedUnloadDoesNotEmitAnotherVerdict) {
   EXPECT_EQ(log.find("ConSan analysis verdict", first + 1), std::string::npos) << log;
 }
 
-TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiSampled) {
-  EXPECT_EQ(rocjitsu::ConSanRequest{}.moi_engine, rocjitsu::ConSanMoiEngine::Sampled);
+TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsTo) {
   for (const char *selection : {static_cast<const char *>(nullptr), ""}) {
     SCOPED_TRACE(selection ? "empty mode" : "unset mode");
     ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
     ScopedEnvVar mode("RJ_CONSAN_MODE", selection);
     ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "0");
     ScopedEnvVar absolute_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
     ScopedEnvVar relative_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", nullptr);
     ScopedEnvVar process_transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
@@ -2193,8 +2085,8 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiSampled) {
     ScopedEnvVar process_growth_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
 
     reset_code_object_observations();
-    rocjitsu::ConSanTransformArtifacts unchanged;
-    unchanged.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+    TransformArtifacts unchanged;
+    unchanged.outcome = TransformOutcome::Unchanged;
     g_transform_override_result = unchanged;
 
     FakeApiTable api;
@@ -2214,9 +2106,7 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiSampled) {
               HSA_STATUS_SUCCESS);
     EXPECT_GT(hook.instrumentation_nanoseconds(), 0u);
     ASSERT_EQ(g_transform_override_flavors.size(), 1u);
-    EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
-    ASSERT_EQ(g_transform_override_engines.size(), 1u);
-    EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::Sampled);
+    EXPECT_EQ(g_transform_override_flavors.front(), Mode::Default);
 
     ASSERT_EQ(g_transform_override_runtime_sample_strides.size(), 1u);
     EXPECT_EQ(g_transform_override_runtime_sample_strides.front(), 256u);
@@ -2233,28 +2123,28 @@ TEST(HsaHooksUnitTest, ConSanThreadsAbsoluteAndRelativePatchedImageGrowthLimits)
   struct GrowthCase {
     const char *absolute;
     const char *relative;
-    rocjitsu::ConSanPatchedImageGrowthLimit expected;
+    PatchedImageGrowthLimit expected;
   };
   constexpr std::array cases = {
       GrowthCase{"4096",
                  nullptr,
-                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+                 {.kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
                   .absolute_bytes = 4096u,
                   .input_percent = 0u}},
       GrowthCase{"0100",
                  nullptr,
-                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+                 {.kind = PatchedImageGrowthLimitKind::AbsoluteBytes,
                   .absolute_bytes = 100u,
                   .input_percent = 0u}},
       GrowthCase{nullptr,
                  "37",
-                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
-                  .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+                 {.kind = PatchedImageGrowthLimitKind::InputPercent,
+                  .absolute_bytes = kDefaultMaxPatchedImageGrowthBytes,
                   .input_percent = 37u}},
       GrowthCase{nullptr,
                  "0100",
-                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
-                  .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+                 {.kind = PatchedImageGrowthLimitKind::InputPercent,
+                  .absolute_bytes = kDefaultMaxPatchedImageGrowthBytes,
                   .input_percent = 100u}},
   };
 
@@ -2265,7 +2155,7 @@ TEST(HsaHooksUnitTest, ConSanThreadsAbsoluteAndRelativePatchedImageGrowthLimits)
     ScopedEnvVar absolute("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", test.absolute);
     ScopedEnvVar relative("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", test.relative);
     reset_code_object_observations();
-    g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+    g_transform_override_result.outcome = TransformOutcome::Unchanged;
 
     FakeApiTable api;
     InstalledDbiHook hook(api);
@@ -2391,10 +2281,10 @@ TEST(HsaHooksUnitTest, ConSanAcceptsBoundaryProcessMemoryLimits) {
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanAcceptsRuntimeSamplingOverrideForEveryMoiEngine) {
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+TEST(HsaHooksUnitTest, ConSanAcceptsRuntimeSamplingOverrideForEveryEngine) {
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-  for (size_t profile_index : {1u, 2u, 3u}) {
+  for (size_t profile_index : {1u}) {
     SCOPED_TRACE(kConSanHookProfiles[profile_index].name);
     configure_consan_profile(kConSanHookProfiles[profile_index], false);
     reset_code_object_observations();
@@ -2406,11 +2296,10 @@ TEST(HsaHooksUnitTest, ConSanAcceptsRuntimeSamplingOverrideForEveryMoiEngine) {
       ASSERT_TRUE(hook.installed()) << hook.error();
     }
     const std::string log = testing::internal::GetCapturedStderr();
-    EXPECT_NE(
-        log.find("moi_runtime_sample_stride=1 moi_runtime_sample_stride_source=expert-override"),
-        std::string::npos)
+    EXPECT_NE(log.find("runtime_sample_stride=1 runtime_sample_stride_source=expert-override"),
+              std::string::npos)
         << log;
-    EXPECT_EQ(log.find("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE is ignored"), std::string::npos) << log;
+    EXPECT_EQ(log.find("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE is ignored"), std::string::npos) << log;
   }
 }
 
@@ -2426,7 +2315,7 @@ TEST(HsaHooksUnitTest, ConSanAcceptsEpochAnalysisPolicies) {
   for (const auto &[value, normalized] : policies) {
     SCOPED_TRACE(value);
     configure_consan_profile(kConSanHookProfiles[1], false);
-    ScopedEnvVar epoch_analysis("RJ_CONSAN_MOI_EPOCH_ANALYSIS", value);
+    ScopedEnvVar epoch_analysis("RJ_CONSAN_EPOCH_ANALYSIS", value);
     ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
     reset_code_object_observations();
 
@@ -2437,7 +2326,7 @@ TEST(HsaHooksUnitTest, ConSanAcceptsEpochAnalysisPolicies) {
       ASSERT_TRUE(hook.installed()) << hook.error();
     }
     const std::string log = testing::internal::GetCapturedStderr();
-    EXPECT_NE(log.find("moi_epoch_analysis=" + std::string(normalized)), std::string::npos) << log;
+    EXPECT_NE(log.find("epoch_analysis=" + std::string(normalized)), std::string::npos) << log;
   }
 }
 
@@ -2450,7 +2339,7 @@ TEST(HsaHooksUnitTest, ConSanRejectsMalformedEpochAnalysisPolicies) {
   for (const char *value : values) {
     SCOPED_TRACE(value);
     configure_consan_profile(kConSanHookProfiles[1], false);
-    ScopedEnvVar epoch_analysis("RJ_CONSAN_MOI_EPOCH_ANALYSIS", value);
+    ScopedEnvVar epoch_analysis("RJ_CONSAN_EPOCH_ANALYSIS", value);
     reset_code_object_observations();
 
     FakeApiTable api;
@@ -2490,8 +2379,8 @@ TEST(HsaHooksUnitTest, ConSanWarnsWhenTransformLimitCannotAdmitAnyNonemptyObject
 TEST(HsaHooksUnitTest, ConSanWarnsWhenRelativeGrowthTransformLimitCannotAdmitAnyObject) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", "37");
-  const rocjitsu::ConSanPatchedImageGrowthLimit growth_limit = {
-      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
+  const PatchedImageGrowthLimit growth_limit = {
+      .kind = PatchedImageGrowthLimitKind::InputPercent,
       .input_percent = 37,
   };
   const uint64_t smallest_reservation = transform_test_reservation_bytes(1, growth_limit);
@@ -2776,7 +2665,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationBeforeOriginalLoad) {
       std::to_string(absolute_transform_test_reservation_bytes(8, 4));
   ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
                                transform_limit_value.c_str());
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = TransformOutcome::Unchanged;
   g_block_first_loader_call = true;
 
   FakeApiTable api;
@@ -2887,7 +2776,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationOnEarlyRejection) {
       std::to_string(absolute_transform_test_reservation_bytes(8, 4));
   ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
                                transform_limit_value.c_str());
-  rocjitsu::ConSanTransformArtifacts unresolved = process_growth_replacement_result();
+  TransformArtifacts unresolved = process_growth_replacement_result();
   install_consan_test_program_identity(unresolved, ROCJITSU_CODE_ARCH_INVALID,
                                        ROCJITSU_CODE_TARGET_GFX1201,
                                        /*semantic_arch_required=*/true);
@@ -3536,174 +3425,43 @@ TEST(HsaHooksUnitTest, ConSanKeepsRetainedChargeForDestroyInsideUnloadedWindow) 
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(executable), HSA_STATUS_SUCCESS);
 }
 
-TEST(HsaHooksUnitTest, RecordReplayBankSaturationReadsModeOwnedFlag) {
-  rocjitsu::ConSanMoiReportHeader header;
-  EXPECT_EQ(rocjitsu::consan_hook::record_replay_bank_saturation_count(header), 0u);
-
-  header.flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
-  EXPECT_EQ(rocjitsu::consan_hook::record_replay_bank_saturation_count(header), 1u);
-}
-
-TEST(HsaHooksUnitTest, ConSanMoiReportTrustEvaluationOwnsDynamicCompleteness) {
-  rocjitsu::consan_hook::AutoMoiReportSummary summary;
-  const auto missing =
-      rocjitsu::consan_hook::evaluate_auto_moi_report_trust(summary, /*require_records=*/true);
+TEST(HsaHooksUnitTest, ConSanReportTrustEvaluationOwnsDynamicCompleteness) {
+  using Summary = rocjitsu::consan::hook::ReportSummary;
+  using rocjitsu::consan::hook::evaluate_report_trust;
+  Summary summary;
+  const auto missing = evaluate_report_trust(summary, true);
   EXPECT_EQ(missing.visible_evidence_count, 0u);
   EXPECT_TRUE(missing.required_records_missing);
   EXPECT_FALSE(missing.dynamic_complete);
-
-  summary.visible_access_record_count = 1;
-  summary.visible_sampled_watchpoint_count = 2;
-  summary.replay_diagnostic_count = 1;
-  summary.allocation_failure_count = 1;
-  summary.cleanup_failure_count = 2;
-  summary.dropped_access_record_count = 1;
-  summary.sampled_dropped_window_count = 2;
-  summary.record_replay_bank_saturation_count = 1;
-  summary.record_replay_invalid_site_token_count = 1;
-  summary.sampled_stale_snapshot_count = 1;
-  summary.exact_incomplete_snapshot_count = 1;
-  summary.release_changed_snapshot_count = 1;
-  summary.token_malformed_snapshot_count = 1;
-  summary.inline_undercoverage_count = 2;
-  summary.inline_overflow_count = 1;
-  summary.sampled_unsupported_sync_count = 1;
-  summary.sampled_malformed_sync_count = 1;
-  summary.replay_dropped_access_count = 1;
-  summary.replay_dropped_barrier_count = 1;
-  summary.replay_unsupported_access_count = 1;
-  summary.replay_unsupported_atomic_count = 1;
-  summary.replay_unsupported_fence_count = 1;
-  summary.replay_metadata_full_count = 1;
-  summary.replay_diagnostic_capacity_exhausted_count = 1;
-
-  const auto evaluated =
-      rocjitsu::consan_hook::evaluate_auto_moi_report_trust(summary, /*require_records=*/true);
-  EXPECT_EQ(evaluated.visible_evidence_count, 3u);
-  EXPECT_EQ(evaluated.dropped_record_count, 3u);
-  EXPECT_EQ(evaluated.inline_coverage_loss_count, 3u);
-  EXPECT_EQ(evaluated.dynamic_incomplete_count, 24u);
-  EXPECT_FALSE(evaluated.required_records_missing);
-  EXPECT_FALSE(evaluated.dynamic_complete);
-  EXPECT_TRUE(evaluated.has_diagnostics);
-}
-
-TEST(HsaHooksUnitTest, RecordReplayPressureDistinguishesLowHighAndSaturatedFanout) {
-  rocjitsu::ConSanMoiReportHeader header;
-  header.access_record_capacity = 8;
-  header.record_replay_dispatch_token_capacity = 4;
-  std::array<rocjitsu::ConSanMoiAccessRecord, 7> records{};
-
-  const auto low = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
-  EXPECT_TRUE(low.available);
-  EXPECT_FALSE(low.saturated);
-  EXPECT_EQ(low.unavailable_reason,
-            rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::None);
-  EXPECT_EQ(low.occupied_access_record_count, 0u);
-  EXPECT_EQ(low.access_record_capacity, 8u);
-  EXPECT_EQ(low.observed_site_count, 0u);
-  EXPECT_EQ(low.maximum_site_owner_address_group_count, 0u);
-  EXPECT_EQ(low.address_group_headroom, 64u);
-  EXPECT_EQ(low.logical_access_range_count, 2u);
-
-  for (size_t index = 0; index < 3; ++index) {
-    records[index].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
-    records[index].site_token = 0;
-    records[index].lds_byte_offset = static_cast<uint32_t>(index) * 4u;
+  EXPECT_TRUE(evaluate_report_trust(summary, false).dynamic_complete);
+  summary.visible_watchpoint_count = 2;
+  EXPECT_TRUE(evaluate_report_trust(summary, true).dynamic_complete);
+  for (auto counter : {&Summary::allocation_failure_count, &Summary::cleanup_failure_count,
+                       &Summary::dropped_window_count, &Summary::stale_snapshot_count,
+                       &Summary::incomplete_snapshot_count, &Summary::changed_snapshot_count,
+                       &Summary::malformed_snapshot_count, &Summary::unsupported_sync_count,
+                       &Summary::malformed_sync_count}) {
+    auto incomplete = summary;
+    incomplete.*counter = 1;
+    const auto evaluated = evaluate_report_trust(incomplete, true);
+    EXPECT_EQ(evaluated.visible_evidence_count, 2u);
+    EXPECT_EQ(evaluated.dynamic_incomplete_count, 1u);
+    EXPECT_FALSE(evaluated.required_records_missing);
+    EXPECT_FALSE(evaluated.dynamic_complete);
+    EXPECT_FALSE(evaluated.has_diagnostics);
   }
-  records[3].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Read);
-  records[3].site_token = 0;
-  records[3].wave_id = 1;
-  records[4].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
-  records[4].site_token = 1;
-  records[5].access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
-  records[5].site_token = 7;
-  records[6] = records[1];
-
-  const auto high = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
-  EXPECT_TRUE(high.available);
-  EXPECT_FALSE(high.saturated);
-  EXPECT_EQ(high.occupied_access_record_count, 7u);
-  EXPECT_EQ(high.observed_site_count, 2u);
-  EXPECT_EQ(high.maximum_site_owner_address_group_count, 3u);
-  EXPECT_EQ(high.maximum_site_token, 0u);
-  EXPECT_EQ(high.invalid_site_token_count, 1u);
-
-  header.flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
-  const auto saturated = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
-  EXPECT_TRUE(saturated.available);
-  EXPECT_TRUE(saturated.saturated);
-  EXPECT_EQ(saturated.occupied_access_record_count, high.occupied_access_record_count);
-  EXPECT_EQ(saturated.maximum_site_owner_address_group_count,
-            high.maximum_site_owner_address_group_count);
-
-  header.record_replay_dispatch_token_capacity = 0;
-  const auto no_dispatch_directory = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
-  EXPECT_EQ(
-      no_dispatch_directory.unavailable_reason,
-      rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NoDispatchDirectory);
-  header.record_replay_dispatch_token_capacity = 4;
-  header.access_record_capacity = 0;
-  const auto no_access_table = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/2, /*address_group_headroom=*/64);
-  EXPECT_EQ(no_access_table.unavailable_reason,
-            rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NoAccessTable);
-  header.access_record_capacity = 8;
-  const auto no_logical_ranges = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/0, /*address_group_headroom=*/64);
-  EXPECT_EQ(no_logical_ranges.unavailable_reason,
-            rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::
-                NoLogicalAccessRanges);
-}
-
-TEST(HsaHooksUnitTest, RecordReplayPressureKeysFanoutByFullDynamicIdentity) {
-  rocjitsu::ConSanMoiReportHeader header;
-  header.access_record_capacity = 16;
-  header.record_replay_dispatch_token_capacity = 4;
-  std::array<rocjitsu::ConSanMoiAccessRecord, 8> records{};
-  for (auto &record : records) {
-    record.access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
-    record.site_token = 1;
-    record.generation = 10;
-    record.workgroup_x = 1;
-    record.workgroup_y = 2;
-    record.workgroup_z = 3;
-    record.wave_id = 4;
+  for (auto counter : {&Summary::conflict_count, &Summary::immediate_conflict_count}) {
+    auto conflict = summary;
+    conflict.*counter = 1;
+    const auto evaluated = evaluate_report_trust(conflict, true);
+    EXPECT_TRUE(evaluated.dynamic_complete);
+    EXPECT_TRUE(evaluated.has_diagnostics);
   }
-  // Keep the two records for the first owner interleaved with the other
-  // identities so this also pins the host-side sort before fanout counting.
-  records[0].lds_byte_offset = 0;
-  records[1].generation = 11;
-  records[1].lds_byte_offset = 8;
-  records[2].workgroup_x = 9;
-  records[2].lds_byte_offset = 8;
-  records[3].lds_byte_offset = 4;
-  records[4].workgroup_y = 9;
-  records[4].lds_byte_offset = 8;
-  records[5].workgroup_z = 9;
-  records[5].lds_byte_offset = 8;
-  records[6].wave_id = 5;
-  records[6].lds_byte_offset = 8;
-  records[7] = records[3];
-
-  const auto telemetry = rocjitsu::consan_hook::record_replay_pressure_telemetry(
-      header, records, /*logical_access_range_count=*/3, /*address_group_headroom=*/8);
-  EXPECT_TRUE(telemetry.available);
-  EXPECT_EQ(telemetry.occupied_access_record_count, 8u);
-  EXPECT_EQ(telemetry.observed_site_count, 1u);
-  EXPECT_EQ(telemetry.maximum_site_owner_address_group_count, 2u);
-  EXPECT_EQ(telemetry.maximum_site_token, 1u);
-  EXPECT_EQ(telemetry.address_group_headroom, 8u);
-  EXPECT_EQ(telemetry.logical_access_range_count, 3u);
 }
 
-TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  std::array<rocjitsu::consan_hook::AutoMoiSampledEvidence, 2> sampled{};
+TEST(HsaHooksUnitTest, ConSanAnalyzerOwnsConflicts) {
+  using AccessKind = ShadowAccessKind;
+  std::array<rocjitsu::consan::hook::Evidence, 2> sampled{};
   for (uint32_t index = 0; index < sampled.size(); ++index) {
     sampled[index].index = index;
     sampled[index].generation = 7;
@@ -3719,476 +3477,200 @@ TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
         .byte_count = 4,
     };
   }
-  const auto sampled_conflict =
-      rocjitsu::consan_hook::analyze_auto_moi_sampled_conflicts(sampled, false);
-  EXPECT_EQ(sampled_conflict.conflict_count, 1u);
-  ASSERT_EQ(sampled_conflict.conflicts.size(), 1u);
-  EXPECT_EQ(sampled_conflict.conflicts.front().first.index, 0u);
-  EXPECT_EQ(sampled_conflict.conflicts.front().second.index, 1u);
+  const auto conflict = rocjitsu::consan::hook::analyze_conflicts(sampled, false);
+  EXPECT_EQ(conflict.conflict_count, 1u);
+  ASSERT_EQ(conflict.examples.size(), 1u);
+  EXPECT_EQ(conflict.examples.front().first.index, 0u);
+  EXPECT_EQ(conflict.examples.front().second.index, 1u);
 
-  std::array<rocjitsu::consan_hook::AutoMoiSampledStaticMapping, 2> mappings{};
+  std::array<rocjitsu::consan::hook::AccessStaticMapping, 2> mappings{};
   mappings[0].owner_kernel_ids = {0x100};
   mappings[1].owner_kernel_ids = {0x200};
   mappings[0].owner_provenance_complete = true;
   mappings[1].owner_provenance_complete = true;
   sampled[0].static_mapping = &mappings[0];
   sampled[1].static_mapping = &mappings[1];
-  EXPECT_EQ(
-      rocjitsu::consan_hook::analyze_auto_moi_sampled_conflicts(sampled, false).conflict_count, 0u);
+  EXPECT_EQ(rocjitsu::consan::hook::analyze_conflicts(sampled, false).conflict_count, 0u);
 
-  rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
-      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
-      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/4,
-      /*sampled_watchpoint_capacity=*/0);
-  header.access_record_count = 2;
-  const std::array records = {
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 7,
-          .workgroup_x = 2,
-          .wave_id = 1,
-          .lane_mask = 0x1,
-          .instruction_offset = 0x10,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 12,
-          .lds_byte_count = 4,
-          .start_cell = 3,
-          .cell_count = 1,
-          .epoch = 4,
-          .event_index = 41,
-      },
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 7,
-          .workgroup_x = 2,
-          .wave_id = 2,
-          .lane_mask = 0x2,
-          .instruction_offset = 0x20,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 12,
-          .lds_byte_count = 4,
-          .start_cell = 3,
-          .cell_count = 1,
-          .epoch = 4,
-          .event_index = 57,
-      },
-  };
-  const auto replay = rocjitsu::consan_hook::analyze_auto_moi_record_replay(
-      header, records, {}, {}, {}, {}, false,
-      /*logical_access_range_count=*/0, /*address_group_headroom=*/0);
-  EXPECT_TRUE(replay.replay_performed);
-  EXPECT_TRUE(replay.effective_conflict);
-  EXPECT_EQ(replay.effective_diagnostic_count, 1u);
-  ASSERT_EQ(replay.diagnostics.size(), 1u);
-  EXPECT_EQ(replay.diagnostics.front().first_instruction_offset, 0x10u);
-  EXPECT_EQ(replay.diagnostics.front().second_instruction_offset, 0x20u);
-
-  // The report-level composition point must run exactly the selected mode.
-  // Seed valid evidence for both analyzers so an accidental all-mode pass is
-  // visible in the inactive summary fields.
+  // Report-level analysis consumes the same typed ConSan evidence.
   sampled[0].static_mapping = nullptr;
   sampled[1].static_mapping = nullptr;
-  rocjitsu::consan_hook::AutoMoiReportPipelineInput pipeline_input;
-  rocjitsu::consan_hook::AutoMoiDecodedReport sampled_report;
-  sampled_report.header.flags = rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
-  rocjitsu::consan_hook::AutoMoiSampledDecodedReport sampled_decoded;
-  sampled_decoded.evidence.assign(sampled.begin(), sampled.end());
-  sampled_report.mode = std::move(sampled_decoded);
-  const auto sampled_report_analysis =
-      rocjitsu::consan_hook::analyze_auto_moi_report(pipeline_input, sampled_report);
-  EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledConflictAnalysis>(
-      sampled_report_analysis.mode));
-  EXPECT_EQ(sampled_report_analysis.summary.sampled_conflict_count, 1u);
-  EXPECT_EQ(sampled_report_analysis.summary.record_replay_bank_saturation_count, 0u);
-  EXPECT_EQ(sampled_report_analysis.summary.replay_conflict_count, 0u);
-
-  rocjitsu::consan_hook::AutoMoiDecodedReport record_replay_report;
-  record_replay_report.header = header;
-  rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport record_replay_decoded;
-  record_replay_decoded.access_records.assign(records.begin(), records.end());
-  record_replay_report.mode = std::move(record_replay_decoded);
-  const auto record_replay_report_analysis =
-      rocjitsu::consan_hook::analyze_auto_moi_report(pipeline_input, record_replay_report);
-  EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayAnalysis>(
-      record_replay_report_analysis.mode));
-  EXPECT_EQ(record_replay_report_analysis.summary.sampled_conflict_count, 0u);
-  EXPECT_EQ(record_replay_report_analysis.summary.replay_conflict_count, 1u);
-}
-
-TEST(HsaHooksUnitTest, RecordReplayShadowCapacityUsesExactUnalignedByteRange) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
-      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/1,
-      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/0,
-      /*sampled_watchpoint_capacity=*/0);
-  header.access_record_count = 1;
-  const std::array records = {
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 7,
-          .workgroup_x = 2,
-          .wave_id = 1,
-          .lane_mask = 0x1,
-          .instruction_offset = 0x10,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 2045,
-          .lds_byte_count = 4,
-          // The static-width cell count cannot encode the extra cell touched
-          // when the runtime address is unaligned.
-          .start_cell = 511,
-          .cell_count = 1,
-          .epoch = 4,
-          .event_index = 41,
-      },
-  };
-
-  const auto replay = rocjitsu::consan_hook::analyze_auto_moi_record_replay(
-      header, records, {}, {}, {}, {}, false,
-      /*logical_access_range_count=*/0, /*address_group_headroom=*/0);
-
-  EXPECT_EQ(replay.required_shadow_entry_count, 513u);
-  EXPECT_EQ(replay.replay_shadow_entry_count, 513u);
-  EXPECT_FALSE(replay.shadow_bounded);
-  EXPECT_FALSE(replay.replay.metadata_full);
-  EXPECT_FALSE(replay.effective_conflict);
-}
-
-TEST(HsaHooksUnitTest, RecordReplaySparseSnapshotCopiesOnlySemanticallyVisibleRegions) {
-  rocjitsu::ConSanMoiAutoReportInventory inventory;
-  inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
-  inventory.access_range_count = 2;
-  inventory.barrier_event_count = 1024;
-  inventory.atomic_event_count = 512;
-  inventory.fence_event_count = 256;
-  inventory.diagnostic_count = 2048;
-  inventory.record_replay_dispatch_token_capacity = 2;
-  inventory.record_replay_access_dispatch_bank_count = 1;
-  inventory.record_replay_access_owner_bank_count = 1;
-  inventory.record_replay_address_group_headroom = 1;
-  const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
-  ASSERT_TRUE(report.complete());
-  const auto header = rocjitsu::make_consan_moi_report_header_for_layout(1, 2, report.layout);
-
-  const auto plan = rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
-      header, report.layout, report.required_bytes, report.layout.access_record_capacity,
-      /*visible_barriers=*/3, /*visible_atomics=*/2, /*visible_fences=*/1,
-      /*visible_diagnostics=*/4);
-  ASSERT_TRUE(plan);
-  EXPECT_EQ(plan->range_count, 6u);
-  const size_t expected_bytes =
-      sizeof(rocjitsu::ConSanMoiReportHeader) +
-      static_cast<size_t>(report.layout.access_record_capacity) *
-          sizeof(rocjitsu::ConSanMoiAccessRecord) +
-      3u * sizeof(rocjitsu::ConSanMoiBarrierRecord) + 2u * sizeof(rocjitsu::ConSanMoiAtomicRecord) +
-      sizeof(rocjitsu::ConSanMoiFenceRecord) + 4u * sizeof(rocjitsu::ConSanMoiDiagnosticRecord);
-  EXPECT_EQ(plan->copied_bytes, expected_bytes);
-  EXPECT_LT(plan->copied_bytes, report.required_bytes);
-
-  EXPECT_FALSE(rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
-      header, report.layout, report.required_bytes, report.layout.access_record_capacity,
-      report.layout.barrier_record_capacity + 1u, 0, 0, 0));
-  auto malformed_layout = report.layout;
-  malformed_layout.diagnostic_records_offset = report.required_bytes;
-  EXPECT_FALSE(rocjitsu::consan_hook::plan_auto_moi_record_replay_snapshot(
-      header, malformed_layout, report.required_bytes, report.layout.access_record_capacity, 0, 0,
-      0, 1));
+  rocjitsu::consan::hook::ReportPipelineInput pipeline_input;
+  rocjitsu::consan::hook::DecodedReport report;
+  report.records.evidence.assign(sampled.begin(), sampled.end());
+  const auto analysis = rocjitsu::consan::hook::analyze_report(pipeline_input, report);
+  EXPECT_EQ(analysis.summary.conflict_count, 1u);
+  EXPECT_EQ(analysis.conflicts.conflict_count, 1u);
 }
 
 TEST(HsaHooksUnitTest, AutoReportSnapshotOwnsVisibilityAndCopyFailures) {
-  rocjitsu::ConSanMoiAutoReportInventory inventory;
-  inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  AutoReportInventory inventory;
   inventory.access_range_count = 2;
   inventory.barrier_event_count = 16;
   inventory.atomic_event_count = 8;
-  inventory.fence_event_count = 4;
-  inventory.diagnostic_count = 8;
-  inventory.record_replay_dispatch_token_capacity = 2;
-  inventory.record_replay_access_dispatch_bank_count = 1;
-  inventory.record_replay_access_owner_bank_count = 1;
-  inventory.record_replay_address_group_headroom = 1;
-  const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
+  inventory.range_bank_count = 2;
+  inventory.watchpoint_count = 2;
+  const auto report = plan_auto_report(inventory);
   ASSERT_TRUE(report.complete());
 
   std::vector<uint8_t> source(report.required_bytes, 0xa5);
-  auto header = rocjitsu::make_consan_moi_report_header_for_layout(1, 2, report.layout);
-  header.barrier_record_count = 1;
-  header.atomic_record_count = 1;
-  header.fence_record_count = 1;
-  header.diagnostic_count = 1;
+  auto header = make_report_header_for_layout(1, 2, report.layout);
   std::memcpy(source.data(), &header, sizeof(header));
-  const rocjitsu::consan_hook::AutoMoiReportSnapshotRequest request{
+  const rocjitsu::consan::hook::ReportSnapshotRequest request{
       .source = source.data(),
       .size = source.size(),
-      .expected_layout = report.layout,
-      .expected_engine = rocjitsu::ConSanMoiEngine::RecordReplay,
       .fine_grained = true,
   };
 
-  const auto sparse = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(request);
-  ASSERT_TRUE(sparse.complete());
-  EXPECT_LT(sparse.copied_bytes, source.size());
-  EXPECT_EQ(sparse.bytes[report.layout.barrier_records_offset], 0xa5);
-  EXPECT_EQ(
-      sparse.bytes[report.layout.barrier_records_offset + sizeof(rocjitsu::ConSanMoiBarrierRecord)],
-      0u);
+  const auto snapshot = rocjitsu::consan::hook::capture_report_snapshot(request);
+  ASSERT_TRUE(snapshot.complete());
+  EXPECT_EQ(snapshot.copied_bytes, source.size());
+  EXPECT_EQ(snapshot.bytes, source);
 
   source[0] = 0;
-  const auto malformed = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(request);
+  const auto malformed = rocjitsu::consan::hook::capture_report_snapshot(request);
   ASSERT_TRUE(malformed.complete());
   EXPECT_EQ(malformed.copied_bytes, source.size());
   EXPECT_EQ(malformed.bytes, source);
 
   auto coarse_request = request;
   coarse_request.fine_grained = false;
-  const auto unavailable = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(coarse_request);
-  EXPECT_EQ(unavailable.failure,
-            rocjitsu::consan_hook::AutoMoiReportSnapshotFailure::CopyUnavailable);
+  const auto unavailable = rocjitsu::consan::hook::capture_report_snapshot(coarse_request);
+  EXPECT_EQ(unavailable.failure, rocjitsu::consan::hook::ReportSnapshotFailure::CopyUnavailable);
 
   const auto failing_copy = [](void *, void *, const void *, size_t, int32_t *status) {
     *status = 17;
     return false;
   };
-  const auto failed = rocjitsu::consan_hook::capture_auto_moi_report_snapshot(
-      coarse_request, failing_copy, nullptr);
-  EXPECT_EQ(failed.failure, rocjitsu::consan_hook::AutoMoiReportSnapshotFailure::CopyFailed);
+  const auto failed =
+      rocjitsu::consan::hook::capture_report_snapshot(coarse_request, failing_copy, nullptr);
+  EXPECT_EQ(failed.failure, rocjitsu::consan::hook::ReportSnapshotFailure::CopyFailed);
   EXPECT_EQ(failed.copy_status, 17);
 }
 
 TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
-  rocjitsu::ConSanMoiAutoReportInventory inventory;
-  inventory.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
-  inventory.access_range_count = 1;
-  inventory.record_replay_dispatch_token_capacity = 1;
-  inventory.record_replay_access_dispatch_bank_count = 1;
-  inventory.record_replay_access_owner_bank_count = 1;
-  inventory.record_replay_address_group_headroom = 1;
-  const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
-  ASSERT_TRUE(report.complete());
 
-  rocjitsu::consan_hook::AutoMoiReportSnapshot snapshot;
+  AutoReportInventory inventory;
+  inventory.access_range_count = 1;
+  inventory.range_bank_count = 1;
+  inventory.watchpoint_count = 1;
+  const auto report = plan_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+  ReportSnapshot snapshot;
   snapshot.bytes.resize(report.required_bytes);
-  auto header = rocjitsu::make_consan_moi_report_header_for_layout(7, 11, report.layout);
-  header.event_counter = 1;
-  header.access_record_count = report.layout.access_record_capacity + 2u;
+  auto header = make_report_header_for_layout(7, 11, report.layout);
+  header.causal_window_count = 1;
+  header.dropped_window_count = 2;
   std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
-  auto *records = reinterpret_cast<rocjitsu::ConSanMoiAccessRecord *>(
-      snapshot.bytes.data() + report.layout.access_records_offset);
-  records[0] = {
+  const CausalWindow window{
       .generation = 7,
-      .wave_id = 3,
-      .lane_mask = 1,
-      .instruction_offset = 0x40,
-      .access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write),
-      .lds_byte_offset = 16,
-      .lds_byte_count = 4,
-      .start_cell = 4,
-      .cell_count = 1,
-      .epoch = 2,
-      .event_index = 1,
+      .dispatch_id = 11,
+      .first_entry = 0,
+      .entry_count = 1,
+      .publication_state = static_cast<uint32_t>(CausalPublicationState::Ready),
   };
-  rocjitsu::consan_hook::AutoMoiReportSummary initial_summary;
-  // Registry metadata already classified this loss. Decoding must accumulate
-  // dynamic evidence rather than overwriting an earlier typed reason.
-  initial_summary.inline_malformed_count = 1;
-  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+  std::memcpy(snapshot.bytes.data() + report.layout.causal_windows_offset, &window, sizeof(window));
+  const uint64_t packed = pack_watchpoint_entry(ShadowAccessKind::Write, 3, 0, 7, 16, 4);
+  std::memcpy(snapshot.bytes.data() + report.layout.watchpoints_offset, &packed, sizeof(packed));
+  ReportSummary initial_summary;
+  initial_summary.allocation_failure_count = 1;
+  ReportPipelineInput input;
   input.reader = 101;
   input.source_address = 0x1000;
   input.size = snapshot.bytes.size();
   input.layout = report.layout;
-  const auto decoded =
-      rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, initial_summary);
+  const auto decoded = decode_report(input, snapshot, initial_summary);
   ASSERT_TRUE(decoded.complete());
-  EXPECT_EQ(decoded.visible_access_slots.size(), report.layout.access_record_capacity);
-  const auto &record_replay =
-      std::get<rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport>(decoded.mode);
-  ASSERT_EQ(record_replay.access_records.size(), 1u);
-  EXPECT_EQ(record_replay.access_records.front().instruction_offset, 0x40u);
-  EXPECT_EQ(decoded.summary.visible_access_record_count, 1u);
-  EXPECT_EQ(decoded.summary.dropped_access_record_count, 2u);
-  EXPECT_EQ(decoded.summary.inline_malformed_count, 1u);
-
+  ASSERT_EQ(decoded.records.evidence.size(), 1u);
+  EXPECT_EQ(decoded.records.evidence.front().entry.owner_id, 3u);
+  EXPECT_EQ(decoded.summary.visible_watchpoint_count, 1u);
+  EXPECT_EQ(decoded.summary.dropped_window_count, 2u);
+  EXPECT_EQ(decoded.summary.allocation_failure_count, 1u);
+  auto mismatched = input;
+  ++mismatched.layout.watchpoint_capacity;
+  EXPECT_EQ(decode_report(mismatched, snapshot, {}).failure, ReportDecodeFailure::LayoutMismatch);
   snapshot.bytes[0] = 0;
-  const auto malformed = rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, {});
-  EXPECT_EQ(malformed.failure, rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader);
+  EXPECT_EQ(decode_report(input, snapshot, {}).failure, ReportDecodeFailure::InvalidHeader);
+  snapshot.bytes.resize(sizeof(header) - 1);
+  EXPECT_EQ(decode_report(input, snapshot, {}).failure, ReportDecodeFailure::SnapshotTooSmall);
 }
 
-TEST(HsaHooksUnitTest, AutoReportDecoderUsesLayoutAsItsOnlyModeAuthority) {
-  constexpr std::array engines{
-      rocjitsu::ConSanMoiEngine::RecordReplay,
-      rocjitsu::ConSanMoiEngine::Sampled,
-      rocjitsu::ConSanMoiEngine::InlineShadow,
-  };
-  for (const rocjitsu::ConSanMoiEngine engine : engines) {
-    SCOPED_TRACE(rocjitsu::consan_moi_engine_name(engine));
-    rocjitsu::ConSanMoiAutoReportInventory inventory;
-    inventory.engine = engine;
-    if (engine == rocjitsu::ConSanMoiEngine::RecordReplay) {
-      inventory.access_range_count = 1u;
-      inventory.record_replay_dispatch_token_capacity = 1u;
-      inventory.record_replay_access_dispatch_bank_count = 1u;
-      inventory.record_replay_access_owner_bank_count = 1u;
-      inventory.record_replay_address_group_headroom = 1u;
-    } else if (engine == rocjitsu::ConSanMoiEngine::Sampled) {
-      inventory.sampled_range_bank_count = 1u;
-      inventory.sampled_watchpoint_count = 1u;
-    } else {
-      inventory.inline_lds_bytes = 4u;
-    }
-    const auto report = rocjitsu::plan_consan_moi_auto_report(inventory);
-    ASSERT_TRUE(report.complete());
-
-    rocjitsu::consan_hook::AutoMoiReportSnapshot snapshot;
-    snapshot.bytes.resize(report.required_bytes);
-    const auto header = rocjitsu::make_consan_moi_report_header_for_layout(7u, 11u, report.layout);
-    std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
-    rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
-    input.size = snapshot.bytes.size();
-    input.layout = report.layout;
-
-    const auto decoded = rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, {});
-    ASSERT_TRUE(decoded.complete());
-    if (engine == rocjitsu::ConSanMoiEngine::RecordReplay) {
-      EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport>(
-          decoded.mode));
-    } else if (engine == rocjitsu::ConSanMoiEngine::InlineShadow) {
-      EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiInlineShadowDecodedReport>(
-          decoded.mode));
-    } else {
-      EXPECT_TRUE(
-          std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledDecodedReport>(decoded.mode));
-    }
-  }
-}
-
-TEST(HsaHooksUnitTest, AutoReportPipelineCarriesOneStaticMetadataModeAlternative) {
-  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+TEST(HsaHooksUnitTest, AutoReportPipelineCarriesOptionalMetadata) {
+  rocjitsu::consan::hook::ReportPipelineInput input;
   EXPECT_EQ(input.static_metadata, nullptr);
-
-  rocjitsu::consan_hook::AutoMoiRuntimeStaticMetadata metadata =
-      rocjitsu::consan_hook::AutoMoiSampledStaticMetadata{.mappings = {}, .malformed = true};
+  rocjitsu::consan::hook::RuntimeStaticMetadata metadata =
+      rocjitsu::consan::hook::AccessStaticMetadata{.mappings = {}, .malformed = true};
   input.static_metadata = &metadata;
-  EXPECT_TRUE(
-      std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledStaticMetadata>(metadata));
-  EXPECT_FALSE(
-      std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayStaticMetadata>(metadata));
-
-  metadata = std::monostate{};
-  EXPECT_TRUE(std::holds_alternative<std::monostate>(metadata));
-  EXPECT_FALSE(
-      std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledStaticMetadata>(metadata));
+  ASSERT_TRUE(input.static_metadata->has_value());
+  EXPECT_TRUE(input.static_metadata->value().malformed);
+  metadata.reset();
+  EXPECT_FALSE(input.static_metadata->has_value());
 }
 
 TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDiagnostics) {
-  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+  rocjitsu::consan::hook::ReportPipelineInput input;
   input.reader = 101;
   input.source_address = 0x2000;
   input.size = 64;
   input.input_fingerprint = "fixture";
 
-  rocjitsu::consan_hook::AutoMoiDecodedReport invalid;
-  invalid.failure = rocjitsu::consan_hook::AutoMoiReportDecodeFailure::InvalidHeader;
+  rocjitsu::consan::hook::DecodedReport invalid;
+  invalid.failure = rocjitsu::consan::hook::ReportDecodeFailure::InvalidHeader;
   invalid.header.magic = 0x1234;
   invalid.header.abi_version = 9;
   invalid.header.header_size = 7;
   const auto failure =
-      rocjitsu::consan_hook::render_auto_moi_report({input, invalid, invalid.summary, nullptr});
+      rocjitsu::consan::hook::render_report({input, invalid, invalid.summary, nullptr});
   ASSERT_EQ(failure.size(), 1u);
-  EXPECT_EQ(failure.front().kind, rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Failure);
+  EXPECT_EQ(failure.front().kind, rocjitsu::consan::hook::ReportDiagnosticKind::Failure);
   EXPECT_EQ(failure.front().text,
-            "ConSan MOI auto report reader=101 has invalid header magic=0x00001234 abi=9 "
+            "ConSan auto report reader=101 has invalid header magic=0x00001234 abi=9 "
             "header_size=7");
 
-  rocjitsu::consan_hook::AutoMoiDecodedReport decoded;
-  input.layout.engine = rocjitsu::ConSanMoiEngine::InlineShadow;
+  rocjitsu::consan::hook::DecodedReport decoded;
   decoded.header.generation = 5;
-  rocjitsu::consan_hook::AutoMoiInlineShadowDecodedReport inline_decoded;
-  inline_decoded.issues.push_back({
-      .reason = rocjitsu::consan_hook::AutoMoiInlineShadowEvidenceReason::ExactMalformed,
+  rocjitsu::consan::hook::DecodedEvidence evidence;
+  evidence.issues.push_back({
+      .reason = rocjitsu::consan::hook::EvidenceReason::MalformedWatchpoint,
       .index = 3,
-      .words = {2, 0x11, 0x22, 0x33, 4},
+      .words = {0x11, 0x22, 4},
   });
-  decoded.mode = std::move(inline_decoded);
-  rocjitsu::consan_hook::AutoMoiModeAnalysis mode_analysis =
-      rocjitsu::consan_hook::AutoMoiInlineShadowAnalysis{};
-  const auto rendered = rocjitsu::consan_hook::render_auto_moi_report(
-      {input, decoded, decoded.summary, &mode_analysis});
+  decoded.records = std::move(evidence);
+  rocjitsu::consan::hook::ConflictAnalysis conflict_analysis =
+      rocjitsu::consan::hook::ConflictAnalysis{};
+  const auto rendered =
+      rocjitsu::consan::hook::render_report({input, decoded, decoded.summary, &conflict_analysis});
   ASSERT_GE(rendered.size(), 2u);
   EXPECT_TRUE(std::ranges::any_of(rendered, [](const auto &diagnostic) {
-    return diagnostic.kind == rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Evidence &&
-           diagnostic.text ==
-               "ConSan MOI first malformed exact snapshot reader=101 index=3 version_before=2 "
-               "packed_access=0x0000000000000011 dispatch_id=0x0000000000000022 "
-               "byte_provenance=0x00000033 version_after=4";
+    return diagnostic.kind == rocjitsu::consan::hook::ReportDiagnosticKind::Evidence &&
+           diagnostic.text == "ConSan malformed packed watchpoint index=3 low=0x00000011 "
+                              "high=0x00000022 epoch=4";
   }));
   EXPECT_TRUE(std::ranges::any_of(rendered, [](const auto &diagnostic) {
-    return diagnostic.kind == rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Summary &&
-           diagnostic.text.starts_with("ConSan MOI auto report reader=101 addr=0x2000 bytes=64 ");
+    return diagnostic.kind == rocjitsu::consan::hook::ReportDiagnosticKind::Summary &&
+           diagnostic.text.starts_with("ConSan auto report reader=101 addr=0x2000 bytes=64 ");
   }));
 }
 
-TEST(HsaHooksUnitTest, AutoReportRendererEmitsOnlySelectedModeSummary) {
-  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+TEST(HsaHooksUnitTest, AutoReportRendererEmitsSummary) {
+
+  ReportPipelineInput input;
   input.reader = 17;
-  input.input_fingerprint = "mode-local-renderer";
-  rocjitsu::consan_hook::AutoMoiDecodedReport decoded;
-
-  const auto render_summary = [&](rocjitsu::ConSanMoiEngine engine,
-                                  rocjitsu::consan_hook::AutoMoiModeDecodedReport mode,
-                                  rocjitsu::consan_hook::AutoMoiModeAnalysis analysis) {
-    input.layout.engine = engine;
-    decoded.mode = std::move(mode);
-    const auto rendered =
-        rocjitsu::consan_hook::render_auto_moi_report({input, decoded, decoded.summary, &analysis});
-    const auto summary = std::ranges::find_if(rendered, [](const auto &diagnostic) {
-      return diagnostic.kind == rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Summary;
-    });
-    EXPECT_NE(summary, rendered.end());
-    return summary != rendered.end() ? summary->text : std::string{};
-  };
-
-  const std::string replay =
-      render_summary(rocjitsu::ConSanMoiEngine::RecordReplay,
-                     rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport{},
-                     rocjitsu::consan_hook::AutoMoiRecordReplayAnalysis{});
-  EXPECT_NE(replay.find("record_replay_flags="), std::string::npos);
-  EXPECT_EQ(replay.find("visible_inline_publications="), std::string::npos);
-  EXPECT_EQ(replay.find("sampled_watchpoints="), std::string::npos);
-
-  const std::string inline_shadow =
-      render_summary(rocjitsu::ConSanMoiEngine::InlineShadow,
-                     rocjitsu::consan_hook::AutoMoiInlineShadowDecodedReport{},
-                     rocjitsu::consan_hook::AutoMoiInlineShadowAnalysis{});
-  EXPECT_EQ(inline_shadow.find("record_replay_flags="), std::string::npos);
-  EXPECT_NE(inline_shadow.find("visible_inline_publications="), std::string::npos);
-  EXPECT_EQ(inline_shadow.find("sampled_watchpoints="), std::string::npos);
-
-  const std::string sampled = render_summary(
-      rocjitsu::ConSanMoiEngine::Sampled, rocjitsu::consan_hook::AutoMoiSampledDecodedReport{},
-      rocjitsu::consan_hook::AutoMoiSampledConflictAnalysis{});
-  EXPECT_EQ(sampled.find("record_replay_flags="), std::string::npos);
-  EXPECT_EQ(sampled.find("visible_inline_publications="), std::string::npos);
-  EXPECT_NE(sampled.find("sampled_watchpoints="), std::string::npos);
+  DecodedReport decoded;
+  ConflictAnalysis analysis;
+  const auto rendered = render_report({input, decoded, decoded.summary, &analysis});
+  const auto summary = std::ranges::find_if(rendered, [](const auto &diagnostic) {
+    return diagnostic.kind == ReportDiagnosticKind::Summary;
+  });
+  ASSERT_NE(summary, rendered.end());
+  EXPECT_NE(summary->text.find("watchpoints="), std::string::npos);
 }
 
 TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
-  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(0), 0u);
-  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(3), 3u);
-  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(4), 4u);
-  EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(19'064), 4u);
-}
-
-TEST(HsaHooksUnitTest, RecordReplaySparseCompactionScalesWithPublicationsNotCapacity) {
-  std::vector<rocjitsu::ConSanMoiAccessRecord> records(1u << 16u);
-  records.front().access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write);
-  records.back().claim_token = 7;
-  records.back().access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Read);
-
-  rocjitsu::consan_hook::AutoMoiReportSummary summary;
-  const auto decoded =
-      rocjitsu::consan_hook::decode_auto_moi_record_replay_report(records, 2, summary);
-  EXPECT_EQ(summary.visible_access_record_count, 2u);
-  ASSERT_EQ(decoded.access_records.size(), 2u);
-  EXPECT_LE(decoded.access_records.capacity(), 2u);
-  EXPECT_EQ(decoded.access_records.front().access_kind,
-            static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write));
-  EXPECT_EQ(decoded.access_records.back().claim_token, 7u);
+  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(0), 0u);
+  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(3), 3u);
+  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(4), 4u);
+  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(19'064), 4u);
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
@@ -4207,7 +3689,7 @@ TEST(HsaHooksUnitTest, ConSanParsesAndNormalizesExactKernelAllowlist) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST",
                          " selected_kernel.kd,second_kernel,selected_kernel ");
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4233,7 +3715,7 @@ TEST(HsaHooksUnitTest, ConSanParsesExactKernelAllowlistFileWithoutCommaAmbiguity
   names.write("void templated_kernel<int, float>(int).kd\nsecond_kernel.kd\n");
   ScopedEnvVar inline_allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", nullptr);
   ScopedEnvVar allowlist_file("RJ_CONSAN_KERNEL_ALLOWLIST_FILE", names.path().c_str());
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4257,7 +3739,7 @@ TEST(HsaHooksUnitTest, ConSanAllowlistSkipsUnmatchedObjectBeforeWaitcheckAndTran
   ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel");
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4290,7 +3772,7 @@ TEST(HsaHooksUnitTest, ConSanAllowlistRetainsMatchedObjectWaitcheckAndTransform)
   ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel.kd");
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4334,7 +3816,7 @@ TEST(HsaHooksUnitTest, ConSanAllowlistMatchesDemangledProfilerKernelName) {
   ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "selected_kernel()");
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4372,7 +3854,7 @@ TEST(HsaHooksUnitTest, ConSanRejectsEmptyKernelAllowlistEntry) {
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsZeroFaultReservationTimeout) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "0");
 
   reset_code_object_observations();
@@ -4384,7 +3866,7 @@ TEST(HsaHooksUnitTest, ConSanRejectsZeroFaultReservationTimeout) {
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidPolicy) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "fatal-races");
 
   reset_code_object_observations();
@@ -4402,9 +3884,9 @@ TEST(HsaHooksUnitTest, ConSanStrictPolicyRequiresCompleteInstrumentationButNotCl
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
-  ScopedEnvVar forbid_diagnostics("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", nullptr);
-  ScopedEnvVar forbid_overflow("RJ_CONSAN_MOI_FORBID_OVERFLOW", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar forbid_diagnostics("RJ_CONSAN_FORBID_DIAGNOSTICS", nullptr);
+  ScopedEnvVar forbid_overflow("RJ_CONSAN_FORBID_OVERFLOW", nullptr);
 
   ASSERT_EXIT(
       {
@@ -4415,7 +3897,7 @@ TEST(HsaHooksUnitTest, ConSanStrictPolicyRequiresCompleteInstrumentationButNotCl
       },
       testing::ExitedWithCode(86),
       "installed ConSan hook.*policy=strict.*fail_closed=true require_patch=true.*"
-      "moi_require_records=true.*moi_forbid_diagnostics=false.*moi_forbid_overflow=true");
+      "require_records=true.*forbid_diagnostics=false.*forbid_overflow=true");
 }
 
 TEST(HsaHooksUnitTest, ConSanStrictPolicyTerminatesAtRejectedCodeObjectLoad) {
@@ -4424,7 +3906,7 @@ TEST(HsaHooksUnitTest, ConSanStrictPolicyTerminatesAtRejectedCodeObjectLoad) {
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unsupported;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unsupported;
 
   ASSERT_EXIT(([] {
                 FakeApiTable api;
@@ -4451,13 +3933,9 @@ TEST(HsaHooksUnitTest, ConSanStrictPolicyTerminatesAtRejectedCodeObjectLoad) {
 
 void expect_transform_profile(const ConSanHookProfile &profile, size_t expected_calls) {
   ASSERT_EQ(g_transform_override_flavors.size(), expected_calls);
-  ASSERT_EQ(g_transform_override_engines.size(), expected_calls);
   ASSERT_EQ(g_transform_override_abort_unmatched_waits.size(), expected_calls);
-  EXPECT_TRUE(std::ranges::all_of(g_transform_override_flavors, [&](const auto flavor) {
-    return flavor == profile.expected_flavor;
-  }));
-  EXPECT_TRUE(std::ranges::all_of(g_transform_override_engines, [&](const auto engine) {
-    return engine == profile.expected_engine;
+  EXPECT_TRUE(std::ranges::all_of(g_transform_override_flavors, [&](const auto mode) {
+    return mode == profile.expected_flavor;
   }));
   EXPECT_TRUE(std::ranges::none_of(g_transform_override_abort_unmatched_waits,
                                    [](bool value) { return value; }));
@@ -4465,29 +3943,23 @@ void expect_transform_profile(const ConSanHookProfile &profile, size_t expected_
   ASSERT_EQ(g_transform_override_track_atomics.size(), expected_calls);
   ASSERT_EQ(g_transform_override_runtime_sample_strides.size(), expected_calls);
   ASSERT_EQ(g_transform_override_patched_image_growth_limits.size(), expected_calls);
-  const bool expected_sync_defaults = profile.expected_flavor == rocjitsu::ConSanFlavor::Moi;
+  const bool expected_sync_defaults = profile.expected_flavor == rocjitsu::consan::Mode::Default;
   EXPECT_EQ(g_transform_override_track_barriers.front(), expected_sync_defaults);
   EXPECT_EQ(g_transform_override_track_atomics.front(), expected_sync_defaults);
-  uint32_t expected_runtime_sample_stride = 1u;
-  if (profile.expected_flavor == rocjitsu::ConSanFlavor::Moi) {
-    if (profile.expected_engine == rocjitsu::ConSanMoiEngine::RecordReplay)
-      expected_runtime_sample_stride = 65536u;
-    else if (profile.expected_engine == rocjitsu::ConSanMoiEngine::Sampled)
-      expected_runtime_sample_stride = 256u;
-  }
+  const uint32_t expected_runtime_sample_stride =
+      profile.expected_flavor == rocjitsu::consan::Mode::Default ? 256u : 1u;
   EXPECT_EQ(g_transform_override_runtime_sample_strides.front(), expected_runtime_sample_stride);
   const auto &growth = g_transform_override_patched_image_growth_limits.front();
-  EXPECT_EQ(growth.kind, rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes);
-  EXPECT_EQ(growth.absolute_bytes, rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes);
+  EXPECT_EQ(growth.kind, rocjitsu::consan::PatchedImageGrowthLimitKind::AbsoluteBytes);
+  EXPECT_EQ(growth.absolute_bytes, rocjitsu::consan::kDefaultMaxPatchedImageGrowthBytes);
 }
 
 void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
-                        rocjitsu::ConSanTransformArtifacts transform_result,
+                        rocjitsu::consan::TransformArtifacts transform_result,
                         hsa_status_t expected_load_status, uint64_t expected_loaded_reader,
                         std::span<const uint8_t> expected_replacement = {},
-                        bool fail_replacement_reader_create = false,
-                        bool use_moi_auto_report = false,
-                        rocjitsu::consan_hook::LogSinkOverride log_sink_override = nullptr,
+                        bool fail_replacement_reader_create = false, bool use_auto_report = false,
+                        hook::LogSinkOverride log_sink_override = nullptr,
                         size_t expected_transform_calls = 1u) {
   reset_code_object_observations();
   g_fail_replacement_reader_create = fail_replacement_reader_create;
@@ -4495,10 +3967,10 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
   std::optional<ScopedEnvVar> report_buffer;
   std::optional<ScopedEnvVar> report_buffer_size;
   std::optional<ScopedEnvVar> auto_report_buffer_size;
-  if (use_moi_auto_report) {
-    report_buffer.emplace("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    report_buffer_size.emplace("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    auto_report_buffer_size.emplace("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "65536");
+  if (use_auto_report) {
+    report_buffer.emplace("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    report_buffer_size.emplace("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    auto_report_buffer_size.emplace("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "65536");
   }
   g_transform_override_result = std::move(transform_result);
   FakeApiTable api;
@@ -4517,7 +3989,7 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
       hsa_executable_t{7}, kHostAgent, original_reader, nullptr, nullptr);
   EXPECT_EQ(status, expected_load_status) << profile.name;
   expect_transform_profile(profile, expected_transform_calls);
-  if (use_moi_auto_report) {
+  if (use_auto_report) {
     ASSERT_EQ(g_transform_override_report_sizes.size(), 1u);
     EXPECT_EQ(g_transform_override_report_sizes.front(), 0u);
   }
@@ -4548,14 +4020,14 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
 
 TEST(HsaHooksUnitTest, ConSanTransformRejectionReportsStableTypedCause) {
   for (const auto [cause, expected] : std::array{
-           std::pair{rocjitsu::ConSanTransformFailureCause::PatchedImageGrowthLimit,
+           std::pair{rocjitsu::consan::TransformFailureCause::PatchedImageGrowthLimit,
                      std::string_view{"patched-image-growth-limit"}},
-           std::pair{rocjitsu::ConSanTransformFailureCause::OverlappingPatchRanges,
+           std::pair{rocjitsu::consan::TransformFailureCause::OverlappingPatchRanges,
                      std::string_view{"overlapping-patch-ranges"}},
        }) {
     SCOPED_TRACE(expected);
-    rocjitsu::ConSanTransformArtifacts result;
-    result.outcome = rocjitsu::ConSanTransformOutcome::Invalid;
+    rocjitsu::consan::TransformArtifacts result;
+    result.outcome = rocjitsu::consan::TransformOutcome::Invalid;
     result.errors.emplace_back("synthetic typed transform failure");
     result.transform_failure_cause = cause;
 
@@ -4626,23 +4098,24 @@ void expect_batch_copy_forwarding(const hsa_amd_memory_copy_op_t &op,
   EXPECT_EQ(g_last_batch_dst_agents, expected_dst_agents);
 }
 
-rocjitsu::ConSanMoiSampledSyncDecodeResult
-sampled_atomic(rocjitsu::ConSanMoiSampledSyncRole role, rocjitsu::ConSanMoiSampledSyncScope scope,
-               rocjitsu::ConSanMoiSampledSyncOutcome outcome, uint64_t address = 0x1000,
-               uint32_t byte_count = 4, uint32_t epoch = 7) {
+rocjitsu::consan::SyncDecodeResult atomic(rocjitsu::consan::SyncRole role,
+                                          rocjitsu::consan::SyncScope scope,
+                                          rocjitsu::consan::SyncOutcome outcome,
+                                          uint64_t address = 0x1000, uint32_t byte_count = 4,
+                                          uint32_t epoch = 7) {
   return {
       .metadata =
           {
               .address = address,
               .byte_count = byte_count,
-              .kind = rocjitsu::ConSanMoiSampledSyncKind::Atomic,
+              .kind = rocjitsu::consan::SyncMetadataKind::Atomic,
               .role = role,
               .scope = scope,
               .outcome = outcome,
               .epoch_before = epoch,
               .epoch_after = epoch,
           },
-      .classification = rocjitsu::ConSanMoiSampledSyncClassification::Valid,
+      .classification = rocjitsu::consan::SyncClassification::Valid,
   };
 }
 
@@ -4650,46 +4123,46 @@ TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", nullptr);
 
   for (const ConSanHookProfile &profile : kConSanHookProfiles) {
     SCOPED_TRACE(profile.name);
 
-    rocjitsu::ConSanTransformArtifacts unchanged;
-    unchanged.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+    rocjitsu::consan::TransformArtifacts unchanged;
+    unchanged.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
     run_hook_load_case(profile, false, unchanged, HSA_STATUS_SUCCESS, 101u);
     run_hook_load_case(profile, true, unchanged, HSA_STATUS_SUCCESS, 101u);
 
-    rocjitsu::ConSanTransformArtifacts unsupported;
-    unsupported.outcome = rocjitsu::ConSanTransformOutcome::Unsupported;
+    rocjitsu::consan::TransformArtifacts unsupported;
+    unsupported.outcome = rocjitsu::consan::TransformOutcome::Unsupported;
     run_hook_load_case(profile, false, unsupported, HSA_STATUS_SUCCESS, 101u);
     run_hook_load_case(profile, true, unsupported, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
 
-    rocjitsu::ConSanTransformArtifacts invalid;
-    invalid.outcome = rocjitsu::ConSanTransformOutcome::Invalid;
+    rocjitsu::consan::TransformArtifacts invalid;
+    invalid.outcome = rocjitsu::consan::TransformOutcome::Invalid;
     run_hook_load_case(profile, false, invalid, HSA_STATUS_SUCCESS, 101u);
     run_hook_load_case(profile, true, invalid, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
 
     const std::array<uint8_t, 7> replacement = {'p', 'a', 't', 'c', 'h', 'e', 'd'};
-    rocjitsu::ConSanTransformArtifacts modified;
+    rocjitsu::consan::TransformArtifacts modified;
     install_consan_test_program_identity(modified, ROCJITSU_CODE_ARCH_CDNA3,
                                          ROCJITSU_CODE_TARGET_GFX942);
-    modified.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+    modified.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
     modified.replacement.assign(replacement.begin(), replacement.end());
-    if (profile.expected_flavor == rocjitsu::ConSanFlavor::SuperCollider) {
-      rocjitsu::ConSanObservationPlan plan;
-      plan.engine = rocjitsu::ConSanCapabilityEngine::SuperCollider;
+    if (profile.expected_flavor == rocjitsu::consan::Mode::SuperCollider) {
+      rocjitsu::consan::ObservationPlan plan;
+      plan.mode = rocjitsu::consan::Mode::SuperCollider;
       ASSERT_TRUE(plan.valid());
-      modified.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
+      modified.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
     }
     run_hook_load_case(profile, false, modified, HSA_STATUS_SUCCESS, 102u, replacement);
     run_hook_load_case(profile, true, modified, HSA_STATUS_SUCCESS, 102u, replacement);
     run_hook_load_case(profile, false, modified, HSA_STATUS_SUCCESS, 101u, {}, true);
     run_hook_load_case(profile, true, modified, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u, {}, true);
 
-    rocjitsu::ConSanTransformArtifacts corrupt = modified;
+    rocjitsu::consan::TransformArtifacts corrupt = modified;
     corrupt.replacement.clear();
     run_hook_load_case(profile, false, corrupt, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
     run_hook_load_case(profile, true, corrupt, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
@@ -4715,11 +4188,11 @@ TEST(HsaHooksUnitTest, ConSanLogsSharedNamesForParsedTypedIdentities) {
 
   for (const TargetCase &target_case : cases) {
     SCOPED_TRACE(target_case.target_name);
-    rocjitsu::ConSanTransformArtifacts result;
+    rocjitsu::consan::TransformArtifacts result;
     install_consan_test_program_identity(result, target_case.semantic_arch, target_case.target);
     result.outcome = target_case.semantic_arch == ROCJITSU_CODE_ARCH_INVALID
-                         ? rocjitsu::ConSanTransformOutcome::Unsupported
-                         : rocjitsu::ConSanTransformOutcome::Unchanged;
+                         ? rocjitsu::consan::TransformOutcome::Unsupported
+                         : rocjitsu::consan::TransformOutcome::Unchanged;
 
     testing::internal::CaptureStderr();
     run_hook_load_case(kConSanHookProfiles[1], false, result, HSA_STATUS_SUCCESS, 101u);
@@ -4733,12 +4206,12 @@ TEST(HsaHooksUnitTest, ConSanLogsSharedNamesForParsedTypedIdentities) {
 TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpen) {
   const std::vector<uint8_t> unsupported =
       rocjitsu::waitcheck_test::make_gfx1200_code_object({0xBFB00000u});
-  rocjitsu::ConSanRequest request;
-  request.flavor = rocjitsu::ConSanFlavor::Moi;
-  const rocjitsu::TransformResult direct = rocjitsu::transform_consan(
-      unsupported, request, rocjitsu::TransformPolicy{}, enabled_consan_runtime_policy(),
-      rocjitsu::ConSanDebugOverrides{}, complete_consan_runtime_capabilities(), {});
-  ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::Unsupported);
+  rocjitsu::consan::Request request;
+  request.mode = rocjitsu::consan::Mode::Default;
+  const TransformResult direct =
+      transform(unsupported, request, TransformPolicy{}, enabled_consan_runtime_policy(),
+                rocjitsu::consan::DebugOverrides{}, complete_consan_runtime_capabilities(), {});
+  ASSERT_EQ(direct.outcome, rocjitsu::consan::TransformOutcome::Unsupported);
   ASSERT_TRUE(direct.program_inventory.code_object_parsed());
   ASSERT_EQ(direct.program_inventory.arch(), ROCJITSU_CODE_ARCH_INVALID);
   ASSERT_FALSE(direct.program_inventory.text_sections().empty());
@@ -4779,30 +4252,30 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = rocjitsu::waitcheck_test::make_gfx1201_code_object(text_words);
-  rocjitsu::ConSanRequest request;
-  request.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  rocjitsu::consan::Request request;
+  request.mode = rocjitsu::consan::Mode::SuperCollider;
   request.probe_lds_check_trap = true;
-  request.delay_nops = 2;
-  request.supercollider_evidence_mode = rocjitsu::ConSanSuperColliderEvidenceMode::TrapOnly;
-  rocjitsu::ConSanDebugOverrides debug;
+  request.supercollider_delay_nops = 2;
+  request.supercollider_evidence_mode = rocjitsu::consan::SuperColliderEvidenceMode::TrapOnly;
+  rocjitsu::consan::DebugOverrides debug;
   debug.scratch_vgpr = 3;
-  rocjitsu::TransformPolicy transform_policy;
+  TransformPolicy transform_policy;
   transform_policy.patched_image_growth_limit.absolute_bytes = 0;
-  const rocjitsu::TransformResult direct =
-      rocjitsu::transform_consan(bytes, request, transform_policy, enabled_consan_runtime_policy(),
-                                 debug, complete_consan_runtime_capabilities(), {});
-  ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::ModifiedValid)
+  const TransformResult direct =
+      transform(bytes, request, transform_policy, enabled_consan_runtime_policy(), debug,
+                complete_consan_runtime_capabilities(), {});
+  ASSERT_EQ(direct.outcome, rocjitsu::consan::TransformOutcome::ModifiedValid)
       << "errors=" << testing::PrintToString(direct.errors)
       << " warnings=" << testing::PrintToString(direct.warnings)
       << " intents=" << direct.observation_plan().probe_intents.size()
-      << " patches=" << rocjitsu::consan_transform_diagnostic_report(direct).patches.size();
+      << " patches=" << transform_diagnostic_report(direct).patches.size();
   ASSERT_EQ(direct.replacement.size(), bytes.size());
-  const auto direct_report = rocjitsu::consan_transform_diagnostic_report(direct);
+  const auto direct_report = transform_diagnostic_report(direct);
   ASSERT_EQ(direct_report.patches.size(), 1u);
   EXPECT_EQ(direct_report.patches.front().trampoline_size, 0u);
   EXPECT_GT(direct_report.patches.front().original_size, 2u * sizeof(uint32_t));
 
-  const auto estimate = rocjitsu::consan_hook::consan_transform_major_image_reservation(
+  const auto estimate = hook::transform_major_image_reservation(
       bytes.size(), transform_policy.patched_image_growth_limit);
   ASSERT_TRUE(estimate);
   ASSERT_GT(estimate->reservation_bytes, 0u);
@@ -4813,7 +4286,7 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
     const std::string limit = std::to_string(estimate->reservation_bytes - 1u);
     ScopedEnvVar probe("RJ_CONSAN_PROBE_LDS_CHECK_TRAP", "1");
     ScopedEnvVar scratch("RJ_CONSAN_TMP_VGPR", "3");
-    ScopedEnvVar delay("RJ_CONSAN_DELAY", "2");
+    ScopedEnvVar delay("RJ_CONSAN_SC_DELAY", "2");
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
     ScopedEnvVar growth("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "0");
     ScopedEnvVar process_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", limit.c_str());
@@ -4837,7 +4310,7 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
     const std::string limit = std::to_string(estimate->reservation_bytes);
     ScopedEnvVar probe("RJ_CONSAN_PROBE_LDS_CHECK_TRAP", "1");
     ScopedEnvVar scratch("RJ_CONSAN_TMP_VGPR", "3");
-    ScopedEnvVar delay("RJ_CONSAN_DELAY", "2");
+    ScopedEnvVar delay("RJ_CONSAN_SC_DELAY", "2");
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
     ScopedEnvVar growth("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "0");
     ScopedEnvVar process_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", limit.c_str());
@@ -4864,7 +4337,7 @@ TEST(HsaHooksUnitTest, ConSanWaitcheckReportsHazardBeforeTransformRegardlessOfWa
   ScopedEnvVar waitcheck_fail("ROCJITSU_WAITCHECK_FAIL", "0");
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4907,7 +4380,7 @@ TEST(HsaHooksUnitTest, ConSanWaitcheckReportsAnalysisFailureBeforeTransform) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4940,7 +4413,7 @@ TEST(HsaHooksUnitTest, ConSanWaitcheckPassesBeforeTransformForCleanCodeObject) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -4969,61 +4442,50 @@ TEST(HsaHooksUnitTest, ConSanWaitcheckPassesBeforeTransformForCleanCodeObject) {
   EXPECT_LT(waitcheck_pos, consan_pos) << log;
 }
 
-TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedMoiCoverageLedger) {
+TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedCoverageLedger) {
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
 
-  rocjitsu::ConSanTransformArtifacts structural_only;
+  rocjitsu::consan::TransformArtifacts structural_only;
   install_consan_test_program_identity(structural_only, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  structural_only.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  structural_only.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   structural_only.replacement = {0x7f, 'E', 'L', 'F', 'p', 'r', 'o', 'l'};
-  rocjitsu::ConSanPatchInfo prologue_patch;
-  prologue_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  prologue_patch.kind = rocjitsu::ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  rocjitsu::consan::PatchInfo prologue_patch;
+  prologue_patch.phase = rocjitsu::consan::PatchPhase::Instrumentation;
+  prologue_patch.kind = rocjitsu::consan::PatchKind::KernelEntryOwnerEpochPrologue;
   structural_only.patches.push_back(prologue_patch);
 
   for (size_t i = 1; i < kConSanHookProfiles.size(); ++i) {
     SCOPED_TRACE(kConSanHookProfiles[i].name);
-    const auto capability_engine = rocjitsu::consan_capability_engine(
-        kConSanHookProfiles[i].expected_flavor, kConSanHookProfiles[i].expected_engine);
+    const auto capability_engine = enabled_mode(kConSanHookProfiles[i].expected_flavor);
     ASSERT_TRUE(capability_engine.has_value());
-    const rocjitsu::ConSanProbeIntentKind intent_kind = [&] {
-      switch (kConSanHookProfiles[i].expected_engine) {
-      case rocjitsu::ConSanMoiEngine::RecordReplay:
-        return rocjitsu::ConSanProbeIntentKind::AccessRecord;
-      case rocjitsu::ConSanMoiEngine::Sampled:
-        return rocjitsu::ConSanProbeIntentKind::SampledAccess;
-      case rocjitsu::ConSanMoiEngine::InlineShadow:
-        return rocjitsu::ConSanProbeIntentKind::ExactShadowAccess;
-      }
-      return rocjitsu::ConSanProbeIntentKind::AccessRecord;
-    }();
+    constexpr auto intent_kind = rocjitsu::consan::ProbeIntentKind::Access;
 
-    rocjitsu::ConSanTransformArtifacts pending = structural_only;
-    install_test_access_coverage(pending, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                                 rocjitsu::ConSanAccessPolicyReason::None,
-                                 rocjitsu::ConSanLoweringOutcomeKind::Pending, *capability_engine,
+    rocjitsu::consan::TransformArtifacts pending = structural_only;
+    install_test_access_coverage(pending, 1u, rocjitsu::consan::SiteDecisionKind::Admitted,
+                                 rocjitsu::consan::AccessPolicyReason::None,
+                                 rocjitsu::consan::LoweringOutcomeKind::Pending, *capability_engine,
                                  intent_kind);
     run_hook_load_case(kConSanHookProfiles[i], false, pending, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
                        0u);
 
-    rocjitsu::ConSanTransformArtifacts resource_rejected = structural_only;
-    install_test_access_coverage(resource_rejected, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                                 rocjitsu::ConSanAccessPolicyReason::None,
-                                 rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected,
-                                 *capability_engine, intent_kind);
+    rocjitsu::consan::TransformArtifacts resource_rejected = structural_only;
+    install_test_access_coverage(
+        resource_rejected, 1u, rocjitsu::consan::SiteDecisionKind::Admitted,
+        rocjitsu::consan::AccessPolicyReason::None,
+        rocjitsu::consan::LoweringOutcomeKind::ResourceRejected, *capability_engine, intent_kind);
     run_hook_load_case(kConSanHookProfiles[i], false, resource_rejected,
                        HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
   }
 
-  rocjitsu::ConSanTransformArtifacts site_patched = structural_only;
-  install_test_access_coverage(site_patched, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None,
-                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented);
-  rocjitsu::ConSanPatchInfo site_patch;
-  site_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  site_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  rocjitsu::consan::TransformArtifacts site_patched = structural_only;
+  install_test_access_coverage(site_patched, 1u, rocjitsu::consan::SiteDecisionKind::Admitted,
+                               rocjitsu::consan::AccessPolicyReason::None,
+                               rocjitsu::consan::LoweringOutcomeKind::Instrumented);
+  rocjitsu::consan::PatchInfo site_patch;
+  site_patch.phase = rocjitsu::consan::PatchPhase::Instrumentation;
+  site_patch.kind = rocjitsu::consan::PatchKind::TrampolineSyncMetadata;
   site_patched.patches.push_back(site_patch);
   run_hook_load_case(kConSanHookProfiles[1], false, site_patched, HSA_STATUS_SUCCESS, 102u,
                      site_patched.replacement);
@@ -5032,75 +4494,75 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedMoiCoverageLedger) {
 TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedSuperColliderCoverageLedger) {
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
   ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
-  rocjitsu::ConSanTransformArtifacts structural_only;
+  rocjitsu::consan::TransformArtifacts structural_only;
   install_consan_test_program_identity(structural_only, ROCJITSU_CODE_ARCH_CDNA4,
                                        ROCJITSU_CODE_TARGET_GFX950);
-  structural_only.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  structural_only.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   structural_only.replacement = {0x7f, 'E', 'L', 'F', 'd', '1', '6'};
-  install_test_access_coverage(structural_only, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None,
-                               rocjitsu::ConSanLoweringOutcomeKind::Pending,
-                               rocjitsu::ConSanCapabilityEngine::SuperCollider,
-                               rocjitsu::ConSanProbeIntentKind::RedundantAccessObservation);
-  rocjitsu::ConSanPatchInfo structural_patch;
-  structural_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  structural_patch.kind = rocjitsu::ConSanPatchKind::TrampolineScPerturbation;
+  install_test_access_coverage(structural_only, 1u, rocjitsu::consan::SiteDecisionKind::Admitted,
+                               rocjitsu::consan::AccessPolicyReason::None,
+                               rocjitsu::consan::LoweringOutcomeKind::Pending,
+                               rocjitsu::consan::Mode::SuperCollider,
+                               rocjitsu::consan::ProbeIntentKind::RedundantAccessObservation);
+  rocjitsu::consan::PatchInfo structural_patch;
+  structural_patch.phase = rocjitsu::consan::PatchPhase::Instrumentation;
+  structural_patch.kind = rocjitsu::consan::PatchKind::TrampolineSuperColliderPerturbation;
   structural_only.patches.push_back(structural_patch);
 
   run_hook_load_case(kConSanHookProfiles[0], false, structural_only,
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u, {}, false, false, nullptr, 2u);
 
-  rocjitsu::ConSanTransformArtifacts placement_rejected = structural_only;
-  ASSERT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      placement_rejected.coverage_ledger, {0u},
-      rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
+  rocjitsu::consan::TransformArtifacts placement_rejected = structural_only;
+  ASSERT_TRUE(
+      publish_test_lowering_outcome(placement_rejected.coverage_ledger, {0u},
+                                    rocjitsu::consan::LoweringOutcomeKind::PlacementRejected));
   run_hook_load_case(kConSanHookProfiles[0], false, placement_rejected,
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u, {}, false, false, nullptr, 2u);
 
-  rocjitsu::ConSanTransformArtifacts unresolved = structural_only;
+  rocjitsu::consan::TransformArtifacts unresolved = structural_only;
   unresolved.coverage_ledger = {};
   run_hook_load_case(kConSanHookProfiles[0], false, unresolved,
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
 
-  rocjitsu::ConSanTransformArtifacts valid_empty = structural_only;
-  rocjitsu::ConSanObservationPlan valid_empty_plan;
-  valid_empty_plan.engine = rocjitsu::ConSanCapabilityEngine::SuperCollider;
+  rocjitsu::consan::TransformArtifacts valid_empty = structural_only;
+  rocjitsu::consan::ObservationPlan valid_empty_plan;
+  valid_empty_plan.mode = rocjitsu::consan::Mode::SuperCollider;
   ASSERT_TRUE(valid_empty_plan.valid());
-  valid_empty.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(valid_empty_plan));
+  valid_empty.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(valid_empty_plan));
   run_hook_load_case(kConSanHookProfiles[0], false, valid_empty, HSA_STATUS_SUCCESS, 102u,
                      valid_empty.replacement);
 
-  rocjitsu::ConSanTransformArtifacts resource_rejected = structural_only;
-  ASSERT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      resource_rejected.coverage_ledger, {0u},
-      rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
+  rocjitsu::consan::TransformArtifacts resource_rejected = structural_only;
+  ASSERT_TRUE(
+      publish_test_lowering_outcome(resource_rejected.coverage_ledger, {0u},
+                                    rocjitsu::consan::LoweringOutcomeKind::ResourceRejected));
   run_hook_load_case(kConSanHookProfiles[0], false, resource_rejected, HSA_STATUS_SUCCESS, 102u,
                      resource_rejected.replacement, false, false, nullptr, 2u);
 }
 
-rocjitsu::ConSanTransformArtifacts moi_fault_test_result_for_arch(rj_code_arch_t arch) {
-  rocjitsu::ConSanTransformArtifacts result;
+rocjitsu::consan::TransformArtifacts fault_test_result_for_arch(rj_code_arch_t arch) {
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, arch, ROCJITSU_CODE_TARGET_GFX950,
                                        /*semantic_arch_required=*/true);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 'f', 'a', 'u', 'l', 't'};
-  rocjitsu::ConSanObservationPlan plan;
-  plan.engine = rocjitsu::ConSanCapabilityEngine::RecordReplay;
+  rocjitsu::consan::ObservationPlan plan;
+  plan.mode = rocjitsu::consan::Mode::Default;
   assert(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
-  rocjitsu::ConSanPatchInfo prologue_patch;
-  prologue_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  prologue_patch.kind = rocjitsu::ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  result.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
+  rocjitsu::consan::PatchInfo prologue_patch;
+  prologue_patch.phase = rocjitsu::consan::PatchPhase::Instrumentation;
+  prologue_patch.kind = rocjitsu::consan::PatchKind::KernelEntryOwnerEpochPrologue;
   result.patches.push_back(prologue_patch);
   return result;
 }
 
 TEST(HsaHooksUnitTest, ConSanLoadRejectsArchitectureDependentResultWithoutResolvedArch) {
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
 
   testing::internal::CaptureStderr();
   run_hook_load_case(kConSanHookProfiles[1], false,
-                     moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_INVALID),
+                     fault_test_result_for_arch(ROCJITSU_CODE_ARCH_INVALID),
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
   const std::string direct_error = testing::internal::GetCapturedStderr();
   EXPECT_NE(direct_error.find("ConSan internal invariant violation"), std::string::npos);
@@ -5108,17 +4570,17 @@ TEST(HsaHooksUnitTest, ConSanLoadRejectsArchitectureDependentResultWithoutResolv
 
   testing::internal::CaptureStderr();
   run_hook_load_case(kConSanHookProfiles[1], false,
-                     moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_INVALID),
+                     fault_test_result_for_arch(ROCJITSU_CODE_ARCH_INVALID),
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u,
                      /*expected_replacement=*/{},
                      /*fail_replacement_reader_create=*/false,
-                     /*use_moi_auto_report=*/true);
+                     /*use_auto_report=*/true);
   const std::string inventory_error = testing::internal::GetCapturedStderr();
   EXPECT_NE(inventory_error.find("reason=internal-semantic-arch-missing"), std::string::npos);
 
-  rocjitsu::ConSanTransformArtifacts empty_moi;
-  empty_moi.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
-  run_hook_load_case(kConSanHookProfiles[1], false, empty_moi, HSA_STATUS_SUCCESS, 101u);
+  rocjitsu::consan::TransformArtifacts empty;
+  empty.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
+  run_hook_load_case(kConSanHookProfiles[1], false, empty, HSA_STATUS_SUCCESS, 101u);
 }
 
 TEST(HsaHooksUnitTest, ConSanStrictRejectionFlushesDiscardedFaultInstallationEvidence) {
@@ -5128,13 +4590,13 @@ TEST(HsaHooksUnitTest, ConSanStrictRejectionFlushesDiscardedFaultInstallationEvi
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
   install_test_access_coverage(g_transform_override_result, 1u,
-                               rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None);
+                               rocjitsu::consan::SiteDecisionKind::Admitted,
+                               rocjitsu::consan::AccessPolicyReason::None);
   g_transform_override_models_fault_application = true;
 
   ASSERT_EXIT(([] {
@@ -5159,10 +4621,10 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationIsReleasedAfterRejectedTransform) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_INVALID);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_INVALID);
   g_transform_override_models_fault_application = true;
 
   FakeApiTable api;
@@ -5191,11 +4653,11 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationIsReleasedWhenReplacementIsNotInsta
   reset_code_object_observations();
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   configure_consan_profile(kConSanHookProfiles[1], false);
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
   g_fail_replacement_reader_create = true;
 
@@ -5235,9 +4697,9 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationIsRetainedAfterReplacementLoads) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "0");
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
 
   FakeApiTable api;
@@ -5283,20 +4745,20 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationRetriesAfterConcurrentRejectedOwner
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "30000");
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
-  rocjitsu::ConSanPatchInfo site_patch;
-  site_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  site_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+  rocjitsu::consan::PatchInfo site_patch;
+  site_patch.phase = rocjitsu::consan::PatchPhase::Instrumentation;
+  site_patch.kind = rocjitsu::consan::PatchKind::TrampolineWatchpointStore;
   g_transform_override_result.patches.push_back(site_patch);
   g_transform_override_models_fault_application = true;
   g_block_first_fault_application = true;
-  g_first_fault_application_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+  g_first_fault_application_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
   install_test_access_coverage(*g_first_fault_application_result, 1u,
-                               rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None);
+                               rocjitsu::consan::SiteDecisionKind::Admitted,
+                               rocjitsu::consan::AccessPolicyReason::None);
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -5352,11 +4814,11 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationTimesOutWithoutApplyingASecondMutat
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "20");
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
   g_block_first_fault_application = true;
 
@@ -5410,11 +4872,11 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationTimesOutWhileOwnerIsInLoader) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar reservation_timeout("RJ_CONSAN_FAULT_RESERVATION_TIMEOUT_MS", "20");
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
   g_block_first_loader_call = true;
 
@@ -5481,10 +4943,10 @@ TEST(HsaHooksUnitTest, ConSanFaultReservationRejectsSameThreadReentry) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
 
   FakeApiTable api;
@@ -5533,9 +4995,9 @@ TEST(HsaHooksUnitTest, ConSanExactOneRejectsMultipleAppliedMutationsBeforeInstal
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", nullptr);
 
-  g_transform_override_result = moi_fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
+  g_transform_override_result = fault_test_result_for_arch(ROCJITSU_CODE_ARCH_CDNA3);
   g_transform_override_models_fault_application = true;
   g_transform_override_actual_fault_applications = 2;
 
@@ -5574,9 +5036,9 @@ TEST(HsaHooksUnitTest, ConSanExactOneRejectsMultipleAppliedMutationsBeforeInstal
 
 TEST(HsaHooksUnitTest, ConSanSynchronizationDefaultsRemainExplicitlyOverridable) {
   reset_code_object_observations();
-  configure_consan_profile(kConSanHookProfiles[2], false);
-  ScopedEnvVar track_barriers("RJ_CONSAN_MOI_TRACK_BARRIERS", "0");
-  ScopedEnvVar track_atomics("RJ_CONSAN_MOI_TRACK_ATOMICS", "0");
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar track_barriers("RJ_CONSAN_TRACK_BARRIERS", "0");
+  ScopedEnvVar track_atomics("RJ_CONSAN_TRACK_ATOMICS", "0");
   ScopedEnvVar abort_unmatched("RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT", "1");
 
   FakeApiTable api;
@@ -5598,15 +5060,15 @@ TEST(HsaHooksUnitTest, ConSanSynchronizationDefaultsRemainExplicitlyOverridable)
   EXPECT_TRUE(g_transform_override_abort_unmatched_waits.front());
 }
 
-rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
-  rocjitsu::ConSanTransformArtifacts result;
+rocjitsu::consan::TransformArtifacts diagnostic_coverage_transform_result() {
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
 
-  const auto semantic_site = [&](uint64_t offset, rocjitsu::ConSanSemanticSiteDomain domain) {
-    return rocjitsu::SemanticSiteId{
+  const auto semantic_site = [&](uint64_t offset, rocjitsu::consan::SemanticSiteDomain domain) {
+    return SemanticSiteId{
         .physical = {.code_object = result.program_inventory.code_object_id(),
                      .original_text_offset = offset},
         .domain = domain,
@@ -5614,23 +5076,21 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
         .range_ordinal = 0u,
     };
   };
-  const rocjitsu::SemanticSiteId access =
-      semantic_site(0x10u, rocjitsu::ConSanSemanticSiteDomain::Access);
-  const rocjitsu::SemanticSiteId barrier =
-      semantic_site(0x20u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
-  const rocjitsu::SemanticSiteId atomic =
-      semantic_site(0x30u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
-  const rocjitsu::SemanticSiteId fence =
-      semantic_site(0x40u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
-  const rocjitsu::ConSanSynchronizationAssociationId atomic_association{"test-atomic"};
-  const rocjitsu::ConSanSynchronizationAssociationId fence_association{"test-fence"};
-  install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
+  const SemanticSiteId access = semantic_site(0x10u, rocjitsu::consan::SemanticSiteDomain::Access);
+  const SemanticSiteId barrier =
+      semantic_site(0x20u, rocjitsu::consan::SemanticSiteDomain::SynchronizationEvent);
+  const SemanticSiteId atomic =
+      semantic_site(0x30u, rocjitsu::consan::SemanticSiteDomain::SynchronizationEvent);
+  const SemanticSiteId fence =
+      semantic_site(0x40u, rocjitsu::consan::SemanticSiteDomain::SynchronizationEvent);
+  const rocjitsu::consan::SynchronizationAssociationId atomic_association{"test-atomic"};
+  install_consan_test_program_inventory(result, [&](ProgramInventoryBuilder &builder) {
     const auto add_source = [&](uint64_t offset, std::string name) {
-      rocjitsu::ConSanProgramContainer container{rocjitsu::ConSanProgramContainerKind::Kernel};
+      rocjitsu::consan::ProgramContainer container{rocjitsu::consan::ProgramContainerKind::Kernel};
       container.name = std::move(name);
-      const rocjitsu::ConSanProgramContainerId container_id =
+      const rocjitsu::consan::ProgramContainerId container_id =
           builder.add_kernel(std::move(container)).id;
-      rocjitsu::ConSanProgramSite site;
+      rocjitsu::consan::ProgramSite site;
       site.physical_id.original_text_offset = offset;
       site.container = container_id;
       builder.add_semantic_site(std::move(site));
@@ -5640,142 +5100,132 @@ rocjitsu::ConSanTransformArtifacts diagnostic_coverage_transform_result() {
     add_source(0x30u, "atomic_kernel");
     add_source(0x40u, "fence_kernel");
   });
-  rocjitsu::ConSanObservationPlan plan = {
-      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
-      .site_decisions = {{
-          .semantic_site = access,
-          .kind = rocjitsu::ConSanSiteDecisionKind::Unsupported,
-          .reason = rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic,
-      }},
-      .barrier_site_decisions = {{
-          .semantic_site = barrier,
-          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
-          .reason = rocjitsu::ConSanBarrierPolicyReason::None,
-      }},
-      .atomic_site_decisions = {{
-          .semantic_site = atomic,
-          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
-          .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
-          .reason = rocjitsu::ConSanAtomicPolicyReason::None,
-      }},
-      .fence_site_decisions = {{
-          .semantic_site = fence,
-          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
-          .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
-          .reason = rocjitsu::ConSanFencePolicyReason::None,
-          .inventory_association = rocjitsu::ConSanFenceAssociation::Qualified,
-      }},
-      .probe_intents =
-          {
-              {.id = {0u},
-               .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
-               .source_site = {0u},
-               .physical_site = barrier.physical,
-               .covered_semantic_sites = {barrier},
-               .kind = rocjitsu::ConSanProbeIntentKind::BarrierRecord,
-               .position = rocjitsu::ConSanProbePosition::After,
-               .synchronization_association = std::nullopt,
-               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
-               .atomic_lowering_form = std::nullopt},
-              {.id = {1u},
-               .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
-               .source_site = {1u},
-               .physical_site = atomic.physical,
-               .covered_semantic_sites = {atomic},
-               .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
-               .position = rocjitsu::ConSanProbePosition::After,
-               .synchronization_association = atomic_association,
-               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
-               .atomic_lowering_form = std::nullopt},
-              {.id = {2u},
-               .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
-               .source_site = {2u},
-               .physical_site = fence.physical,
-               .covered_semantic_sites = {fence},
-               .kind = rocjitsu::ConSanProbeIntentKind::FenceRecord,
-               .position = rocjitsu::ConSanProbePosition::After,
-               .synchronization_association = fence_association,
-               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
-               .atomic_lowering_form = std::nullopt},
-          },
-  };
+  rocjitsu::consan::ObservationPlan plan =
+      {
+          .mode = rocjitsu::consan::Mode::Default,
+          .site_decisions = {{
+              .semantic_site = access,
+              .kind = rocjitsu::consan::SiteDecisionKind::Unsupported,
+              .reason = rocjitsu::consan::AccessPolicyReason::UnsupportedMnemonic,
+          }},
+          .barrier_site_decisions = {{
+              .semantic_site = barrier,
+              .kind = rocjitsu::consan::SiteDecisionKind::Admitted,
+              .reason = rocjitsu::consan::BarrierPolicyReason::None,
+          }},
+          .atomic_site_decisions = {{
+              .semantic_site = atomic,
+              .kind = rocjitsu::consan::SiteDecisionKind::Admitted,
+              .capability = rocjitsu::consan::CapabilityDisposition::Supported,
+              .reason = rocjitsu::consan::AtomicPolicyReason::None,
+          }},
+          .fence_site_decisions = {{
+              .semantic_site = fence,
+              .kind = rocjitsu::consan::SiteDecisionKind::Admitted,
+              .capability = rocjitsu::consan::CapabilityDisposition::Supported,
+              .reason = rocjitsu::consan::FencePolicyReason::None,
+              .inventory_association = rocjitsu::consan::FenceAssociation::Qualified,
+          }},
+          .probe_intents =
+              {
+                  {.id = {0u},
+                   .mode = rocjitsu::consan::Mode::Default,
+                   .source_site = {0u},
+                   .physical_site = barrier.physical,
+                   .covered_semantic_sites = {barrier},
+                   .kind = rocjitsu::consan::ProbeIntentKind::BarrierEpoch,
+                   .position = rocjitsu::consan::ProbePosition::After,
+                   .synchronization_association = std::nullopt,
+                   .dynamic_result = rocjitsu::consan::DynamicResultRequirement::None,
+                   .atomic_lowering_form = std::nullopt},
+                  {.id = {1u},
+                   .mode = rocjitsu::consan::Mode::Default,
+                   .source_site = {1u},
+                   .physical_site = atomic.physical,
+                   .covered_semantic_sites = {atomic, fence},
+                   .kind = rocjitsu::consan::ProbeIntentKind::AtomicOrdering,
+                   .position = rocjitsu::consan::ProbePosition::After,
+                   .synchronization_association = atomic_association,
+                   .dynamic_result = rocjitsu::consan::DynamicResultRequirement::None,
+                   .atomic_lowering_form = std::nullopt},
+
+              },
+      };
   EXPECT_TRUE(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
-  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      result.coverage_ledger, {0u}, rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
-  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      result.coverage_ledger, {1u}, rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
-  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      result.coverage_ledger, {2u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  result.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
+  EXPECT_TRUE(publish_test_lowering_outcome(
+      result.coverage_ledger, {0u}, rocjitsu::consan::LoweringOutcomeKind::ResourceRejected));
+  EXPECT_TRUE(publish_test_lowering_outcome(
+      result.coverage_ledger, {1u}, rocjitsu::consan::LoweringOutcomeKind::PlacementRejected));
   return result;
 }
 
-rocjitsu::ConSanTransformArtifacts typed_coverage_transform_result() {
-  rocjitsu::ConSanTransformArtifacts result;
+rocjitsu::consan::TransformArtifacts typed_coverage_transform_result() {
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
 
-  const rocjitsu::PhysicalSiteId physical{
+  const PhysicalSiteId physical{
       .code_object = result.program_inventory.code_object_id(),
       .original_text_offset = 0x10u,
   };
-  const rocjitsu::SemanticSiteId semantic{
+  const SemanticSiteId semantic{
       .physical = physical,
-      .domain = rocjitsu::ConSanSemanticSiteDomain::Access,
+      .domain = rocjitsu::consan::SemanticSiteDomain::Access,
       .member_ordinal = 0u,
       .range_ordinal = 0u,
   };
-  install_consan_test_program_inventory(result, [&](rocjitsu::ProgramInventoryBuilder &builder) {
-    rocjitsu::ConSanProgramContainer container{rocjitsu::ConSanProgramContainerKind::Kernel};
+  install_consan_test_program_inventory(result, [&](ProgramInventoryBuilder &builder) {
+    rocjitsu::consan::ProgramContainer container{rocjitsu::consan::ProgramContainerKind::Kernel};
     container.name = "typed_kernel";
-    const rocjitsu::ConSanProgramContainerId container_id =
+    const rocjitsu::consan::ProgramContainerId container_id =
         builder.add_kernel(std::move(container)).id;
-    rocjitsu::ConSanProgramSite site;
+    rocjitsu::consan::ProgramSite site;
     site.physical_id.original_text_offset = 0x10u;
     site.container = container_id;
     builder.add_semantic_site(std::move(site));
   });
-  rocjitsu::ConSanObservationPlan plan = {
-      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+  rocjitsu::consan::ObservationPlan plan = {
+      .mode = rocjitsu::consan::Mode::Default,
       .site_decisions = {{
           .semantic_site = semantic,
-          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
-          .reason = rocjitsu::ConSanAccessPolicyReason::None,
+          .kind = rocjitsu::consan::SiteDecisionKind::Admitted,
+          .reason = rocjitsu::consan::AccessPolicyReason::None,
       }},
       .barrier_site_decisions = {},
       .atomic_site_decisions = {},
       .fence_site_decisions = {},
       .probe_intents = {{
           .id = {0u},
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .mode = rocjitsu::consan::Mode::Default,
           .source_site = {0u},
           .physical_site = physical,
           .covered_semantic_sites = {semantic},
-          .kind = rocjitsu::ConSanProbeIntentKind::AccessRecord,
-          .position = rocjitsu::ConSanProbePosition::Before,
+          .kind = rocjitsu::consan::ProbeIntentKind::Access,
+          .position = rocjitsu::consan::ProbePosition::Before,
           .synchronization_association = std::nullopt,
-          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .dynamic_result = rocjitsu::consan::DynamicResultRequirement::None,
           .atomic_lowering_form = std::nullopt,
       }},
   };
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
-  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      result.coverage_ledger, {0u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  result.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
+  EXPECT_TRUE(publish_test_lowering_outcome(result.coverage_ledger, {0u},
+                                            rocjitsu::consan::LoweringOutcomeKind::Instrumented));
   return result;
 }
 
 TEST(HsaHooksUnitTest, ConSanCoverageUsesTypedPipelineLedgerAfterPublishingMechanismResult) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
-  const rocjitsu::ConSanTransformArtifacts result = typed_coverage_transform_result();
+  const rocjitsu::consan::TransformArtifacts result = typed_coverage_transform_result();
 
   testing::internal::CaptureStderr();
   run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.replacement);
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_NE(log.find("ConSan coverage reader=101 flavor=moi engine=record_replay "
+  EXPECT_NE(log.find("ConSan coverage reader=101 mode=default "
                      "analysis_complete=true"),
             std::string::npos)
       << log;
@@ -5788,7 +5238,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageUsesTypedPipelineLedgerAfterPublishingMecha
 TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSourceLocations) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
-  const rocjitsu::ConSanTransformArtifacts result = diagnostic_coverage_transform_result();
+  const rocjitsu::consan::TransformArtifacts result = diagnostic_coverage_transform_result();
 
   testing::internal::CaptureStderr();
   run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.replacement);
@@ -5813,7 +5263,8 @@ TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSource
             std::string::npos)
       << log;
   EXPECT_NE(log.find("ConSan coverage_site reader=101 kind=fence disposition=supported "
-                     "reason=none outcome=patched lowering_reason=none resource_reason=none "
+                     "reason=none outcome=placement_or_lowering_failed "
+                     "lowering_reason=instrumentation_patch_missing resource_reason=none "
                      "container=fence_kernel scope=kernel text=0x40 mnemonic=unknown"),
             std::string::npos)
       << log;
@@ -5822,12 +5273,13 @@ TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSource
 TEST(HsaHooksUnitTest, ConSanHighCardinalityTypedDiagnosticsUseBoundedBatchedWrites) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
-  rocjitsu::ConSanTransformArtifacts result = diagnostic_coverage_transform_result();
+  rocjitsu::consan::TransformArtifacts result = diagnostic_coverage_transform_result();
   constexpr size_t kRecordCount = 4096;
 
-  install_test_access_coverage(result, kRecordCount, rocjitsu::ConSanSiteDecisionKind::Unsupported,
-                               rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic);
-  result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  install_test_access_coverage(result, kRecordCount,
+                               rocjitsu::consan::SiteDecisionKind::Unsupported,
+                               rocjitsu::consan::AccessPolicyReason::UnsupportedMnemonic);
+  result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
   result.replacement.clear();
   const auto count_records = [](std::string_view log, std::string_view marker) {
     size_t count = 0;
@@ -5858,39 +5310,39 @@ TEST(HsaHooksUnitTest, ConSanHighCardinalityTypedDiagnosticsUseBoundedBatchedWri
 TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificationLogLevel) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
-  rocjitsu::ConSanTransformArtifacts result;
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
 
-  rocjitsu::ConSanCandidateResourcePlan access_plan;
-  access_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Access;
+  rocjitsu::consan::CandidateResourcePlan access_plan;
+  access_plan.site_kind = rocjitsu::consan::ResourceSiteKind::Access;
   access_plan.candidate_index = 0;
   access_plan.text_offset = 0x20;
-  access_plan.source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired;
+  access_plan.source = rocjitsu::consan::RegisterAllocationSource::SpillRequired;
   access_plan.alternatives = {
-      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
-       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+      {.kind = rocjitsu::consan::ResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::consan::RegisterAllocationSource::SpillRequired,
        .scratch_vgpr_count = 17,
-       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Superseded},
-      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
-       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+       .outcome = rocjitsu::consan::ResourcePlanAlternativeOutcome::Superseded},
+      {.kind = rocjitsu::consan::ResourcePlanAlternativeKind::SpillBackedOperandRecovery,
+       .source = rocjitsu::consan::RegisterAllocationSource::SpillRequired,
        .scratch_vgpr_count = 16,
-       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Selected},
-      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
-       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+       .outcome = rocjitsu::consan::ResourcePlanAlternativeOutcome::Selected},
+      {.kind = rocjitsu::consan::ResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::consan::RegisterAllocationSource::SpillRequired,
        .scratch_vgpr_count = 16,
-       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Contributed},
+       .outcome = rocjitsu::consan::ResourcePlanAlternativeOutcome::Contributed},
   };
   result.resource_plans.push_back(std::move(access_plan));
 
-  rocjitsu::ConSanCandidateResourcePlan atomic_plan;
-  atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
+  rocjitsu::consan::CandidateResourcePlan atomic_plan;
+  atomic_plan.site_kind = rocjitsu::consan::ResourceSiteKind::Atomic;
   atomic_plan.candidate_index = 1;
   atomic_plan.text_offset = 0x40;
-  atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
-  atomic_plan.reason = rocjitsu::ConSanRegisterPlanReason::ForbiddenOverlap;
+  atomic_plan.source = rocjitsu::consan::RegisterAllocationSource::Unsupported;
+  atomic_plan.reason = rocjitsu::consan::RegisterPlanReason::ForbiddenOverlap;
   atomic_plan.scratch_vgpr_count = 10;
   atomic_plan.current_vgpr_count = 64;
   atomic_plan.max_referenced_vgpr_count = 61;
@@ -5898,19 +5350,19 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   atomic_plan.required_vgpr_count = 64;
   atomic_plan.owner_kernel_ids = {{0}};
   atomic_plan.alternatives = {
-      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
-       .source = rocjitsu::ConSanRegisterAllocationSource::SpillRequired,
+      {.kind = rocjitsu::consan::ResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::consan::RegisterAllocationSource::SpillRequired,
        .scratch_vgpr_count = 10,
-       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Selected},
+       .outcome = rocjitsu::consan::ResourcePlanAlternativeOutcome::Selected},
   };
   result.resource_plans.push_back(std::move(atomic_plan));
 
-  rocjitsu::ConSanCandidateResourcePlan fence_plan;
-  fence_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Fence;
+  rocjitsu::consan::CandidateResourcePlan fence_plan;
+  fence_plan.site_kind = rocjitsu::consan::ResourceSiteKind::Fence;
   fence_plan.candidate_index = 2;
   fence_plan.text_offset = 0x60;
-  fence_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
-  fence_plan.reason = rocjitsu::ConSanRegisterPlanReason::NoLegalWindow;
+  fence_plan.source = rocjitsu::consan::RegisterAllocationSource::Unsupported;
+  fence_plan.reason = rocjitsu::consan::RegisterPlanReason::NoLegalWindow;
   fence_plan.scratch_vgpr_count = 8;
   fence_plan.current_vgpr_count = 256;
   fence_plan.max_referenced_vgpr_count = 256;
@@ -5919,11 +5371,11 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   fence_plan.owner_kernel_ids = {{1}, {2}};
   fence_plan.has_indirect_vgpr_access = true;
   fence_plan.alternatives = {
-      {.kind = rocjitsu::ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
-       .source = rocjitsu::ConSanRegisterAllocationSource::Unsupported,
-       .reason = rocjitsu::ConSanRegisterPlanReason::NoLegalWindow,
+      {.kind = rocjitsu::consan::ResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+       .source = rocjitsu::consan::RegisterAllocationSource::Unsupported,
+       .reason = rocjitsu::consan::RegisterPlanReason::NoLegalWindow,
        .scratch_vgpr_count = 8,
-       .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Rejected},
+       .outcome = rocjitsu::consan::ResourcePlanAlternativeOutcome::Rejected},
   };
   result.resource_plans.push_back(std::move(fence_plan));
 
@@ -5975,38 +5427,38 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
 TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
-  rocjitsu::ConSanTransformArtifacts result;
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
-  const rocjitsu::SemanticSiteId atomic_site{
+  const SemanticSiteId atomic_site{
       .physical = {.code_object = result.program_inventory.code_object_id(),
                    .original_text_offset = 0x30u},
-      .domain = rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent,
+      .domain = rocjitsu::consan::SemanticSiteDomain::SynchronizationEvent,
       .member_ordinal = 0u,
       .range_ordinal = 0u,
   };
-  rocjitsu::ConSanObservationPlan plan = {
-      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+  rocjitsu::consan::ObservationPlan plan = {
+      .mode = rocjitsu::consan::Mode::Default,
       .site_decisions = {},
       .barrier_site_decisions = {},
       .atomic_site_decisions = {{
           .semantic_site = atomic_site,
-          .kind = rocjitsu::ConSanSiteDecisionKind::NotApplicable,
-          .capability = rocjitsu::ConSanCapabilityDisposition::OutOfContract,
-          .reason = rocjitsu::ConSanAtomicPolicyReason::UnqualifiedSyncSequence,
+          .kind = rocjitsu::consan::SiteDecisionKind::NotApplicable,
+          .capability = rocjitsu::consan::CapabilityDisposition::OutOfContract,
+          .reason = rocjitsu::consan::AtomicPolicyReason::UnqualifiedSyncSequence,
       }},
       .fence_site_decisions = {},
       .probe_intents = {},
   };
   ASSERT_TRUE(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
-  rocjitsu::ConSanCandidateResourcePlan atomic_plan;
-  atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
+  result.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
+  rocjitsu::consan::CandidateResourcePlan atomic_plan;
+  atomic_plan.site_kind = rocjitsu::consan::ResourceSiteKind::Atomic;
   atomic_plan.text_offset = 0x30;
   result.resource_plans.push_back(std::move(atomic_plan));
-  result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  result.outcome = rocjitsu::consan::TransformOutcome::Unchanged;
   result.replacement.clear();
 
   testing::internal::CaptureStderr();
@@ -6021,110 +5473,105 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
   EXPECT_EQ(log.find("coverage_site reader=101 kind=atomic"), std::string::npos) << log;
 }
 
-rocjitsu::ConSanTransformArtifacts auto_report_atomic_transform_result() {
-  rocjitsu::ConSanTransformArtifacts result;
+rocjitsu::consan::TransformArtifacts auto_report_atomic_transform_result() {
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
-  rocjitsu::ConSanCandidateResourcePlan atomic_plan;
-  atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
-  atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::LivenessDead;
+  rocjitsu::consan::CandidateResourcePlan atomic_plan;
+  atomic_plan.site_kind = rocjitsu::consan::ResourceSiteKind::Atomic;
+  atomic_plan.source = rocjitsu::consan::RegisterAllocationSource::LivenessDead;
   result.resource_plans.push_back(atomic_plan);
-  install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
+  install_consan_test_program_inventory(result, [](ProgramInventoryBuilder &builder) {
     auto &kernel = builder.add_kernel();
     kernel.name = "auto_report_atomic";
     kernel.entry_text_offset = 0u;
     kernel.code_size = 4u;
     kernel.has_text_range = true;
-    auto site = rocjitsu::make_consan_program_site(kernel.id, rocjitsu::ConSanAtomicSite{});
+    auto site = make_program_site(kernel.id, rocjitsu::consan::AtomicSite{});
     site.execution_owners = {{.kernel = kernel.id}};
     builder.add_semantic_site(std::move(site));
   });
-  const rocjitsu::PhysicalSiteId physical{
+  const PhysicalSiteId physical{
       .code_object = result.program_inventory.code_object_id(),
       .original_text_offset = 0u,
   };
-  const rocjitsu::SemanticSiteId semantic{
+  const SemanticSiteId semantic{
       .physical = physical,
-      .domain = rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent,
+      .domain = rocjitsu::consan::SemanticSiteDomain::SynchronizationEvent,
   };
-  rocjitsu::ConSanObservationPlan plan = {
-      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+  rocjitsu::consan::ObservationPlan plan = {
+      .mode = rocjitsu::consan::Mode::Default,
       .site_decisions = {},
       .barrier_site_decisions = {},
       .atomic_site_decisions = {},
       .fence_site_decisions = {},
       .probe_intents = {{
           .id = {0u},
-          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .mode = rocjitsu::consan::Mode::Default,
           .source_site = {0u},
           .physical_site = physical,
           .covered_semantic_sites = {semantic},
-          .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
-          .position = rocjitsu::ConSanProbePosition::After,
+          .kind = rocjitsu::consan::ProbeIntentKind::AtomicOrdering,
+          .position = rocjitsu::consan::ProbePosition::After,
           .synchronization_association =
-              rocjitsu::ConSanSynchronizationAssociationId{"auto-report-atomic"},
-          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+              rocjitsu::consan::SynchronizationAssociationId{"auto-report-atomic"},
+          .dynamic_result = rocjitsu::consan::DynamicResultRequirement::None,
           .atomic_lowering_form = std::nullopt,
       }},
   };
   EXPECT_TRUE(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
-  EXPECT_TRUE(rocjitsu::publish_test_lowering_outcome(
-      result.coverage_ledger, {0u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  result.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
+  EXPECT_TRUE(publish_test_lowering_outcome(result.coverage_ledger, {0u},
+                                            rocjitsu::consan::LoweringOutcomeKind::Instrumented));
   return result;
 }
 
-enum class AutoReplayOwnerScope {
-  NoProvenance,
-  SharedOwnerPair,
-  DisjointOwnerPair,
-  UnknownOwnerPair,
-};
-
-void install_auto_report_access_coverage(rocjitsu::ConSanTransformArtifacts &result,
-                                         rocjitsu::ConSanCapabilityEngine engine,
-                                         rocjitsu::ConSanProbeIntentKind intent_kind,
+void install_auto_report_access_coverage(rocjitsu::consan::TransformArtifacts &result,
+                                         rocjitsu::consan::Mode mode,
+                                         rocjitsu::consan::ProbeIntentKind intent_kind,
                                          std::span<const uint64_t> instruction_offsets) {
-  rocjitsu::ConSanObservationPlan plan;
-  plan.engine = engine;
+  rocjitsu::consan::ObservationPlan plan;
+  plan.mode = mode;
   for (uint64_t instruction_offset : instruction_offsets) {
-    const rocjitsu::PhysicalSiteId physical{
+    const PhysicalSiteId physical{
         .code_object = result.program_inventory.code_object_id(),
         .original_text_offset = instruction_offset,
     };
-    const rocjitsu::SemanticSiteId semantic{
+    const SemanticSiteId semantic{
         .physical = physical,
-        .domain = rocjitsu::ConSanSemanticSiteDomain::Access,
+        .domain = rocjitsu::consan::SemanticSiteDomain::Access,
     };
-    const rocjitsu::ConSanProbeIntentId intent_id{static_cast<uint32_t>(plan.probe_intents.size())};
+    const rocjitsu::consan::ProbeIntentId intent_id{
+        static_cast<uint32_t>(plan.probe_intents.size())};
     plan.site_decisions.push_back({
         .semantic_site = semantic,
-        .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
-        .reason = rocjitsu::ConSanAccessPolicyReason::None,
+        .kind = rocjitsu::consan::SiteDecisionKind::Admitted,
+        .reason = rocjitsu::consan::AccessPolicyReason::None,
     });
     plan.probe_intents.push_back({
         .id = intent_id,
-        .engine = engine,
+        .mode = mode,
         .source_site = {intent_id.value},
         .physical_site = physical,
         .covered_semantic_sites = {semantic},
         .kind = intent_kind,
-        .position = rocjitsu::ConSanProbePosition::Before,
+        .position = rocjitsu::consan::ProbePosition::Before,
         .synchronization_association = std::nullopt,
-        .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+        .dynamic_result = rocjitsu::consan::DynamicResultRequirement::None,
         .atomic_lowering_form = std::nullopt,
     });
   }
   ASSERT_TRUE(plan.valid());
-  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
+  result.coverage_ledger = rocjitsu::consan::CoverageLedger(std::move(plan));
 }
 
-rocjitsu::ConSanStaticAccessAttribution auto_report_static_access_attribution(
-    const rocjitsu::ConSanTransformArtifacts &result, size_t intent_index,
-    std::vector<rocjitsu::ConSanProgramContainerId> owners, bool owner_provenance_complete) {
-  const rocjitsu::ConSanProbeIntent &intent = result.observation_plan().probe_intents[intent_index];
+rocjitsu::consan::StaticAccessAttribution auto_report_static_access_attribution(
+    const rocjitsu::consan::TransformArtifacts &result, size_t intent_index,
+    std::vector<rocjitsu::consan::ProgramContainerId> owners, bool owner_provenance_complete) {
+  const rocjitsu::consan::ProbeIntent &intent =
+      result.observation_plan().probe_intents[intent_index];
   return {
       .intent_ids = {intent.id},
       .original_site = intent.physical_site,
@@ -6134,76 +5581,33 @@ rocjitsu::ConSanStaticAccessAttribution auto_report_static_access_attribution(
   };
 }
 
-rocjitsu::ConSanTransformArtifacts auto_report_replay_transform_result(
-    AutoReplayOwnerScope owner_scope = AutoReplayOwnerScope::NoProvenance) {
-  rocjitsu::ConSanTransformArtifacts result = auto_report_atomic_transform_result();
-  std::vector<uint64_t> instruction_offsets = {0xfe96cu};
-  if (owner_scope != AutoReplayOwnerScope::NoProvenance)
-    instruction_offsets.push_back(0xfe974u);
-  install_auto_report_access_coverage(result, rocjitsu::ConSanCapabilityEngine::RecordReplay,
-                                      rocjitsu::ConSanProbeIntentKind::AccessRecord,
-                                      instruction_offsets);
-  for (size_t index = 0; index < instruction_offsets.size(); ++index) {
-    const bool owner_provenance_complete = owner_scope != AutoReplayOwnerScope::NoProvenance &&
-                                           owner_scope != AutoReplayOwnerScope::UnknownOwnerPair;
-    std::vector<rocjitsu::ConSanProgramContainerId> owners;
-    if (owner_provenance_complete) {
-      owners.push_back({index == 1u && owner_scope == AutoReplayOwnerScope::DisjointOwnerPair
-                            ? 0x200u
-                            : 0x100u});
-    }
-    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping =
-        rocjitsu::ConSanRuntimeStaticMapping::record_replay({
-            .access = auto_report_static_access_attribution(result, index, std::move(owners),
-                                                            owner_provenance_complete),
-        });
-    const rocjitsu::ConSanProbeIntent &intent = result.observation_plan().probe_intents[index];
-    const std::array intent_ids = {intent.id};
-    const std::array locations = {rocjitsu::ConSanCommittedLoweringLocation{
-        .original_site = intent.physical_site,
-        .emitted_text_offset = instruction_offsets[index],
-        .emitted_size = 4u,
-        .relocated_guest_text_offset = std::nullopt,
-    }};
-    auto commit = rocjitsu::make_consan_committed_lowering(
-        result.observation_plan(), intent_ids, locations,
-        rocjitsu::ConSanLoweringOutcomeKind::Instrumented, {}, std::move(runtime_mapping));
-    EXPECT_TRUE(commit.has_value());
-    if (commit) {
-      EXPECT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
-    }
-  }
-  return result;
-}
-
-enum class AutoSampledOwnerScope {
+enum class ReportOwnerScope {
   SingleMapping,
   SharedOwnerPair,
   DisjointOwnerPair,
   UnknownOwnerPair,
 };
 
-rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
-    bool malformed_mapping = false,
-    AutoSampledOwnerScope owner_scope = AutoSampledOwnerScope::SingleMapping) {
-  rocjitsu::ConSanTransformArtifacts result = auto_report_atomic_transform_result();
+rocjitsu::consan::TransformArtifacts
+auto_report_transform_result(bool malformed_mapping = false,
+                             ReportOwnerScope owner_scope = ReportOwnerScope::SingleMapping) {
+  rocjitsu::consan::TransformArtifacts result = auto_report_atomic_transform_result();
   std::vector<uint64_t> instruction_offsets = {0x120u};
-  if (owner_scope != AutoSampledOwnerScope::SingleMapping)
+  if (owner_scope != ReportOwnerScope::SingleMapping)
     instruction_offsets.push_back(0x140u);
-  install_auto_report_access_coverage(result, rocjitsu::ConSanCapabilityEngine::Sampled,
-                                      rocjitsu::ConSanProbeIntentKind::SampledAccess,
+  install_auto_report_access_coverage(result, rocjitsu::consan::Mode::Default,
+                                      rocjitsu::consan::ProbeIntentKind::Access,
                                       instruction_offsets);
   for (size_t index = 0; index < instruction_offsets.size(); ++index) {
     const bool owner_provenance_complete =
-        !(index == 1u && owner_scope == AutoSampledOwnerScope::UnknownOwnerPair);
-    std::vector<rocjitsu::ConSanProgramContainerId> owners;
+        !(index == 1u && owner_scope == ReportOwnerScope::UnknownOwnerPair);
+    std::vector<rocjitsu::consan::ProgramContainerId> owners;
     if (owner_provenance_complete) {
-      owners.push_back({index == 1u && owner_scope == AutoSampledOwnerScope::DisjointOwnerPair
-                            ? 0x200u
-                            : 0x100u});
+      owners.push_back(
+          {index == 1u && owner_scope == ReportOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u});
     }
-    rocjitsu::ConSanRuntimeStaticMapping runtime_mapping =
-        rocjitsu::ConSanRuntimeStaticMapping::sampled({
+    rocjitsu::consan::RuntimeStaticMapping runtime_mapping =
+        rocjitsu::consan::RuntimeStaticMapping::from_access({
             .access = auto_report_static_access_attribution(result, index, std::move(owners),
                                                             owner_provenance_complete),
             .first_slot = malformed_mapping && index == 0u ? std::numeric_limits<uint32_t>::max()
@@ -6214,17 +5618,17 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
             .relocated_guest_text_offset = 0x448u + index * 0x20u,
             .scratch_vgpr = 12u,
         });
-    const rocjitsu::ConSanProbeIntent &intent = result.observation_plan().probe_intents[index];
+    const rocjitsu::consan::ProbeIntent &intent = result.observation_plan().probe_intents[index];
     const std::array intent_ids = {intent.id};
-    const std::array locations = {rocjitsu::ConSanCommittedLoweringLocation{
+    const std::array locations = {rocjitsu::consan::CommittedLoweringLocation{
         .original_site = intent.physical_site,
         .emitted_text_offset = 0x440u + index * 0x20u,
         .emitted_size = 4u,
         .relocated_guest_text_offset = 0x448u + index * 0x20u,
     }};
-    auto commit = rocjitsu::make_consan_committed_lowering(
-        result.observation_plan(), intent_ids, locations,
-        rocjitsu::ConSanLoweringOutcomeKind::Instrumented, {}, std::move(runtime_mapping));
+    auto commit = make_committed_lowering(result.observation_plan(), intent_ids, locations,
+                                          rocjitsu::consan::LoweringOutcomeKind::Instrumented, {},
+                                          std::move(runtime_mapping));
     EXPECT_TRUE(commit.has_value());
     if (commit) {
       EXPECT_TRUE(result.coverage_ledger.publish_lowering_commit(std::move(*commit)));
@@ -6233,51 +5637,18 @@ rocjitsu::ConSanTransformArtifacts auto_report_sampled_transform_result(
   return result;
 }
 
-rocjitsu::ConSanTransformArtifacts auto_report_inline_shadow_transform_result() {
-  rocjitsu::ConSanTransformArtifacts result = auto_report_atomic_transform_result();
-  constexpr std::array<uint8_t, 8> instruction_bytes{};
-  constexpr uint64_t owner_descriptor_offset = 0x100u;
-  rocjitsu::ProgramInventoryBuilder inventory(instruction_bytes);
-  inventory.set_code_object_facts(true, 0u, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
-  rocjitsu::ConSanProgramContainer kernel{rocjitsu::ConSanProgramContainerKind::Kernel};
-  kernel.name = "auto_report_inline_shadow";
-  kernel.descriptor_file_offset = owner_descriptor_offset;
-  kernel.declared_group_segment_bytes = 256u;
-  rocjitsu::ConSanProgramSite access;
-  access.origin = rocjitsu::ConSanAccessOrigin::NativeLds;
-  access.kind = rocjitsu::ConSanLdsAccessKind::Write;
-  access.physical_id.original_text_offset = 0u;
-  access.decoded_site().file_offset = 0u;
-  access.decoded_site().size = sizeof(uint32_t);
-  access.decoded_width_bits = 32u;
-  access.operands.address_vgpr = 0u;
-  access.operands.data_vgpr = 1u;
-  access.decoded_site().mnemonic = "ds_store_b32";
-  access.container = inventory.add_kernel(std::move(kernel)).id;
-  inventory.add_access_site(std::move(access));
-  inventory.publish_decoded_accesses(instruction_bytes);
-  inventory.access_sites().front().execution_owners = {{.kernel = inventory.kernels().front().id}};
-  result.program_inventory = inventory.view();
-  install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None,
-                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
-                               rocjitsu::ConSanCapabilityEngine::InlineShadow,
-                               rocjitsu::ConSanProbeIntentKind::ExactShadowAccess);
-  return result;
-}
-
 TEST(HsaHooksUnitTest, ConSanAutoReportNeverReconstructsMissingEvidenceFromMechanismTelemetry) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   g_transform_override_result.coverage_ledger = {};
 
   testing::internal::CaptureStderr();
@@ -6302,21 +5673,20 @@ TEST(HsaHooksUnitTest, ConSanAutoReportNeverReconstructsMissingEvidenceFromMecha
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportDoesNotAllocateForValidEmptyTypedEvidence) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
-  rocjitsu::ConSanObservationPlan valid_empty_plan;
-  valid_empty_plan.engine = rocjitsu::ConSanCapabilityEngine::RecordReplay;
+  g_transform_override_result = auto_report_transform_result();
+  rocjitsu::consan::ObservationPlan valid_empty_plan;
+  valid_empty_plan.mode = rocjitsu::consan::Mode::Default;
   ASSERT_TRUE(valid_empty_plan.valid());
   g_transform_override_result.coverage_ledger =
-      rocjitsu::ConSanCoverageLedger(std::move(valid_empty_plan));
+      rocjitsu::consan::CoverageLedger(std::move(valid_empty_plan));
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -6350,12 +5720,12 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
   };
   for (const char *fault_environment : fault_environments) {
     SCOPED_TRACE(fault_environment);
-    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
     ScopedEnvVar selected_fault(fault_environment, "1");
     ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
@@ -6368,7 +5738,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
 
     reset_code_object_observations();
     reset_core_memory_observations();
-    g_transform_override_result = auto_report_replay_transform_result();
+    g_transform_override_result = auto_report_transform_result();
     g_transform_override_models_fault_application = true;
     {
       FakeApiTable api;
@@ -6386,7 +5756,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
 
       EXPECT_EQ(g_transform_override_fault_dry_runs, (std::vector<bool>{true, false, false}));
       EXPECT_EQ(g_transform_override_fault_mutations, (std::vector<bool>{true, false, true}));
-      EXPECT_EQ(hook.moi_retry_count(), 1u);
+      EXPECT_EQ(hook.retry_count(), 1u);
       ASSERT_EQ(g_transform_override_report_layouts.size(), 3u);
       EXPECT_FALSE(g_transform_override_report_layouts[0]);
       EXPECT_FALSE(g_transform_override_report_layouts[1]);
@@ -6401,12 +5771,12 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLi
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
   ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
   ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
@@ -6414,15 +5784,15 @@ TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   g_transform_override_live_fault_result = g_transform_override_result;
   g_transform_override_live_fault_result->resource_plans.push_back(
       g_transform_override_live_fault_result->resource_plans.front());
   install_test_access_coverage(
-      *g_transform_override_live_fault_result, 2u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
-      rocjitsu::ConSanCapabilityEngine::RecordReplay,
-      rocjitsu::ConSanProbeIntentKind::AccessRecord);
+      *g_transform_override_live_fault_result, 2u, rocjitsu::consan::SiteDecisionKind::Admitted,
+      rocjitsu::consan::AccessPolicyReason::None,
+      rocjitsu::consan::LoweringOutcomeKind::Instrumented, rocjitsu::consan::Mode::Default,
+      rocjitsu::consan::ProbeIntentKind::Access);
   g_transform_override_models_fault_application = true;
 
   testing::internal::CaptureStderr();
@@ -6443,10 +5813,10 @@ TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_NE(log.find("live fault transform grew the automatic MOI report inventory"),
+  EXPECT_NE(log.find("live fault transform grew the automatic ConSan report inventory"),
             std::string::npos)
       << log;
-  EXPECT_NE(log.find("reason=moi-report-live-inventory-growth"), std::string::npos) << log;
+  EXPECT_NE(log.find("reason=report-live-inventory-growth"), std::string::npos) << log;
   EXPECT_NE(log.find("ConSan fault install"), std::string::npos) << log;
   EXPECT_NE(log.find("applied=1 installed=false"), std::string::npos) << log;
   EXPECT_TRUE(g_core_memory_allocations.empty());
@@ -6457,24 +5827,19 @@ TEST(HsaHooksUnitTest, ConSanAutoReportFallbacksStillExecuteLiveFaultTransform) 
   struct Case {
     const char *name;
     bool has_report_sites;
-    bool dynamic_records;
     bool fail_allocation;
   };
   constexpr std::array cases = {
-      Case{"no-report-sites", false, false, false},
-      Case{"dynamic-replay-without-explicit-cap", true, true, false},
-      Case{"report-allocation-failure", true, false, true},
+      Case{"no-report-sites", false, false},
+      Case{"report-allocation-failure", true, true},
   };
   for (const Case &test : cases) {
     SCOPED_TRACE(test.name);
-    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE",
-                                  test.dynamic_records ? nullptr : "262144");
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS",
-                                 test.dynamic_records ? "1" : "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "262144");
     ScopedEnvVar drop_barrier("RJ_CONSAN_FAULT_DROP_BARRIER", "1");
     ScopedEnvVar require_exactly_one("RJ_CONSAN_FAULT_REQUIRE_EXACTLY_ONE", "1");
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
@@ -6483,16 +5848,17 @@ TEST(HsaHooksUnitTest, ConSanAutoReportFallbacksStillExecuteLiveFaultTransform) 
     reset_core_memory_observations();
     g_fail_core_memory_allocate = test.fail_allocation;
     if (test.has_report_sites) {
-      g_transform_override_result = auto_report_replay_transform_result();
+      g_transform_override_result = auto_report_transform_result();
     } else {
       install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_RDNA4,
                                            ROCJITSU_CODE_TARGET_GFX1201);
-      g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+      g_transform_override_result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
       g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 'n', 'o'};
-      rocjitsu::ConSanObservationPlan plan;
-      plan.engine = rocjitsu::ConSanCapabilityEngine::RecordReplay;
+      rocjitsu::consan::ObservationPlan plan;
+      plan.mode = rocjitsu::consan::Mode::Default;
       ASSERT_TRUE(plan.valid());
-      g_transform_override_result.coverage_ledger = rocjitsu::ConSanCoverageLedger(std::move(plan));
+      g_transform_override_result.coverage_ledger =
+          rocjitsu::consan::CoverageLedger(std::move(plan));
     }
     g_transform_override_models_fault_application = true;
     {
@@ -6518,21 +5884,21 @@ TEST(HsaHooksUnitTest, ConSanAutoReportFallbacksStillExecuteLiveFaultTransform) 
   }
 }
 
-rocjitsu::ConSanTransformArtifacts auto_sc_transform_result() {
-  rocjitsu::ConSanTransformArtifacts result;
+rocjitsu::consan::TransformArtifacts auto_sc_transform_result() {
+  rocjitsu::consan::TransformArtifacts result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_CDNA3,
                                        ROCJITSU_CODE_TARGET_GFX942);
-  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.outcome = rocjitsu::consan::TransformOutcome::ModifiedValid;
   result.replacement = {0x7f, 'E', 'L', 'F', 's', 'c'};
-  rocjitsu::ConSanPatchInfo patch;
-  patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  patch.kind = rocjitsu::ConSanPatchKind::LdsStoreCheckTrap;
+  rocjitsu::consan::PatchInfo patch;
+  patch.phase = rocjitsu::consan::PatchPhase::Instrumentation;
+  patch.kind = rocjitsu::consan::PatchKind::LdsStoreCheckTrap;
   result.patches.push_back(patch);
-  install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None,
-                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
-                               rocjitsu::ConSanCapabilityEngine::SuperCollider,
-                               rocjitsu::ConSanProbeIntentKind::RedundantAccessObservation);
+  install_test_access_coverage(result, 1u, rocjitsu::consan::SiteDecisionKind::Admitted,
+                               rocjitsu::consan::AccessPolicyReason::None,
+                               rocjitsu::consan::LoweringOutcomeKind::Instrumented,
+                               rocjitsu::consan::Mode::SuperCollider,
+                               rocjitsu::consan::ProbeIntentKind::RedundantAccessObservation);
   return result;
 }
 
@@ -6541,7 +5907,7 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportNeverReconstructsMissingEvidenceFromMec
     SCOPED_TRACE(fail_closed);
     ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
-    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", nullptr);
     ScopedEnvVar fail_closed_value("RJ_CONSAN_FAIL_CLOSED", fail_closed ? "1" : "0");
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
     ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
@@ -6584,25 +5950,25 @@ TEST(HsaHooksUnitTest, ConSanOnUnloadDefersLiveReportFreeToRuntime) {
   };
   constexpr std::array cases = {
       Case{"supercollider", true, false},
-      Case{"record-replay", false, false},
-      Case{"sampled", false, true},
+      Case{"default", false, false},
+      Case{"default", false, true},
   };
 
   for (const Case &test : cases) {
     SCOPED_TRACE(test.mode);
     ScopedEnvVar mode("RJ_CONSAN_MODE", test.mode);
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
     reset_code_object_observations();
     reset_core_memory_observations();
     g_transform_override_result = test.supercollider ? auto_sc_transform_result()
-                                  : test.sampled     ? auto_report_sampled_transform_result()
-                                                     : auto_report_replay_transform_result();
+                                  : test.sampled     ? auto_report_transform_result()
+                                                     : auto_report_transform_result();
     {
       FakeApiTable api;
       InstalledDbiHook hook(api);
@@ -6629,9 +5995,9 @@ TEST(HsaHooksUnitTest, ConSanOnUnloadDefersLiveReportFreeToRuntime) {
 TEST(HsaHooksUnitTest, ConSanScAutoReportUsesMarkerAndCleansUpWithoutTrapFallback) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
   ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
-  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
-  ScopedEnvVar foreign_moi_report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", "4096");
-  ScopedEnvVar foreign_moi_report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", "65536");
+  ScopedEnvVar report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", nullptr);
+  ScopedEnvVar foreign_report_buffer("RJ_CONSAN_REPORT_BUFFER", "4096");
+  ScopedEnvVar foreign_report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", "65536");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
@@ -6675,7 +6041,7 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportReclaimsEveryExecutableAcrossRegistryCh
     ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
     ScopedEnvVar selected_policy("RJ_CONSAN_POLICY", policy);
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
-    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", nullptr);
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
     ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
@@ -6712,7 +6078,7 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportReclaimsEveryExecutableAcrossRegistryCh
 
 TEST(HsaHooksUnitTest, ConSanScTrapIsExplicitAndAllocationFailureDoesNotFallBack) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
-  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", nullptr);
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
@@ -6741,7 +6107,7 @@ TEST(HsaHooksUnitTest, ConSanScTrapIsExplicitAndAllocationFailureDoesNotFallBack
   reset_core_memory_observations();
   g_transform_override_result = auto_sc_transform_result();
   {
-    ScopedEnvVar explicit_report_buffer("RJ_CONSAN_REPORT_BUFFER", "4096");
+    ScopedEnvVar explicit_report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", "4096");
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
     FakeApiTable api;
     InstalledDbiHook hook(api);
@@ -6789,7 +6155,7 @@ TEST(HsaHooksUnitTest, ConSanScTrapIsExplicitAndAllocationFailureDoesNotFallBack
 TEST(HsaHooksUnitTest, ConSanScAutoReportAllocationFailureRejectsWhenFailClosed) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
   ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
-  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", nullptr);
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
@@ -6814,7 +6180,7 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportAllocationFailureRejectsWhenFailClosed)
   g_fail_core_memory_allocate = false;
 }
 
-TEST(HsaHooksUnitTest, AutoReportsHonorTypedVisibilityAndPreferFineRegionAcrossEngines) {
+TEST(HsaHooksUnitTest, ReportsHonorTypedVisibilityAndPreferFineRegion) {
   struct Case {
     const char *mode;
     bool offer_fine_region;
@@ -6824,27 +6190,20 @@ TEST(HsaHooksUnitTest, AutoReportsHonorTypedVisibilityAndPreferFineRegionAcrossE
     std::optional<uint64_t> expected_region;
   };
   constexpr std::array cases = {
-      Case{"record-replay", true, false, false, HSA_STATUS_SUCCESS, 30u},
-      Case{"record-replay", true, true, false, HSA_STATUS_SUCCESS, 30u},
-      Case{"record-replay", true, true, true, HSA_STATUS_SUCCESS, 30u},
-      Case{"sampled", true, false, false, HSA_STATUS_SUCCESS, 30u},
-      Case{"sampled", true, true, false, HSA_STATUS_SUCCESS, 30u},
-      Case{"sampled", true, true, true, HSA_STATUS_SUCCESS, 30u},
-      Case{"inline-shadow", true, false, false, HSA_STATUS_SUCCESS, 30u},
-      Case{"inline-shadow", true, true, false, HSA_STATUS_SUCCESS, 30u},
-      Case{"inline-shadow", true, true, true, HSA_STATUS_SUCCESS, 30u},
-      Case{"record-replay", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
-      Case{"sampled", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
-      Case{"inline-shadow", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
+      Case{"default", true, false, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"default", true, true, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"default", true, true, true, HSA_STATUS_SUCCESS, 30u},
+      Case{"default", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
+
   };
   for (const Case &test : cases) {
     SCOPED_TRACE(test.mode);
     ScopedEnvVar mode("RJ_CONSAN_MODE", test.mode);
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "67108864");
+
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
     reset_code_object_observations();
@@ -6852,11 +6211,10 @@ TEST(HsaHooksUnitTest, AutoReportsHonorTypedVisibilityAndPreferFineRegionAcrossE
     g_offer_fine_report_region = test.offer_fine_region;
     g_offer_coarse_report_region = test.offer_coarse_region;
     g_offer_coarse_report_region_first = test.offer_coarse_region_first;
-    g_transform_override_result = std::string_view(test.mode) == "sampled"
-                                      ? auto_report_sampled_transform_result()
-                                  : std::string_view(test.mode) == "inline-shadow"
-                                      ? auto_report_inline_shadow_transform_result()
-                                      : auto_report_replay_transform_result();
+    g_transform_override_result =
+        std::string_view(test.mode) == "default"   ? auto_report_transform_result()
+        : std::string_view(test.mode) == "default" ? auto_report_transform_result()
+                                                   : auto_report_transform_result();
     {
       FakeApiTable api;
       InstalledDbiHook hook(api);
@@ -6884,17 +6242,17 @@ TEST(HsaHooksUnitTest, AutoReportsHonorTypedVisibilityAndPreferFineRegionAcrossE
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAndCleansUp) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", nullptr);
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_atomic_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   {
     FakeApiTable api;
     InstalledDbiHook hook(api);
@@ -6921,10 +6279,8 @@ TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAn
     EXPECT_EQ(g_core_memory_allocations.size(), 2u);
     EXPECT_EQ(g_core_memory_free_calls, 0);
     for (size_t size : g_core_memory_allocation_sizes) {
-      EXPECT_GE(size, sizeof(rocjitsu::ConSanMoiReportHeader));
-      EXPECT_LE(size, static_cast<size_t>(
-                          rocjitsu::consan_moi_mode_policy(rocjitsu::ConSanMoiEngine::RecordReplay)
-                              .auto_report_buffer_ceiling_bytes));
+      EXPECT_GE(size, sizeof(rocjitsu::consan::ReportHeader));
+      EXPECT_LE(size, static_cast<size_t>(rocjitsu::consan::kOrdinaryAutoReportBufferCeilingBytes));
     }
     ASSERT_EQ(g_transform_override_report_sizes.size(), 4u);
     ASSERT_EQ(g_transform_override_report_layouts.size(), 4u);
@@ -6947,30 +6303,29 @@ TEST(HsaHooksUnitTest, ConSanAutoReportUsesExactLayoutAcrossTwoLiveCodeObjectsAn
   EXPECT_EQ(g_core_memory_free_calls, 2);
   ASSERT_EQ(g_core_memory_headers_at_free.size(), 2u);
   for (const auto &header : g_core_memory_headers_at_free) {
-    EXPECT_TRUE(rocjitsu::consan_moi_report_header_is_current(header));
-    EXPECT_EQ(header.atomic_record_capacity,
-              rocjitsu::kConSanMoiRecordReplayDynamicLaneEventHeadroom);
-    EXPECT_GT(header.diagnostic_capacity, 0u);
+    EXPECT_TRUE(report_header_is_current(header));
+    EXPECT_GT(header.sync_metadata_capacity, 0u);
+    EXPECT_GT(header.causal_window_capacity, 0u);
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanMoiAutoReportReclaimsEveryExecutableAcrossProcessBudgetChurn) {
+TEST(HsaHooksUnitTest, ConSanAutoReportReclaimsEveryExecutableAcrossProcessBudgetChurn) {
   for (const char *policy : {"default", "strict"}) {
     SCOPED_TRACE(policy);
-    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
     ScopedEnvVar selected_policy("RJ_CONSAN_POLICY", policy);
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
     ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
-    ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+    ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", nullptr);
+
     ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
     reset_code_object_observations();
     reset_core_memory_observations();
-    g_transform_override_result = auto_report_replay_transform_result();
+    g_transform_override_result = auto_report_transform_result();
     {
       FakeApiTable api;
       InstalledDbiHook hook(api);
@@ -6999,12 +6354,11 @@ TEST(HsaHooksUnitTest, ConSanMoiAutoReportReclaimsEveryExecutableAcrossProcessBu
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportAllocationFailureFailsClosedWithoutLeakingBudget) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", nullptr);
 
   reset_code_object_observations();
   reset_core_memory_observations();
@@ -7032,89 +6386,71 @@ TEST(HsaHooksUnitTest, ConSanAutoReportAllocationFailureFailsClosedWithoutLeakin
   EXPECT_TRUE(g_core_memory_allocations.empty());
 }
 
-TEST(HsaHooksUnitTest, ConSanEpochCheckpointRecyclesEveryMoiEngineInPlace) {
-  struct Case {
-    const char *mode;
-    rocjitsu::ConSanMoiEngine engine;
-  };
-  const std::array cases = {
-      Case{"record-replay", rocjitsu::ConSanMoiEngine::RecordReplay},
-      Case{"sampled", rocjitsu::ConSanMoiEngine::Sampled},
-      Case{"inline-shadow", rocjitsu::ConSanMoiEngine::InlineShadow},
-  };
-
-  for (const Case &test : cases) {
-    SCOPED_TRACE(test.mode);
-    ScopedEnvVar mode("RJ_CONSAN_MODE", test.mode);
-    ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-    ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
-
-    reset_code_object_observations();
-    reset_core_memory_observations();
-    g_transform_override_result = test.engine == rocjitsu::ConSanMoiEngine::RecordReplay
-                                      ? auto_report_replay_transform_result()
-                                  : test.engine == rocjitsu::ConSanMoiEngine::Sampled
-                                      ? auto_report_sampled_transform_result()
-                                      : auto_report_inline_shadow_transform_result();
-    {
-      FakeApiTable api;
-      InstalledDbiHook hook(api);
-      ASSERT_TRUE(hook.installed()) << hook.error();
-      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-      hsa_code_object_reader_t reader{};
-      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
-                                                                      original.size(), &reader),
-                HSA_STATUS_SUCCESS);
-      ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                                  reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-      ASSERT_EQ(g_core_memory_allocations.size(), 1u);
-      ASSERT_EQ(g_core_memory_allocation_sizes.size(), 1u);
-
-      auto *const bytes = static_cast<uint8_t *>(g_core_memory_allocations.front());
-      const size_t size = g_core_memory_allocation_sizes.front();
-      ASSERT_GT(size, sizeof(rocjitsu::ConSanMoiReportHeader));
-      auto *const header = reinterpret_cast<rocjitsu::ConSanMoiReportHeader *>(bytes);
-      const rocjitsu::ConSanMoiReportHeader original_header = *header;
-      header->event_counter = 17u;
-      bytes[size - 1u] = 0xa5u;
-      void *const allocation = bytes;
-
-      EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
-      EXPECT_EQ(g_core_memory_allocations.size(), 1u);
-      EXPECT_EQ(g_core_memory_allocations.front(), allocation);
-      EXPECT_EQ(header->generation, original_header.generation);
-      EXPECT_EQ(header->dispatch_id, original_header.dispatch_id);
-      EXPECT_EQ(header->engine, original_header.engine);
-      EXPECT_EQ(header->event_counter, 0u);
-      EXPECT_EQ(header->flags, 0u);
-      EXPECT_TRUE(std::ranges::all_of(
-          std::span<const uint8_t>(bytes + sizeof(*header), size - sizeof(*header)),
-          [](uint8_t byte) { return byte == 0u; }));
-
-      // Empty epochs are legal and recycling never reallocates the report.
-      EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
-      EXPECT_EQ(g_core_memory_allocations.front(), allocation);
-    }
-    EXPECT_TRUE(g_core_memory_allocations.empty());
-  }
-}
-
-TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "inline-shadow");
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointRecyclesInPlace) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "67108864");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_inline_shadow_transform_result();
+  g_transform_override_result = auto_report_transform_result();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+    ASSERT_EQ(g_core_memory_allocation_sizes.size(), 1u);
+
+    auto *const bytes = static_cast<uint8_t *>(g_core_memory_allocations.front());
+    const size_t size = g_core_memory_allocation_sizes.front();
+    ASSERT_GT(size, sizeof(rocjitsu::consan::ReportHeader));
+    auto *const header = reinterpret_cast<rocjitsu::consan::ReportHeader *>(bytes);
+    const rocjitsu::consan::ReportHeader original_header = *header;
+    header->event_counter = 17u;
+    bytes[size - 1u] = 0xa5u;
+    void *const allocation = bytes;
+
+    EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+    EXPECT_EQ(g_core_memory_allocations.size(), 1u);
+    EXPECT_EQ(g_core_memory_allocations.front(), allocation);
+    EXPECT_EQ(header->generation, original_header.generation);
+    EXPECT_EQ(header->dispatch_id, original_header.dispatch_id);
+    EXPECT_EQ(header->event_counter, 0u);
+    EXPECT_EQ(header->flags, 0u);
+    EXPECT_TRUE(std::ranges::all_of(
+        std::span<const uint8_t>(bytes + sizeof(*header), size - sizeof(*header)),
+        [](uint8_t byte) { return byte == 0u; }));
+
+    // Empty epochs are legal and recycling never reallocates the report.
+    EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+    EXPECT_EQ(g_core_memory_allocations.front(), allocation);
+  }
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+}
+
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "67108864");
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_transform_result();
   testing::internal::CaptureStderr();
   {
     FakeApiTable api;
@@ -7130,10 +6466,34 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
               HSA_STATUS_SUCCESS);
     ASSERT_EQ(g_core_memory_allocations.size(), 1u);
     auto *const header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
-    header->event_counter = 3u;
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
+    ASSERT_TRUE(g_transform_override_report_layouts.back());
+    const auto &layout = *g_transform_override_report_layouts.back();
+    const auto publish = [&](uint32_t count) {
+      ASSERT_GE(layout.causal_window_capacity, count);
+      ASSERT_GE(layout.watchpoint_capacity, count);
+      auto *bytes = reinterpret_cast<uint8_t *>(header);
+      for (uint32_t index = 0; index < count; ++index) {
+        const rocjitsu::consan::CausalWindow window{
+            .generation = header->generation,
+            .dispatch_id = header->dispatch_id,
+            .first_entry = index,
+            .entry_count = 1,
+            .publication_state =
+                static_cast<uint32_t>(rocjitsu::consan::CausalPublicationState::Ready),
+        };
+        std::memcpy(bytes + layout.causal_windows_offset + index * sizeof(window), &window,
+                    sizeof(window));
+        const uint64_t packed = pack_watchpoint_entry(rocjitsu::consan::ShadowAccessKind::Write, 0,
+                                                      0, header->generation, 16, 4);
+        std::memcpy(bytes + layout.watchpoints_offset + index * sizeof(packed), &packed,
+                    sizeof(packed));
+      }
+      header->causal_window_count = count;
+    };
+    publish(3u);
     ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
-    header->event_counter = 5u;
+    publish(5u);
     ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
   }
   const std::string log = testing::internal::GetCapturedStderr();
@@ -7142,16 +6502,16 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
 }
 
 TEST(HsaHooksUnitTest, ConSanEpochCheckpointSustainsManyRepeatedRuns) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "67108864");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "67108864");
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_sampled_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   testing::internal::CaptureStderr();
   {
     FakeApiTable api;
@@ -7167,7 +6527,7 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointSustainsManyRepeatedRuns) {
               HSA_STATUS_SUCCESS);
     ASSERT_EQ(g_core_memory_allocations.size(), 1u);
     void *const allocation = g_core_memory_allocations.front();
-    auto *const header = static_cast<rocjitsu::ConSanMoiReportHeader *>(allocation);
+    auto *const header = static_cast<rocjitsu::consan::ReportHeader *>(allocation);
     for (uint32_t epoch = 0; epoch < 256u; ++epoch) {
       header->event_counter = epoch + 1u;
       ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u) << epoch;
@@ -7181,18 +6541,18 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointSustainsManyRepeatedRuns) {
   EXPECT_EQ(g_core_memory_allocate_calls, 1);
 }
 
-TEST(HsaHooksUnitTest, ConSanEpochCheckpointPreservesPriorSaturationAndClearsNextEpoch) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointPreservesPriorLossAndClearsNextEpoch) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   testing::internal::CaptureStderr();
   {
     FakeApiTable api;
@@ -7208,31 +6568,31 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointPreservesPriorSaturationAndClearsNex
               HSA_STATUS_SUCCESS);
     ASSERT_EQ(g_core_memory_allocations.size(), 1u);
     auto *const header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
-    header->flags |= rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
+    header->dropped_window_count = 1u;
     ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
-    EXPECT_EQ(header->flags, 0u);
+    EXPECT_EQ(header->dropped_window_count, 0u);
     header->event_counter = 1u;
     ASSERT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
     EXPECT_EQ(header->event_counter, 0u);
   }
   const std::string log = testing::internal::GetCapturedStderr();
   EXPECT_NE(log.find("completed_epochs=2"), std::string::npos) << log;
-  EXPECT_NE(log.find("record_replay_bank_saturation=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("dynamic_incomplete=1"), std::string::npos) << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsTransactionalAcrossLiveReports) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   {
     FakeApiTable api;
     InstalledDbiHook hook(api);
@@ -7255,10 +6615,10 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsTransactionalAcrossLiveReports) {
               HSA_STATUS_SUCCESS);
     ASSERT_EQ(g_core_memory_allocations.size(), 2u);
     auto *const first_header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations[0]);
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations[0]);
     auto *const second_header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations[1]);
-    const rocjitsu::ConSanMoiReportHeader valid_second_header = *second_header;
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations[1]);
+    const rocjitsu::consan::ReportHeader valid_second_header = *second_header;
     first_header->event_counter = 11u;
     second_header->magic = 0u;
 
@@ -7274,11 +6634,11 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsTransactionalAcrossLiveReports) {
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsNoOpOutsideMoi) {
+TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsNoOpOutside) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
   ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
-  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_buffer("RJ_CONSAN_SC_REPORT_BUFFER", nullptr);
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
 
   reset_code_object_observations();
@@ -7305,13 +6665,13 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointIsNoOpOutsideMoi) {
 }
 
 TEST(HsaHooksUnitTest, ConSanAutomaticallyCheckpointsAtTrackedGlobalQuiescence) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
@@ -7365,7 +6725,7 @@ TEST(HsaHooksUnitTest, ConSanAutomaticallyCheckpointsAtTrackedGlobalQuiescence) 
                              fake_intercept_packet_writer);
 
     auto *const header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
     header->event_counter = 7u;
     set_fake_signal_value(first_signal, 0);
     EXPECT_EQ(api.core.hsa_signal_wait_scacquire_fn(first_signal, HSA_SIGNAL_CONDITION_LT, 1u,
@@ -7413,14 +6773,14 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochAnalysisSelectionDiscardsUnselectedEp
 
   for (const Case &test : cases) {
     SCOPED_TRACE(test.policy);
-    ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
     ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-    ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-    ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
-    ScopedEnvVar epoch_analysis("RJ_CONSAN_MOI_EPOCH_ANALYSIS", test.policy);
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+    ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+    ScopedEnvVar epoch_analysis("RJ_CONSAN_EPOCH_ANALYSIS", test.policy);
 
     reset_code_object_observations();
     reset_core_memory_observations();
@@ -7455,7 +6815,7 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochAnalysisSelectionDiscardsUnselectedEp
                     kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
                 HSA_STATUS_SUCCESS);
       auto *const header =
-          static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+          static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
 
       for (size_t epoch = 0; epoch < test.epoch_count; ++epoch) {
         if (epoch == test.window_epoch) {
@@ -7492,14 +6852,14 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochAnalysisSelectionDiscardsUnselectedEp
 }
 
 TEST(HsaHooksUnitTest, ConSanAutomaticEpochSelectionRetriesAfterTransactionalFailure) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
-  ScopedEnvVar epoch_analysis("RJ_CONSAN_MOI_EPOCH_ANALYSIS", "nth:1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+  ScopedEnvVar epoch_analysis("RJ_CONSAN_EPOCH_ANALYSIS", "nth:1");
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
   reset_code_object_observations();
@@ -7535,7 +6895,7 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochSelectionRetriesAfterTransactionalFai
                   kFakeExecutable, g_fake_symbol_name.c_str(), &kGuestAgent, &symbol),
               HSA_STATUS_SUCCESS);
     auto *const header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
     const uint32_t expected_magic = header->magic;
 
     const hsa_signal_t signal{7199u};
@@ -7569,7 +6929,7 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochSelectionRetriesAfterTransactionalFai
 
 TEST(HsaHooksUnitTest, ConSanManualEpochAnalysisWindowHasStrictLifecycle) {
   configure_consan_profile(kConSanHookProfiles[1], false);
-  ScopedEnvVar epoch_analysis("RJ_CONSAN_MOI_EPOCH_ANALYSIS", "every");
+  ScopedEnvVar epoch_analysis("RJ_CONSAN_EPOCH_ANALYSIS", "every");
   reset_code_object_observations();
   {
     FakeApiTable api;
@@ -7579,7 +6939,7 @@ TEST(HsaHooksUnitTest, ConSanManualEpochAnalysisWindowHasStrictLifecycle) {
     EXPECT_EQ(hook.end_epoch_analysis_window(), 3u);
   }
 
-  ScopedEnvVar manual_epoch_analysis("RJ_CONSAN_MOI_EPOCH_ANALYSIS", "manual");
+  ScopedEnvVar manual_epoch_analysis("RJ_CONSAN_EPOCH_ANALYSIS", "manual");
   reset_code_object_observations();
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -7592,13 +6952,13 @@ TEST(HsaHooksUnitTest, ConSanManualEpochAnalysisWindowHasStrictLifecycle) {
 }
 
 TEST(HsaHooksUnitTest, ConSanUsesOrderedBarrierAsCompletionProxyForSignalLessDispatch) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
@@ -7650,7 +7010,7 @@ TEST(HsaHooksUnitTest, ConSanUsesOrderedBarrierAsCompletionProxyForSignalLessDis
     };
 
     auto *const header =
-        static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+        static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
     constexpr hsa_signal_t unordered_signal{7020u};
     submit_epoch(unordered_signal, false);
     header->event_counter = 5u;
@@ -7703,13 +7063,13 @@ TEST(HsaHooksUnitTest, ConSanUsesOrderedBarrierAsCompletionProxyForSignalLessDis
 }
 
 TEST(HsaHooksUnitTest, ConSanExplicitCheckpointRecoversUntrackableDispatchEpoch) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
 
   reset_code_object_observations();
   reset_core_memory_observations();
@@ -7749,7 +7109,7 @@ TEST(HsaHooksUnitTest, ConSanExplicitCheckpointRecoversUntrackableDispatchEpoch)
   g_fake_intercept_handler(&packet, 1u, 0u, g_fake_intercept_user_data,
                            fake_intercept_packet_writer);
   auto *const header =
-      static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
+      static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front());
   header->event_counter = 5u;
   constexpr hsa_signal_t unrelated_signal{7010u};
   set_fake_signal_value(unrelated_signal, 0);
@@ -7764,567 +7124,79 @@ TEST(HsaHooksUnitTest, ConSanExplicitCheckpointRecoversUntrackableDispatchEpoch)
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
 }
 
-TEST(HsaHooksUnitTest, SampledAtomicPairAcceptsCompleteReleaseToAcquireEvidence) {
-  using Outcome = rocjitsu::ConSanMoiSampledSyncOutcome;
-  using Role = rocjitsu::ConSanMoiSampledSyncRole;
-  using Scope = rocjitsu::ConSanMoiSampledSyncScope;
+TEST(HsaHooksUnitTest, AtomicPairAcceptsCompleteReleaseToAcquireEvidence) {
+  using Outcome = rocjitsu::consan::SyncOutcome;
+  using Role = rocjitsu::consan::SyncRole;
+  using Scope = rocjitsu::consan::SyncScope;
 
-  const auto release = sampled_atomic(Role::Release, Scope::Workgroup, Outcome::NotApplicable);
-  const auto acquire = sampled_atomic(Role::Acquire, Scope::System, Outcome::NotApplicable);
-  EXPECT_TRUE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(release, acquire));
+  const auto release = atomic(Role::Release, Scope::Workgroup, Outcome::NotApplicable);
+  const auto acquire = atomic(Role::Acquire, Scope::System, Outcome::NotApplicable);
+  EXPECT_TRUE(atomic_pair_orders_same_workgroup(release, acquire));
 
-  const auto successful_cas =
-      sampled_atomic(Role::RmwAcquireRelease, Scope::Agent, Outcome::CasSuccess);
-  const auto failed_acquire =
-      sampled_atomic(Role::RmwAcquire, Scope::Workgroup, Outcome::CasFailure);
-  EXPECT_TRUE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(successful_cas,
-                                                                             failed_acquire));
+  const auto successful_cas = atomic(Role::RmwAcquireRelease, Scope::Agent, Outcome::CasSuccess);
+  const auto failed_acquire = atomic(Role::RmwAcquire, Scope::Workgroup, Outcome::CasFailure);
+  EXPECT_TRUE(atomic_pair_orders_same_workgroup(successful_cas, failed_acquire));
 }
 
-TEST(HsaHooksUnitTest, SampledAtomicPairRejectsIncompleteDirectionRangeScopeEpochAndOutcome) {
-  using Outcome = rocjitsu::ConSanMoiSampledSyncOutcome;
-  using Role = rocjitsu::ConSanMoiSampledSyncRole;
-  using Scope = rocjitsu::ConSanMoiSampledSyncScope;
+TEST(HsaHooksUnitTest, AtomicPairRejectsIncompleteDirectionRangeScopeEpochAndOutcome) {
+  using Outcome = rocjitsu::consan::SyncOutcome;
+  using Role = rocjitsu::consan::SyncRole;
+  using Scope = rocjitsu::consan::SyncScope;
 
-  const auto release = sampled_atomic(Role::RmwRelease, Scope::Agent, Outcome::RmwReturnsOld);
-  const auto acquire = sampled_atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld);
-  EXPECT_TRUE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(acquire, release));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      release, sampled_atomic(Role::Release, Scope::System, Outcome::NotApplicable)));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      acquire, sampled_atomic(Role::Acquire, Scope::System, Outcome::NotApplicable)));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      release, sampled_atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld, 0x1004)));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      release, sampled_atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld, 0x1000, 8)));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      sampled_atomic(Role::RmwRelease, Scope::Wavefront, Outcome::RmwReturnsOld), acquire));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      release,
-      sampled_atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld, 0x1000, 4, 8)));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      sampled_atomic(Role::RmwRelease, Scope::Agent, Outcome::CasFailure), acquire));
+  const auto release = atomic(Role::RmwRelease, Scope::Agent, Outcome::RmwReturnsOld);
+  const auto acquire = atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld);
+  EXPECT_TRUE(atomic_pair_orders_same_workgroup(acquire, release));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      release, atomic(Role::Release, Scope::System, Outcome::NotApplicable)));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      acquire, atomic(Role::Acquire, Scope::System, Outcome::NotApplicable)));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      release, atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld, 0x1004)));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      release, atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld, 0x1000, 8)));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      atomic(Role::RmwRelease, Scope::Wavefront, Outcome::RmwReturnsOld), acquire));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      release, atomic(Role::RmwAcquire, Scope::Agent, Outcome::RmwReturnsOld, 0x1000, 4, 8)));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(
+      atomic(Role::RmwRelease, Scope::Agent, Outcome::CasFailure), acquire));
 }
 
-TEST(HsaHooksUnitTest, SampledAtomicPairFailsClosedOnMissingMalformedAndCollidingHalves) {
-  using Classification = rocjitsu::ConSanMoiSampledSyncClassification;
-  using Outcome = rocjitsu::ConSanMoiSampledSyncOutcome;
-  using Role = rocjitsu::ConSanMoiSampledSyncRole;
-  using Scope = rocjitsu::ConSanMoiSampledSyncScope;
+TEST(HsaHooksUnitTest, AtomicPairFailsClosedOnMissingMalformedAndCollidingHalves) {
+  using Classification = rocjitsu::consan::SyncClassification;
+  using Outcome = rocjitsu::consan::SyncOutcome;
+  using Role = rocjitsu::consan::SyncRole;
+  using Scope = rocjitsu::consan::SyncScope;
 
-  const auto release = sampled_atomic(Role::Release, Scope::Agent, Outcome::NotApplicable);
-  const auto acquire = sampled_atomic(Role::Acquire, Scope::Agent, Outcome::NotApplicable);
+  const auto release = atomic(Role::Release, Scope::Agent, Outcome::NotApplicable);
+  const auto acquire = atomic(Role::Acquire, Scope::Agent, Outcome::NotApplicable);
   auto malformed = acquire;
   malformed.classification = Classification::Malformed;
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(release, malformed));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_atomic_pair_orders_same_workgroup(
-      rocjitsu::ConSanMoiSampledSyncDecodeResult{}, acquire));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(release, malformed));
+  EXPECT_FALSE(atomic_pair_orders_same_workgroup(rocjitsu::consan::SyncDecodeResult{}, acquire));
 
-  EXPECT_TRUE(rocjitsu::consan_moi_sampled_sync_report_is_complete(0, 0, 0));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_sync_report_is_complete(1, 0, 0));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_sync_report_is_complete(0, 1, 0));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_sync_report_is_complete(0, 0, 1));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_sync_report_is_complete(0, 0, 0, 1, 0));
-  EXPECT_FALSE(rocjitsu::consan_moi_sampled_sync_report_is_complete(0, 0, 0, 0, 1));
-}
-TEST(HsaHooksUnitTest, InlineReleaseRenderingRequiresOneStableReleaseAndSnapshot) {
-  using State = rocjitsu::ConSanMoiInlineReleaseSnapshotState;
-  rocjitsu::ConSanMoiInlineReleaseSnapshotWords words;
-  words.version_before = words.slot.version = words.version_after = 4;
-  words.slot.owner_id = 2;
-  words.slot.epoch_plus_one = 7;
-  words.slot.workgroup_key = 0x30;
-  words.slot.atomic_address = 0x4000;
-  words.slot.dispatch_id = 0x500000006ull;
-  words.snapshot.entry_count = 1;
-  words.snapshot.entries[0] = {9, 3};
-  EXPECT_EQ(rocjitsu::classify_consan_moi_inline_release_snapshot(words).state, State::Stable);
-
-  words.version_after = 6;
-  EXPECT_EQ(rocjitsu::classify_consan_moi_inline_release_snapshot(words).state,
-            State::ChangedDuringRead);
-  words.version_after = 4;
-  words.snapshot.flags = rocjitsu::consan_moi_inline_causal_snapshot_flag(
-      rocjitsu::ConSanMoiInlineCausalSnapshotFlag::CapacityOverflow);
-  EXPECT_EQ(rocjitsu::classify_consan_moi_inline_release_snapshot(words).state,
-            State::CapacityOverflow);
-  words.snapshot.flags = rocjitsu::consan_moi_inline_causal_snapshot_flag(
-      rocjitsu::ConSanMoiInlineCausalSnapshotFlag::SourceIncomplete);
-  EXPECT_EQ(rocjitsu::classify_consan_moi_inline_release_snapshot(words).state,
-            State::SourceIncomplete);
-}
-
-TEST(HsaHooksUnitTest, InlineTokenRenderingAdmitsOnlyStableDirectOrInheritedState) {
-  using Kind = rocjitsu::ConSanMoiInlineTokenEvidenceKind;
-  using State = rocjitsu::ConSanMoiInlineAcquiredTokenState;
-  rocjitsu::ConSanMoiInlineAcquiredEpochTokenSlot token{
-      .version = 2,
-      .consumer_owner_id = 4,
-      .producer_owner_id = 2,
-      .producer_epoch_plus_one = 7,
-      .workgroup_key = 0x30,
-      .kind = static_cast<uint32_t>(Kind::Direct),
-      .dispatch_id = 0x500000006ull,
-      .source_release_address = 0x4000,
-      .source_release_version = 4,
-      .consumer_epoch_plus_one = 1,
-  };
-  EXPECT_EQ(rocjitsu::consan_moi_inline_classify_acquired_token({2, token, 2}).state,
-            State::Stable);
-  token.kind = static_cast<uint32_t>(Kind::Inherited);
-  EXPECT_EQ(rocjitsu::consan_moi_inline_classify_acquired_token({2, token, 2}).state,
-            State::Stable);
-  EXPECT_EQ(rocjitsu::consan_moi_inline_classify_acquired_token({2, token, 4}).state,
-            State::Changed);
-  token.kind = 0xffffffffu;
-  EXPECT_EQ(rocjitsu::consan_moi_inline_classify_acquired_token({2, token, 2}).state,
-            State::Malformed);
-}
-TEST(HsaHooksUnitTest, RecordReplayProvenanceUsesActualConflictingWorkgroupCell) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  const auto access = [](uint32_t event_index, uint32_t workgroup_x, uint32_t owner, uint64_t lanes,
-                         uint32_t instruction, uint32_t byte_offset, uint32_t byte_count,
-                         uint32_t start_cell,
-                         uint32_t cell_count) -> rocjitsu::ConSanMoiAccessRecord {
-    return {
-        .generation = 7,
-        .workgroup_x = workgroup_x,
-        .workgroup_y = 0,
-        .workgroup_z = 0,
-        .wave_id = owner,
-        .lane_mask = lanes,
-        .instruction_offset = instruction,
-        .access_kind = static_cast<uint32_t>(AccessKind::Write),
-        .lds_byte_offset = byte_offset,
-        .lds_byte_count = byte_count,
-        .start_cell = start_cell,
-        .cell_count = cell_count,
-        .epoch = 1,
-        .event_index = event_index,
-    };
-  };
-  const std::array records = {
-      access(1, 0, 1, 0x1, 0x10, 8, 8, 2, 2),
-      // Same-owner replacement changes only cell 2. It must be the provenance
-      // selected for the later two-cell conflict, not the older wider access.
-      // Its high instruction bits are deliberately absent from the packed
-      // identity which the companion must match.
-      access(2, 0, 1, 0x2, rocjitsu::consan_moi_exact_shadow::max_instruction_offset + 1u + 0x11u,
-             8, 4, 2, 1),
-      // The same cell in another workgroup must remain isolated.
-      access(3, 1, 9, 0xff, 0x99, 8, 4, 2, 1),
-      access(4, 0, 3, 0xc, 0x20, 8, 8, 2, 2),
-  };
-  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
-      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
-      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
-      .generation = 7,
-      .epoch = 1,
-      .first_owner_id = 1,
-      .second_owner_id = 3,
-      .reserved = 4,
-      .first_instruction_offset = 0x11,
-      .second_instruction_offset = 0x20,
-      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
-      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
-  };
-  // The packed-only engine intentionally cannot recover prior lane/range
-  // evidence and must leave it unknown.
-  EXPECT_EQ(diagnostic.first_lane_mask, 0u);
-  EXPECT_EQ(diagnostic.first_lds_byte_count, 0u);
-  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
-      rocjitsu::repair_consan_moi_record_replay_provenance(records, {&diagnostic, 1});
-  EXPECT_EQ(repair.repaired_diagnostic_count, 1u);
-  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
-  EXPECT_EQ(diagnostic.first_instruction_offset, 0x11u);
-  EXPECT_EQ(diagnostic.first_lane_mask, 0x2u);
-  EXPECT_EQ(diagnostic.first_lds_byte_offset, 8u);
-  EXPECT_EQ(diagnostic.first_lds_byte_count, 4u);
-  EXPECT_EQ(diagnostic.second_lane_mask, 0xcu);
-  EXPECT_EQ(diagnostic.second_lds_byte_offset, 8u);
-  EXPECT_EQ(diagnostic.second_lds_byte_count, 8u);
-}
-
-TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticCarriesExactEventProvenance) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
-      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
-      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/4,
-      /*sampled_watchpoint_capacity=*/0);
-  header.access_record_count = 2;
-
-  const std::array records = {
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 7,
-          .workgroup_x = 2,
-          .wave_id = 1,
-          .lane_mask = 0x1,
-          .instruction_offset = 0x10,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 12,
-          .lds_byte_count = 4,
-          .start_cell = 3,
-          .cell_count = 1,
-          .epoch = 4,
-          .event_index = 41,
-      },
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 7,
-          .workgroup_x = 2,
-          .wave_id = 2,
-          .lane_mask = 0x2,
-          .instruction_offset = 0x20,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 12,
-          .lds_byte_count = 4,
-          .start_cell = 3,
-          .cell_count = 1,
-          .epoch = 4,
-          .event_index = 57,
-      },
-  };
-  std::array<rocjitsu::ConSanMoiDiagnosticRecord, 1> diagnostics{};
-  std::array<uint64_t, 4> shadow{};
-
-  const rocjitsu::ConSanMoiRecordReplayResult replay =
-      rocjitsu::consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
-
-  ASSERT_EQ(replay.emitted_diagnostic_count, 1u);
-  ASSERT_EQ(header.diagnostic_count, 1u);
-  EXPECT_EQ(diagnostics[0].reserved, records[1].event_index);
-  EXPECT_EQ(diagnostics[0].first_lane_mask, records[0].lane_mask);
-  EXPECT_EQ(diagnostics[0].first_lds_byte_count, records[0].lds_byte_count);
-
-  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
-      rocjitsu::repair_consan_moi_record_replay_provenance(records, diagnostics);
-
-  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
-  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
-  EXPECT_EQ(diagnostics[0].first_lane_mask, records[0].lane_mask);
-  EXPECT_EQ(diagnostics[0].first_lds_byte_offset, records[0].lds_byte_offset);
-  EXPECT_EQ(diagnostics[0].first_lds_byte_count, records[0].lds_byte_count);
-  EXPECT_EQ(diagnostics[0].second_lane_mask, records[1].lane_mask);
-  EXPECT_EQ(diagnostics[0].second_lds_byte_offset, records[1].lds_byte_offset);
-  EXPECT_EQ(diagnostics[0].second_lds_byte_count, records[1].lds_byte_count);
-}
-TEST(HsaHooksUnitTest, RecordReplayProvenanceAcceptsAlreadyExactDiagnostic) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  const rocjitsu::ConSanMoiAccessRecord record{
-      .generation = 7,
-      .workgroup_x = 2,
-      .wave_id = 1,
-      .lane_mask = 0xff,
-      .instruction_offset = 0x30,
-      .access_kind = static_cast<uint32_t>(AccessKind::Write),
-      .lds_byte_offset = 12,
-      .lds_byte_count = 2,
-      .start_cell = 3,
-      .cell_count = 1,
-      .epoch = 4,
-      .event_index = 57,
-  };
-  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
-      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
-      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
-      .generation = 7,
-      .epoch = 4,
-      .first_owner_id = 1,
-      .second_owner_id = 1,
-      .reserved = 57,
-      .first_lane_mask = 0x1,
-      .second_lane_mask = 0xfe,
-      .first_instruction_offset = 0x30,
-      .second_instruction_offset = 0x30,
-      .first_lds_byte_offset = 12,
-      .first_lds_byte_count = 2,
-      .second_lds_byte_offset = 12,
-      .second_lds_byte_count = 2,
-      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
-      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
-  };
-
-  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
-      rocjitsu::repair_consan_moi_record_replay_provenance({&record, 1}, {&diagnostic, 1});
-
-  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
-  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
-  EXPECT_EQ(diagnostic.first_lane_mask, 0x1u);
-  EXPECT_EQ(diagnostic.second_lane_mask, 0xfeu);
-  EXPECT_EQ(diagnostic.first_lds_byte_offset, 12u);
-  EXPECT_EQ(diagnostic.first_lds_byte_count, 2u);
-}
-
-TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotContracts) {
-  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  const std::string code_object =
-      "code_object=" + rocjitsu::make_consan_code_object_id(original).fingerprint;
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
-  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-
-  reset_code_object_observations();
-  reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
-  g_seed_auto_replay_report_on_load = true;
-
-  testing::internal::CaptureStderr();
-  {
-    FakeApiTable api;
-    InstalledDbiHook hook(api);
-    EXPECT_TRUE(hook.installed()) << hook.error();
-    if (hook.installed()) {
-      hsa_code_object_reader_t reader{};
-      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
-                                                                      original.size(), &reader),
-                HSA_STATUS_SUCCESS);
-      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                                  reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-    }
-  }
-  const std::string log = testing::internal::GetCapturedStderr();
-
-  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_EQ(g_core_memory_free_calls, 0);
-  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
-  EXPECT_NE(log.find(code_object), std::string::npos) << code_object << "\n" << log;
-  for (std::string_view field :
-       {"reader=101", "generation=", "diagnostics=1", "replay_input_access=2", "conflict=true",
-        "metadata_full=false", "diagnostic_capacity_exhausted=false", "diagnostic_capacity=1",
-        "provenance_repaired=0", "provenance_unresolved=0", "coarse_grained_snapshot_bytes=0"}) {
-    EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
-  }
-  ASSERT_FALSE(g_transform_override_report_sizes.empty());
-  EXPECT_NE(log.find("fine_grained_snapshot_bytes="), std::string::npos) << log;
-  const std::string full_snapshot =
-      "fine_grained_snapshot_bytes=" + std::to_string(g_transform_override_report_sizes.back());
-  EXPECT_EQ(log.find(full_snapshot), std::string::npos) << full_snapshot << '\n' << log;
-  const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");
-  ASSERT_NE(detail, std::string::npos) << log;
-  EXPECT_NE(log.find(code_object, detail), std::string::npos) << code_object << "\n" << log;
-  for (std::string_view field :
-       {"index=0", "kind=1", "report_generation=", "generation=", "first_owner=", "second_owner=",
-        "first_inst=0xfe96c", "second_inst=0xfe974", "first_lds_known=true", "first_lds=[16,20)",
-        "second_lds=[16,20)", "first_kind=2", "second_kind=2"}) {
-    EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
-  }
-}
-
-TEST(HsaHooksUnitTest, AutoReplayConflictRequiresCommonKernelOwnerScope) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
-  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-
-  struct Case {
-    std::string_view name;
-    AutoReplayOwnerScope owner_scope;
-    uint32_t expected_diagnostics = 0;
-    uint32_t expected_suppressed = 0;
-  };
-  constexpr std::array cases = {
-      Case{"same kernel owner", AutoReplayOwnerScope::SharedOwnerPair, 1u, 0u},
-      Case{"disjoint kernel owners", AutoReplayOwnerScope::DisjointOwnerPair, 0u, 1u},
-      Case{"missing kernel-owner provenance remains conservative",
-           AutoReplayOwnerScope::UnknownOwnerPair, 1u, 0u},
-  };
-  for (const Case &test_case : cases) {
-    SCOPED_TRACE(test_case.name);
-    reset_code_object_observations();
-    reset_core_memory_observations();
-    g_transform_override_result = auto_report_replay_transform_result(test_case.owner_scope);
-    g_seed_auto_replay_report_on_load = true;
-
-    testing::internal::CaptureStderr();
-    {
-      FakeApiTable api;
-      InstalledDbiHook hook(api);
-      ASSERT_TRUE(hook.installed()) << hook.error();
-      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-      hsa_code_object_reader_t reader{};
-      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
-                                                                      original.size(), &reader),
-                HSA_STATUS_SUCCESS);
-      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                                  reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-    }
-    const std::string log = testing::internal::GetCapturedStderr();
-
-    EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-    const size_t replay = log.find("ConSan MOI auto replay reader=101");
-    ASSERT_NE(replay, std::string::npos) << log;
-    EXPECT_NE(log.find("diagnostics=" + std::to_string(test_case.expected_diagnostics), replay),
-              std::string::npos)
-        << log;
-    EXPECT_NE(log.find("disjoint_owner_suppressed=" + std::to_string(test_case.expected_suppressed),
-                       replay),
-              std::string::npos)
-        << log;
-    const bool expected_conflict = test_case.expected_diagnostics != 0u;
-    EXPECT_NE(log.find(std::string("conflict=") + (expected_conflict ? "true" : "false"), replay),
-              std::string::npos)
-        << log;
-  }
-}
-
-TEST(HsaHooksUnitTest, AutoReplayCompactsSparseFixedCapacityBeforeReplay) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
-  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-
-  reset_code_object_observations();
-  reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
-  g_seed_auto_replay_report_on_load = true;
-  g_seed_auto_replay_sparse_capacity = true;
-
-  testing::internal::CaptureStderr();
-  {
-    FakeApiTable api;
-    InstalledDbiHook hook(api);
-    EXPECT_TRUE(hook.installed()) << hook.error();
-    if (hook.installed()) {
-      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-      hsa_code_object_reader_t reader{};
-      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
-                                                                      original.size(), &reader),
-                HSA_STATUS_SUCCESS);
-      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                                  reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-    }
-  }
-  const std::string log = testing::internal::GetCapturedStderr();
-
-  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_EQ(g_core_memory_free_calls, 0);
-  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
-  for (std::string_view field :
-       {"committed_records=2", "replay_input_access=2", "published_access=2", "processed_access=2",
-        "dropped_access=0", "diagnostics=1", "conflict=true"}) {
-    EXPECT_NE(log.find(field), std::string::npos) << field << '\n' << log;
-  }
-}
-
-TEST(HsaHooksUnitTest, AutoReplayBoundsSparseShadowAndFailsClosedForOverlimitRange) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
-  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-
-  reset_code_object_observations();
-  reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
-  g_seed_auto_replay_report_on_load = true;
-  g_seed_auto_replay_overlimit_range = true;
-
-  testing::internal::CaptureStderr();
-  {
-    FakeApiTable api;
-    InstalledDbiHook hook(api);
-    EXPECT_TRUE(hook.installed()) << hook.error();
-    if (hook.installed()) {
-      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-      hsa_code_object_reader_t reader{};
-      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
-                                                                      original.size(), &reader),
-                HSA_STATUS_SUCCESS);
-      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                                  reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-    }
-  }
-  const std::string log = testing::internal::GetCapturedStderr();
-
-  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_EQ(g_core_memory_free_calls, 0);
-  EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
-  EXPECT_EQ(log.find(" skipped "), std::string::npos) << log;
-  for (std::string_view field :
-       {"ConSan MOI replay shadow bounded reader=101", "required_shadow_entries=1048578",
-        "limit=1048576", "shadow_entries=1048576", "replay_input_access=2", "processed_access=2",
-        "diagnostics=1", "conflict=true", "metadata_full=true", "dynamic_complete=false"}) {
-    EXPECT_NE(log.find(field), std::string::npos) << field << '\n' << log;
-  }
-}
-
-TEST(HsaHooksUnitTest, AutoReplayInvalidSiteTokensMakeDynamicEvidenceIncomplete) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
-  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
-  ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-
-  reset_code_object_observations();
-  reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
-  g_seed_auto_replay_report_on_load = true;
-  g_seed_auto_replay_invalid_site_token = true;
-
-  testing::internal::CaptureStderr();
-  {
-    FakeApiTable api;
-    InstalledDbiHook hook(api);
-    EXPECT_TRUE(hook.installed()) << hook.error();
-    if (hook.installed()) {
-      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-      hsa_code_object_reader_t reader{};
-      EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
-                                                                      original.size(), &reader),
-                HSA_STATUS_SUCCESS);
-      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                                  reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-    }
-  }
-  const std::string log = testing::internal::GetCapturedStderr();
-
-  EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
-  EXPECT_NE(log.find("record_replay_invalid_site_tokens=2"), std::string::npos) << log;
-  EXPECT_NE(log.find("dynamic_complete=false"), std::string::npos) << log;
-  EXPECT_NE(log.find("dynamic_incomplete=2"), std::string::npos) << log;
-  EXPECT_NE(log.find("Record/Replay malformed access evidence: invalid_site_tokens=2"),
-            std::string::npos)
-      << log;
+  EXPECT_TRUE(sync_report_is_complete(0, 0, 0));
+  EXPECT_FALSE(sync_report_is_complete(1, 0, 0));
+  EXPECT_FALSE(sync_report_is_complete(0, 1, 0));
+  EXPECT_FALSE(sync_report_is_complete(0, 0, 1));
+  EXPECT_FALSE(sync_report_is_complete(0, 0, 0, 1, 0));
+  EXPECT_FALSE(sync_report_is_complete(0, 0, 0, 0, 1));
 }
 
 TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
   constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  const std::string fingerprint =
-      "code_object=" + rocjitsu::make_consan_code_object_id(original).fingerprint;
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  const std::string fingerprint = "code_object=" + make_code_object_id(original).fingerprint;
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   testing::internal::CaptureStderr();
   {
     FakeApiTable api;
@@ -8356,20 +7228,20 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
   EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 2);
 }
 
-TEST(HsaHooksUnitTest, AutoSampledReportLogsStaticMappingProvenance) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoReportLogsStaticMappingProvenance) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_sampled_transform_result();
-  g_seed_auto_sampled_report_on_load = true;
+  g_transform_override_result = auto_report_transform_result();
+  g_seed_auto_report_on_load = true;
 
   testing::internal::CaptureStderr();
   {
@@ -8387,47 +7259,45 @@ TEST(HsaHooksUnitTest, AutoSampledReportLogsStaticMappingProvenance) {
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
-  const size_t detail = log.find("ConSan MOI auto sampled reader=101");
+  EXPECT_TRUE(g_seed_auto_report_succeeded) << log;
+  const size_t detail = log.find("ConSan access reader=101");
   ASSERT_NE(detail, std::string::npos) << log;
   for (std::string_view field :
        {"dispatch=0x1122334455667788", "workgroup=(3,4,5)", "instruction=0x120", "trampoline=0x440",
         "relocated_guest=0x448", "scratch_vgpr=12", "range=0", "bank=0", "mapped=true"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
   }
-  // Access-only Sampled reports cannot publish pending atomic acquires. Even
+  // Access-only ConSan reports cannot publish pending atomic acquires. Even
   // with a visible watchpoint, report teardown must not scan the capacity-sized
   // pending table once for every visible entry.
-  EXPECT_NE(log.find("sampled_pending_acquires=0 sampled_pending_acquire_contention=0 "),
-            std::string::npos)
-      << log;
-  EXPECT_NE(log.find("sampled_pending_release_slots_examined=0"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_watchpoint_slots_examined=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("pending_acquires=0 pending_acquire_contention=0 "), std::string::npos) << log;
+  EXPECT_NE(log.find("pending_release_slots_examined=0"), std::string::npos) << log;
+  EXPECT_NE(log.find("watchpoint_slots_examined=1"), std::string::npos) << log;
 }
 
-TEST(HsaHooksUnitTest, AutoSampledReportDoesNotInferAttributionFromRawPatchTelemetry) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoReportDoesNotInferAttributionFromRawPatchTelemetry) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_sampled_transform_result();
+  g_transform_override_result = auto_report_transform_result();
   g_transform_override_result.coverage_ledger.discard_instrumented_lowerings();
-  rocjitsu::ConSanPatchInfo raw_patch_telemetry;
-  raw_patch_telemetry.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  rocjitsu::consan::PatchInfo raw_patch_telemetry;
+  raw_patch_telemetry.kind = rocjitsu::consan::PatchKind::TrampolineWatchpointStore;
   raw_patch_telemetry.anchor_offset = 0x120u;
   raw_patch_telemetry.trampoline_offset = 0x440u;
   raw_patch_telemetry.relocated_guest_instruction_offset = 0x448u;
   raw_patch_telemetry.scratch_vgpr = 12u;
   raw_patch_telemetry.owner_descriptor_file_offsets = {0x100u};
   g_transform_override_result.patches.push_back(std::move(raw_patch_telemetry));
-  g_seed_auto_sampled_report_on_load = true;
+  g_seed_auto_report_on_load = true;
 
   testing::internal::CaptureStderr();
   {
@@ -8445,29 +7315,29 @@ TEST(HsaHooksUnitTest, AutoSampledReportDoesNotInferAttributionFromRawPatchTelem
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
-  EXPECT_EQ(log.find("ConSan MOI sampled diagnostic map reader=101"), std::string::npos) << log;
-  const size_t detail = log.find("ConSan MOI auto sampled reader=101");
+  EXPECT_TRUE(g_seed_auto_report_succeeded) << log;
+  EXPECT_EQ(log.find("ConSan diagnostic map reader=101"), std::string::npos) << log;
+  const size_t detail = log.find("ConSan access reader=101");
   ASSERT_NE(detail, std::string::npos) << log;
   EXPECT_NE(log.find("instruction=0x0", detail), std::string::npos) << log;
   EXPECT_NE(log.find("mapped=false", detail), std::string::npos) << log;
 }
 
-TEST(HsaHooksUnitTest, AutoSampledPendingReleaseScansEachRelevantOwnerBankOnce) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoPendingReleaseScansEachRelevantOwnerBankOnce) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_sampled_transform_result();
-  g_seed_auto_sampled_report_on_load = true;
-  g_seed_auto_sampled_pending_release_scale = true;
+  g_transform_override_result = auto_report_transform_result();
+  g_seed_auto_report_on_load = true;
+  g_seed_auto_pending_release_scale = true;
 
   testing::internal::CaptureStderr();
   {
@@ -8485,40 +7355,39 @@ TEST(HsaHooksUnitTest, AutoSampledPendingReleaseScansEachRelevantOwnerBankOnce) 
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
+  EXPECT_TRUE(g_seed_auto_report_succeeded) << log;
   ASSERT_FALSE(g_transform_override_report_layouts.empty());
   ASSERT_TRUE(g_transform_override_report_layouts.back());
-  const uint32_t capacity =
-      g_transform_override_report_layouts.back()->sampled_causal_window_capacity;
+  const uint32_t capacity = g_transform_override_report_layouts.back()->causal_window_capacity;
   ASSERT_NE(capacity, 0u);
-  EXPECT_NE(log.find("visible_sampled=2"), std::string::npos) << log;
-  EXPECT_NE(log.find("visible_sampled_sync=2"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_watchpoint_slots_examined=2"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_pending_acquires=1"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_pending_release_slots_examined=" + std::to_string(capacity)),
+  EXPECT_NE(log.find("visible=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("visible_sync=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("watchpoint_slots_examined=2"), std::string::npos) << log;
+  EXPECT_NE(log.find("pending_acquires=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("pending_release_slots_examined=" + std::to_string(capacity)),
             std::string::npos)
       << log;
-  EXPECT_EQ(log.find("sampled_pending_release_slots_examined=" + std::to_string(2u * capacity)),
+  EXPECT_EQ(log.find("pending_release_slots_examined=" + std::to_string(2u * capacity)),
             std::string::npos)
       << "report teardown must scan the relevant bank once, not once per visible access\n"
       << log;
 }
 
-TEST(HsaHooksUnitTest, AutoSampledIgnoresPendingAcquireIdentityCollision) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoIgnoresPendingAcquireIdentityCollision) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_sampled_transform_result();
-  g_seed_auto_sampled_report_on_load = true;
-  g_seed_auto_sampled_pending_identity_collision = true;
+  g_transform_override_result = auto_report_transform_result();
+  g_seed_auto_report_on_load = true;
+  g_seed_auto_pending_identity_collision = true;
 
   testing::internal::CaptureStderr();
   {
@@ -8536,50 +7405,50 @@ TEST(HsaHooksUnitTest, AutoSampledIgnoresPendingAcquireIdentityCollision) {
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
-  EXPECT_NE(log.find("visible_sampled=1"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_pending_acquires=1"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_malformed_sync=0"), std::string::npos) << log;
+  EXPECT_TRUE(g_seed_auto_report_succeeded) << log;
+  EXPECT_NE(log.find("visible=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("pending_acquires=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("malformed_sync=0"), std::string::npos) << log;
   EXPECT_NE(log.find("dynamic_complete=true"), std::string::npos) << log;
 }
 
-TEST(HsaHooksUnitTest, AutoSampledConflictRequiresSameDispatchClusterAndKernelOwnerScope) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoConflictRequiresSameDispatchClusterAndKernelOwnerScope) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
 
   struct Case {
     std::string_view name;
-    AutoSampledOwnerScope owner_scope;
+    ReportOwnerScope owner_scope;
     bool distinct_dispatches = false;
     bool distinct_clusters = false;
     uint32_t expected_conflicts = 0;
   };
   constexpr std::array cases = {
-      Case{"same dispatch, cluster, and owner", AutoSampledOwnerScope::SharedOwnerPair, false,
-           false, 1u},
-      Case{"disjoint kernel owners", AutoSampledOwnerScope::DisjointOwnerPair, false, false, 0u},
+      Case{"same dispatch, cluster, and owner", ReportOwnerScope::SharedOwnerPair, false, false,
+           1u},
+      Case{"disjoint kernel owners", ReportOwnerScope::DisjointOwnerPair, false, false, 0u},
       Case{"missing kernel-owner provenance remains conservative",
-           AutoSampledOwnerScope::UnknownOwnerPair, false, false, 1u},
-      Case{"different dispatches", AutoSampledOwnerScope::SharedOwnerPair, true, false, 0u},
-      Case{"different cluster workgroups", AutoSampledOwnerScope::SharedOwnerPair, false, true, 0u},
+           ReportOwnerScope::UnknownOwnerPair, false, false, 1u},
+      Case{"different dispatches", ReportOwnerScope::SharedOwnerPair, true, false, 0u},
+      Case{"different cluster workgroups", ReportOwnerScope::SharedOwnerPair, false, true, 0u},
   };
   for (const Case &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     reset_code_object_observations();
     reset_core_memory_observations();
     g_transform_override_result =
-        auto_report_sampled_transform_result(/*malformed_mapping=*/false, test_case.owner_scope);
-    g_seed_auto_sampled_report_on_load = true;
-    g_seed_auto_sampled_conflict_pair = true;
-    g_seed_auto_sampled_distinct_dispatches = test_case.distinct_dispatches;
-    g_seed_auto_sampled_distinct_clusters = test_case.distinct_clusters;
+        auto_report_transform_result(/*malformed_mapping=*/false, test_case.owner_scope);
+    g_seed_auto_report_on_load = true;
+    g_seed_auto_conflict_pair = true;
+    g_seed_auto_distinct_dispatches = test_case.distinct_dispatches;
+    g_seed_auto_distinct_clusters = test_case.distinct_clusters;
 
     testing::internal::CaptureStderr();
     {
@@ -8597,37 +7466,37 @@ TEST(HsaHooksUnitTest, AutoSampledConflictRequiresSameDispatchClusterAndKernelOw
     }
     const std::string log = testing::internal::GetCapturedStderr();
 
-    EXPECT_TRUE(g_seed_auto_sampled_report_succeeded) << log;
-    EXPECT_NE(log.find("visible_sampled=2"), std::string::npos) << log;
-    EXPECT_NE(log.find("sampled_conflicts=" + std::to_string(test_case.expected_conflicts)),
+    EXPECT_TRUE(g_seed_auto_report_succeeded) << log;
+    EXPECT_NE(log.find("visible=2"), std::string::npos) << log;
+    EXPECT_NE(log.find("conflicts=" + std::to_string(test_case.expected_conflicts)),
               std::string::npos)
         << log;
   }
 }
 
-TEST(HsaHooksUnitTest, AutoSampledExampleBudgetSpansReportsWithoutSuppressingCounts) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoExampleBudgetSpansReportsWithoutSuppressingCounts) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-  ScopedEnvVar example_limit("RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", "1");
-  ScopedEnvVar total_limit("RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT", "2");
+  ScopedEnvVar example_limit("RJ_CONSAN_CONFLICT_LIMIT", "1");
+  ScopedEnvVar total_limit("RJ_CONSAN_TOTAL_CONFLICT_LIMIT", "2");
   reset_code_object_observations();
   reset_core_memory_observations();
   g_transform_override_result =
-      auto_report_sampled_transform_result(false, AutoSampledOwnerScope::SharedOwnerPair);
-  g_seed_auto_sampled_conflict_pair = true;
+      auto_report_transform_result(false, ReportOwnerScope::SharedOwnerPair);
+  g_seed_auto_conflict_pair = true;
   testing::internal::CaptureStderr();
   {
     FakeApiTable api;
     InstalledDbiHook hook(api);
     ASSERT_TRUE(hook.installed()) << hook.error();
     for (uint8_t i = 0; i < 3; ++i) {
-      g_seed_auto_sampled_report_on_load = true;
-      g_seed_auto_sampled_report_succeeded = false;
+      g_seed_auto_report_on_load = true;
+      g_seed_auto_report_succeeded = false;
       const std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, i};
       hsa_code_object_reader_t reader{};
       ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
@@ -8636,7 +7505,7 @@ TEST(HsaHooksUnitTest, AutoSampledExampleBudgetSpansReportsWithoutSuppressingCou
       ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(
                     hsa_executable_t{7u + i}, kHostAgent, reader, nullptr, nullptr),
                 HSA_STATUS_SUCCESS);
-      EXPECT_TRUE(g_seed_auto_sampled_report_succeeded);
+      EXPECT_TRUE(g_seed_auto_report_succeeded);
     }
   }
   const auto log = testing::internal::GetCapturedStderr();
@@ -8649,21 +7518,20 @@ TEST(HsaHooksUnitTest, AutoSampledExampleBudgetSpansReportsWithoutSuppressingCou
     return count;
   };
   EXPECT_EQ(occurrences("effective_banks_min=1 effective_banks_max=1"), 3u) << log;
-  EXPECT_EQ(occurrences("sampled_conflicts=1 "), 3u) << log;
-  EXPECT_EQ(occurrences("ConSan MOI auto sampled conflict reader="), 2u) << log;
-  EXPECT_EQ(occurrences("sampled_conflict_examples=0 sampled_conflict_pairs_without_example=1"), 1u)
-      << log;
+  EXPECT_EQ(occurrences("conflicts=1 "), 3u) << log;
+  EXPECT_EQ(occurrences("ConSan conflict reader="), 2u) << log;
+  EXPECT_EQ(occurrences("conflict_examples=0 conflict_pairs_without_example=1"), 1u) << log;
 }
 
-TEST(HsaHooksUnitTest, ConSanSampledResolvesIndependentSelectorsAndRejectsAmbiguity) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
-  ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);
-  ScopedEnvVar legacy_offset("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", nullptr);
-  ScopedEnvVar workgroup_stride("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", "1");
-  ScopedEnvVar workgroup_offset("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET", nullptr);
-  ScopedEnvVar cell_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", "4");
-  ScopedEnvVar cell_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", "3");
-  ScopedEnvVar banks("RJ_CONSAN_MOI_SAMPLED_BANKS", "2");
+TEST(HsaHooksUnitTest, ConSanResolvesIndependentSelectorsAndRejectsAmbiguity) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
+  ScopedEnvVar legacy_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar legacy_offset("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar workgroup_stride("RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE", "1");
+  ScopedEnvVar workgroup_offset("RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar cell_stride("RJ_CONSAN_CELL_SAMPLE_STRIDE", "4");
+  ScopedEnvVar cell_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", "3");
+  ScopedEnvVar banks("RJ_CONSAN_WATCHPOINT_BANKS", "2");
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const auto install = [] {
     reset_code_object_observations();
@@ -8683,27 +7551,27 @@ TEST(HsaHooksUnitTest, ConSanSampledResolvesIndependentSelectorsAndRejectsAmbigu
       << log;
   EXPECT_NE(log.find("selection=independent requested_banks=2"), std::string::npos) << log;
   {
-    ScopedEnvVar ambiguous("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", "0");
+    ScopedEnvVar ambiguous("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET", "0");
     EXPECT_FALSE(install().first);
   }
   {
-    ScopedEnvVar unspecified_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", nullptr);
+    ScopedEnvVar unspecified_stride("RJ_CONSAN_CELL_SAMPLE_STRIDE", nullptr);
     const auto [default_installed, default_log] = install();
     ASSERT_TRUE(default_installed) << default_log;
     EXPECT_NE(default_log.find("cell_stride=256 cell_offset=3"), std::string::npos) << default_log;
   }
   {
-    ScopedEnvVar wrong_mode("RJ_CONSAN_MODE", "record_replay");
+    ScopedEnvVar wrong_mode("RJ_CONSAN_MODE", "supercollider");
     EXPECT_FALSE(install().first);
   }
 }
 
 TEST(HsaHooksUnitTest, ConSanUniformLdsStoresRequireExplicitOptIn) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-  for (const char *mode : {"sampled", "record-replay"}) {
+  for (const char *mode : {"default"}) {
     ScopedEnvVar selected_mode("RJ_CONSAN_MODE", mode);
     for (const char *value : {static_cast<const char *>(nullptr), "0", "1", "invalid"}) {
-      ScopedEnvVar policy("RJ_CONSAN_MOI_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES", value);
+      ScopedEnvVar policy("RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES", value);
       reset_code_object_observations();
       testing::internal::CaptureStderr();
       bool installed;
@@ -8726,14 +7594,14 @@ TEST(HsaHooksUnitTest, ConSanUniformLdsStoresRequireExplicitOptIn) {
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanSampledPresetsResolveAndAllowExplicitOverrides) {
+TEST(HsaHooksUnitTest, ConSanPresetsResolveAndAllowExplicitOverrides) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
-  ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);
-  ScopedEnvVar legacy_offset("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", nullptr);
-  ScopedEnvVar workgroup_stride("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", nullptr);
-  ScopedEnvVar workgroup_offset("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET", nullptr);
-  ScopedEnvVar cell_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", nullptr);
-  ScopedEnvVar cell_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar legacy_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar legacy_offset("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar workgroup_stride("RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar workgroup_offset("RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar cell_stride("RJ_CONSAN_CELL_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar cell_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   const auto install = [] {
     reset_code_object_observations();
@@ -8756,27 +7624,27 @@ TEST(HsaHooksUnitTest, ConSanSampledPresetsResolveAndAllowExplicitOverrides) {
                      "workgroup_stride=1024 workgroup_offset=0 cell_stride=1024 cell_offset=0"},
            std::pair{"high", "workgroup_stride=1 workgroup_offset=0 cell_stride=4 cell_offset=0"},
            std::pair{"max", "workgroup_stride=1 workgroup_offset=0 cell_stride=1 cell_offset=0"}}) {
-    ScopedEnvVar selected("RJ_CONSAN_MOI_SAMPLED_PRESET", preset);
+    ScopedEnvVar selected("RJ_CONSAN_PRESET", preset);
     const auto [ok, log] = install();
     ASSERT_TRUE(ok) << log;
     EXPECT_NE(log.find(selection), std::string::npos) << log;
     EXPECT_NE(log.find("requested_banks=auto"), std::string::npos) << log;
     EXPECT_NE(log.find("epoch_analysis=every"), std::string::npos) << log;
   }
-  ScopedEnvVar high("RJ_CONSAN_MOI_SAMPLED_PRESET", "high");
+  ScopedEnvVar high("RJ_CONSAN_PRESET", "high");
   {
-    ScopedEnvVar explicit_cell("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", "8");
-    ScopedEnvVar explicit_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", "7");
+    ScopedEnvVar explicit_cell("RJ_CONSAN_CELL_SAMPLE_STRIDE", "8");
+    ScopedEnvVar explicit_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", "7");
     const auto [ok, log] = install();
     ASSERT_TRUE(ok) << log;
     EXPECT_NE(log.find("workgroup_stride=1 workgroup_offset=0 cell_stride=8 cell_offset=7"),
               std::string::npos)
         << log;
-    ScopedEnvVar mixed("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "2");
+    ScopedEnvVar mixed("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "2");
     EXPECT_FALSE(install().first);
   }
   {
-    ScopedEnvVar explicit_legacy("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "2");
+    ScopedEnvVar explicit_legacy("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "2");
     const auto [ok, log] = install();
     ASSERT_TRUE(ok) << log;
     EXPECT_NE(log.find("workgroup_stride=2 workgroup_offset=0 cell_stride=2 cell_offset=0"),
@@ -8784,27 +7652,26 @@ TEST(HsaHooksUnitTest, ConSanSampledPresetsResolveAndAllowExplicitOverrides) {
         << log;
   }
   {
-    ScopedEnvVar bad_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", "4");
+    ScopedEnvVar bad_offset("RJ_CONSAN_CELL_SAMPLE_OFFSET", "4");
     EXPECT_FALSE(install().first);
   }
   {
-    ScopedEnvVar invalid("RJ_CONSAN_MOI_SAMPLED_PRESET", "highest");
+    ScopedEnvVar invalid("RJ_CONSAN_PRESET", "highest");
     const auto [ok, log] = install();
     EXPECT_FALSE(ok);
     EXPECT_NE(log.find("expected low|default|high|max"), std::string::npos) << log;
   }
-  for (const char *other : {"record-replay", "inline-shadow", "supercollider"}) {
+  for (const char *other : {"supercollider"}) {
     ScopedEnvVar other_mode("RJ_CONSAN_MODE", other);
     EXPECT_FALSE(install().first);
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanSampledRejectsUnboundedExampleLimits) {
-  for (const auto &[name, value] :
-       std::array{std::pair{"RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", "1025"},
-                  std::pair{"RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT", "65537"},
-                  std::pair{"RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", "-1"}}) {
-    ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, ConSanRejectsUnboundedExampleLimits) {
+  for (const auto &[name, value] : std::array{std::pair{"RJ_CONSAN_CONFLICT_LIMIT", "1025"},
+                                              std::pair{"RJ_CONSAN_TOTAL_CONFLICT_LIMIT", "65537"},
+                                              std::pair{"RJ_CONSAN_CONFLICT_LIMIT", "-1"}}) {
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
     ScopedEnvVar limit(name, value);
     reset_code_object_observations();
     FakeApiTable api;
@@ -8813,19 +7680,19 @@ TEST(HsaHooksUnitTest, ConSanSampledRejectsUnboundedExampleLimits) {
   }
 }
 
-TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalformedStaticMapping) {
-  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+TEST(HsaHooksUnitTest, AutoEmptyReportSkipsCapacityScanAndSurfacesMalformedStaticMapping) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
-  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
+
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   reset_code_object_observations();
   reset_core_memory_observations();
-  g_transform_override_result = auto_report_sampled_transform_result(/*malformed_mapping=*/true);
+  g_transform_override_result = auto_report_transform_result(/*malformed_mapping=*/true);
 
   testing::internal::CaptureStderr();
   {
@@ -8843,173 +7710,11 @@ TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalform
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  const size_t mapping =
-      log.find("ConSan MOI sampled diagnostic map reader=101 entries=1 mappings=0 ");
+  const size_t mapping = log.find("ConSan diagnostic map reader=101 entries=1 mappings=0 ");
   ASSERT_NE(mapping, std::string::npos) << log;
   EXPECT_NE(log.find("malformed=true", mapping), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_static_mapping_malformed=1"), std::string::npos) << log;
-  EXPECT_NE(log.find("sampled_watchpoint_slots_examined=0"), std::string::npos) << log;
-}
-
-TEST(HsaHooksUnitTest, RecordReplayProvenanceMismatchRemainsUnknown) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  const std::array records = {
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 3,
-          .workgroup_x = 0,
-          .workgroup_y = 0,
-          .workgroup_z = 0,
-          .wave_id = 1,
-          .lane_mask = 0x5,
-          .instruction_offset = 0x10,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 0,
-          .lds_byte_count = 4,
-          .start_cell = 0,
-          .cell_count = 1,
-          .epoch = 1,
-          .event_index = 1,
-      },
-      rocjitsu::ConSanMoiAccessRecord{
-          .generation = 3,
-          .workgroup_x = 0,
-          .workgroup_y = 0,
-          .workgroup_z = 0,
-          .wave_id = 2,
-          .lane_mask = 0xa,
-          .instruction_offset = 0x20,
-          .access_kind = static_cast<uint32_t>(AccessKind::Write),
-          .lds_byte_offset = 0,
-          .lds_byte_count = 4,
-          .start_cell = 0,
-          .cell_count = 1,
-          .epoch = 1,
-          .event_index = 2,
-      },
-  };
-  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
-      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
-      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
-      .generation = 3,
-      .epoch = 1,
-      .first_owner_id = 1,
-      .second_owner_id = 2,
-      .reserved = 2,
-      .first_instruction_offset = 0xdead,
-      .second_instruction_offset = 0x20,
-      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
-      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
-  };
-
-  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
-      rocjitsu::repair_consan_moi_record_replay_provenance(records, {&diagnostic, 1});
-
-  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
-  EXPECT_EQ(repair.unresolved_diagnostic_count, 1u);
-  EXPECT_EQ(diagnostic.first_lane_mask, 0u);
-  EXPECT_EQ(diagnostic.first_lds_byte_count, 0u);
-}
-
-TEST(HsaHooksUnitTest, RecordReplayProvenanceTracksSparseCellsAndExactCurrentEvent) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  constexpr uint32_t kHighCell = 2047;
-  std::vector<rocjitsu::ConSanMoiAccessRecord> records;
-  records.reserve(514);
-  const auto access = [](uint32_t event_index, uint32_t workgroup_x, uint32_t owner,
-                         uint32_t instruction, uint64_t lanes) {
-    return rocjitsu::ConSanMoiAccessRecord{
-        .generation = 9,
-        .workgroup_x = workgroup_x,
-        .wave_id = owner,
-        .lane_mask = lanes,
-        .instruction_offset = instruction,
-        .access_kind = static_cast<uint32_t>(AccessKind::Write),
-        .lds_byte_offset = kHighCell * 4u,
-        .lds_byte_count = 4,
-        .start_cell = kHighCell,
-        .cell_count = 1,
-        .epoch = 36,
-        .event_index = event_index,
-    };
-  };
-  for (uint32_t workgroup = 0; workgroup < 512; ++workgroup)
-    records.push_back(access(workgroup + 1u, workgroup, 2, 0xfea78, 0x1));
-  records.push_back(access(513, 512, 3, 0xfea70, 0x8));
-  records.push_back(access(514, 512, 2, 0xfea78, 0x4));
-
-  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
-      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
-      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
-      .generation = 9,
-      .epoch = 36,
-      .first_owner_id = 3,
-      .second_owner_id = 2,
-      .reserved = 514,
-      .first_instruction_offset = 0xfea70,
-      .second_instruction_offset = 0xfea78,
-      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
-      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
-  };
-
-  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
-      rocjitsu::repair_consan_moi_record_replay_provenance(records, {&diagnostic, 1});
-
-  EXPECT_EQ(repair.repaired_diagnostic_count, 1u);
-  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
-  EXPECT_EQ(diagnostic.first_lane_mask, 0x8u);
-  EXPECT_EQ(diagnostic.first_lds_byte_offset, kHighCell * 4u);
-  EXPECT_EQ(diagnostic.first_lds_byte_count, 4u);
-  EXPECT_EQ(diagnostic.second_lane_mask, 0x4u);
-  EXPECT_EQ(diagnostic.second_lds_byte_offset, kHighCell * 4u);
-  EXPECT_EQ(diagnostic.second_lds_byte_count, 4u);
-}
-
-TEST(HsaHooksUnitTest, RecordReplayProvenanceFailsClosedAfterGlobalBudgetExhaustion) {
-  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
-  constexpr uint32_t kCompanionCellCapacity = 1u << 20u;
-  const auto access = [](uint32_t event_index, uint32_t workgroup_x, uint32_t owner,
-                         uint32_t start_cell, uint32_t cell_count) {
-    return rocjitsu::ConSanMoiAccessRecord{
-        .generation = 5,
-        .workgroup_x = workgroup_x,
-        .wave_id = owner,
-        .lane_mask = uint64_t{1} << owner,
-        .instruction_offset = 0x10u * event_index,
-        .access_kind = static_cast<uint32_t>(AccessKind::Write),
-        .lds_byte_offset = start_cell * 4u,
-        .lds_byte_count = cell_count * 4u,
-        .start_cell = start_cell,
-        .cell_count = cell_count,
-        .epoch = 2,
-        .event_index = event_index,
-    };
-  };
-  const std::array records = {
-      access(1, 0, 1, 0, kCompanionCellCapacity),
-      access(2, 1, 2, 0, 1),
-      access(3, 1, 3, 0, 1),
-  };
-  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
-      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
-      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
-      .generation = 5,
-      .epoch = 2,
-      .first_owner_id = 2,
-      .second_owner_id = 3,
-      .reserved = 3,
-      .first_instruction_offset = 0x20,
-      .second_instruction_offset = 0x30,
-      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
-      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
-  };
-
-  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
-      rocjitsu::repair_consan_moi_record_replay_provenance(records, {&diagnostic, 1});
-
-  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
-  EXPECT_EQ(repair.unresolved_diagnostic_count, 1u);
-  EXPECT_EQ(diagnostic.first_lane_mask, 0u);
-  EXPECT_EQ(diagnostic.first_lds_byte_count, 0u);
+  EXPECT_NE(log.find("static_mapping_malformed=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("watchpoint_slots_examined=0"), std::string::npos) << log;
 }
 
 void reset_queue_fakes() {
@@ -10464,27 +9169,27 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   reset_queue_fakes();
   configure_consan_profile(kConSanHookProfiles[1], false);
 
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  g_transform_override_result.outcome = TransformOutcome::ModifiedValid;
   install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_CDNA3,
                                        ROCJITSU_CODE_TARGET_GFX942);
   g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
   install_consan_test_program_inventory(g_transform_override_result,
-                                        [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                        [](ProgramInventoryBuilder &builder) {
                                           auto &kernel = builder.add_kernel();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
                                           kernel.uses_dynamic_stack = true;
                                         });
 
-  rocjitsu::ConSanPatchInfo first_patch;
-  first_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  first_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  PatchInfo first_patch;
+  first_patch.phase = PatchPhase::Instrumentation;
+  first_patch.kind = PatchKind::TrampolineSyncMetadata;
   first_patch.required_private_segment_size = 48u;
   first_patch.dynamic_private_segment_addend = 32u;
   first_patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(first_patch);
 
-  rocjitsu::ConSanPatchInfo second_patch = first_patch;
+  PatchInfo second_patch = first_patch;
   second_patch.required_private_segment_size = 64u;
   second_patch.dynamic_private_segment_addend = 16u;
   g_transform_override_result.patches.push_back(second_patch);
@@ -10554,11 +9259,11 @@ TEST(HsaHooksUnitTest, ConSanDynamicPrivateReplacementRequiresDispatchPacketInte
     configure_consan_profile(kConSanHookProfiles[0], fail_closed);
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
 
-    g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+    g_transform_override_result.outcome = TransformOutcome::ModifiedValid;
     install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_CDNA3,
                                          ROCJITSU_CODE_TARGET_GFX942);
     install_consan_test_program_inventory(g_transform_override_result,
-                                          [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                          [](ProgramInventoryBuilder &builder) {
                                             auto &kernel = builder.add_kernel();
                                             kernel.name = "oversized_kernel";
                                             kernel.descriptor_file_offset = 64u;
@@ -10568,9 +9273,9 @@ TEST(HsaHooksUnitTest, ConSanDynamicPrivateReplacementRequiresDispatchPacketInte
                                             kernel.uses_dynamic_stack = true;
                                           });
     g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
-    rocjitsu::ConSanPatchInfo patch;
-    patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-    patch.kind = rocjitsu::ConSanPatchKind::FlatLoadCheckTrap;
+    PatchInfo patch;
+    patch.phase = PatchPhase::Instrumentation;
+    patch.kind = PatchKind::FlatLoadCheckTrap;
     patch.required_private_segment_size = 32u;
     patch.dynamic_private_segment_addend = 32u;
     patch.owner_descriptor_file_offsets = {64u};
@@ -10607,12 +9312,12 @@ void configure_consan_symbol_binding_case() {
   reset_queue_fakes();
   configure_consan_profile(kConSanHookProfiles[1], false);
 
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  g_transform_override_result.outcome = TransformOutcome::ModifiedValid;
   install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_CDNA3,
                                        ROCJITSU_CODE_TARGET_GFX942);
   g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 's', 'y', 'm'};
   install_consan_test_program_inventory(g_transform_override_result,
-                                        [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                        [](ProgramInventoryBuilder &builder) {
                                           auto &kernel = builder.add_kernel();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
@@ -10621,11 +9326,10 @@ void configure_consan_symbol_binding_case() {
                                           kernel.has_text_range = true;
                                         });
 
-  rocjitsu::ConSanPatchInfo patch;
-  patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  PatchInfo patch;
+  patch.phase = PatchPhase::Instrumentation;
+  patch.kind = PatchKind::TrampolineSyncMetadata;
   patch.required_private_segment_size = 64u;
-  patch.workgroup_shadow.emplace().required_group_segment_size = 128u;
   patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(std::move(patch));
 }
@@ -10651,7 +9355,7 @@ void expect_consan_symbol_segment_requirements(FakeApiTable &api, hsa_executable
   ASSERT_EQ(api.core.hsa_executable_symbol_get_info_fn(
                 symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_bytes),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(group_bytes, 128u);
+  EXPECT_EQ(group_bytes, g_fake_symbol_group_segment_size);
 }
 
 TEST(HsaHooksUnitTest, ConSanLegacyGetSymbolBindsDispatchSegmentRequirements) {
@@ -10732,15 +9436,15 @@ TEST(HsaHooksUnitTest, ConSanExecutableDestroyDropsReusedSymbolDispatchMetadata)
 void configure_consan_zero_record_case() {
   reset_code_object_observations();
   reset_queue_fakes();
-  unsetenv("RJ_CONSAN_MOI_REPORT_BUFFER");
-  unsetenv("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE");
-  setenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "1048576", 1);
-  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  unsetenv("RJ_CONSAN_REPORT_BUFFER");
+  unsetenv("RJ_CONSAN_REPORT_BUFFER_SIZE");
+  setenv("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "1048576", 1);
+  g_transform_override_result.outcome = TransformOutcome::ModifiedValid;
   install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_CDNA3,
                                        ROCJITSU_CODE_TARGET_GFX942);
   g_transform_override_result.replacement = {0x7f, 'E', 'L', 'F', 's', 'a', 'm', 'p'};
   install_consan_test_program_inventory(g_transform_override_result,
-                                        [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                        [](ProgramInventoryBuilder &builder) {
                                           auto &kernel = builder.add_kernel();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
@@ -10749,13 +9453,12 @@ void configure_consan_zero_record_case() {
                                           kernel.has_text_range = true;
                                         });
 
-  install_test_access_coverage(
-      g_transform_override_result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented);
+  install_test_access_coverage(g_transform_override_result, 1u, SiteDecisionKind::Admitted,
+                               AccessPolicyReason::None, LoweringOutcomeKind::Instrumented);
 
-  rocjitsu::ConSanPatchInfo patch;
-  patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  PatchInfo patch;
+  patch.phase = PatchPhase::Instrumentation;
+  patch.kind = PatchKind::TrampolineSyncMetadata;
   patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(patch);
 }
@@ -10815,7 +9518,7 @@ void run_consan_zero_record_case(bool iterate_symbol, bool dispatch_kernel) {
                            fake_intercept_packet_writer);
 }
 
-TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsRuntimeSampledDispatch) {
+TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsRuntimeDispatch) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
   configure_consan_zero_record_case();
@@ -10827,23 +9530,21 @@ TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsRuntimeSampledDispatch) 
       }()),
       testing::ExitedWithCode(86),
       "zero visible records after 1 instrumented dispatch packet.*runtime sampling may have "
-      "selected no workgroups.*stride=65536 offset=0");
+      "selected no workgroups.*stride=256 offset=0");
 }
 
 TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticRecognizesIndependentCellSampling) {
-  configure_consan_profile(kConSanHookProfiles[3], false);
+  configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
-  ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);
-  ScopedEnvVar legacy_offset("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", nullptr);
-  ScopedEnvVar workgroup_stride("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", "1");
-  ScopedEnvVar cell_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", "256");
+  ScopedEnvVar legacy_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar legacy_offset("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar workgroup_stride("RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE", "1");
+  ScopedEnvVar cell_stride("RJ_CONSAN_CELL_SAMPLE_STRIDE", "256");
   configure_consan_zero_record_case();
-  g_transform_override_result.patches.front().kind =
-      rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
-  install_test_access_coverage(
-      g_transform_override_result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
-      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
-      rocjitsu::ConSanCapabilityEngine::Sampled, rocjitsu::ConSanProbeIntentKind::SampledAccess);
+  g_transform_override_result.patches.front().kind = PatchKind::TrampolineWatchpointStore;
+  install_test_access_coverage(g_transform_override_result, 1u, SiteDecisionKind::Admitted,
+                               AccessPolicyReason::None, LoweringOutcomeKind::Instrumented,
+                               Mode::Default, ProbeIntentKind::Access);
   ASSERT_EXIT(([] {
                 run_consan_zero_record_case(/*iterate_symbol=*/true, /*dispatch_kernel=*/true);
                 std::_Exit(8);
@@ -10887,10 +9588,8 @@ TEST(HsaHooksUnitTest, ConSanAllowlistReportsLoadedEntryThatWasNotInstrumented) 
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "0");
   ScopedEnvVar allowlist("RJ_CONSAN_KERNEL_ALLOWLIST", "oversized_kernel");
   configure_consan_zero_record_case();
-  install_test_access_coverage(g_transform_override_result, 1u,
-                               rocjitsu::ConSanSiteDecisionKind::Admitted,
-                               rocjitsu::ConSanAccessPolicyReason::None,
-                               rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected);
+  install_test_access_coverage(g_transform_override_result, 1u, SiteDecisionKind::Admitted,
+                               AccessPolicyReason::None, LoweringOutcomeKind::PlacementRejected);
 
   ASSERT_EXIT(([] {
                 run_consan_zero_record_case(/*iterate_symbol=*/false, /*dispatch_kernel=*/false);
@@ -10934,7 +9633,7 @@ TEST(HsaHooksUnitTest, ConSanAllowlistReportsEntryThatWasNeverLoaded) {
 TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsDensePathGap) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
-  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "1");
   configure_consan_zero_record_case();
 
   ASSERT_EXIT(
@@ -12057,3 +10756,5 @@ TEST(HsaHooksUnitTest, UntrackedSignalStoreScreleaseIsForwarded) {
 }
 
 } // namespace
+
+} // namespace rocjitsu::consan::hook

@@ -23,24 +23,9 @@
               "detector": "not_detected",
               "oracle": "any"
             },
-            "record-replay": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
-            },
-            "sampled": {
+            "default": {
               "detector": "not_detected",
               "oracle": "any"
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "any",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii"
-              }
             }
           }
         }
@@ -62,21 +47,9 @@
               "detector": "not_detected",
               "oracle": "fail"
             },
-            "record-replay": {
+            "default": {
               "detector": "not_detected",
               "oracle": "fail"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "fail",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "prefill_bs1$async_dispatch_12_attention_4x2xDx32x32xD"
-              }
             }
           }
         }
@@ -98,21 +71,9 @@
               "detector": "not_detected",
               "oracle": "fail"
             },
-            "record-replay": {
+            "default": {
               "detector": "not_detected",
               "oracle": "fail"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32"
-              }
             }
           }
         }
@@ -133,22 +94,11 @@
               "detector": "detected",
               "oracle": "pass"
             },
-            "record-replay": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "sampled": {
+            "default": {
               "detector": "detected",
               "oracle": "pass",
               "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+                "RJ_CONSAN_REQUIRE_DIAGNOSTICS": "1"
               }
             }
           }
@@ -170,15 +120,7 @@
               "detector": "not_detected",
               "oracle": "pass"
             },
-            "record-replay": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "inline-shadow": {
+            "default": {
               "detector": "not_detected",
               "oracle": "pass"
             }
@@ -201,21 +143,9 @@
               "detector": "not_detected",
               "oracle": "fail"
             },
-            "record-replay": {
+            "default": {
               "detector": "not_detected",
               "oracle": "fail"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "fail",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_TEST_KERNEL_FILTER": "_initializer_11_dispatch_0_transpose_1024x3072_f32"
-              }
             }
           }
         }
@@ -236,15 +166,7 @@
               "detector": "not_detected",
               "oracle": "fail"
             },
-            "record-replay": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "inline-shadow": {
+            "default": {
               "detector": "not_detected",
               "oracle": "fail"
             }
@@ -267,16 +189,8 @@
               "detector": "not_detected",
               "oracle": "fail"
             },
-            "record-replay": {
+            "default": {
               "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "inline-shadow": {
-              "detector": "detected",
               "oracle": "fail"
             }
           }
@@ -298,15 +212,7 @@
               "detector": "not_detected",
               "oracle": "fail"
             },
-            "record-replay": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "fail"
-            },
-            "inline-shadow": {
+            "default": {
               "detector": "not_detected",
               "oracle": "fail"
             }
@@ -335,27 +241,13 @@
               "oracle": "fail",
               "tracking_issue": "bd-2sjm.1"
             },
-            "record-replay": {
+            "default": {
               "detector": "detected",
               "oracle": "fail",
               "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
-            },
-            "sampled": {
-              "detector": "detected",
-              "oracle": "fail",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "1",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0"
-              }
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "fail",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
+                "RJ_CONSAN_REQUIRE_DIAGNOSTICS": "1",
+                "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE": "1",
+                "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET": "0"
               }
             }
           }
@@ -377,15 +269,7 @@
               "detector": "not_detected",
               "oracle": "pass"
             },
-            "record-replay": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "inline-shadow": {
+            "default": {
               "detector": "not_detected",
               "oracle": "pass"
             }
@@ -403,20 +287,9 @@
               "detector": "not_detected",
               "oracle": "pass"
             },
-            "record-replay": {
+            "default": {
               "detector": "not_detected",
               "oracle": "pass"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "fail",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
             }
           }
         }
@@ -437,15 +310,7 @@
               "detector": "not_detected",
               "oracle": "pass"
             },
-            "record-replay": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "inline-shadow": {
+            "default": {
               "detector": "not_detected",
               "oracle": "pass"
             }
@@ -463,20 +328,9 @@
               "detector": "not_detected",
               "oracle": "pass"
             },
-            "record-replay": {
+            "default": {
               "detector": "not_detected",
               "oracle": "pass"
-            },
-            "sampled": {
-              "detector": "not_detected",
-              "oracle": "pass"
-            },
-            "inline-shadow": {
-              "detector": "detected",
-              "oracle": "pass",
-              "environment": {
-                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS": "1"
-              }
             }
           }
         }

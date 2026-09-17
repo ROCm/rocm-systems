@@ -9,9 +9,9 @@
 
 #include <cstdint>
 
-#define RJ_CONSAN_GFX950_TWO_QUEUE_CAVE                                                         \
-  ".rept 512\n\t"                                                                              \
-  "s_nop 0\n\t"                                                                                \
+#define RJ_CONSAN_GFX950_TWO_QUEUE_CAVE                                                            \
+  ".rept 512\n\t"                                                                                  \
+  "s_nop 0\n\t"                                                                                    \
   ".endr\n\t"
 
 namespace {
@@ -38,8 +38,7 @@ __device__ __forceinline__ uint32_t load_lds_word(volatile uint32_t *address) {
   const uint32_t lds_address =
       static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
   uint32_t value = 0u;
-  asm volatile("ds_read_b32 %0, %1\n\t" RJ_CONSAN_GFX950_TWO_QUEUE_CAVE
-               "s_waitcnt lgkmcnt(0)\n\t"
+  asm volatile("ds_read_b32 %0, %1\n\t" RJ_CONSAN_GFX950_TWO_QUEUE_CAVE "s_waitcnt lgkmcnt(0)\n\t"
                : "=v"(value)
                : "v"(lds_address)
                : "memory");
@@ -86,12 +85,12 @@ template <bool Synchronize> __device__ void run_two_queue_dispatch(TwoQueueState
 
 } // namespace
 
-extern "C" __global__ __launch_bounds__(128) void
-consan_gfx950_two_queue_dispatch_correct(TwoQueueState *state) {
+extern "C" __global__
+__launch_bounds__(128) void consan_gfx950_two_queue_dispatch_correct(TwoQueueState *state) {
   run_two_queue_dispatch<true>(state);
 }
 
-extern "C" __global__ __launch_bounds__(128) void
-consan_gfx950_two_queue_dispatch_incorrect(TwoQueueState *state) {
+extern "C" __global__
+__launch_bounds__(128) void consan_gfx950_two_queue_dispatch_incorrect(TwoQueueState *state) {
   run_two_queue_dispatch<false>(state);
 }

@@ -13,10 +13,10 @@
 #include <optional>
 #include <span>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// @brief One contiguous temporary-register request at an instruction.
-struct ConSanRegisterRequest {
+struct RegisterRequest {
   RegClass reg_class = RegClass::VGPR;
   uint16_t count = 0;
   uint16_t alignment = 1;
@@ -32,25 +32,24 @@ struct ConSanRegisterRequest {
 };
 
 /// @brief Read-only result of planning one register request.
-struct ConSanRegisterPlan {
-  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
-  ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
+struct RegisterPlan {
+  RegisterAllocationSource source = RegisterAllocationSource::Unsupported;
+  RegisterPlanReason reason = RegisterPlanReason::None;
   std::optional<uint16_t> base;
   uint16_t count = 0;
   uint16_t required_descriptor_count = 0;
 };
 
 /// @brief Plan explicit, dead, fresh, or spill-backed registers without mutation.
-[[nodiscard]] ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
-                                                       const RegisterSet &live_before);
+[[nodiscard]] RegisterPlan plan_registers(const RegisterRequest &request,
+                                          const RegisterSet &live_before);
 
 /// Summarize planner decisions without depending on emitted patch proof.
-[[nodiscard]] ConSanResourcePlanSummary
-summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans);
+[[nodiscard]] ResourcePlanSummary
+summarize_resource_plans(std::span<const CandidateResourcePlan> plans);
 
 /// Add the spill telemetry from one emitted patch's ABI effect. Keeping this
 /// separate prevents resource reporting from receiving validation proof.
-void accumulate_consan_emitted_spill(ConSanResourcePlanSummary &summary,
-                                     const ConSanPatchAbiEffects &effects);
+void accumulate_emitted_spill(ResourcePlanSummary &summary, const PatchAbiEffects &effects);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

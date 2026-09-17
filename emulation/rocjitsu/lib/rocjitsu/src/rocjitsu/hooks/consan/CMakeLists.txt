@@ -4,7 +4,7 @@
 # Keep ConSan's DBI hook isolated from the generic rocjitsu hook target. The
 # output directory intentionally remains the parent hooks directory for
 # compatibility with installed layouts and existing validation tooling.
-add_library(rocjitsu_consan_report_trust STATIC rj_hsa_dbi_moi_report_trust.cpp)
+add_library(rocjitsu_consan_report_trust STATIC rj_hsa_dbi_report_trust.cpp)
 set_target_properties(
     rocjitsu_consan_report_trust
     PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -14,7 +14,7 @@ target_include_directories(
     PUBLIC ${ROCJITSU_SRC_DIR}
 )
 
-add_library(rocjitsu_consan_report_snapshot STATIC rj_hsa_dbi_moi_report_snapshot.cpp)
+add_library(rocjitsu_consan_report_snapshot STATIC rj_hsa_dbi_report_snapshot.cpp)
 set_target_properties(
     rocjitsu_consan_report_snapshot
     PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -28,10 +28,8 @@ target_link_libraries(rocjitsu_consan_report_snapshot PRIVATE util)
 add_library(
     rocjitsu_consan_report_decoder
     STATIC
-        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
-        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.cpp
-        rj_hsa_dbi_moi_report_decoder.cpp
-        modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.cpp
+        rj_hsa_dbi_report_decoder.cpp
+        rj_hsa_dbi_evidence_decoder.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_decoder
@@ -46,9 +44,8 @@ target_link_libraries(rocjitsu_consan_report_decoder PRIVATE util)
 add_library(
     rocjitsu_consan_report_analyzer
     STATIC
-        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
-        rj_hsa_dbi_moi_report_analyzer.cpp
-        modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+        rj_hsa_dbi_report_analyzer.cpp
+        rj_hsa_dbi_conflict_analysis.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_analyzer
@@ -63,10 +60,8 @@ target_link_libraries(rocjitsu_consan_report_analyzer PRIVATE util)
 add_library(
     rocjitsu_consan_report_renderer
     STATIC
-        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
-        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.cpp
-        rj_hsa_dbi_moi_report_renderer.cpp
-        modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.cpp
+        rj_hsa_dbi_report_renderer.cpp
+        rj_hsa_dbi_conflict_rendering.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_renderer
@@ -85,8 +80,8 @@ add_library(
     rocjitsu_dbi_hooks
     SHARED
     rj_hsa_dbi_hook_config.cpp
-    rj_hsa_dbi_hook_moi_report.cpp
-    rj_hsa_dbi_moi_report_pipeline.cpp
+    rj_hsa_dbi_hook_report.cpp
+    rj_hsa_dbi_report_pipeline.cpp
     rj_hsa_dbi_hooks.cpp
 )
 set_target_properties(

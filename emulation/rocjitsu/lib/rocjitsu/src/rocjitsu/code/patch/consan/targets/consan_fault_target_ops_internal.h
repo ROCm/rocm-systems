@@ -8,20 +8,20 @@
 
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 
-namespace rocjitsu::consan_fault_target_detail {
+namespace rocjitsu::consan::fault_target_detail {
 
-[[nodiscard]] ConSanAtomicFaultEncoding
+[[nodiscard]] AtomicFaultEncoding
 classify_cdna3_cdna4_atomic_fault_encoding(std::string_view mnemonic, uint32_t size);
 
-[[nodiscard]] ConSanAtomicFaultEncoding
+[[nodiscard]] AtomicFaultEncoding
 classify_rdna4_cdna5_atomic_fault_encoding(std::string_view mnemonic, uint32_t size);
 
-[[nodiscard]] ConSanAtomicFaultRewriteResult
+[[nodiscard]] AtomicFaultRewriteResult
 rewrite_rdna4_cdna5_atomic_fault_address(std::span<uint8_t> instruction,
-                                         ConSanAtomicFaultEncoding encoding, uint32_t width_bits,
+                                         AtomicFaultEncoding encoding, uint32_t width_bits,
                                          uint32_t address_delta);
-[[nodiscard]] ConSanAtomicFaultRewriteResult
+[[nodiscard]] AtomicFaultRewriteResult
 rewrite_rdna4_cdna5_atomic_fault_scope_to_wave(std::span<uint8_t> instruction,
-                                               ConSanAtomicFaultEncoding encoding);
+                                               AtomicFaultEncoding encoding);
 
-} // namespace rocjitsu::consan_fault_target_detail
+} // namespace rocjitsu::consan::fault_target_detail

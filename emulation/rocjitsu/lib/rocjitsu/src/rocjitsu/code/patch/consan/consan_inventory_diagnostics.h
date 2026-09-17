@@ -11,15 +11,13 @@
 #include <cstdint>
 #include <string>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-[[nodiscard]] std::string consan_fixed_hex(uint64_t value, unsigned digits);
-[[nodiscard]] std::string consan_atomic_semantic_role(const ConSanAtomicSite &site);
-[[nodiscard]] std::string consan_barrier_decoded_operands(const ConSanBarrierSite &site,
-                                                          uint32_t encoding);
-[[nodiscard]] std::string consan_atomic_decoded_operands(const ConSanAtomicSite &site);
-[[nodiscard]] std::string consan_lds_decoded_operands(const ConSanAccessOperandFacts &operands);
-[[nodiscard]] std::string
-consan_ordinary_memory_decoded_operands(const ConSanOrdinaryMemorySite &site);
+[[nodiscard]] std::string fixed_hex(uint64_t value, unsigned digits);
+[[nodiscard]] std::string atomic_semantic_role(const AtomicSite &site);
+[[nodiscard]] std::string barrier_decoded_operands(const BarrierSite &site, uint32_t encoding);
+[[nodiscard]] std::string atomic_decoded_operands(const AtomicSite &site);
+[[nodiscard]] std::string lds_decoded_operands(const AccessOperandFacts &operands);
+[[nodiscard]] std::string ordinary_memory_decoded_operands(const OrdinaryMemorySite &site);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

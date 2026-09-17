@@ -8,7 +8,7 @@
 
 #include <string_view>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// ROCclr reserves this prefix for runtime implementation kernels that are not
 /// user synchronization domains and must not be selected for instrumentation.
@@ -16,4 +16,4 @@ namespace rocjitsu {
   return name.starts_with("__amd_rocclr_");
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

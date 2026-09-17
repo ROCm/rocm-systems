@@ -397,13 +397,13 @@ include(consan/CMakeLists.txt)
 # These suites run prebuilt binaries through the simulator. The explicit
 # target-specific hip-moi build-directory opt-ins therefore register
 # independently of the host HIP compiler and runtime gates below.
-rj_add_consan_cdna_hip_moi_sim_tests(
+rj_add_consan_cdna_hip_sim_tests(
     Gfx942
     gfx942
     RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR
     "${RJ_CONSAN_GFX942_HIP_MOI_BUILD_DIR}"
 )
-rj_add_consan_cdna_hip_moi_sim_tests(
+rj_add_consan_cdna_hip_sim_tests(
     Gfx950
     gfx950
     RJ_CONSAN_GFX950_HIP_MOI_BUILD_DIR
@@ -471,12 +471,12 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_benchmark.py -v
 )
 add_test(
-    NAME ConSanSampledSweepUnitTest
+    NAME ConSanSweepUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_sampled_sweep.py -v
+        ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_sweep.py -v
 )
-set_tests_properties(ConSanSampledSweepUnitTest PROPERTIES LABELS consan)
+set_tests_properties(ConSanSweepUnitTest PROPERTIES LABELS consan)
 add_test(
     NAME ConSanHipblasltBenchmarkWorkloadUnitTest
     COMMAND
@@ -1601,7 +1601,7 @@ endif()
 
 add_executable(
     hsa_hooks_unit_test
-    dbt/consan_sampled_report_test.cpp
+    dbt/consan_report_test.cpp
     dbt/hsa_code_object_reader_registry_test.cpp
     dbt/hsa_hooks_unit_test.cpp
     dbt/sidecar_registry_test.cpp

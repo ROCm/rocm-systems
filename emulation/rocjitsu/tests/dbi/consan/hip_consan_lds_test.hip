@@ -229,12 +229,12 @@ void write_instability_oracle(const char *outcome, uint32_t launches, uint32_t d
 
 struct ReportEnvGuard {
   ~ReportEnvGuard() {
-    (void)unsetenv("RJ_CONSAN_REPORT_BUFFER");
-    (void)unsetenv("RJ_CONSAN_REPORT_MARKER");
+    (void)unsetenv("RJ_CONSAN_SC_REPORT_BUFFER");
+    (void)unsetenv("RJ_CONSAN_SC_REPORT_MARKER");
   }
 };
 
-bool set_report_buffer_env(uint32_t *d_report) {
+bool set_supercollider_report_buffer_env(uint32_t *d_report) {
   char address[32];
   const int written =
       std::snprintf(address, sizeof(address), "0x%llx",
@@ -243,12 +243,12 @@ bool set_report_buffer_env(uint32_t *d_report) {
     ADD_FAILURE() << "failed to format report-buffer address";
     return false;
   }
-  if (setenv("RJ_CONSAN_REPORT_BUFFER", address, 1) != 0) {
-    ADD_FAILURE() << "failed to set RJ_CONSAN_REPORT_BUFFER";
+  if (setenv("RJ_CONSAN_SC_REPORT_BUFFER", address, 1) != 0) {
+    ADD_FAILURE() << "failed to set RJ_CONSAN_SC_REPORT_BUFFER";
     return false;
   }
-  if (setenv("RJ_CONSAN_REPORT_MARKER", "424242", 1) != 0) {
-    ADD_FAILURE() << "failed to set RJ_CONSAN_REPORT_MARKER";
+  if (setenv("RJ_CONSAN_SC_REPORT_MARKER", "424242", 1) != 0) {
+    ADD_FAILURE() << "failed to set RJ_CONSAN_SC_REPORT_MARKER";
     return false;
   }
   return true;
@@ -611,7 +611,7 @@ __device__ __forceinline__ void padded_exact_byte_pair(bool adjacent) {
   padded_flat_low_b8_store_at(byte_offset, tid == 0 ? 0x11u : 0x22u);
 }
 
-__global__ __launch_bounds__(128) void padded_inline_exact_local_adjacent_bytes(uint32_t *out) {
+__global__ __launch_bounds__(128) void padded_static_lds_byte_adjacent_bytes(uint32_t *out) {
   __shared__ uint32_t lds[1];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   padded_exact_byte_pair(/*adjacent=*/true);
@@ -620,7 +620,7 @@ __global__ __launch_bounds__(128) void padded_inline_exact_local_adjacent_bytes(
     out[0] = 0x1a11u;
 }
 
-__global__ __launch_bounds__(128) void padded_inline_exact_local_overlapping_byte(uint32_t *out) {
+__global__ __launch_bounds__(128) void padded_static_lds_byte_overlapping_byte(uint32_t *out) {
   __shared__ uint32_t lds[1];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   padded_exact_byte_pair(/*adjacent=*/false);
@@ -629,7 +629,7 @@ __global__ __launch_bounds__(128) void padded_inline_exact_local_overlapping_byt
     out[0] = 0x1a22u;
 }
 
-__global__ __launch_bounds__(128) void padded_inline_exact_external_adjacent_bytes(uint32_t *out) {
+__global__ __launch_bounds__(128) void padded_dynamic_lds_byte_adjacent_bytes(uint32_t *out) {
   extern __shared__ uint32_t lds[];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   padded_exact_byte_pair(/*adjacent=*/true);
@@ -638,8 +638,7 @@ __global__ __launch_bounds__(128) void padded_inline_exact_external_adjacent_byt
     out[0] = 0x1e11u;
 }
 
-__global__
-__launch_bounds__(128) void padded_inline_exact_external_overlapping_byte(uint32_t *out) {
+__global__ __launch_bounds__(128) void padded_dynamic_lds_byte_overlapping_byte(uint32_t *out) {
   extern __shared__ uint32_t lds[];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   padded_exact_byte_pair(/*adjacent=*/false);
@@ -648,7 +647,7 @@ __launch_bounds__(128) void padded_inline_exact_external_overlapping_byte(uint32
     out[0] = 0x1e22u;
 }
 
-__global__ __launch_bounds__(128) void padded_inline_exact_local_tail_b16(uint32_t *out) {
+__global__ __launch_bounds__(128) void padded_static_lds_byte_tail_b16(uint32_t *out) {
   __shared__ uint32_t lds[1];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   asm volatile("v_mov_b32 v20, 0" ::: "v20");
@@ -660,7 +659,7 @@ __global__ __launch_bounds__(128) void padded_inline_exact_local_tail_b16(uint32
 }
 
 __global__
-__launch_bounds__(128) void padded_inline_exact_external_unequal_high_byte_overlap(uint32_t *out) {
+__launch_bounds__(128) void padded_dynamic_lds_byte_unequal_high_byte_overlap(uint32_t *out) {
   extern __shared__ uint32_t lds[];
   asm volatile("" : : "v"(&lds[0]) : "memory");
   asm volatile("v_mov_b32 v20, 0" ::: "v20");
@@ -936,7 +935,7 @@ TEST(ConSanLdsTest, PaddedHighHalfD16FlatStoresProduceExpectedResults) {
   EXPECT_EQ(out[3], 0xAAAA55EFu);
 }
 
-template <typename Launch> void run_inline_exact_kernel(Launch &&launch, uint32_t expected) {
+template <typename Launch> void run_lds_byte_kernel(Launch &&launch, uint32_t expected) {
   uint32_t *d_out = nullptr;
   HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
   HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
@@ -949,41 +948,41 @@ template <typename Launch> void run_inline_exact_kernel(Launch &&launch, uint32_
   EXPECT_EQ(out, expected);
 }
 
-TEST(ConSanLdsTest, InlineExactLocalAdjacentBytesStayIndependent) {
-  run_inline_exact_kernel(
-      [](uint32_t *out) { padded_inline_exact_local_adjacent_bytes<<<1, 128>>>(out); }, 0x1a11u);
+TEST(ConSanLdsTest, StaticLdsByteAdjacentBytesStayIndependent) {
+  run_lds_byte_kernel([](uint32_t *out) { padded_static_lds_byte_adjacent_bytes<<<1, 128>>>(out); },
+                      0x1a11u);
 }
 
-TEST(ConSanLdsTest, InlineExactLocalOverlappingByteCompletes) {
-  run_inline_exact_kernel(
-      [](uint32_t *out) { padded_inline_exact_local_overlapping_byte<<<1, 128>>>(out); }, 0x1a22u);
+TEST(ConSanLdsTest, StaticLdsByteOverlappingByteCompletes) {
+  run_lds_byte_kernel(
+      [](uint32_t *out) { padded_static_lds_byte_overlapping_byte<<<1, 128>>>(out); }, 0x1a22u);
 }
 
-TEST(ConSanLdsTest, InlineExactExternalAdjacentBytesStayIndependent) {
-  run_inline_exact_kernel(
+TEST(ConSanLdsTest, DynamicLdsByteAdjacentBytesStayIndependent) {
+  run_lds_byte_kernel(
       [](uint32_t *out) {
-        padded_inline_exact_external_adjacent_bytes<<<1, 128, sizeof(uint32_t)>>>(out);
+        padded_dynamic_lds_byte_adjacent_bytes<<<1, 128, sizeof(uint32_t)>>>(out);
       },
       0x1e11u);
 }
 
-TEST(ConSanLdsTest, InlineExactExternalOverlappingByteCompletes) {
-  run_inline_exact_kernel(
+TEST(ConSanLdsTest, DynamicLdsByteOverlappingByteCompletes) {
+  run_lds_byte_kernel(
       [](uint32_t *out) {
-        padded_inline_exact_external_overlapping_byte<<<1, 128, sizeof(uint32_t)>>>(out);
+        padded_dynamic_lds_byte_overlapping_byte<<<1, 128, sizeof(uint32_t)>>>(out);
       },
       0x1e22u);
 }
 
-TEST(ConSanLdsTest, InlineExactLocalTailB16StaysWithinCoverage) {
-  run_inline_exact_kernel(
-      [](uint32_t *out) { padded_inline_exact_local_tail_b16<<<1, 128>>>(out); }, 0x1a33u);
+TEST(ConSanLdsTest, StaticLdsByteTailB16StaysWithinCoverage) {
+  run_lds_byte_kernel([](uint32_t *out) { padded_static_lds_byte_tail_b16<<<1, 128>>>(out); },
+                      0x1a33u);
 }
 
-TEST(ConSanLdsTest, InlineExactExternalUnequalHighByteOverlapCompletes) {
-  run_inline_exact_kernel(
+TEST(ConSanLdsTest, DynamicLdsByteUnequalHighByteOverlapCompletes) {
+  run_lds_byte_kernel(
       [](uint32_t *out) {
-        padded_inline_exact_external_unequal_high_byte_overlap<<<1, 128, sizeof(uint32_t)>>>(out);
+        padded_dynamic_lds_byte_unequal_high_byte_overlap<<<1, 128, sizeof(uint32_t)>>>(out);
       },
       0x1e44u);
 }
@@ -1019,7 +1018,7 @@ TEST(ConSanLdsTest, PaddedCleanStoreReportBufferStaysZero) {
   HIP_ASSERT(hipMalloc(&d_out, kValues * sizeof(uint32_t)));
   HIP_ASSERT(hipMalloc(&d_report, sizeof(uint32_t)));
   ReportEnvGuard report_env;
-  ASSERT_TRUE(set_report_buffer_env(d_report));
+  ASSERT_TRUE(set_supercollider_report_buffer_env(d_report));
   std::vector<uint32_t> out(kValues);
   for (uint32_t launch = 0; launch < launches; ++launch) {
     HIP_ASSERT(hipMemset(d_out, 0, kValues * sizeof(uint32_t)));
@@ -1047,7 +1046,7 @@ TEST(ConSanLdsTest, PaddedRacyStoreReportsMarker) {
   HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
   HIP_ASSERT(hipMalloc(&d_report, sizeof(uint32_t)));
   ReportEnvGuard report_env;
-  ASSERT_TRUE(set_report_buffer_env(d_report));
+  ASSERT_TRUE(set_supercollider_report_buffer_env(d_report));
   uint32_t detections = 0;
   for (uint32_t launch = 0; launch < launches; ++launch) {
     HIP_ASSERT(hipMemset(d_out, 0, sizeof(uint32_t)));

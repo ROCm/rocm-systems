@@ -9,16 +9,15 @@
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-namespace consan_program_analysis_target_detail {
+namespace program_analysis_target_detail {
 
-[[nodiscard]] inline ConSanWaitInstructionEncoding classify_target_wait_instruction(
+[[nodiscard]] inline WaitInstructionEncoding classify_target_wait_instruction(
     uint32_t word, rj_code_arch_t arch, std::optional<uint32_t> extra_release,
     bool store_waits_are_release_boundaries, bool bounded_release_counter_form) {
   namespace ib = instrumentation;
-  ConSanWaitInstructionEncoding result{.bounded_release_counter_form =
-                                           bounded_release_counter_form};
+  WaitInstructionEncoding result{.bounded_release_counter_form = bounded_release_counter_form};
   const auto matches = [&](const std::optional<uint32_t> &encoding) {
     return encoding && word == *encoding;
   };
@@ -36,11 +35,11 @@ namespace consan_program_analysis_target_detail {
   return result;
 }
 
-} // namespace consan_program_analysis_target_detail
+} // namespace program_analysis_target_detail
 
-extern const ConSanProgramAnalysisTargetOperations kConSanCdna3Cdna4ProgramAnalysisOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanRdna3ProgramAnalysisOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanRdna4ProgramAnalysisOperations;
-extern const ConSanProgramAnalysisTargetOperations kConSanCdna5ProgramAnalysisOperations;
+extern const ProgramAnalysisTargetOperations kCdna3Cdna4ProgramAnalysisOperations;
+extern const ProgramAnalysisTargetOperations kRdna3ProgramAnalysisOperations;
+extern const ProgramAnalysisTargetOperations kRdna4ProgramAnalysisOperations;
+extern const ProgramAnalysisTargetOperations kCdna5ProgramAnalysisOperations;
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

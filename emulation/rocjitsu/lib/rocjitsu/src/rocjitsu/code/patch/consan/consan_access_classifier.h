@@ -9,14 +9,14 @@
 #include "rocjitsu/code/patch/consan/consan_access_shape.h"
 #include "rocjitsu/code/rj_code.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-struct ConSanProgramSite;
+struct ProgramSite;
 
 /// Normalize one completed inventory access and classify the exact target
 /// operations that can consume it. This is the sole access-form admission
 /// authority; semantic policy and emitters consume its typed result.
-[[nodiscard]] ConSanAccessLoweringClassification
-classify_consan_access_lowering(const ConSanProgramSite &access, rj_code_arch_t arch);
+[[nodiscard]] AccessLoweringClassification classify_access_lowering(const ProgramSite &access,
+                                                                    rj_code_arch_t arch);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

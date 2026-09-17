@@ -8,12 +8,12 @@
 
 #include <cstdint>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Select how far one native lowering pass may execute.
-enum class ConSanLoweringExtent : uint8_t {
+enum class LoweringExtent : uint8_t {
   Complete,
   ThroughProgramInventory,
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

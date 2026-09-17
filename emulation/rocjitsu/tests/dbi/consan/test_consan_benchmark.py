@@ -68,13 +68,28 @@ def _run(
 
 
 class ConSanBenchmarkTest(unittest.TestCase):
-    def test_source_identity_tracks_dirty_code_but_not_markdown_or_commit_bookkeeping(self) -> None:
+    def test_source_identity_tracks_dirty_code_but_not_markdown_or_commit_bookkeeping(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+
             def git(*args):
-                subprocess.run(("git", "-C", directory, "-c", "user.name=Test",
-                                "-c", "user.email=test@example.invalid", *args),
-                               check=True, capture_output=True)
+                subprocess.run(
+                    (
+                        "git",
+                        "-C",
+                        directory,
+                        "-c",
+                        "user.name=Test",
+                        "-c",
+                        "user.email=test@example.invalid",
+                        *args,
+                    ),
+                    check=True,
+                    capture_output=True,
+                )
+
             git("init")
             (root / "code.py").write_text("value = 1\n")
             (root / "STATUS.md").write_text("pending\n")
@@ -82,33 +97,73 @@ class ConSanBenchmarkTest(unittest.TestCase):
             git("commit", "-m", "initial")
             initial = benchmark._git_identity(root)
             (root / "STATUS.md").write_text("accepted\n")
-            self.assertEqual(initial["execution_tree_sha256"], benchmark._git_identity(root)["execution_tree_sha256"])
+            self.assertEqual(
+                initial["execution_tree_sha256"],
+                benchmark._git_identity(root)["execution_tree_sha256"],
+            )
             (root / "code.py").write_text("value = 2\n")
             dirty = benchmark._git_identity(root)
-            self.assertNotEqual(initial["execution_tree_sha256"], dirty["execution_tree_sha256"])
+            self.assertNotEqual(
+                initial["execution_tree_sha256"], dirty["execution_tree_sha256"]
+            )
             git("add", ".")
             git("commit", "-m", "record tested code")
             committed = benchmark._git_identity(root)
-            self.assertEqual(dirty["execution_tree_sha256"], committed["execution_tree_sha256"])
+            self.assertEqual(
+                dirty["execution_tree_sha256"], committed["execution_tree_sha256"]
+            )
             self.assertNotEqual(initial["commit"], committed["commit"])
 
-    def test_workload_identity_uses_executables_not_ledger_commit_or_selection(self) -> None:
+    def test_workload_identity_uses_executables_not_ledger_commit_or_selection(
+        self,
+    ) -> None:
         workload = benchmark.WORKLOADS[3]
-        identity = {"source": {"commit": "before", "dirty": False, "execution_tree_sha256": "code"},
-                    "hook_sha256": "hook", "payload_sha256": {"gluon": "payload"}}
+        identity = {
+            "source": {
+                "commit": "before",
+                "dirty": False,
+                "execution_tree_sha256": "code",
+            },
+            "hook_sha256": "hook",
+            "payload_sha256": {"gluon": "payload"},
+        }
         expected = benchmark._workload_identity(identity, workload)
-        changed = {**identity, "source": {"commit": "ledger-commit", "dirty": True, "execution_tree_sha256": "code"},
-                   "payload_sha256": {"gluon": "payload", "tokenspeed": "another-payload"}}
+        changed = {
+            **identity,
+            "source": {
+                "commit": "ledger-commit",
+                "dirty": True,
+                "execution_tree_sha256": "code",
+            },
+            "payload_sha256": {"gluon": "payload", "tokenspeed": "another-payload"},
+        }
         self.assertEqual(expected, benchmark._workload_identity(changed, workload))
-        self.assertNotEqual(expected, benchmark._workload_identity(
-            {**identity, "source": {"execution_tree_sha256": "changed-code"}}, workload))
-        for key, value in (("hook_sha256", "new-hook"),
-                           ("payload_sha256", {"gluon": "new-payload"}),
-                           ("python_environment", {"torch": "changed"})):
-            self.assertNotEqual(expected, benchmark._workload_identity({**identity, key: value}, workload))
-        different_input = benchmark.Workload(workload.id, workload.description,
-            workload.primary_metric, {**workload.config, "elements": 42}, workload.payload)
-        self.assertNotEqual(expected, benchmark._workload_identity(identity, different_input))
+        self.assertNotEqual(
+            expected,
+            benchmark._workload_identity(
+                {**identity, "source": {"execution_tree_sha256": "changed-code"}},
+                workload,
+            ),
+        )
+        for key, value in (
+            ("hook_sha256", "new-hook"),
+            ("payload_sha256", {"gluon": "new-payload"}),
+            ("python_environment", {"torch": "changed"}),
+        ):
+            self.assertNotEqual(
+                expected,
+                benchmark._workload_identity({**identity, key: value}, workload),
+            )
+        different_input = benchmark.Workload(
+            workload.id,
+            workload.description,
+            workload.primary_metric,
+            {**workload.config, "elements": 42},
+            workload.payload,
+        )
+        self.assertNotEqual(
+            expected, benchmark._workload_identity(identity, different_input)
+        )
 
     def test_target_corpus_preserves_rdna_and_preallocates_cdna_rows(self) -> None:
         self.assertEqual(benchmark._target_workloads("gfx1201"), benchmark.WORKLOADS)
@@ -117,32 +172,51 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(len({workload.id for workload in cdna}), 13)
         self.assertEqual(cdna[:5], benchmark.WORKLOADS)
 
-    def test_live_status_records_running_and_failure_without_removing_rows(self) -> None:
+    def test_live_status_records_running_and_failure_without_removing_rows(
+        self,
+    ) -> None:
         workloads = benchmark._target_workloads("gfx950")
         with tempfile.TemporaryDirectory() as directory:
             args = self._runner_args(directory)
             args.status = Path(directory) / "STATUS.md"
             args.status_projection = {
                 "target": "gfx950",
-                "workloads": [{"id": w.id, "description": w.description, "modes": {}, "progress": {}} for w in workloads],
+                "workloads": [
+                    {
+                        "id": w.id,
+                        "description": w.description,
+                        "modes": {},
+                        "progress": {},
+                    }
+                    for w in workloads
+                ],
             }
 
             def fail(*unused_args, **unused_kwargs):
                 text = args.status.read_text()
                 self.assertIn("native-reference-1: running", text)
                 self.assertIn(workloads[-1].description, text)
-                raise subprocess.TimeoutExpired("fixture", 7, output=b"partial evidence")
+                raise subprocess.TimeoutExpired(
+                    "fixture", 7, output=b"partial evidence"
+                )
 
             with mock.patch.object(benchmark.subprocess, "run", side_effect=fail):
                 with self.assertRaises(benchmark.BenchmarkError):
-                    benchmark._run_one(args=args, workload=workloads[0], mode=None,
-                                       audit_sites=False, label="native-reference-1")
+                    benchmark._run_one(
+                        args=args,
+                        workload=workloads[0],
+                        mode=None,
+                        audit_sites=False,
+                        label="native-reference-1",
+                    )
             text = args.status.read_text()
             self.assertIn("native-reference-1: failed", text)
             self.assertIn("| failed | failed |", text)
             self.assertTrue(all(w.description in text for w in workloads))
             progress = json.loads((Path(directory) / "progress.json").read_text())
-            self.assertIn("timed out", progress["projection"]["workloads"][0]["progress"]["error"])
+            self.assertIn(
+                "timed out", progress["projection"]["workloads"][0]["progress"]["error"]
+            )
 
     @staticmethod
     def _runner_args(directory: str, *, resume: bool = False) -> SimpleNamespace:
@@ -347,12 +421,12 @@ class ConSanBenchmarkTest(unittest.TestCase):
         ):
             native = benchmark._clean_environment("gfx1201", None, None, False)
             instrumented = benchmark._clean_environment(
-                "gfx1201", Path("/new-hook"), "sampled", True, Path("/names.txt")
+                "gfx1201", Path("/new-hook"), "default", True, Path("/names.txt")
             )
             manually_selected = benchmark._clean_environment(
                 "gfx1201",
                 Path("/new-hook"),
-                "inline-shadow",
+                "default",
                 True,
                 epoch_analysis="manual",
             )
@@ -365,17 +439,15 @@ class ConSanBenchmarkTest(unittest.TestCase):
             )
         self.assertEqual(native, {"PATH": "/bin", "HIP_TARGET": "gfx1201"})
         self.assertEqual(instrumented["HSA_TOOLS_LIB"], "/new-hook")
-        self.assertEqual(instrumented["RJ_CONSAN_MODE"], "sampled")
+        self.assertEqual(instrumented["RJ_CONSAN_MODE"], "default")
         self.assertEqual(instrumented["RJ_CONSAN_LOG"], "3")
         self.assertEqual(instrumented["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], "/names.txt")
-        self.assertEqual(instrumented["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "0")
-        self.assertEqual(instrumented["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "0")
-        self.assertEqual(instrumented["RJ_CONSAN_MOI_FORBID_OVERFLOW"], "0")
+        self.assertEqual(instrumented["RJ_CONSAN_REQUIRE_RECORDS"], "0")
+        self.assertEqual(instrumented["RJ_CONSAN_FORBID_DIAGNOSTICS"], "0")
+        self.assertEqual(instrumented["RJ_CONSAN_FORBID_OVERFLOW"], "0")
         self.assertNotIn("HSA_MODEL_LIB", instrumented)
-        self.assertEqual(
-            manually_selected["RJ_CONSAN_MOI_EPOCH_ANALYSIS"], "manual"
-        )
-        self.assertNotIn("RJ_CONSAN_MOI_EPOCH_ANALYSIS", supercollider)
+        self.assertEqual(manually_selected["RJ_CONSAN_EPOCH_ANALYSIS"], "manual")
+        self.assertNotIn("RJ_CONSAN_EPOCH_ANALYSIS", supercollider)
 
     def test_payload_parser_requires_one_successful_machine_record(self) -> None:
         text = (
@@ -410,7 +482,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
                         analysis_complete="false",
                         dynamic_complete="false",
                         dynamic_incomplete="1",
-                        record_replay_bank_saturation="1",
+                        window_saturation="1",
                     ),
                 )
             )
@@ -504,7 +576,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(benchmark._runtime_ms(run, 0), 2.0)
         self.assertEqual(benchmark._runtime_ms(run, 1), 3.0)
 
-    def test_status_primary_table_has_all_four_modes(self) -> None:
+    def test_status_primary_table_has_both_modes(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {
             mode: _run(
@@ -544,7 +616,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
             self.assertIn(label, text)
         self.assertIn(
             "| description | 0.005 s | 0.005 s (1×) | 1.5 s | 1 s (200×) | "
-            "1.5 s | 1 s (200×) | 1.5 s | 1 s (200×) | 1.5 s | 1 s (200×) |",
+            "1.5 s | 1 s (200×) |",
             text,
         )
         self.assertNotIn("Absolute latency", text)

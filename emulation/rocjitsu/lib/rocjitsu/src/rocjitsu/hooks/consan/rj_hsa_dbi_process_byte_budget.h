@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace rocjitsu::consan_hook {
+namespace rocjitsu::consan::hook {
 
 /// Tracks bytes charged by a caller-provided lifetime registry.
 ///
@@ -89,4 +89,4 @@ private:
   uint64_t peak_bytes_ = 0;
 };
 
-} // namespace rocjitsu::consan_hook
+} // namespace rocjitsu::consan::hook

@@ -11,21 +11,20 @@
 
 #include <span>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-/// Coordinate analysis, mutation, observation, and engine lowering through
+/// Coordinate analysis, mutation, observation, and mode lowering through
 /// their compiled contracts. This private boundary deliberately exposes only
 /// complete top-level products; component-private staging state remains owned
 /// by the composition implementation.
-[[nodiscard]] ConSanTransformArtifacts
-compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                        const ConSanMoiOperatingPoint &initial_operating_point,
-                        ConSanPerturbationPlanningState *inspected_perturbation,
-                        const ConSanPreappliedMutationLayout &preapplied_mutation,
-                        ConSanLoweringExtent extent, const ConSanLoweringObservation *observation);
+[[nodiscard]] TransformArtifacts
+compose_lowering(std::span<const uint8_t> code_object_bytes, const Options &options,
+                 const OperatingPoint &initial_operating_point,
+                 SuperColliderPerturbationPlanningState *inspected_supercollider_perturbation,
+                 const PreappliedMutationLayout &preapplied_mutation, LoweringExtent extent,
+                 const LoweringObservation *observation);
 
-[[nodiscard]] bool
-compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,
-                           const ConSanLoweringObservation *prepared_observation);
+[[nodiscard]] bool compose_observation(const Options &options, TransformArtifacts &result,
+                                       const LoweringObservation *prepared_observation);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

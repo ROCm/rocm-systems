@@ -57,13 +57,13 @@ unrelated kernels do not. An unresolved indirect edge or incomplete owner set
 is a missing-ownership rejection. An explicit override cannot reinterpret it
 as “owned by every descriptor.”
 
-Persistent MOI state follows the same rule. Shared text must have one
+Persistent ConSan state follows the same rule. Shared text must have one
 owner/epoch/workgroup representation valid for all owners, whether that is a
 VGPR tuple, scalar tuple, or fixed private layout.
 
 ## Persistent and transient state
 
-MOI separates state that survives between probes from state borrowed only for
+ConSan separates state that survives between probes from state borrowed only for
 one probe:
 
 - persistent owner, epoch, workgroup, and dispatch identity;
@@ -71,13 +71,10 @@ one probe:
 - transient scalar publication and indirect-routing state; and
 - saved guest state required by a spill transaction.
 
-Mode policy selects the required shapes. Record/Replay and Sampled normally
-initialize owner/epoch state at entry and derive the owner from captured
-work-item identity. Inline Shadow defaults to resident-wave hardware identity
-and does not initialize an owner/epoch VGPR pair unless the selected operating
-point needs one. An explicit `workitem_id` owner is rejected by Inline Shadow
-because `workitem_id_x` alone is not a unique resident-wave identity for
-arbitrary multidimensional workgroups.
+ConSan normally initializes owner/epoch state at entry and derives the owner
+from captured work-item identity. This default requires x to identify the wave;
+multidimensional workgroups can need an explicit hardware owner and additional
+window banks. See [CAPABILITIES.md](CAPABILITIES.md) for the ownership limits.
 
 When fixed private storage is used, ConSan appends a stable DBI-owned region
 after the maximum guest per-lane extent:
@@ -91,11 +88,10 @@ router leases start after that prefix. Every owner of shared spilled text uses
 the same offsets and grows to the same required minimum. A lease cannot overlap
 persistent state or another simultaneously live lease.
 
-Inline Shadow prefers descriptor-backed VGPR owner/epoch state when safe. Its
-fixed-stack fallback places persistent epoch and entry-captured owner in
-private memory. Record/Replay and Sampled can use their own proved persistent
-scalar or vector layouts at high pressure. These are mode-owned choices over a
-shared layout mechanism, not target-specific copies of the allocator.
+ConSan uses proved persistent scalar or vector layouts at high pressure. A
+fixed-stack private-state fallback is available for work-item-derived ownership;
+hardware ownership retains register-backed state. Shared layout planning keeps
+persistent fields separate from transient spill leases.
 
 ## Dynamic-stack kernels
 
@@ -106,13 +102,10 @@ therefore creates a site-local frame relative to the incoming stack top,
 preserves the incoming frame and condition codes, and restores everything
 before returning to guest code.
 
-The MOI mode registry owns the dynamic-stack policy. All current ConSan target
-profiles provide the normalized backend used by Record/Replay and Sampled;
-both require every owner of shared spilled text to use the dynamic convention.
-Inline Shadow supplies its mode-level dynamic recipe and does not require that
-blanket all-owner rule for every operating point. Actual admission still
-depends on target encodability, owner proof, scalar bootstrap state, and the
-selected probe's complete resource demand.
+All admitted ConSan target profiles provide the normalized dynamic-stack
+backend used by ConSan. Every owner of shared spilled text must use the dynamic
+convention. Admission also depends on target encodability, owner proof, scalar
+bootstrap state, and the probe's complete resource demand.
 
 SuperCollider plans its redundant-access windows separately but uses the same
 underlying dynamic-frame helpers when pressure requires borrowing. Native-LDS
@@ -131,7 +124,7 @@ max(descriptor minimum, launch-selected private bytes + maximum site-local adden
 
 Alternative probes use a maximum, not a sum, because their site-local frames
 cannot be active simultaneously. The typed per-kernel
-`ConSanDispatchRequirements` carries this fact from validated lowering to the
+`DispatchRequirements` carries this fact from validated lowering to the
 loaded symbol; the hook does not infer it from patch names.
 
 ## Scalar state and dispatch identity
@@ -143,9 +136,7 @@ explicit instruction operands.
 
 Dispatch identity is planned as part of each mode's scalar ABI. A target
 profile describes how identity can be captured; a mode decides whether it
-needs identity and which typed fallback is semantically valid. Sampled and
-Inline Shadow can use a frozen report identity at operating points where their
-mode policy permits it. This can remove persistent pair pressure but does not
+needs identity and which typed fallback is semantically valid. ConSan can use a frozen report identity where its policy permits it. This can remove persistent pair pressure but does not
 solve transient scratch or router allocation.
 
 Automatic hardware identity is queue-aware: descriptor planning enables both
@@ -155,14 +146,14 @@ source map. The persistent 64-bit value is presently a fingerprint, not an
 injective encoding of the full pair; see [VALIDATION.md](validation/VALIDATION.md) for the
 residual collision and queue-lifetime limitation.
 
-Sampled's mode-owned literal fallback remains available when the hardware
+ConSan's mode-owned literal fallback remains available when the hardware
 identity pair overlaps guest scalar state. It is not queue-aware, so a clean
 run at that operating point does not establish exact multi-launch separation.
-This limitation belongs to Sampled's evidence semantics and is not repaired or
+This limitation belongs to ConSan's evidence semantics and is not repaired or
 hidden by common placement, target emission, final validation, or runtime trust.
 
 SuperCollider's indirect route reserves disjoint return-PC and condition-code
-state and validates its entry/return encodings. MOI common planning similarly
+state and validates its entry/return encodings. ConSan common planning similarly
 retains a single scalar-routing state that access, synchronization, prologue,
 and spill plans project without recomputing different ABI snapshots.
 
@@ -210,9 +201,9 @@ therefore cannot be mistaken for a clean instrumented execution.
 
 - `code/patch/consan/consan_resource.*` owns common resource alternatives and
   typed outcomes.
-- `consan_moi_probe_planning.cpp`, `consan_moi_placement.cpp`, and
-  `consan_moi_mode_planning.*` join common mechanics with mode policy.
-- `code/patch/consan/modes/<mode>/` owns mode-local scratch, persistent-state,
+- `consan_probe_planning.cpp`, `consan_register_allocation.cpp`, and
+  `consan_lowering_plan.h` join common mechanics with mode policy.
+- `code/patch/consan/consan_probe_lowering.cpp`, `code/patch/consan/supercollider/` owns mode-local scratch, persistent-state,
   scalar-ABI, and fallback choices.
 - `code/patch/consan/targets/` owns target profiles and special native state.
 - `code/patch/spill_manager.*` owns reusable spill layouts and save/restore

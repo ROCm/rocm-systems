@@ -12,7 +12,6 @@ import sys
 
 from consan_validation_support import SITE_KINDS
 
-
 PREFIX = "[rocjitsu-dbi-hooks] ConSan "
 COVERAGE_KIND = "coverage"
 VERDICT_KIND = "analysis verdict"
@@ -32,8 +31,7 @@ class CoverageParseError(ValueError):
 class CoverageRecord:
     reader: int
     load: int | None
-    flavor: str
-    engine: str
+    mode: str
     analysis_complete: bool
     expert_limit: bool
     counts: dict[str, int]
@@ -124,10 +122,6 @@ _VERDICT_COUNT_FIELDS = (
     "applicable_code_objects",
     "incomplete_code_objects",
     "dynamic_incomplete",
-    "replay_unsupported_access",
-    "replay_unsupported_atomics",
-    "replay_unsupported_fences",
-    "replay_metadata_full",
 )
 
 _SITE_DISPOSITIONS = {"not_applicable", "supported", "unsupported"}
@@ -152,7 +146,7 @@ _SITE_REASONS = {
     "flat_provenance_policy_excluded",
     "runtime_kernel_excluded",
     "tracking_disabled",
-    "engine_mutation_only",
+    "mode_mutation_only",
     "invalid_barrier_encoding",
     "unqualified_sync_sequence",
     "ambiguous_sequence_membership",
@@ -227,14 +221,18 @@ def _require(fields: dict[str, str], names: tuple[str, ...], context: str) -> No
 def _boolean(fields: dict[str, str], name: str, context: str) -> bool:
     value = fields[name]
     if value not in ("true", "false"):
-        raise CoverageParseError(f"{context}: {name} must be true or false, got {value!r}")
+        raise CoverageParseError(
+            f"{context}: {name} must be true or false, got {value!r}"
+        )
     return value == "true"
 
 
 def _count(fields: dict[str, str], name: str, context: str) -> int:
     value = fields[name]
     if not _COUNT.fullmatch(value):
-        raise CoverageParseError(f"{context}: {name} is not an unsigned decimal count: {value!r}")
+        raise CoverageParseError(
+            f"{context}: {name} is not an unsigned decimal count: {value!r}"
+        )
     parsed = int(value)
     if parsed > _UINT64_MAX:
         raise CoverageParseError(f"{context}: {name} exceeds uint64: {value!r}")
@@ -326,7 +324,10 @@ def _parse_site(payload: str, line_number: int) -> CoverageSiteRecord:
     }.get(record.outcome)
     if expected is not None:
         disposition, lowering_reason, resource_reason = expected
-        if record.disposition != disposition or record.lowering_reason != lowering_reason:
+        if (
+            record.disposition != disposition
+            or record.lowering_reason != lowering_reason
+        ):
             raise CoverageParseError(
                 f"{context}: inconsistent disposition/lowering reason for {record.outcome}"
             )
@@ -341,11 +342,15 @@ def _parse_site(payload: str, line_number: int) -> CoverageSiteRecord:
             )
     if record.outcome == "unsupported" and record.reason == "none":
         raise CoverageParseError(f"{context}: unsupported requires a semantic reason")
-    if record.outcome in {
-        "patched",
-        "resource_failed",
-        "placement_or_lowering_failed",
-    } and record.reason != "none":
+    if (
+        record.outcome
+        in {
+            "patched",
+            "resource_failed",
+            "placement_or_lowering_failed",
+        }
+        and record.reason != "none"
+    ):
         raise CoverageParseError(f"{context}: {record.outcome} requires reason=none")
     return record
 
@@ -355,23 +360,17 @@ def _parse_coverage(payload: str, line_number: int) -> CoverageRecord:
     fields = _fields(payload, context)
     required = (
         "reader",
-        "flavor",
-        "engine",
+        "mode",
         "analysis_complete",
         "expert_limit",
         *_COVERAGE_COUNT_FIELDS,
     )
     _require(fields, required, context)
-    flavor = _choice(fields, "flavor", {"moi", "supercollider"}, context)
-    engines = {
-        "moi": {"record_replay", "inline_shadow", "sampled"},
-        "supercollider": {"supercollider"},
-    }
+    mode = _choice(fields, "mode", {"default", "supercollider"}, context)
     record = CoverageRecord(
         reader=_count(fields, "reader", context),
         load=_load(fields, context),
-        flavor=flavor,
-        engine=_choice(fields, "engine", engines[flavor], context),
+        mode=mode,
         analysis_complete=_boolean(fields, "analysis_complete", context),
         expert_limit=_boolean(fields, "expert_limit", context),
         counts={name: _count(fields, name, context) for name in _COVERAGE_COUNT_FIELDS},
@@ -401,7 +400,9 @@ def _parse_coverage(payload: str, line_number: int) -> CoverageRecord:
                 f"{context}: {kind} selected != patched + failed: "
                 f"{selected} != {patched} + {resource_failed} + {placement_failed}"
             )
-        complete &= unsupported == resource_failed == placement_failed == expert_omitted == 0
+        complete &= (
+            unsupported == resource_failed == placement_failed == expert_omitted == 0
+        )
     if record.analysis_complete != complete:
         raise CoverageParseError(
             f"{context}: analysis_complete disagrees with independently derived counters"
@@ -411,7 +412,12 @@ def _parse_coverage(payload: str, line_number: int) -> CoverageRecord:
 
 def _parse_verdict(payload: str, line_number: int) -> AnalysisVerdict:
     context = f"analysis verdict line {line_number}"
-    booleans = ("applicable", "analysis_complete", "static_complete", "dynamic_complete")
+    booleans = (
+        "applicable",
+        "analysis_complete",
+        "static_complete",
+        "dynamic_complete",
+    )
     fields = _fields(payload, context)
     _require(fields, (*booleans, *SITE_KINDS, *_VERDICT_COUNT_FIELDS), context)
     pairs = {kind: _pair(fields, kind, context) for kind in SITE_KINDS}
@@ -438,8 +444,12 @@ def _aggregate_verdicts(verdicts: list[AnalysisVerdict]) -> AnalysisVerdict:
         static_complete=bool(applicable)
         and all(verdict.static_complete for verdict in applicable),
         dynamic_complete=all(verdict.dynamic_complete for verdict in verdicts),
-        applicable_code_objects=sum(verdict.applicable_code_objects for verdict in verdicts),
-        incomplete_code_objects=sum(verdict.incomplete_code_objects for verdict in verdicts),
+        applicable_code_objects=sum(
+            verdict.applicable_code_objects for verdict in verdicts
+        ),
+        incomplete_code_objects=sum(
+            verdict.incomplete_code_objects for verdict in verdicts
+        ),
         patched_supported={
             kind: (
                 sum(verdict.patched_supported[kind][0] for verdict in verdicts),
@@ -478,9 +488,13 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
             continue
         record = line[marker + len(PREFIX) :]
         if record.startswith(COVERAGE_KIND + " "):
-            coverage.append(_parse_coverage(record[len(COVERAGE_KIND) + 1 :], line_number))
+            coverage.append(
+                _parse_coverage(record[len(COVERAGE_KIND) + 1 :], line_number)
+            )
         elif record.startswith(VERDICT_KIND + " "):
-            verdicts.append(_parse_verdict(record[len(VERDICT_KIND) + 1 :], line_number))
+            verdicts.append(
+                _parse_verdict(record[len(VERDICT_KIND) + 1 :], line_number)
+            )
 
     if not coverage:
         raise CoverageParseError("missing ConSan coverage record")
@@ -491,10 +505,11 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
         identity for identity in set(identities) if identities.count(identity) > 1
     )
     ambiguous_duplicates = [
-        identity for identity in duplicate_identities
+        identity
+        for identity in duplicate_identities
         if identity[1] is not None
         or any(
-            record.flavor != "supercollider"
+            record.mode != "supercollider"
             for record in coverage
             if (record.reader, record.load) == identity
         )
@@ -502,7 +517,9 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
     if ambiguous_duplicates:
         raise CoverageParseError(
             "ambiguous duplicate coverage load identities: "
-            + ", ".join(f"reader={reader},load={load}" for reader, load in ambiguous_duplicates)
+            + ", ".join(
+                f"reader={reader},load={load}" for reader, load in ambiguous_duplicates
+            )
         )
 
     identity_set = set(identities)
@@ -513,13 +530,16 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
         raise CoverageParseError(
             "coverage_site records reference unknown load identities: "
             + ", ".join(
-                f"reader={reader},load={load}" for reader, load in unknown_site_identities
+                f"reader={reader},load={load}"
+                for reader, load in unknown_site_identities
             )
         )
     for coverage_record in coverage:
         reader_sites = tuple(
-            site for site in sites
-            if (site.reader, site.load) == (coverage_record.reader, coverage_record.load)
+            site
+            for site in sites
+            if (site.reader, site.load)
+            == (coverage_record.reader, coverage_record.load)
         )
         # Compact production logs intentionally retain only the signed aggregate
         # coverage and verdict records. When verbose per-site evidence is present,
@@ -528,9 +548,7 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
         if not reader_sites:
             continue
         for kind in SITE_KINDS:
-            retained = tuple(
-                site for site in reader_sites if site.kind == kind
-            )
+            retained = tuple(site for site in reader_sites if site.kind == kind)
             # The semantic ledger may contain several decisions for one physical
             # instruction. The hook's aggregate collapses them by kind and offset.
             physical_sites: dict[int, list[CoverageSiteRecord]] = {}
@@ -541,9 +559,7 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
                 for site_records in physical_sites.values()
                 # Filter exclusions remain in the verbose inventory but are not
                 # instrumentation sites and therefore do not enter the aggregate.
-                if any(
-                    site.disposition != "not_applicable" for site in site_records
-                )
+                if any(site.disposition != "not_applicable" for site in site_records)
             )
             expected_discovered = coverage_record.counts[f"{kind}_discovered"]
             if len(discovered) != expected_discovered:
@@ -581,14 +597,10 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
                         for site in site_records
                         if site.disposition == "supported"
                     )
-                    and any(
-                        site.outcome == "resource_failed" for site in site_records
-                    )
+                    and any(site.outcome == "resource_failed" for site in site_records)
                     for site_records in supported_sites
                 )
-                placement_or_lowering_failed = (
-                    supported - patched - resource_failed
-                )
+                placement_or_lowering_failed = supported - patched - resource_failed
                 for retained_count, counter in (
                     (patched, "patched"),
                     (resource_failed, "resource_failed"),
@@ -633,7 +645,12 @@ def acceptance_decision(log_text: str) -> AcceptanceDecision:
     evidence = parse_coverage_evidence(log_text)
     verdict = evidence.verdict
     reasons = []
-    for name in ("applicable", "static_complete", "dynamic_complete", "analysis_complete"):
+    for name in (
+        "applicable",
+        "static_complete",
+        "dynamic_complete",
+        "analysis_complete",
+    ):
         if not getattr(verdict, name):
             reasons.append(f"verdict {name}=false")
     if any(record.expert_limit for record in evidence.coverage):
@@ -641,9 +658,7 @@ def acceptance_decision(log_text: str) -> AcceptanceDecision:
     if verdict.applicable_code_objects == 0:
         reasons.append("no applicable code objects")
     if verdict.incomplete_code_objects != 0:
-        reasons.append(
-            f"incomplete code objects: {verdict.incomplete_code_objects}"
-        )
+        reasons.append(f"incomplete code objects: {verdict.incomplete_code_objects}")
     if verdict.counts["dynamic_incomplete"] != 0:
         reasons.append(
             f"dynamic analysis incomplete: {verdict.counts['dynamic_incomplete']}"
@@ -673,9 +688,7 @@ def acceptance_decision(log_text: str) -> AcceptanceDecision:
             ):
                 count = record.counts[f"{kind}_{category}"]
                 if count:
-                    reasons.append(
-                        f"reader {record.reader} {kind} {category}: {count}"
-                    )
+                    reasons.append(f"reader {record.reader} {kind} {category}: {count}")
     return AcceptanceDecision(not reasons, tuple(reasons), evidence)
 
 

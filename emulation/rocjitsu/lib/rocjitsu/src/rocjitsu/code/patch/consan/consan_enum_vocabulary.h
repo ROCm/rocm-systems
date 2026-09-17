@@ -8,25 +8,24 @@
 #include <string_view>
 #include <type_traits>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// One entry in a closed enum's authoritative iterable and diagnostic vocabulary.
-template <typename Enum> struct ConSanEnumVocabularyEntry {
+template <typename Enum> struct EnumVocabularyEntry {
   Enum value;
   std::string_view name;
 };
 
 template <typename Enum>
-[[nodiscard]] constexpr ConSanEnumVocabularyEntry<Enum> consan_enum(Enum value,
-                                                                    std::string_view name) {
+[[nodiscard]] constexpr EnumVocabularyEntry<Enum> enum_entry(Enum value, std::string_view name) {
   return {value, name};
 }
 
 /// A closed enum's values and stable spellings, kept in one declaration.
-template <typename Enum, size_t Size> class ConSanEnumVocabulary {
+template <typename Enum, size_t Size> class EnumVocabulary {
 public:
-  constexpr ConSanEnumVocabulary(std::array<ConSanEnumVocabularyEntry<Enum>, Size> entries,
-                                 std::string_view invalid_name)
+  constexpr EnumVocabulary(std::array<EnumVocabularyEntry<Enum>, Size> entries,
+                           std::string_view invalid_name)
       : invalid_name_(invalid_name) {
     for (size_t i = 0; i < Size; ++i) {
       values_[i] = entries[i].value;
@@ -53,11 +52,11 @@ private:
 };
 
 template <typename Enum, typename... Entries>
-[[nodiscard]] constexpr auto make_consan_enum_vocabulary(std::string_view invalid_name,
-                                                         ConSanEnumVocabularyEntry<Enum> first,
-                                                         Entries... rest) {
-  static_assert((std::is_same_v<ConSanEnumVocabularyEntry<Enum>, Entries> && ...));
-  return ConSanEnumVocabulary(std::array{first, rest...}, invalid_name);
+[[nodiscard]] constexpr auto make_enum_vocabulary(std::string_view invalid_name,
+                                                  EnumVocabularyEntry<Enum> first,
+                                                  Entries... rest) {
+  static_assert((std::is_same_v<EnumVocabularyEntry<Enum>, Entries> && ...));
+  return EnumVocabulary(std::array{first, rest...}, invalid_name);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

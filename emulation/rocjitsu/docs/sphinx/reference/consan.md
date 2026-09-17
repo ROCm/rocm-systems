@@ -7,13 +7,13 @@ myst:
 
 # ConSan GPU LDS sanitizer reference
 
-ConSan instruments AMD LDS (shared-memory) behavior by intercepting HSA code-object loads, inspecting final native machine code, and loading a patched replacement when instrumentation is possible. ConSan does not translate code objects between GPU architectures; it patches the final code object for the architecture that executes the kernel. Current live implementation and validation target RDNA4 / gfx1201.
+ConSan instruments AMD LDS (shared-memory) behavior by intercepting HSA code-object loads, inspecting final native machine code, and loading a patched replacement when instrumentation is possible. ConSan does not translate code objects between GPU architectures; it patches the final code object for the architecture that executes the kernel. Admitted native targets are gfx942, gfx950, gfx1100, gfx1201, and gfx1250; physical qualification depends on the target.
 
 For a hands-on walkthrough, see [Detect an LDS data race with ConSan](/tutorials/consan-detect-lds-race.md). For background on how ConSan fits into the rocJITsu plugin system, see [Execution plugin system](/conceptual/execution-plugins.md).
 
 ## Enabling ConSan
 
-ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation mode with `RJ_CONSAN_MODE`. Loading the hook activates ConSan; when the mode is unset or empty, it defaults to `sampled`.
+ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation mode with `RJ_CONSAN_MODE`. Loading the hook activates ConSan; when the mode is unset or empty, it defaults to `default`.
 
 ``` bash
 env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
@@ -23,20 +23,18 @@ env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjit
 
 ### Instrumentation profiles
 
-ConSan exposes four modes.
+ConSan exposes ConSan and SuperCollider.
 
 | Selection | Behavior |
 | --- | --- |
 | `RJ_CONSAN_MODE=supercollider` | Duplicate or read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. |
-| `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. |
-| default or `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime sampling; retain bounded sampled causal windows and synchronization metadata. |
-| `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. |
+| default or `RJ_CONSAN_MODE=default` | Patch all admitted supported sites; use automatic runtime sampling; retain bounded sampled causal windows and synchronization metadata. |
 
 ### Core environment variables
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MODE` | `sampled` | Select `record-replay`, `sampled`, `inline-shadow`, or `supercollider`. |
+| `RJ_CONSAN_MODE` | `sampled` | Select `sampled` or `supercollider`. |
 | `RJ_CONSAN_LOG` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED` | `0` | Reject unsupported or invalid transformation outcomes instead of loading the original code object. |
 | `RJ_CONSAN_REQUIRE_PATCH` | `0` | Reject an applicable code object when no real access, barrier, atomic, or fence instrumentation patch is emitted. |
@@ -51,14 +49,14 @@ When `RJ_CONSAN_LOG=1` or higher, ConSan emits structured text records to standa
 ``` text
 ConSan patch end ... outcome=... patches=... modified=...
 ConSan summary ... patches=... modified=...
-ConSan coverage ... flavor=... engine=... access=... barrier=... atomic=... fence=...
+ConSan coverage ... mode=... access=... barrier=... atomic=... fence=...
 ConSan coverage_site ... kind=... disposition=... outcome=... reason=... lowering_reason=... resource_reason=...
 ConSan analysis verdict ... static_complete=... dynamic_complete=...
 ```
 
 ### Coverage site records
 
-MOI emits one typed `coverage_site` record per semantically relevant final-code site. Each record retains:
+ConSan emits one typed `coverage_site` record per semantically relevant final-code site. Each record retains:
 
 -   **kind** --- access, barrier, atomic, or fence.
 -   **disposition** --- `not_applicable`, `supported`, or `unsupported`.
@@ -76,27 +74,25 @@ supported = selected + expert_limit_omitted
 selected = patched + resource_failed + placement_or_lowering_failed
 ```
 
-### MOI report diagnostics
+### ConSan report diagnostics
 
-Inline Shadow emits bounded first-N diagnostics recording:
-
--   Instruction offset and access kind.
--   Owner identity and epoch.
--   LDS byte range.
--   Current conflict EXEC mask.
--   Visible overflow count.
-
-The prior writer's lane mask is unavailable in the compact exact-shadow word and is reported as unknown or zero.
+ConSan's host analyzer compares retained causal windows and emits bounded
+conflict examples containing the two sites, owners, epochs, access kinds, and
+LDS byte ranges. Qualifying accesses also retain exact participating lane masks;
+otherwise lane provenance is unavailable. Output limits cap examples without
+stopping conflict counting. Saturation, dropped evidence, and malformed reports
+are separate from a race verdict. A clean sampled report is not proof of race
+freedom.
 
 ## Supported race classes
 
-ConSan detects intra-workgroup LDS data races in the following categories:
+ConSan can detect retained intra-workgroup LDS data races in the following categories:
 
 -   **Read-after-write (RAW)** --- one wave reads an LDS byte while another wave has an outstanding write to the same byte without an intervening barrier.
 -   **Write-after-read (WAR)** --- one wave writes an LDS byte while another wave has an outstanding read of the same byte without an intervening barrier.
 -   **Write-after-write (WAW)** --- two waves write to the same LDS byte without an intervening barrier.
 
-The conflict predicate, in simplified terms, requires:
+For cross-wave conflicts, the predicate requires:
 
 -   Same workgroup.
 -   Overlapping LDS cell or range.
@@ -109,75 +105,54 @@ The conflict predicate, in simplified terms, requires:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `RJ_CONSAN_SC_REPORT_MODE` | `auto` | `auto` owns a non-trapping sticky marker per relevant code object. `trap` is an expert process-disrupting mode. |
-| `RJ_CONSAN_REPORT_BUFFER` | unset | Use a caller-owned device-visible 32-bit marker address instead of automatic allocation. |
-| `RJ_CONSAN_REPORT_MARKER` | `1` | Value written on mismatch. |
-| `RJ_CONSAN_DELAY` | `0` | Delay parameter between the guest access and duplicate or read-back. |
-| `RJ_CONSAN_DELAY_MODE` | `nop` | Select `s_nop`, `s_sleep`, or `s_sleep_var` delay lowering. |
-| `RJ_CONSAN_DELAY_VAR_SSRC` | `106` | Scalar source encoding used by `sleep_var`. |
+| `RJ_CONSAN_SC_REPORT_BUFFER` | unset | Use a caller-owned device-visible 32-bit marker address instead of automatic allocation. |
+| `RJ_CONSAN_SC_REPORT_MARKER` | `1` | Value written on mismatch. |
+| `RJ_CONSAN_SC_DELAY` | `0` | Delay parameter between the guest access and duplicate or read-back. |
+| `RJ_CONSAN_SC_DELAY_MODE` | `nop` | Select `s_nop`, `s_sleep`, or `s_sleep_var` delay lowering. |
+| `RJ_CONSAN_SC_DELAY_VAR_SSRC` | `106` | Scalar source encoding used by `sleep_var`. |
 | `RJ_CONSAN_CHECK_TRAP_MODE` | `all` | Restrict SuperCollider to native DS (`lds`), admitted flat LDS (`flat`), or both (`all`). |
 
-## Sampled presets
+## ConSan presets
 
-Use `RJ_CONSAN_MOI_SAMPLED_PRESET=low|default|high|max` to tune Sampled coverage.
+Use `RJ_CONSAN_PRESET=low|default|high|max` to tune ConSan coverage.
 Unset, empty, and `default` preserve existing behavior. Workgroup/cell strides
 are respectively `1024/1024`, `256/256`, `1/4`, and `1/1`. Use `high` for small
 repros and `max` to remove both sampling filters; bounded retention still applies.
 Explicit selector knobs override preset defaults. See the
-[usage guide](../../consan/USAGE.md#sampled-presets) for precedence and limitations.
+[usage guide](../../consan/USAGE.md#presets) for precedence and limitations.
 
-## MOI report buffer controls
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE` | 16 MiB ceiling | Expert cap for HSA-tool-owned allocation. `0` disables automatic allocation. |
-| `RJ_CONSAN_MOI_REPORT_BUFFER` | unset | Caller-owned device-visible report buffer address. |
-| `RJ_CONSAN_MOI_REPORT_BUFFER_SIZE` | `0` | Size of the caller-owned buffer. |
-| `RJ_CONSAN_MOI_REQUIRE_RECORDS` | `0` | At unload, require visible auto-buffer evidence. |
-| `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS` | `0` | Require at least one diagnostic or conflict. |
-| `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS` | `0` | Require zero diagnostics or conflicts. |
-| `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT` | `0` | Record/Replay-only positive guard. |
-| `RJ_CONSAN_MOI_FORBID_OVERFLOW` | `0` | Fail if evidence was truly dropped. |
-
-Automatic report buffers are limited to 16 MiB per buffer and 256 MiB of live automatic-report memory per process. The allocator requests exact inventory-derived bytes below those ceilings and does not silently shrink site coverage or disable an event kind to fit. Arithmetic overflow, a ceiling violation, or allocation failure is a typed incomplete outcome.
-
-## MOI event and sampling controls
+## ConSan report buffer controls
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MOI_TRACK_BARRIERS` | `1` | Track admitted barrier events. Explicit `0` is an expert override. |
-| `RJ_CONSAN_MOI_TRACK_ATOMICS` | `1` | Track admitted atomic and fence ordering evidence. Explicit `0` is an expert override. |
-| `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS` | `0` | Record/Replay per-lane dynamic append (bounded expert tracing). |
-| `RJ_CONSAN_MOI_SAMPLE_STRIDE` | `1` | Sampled static site stride. |
-| `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `0` | Static residue, smaller than the static stride. |
-| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE` | `16384` | Expert power-of-two runtime stride (Sampled engine). |
-| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET` | `0` | Expert runtime residue. |
-| `RJ_CONSAN_MOI_SAMPLED_CHECK` | `0` | Enable immediate adjacent-range GPU check in addition to host scanning. |
+| `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE` | 128 MiB ceiling | Expert cap for HSA-tool-owned allocation. `0` disables automatic allocation. |
+| `RJ_CONSAN_REPORT_BUFFER` | unset | Caller-owned device-visible report buffer address. |
+| `RJ_CONSAN_REPORT_BUFFER_SIZE` | `0` | Size of the caller-owned buffer. |
+| `RJ_CONSAN_REQUIRE_RECORDS` | `0` | At unload, require visible auto-buffer evidence. |
+| `RJ_CONSAN_REQUIRE_DIAGNOSTICS` | `0` | Require at least one diagnostic or conflict. |
+| `RJ_CONSAN_FORBID_DIAGNOSTICS` | `0` | Require zero diagnostics or conflicts. |
+| `RJ_CONSAN_FORBID_OVERFLOW` | `0` | Fail if evidence was truly dropped. |
+
+Automatic report buffers are limited to 128 MiB per buffer and 4 GiB of live automatic-report memory per process. The allocator requests exact inventory-derived bytes below those ceilings and does not silently shrink site coverage or disable an event kind to fit. Arithmetic overflow, a ceiling violation, or allocation failure is a typed incomplete outcome.
+
+## ConSan event and sampling controls
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RJ_CONSAN_TRACK_BARRIERS` | `1` | Track admitted barrier events. Explicit `0` is an expert override. |
+| `RJ_CONSAN_TRACK_ATOMICS` | `1` | Track admitted atomic and fence ordering evidence. Explicit `0` is an expert override. |
+| `RJ_CONSAN_SAMPLE_STRIDE` | `1` | ConSan static site stride. |
+| `RJ_CONSAN_SAMPLE_OFFSET` | `0` | Static residue, smaller than the static stride. |
+| `RJ_CONSAN_RUNTIME_SAMPLE_STRIDE` | `256` | Expert power-of-two runtime stride (default mode). |
+| `RJ_CONSAN_RUNTIME_SAMPLE_OFFSET` | `0` | Expert runtime residue. |
+| `RJ_CONSAN_DEVICE_CONFLICT_CHECK` | `0` | Enable immediate adjacent-range GPU check in addition to host scanning. |
 
 ## Supported instruction coverage
 
-### Native LDS instructions
-
--   `ds_load_b32`
--   `ds_load_b64`
--   `ds_load_b128`
--   `ds_load_2addr_b32`
--   `ds_load_2addr_b64`
--   `ds_load_2addr_stride64_b32`
--   `ds_load_2addr_stride64_b64`
--   `ds_load_u16_d16`
--   `ds_load_u16_d16_hi`
--   `ds_store_b32`
--   `ds_store_b64`
--   `ds_store_b128`
-
-### Flat LDS instructions (RDNA4 12-byte VFLAT)
-
--   `flat_load_b32`
--   `flat_load_b64`
--   `flat_load_b128`
--   `flat_store_b32`
--   `flat_store_b64`
--   `flat_store_b128`
+Native LDS and admitted group-FLAT loads/stores are covered according to their
+normalized ranges and target instruction forms. Associated barrier and atomic
+metadata supplies ordering. See the [capability matrix](../../consan/CAPABILITIES.md)
+for exact target/form support, including lane provenance and ownership limits.
 
 ## Current limitations
 
@@ -187,23 +162,22 @@ Automatic report buffers are limited to 16 MiB per buffer and 256 MiB of live au
 
 ### Architecture
 
--   **RDNA4 validation** --- Live native validation is gfx1201 only. The intended native-instrumentation target set is `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. Other target ISAs need their own encoders, inventories, exact mutation identities, and GPU evidence.
+Instrumentation preserves the code object's native target. Emulator checks
+exercise admitted ISAs but do not establish physical qualification on those
+GPUs. See the [validation ledgers](../../consan/validation/VALIDATION.md).
 
 ### Coverage
 
 -   ConSan is LDS and shared-memory focused. Selected atomics and fences provide ordering evidence but are not general global-memory race instrumentation.
 -   Ordinary global-memory instrumentation is not in scope.
--   Unsupported flat widths such as b8, b16, and b96 are not instrumented.
 -   Arbitrary flat accesses with unknown provenance are not instrumented.
 -   Atomics are not instrumented as SuperCollider duplicate-access checks.
 -   Async copies are not instrumented.
 
-### Engine-specific
+### Mode-specific
 
 -   **SuperCollider** reports redundant-access instability, not causality. A race-free program can legitimately advance another wave between the original and repeated access.
--   **Record/Replay** is a bounded snapshot unless dynamic append is explicitly enabled, and dynamic append is still bounded by its finite report.
--   **Sampled** is probabilistic and can miss races. Clean sampled output is inconclusive about race freedom.
--   **Inline Shadow** has bounded diagnostics and supported-form semantics. It does not provide unbounded tracing or complete ISA coverage.
+-   **ConSan** is probabilistic and can miss races. Clean sampled output is inconclusive about race freedom.
 
 ## Known edge cases
 

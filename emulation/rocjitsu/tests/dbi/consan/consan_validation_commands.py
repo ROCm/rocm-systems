@@ -37,7 +37,6 @@ from consan_validation_catalog import (
     QWEN_COMPILE_OPTIONS,
     QWEN_OVERHEAD_REPETITIONS,
     RDNA4_MATMUL_DIR_ENV,
-    RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS,
     SAMPLED_STANDARD_RUNTIME_DEFAULTS,
     SCHEMA_VERSION,
     SETTING_CATEGORIES,
@@ -60,8 +59,6 @@ from consan_validation_catalog import (
 )
 from consan_validation_diagnostics import _llvm_readelf
 from consan_validation_support import atomic_write_json, git_identity, sha256_file
-
-
 
 
 def _workspace_from_environment() -> Path:
@@ -314,9 +311,7 @@ def _tensile_python() -> Path:
     )
 
 
-def _tensile_runtime_probe(
-    python: Path, paths: TensileValidationPaths
-) -> dict:
+def _tensile_runtime_probe(python: Path, paths: TensileValidationPaths) -> dict:
     """Proves that the Tensile driver and its native client are loadable."""
     environment = tensile_python_environment(paths)
     try:
@@ -365,7 +360,9 @@ def _tensile_runtime_probe(
     if import_probe.returncode != 0:
         reasons.append(f"Tensile import exited with status {import_probe.returncode}")
     if client_probe.returncode != 0:
-        reasons.append(f"Tensile client ldd exited with status {client_probe.returncode}")
+        reasons.append(
+            f"Tensile client ldd exited with status {client_probe.returncode}"
+        )
     if missing_libraries:
         reasons.append(
             "Tensile client has missing runtime libraries: "
@@ -374,9 +371,10 @@ def _tensile_runtime_probe(
     linkage_detail = "\n".join(missing_libraries)
     if client_probe.returncode != 0 and not linkage_detail:
         linkage_detail = client_detail
-    detail = "\n".join(
-        part for part in (import_detail, linkage_detail) if part
-    ) or "Tensile import and client runtime closure passed"
+    detail = (
+        "\n".join(part for part in (import_detail, linkage_detail) if part)
+        or "Tensile import and client runtime closure passed"
+    )
     return {
         "ok": not reasons,
         "python": str(python),
@@ -470,8 +468,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             "python": _tensile_python(),
             "workload-source": Path(__file__).with_name("consan_tensile_validation.py"),
             "support-source": Path(__file__).with_name("consan_tensile_support.py"),
-            "config": _corpus_root(workspace, workload.corpus)
-            / workload.relative_path,
+            "config": _corpus_root(workspace, workload.corpus) / workload.relative_path,
             "client": paths.client,
             "wrapper": paths.wrapper,
             "rocjitsu": paths.rocjitsu,
@@ -516,8 +513,7 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
         return {
             "vmfb": root / target / "qwen3-600m.vmfb",
             "build-manifest": root / target / "qwen3-600m.consan-build.json",
-            "source": workspace
-            / "iree-test-suites/torch_models/qwen3-600m/model.mlir",
+            "source": workspace / "iree-test-suites/torch_models/qwen3-600m/model.mlir",
             "parameters": data / "real_weights.irpa",
             "input": data / "inference_input.0.bin",
             "expected": data / "inference_output.0.bin",
@@ -652,9 +648,7 @@ def _prepare_qwen(workspace: Path, target: str) -> dict[str, object]:
     if not candidate.is_file() or candidate.stat().st_size == 0:
         raise ValidationError("Qwen compilation produced no VMFB")
     os.replace(candidate, vmfb)
-    document = _qwen_build_manifest(
-        target, source, vmfb, compiler, encoder_output
-    )
+    document = _qwen_build_manifest(target, source, vmfb, compiler, encoder_output)
     atomic_write_json(inputs["build-manifest"], document)
     return document
 
@@ -848,25 +842,15 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
-    if (
-        profile == "record-replay"
-        and workload.record_replay_runtime_sample_stride is not None
-    ):
-        stride = workload.record_replay_runtime_sample_stride
-        if stride <= 0 or stride & (stride - 1):
-            raise ValidationError(
-                f"{workload.id} has a non-power-of-two Record/Replay sampling stride: {stride}"
-            )
-        environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"] = str(stride)
     if workload.kind in {"pytorch", "llama", "rdna4-matmul"}:
         # These clients use a modern HSA runtime which returns after successful
         # rocprofiler registration unless legacy environment tools are
         # explicitly requested. ConSan is currently such a tool.
         environment["HSA_TOOLS_ROCPROFILER_V1_TOOLS"] = "1"
-    if not workload.moi_record_evidence_expected:
-        environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "0"
-    if workload.id == "qwen-prefill" and profile == "sampled":
-        environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"] = "1"
+    if not workload.record_evidence_expected:
+        environment["RJ_CONSAN_REQUIRE_RECORDS"] = "0"
+    if workload.id == "qwen-prefill" and profile == "default":
+        environment["RJ_CONSAN_REQUIRE_RECORDS"] = "1"
     return environment
 
 
@@ -920,13 +904,13 @@ def _setting_metadata(name: str) -> dict:
     elif name in {
         "RJ_CONSAN_MODE",
         "RJ_CONSAN_POLICY",
-        "RJ_CONSAN_MOI_TRACK_BARRIERS",
-        "RJ_CONSAN_MOI_TRACK_ATOMICS",
+        "RJ_CONSAN_TRACK_BARRIERS",
+        "RJ_CONSAN_TRACK_ATOMICS",
     }:
         category = "instrumentation-selection"
     elif name in ORDINARY_FORBIDDEN_ENVIRONMENT or name in {
-        "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
-        "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+        "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
+        "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT",
         "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
@@ -944,11 +928,11 @@ def _setting_metadata(name: str) -> dict:
         "usability_exception": category == "workload-tuning",
     }
     if name in {
-        "RJ_CONSAN_MOI_TRACK_BARRIERS",
-        "RJ_CONSAN_MOI_TRACK_ATOMICS",
+        "RJ_CONSAN_TRACK_BARRIERS",
+        "RJ_CONSAN_TRACK_ATOMICS",
     }:
         result["usability_note"] = (
-            "Ordinary MOI enables this event family by default; an explicit "
+            "Ordinary ConSan enables this event family by default; an explicit "
             "value is an expert compatibility override."
         )
     elif category == "workload-tuning":
@@ -988,12 +972,10 @@ def _audited_unsets(names: list[str]) -> list[dict]:
 def _profile_runtime_defaults(
     profile: str, explicit_environment: dict[str, str] | None = None
 ) -> list[dict]:
-    if PROFILES[profile].flavor != "moi":
+    if PROFILES[profile].mode != "default":
         return []
     defaults = dict(ORDINARY_MOI_RUNTIME_DEFAULTS)
-    if profile == "record-replay":
-        defaults.update(RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS)
-    elif profile == "sampled":
+    if profile == "default":
         defaults.update(SAMPLED_STANDARD_RUNTIME_DEFAULTS)
     explicit_names = set(explicit_environment or {})
     settings = _audited_settings(
@@ -1151,9 +1133,7 @@ def _workload_command(
         if tensile_exact_problem_sizes is not None:
             # Each leaf proves a positive timing canary. The parent result
             # aggregates all shards and enforces the workload-level minimum.
-            minimum_timed_ms = min(
-                minimum_timed_ms, TENSILE_SHARD_TIMING_CANARY_MS
-            )
+            minimum_timed_ms = min(minimum_timed_ms, TENSILE_SHARD_TIMING_CANARY_MS)
         command = [
             str(_tensile_python()),
             str(Path(__file__).with_name("consan_tensile_validation.py")),
@@ -1204,9 +1184,7 @@ def _workload_command(
                 )
             )
         if tensile_exact_problem_sizes is not None:
-            source_blocks = (
-                workload.tensile_expected_source_exact_problem_size_blocks
-            )
+            source_blocks = workload.tensile_expected_source_exact_problem_size_blocks
             source_problem_sizes = tuple(
                 dict.fromkeys(
                     size
@@ -1336,9 +1314,9 @@ def _workload_commands(
                 inner_repetitions_override,
             )
         ]
-    expected_rows = workload.tensile_expected_numeric_rows_per_shard or (
-        None,
-    ) * len(shards)
+    expected_rows = workload.tensile_expected_numeric_rows_per_shard or (None,) * len(
+        shards
+    )
     expected_clients = workload.tensile_expected_client_passes_per_shard or (
         None,
     ) * len(shards)
@@ -1950,8 +1928,6 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
     if workload.kind == "pytorch":
         roots.append(workspace / "pytorch")
     return [git_identity(root) for root in roots]
-
-
 
 
 def _launcher_from_json(value: str | None) -> list[str]:

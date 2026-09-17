@@ -21,7 +21,7 @@
 #include <memory>
 #include <ranges>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 struct TextRange {
   uint64_t begin = 0;
@@ -47,7 +47,7 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
                                                          uint64_t text_size) {
   std::vector<TextRange> ranges;
   ranges.reserve(inventory.containers().size());
-  for (const ConSanProgramContainer &container : inventory.containers()) {
+  for (const ProgramContainer &container : inventory.containers()) {
     if (!container.is_kernel() || container.has_text_range)
       add_covered_text_range(ranges, container.entry_text_offset, container.code_size, text_size);
   }
@@ -89,7 +89,7 @@ local_cave_owner_ranges(const ProgramInventory &inventory, uint64_t text_size) {
     const uint64_t code_end = entry + std::min(code_size, text_size - entry);
     owners.push_back({entry, code_end, text_size});
   };
-  for (const ConSanProgramContainer &container : inventory.containers()) {
+  for (const ProgramContainer &container : inventory.containers()) {
     if (!container.is_kernel() || container.has_text_range)
       add_owner(container.entry_text_offset, container.code_size);
   }
@@ -171,9 +171,9 @@ find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInven
   return caves;
 }
 
-bool is_relocatable_consan_barrier_destination(const Instruction &instruction, uint64_t offset,
-                                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                                               std::string *error_out) {
+bool is_relocatable_barrier_destination(const Instruction &instruction, uint64_t offset,
+                                        std::span<const uint8_t> text, rj_code_arch_t arch,
+                                        std::string *error_out) {
   const int size = instruction.size();
   if (size == 4 || size == 8)
     return is_relocatable_anchor(instruction, offset, text, arch, error_out);
@@ -197,7 +197,7 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   return true;
 }
 
-[[nodiscard]] std::optional<uint16_t> access_dword_count(const ConSanProgramSite &access) {
+[[nodiscard]] std::optional<uint16_t> access_dword_count(const ProgramSite &access) {
   if (!access.lowering.form || access.lowering.form->data_register_count == 0u)
     return std::nullopt;
   return access.lowering.form->data_register_count;
@@ -213,27 +213,27 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
 /// Apply the classifier-owned alignment of the duplicated data tuple.
 /// Architecture and exact instruction spelling have already been normalized
 /// into the form, so scratch planning cannot rediscover a target exception.
-[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ConSanProgramSite &access,
+[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ProgramSite &access,
                                                       uint16_t candidate) {
   return !access.lowering.form || access.lowering.form->data_register_alignment <= 1u ||
          candidate % access.lowering.form->data_register_alignment == 0u;
 }
 
-[[nodiscard]] bool lds_load_clobbers_address(const ConSanProgramSite &access) {
+[[nodiscard]] bool lds_load_clobbers_address(const ProgramSite &access) {
   if (!access.lowering.form)
     return false;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
-  if (form.access_kind != ConSanLdsAccessKind::Read || !form.address_vgpr || !form.destination_vgpr)
+  const AccessLoweringForm &form = *access.lowering.form;
+  if (form.access_kind != LdsAccessKind::Read || !form.address_vgpr || !form.destination_vgpr)
     return false;
   return vgpr_ranges_overlap(*form.address_vgpr, form.address_vgpr_count, *form.destination_vgpr,
                              form.destination_register_count);
 }
 
-[[nodiscard]] bool is_forbidden_scratch_vgpr_run(const ConSanProgramSite &access,
-                                                 uint16_t candidate, uint16_t required_vgprs) {
+[[nodiscard]] bool is_forbidden_scratch_vgpr_run(const ProgramSite &access, uint16_t candidate,
+                                                 uint16_t required_vgprs) {
   if (!access.lowering.form)
     return true;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  const AccessLoweringForm &form = *access.lowering.form;
   if (form.address_vgpr &&
       vgpr_ranges_overlap(candidate, required_vgprs, *form.address_vgpr, form.address_vgpr_count))
     return true;
@@ -256,10 +256,10 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   return false;
 }
 
-[[nodiscard]] uint16_t access_scratch_search_start(const ConSanProgramSite &access) {
+[[nodiscard]] uint16_t access_scratch_search_start(const ProgramSite &access) {
   if (!access.lowering.form)
     return 0u;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
+  const AccessLoweringForm &form = *access.lowering.form;
   std::optional<uint32_t> first_after_operands;
   auto note_range = [&first_after_operands](std::optional<uint16_t> base, uint16_t count) {
     if (!base)
@@ -281,13 +281,13 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   return *first_after_operands <= 255 ? static_cast<uint16_t>(*first_after_operands) : 256;
 }
 
-[[nodiscard]] bool needs_scratch_headroom_at_descriptor_edge(const ConSanProgramSite &access) {
+[[nodiscard]] bool needs_scratch_headroom_at_descriptor_edge(const ProgramSite &access) {
   return access.lowering.form && access.lowering.form->destination_allocation_headroom != 0u;
 }
 
 [[nodiscard]] std::optional<uint16_t>
-required_descriptor_vgpr_allocation_for_scratch(const ConSanProgramSite &access,
-                                                uint16_t scratch_vgpr, uint16_t required_vgprs) {
+required_descriptor_vgpr_allocation_for_scratch(const ProgramSite &access, uint16_t scratch_vgpr,
+                                                uint16_t required_vgprs) {
   uint32_t required_count = static_cast<uint32_t>(scratch_vgpr) + required_vgprs;
   if (needs_scratch_headroom_at_descriptor_edge(access))
     ++required_count;
@@ -297,7 +297,7 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanProgramSite &access,
 }
 
 [[nodiscard]] std::optional<uint16_t>
-find_liveness_scratch_vgpr(const ConSanProgramSite &access, const Instruction *inst,
+find_liveness_scratch_vgpr(const ProgramSite &access, const Instruction *inst,
                            const LivenessAnalysis *liveness,
                            std::optional<uint16_t> min_auto_scratch_vgpr,
                            std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
@@ -329,7 +329,7 @@ find_liveness_scratch_vgpr(const ConSanProgramSite &access, const Instruction *i
 }
 
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> requested_scratch_vgpr,
+choose_scratch_vgpr(const ProgramSite &access, std::optional<uint16_t> requested_scratch_vgpr,
                     const Instruction *inst, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
@@ -348,7 +348,7 @@ choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> req
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanProgramSite &access,
+[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ProgramSite &access,
                                                                 uint16_t allocation_count,
                                                                 uint16_t required_vgprs,
                                                                 uint16_t alignment) {
@@ -426,8 +426,7 @@ void update_max_sgpr_ref(const RegisterSet &set, std::optional<uint16_t> &max_sg
 }
 
 [[nodiscard]] KernelMaxRegisterRefs
-max_register_refs_in_kernel(const ConSanProgramContainer &kernel,
-                            std::span<BasicBlock *const> blocks) {
+max_register_refs_in_kernel(const ProgramContainer &kernel, std::span<BasicBlock *const> blocks) {
   KernelMaxRegisterRefs max_refs;
   if (!kernel.has_text_range || kernel.code_size == 0)
     return max_refs;
@@ -459,7 +458,7 @@ max_register_refs_in_kernel(const ConSanProgramContainer &kernel,
   return true;
 }
 
-void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) {
+void append_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) {
   const size_t old_size = bytes.size();
   const size_t added_size = words.size() * sizeof(uint32_t);
   bytes.resize(old_size + added_size);
@@ -482,26 +481,26 @@ void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint
 [[nodiscard]] bool has_only_rocclr_runtime_kernels(const ProgramInventory &program_inventory) {
   if (program_inventory.kernels().empty())
     return false;
-  for (const ConSanProgramContainer &kernel : program_inventory.kernels()) {
+  for (const ProgramContainer &kernel : program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       return false;
   }
   return true;
 }
 
-std::optional<ConSanCommittedLowering> make_consan_instrumented_patch_lowering(
-    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
-    const ConSanCommittedPatchGeometry &patch, ConSanRuntimeStaticMapping runtime_mapping) {
+std::optional<CommittedLowering> make_instrumented_patch_lowering(
+    const ObservationPlan &plan, std::span<const ProbeIntentId> intent_ids,
+    const CommittedPatchGeometry &patch, RuntimeStaticMapping runtime_mapping) {
   std::vector<PhysicalSiteId> original_sites;
-  for (ConSanProbeIntentId id : intent_ids) {
-    const ConSanProbeIntent *intent = plan.intent(id);
+  for (ProbeIntentId id : intent_ids) {
+    const ProbeIntent *intent = plan.intent(id);
     if (intent == nullptr)
       return std::nullopt;
     if (std::ranges::find(original_sites, intent->physical_site) == original_sites.end())
       original_sites.push_back(intent->physical_site);
   }
 
-  std::vector<ConSanCommittedLoweringLocation> locations;
+  std::vector<CommittedLoweringLocation> locations;
   locations.reserve(original_sites.size() * (patch.trampoline_size == 0u ? 1u : 2u));
   for (const PhysicalSiteId &site : original_sites) {
     if (patch.original_size != 0u) {
@@ -522,9 +521,8 @@ std::optional<ConSanCommittedLowering> make_consan_instrumented_patch_lowering(
       });
     }
   }
-  return make_consan_committed_lowering(plan, intent_ids, locations,
-                                        ConSanLoweringOutcomeKind::Instrumented, {},
-                                        std::move(runtime_mapping));
+  return make_committed_lowering(plan, intent_ids, locations, LoweringOutcomeKind::Instrumented, {},
+                                 std::move(runtime_mapping));
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

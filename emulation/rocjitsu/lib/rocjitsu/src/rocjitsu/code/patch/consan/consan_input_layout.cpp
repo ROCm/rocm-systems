@@ -17,7 +17,7 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <span>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 [[nodiscard]] bool range_contains(uint64_t outer_offset, uint64_t outer_size, uint64_t inner_offset,
@@ -48,8 +48,8 @@ namespace {
 
 } // namespace
 
-std::vector<std::string> validate_consan_input_layout(const AmdGpuCodeObject &code_object,
-                                                      bool allow_descriptor_entry_redirect) {
+std::vector<std::string> validate_input_layout(const AmdGpuCodeObject &code_object,
+                                               bool allow_descriptor_entry_redirect) {
   std::vector<std::string> errors;
   if (!code_object.kernel_metadata_is_trustworthy()) {
     const size_t malformed_notes = code_object.malformed_kernel_metadata_note_count();
@@ -123,14 +123,14 @@ std::vector<std::string> validate_consan_input_layout(const AmdGpuCodeObject &co
     }
     if (function.entry_text_offset > function.text_size ||
         function.code_size > function.text_size - function.entry_text_offset) {
-      errors.emplace_back("ConSan function '" + function.name +
-                          "' symbol exceeds its text section (entry=" +
-                          std::to_string(function.entry_text_offset) + " code=" +
-                          std::to_string(function.code_size) + " section=" +
-                          std::to_string(function.text_size) + ")");
+      errors.emplace_back(
+          "ConSan function '" + function.name +
+          "' symbol exceeds its text section (entry=" + std::to_string(function.entry_text_offset) +
+          " code=" + std::to_string(function.code_size) +
+          " section=" + std::to_string(function.text_size) + ")");
     }
   }
   return errors;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -16,13 +16,15 @@
 #include <vector>
 
 namespace rocjitsu {
-
 class AmdGpuCodeObject;
 class BasicBlock;
 class Instruction;
 class LivenessAnalysis;
+} // namespace rocjitsu
 
-struct BarrierSite {
+namespace rocjitsu::consan {
+
+struct BarrierLocation {
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t size = 0;
@@ -44,28 +46,27 @@ struct KernelMaxRegisterRefs {
 [[nodiscard]] std::vector<LocalNopCave>
 find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ProgramInventory &inventory,
                          rj_code_arch_t arch);
-[[nodiscard]] bool is_relocatable_consan_barrier_destination(const Instruction &instruction,
-                                                             uint64_t offset,
-                                                             std::span<const uint8_t> text,
-                                                             rj_code_arch_t arch,
-                                                             std::string *error_out);
+[[nodiscard]] bool is_relocatable_barrier_destination(const Instruction &instruction,
+                                                      uint64_t offset,
+                                                      std::span<const uint8_t> text,
+                                                      rj_code_arch_t arch, std::string *error_out);
 
-[[nodiscard]] std::optional<uint16_t> access_dword_count(const ConSanProgramSite &access);
+[[nodiscard]] std::optional<uint16_t> access_dword_count(const ProgramSite &access);
 [[nodiscard]] bool vgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_count, uint16_t rhs_base,
                                        uint16_t rhs_count);
-[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ConSanProgramSite &access,
+[[nodiscard]] bool access_scratch_tuple_base_is_valid(const ProgramSite &access,
                                                       uint16_t candidate);
-[[nodiscard]] uint16_t access_scratch_search_start(const ConSanProgramSite &access);
-[[nodiscard]] bool lds_load_clobbers_address(const ConSanProgramSite &access);
+[[nodiscard]] uint16_t access_scratch_search_start(const ProgramSite &access);
+[[nodiscard]] bool lds_load_clobbers_address(const ProgramSite &access);
 [[nodiscard]] std::optional<uint16_t>
-required_descriptor_vgpr_allocation_for_scratch(const ConSanProgramSite &access,
-                                                uint16_t scratch_vgpr, uint16_t required_vgprs);
+required_descriptor_vgpr_allocation_for_scratch(const ProgramSite &access, uint16_t scratch_vgpr,
+                                                uint16_t required_vgprs);
 [[nodiscard]] std::optional<uint16_t>
-choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> requested_scratch_vgpr,
+choose_scratch_vgpr(const ProgramSite &access, std::optional<uint16_t> requested_scratch_vgpr,
                     const Instruction *instruction, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs);
-[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanProgramSite &access,
+[[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ProgramSite &access,
                                                                 uint16_t allocation_count,
                                                                 uint16_t required_vgprs,
                                                                 uint16_t alignment = 1u);
@@ -77,12 +78,11 @@ find_instruction_at_text_offset(std::span<BasicBlock *const> blocks, uint64_t te
 [[nodiscard]] bool text_offset_is_inside_s_clause(std::span<BasicBlock *const> blocks,
                                                   uint64_t text_offset);
 [[nodiscard]] KernelMaxRegisterRefs
-max_register_refs_in_kernel(const ConSanProgramContainer &kernel,
-                            std::span<BasicBlock *const> blocks);
+max_register_refs_in_kernel(const ProgramContainer &kernel, std::span<BasicBlock *const> blocks);
 
 [[nodiscard]] bool read_words_at(std::span<const uint8_t> bytes, uint64_t offset,
                                  std::span<uint32_t> words);
-void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words);
+void append_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words);
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,
                                          rj_code_arch_t arch, uint32_t max_word_count = UINT32_MAX);
 [[nodiscard]] bool has_only_rocclr_runtime_kernels(const ProgramInventory &program_inventory);
@@ -91,8 +91,8 @@ void append_consan_patch_words(std::vector<uint8_t> &bytes, std::span<const uint
 /// identity and the narrow geometry shared by every committed patch product.
 /// Anchor and trampoline locations are emitted once for every unique original
 /// physical site covered by the intent set; no patch kind is interpreted.
-[[nodiscard]] std::optional<ConSanCommittedLowering> make_consan_instrumented_patch_lowering(
-    const ConSanObservationPlan &plan, std::span<const ConSanProbeIntentId> intent_ids,
-    const ConSanCommittedPatchGeometry &patch, ConSanRuntimeStaticMapping runtime_mapping = {});
+[[nodiscard]] std::optional<CommittedLowering> make_instrumented_patch_lowering(
+    const ObservationPlan &plan, std::span<const ProbeIntentId> intent_ids,
+    const CommittedPatchGeometry &patch, RuntimeStaticMapping runtime_mapping = {});
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

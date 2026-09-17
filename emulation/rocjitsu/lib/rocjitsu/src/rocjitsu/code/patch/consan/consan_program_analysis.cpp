@@ -40,45 +40,44 @@
 #include <unordered_set>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 #include "rocjitsu/code/patch/consan/consan_analysis.inc"
 
 void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_bytes,
                                         Decoder &decoder, rj_code_arch_t arch,
                                         ProgramInventoryBuilder &inventory,
-                                        ConSanProgramAnalysisResult &result) {
-  std::span<ConSanProgramContainer> kernels = inventory.kernels();
-  for (const ConSanPreappliedCodeRange &range :
+                                        ProgramAnalysisResult &result) {
+  std::span<ProgramContainer> kernels = inventory.kernels();
+  for (const PreappliedCodeRange &range :
        result.program_inventory.preapplied_mutation().code_ranges) {
-    const auto kernel = std::ranges::find_if(kernels, [&](const ConSanProgramContainer &item) {
-      return item.name == range.kernel_name;
-    });
+    const auto kernel = std::ranges::find_if(
+        kernels, [&](const ProgramContainer &item) { return item.name == range.kernel_name; });
     if (kernel == kernels.end()) {
       result.errors.emplace_back("ConSan could not recover the owner of a preapplied fault cave");
       continue;
     }
-    const ConSanProgramContainerId owner = kernel->id;
+    const ProgramContainerId owner = kernel->id;
     inventory.reattribute_semantic_range(range.text_offset, range.size, *kernel);
 
-    ConSanProgramContainer decoded_range;
-    decoded_range.kind = ConSanProgramContainerKind::Kernel;
+    ProgramContainer decoded_range;
+    decoded_range.kind = ProgramContainerKind::Kernel;
     decoded_range.name = kernel->name;
     decoded_range.entry_text_offset = range.text_offset;
     decoded_range.text_file_offset = kernel->text_file_offset;
     decoded_range.code_size = range.size;
     decoded_range.has_text_range = true;
-    ConSanProgramSiteArena decoded_sites;
+    ProgramSiteArena decoded_sites;
     decode_container_stats(code_object_bytes, decoder, arch, decoded_range, decoded_sites,
                            result.warnings);
     inventory.reattribute_access_range(range.text_offset, range.size, *kernel,
                                        decoded_sites.access_sites(), code_object_bytes);
-    for (ConSanProgramSite &site : decoded_sites.sites()) {
-      if (std::holds_alternative<ConSanAccessSite>(site.payload))
+    for (ProgramSite &site : decoded_sites.sites()) {
+      if (std::holds_alternative<AccessSite>(site.payload))
         continue;
       site.container = owner;
       const bool duplicate =
-          std::ranges::any_of(inventory.program_sites(), [&](const ConSanProgramSite &existing) {
+          std::ranges::any_of(inventory.program_sites(), [&](const ProgramSite &existing) {
             return existing.container == owner &&
                    existing.payload.index() == site.payload.index() &&
                    existing.text_offset() == site.text_offset();
@@ -91,11 +90,12 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
 
 } // namespace
 
-bool analyze_consan_program_inventory(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-    std::unique_ptr<AmdGpuCodeObject> &code_object, ProgramInventoryBuilder &inventory_builder,
-    ConSanPerturbationPlanningState &perturbation, ConSanProgramAnalysisResult &result) {
+bool analyze_program_inventory(std::span<const uint8_t> code_object_bytes, const Request &request,
+                               const DebugOverrides &debug, const MutationRequest &mutation,
+                               std::unique_ptr<AmdGpuCodeObject> &code_object,
+                               ProgramInventoryBuilder &inventory_builder,
+                               SuperColliderPerturbationPlanningState &supercollider_perturbation,
+                               ProgramAnalysisResult &result) {
   // Even a parse failure publishes the identity-bearing empty view. Pipeline
   // stage accounting distinguishes a completed, invalid inventory attempt
   // from an analysis stage that was never entered.
@@ -114,16 +114,16 @@ bool analyze_consan_program_inventory(
   const size_t malformed_kernel_metadata_note_count =
       code_object->malformed_kernel_metadata_note_count();
   const rj_code_target_id_t target = code_object->target_id();
-  const ConSanTargetProfile *target_profile = consan_target_profile(target);
+  const TargetProfile *target_profile = consan::target_profile(target);
   const rj_code_arch_t arch = target_profile ? target_profile->arch : ROCJITSU_CODE_ARCH_INVALID;
   inventory_builder.set_code_object_facts(kernel_metadata_trustworthy,
                                           malformed_kernel_metadata_note_count, arch, target);
-  result.errors = validate_consan_input_layout(*code_object);
+  result.errors = validate_input_layout(*code_object);
   if (!result.errors.empty())
     return false;
 
   for (const Section *section : code_object->text_sections()) {
-    ConSanTextSection info;
+    TextSection info;
     info.name = section->name();
     info.file_offset = section->sectionOffset();
     info.virtual_address = section->vaddr();
@@ -132,7 +132,7 @@ bool analyze_consan_program_inventory(
   }
 
   for (const AmdGpuKernelInfo &kernel : code_object->kernels()) {
-    ConSanProgramContainer info;
+    ProgramContainer info;
     info.name = kernel.name;
     info.descriptor_file_offset = kernel.descriptor_file_offset;
     if (const auto descriptor =
@@ -162,7 +162,7 @@ bool analyze_consan_program_inventory(
   for (const AmdGpuFunctionInfo &function : code_object->functions()) {
     if (kernel_names.contains(function.name))
       continue;
-    ConSanProgramContainer info;
+    ProgramContainer info;
     info.name = function.name;
     info.entry_text_offset = function.entry_text_offset;
     info.text_file_offset = function.text_file_offset;
@@ -187,7 +187,7 @@ bool analyze_consan_program_inventory(
     publish_access_inventory();
     result.warnings.emplace_back("ConSan does not support target '" +
                                  std::string(rj_code_target_name(target)) + "'");
-    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.outcome = TransformOutcome::Unsupported;
     return false;
   }
   inventory_builder.set_semantic_arch_required(true);
@@ -197,25 +197,25 @@ bool analyze_consan_program_inventory(
     publish_access_inventory();
     result.warnings.emplace_back("ConSan could not create decoder for arch '" +
                                  std::string(rj_code_arch_name(arch)) + "'");
-    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.outcome = TransformOutcome::Unsupported;
     return false;
   }
 
-  ConSanProgramSiteArena kernel_sites;
-  for (ConSanProgramContainer &kernel : inventory_builder.kernels()) {
+  ProgramSiteArena kernel_sites;
+  for (ProgramContainer &kernel : inventory_builder.kernels()) {
     // The production allowlist names dispatchable kernel entries and can
     // therefore bound semantic decoding. The test-only filter may instead
     // name a shared function; it is a candidate filter, not a proof that its
     // owning kernel bodies may be omitted from the program inventory.
     if (!request.kernel_name_allowlist.empty() &&
-        !consan_container_selected(request, debug, kernel.name)) {
+        !container_selected(request, debug, kernel.name)) {
       continue;
     }
     decode_container_stats(code_object_bytes, *decoder, arch, kernel, kernel_sites,
                            result.warnings);
   }
-  ConSanProgramSiteArena function_sites;
-  for (ConSanProgramContainer &function : inventory_builder.functions())
+  ProgramSiteArena function_sites;
+  for (ProgramContainer &function : inventory_builder.functions())
     decode_container_stats(code_object_bytes, *decoder, arch, function, function_sites,
                            result.warnings);
   const auto publish_decoded_sites = [&] {
@@ -223,18 +223,16 @@ bool analyze_consan_program_inventory(
     inventory_builder.add_sites(std::move(function_sites));
   };
   const bool has_decode_error =
-      std::ranges::any_of(result.program_inventory.kernels(),
-                          [](const ConSanProgramContainer &kernel) {
-                            return kernel.stats.decode_error_count != 0u;
-                          }) ||
-      std::ranges::any_of(result.program_inventory.functions(),
-                          [](const ConSanProgramContainer &function) {
-                            return function.stats.decode_error_count != 0u;
-                          });
+      std::ranges::any_of(
+          result.program_inventory.kernels(),
+          [](const ProgramContainer &kernel) { return kernel.stats.decode_error_count != 0u; }) ||
+      std::ranges::any_of(
+          result.program_inventory.functions(),
+          [](const ProgramContainer &function) { return function.stats.decode_error_count != 0u; });
   if (has_decode_error) {
     publish_decoded_sites();
     publish_access_inventory();
-    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.outcome = TransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan stopped before CFG analysis because an instruction could not be decoded");
     return false;
@@ -244,11 +242,11 @@ bool analyze_consan_program_inventory(
       inventory_builder.functions(), function_sites, result.warnings);
   publish_decoded_sites();
   publish_access_inventory();
-  if (request.flavor == ConSanFlavor::SuperCollider && !mutation.fault_dry_run &&
-      mutation.sc_perturb_kind == ConSanPerturbationKind::None) {
-    for (ConSanProgramContainer &kernel : inventory_builder.kernels()) {
+  if (request.mode == Mode::SuperCollider && !mutation.fault_dry_run &&
+      mutation.supercollider_perturb_kind == SuperColliderPerturbationKind::None) {
+    for (ProgramContainer &kernel : inventory_builder.kernels()) {
       if (!request.kernel_name_allowlist.empty() &&
-          !consan_container_selected(request, debug, kernel.name)) {
+          !container_selected(request, debug, kernel.name)) {
         continue;
       }
       preflight_kernel(kernel, result.warnings);
@@ -260,9 +258,9 @@ bool analyze_consan_program_inventory(
   prune_unreachable_inferred_ranges(*code_object, *decoder, arch,
                                     result.program_inventory.preapplied_mutation().code_ranges,
                                     inventory_builder);
-  return analyze_consan_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, request,
-                                           debug, mutation, inventory_builder, perturbation,
-                                           result);
+  return analyze_semantic_inventory(code_object_bytes, *code_object, *decoder, arch, request, debug,
+                                    mutation, inventory_builder, supercollider_perturbation,
+                                    result);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -10,40 +10,39 @@
 #include <string>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Publish one synthetic lowering transaction for a policy-oriented test.
 ///
 /// Production has no outcome-only mutation API: every finalized intent is
-/// owned by a complete `ConSanCommittedLowering`. Tests that do not exercise
+/// owned by a complete `CommittedLowering`. Tests that do not exercise
 /// machine-code geometry use this adapter to create the smallest valid
 /// transaction, including the runtime attribution required by access intents.
 [[nodiscard]] inline bool publish_test_lowering_outcome(
-    ConSanCoverageLedger &ledger, ConSanProbeIntentId id, ConSanLoweringOutcomeKind outcome,
-    std::string detail = {},
-    std::optional<ConSanRegisterPlanReason> resource_rejection_reason = std::nullopt) {
-  const ConSanObservationPlan &plan = ledger.observation_plan();
-  const ConSanProbeIntent *intent = plan.intent(id);
+    CoverageLedger &ledger, ProbeIntentId id, LoweringOutcomeKind outcome, std::string detail = {},
+    std::optional<RegisterPlanReason> resource_rejection_reason = std::nullopt) {
+  const ObservationPlan &plan = ledger.observation_plan();
+  const ProbeIntent *intent = plan.intent(id);
   if (intent == nullptr)
     return false;
-  if (outcome == ConSanLoweringOutcomeKind::Pending) {
-    const ConSanIntentCoverageEntry *entry = ledger.intent_entry(id);
-    return entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Pending &&
-           detail.empty() && !resource_rejection_reason;
+  if (outcome == LoweringOutcomeKind::Pending) {
+    const IntentCoverageEntry *entry = ledger.intent_entry(id);
+    return entry != nullptr && entry->lowering == LoweringOutcomeKind::Pending && detail.empty() &&
+           !resource_rejection_reason;
   }
 
-  std::array<ConSanCommittedLoweringLocation, 1> locations = {
-      ConSanCommittedLoweringLocation{
+  std::array<CommittedLoweringLocation, 1> locations = {
+      CommittedLoweringLocation{
           .original_site = intent->physical_site,
           .emitted_text_offset = intent->physical_site.original_text_offset,
           .emitted_size = 4u,
           .relocated_guest_text_offset = std::nullopt,
       },
   };
-  const bool instrumented = outcome == ConSanLoweringOutcomeKind::Instrumented;
-  ConSanRuntimeStaticMapping runtime_mapping;
+  const bool instrumented = outcome == LoweringOutcomeKind::Instrumented;
+  RuntimeStaticMapping runtime_mapping;
   if (instrumented) {
-    ConSanStaticAccessAttribution attribution{
+    StaticAccessAttribution attribution{
         .intent_ids = {id},
         .original_site = intent->physical_site,
         .original_semantic_sites = intent->covered_semantic_sites,
@@ -51,12 +50,8 @@ namespace rocjitsu {
         .owner_provenance_complete = false,
     };
     switch (intent->kind) {
-    case ConSanProbeIntentKind::AccessRecord:
-      runtime_mapping =
-          ConSanRuntimeStaticMapping::record_replay({.access = std::move(attribution)});
-      break;
-    case ConSanProbeIntentKind::SampledAccess:
-      runtime_mapping = ConSanRuntimeStaticMapping::sampled({
+    case ProbeIntentKind::Access:
+      runtime_mapping = RuntimeStaticMapping::from_access({
           .access = std::move(attribution),
           .first_slot = 0u,
           .range_count = 1u,
@@ -66,23 +61,19 @@ namespace rocjitsu {
           .scratch_vgpr = std::nullopt,
       });
       break;
-    case ConSanProbeIntentKind::ExactShadowAccess:
-      // InlineShadow diagnostics carry their complete attribution directly;
-      // unlike the other modes they need no host-side static mapping.
-      break;
     default:
       break;
     }
   }
 
   const std::array intent_ids = {id};
-  const std::span<const ConSanCommittedLoweringLocation> committed_locations =
-      instrumented ? std::span<const ConSanCommittedLoweringLocation>(locations)
-                   : std::span<const ConSanCommittedLoweringLocation>{};
-  auto commit = make_consan_committed_lowering(plan, intent_ids, committed_locations, outcome,
-                                               std::move(detail), std::move(runtime_mapping),
-                                               resource_rejection_reason);
+  const std::span<const CommittedLoweringLocation> committed_locations =
+      instrumented ? std::span<const CommittedLoweringLocation>(locations)
+                   : std::span<const CommittedLoweringLocation>{};
+  auto commit =
+      make_committed_lowering(plan, intent_ids, committed_locations, outcome, std::move(detail),
+                              std::move(runtime_mapping), resource_rejection_reason);
   return commit && ledger.publish_lowering_commit(std::move(*commit));
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -3,12 +3,12 @@
 
 #include "consan_test_support.h"
 
-#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
-#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_identity_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 struct PhysicalAliasTestCandidate {
@@ -23,7 +23,7 @@ struct PhysicalAliasTestCandidate {
 
 auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
                                             size_t expected_candidate_count = 0) {
-  return consan_detail::make_physical_site_alias_canonicalizer<PhysicalAliasTestCandidate>(
+  return detail::make_physical_site_alias_canonicalizer<PhysicalAliasTestCandidate>(
       errors, "ConSan incremental test site",
       [](const PhysicalAliasTestCandidate &candidate) { return candidate.file_offset; },
       [](const PhysicalAliasTestCandidate &candidate) -> std::string_view {
@@ -44,23 +44,21 @@ TEST(ConSan, SelectableVgprBankStateDispatchesOnlyToOwningTarget) {
   std::array<uint8_t, sizeof(kSetVgprBankModeFour)> bytes{};
   std::memcpy(bytes.data(), &kSetVgprBankModeFour, sizeof(kSetVgprBankModeFour));
 
-  EXPECT_EQ(
-      consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 0u, 0u, bytes.size()),
-      4u);
+  EXPECT_EQ(selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 0u, 0u, bytes.size()),
+            4u);
+  EXPECT_FALSE(selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u, 0u, bytes.size()));
+  EXPECT_FALSE(selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 1u, bytes.size(),
+                                            bytes.size()));
+  EXPECT_TRUE(
+      selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_CDNA5, bytes, 0u, bytes.size()));
   EXPECT_FALSE(
-      consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u, 0u, bytes.size()));
-  EXPECT_FALSE(consan_selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes, 1u,
-                                                   bytes.size(), bytes.size()));
-  EXPECT_TRUE(consan_selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_CDNA5, bytes, 0u,
-                                                              bytes.size()));
-  EXPECT_FALSE(consan_selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u,
-                                                               bytes.size()));
-  EXPECT_FALSE(consan_selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_CDNA5, bytes,
-                                                               bytes.size(), 0u));
+      selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_RDNA4, bytes, 0u, bytes.size()));
+  EXPECT_FALSE(
+      selectable_vgpr_bank_transition_in_range(ROCJITSU_CODE_ARCH_CDNA5, bytes, bytes.size(), 0u));
 }
 
 TEST(ConSan, SplitTwoAddressLdsRecipeDispatchesOnlyToOwningTarget) {
-  const ConSanSplitTwoAddressLdsRequest request{
+  const SplitTwoAddressLdsRequest request{
       .first_byte_offset = 4u,
       .second_byte_offset = 8u,
       .element_dwords = 1u,
@@ -71,296 +69,239 @@ TEST(ConSan, SplitTwoAddressLdsRecipeDispatchesOnlyToOwningTarget) {
       .load = true,
   };
 
-  const auto gfx1250 = consan_build_split_two_address_lds_pair(request, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto gfx1250 = build_split_two_address_lds_pair(request, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(gfx1250);
   EXPECT_EQ(gfx1250->size(), 4u);
-  EXPECT_FALSE(consan_build_split_two_address_lds_pair(request, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_split_two_address_lds_pair(request, ROCJITSU_CODE_ARCH_RDNA4));
 
-  ConSanSplitTwoAddressLdsRequest large_offset = request;
+  SplitTwoAddressLdsRequest large_offset = request;
   large_offset.second_byte_offset = UINT16_MAX + 1u;
-  EXPECT_FALSE(consan_build_split_two_address_lds_pair(large_offset, ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(build_split_two_address_lds_pair(large_offset, ROCJITSU_CODE_ARCH_CDNA5));
   large_offset.adjusted_address_vgpr = 5u;
-  const auto adjusted =
-      consan_build_split_two_address_lds_pair(large_offset, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto adjusted = build_split_two_address_lds_pair(large_offset, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(adjusted);
   EXPECT_EQ(adjusted->size(), 6u);
 }
 
-TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
-  ConSanMoiTransientSgprAssignment owner_state;
+TEST(ConSan, OperatingPointEqualityCoversOwnerAssignments) {
+  TransientSgprAssignment owner_state;
   owner_state.descriptor_file_offset = 64u;
   owner_state.exec_save_sgpr = 8u;
   owner_state.dispatch_id_sgpr = 10u;
-  ConSanMoiPersistentVgprAssignment persistent_state;
+  PersistentVgprAssignment persistent_state;
   persistent_state.descriptor_file_offset = 64u;
-  persistent_state.owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{16u, 17u};
-  ConSanMoiOperatingPoint allocation;
-  allocation.automatic_moi_private_epoch = true;
-  allocation.moi_exec_save_sgpr = 2u;
-  allocation.moi_dispatch_identity.set_sgpr(4u);
+  persistent_state.owner_epoch_vgprs = OwnerEpochRegisters{16u, 17u};
+  OperatingPoint allocation;
+  allocation.automatic_private_epoch = true;
+  allocation.exec_save_sgpr = 2u;
+  allocation.dispatch_sgpr.set(4u);
   allocation.owner_persistent_vgprs = {persistent_state};
   allocation.owner_transient_sgprs = {owner_state};
-  allocation.moi_dispatch_identity.set_vgpr(12u);
 
-  EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
-  EXPECT_EQ(allocation, ConSanMoiOperatingPoint(allocation));
+  EXPECT_EQ(OperatingPoint{}, OperatingPoint{});
+  EXPECT_EQ(allocation, OperatingPoint(allocation));
 
-  ConSanMoiOperatingPoint changed = allocation;
-  changed.automatic_moi_private_epoch = false;
+  OperatingPoint changed = allocation;
+  changed.automatic_private_epoch = false;
   EXPECT_NE(changed, allocation);
   changed = allocation;
   changed.owner_persistent_vgprs.clear();
   EXPECT_NE(changed, allocation);
   changed = allocation;
-  changed.moi_exec_save_sgpr.reset();
+  changed.exec_save_sgpr.reset();
   EXPECT_NE(changed, allocation);
   changed = allocation;
   changed.owner_transient_sgprs.clear();
   EXPECT_NE(changed, allocation);
   changed = allocation;
-  changed.moi_dispatch_identity.reset_vgpr();
+  changed.dispatch_sgpr.reset();
   EXPECT_NE(changed, allocation);
 }
 
-TEST(ConSan, MoiPersistentVgprStateHasOneProjectionForEveryAllocationScope) {
-  ConSanMoiOperatingPoint point;
-  point.set_moi_owner_epoch_vgprs(3u, 4u);
-  point.moi_workgroup_key_vgpr = 5u;
-  point.moi_dispatch_identity.set_vgpr(6u);
-  point.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u);
+TEST(ConSan, PersistentVgprStateHasOneProjectionForEveryAllocationScope) {
+  OperatingPoint point;
+  point.set_owner_epoch_vgprs(3u, 4u);
+  point.exact_workgroup_vgprs = PersistentWorkgroupRegisters(8u, 9u, 10u, 11u);
 
-  ConSanMoiPersistentVgprAssignment assignment{
+  PersistentVgprAssignment assignment{
       .descriptor_file_offset = 64u,
       .owner_epoch_vgprs = {3u, 4u},
-      .workgroup_key_vgpr = 5u,
-      .exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u),
-      .dispatch_id_vgpr = 6u,
+      .exact_workgroup_vgprs = PersistentWorkgroupRegisters(8u, 9u, 10u, 11u),
   };
-  const auto point_state = consan_moi_impl::moi_persistent_vgpr_state_view(point);
-  EXPECT_EQ(point_state, consan_moi_impl::moi_persistent_vgpr_state_view(assignment));
+  const auto point_state = detail::persistent_vgpr_state_view(point);
+  EXPECT_EQ(point_state, detail::persistent_vgpr_state_view(assignment));
 
   std::vector<std::pair<uint16_t, uint16_t>> ranges;
   point_state.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
     if (base)
       ranges.emplace_back(*base, width);
   });
-  EXPECT_EQ(ranges,
-            (std::vector<std::pair<uint16_t, uint16_t>>{
-                {3u, 1u}, {4u, 1u}, {5u, 1u}, {6u, 2u}, {8u, 1u}, {9u, 1u}, {10u, 1u}, {11u, 1u}}));
-  ranges.clear();
-  point_state.for_each_range(
-      [&](std::optional<uint16_t> base, uint16_t width) {
-        if (base)
-          ranges.emplace_back(*base, width);
-      },
-      false);
   EXPECT_EQ(ranges, (std::vector<std::pair<uint16_t, uint16_t>>{
-                        {3u, 1u}, {4u, 1u}, {5u, 1u}, {8u, 1u}, {9u, 1u}, {10u, 1u}, {11u, 1u}}));
+                        {3u, 1u}, {4u, 1u}, {8u, 1u}, {9u, 1u}, {10u, 1u}, {11u, 1u}}));
 }
 
-TEST(ConSan, MoiPersistentSgprStateOwnsItsCompleteDescriptorExtent) {
-  ConSanMoiOperatingPoint point;
-  point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
-  point.moi_persistent_sgprs.workgroup_key = 22u;
-  point.moi_persistent_sgprs.exact_workgroup =
-      ConSanMoiPersistentWorkgroupRegisters(23u, 24u, 25u, 26u);
-  consan_moi_impl::ResolvedMoiScratchPlan resources;
+TEST(ConSan, PersistentSgprStateOwnsItsCompleteDescriptorExtent) {
+  OperatingPoint point;
+  point.persistent_sgprs.set_owner_epoch(20u, 21u);
+  point.persistent_sgprs.exact_workgroup = PersistentWorkgroupRegisters(23u, 24u, 25u, 26u);
+  detail::ResolvedScratchPlan resources;
   resources.owner_descriptor_file_offsets = {64u};
-  consan_moi_impl::MoiDescriptorSgprRequirements requirements;
+  detail::DescriptorSgprRequirements requirements;
 
-  consan_moi_impl::note_moi_sgpr_requirements(
-      requirements, resources, ConSanRequest{}, BoundRuntimeResources{}, point,
-      consan_moi_impl::MoiObjectModeSemantics{}, ROCJITSU_CODE_ARCH_RDNA4);
+  detail::note_sgpr_requirements(requirements, resources, Request{}, BoundRuntimeResources{}, point,
+                                 ROCJITSU_CODE_ARCH_RDNA4);
 
   ASSERT_EQ(requirements.size(), 1u);
   EXPECT_EQ(requirements.at(64u), 27u);
 }
 
-TEST(ConSan, MoiExactEntryWorkgroupCaptureHasOneExplicitStorageDomain) {
-  ConSanMoiOperatingPoint point;
-  const ConSanMoiPersistentWorkgroupPrivateOffsets private_offsets{32u, 36u, 40u};
+TEST(ConSan, ExactEntryWorkgroupCaptureHasOneExplicitStorageDomain) {
+  OperatingPoint point;
+  const PersistentWorkgroupPrivateOffsets private_offsets{32u, 36u, 40u};
 
-  EXPECT_FALSE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point));
-  EXPECT_TRUE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, &private_offsets));
-  EXPECT_TRUE(
-      consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point, &private_offsets));
+  EXPECT_FALSE(detail::has_exact_entry_workgroup_capture(point));
+  EXPECT_TRUE(detail::has_exact_entry_workgroup_capture(point, &private_offsets));
+  EXPECT_TRUE(detail::exact_entry_workgroup_capture_is_unambiguous(point, &private_offsets));
 
-  point.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u};
-  EXPECT_TRUE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point));
-  EXPECT_FALSE(
-      consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point, &private_offsets));
+  point.exact_workgroup_vgprs = PersistentWorkgroupRegisters{26u, 27u, 28u};
+  EXPECT_TRUE(detail::has_exact_entry_workgroup_capture(point));
+  EXPECT_FALSE(detail::exact_entry_workgroup_capture_is_unambiguous(point, &private_offsets));
 }
 
-TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
-  ConSanMoiOperatingPoint state{
-      .moi_initialize_owner_epoch = true,
-      .moi_exec_save_sgpr = 2u,
-      .moi_owner_sgpr = {},
-      .moi_owner_epoch_vgprs = ConSanMoiOwnerEpochRegisters{4u, 5u},
-      .automatic_moi_persistent_vgprs = true,
-      .automatic_moi_private_epoch = true,
-      .automatic_moi_partial_exec_save_sgprs = true,
-      .automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline,
-      .moi_exec_save_sgprs_persistent = true,
-      .moi_dynamic_stack_spill = true,
-      .moi_scalar_spill_setup =
-          ConSanMoiScalarSpillSetup{
-              .temporaries = ConSanMoiScalarSpillTemporaries{2u, 7u},
-              .visible_evidence_sgpr = 8u,
+TEST(ConSan, OperatingPointEqualityCoversEveryCodeObjectWideSelection) {
+  OperatingPoint state{
+      .initialize_owner_epoch = true,
+      .exec_save_sgpr = 2u,
+      .owner_sgpr = {},
+      .owner_epoch_vgprs = OwnerEpochRegisters{4u, 5u},
+      .automatic_persistent_vgprs = true,
+      .automatic_private_epoch = true,
+      .automatic_partial_exec_save_sgprs = true,
+      .automatic_scalar_spill_layout = ScalarSpillLayout::Compact,
+      .exec_save_sgprs_persistent = true,
+      .dynamic_stack_spill = true,
+      .scalar_spill_setup =
+          ScalarSpillSetup{
+              .temporaries = ScalarSpillTemporaries{2u, 7u},
           },
-      .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
-      .moi_dispatch_identity = {},
-      .moi_persistent_sgprs = {},
-      .moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u},
-      .moi_workgroup_key_vgpr = 29u,
+      .branch_only_spill = BranchOnlyScalarSpill{10u},
+      .dispatch_sgpr = {},
+      .persistent_sgprs = {},
+      .exact_workgroup_vgprs = PersistentWorkgroupRegisters{26u, 27u, 28u},
       .owner_persistent_vgprs = {},
       .owner_transient_sgprs = {},
   };
-  state.moi_owner_sgpr.set(3u, true);
-  state.moi_dispatch_identity.set_sgpr(16u, true);
-  state.moi_dispatch_identity.set_private_fallback(true);
-  state.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
-  state.moi_persistent_sgprs.workgroup_key = 22u;
-  state.moi_persistent_sgprs.exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u};
+  state.owner_sgpr.set(3u, true);
+  state.dispatch_sgpr.set(16u, true);
+  state.persistent_sgprs.set_owner_epoch(20u, 21u);
+  state.persistent_sgprs.exact_workgroup = PersistentWorkgroupRegisters{23u, 24u, 25u};
 
-  EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
-  EXPECT_EQ(state, ConSanMoiOperatingPoint(state));
+  EXPECT_EQ(OperatingPoint{}, OperatingPoint{});
+  EXPECT_EQ(state, OperatingPoint(state));
 
   auto expect_field_participates = [&](auto mutate) {
-    ConSanMoiOperatingPoint changed = state;
+    OperatingPoint changed = state;
     mutate(changed);
     EXPECT_NE(changed, state);
   };
-  expect_field_participates([](auto &value) { value.moi_initialize_owner_epoch = false; });
-  expect_field_participates([](auto &value) { value.moi_exec_save_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_owner_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_owner_epoch_vgprs.reset_owner_epoch(); });
+  expect_field_participates([](auto &value) { value.initialize_owner_epoch = false; });
+  expect_field_participates([](auto &value) { value.exec_save_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.owner_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.owner_epoch_vgprs.reset_owner_epoch(); });
+  expect_field_participates([](auto &value) { value.owner_epoch_vgprs.set_owner_epoch(5u, 5u); });
+  expect_field_participates([](auto &value) { value.owner_epoch_vgprs.set_owner_epoch(4u, 6u); });
+  expect_field_participates([](auto &value) { value.automatic_persistent_vgprs = false; });
+  expect_field_participates([](auto &value) { value.automatic_private_epoch = false; });
+  expect_field_participates([](auto &value) { value.automatic_partial_exec_save_sgprs = false; });
   expect_field_participates(
-      [](auto &value) { value.moi_owner_epoch_vgprs.set_owner_epoch(5u, 5u); });
-  expect_field_participates(
-      [](auto &value) { value.moi_owner_epoch_vgprs.set_owner_epoch(4u, 6u); });
-  expect_field_participates([](auto &value) { value.automatic_moi_persistent_vgprs = false; });
-  expect_field_participates([](auto &value) { value.automatic_moi_private_epoch = false; });
-  expect_field_participates(
-      [](auto &value) { value.automatic_moi_partial_exec_save_sgprs = false; });
-  expect_field_participates([](auto &value) {
-    value.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  });
-  expect_field_participates([](auto &value) { value.moi_exec_save_sgprs_persistent = false; });
-  expect_field_participates([](auto &value) { value.moi_dynamic_stack_spill = false; });
-  expect_field_participates([](auto &value) { value.moi_owner_sgpr.set(3u, false); });
-  expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_sgpr(16u, false); });
-  expect_field_participates(
-      [](auto &value) { value.moi_dispatch_identity.set_private_fallback(false); });
-  expect_field_participates([](auto &value) { value.moi_scalar_spill_setup.reset(); });
-  expect_field_participates(
-      [](auto &value) { value.moi_scalar_spill_setup->visible_evidence_sgpr.reset(); });
-  expect_field_participates([](auto &value) { value.moi_branch_only_spill.reset(); });
-  expect_field_participates([](auto &value) { value.moi_dispatch_identity.reset_sgpr(); });
-  expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_vgpr(18u); });
-  expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });
-  expect_field_participates([](auto &value) { value.moi_exact_workgroup_vgprs = {}; });
-  expect_field_participates([](auto &value) { value.moi_workgroup_key_vgpr.reset(); });
+      [](auto &value) { value.automatic_scalar_spill_layout = ScalarSpillLayout::None; });
+  expect_field_participates([](auto &value) { value.exec_save_sgprs_persistent = false; });
+  expect_field_participates([](auto &value) { value.dynamic_stack_spill = false; });
+  expect_field_participates([](auto &value) { value.owner_sgpr.set(3u, false); });
+  expect_field_participates([](auto &value) { value.dispatch_sgpr.set(16u, false); });
+  expect_field_participates([](auto &value) { value.scalar_spill_setup.reset(); });
+  expect_field_participates([](auto &value) { value.branch_only_spill.reset(); });
+  expect_field_participates([](auto &value) { value.dispatch_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.persistent_sgprs = {}; });
+  expect_field_participates([](auto &value) { value.exact_workgroup_vgprs = {}; });
 }
 
-TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
-  ConSanOptions input;
-  input.requested_moi_exec_save_sgpr = 2u;
-  input.requested_moi_owner_sgpr = 3u;
-  input.requested_moi_owner_vgpr = 4u;
-  input.requested_moi_epoch_vgpr = 5u;
+TEST(ConSan, OptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
+  Options input;
+  input.requested_exec_save_sgpr = 2u;
+  input.requested_owner_sgpr = 3u;
+  input.requested_owner_vgpr = 4u;
+  input.requested_epoch_vgpr = 5u;
 
-  MoiOptions attempt(input);
-  EXPECT_EQ(attempt.moi_exec_save_sgpr, 2u);
-  EXPECT_EQ(attempt.moi_owner_sgpr.base(), 3u);
-  EXPECT_EQ(attempt.moi_owner_epoch_vgprs.owner(), 4u);
-  EXPECT_EQ(attempt.moi_owner_epoch_vgprs.epoch(), 5u);
+  TestOptions attempt(input);
+  EXPECT_EQ(attempt.exec_save_sgpr, 2u);
+  EXPECT_EQ(attempt.owner_sgpr.base(), 3u);
+  EXPECT_EQ(attempt.owner_epoch_vgprs.owner(), 4u);
+  EXPECT_EQ(attempt.owner_epoch_vgprs.epoch(), 5u);
 
-  attempt.moi_exec_save_sgpr = 12u;
-  attempt.moi_owner_sgpr.reset();
-  attempt.set_moi_owner_epoch_vgprs(14u, 15u);
+  attempt.exec_save_sgpr = 12u;
+  attempt.owner_sgpr.reset();
+  attempt.set_owner_epoch_vgprs(14u, 15u);
 
-  EXPECT_EQ(input.requested_moi_exec_save_sgpr, 2u);
-  EXPECT_EQ(input.requested_moi_owner_sgpr, 3u);
-  EXPECT_EQ(input.requested_moi_owner_vgpr, 4u);
-  EXPECT_EQ(input.requested_moi_epoch_vgpr, 5u);
-  const MoiOptions fresh_attempt(input);
-  EXPECT_EQ(fresh_attempt.moi_exec_save_sgpr, 2u);
-  EXPECT_EQ(fresh_attempt.moi_owner_sgpr.base(), 3u);
-  EXPECT_EQ(fresh_attempt.moi_owner_epoch_vgprs.owner(), 4u);
-  EXPECT_EQ(fresh_attempt.moi_owner_epoch_vgprs.epoch(), 5u);
+  EXPECT_EQ(input.requested_exec_save_sgpr, 2u);
+  EXPECT_EQ(input.requested_owner_sgpr, 3u);
+  EXPECT_EQ(input.requested_owner_vgpr, 4u);
+  EXPECT_EQ(input.requested_epoch_vgpr, 5u);
+  const TestOptions fresh_attempt(input);
+  EXPECT_EQ(fresh_attempt.exec_save_sgpr, 2u);
+  EXPECT_EQ(fresh_attempt.owner_sgpr.base(), 3u);
+  EXPECT_EQ(fresh_attempt.owner_epoch_vgprs.owner(), 4u);
+  EXPECT_EQ(fresh_attempt.owner_epoch_vgprs.epoch(), 5u);
 }
 
-TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
-  ConSanRequest request;
-  request.moi_engine = ConSanMoiEngine::RecordReplay;
-  request.moi_track_atomics = true;
-  request.moi_dynamic_access_records = false;
-  request.moi_runtime_sample_stride = 7u;
+TEST(ConSan, ExecSaveRequirementProjectsOnlyScalarAbiFacts) {
+  Request request;
+  request.track_atomics = true;
+  request.runtime_sample_stride = 7u;
   BoundRuntimeResources resources;
-  resources.moi_report_buffer_address = 0x1000u;
-  resources.moi_report_layout = ConSanMoiReportBufferLayout{};
-  resources.moi_report_layout->record_replay_dispatch_token_capacity = 4u;
-  ConSanMoiOperatingPoint point;
-  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_dynamic_stack_spill = true;
-  const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
-      .inline_access_present = true,
-      .automatic_banked_record_capture = true,
-      .report_layout = {},
-      .reserved_atomic_patch_count = 0u,
-  };
-
-  EXPECT_EQ(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
-            (MoiExecSaveRequirement{
-                .engine = ConSanMoiEngine::RecordReplay,
+  resources.report_buffer_address = 0x1000u;
+  resources.report_layout = ReportBufferLayout{};
+  OperatingPoint point;
+  point.automatic_scalar_spill_layout = ScalarSpillLayout::Compact;
+  point.dynamic_stack_spill = true;
+  EXPECT_EQ(resolve_exec_save_requirement(request, resources, point),
+            (ExecSaveRequirement{
                 .has_report_buffer = true,
                 .track_atomics = true,
-                .automatic_banked_record_capture = true,
-                .runtime_sample_stride = 7u,
+
                 .scalar_spill = true,
                 .dynamic_stack_spill = true,
-                .inline_access_present = true,
+
             }));
-
-  request.moi_dynamic_access_records = true;
-  EXPECT_TRUE(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics)
-                  .automatic_banked_record_capture);
 }
 
-TEST(ConSan, MoiOwnerEpochInitializationIsAnOperatingPointDecision) {
-  ConSanOptions options;
-  EXPECT_FALSE(initial_consan_moi_operating_point(options, options).moi_initialize_owner_epoch);
+TEST(ConSan, OwnerEpochInitializationIsAnOperatingPointDecision) {
+  Options options;
+  EXPECT_FALSE(initial_operating_point(options, options).initialize_owner_epoch);
 
-  options.moi_init_owner_epoch = true;
-  ConSanMoiOperatingPoint point = initial_consan_moi_operating_point(options, options);
-  EXPECT_TRUE(point.moi_initialize_owner_epoch);
+  options.init_owner_epoch = true;
+  OperatingPoint point = initial_operating_point(options, options);
+  EXPECT_TRUE(point.initialize_owner_epoch);
 
-  options.moi_init_owner_epoch = false;
-  EXPECT_TRUE(point.moi_initialize_owner_epoch);
-  point.moi_initialize_owner_epoch = false;
-  EXPECT_FALSE(point.moi_initialize_owner_epoch);
-  EXPECT_FALSE(options.moi_init_owner_epoch);
+  options.init_owner_epoch = false;
+  EXPECT_TRUE(point.initialize_owner_epoch);
+  point.initialize_owner_epoch = false;
+  EXPECT_FALSE(point.initialize_owner_epoch);
+  EXPECT_FALSE(options.init_owner_epoch);
 }
 
-TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
+TEST(ConSan, ResourceProblemBindsImmutableSolverInputs) {
   const std::array<uint8_t, 4> image{1u, 2u, 3u, 4u};
-  ConSanRequest request;
-  request.moi_engine = ConSanMoiEngine::Sampled;
+  Request request;
   BoundRuntimeResources resources;
-  resources.moi_report_buffer_address = 0x2000u;
+  resources.report_buffer_address = 0x2000u;
   ProgramInventory inventory;
-  ConSanObservationPlan observation_plan;
-  const ConSanProgramSite site;
-  const std::array<ConSanMoiCandidate, 1> candidates{ConSanMoiCandidate(site)};
-  const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
-      .inline_access_present = true,
-      .report_layout = {},
-      .reserved_atomic_patch_count = 0u,
-  };
-
-  const MoiResourceProblem problem(image, ROCJITSU_CODE_ARCH_CDNA5, request, resources, inventory,
-                                   observation_plan, candidates, mode_semantics);
+  ObservationPlan observation_plan;
+  const ProgramSite site;
+  const std::array<Candidate, 1> candidates{Candidate(site)};
+  const detail::ObjectModeSemantics mode_semantics{};
+  const ResourceProblem problem(image, ROCJITSU_CODE_ARCH_CDNA5, request, resources, inventory,
+                                observation_plan, candidates, mode_semantics);
   EXPECT_EQ(problem.image().data(), image.data());
   EXPECT_EQ(problem.image().size(), image.size());
   EXPECT_EQ(problem.arch(), ROCJITSU_CODE_ARCH_CDNA5);
@@ -373,64 +314,40 @@ TEST(ConSan, MoiResourceProblemBindsImmutableSolverInputs) {
   EXPECT_EQ(problem.mode_semantics(), mode_semantics);
 }
 
-TEST(ConSan, MoiExecSaveRequirementOwnsTargetAndFallbackSizing) {
-  MoiExecSaveRequirement requirement{.engine = ConSanMoiEngine::RecordReplay};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 0u);
+TEST(ConSan, ExecSaveRequirementOwnsTargetAndFallbackSizing) {
+  ExecSaveRequirement requirement{};
+  EXPECT_EQ(exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 0u);
 
-  requirement.has_report_buffer = true;
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 5u);
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 6u);
-  requirement.runtime_sample_stride = 2u;
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
-  requirement.automatic_banked_record_capture = true;
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 14u);
-  requirement = {.engine = ConSanMoiEngine::RecordReplay,
-                 .has_report_buffer = true,
-                 .dynamic_stack_spill = true};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 6u);
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 7u);
-  requirement = {
-      .engine = ConSanMoiEngine::RecordReplay, .has_report_buffer = true, .scalar_spill = true};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 4u);
-
-  requirement = {.engine = ConSanMoiEngine::Sampled, .has_report_buffer = true};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 8u);
+  requirement = {.has_report_buffer = true};
+  EXPECT_EQ(exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 7u);
+  EXPECT_EQ(exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 8u);
   requirement.track_atomics = true;
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
-  requirement = {
-      .engine = ConSanMoiEngine::Sampled, .has_report_buffer = true, .dynamic_stack_spill = true};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 9u);
+  EXPECT_EQ(exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA3), 8u);
+  requirement = {.has_report_buffer = true, .dynamic_stack_spill = true};
+  EXPECT_EQ(exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 9u);
 
-  requirement = {.engine = ConSanMoiEngine::InlineShadow, .has_report_buffer = true};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4), 22u);
-  requirement.inline_access_present = true;
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4),
-            kConSanMoiInlineExecSaveSgprCount);
-  requirement = {.engine = ConSanMoiEngine::InlineShadow,
-                 .has_report_buffer = true,
-                 .dynamic_stack_spill = true};
-  EXPECT_EQ(moi_exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_RDNA4), 25u);
+  requirement = {.has_report_buffer = true, .scalar_spill = true};
+  EXPECT_EQ(exec_save_sgpr_count(requirement, ROCJITSU_CODE_ARCH_CDNA5), 8u);
 }
 
-TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedSites) {
-  ConSanMoiResourcePlanningResult planning;
-  planning.attempted_operating_point.moi_exec_save_sgpr = 12u;
-  ConSanCandidateResourcePlan unsupported;
-  unsupported.source = ConSanRegisterAllocationSource::Unsupported;
-  unsupported.reason = ConSanRegisterPlanReason::NoLegalWindow;
+TEST(ConSan, ResourcePlanningResultSeparatesStructuralFailureFromUnsupportedSites) {
+  ResourcePlanningResult planning;
+  planning.attempted_operating_point.exec_save_sgpr = 12u;
+  CandidateResourcePlan unsupported;
+  unsupported.source = RegisterAllocationSource::Unsupported;
+  unsupported.reason = RegisterPlanReason::NoLegalWindow;
   planning.plans.push_back(unsupported);
-  planning.selected_fallback = ConSanMoiFallbackKind::DynamicStackScalarSpill;
+  planning.selected_fallback = FallbackKind::DynamicStackScalarSpill;
   planning.diagnostics.emplace_back("accepted attempt diagnostic");
   EXPECT_TRUE(planning.success());
 
-  ConSanMoiResourcePlanningResult accepted_attempt = planning;
+  ResourcePlanningResult accepted_attempt = planning;
   const auto accepted = std::move(accepted_attempt).accept();
   ASSERT_TRUE(accepted);
-  EXPECT_EQ(accepted->operating_point.moi_exec_save_sgpr, 12u);
+  EXPECT_EQ(accepted->operating_point.exec_save_sgpr, 12u);
   ASSERT_EQ(accepted->site_plans.size(), 1u);
-  EXPECT_EQ(accepted->site_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(accepted->selected_fallback, ConSanMoiFallbackKind::DynamicStackScalarSpill);
+  EXPECT_EQ(accepted->site_plans.front().source, RegisterAllocationSource::Unsupported);
+  EXPECT_EQ(accepted->selected_fallback, FallbackKind::DynamicStackScalarSpill);
   ASSERT_EQ(accepted->diagnostics.size(), 1u);
   EXPECT_EQ(accepted->diagnostics.front(), "accepted attempt diagnostic");
 
@@ -440,39 +357,39 @@ TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedS
   EXPECT_FALSE(std::move(planning).accept());
 }
 
-TEST(ConSan, MoiOperatingPointAttemptPublishesOnlyTypedAcceptedFallbacks) {
-  ConSanMoiOperatingPointAttempt rejected;
-  rejected.attempted_operating_point.moi_exec_save_sgpr = 42u;
+TEST(ConSan, OperatingPointAttemptPublishesOnlyTypedAcceptedFallbacks) {
+  OperatingPointAttempt rejected;
+  rejected.attempted_operating_point.exec_save_sgpr = 42u;
   EXPECT_FALSE(rejected.accepted());
   EXPECT_FALSE(rejected.accepted_fallback.has_value());
 
-  ConSanMoiOperatingPointAttempt accepted;
-  accepted.attempted_operating_point.moi_exec_save_sgpr = 44u;
-  accepted.accepted_fallback = ConSanMoiFallbackKind::SampledLiteralDispatchId;
+  OperatingPointAttempt accepted;
+  accepted.attempted_operating_point.exec_save_sgpr = 44u;
+  accepted.accepted_fallback = FallbackKind::LiteralDispatchId;
   accepted.diagnostics.emplace_back("rendered only after acceptance");
   ASSERT_TRUE(accepted.accepted());
-  EXPECT_EQ(*accepted.accepted_fallback, ConSanMoiFallbackKind::SampledLiteralDispatchId);
-  EXPECT_EQ(accepted.attempted_operating_point.moi_exec_save_sgpr, 44u);
+  EXPECT_EQ(*accepted.accepted_fallback, FallbackKind::LiteralDispatchId);
+  EXPECT_EQ(accepted.attempted_operating_point.exec_save_sgpr, 44u);
   EXPECT_EQ(accepted.diagnostics.size(), 1u);
 }
 
-TEST(ConSan, MoiOperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionTogether) {
-  ConSanMoiOperatingPointUpdate accepted;
-  accepted.attempted_operating_point.moi_dispatch_identity.set_sgpr(40u);
+TEST(ConSan, OperatingPointUpdateCarriesPointDiagnosticsAndTypedRejectionTogether) {
+  OperatingPointUpdate accepted;
+  accepted.attempted_operating_point.dispatch_sgpr.set(40u);
   accepted.diagnostics.emplace_back("accepted placement");
   EXPECT_TRUE(accepted.accepted());
-  EXPECT_EQ(accepted.attempted_operating_point.moi_dispatch_identity.sgpr(), 40u);
+  EXPECT_EQ(accepted.attempted_operating_point.dispatch_sgpr.base(), 40u);
   EXPECT_EQ(accepted.diagnostics, std::vector<std::string>{"accepted placement"});
 
-  ConSanMoiOperatingPointUpdate rejected = accepted;
-  rejected.rejection = ConSanMoiPlacementRejection::DispatchIdSgprUnavailable;
+  OperatingPointUpdate rejected = accepted;
+  rejected.rejection = PlacementRejection::PersistentStateUnavailable;
   EXPECT_FALSE(rejected.accepted());
-  EXPECT_EQ(rejected.rejection, ConSanMoiPlacementRejection::DispatchIdSgprUnavailable);
+  EXPECT_EQ(rejected.rejection, PlacementRejection::PersistentStateUnavailable);
 }
 
-TEST(ConSan, MoiPersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint) {
-  ConSanMoiPersistentPlacementUpdate accepted;
-  accepted.attempted_operating_point.set_moi_owner_epoch_vgprs(40u, 41u);
+TEST(ConSan, PersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint) {
+  PersistentPlacementUpdate accepted;
+  accepted.attempted_operating_point.set_owner_epoch_vgprs(40u, 41u);
   accepted.prologue_scratch_assignments.push_back(
       {.descriptor_file_offset = 96u, .scratch_vgpr = 42u});
   EXPECT_TRUE(accepted.accepted());
@@ -480,13 +397,13 @@ TEST(ConSan, MoiPersistentPlacementUpdateKeepsEntryScratchWithItsOperatingPoint)
   EXPECT_EQ(accepted.prologue_scratch_assignments.front().descriptor_file_offset, 96u);
   EXPECT_EQ(accepted.prologue_scratch_assignments.front().scratch_vgpr, 42u);
 
-  ConSanMoiPersistentPlacementUpdate rejected = accepted;
-  rejected.rejection = ConSanMoiPlacementRejection::PersistentStateUnavailable;
+  PersistentPlacementUpdate rejected = accepted;
+  rejected.rejection = PlacementRejection::PersistentStateUnavailable;
   EXPECT_FALSE(rejected.accepted());
 }
 
-TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
-  ConSanMoiPersistentSgprState state;
+TEST(ConSan, PersistentScalarStateRequiresTheOwnerEpochPair) {
+  PersistentSgprState state;
   EXPECT_FALSE(state.complete());
   EXPECT_FALSE(state.owner());
   EXPECT_FALSE(state.epoch());
@@ -502,42 +419,42 @@ TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   EXPECT_FALSE(state.epoch());
 }
 
-TEST(ConSan, MoiOperatingPointPersistentOwnerEpochVgprsAreAllOrNothing) {
-  ConSanMoiOperatingPoint point;
-  EXPECT_FALSE(point.moi_owner_epoch_vgprs.complete());
-  EXPECT_FALSE(point.moi_owner_epoch_vgprs.owner());
-  EXPECT_FALSE(point.moi_owner_epoch_vgprs.epoch());
+TEST(ConSan, OperatingPointPersistentOwnerEpochVgprsAreAllOrNothing) {
+  OperatingPoint point;
+  EXPECT_FALSE(point.owner_epoch_vgprs.complete());
+  EXPECT_FALSE(point.owner_epoch_vgprs.owner());
+  EXPECT_FALSE(point.owner_epoch_vgprs.epoch());
 
-  point.set_moi_owner_epoch_vgprs(12u, 13u);
-  ASSERT_TRUE(point.moi_owner_epoch_vgprs.complete());
-  EXPECT_EQ(point.moi_owner_epoch_vgprs.owner(), 12u);
-  EXPECT_EQ(point.moi_owner_epoch_vgprs.epoch(), 13u);
+  point.set_owner_epoch_vgprs(12u, 13u);
+  ASSERT_TRUE(point.owner_epoch_vgprs.complete());
+  EXPECT_EQ(point.owner_epoch_vgprs.owner(), 12u);
+  EXPECT_EQ(point.owner_epoch_vgprs.epoch(), 13u);
 
-  point.reset_moi_owner_epoch_vgprs();
-  EXPECT_FALSE(point.moi_owner_epoch_vgprs.complete());
-  EXPECT_FALSE(point.moi_owner_epoch_vgprs.owner());
-  EXPECT_FALSE(point.moi_owner_epoch_vgprs.epoch());
+  point.reset_owner_epoch_vgprs();
+  EXPECT_FALSE(point.owner_epoch_vgprs.complete());
+  EXPECT_FALSE(point.owner_epoch_vgprs.owner());
+  EXPECT_FALSE(point.owner_epoch_vgprs.epoch());
 }
 
-TEST(ConSan, MoiSiteSourcesRemainDistinctFromAcceptedOwnerEpochPair) {
-  ConSanMoiOperatingPoint accepted;
-  accepted.set_moi_owner_epoch_vgprs(12u, 13u);
-  const ConSanMoiOwnerEpochVgprSources materialized{.owner = std::nullopt, .epoch = 31u};
+TEST(ConSan, SiteSourcesRemainDistinctFromAcceptedOwnerEpochPair) {
+  OperatingPoint accepted;
+  accepted.set_owner_epoch_vgprs(12u, 13u);
+  const OwnerEpochVgprSources materialized{.owner = std::nullopt, .epoch = 31u};
 
   EXPECT_FALSE(materialized.owner);
   EXPECT_EQ(materialized.epoch, 31u);
-  EXPECT_EQ(accepted.moi_owner_epoch_vgprs.owner(), 12u);
-  EXPECT_EQ(accepted.moi_owner_epoch_vgprs.epoch(), 13u);
+  EXPECT_EQ(accepted.owner_epoch_vgprs.owner(), 12u);
+  EXPECT_EQ(accepted.owner_epoch_vgprs.epoch(), 13u);
 }
 
-TEST(ConSan, MoiPersistentWorkgroupTupleIsAllOrNothing) {
-  ConSanMoiPersistentWorkgroupRegisters registers;
+TEST(ConSan, PersistentWorkgroupTupleIsAllOrNothing) {
+  PersistentWorkgroupRegisters registers;
   EXPECT_TRUE(registers.empty());
   EXPECT_FALSE(registers.complete());
   EXPECT_EQ(registers.values(), (std::array<std::optional<uint16_t>, 4>{
                                     std::nullopt, std::nullopt, std::nullopt, std::nullopt}));
 
-  registers = ConSanMoiPersistentWorkgroupRegisters{12u, 13u, 14u, 15u};
+  registers = PersistentWorkgroupRegisters{12u, 13u, 14u, 15u};
   EXPECT_FALSE(registers.empty());
   EXPECT_TRUE(registers.complete());
   EXPECT_EQ(registers.values(), (std::array<std::optional<uint16_t>, 4>{12u, 13u, 14u, 15u}));
@@ -574,7 +491,7 @@ TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {
   };
   std::vector<std::string> errors;
 
-  ASSERT_TRUE(consan_detail::canonicalize_physical_site_aliases(
+  ASSERT_TRUE(detail::canonicalize_physical_site_aliases(
       candidates, errors, "ConSan test site",
       [](const PhysicalAliasTestCandidate &candidate) { return candidate.file_offset; },
       [](const PhysicalAliasTestCandidate &candidate) -> std::string_view {
@@ -615,7 +532,7 @@ TEST(ConSan, PhysicalSiteAliasCanonicalizationReportsExactTypedConflict) {
   const std::vector<PhysicalAliasTestCandidate> original = candidates;
   std::vector<std::string> errors;
 
-  EXPECT_FALSE(consan_detail::canonicalize_physical_site_aliases(
+  EXPECT_FALSE(detail::canonicalize_physical_site_aliases(
       candidates, errors, "ConSan test site",
       [](const PhysicalAliasTestCandidate &candidate) { return candidate.file_offset; },
       [](const PhysicalAliasTestCandidate &candidate) -> std::string_view {
@@ -744,16 +661,16 @@ TEST(ConSan, IncrementalPhysicalSiteAliasMergeRetainsOrderAndClosesAfterTake) {
 
 TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   const std::vector<uint8_t> bytes = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::None;
-  options.delay_nops = 32;
+  Options options;
+  options.mode = Mode::None;
+  options.supercollider_delay_nops = 32;
 
   const auto result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified());
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
+  EXPECT_EQ(result.outcome, TransformOutcome::Unchanged);
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_code_object_id(bytes));
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(result.warnings.empty());
@@ -762,15 +679,15 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
 }
 
 TEST(ConSan, StagedModificationStateCannotOverwriteFailureOutcome) {
-  ConSanTransformArtifacts artifacts;
+  TransformArtifacts artifacts;
   EXPECT_FALSE(artifacts.modified());
 
   artifacts.mark_modified();
   EXPECT_TRUE(artifacts.modified());
-  EXPECT_EQ(artifacts.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(artifacts.outcome, TransformOutcome::ModifiedValid);
 
-  for (const ConSanTransformOutcome failure :
-       {ConSanTransformOutcome::Unsupported, ConSanTransformOutcome::Invalid}) {
+  for (const TransformOutcome failure :
+       {TransformOutcome::Unsupported, TransformOutcome::Invalid}) {
     artifacts.outcome = failure;
     artifacts.mark_modified();
     EXPECT_FALSE(artifacts.modified());
@@ -782,118 +699,105 @@ TEST(ConSan, StagedModificationStateCannotOverwriteFailureOutcome) {
 
   artifacts.replacement = {1u, 2u, 3u};
   artifacts.warnings.emplace_back("retained diagnostic");
-  artifacts.outcome = ConSanTransformOutcome::Unsupported;
+  artifacts.outcome = TransformOutcome::Unsupported;
   artifacts.mutation.fault.planned = 2u;
   artifacts.discard_candidate_modification();
   EXPECT_TRUE(artifacts.replacement.empty());
   EXPECT_TRUE(artifacts.patches.empty());
-  EXPECT_EQ(artifacts.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(artifacts.outcome, TransformOutcome::Unsupported);
   EXPECT_EQ(artifacts.warnings, std::vector<std::string>{"retained diagnostic"});
   EXPECT_EQ(artifacts.mutation.fault.planned, 2u);
   EXPECT_FALSE(artifacts.modified());
 }
 
 TEST(ConSan, PatchedImageGrowthPolicyPreservesAbsoluteDefault) {
-  ConSanPatchedImageGrowthLimit policy;
-  EXPECT_EQ(policy.kind, ConSanPatchedImageGrowthLimitKind::AbsoluteBytes);
-  EXPECT_EQ(policy.absolute_bytes, kConSanDefaultMaxPatchedImageGrowthBytes);
-  EXPECT_EQ(consan_patched_image_growth_limit_bytes(policy, 17u),
-            kConSanDefaultMaxPatchedImageGrowthBytes);
-}
-
-TEST(ConSan, PatchedImageGrowthDefaultCoversQualifiedGeneratedOperator) {
-  // The gfx950 PyTorch top-k InlineShadow transform is the largest qualified
-  // generated operator at this policy boundary. Keep modest bounded headroom
-  // above its alignment-inclusive growth instead of requiring an expert
-  // per-workload override.
-  constexpr uint64_t kTopkInlineShadowGrowthBytes = 916'557'824u;
-  EXPECT_EQ(kConSanDefaultMaxPatchedImageGrowthBytes, uint64_t{896} * 1024 * 1024);
-  EXPECT_GT(kConSanDefaultMaxPatchedImageGrowthBytes, kTopkInlineShadowGrowthBytes);
+  PatchedImageGrowthLimit policy;
+  EXPECT_EQ(policy.kind, PatchedImageGrowthLimitKind::AbsoluteBytes);
+  EXPECT_EQ(policy.absolute_bytes, kDefaultMaxPatchedImageGrowthBytes);
+  EXPECT_EQ(patched_image_growth_limit_bytes(policy, 17u), kDefaultMaxPatchedImageGrowthBytes);
 }
 
 TEST(ConSan, RelativePatchedImageGrowthPolicyRoundsDownWithoutOverflow) {
-  ConSanPatchedImageGrowthLimit policy;
-  policy.kind = ConSanPatchedImageGrowthLimitKind::InputPercent;
+  PatchedImageGrowthLimit policy;
+  policy.kind = PatchedImageGrowthLimitKind::InputPercent;
   policy.input_percent = 25u;
-  EXPECT_EQ(consan_patched_image_growth_limit_bytes(policy, 1003u), 250u);
+  EXPECT_EQ(patched_image_growth_limit_bytes(policy, 1003u), 250u);
 
   policy.input_percent = 200u;
-  EXPECT_EQ(consan_patched_image_growth_limit_bytes(policy, std::numeric_limits<size_t>::max()),
+  EXPECT_EQ(patched_image_growth_limit_bytes(policy, std::numeric_limits<size_t>::max()),
             std::numeric_limits<size_t>::max());
 }
 
 TEST(ConSan, PatchedImageGrowthPolicyRejectsInvalidKind) {
-  ConSanPatchedImageGrowthLimit policy;
-  policy.kind = static_cast<ConSanPatchedImageGrowthLimitKind>(255u);
-  EXPECT_FALSE(consan_patched_image_growth_limit_bytes(policy, 1003u));
+  PatchedImageGrowthLimit policy;
+  policy.kind = static_cast<PatchedImageGrowthLimitKind>(255u);
+  EXPECT_FALSE(patched_image_growth_limit_bytes(policy, 1003u));
 }
 
 TEST(ConSan, PatchedImageGrowthBudgetIsSharedAcrossStages) {
-  ConSanPatchedImageGrowthLimit policy{
-      .kind = ConSanPatchedImageGrowthLimitKind::InputPercent,
+  PatchedImageGrowthLimit policy{
+      .kind = PatchedImageGrowthLimitKind::InputPercent,
       .input_percent = 25u,
   };
-  const auto budget = consan_patched_image_growth_budget(policy, 1000u, 1100u);
+  const auto budget = patched_image_growth_budget(policy, 1000u, 1100u);
   ASSERT_TRUE(budget);
   EXPECT_EQ(budget->total_limit_bytes, 250u);
   EXPECT_EQ(budget->existing_growth_bytes, 100u);
   EXPECT_EQ(budget->remaining_growth_bytes, 150u);
   EXPECT_FALSE(budget->already_exceeded);
 
-  const auto exceeded = consan_patched_image_growth_budget(policy, 1000u, 1300u);
+  const auto exceeded = patched_image_growth_budget(policy, 1000u, 1300u);
   ASSERT_TRUE(exceeded);
   EXPECT_EQ(exceeded->remaining_growth_bytes, 0u);
   EXPECT_TRUE(exceeded->already_exceeded);
 }
 
 TEST(ConSan, SharedDiagnosticVocabularyUsesStableNames) {
-  EXPECT_STREQ(consan_delay_mode_name(ConSanDelayMode::SleepVar), "sleep_var");
-  EXPECT_STREQ(
-      consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource::StaticM0Literal32),
-      "static-m0-literal32");
-  EXPECT_STREQ(consan_barrier_scope_name(ConSanBarrierSite::Scope::Workgroup), "workgroup");
+  EXPECT_STREQ(delay_mode_name(SuperColliderDelayMode::SleepVar), "sleep_var");
+  EXPECT_STREQ(barrier_operand_source_name(BarrierSite::OperandSource::StaticM0Literal32),
+               "static-m0-literal32");
+  EXPECT_STREQ(barrier_scope_name(BarrierSite::Scope::Workgroup), "workgroup");
 }
 
 TEST(ConSan, SynchronizationConfidenceCompositionNeverStrengthensInputs) {
   constexpr std::array confidences = {
-      ConSanSemanticConfidence::Exact,
-      ConSanSemanticConfidence::Conservative,
-      ConSanSemanticConfidence::Ambiguous,
-      ConSanSemanticConfidence::Unsupported,
+      SemanticConfidence::Exact,
+      SemanticConfidence::Conservative,
+      SemanticConfidence::Ambiguous,
+      SemanticConfidence::Unsupported,
   };
   for (size_t lhs = 0; lhs < confidences.size(); ++lhs) {
     for (size_t rhs = 0; rhs < confidences.size(); ++rhs) {
-      const ConSanSemanticConfidence combined =
-          combine_consan_sync_confidence(confidences[lhs], confidences[rhs]);
+      const SemanticConfidence combined =
+          combine_sync_confidence(confidences[lhs], confidences[rhs]);
       EXPECT_EQ(combined, confidences[std::max(lhs, rhs)]);
-      EXPECT_EQ(combined, combine_consan_sync_confidence(confidences[rhs], confidences[lhs]));
+      EXPECT_EQ(combined, combine_sync_confidence(confidences[rhs], confidences[lhs]));
     }
   }
 }
 
 TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
-  EXPECT_TRUE(consan_sync_confidence_meets(ConSanSemanticConfidence::Exact,
-                                           ConSanSemanticConfidence::Conservative));
-  EXPECT_TRUE(consan_sync_confidence_meets(ConSanSemanticConfidence::Conservative,
-                                           ConSanSemanticConfidence::Conservative));
-  EXPECT_FALSE(consan_sync_confidence_meets(ConSanSemanticConfidence::Ambiguous,
-                                            ConSanSemanticConfidence::Conservative));
-  EXPECT_FALSE(consan_sync_confidence_meets(ConSanSemanticConfidence::Unsupported,
-                                            ConSanSemanticConfidence::Ambiguous));
+  EXPECT_TRUE(sync_confidence_meets(SemanticConfidence::Exact, SemanticConfidence::Conservative));
+  EXPECT_TRUE(
+      sync_confidence_meets(SemanticConfidence::Conservative, SemanticConfidence::Conservative));
+  EXPECT_FALSE(
+      sync_confidence_meets(SemanticConfidence::Ambiguous, SemanticConfidence::Conservative));
+  EXPECT_FALSE(
+      sync_confidence_meets(SemanticConfidence::Unsupported, SemanticConfidence::Ambiguous));
 
-  ConSanTransformArtifacts result;
+  TransformArtifacts result;
   ProgramInventoryBuilder inventory;
-  ConSanSyncEvent event_a;
+  SyncEvent event_a;
   event_a.identity = "event-a";
   event_a.semantic_id.physical.original_text_offset = 4;
-  event_a.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
-  ConSanSyncEvent event_b;
+  event_a.semantic_id.domain = SemanticSiteDomain::SynchronizationEvent;
+  SyncEvent event_b;
   event_b.identity = "event-b";
   event_b.semantic_id.physical.original_text_offset = 8;
-  event_b.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+  event_b.semantic_id.domain = SemanticSiteDomain::SynchronizationEvent;
   inventory.synchronization().sync_events = {event_a, event_b};
 
-  ConSanSyncSequence sequence;
+  SyncSequence sequence;
   sequence.identity = "sequence-a";
   sequence.member_event_ids = {{0}, {1}};
   inventory.synchronization().sync_sequences.push_back(sequence);
@@ -910,15 +814,15 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
 
 TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   const std::vector<uint8_t> bytes = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified());
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
+  EXPECT_EQ(result.outcome, TransformOutcome::Invalid);
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_code_object_id(bytes));
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_FALSE(result.errors.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
@@ -939,20 +843,19 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
 
   for (const UnsupportedTarget &unsupported : unsupported_targets) {
     SCOPED_TRACE(unsupported.machine);
-    EXPECT_EQ(consan_arch_for_target(unsupported.target), ROCJITSU_CODE_ARCH_INVALID);
-    EXPECT_EQ(consan_capability_disposition(unsupported.target,
-                                            ConSanCapabilityEngine::SuperCollider,
-                                            ConSanCapabilityForm::NativeLdsAccess),
-              ConSanCapabilityDisposition::OutOfContract);
+    EXPECT_EQ(arch_for_target(unsupported.target), ROCJITSU_CODE_ARCH_INVALID);
+    EXPECT_EQ(capability_disposition(unsupported.target, Mode::SuperCollider,
+                                     CapabilityForm::NativeLdsAccess),
+              CapabilityDisposition::OutOfContract);
     std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
     mutate_elf_header(bytes,
                       [unsupported](Elf64_Ehdr &header) { header.e_flags = unsupported.machine; });
-    ConSanOptions options;
-    options.flavor = ConSanFlavor::SuperCollider;
+    Options options;
+    options.mode = Mode::SuperCollider;
 
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+    EXPECT_EQ(result.outcome, TransformOutcome::Unsupported);
     EXPECT_TRUE(result.program_inventory.code_object_parsed());
     EXPECT_FALSE(result.modified());
     EXPECT_TRUE(result.errors.empty());
@@ -967,8 +870,8 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
 }
 
 TEST(ConSan, ProgramInventoryOwnsSemanticArchitectureResolutionGate) {
-  ConSanTransformArtifacts parse_only;
-  parse_only.outcome = ConSanTransformOutcome::Unsupported;
+  TransformArtifacts parse_only;
+  parse_only.outcome = TransformOutcome::Unsupported;
   ProgramInventoryBuilder inventory;
   inventory.text_sections().push_back({});
   inventory.add_kernel({});
@@ -990,15 +893,15 @@ TEST(ConSan, ProgramInventoryOwnsSemanticArchitectureResolutionGate) {
 
 TEST(ConSan, StubRejectsEmptyCodeObject) {
   const std::vector<uint8_t> bytes;
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified());
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
+  EXPECT_EQ(result.outcome, TransformOutcome::Invalid);
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_code_object_id(bytes));
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_FALSE(result.errors.empty());
 }
@@ -1073,13 +976,13 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
   mutate_elf_symbol(overlapping_symbols, 2, [](Elf64_Sym &symbol) { symbol.st_value = 0x1104u; });
   cases.emplace_back("partially overlapping function symbols", std::move(overlapping_symbols));
 
-  for (const auto &profile : all_consan_transform_profiles()) {
+  for (const auto &profile : all_transform_profiles()) {
     for (const auto &[name, bytes] : cases) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
-      const ConSanTransformArtifacts result = test_lower_consan(bytes, profile.options);
-      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      const TransformArtifacts result = test_lower_consan(bytes, profile.options);
+      EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified());
-      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
     }
@@ -1149,20 +1052,19 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
        .expected_error =
            "ConSan cannot safely transform a code object with incomplete AMDGPU kernel metadata"});
 
-  // Absence is accepted by InlineShadowSpillingWorksWithoutMetadata; a note
-  // that claims metadata but cannot be read is rejected by every engine.
+  // A note that claims metadata but cannot be read is rejected by every mode.
   for (const MetadataDamageCase &damage : cases) {
     AmdGpuCodeObject malformed(damage.bytes.data(), damage.bytes.size());
     ASSERT_TRUE(malformed.is_valid());
     ASSERT_FALSE(malformed.kernel_metadata_is_trustworthy());
     ASSERT_EQ(malformed.malformed_kernel_metadata_note_count(), damage.malformed_note_count);
 
-    for (const auto &profile : all_consan_transform_profiles()) {
+    for (const auto &profile : all_transform_profiles()) {
       SCOPED_TRACE(::testing::Message() << damage.description << ": " << profile.name);
-      const ConSanTransformArtifacts result = test_lower_consan(damage.bytes, profile.options);
-      EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+      const TransformArtifacts result = test_lower_consan(damage.bytes, profile.options);
+      EXPECT_EQ(result.outcome, TransformOutcome::Invalid);
       EXPECT_FALSE(result.modified());
-      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
       EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
@@ -1203,10 +1105,10 @@ TEST(ConSan, ReportsMultipleMalformedKernelMetadataNotes) {
   ASSERT_EQ(malformed.malformed_kernel_metadata_note_count(), 2u);
   ASSERT_FALSE(malformed.kernel_metadata_is_trustworthy());
 
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+  Options options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  EXPECT_EQ(result.outcome, TransformOutcome::Invalid);
   EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
   EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(), 2u);
   ASSERT_EQ(result.errors.size(), 1u);
@@ -1223,11 +1125,11 @@ TEST(ConSan, InfersZeroSizedKernelFunctionThroughTextEnd) {
   std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   mutate_elf_symbol(bytes, 1, [](Elf64_Sym &symbol) { symbol.st_size = 0; });
 
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  Options options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().has_text_range);
   EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
@@ -1248,11 +1150,11 @@ TEST(ConSan, UsesExplicitAliasedFunctionSizeForZeroSizedKernelSymbol) {
   mutate_elf_symbol(bytes, 1, [](Elf64_Sym &symbol) { symbol.st_size = 0; });
   mutate_elf_symbol(bytes, 2, [](Elf64_Sym &symbol) { symbol.st_value = 0x1100u; });
 
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  Options options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().has_text_range);
   EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
@@ -1323,19 +1225,19 @@ TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
       kernel_words, empty_specialization, {}, kRdna4Wave64AllVgprsGranulated,
       /*function_is_kernel=*/true);
 
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  Options options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
-  const auto empty = std::ranges::find(result.program_inventory.kernels(), "lds_helper",
-                                       &ConSanProgramContainer::name);
+  const auto empty =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ProgramContainer::name);
   ASSERT_NE(empty, result.program_inventory.kernels().end());
   EXPECT_TRUE(empty->has_text_range);
   EXPECT_EQ(empty->code_size, 0u);
   EXPECT_TRUE(empty->decoded);
-  EXPECT_EQ(empty->preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_EQ(empty->preflight_action, PreflightAction::Skip);
   EXPECT_EQ(empty->stats.instruction_count, 0u);
 }
 
@@ -1361,13 +1263,13 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
   });
   cases.emplace_back("overflowing program-header table", std::move(overflowing_program_headers));
 
-  for (const auto &profile : all_consan_replacement_profiles()) {
+  for (const auto &profile : all_replacement_profiles()) {
     for (const auto &[name, bytes] : cases) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
-      const ConSanTransformArtifacts result = test_lower_consan(bytes, profile.options);
-      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      const TransformArtifacts result = test_lower_consan(bytes, profile.options);
+      EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified());
-      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
     }
@@ -1379,13 +1281,13 @@ TEST(ConSan, RelocationRejectsAlignmentGrowthBeforeAllocation) {
   auto bytes = make_rdna4_lds_code_object(text_words);
   mutate_elf_section(bytes, 2,
                      [](Elf64_Shdr &section) { section.sh_addralign = uint64_t{1} << 58u; });
-  for (const auto &profile : all_consan_replacement_profiles()) {
+  for (const auto &profile : all_replacement_profiles()) {
     SCOPED_TRACE(profile.name);
     const auto result = test_lower_consan(bytes, profile.options);
     EXPECT_FALSE(result.modified());
     EXPECT_TRUE(result.replacement.empty());
     EXPECT_TRUE(result.patches.empty());
-    EXPECT_EQ(result.transform_failure_cause, ConSanTransformFailureCause::PatchedImageGrowthLimit);
+    EXPECT_EQ(result.transform_failure_cause, TransformFailureCause::PatchedImageGrowthLimit);
   }
 }
 
@@ -1401,24 +1303,24 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
   };
   const std::vector<uint8_t> valid = make_rdna4_lds_code_object(text_words);
   auto expect_transactional_result = [&](std::span<const uint8_t> input,
-                                         const ConSanTransformProfile &profile) {
-    const ConSanTransformArtifacts result = test_lower_consan(input, profile.options);
-    EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
+                                         const TransformProfile &profile) {
+    const TransformArtifacts result = test_lower_consan(input, profile.options);
+    EXPECT_EQ(result.program_inventory.code_object_id(), make_code_object_id(input));
     if (result.modified()) {
       EXPECT_TRUE(result.modified());
-      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.replacement.empty());
       EXPECT_FALSE(result.patches.empty());
-      EXPECT_TRUE(validate_consan_modified_elf(input, result).empty());
+      EXPECT_TRUE(validate_modified_elf(input, result).empty());
     } else {
       EXPECT_FALSE(result.modified());
-      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
     }
   };
 
-  for (const auto &profile : all_consan_transform_profiles()) {
+  for (const auto &profile : all_transform_profiles()) {
     for (size_t size = 0; size <= valid.size(); ++size) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": truncation size " << size);
       expect_transactional_result(std::span<const uint8_t>(valid.data(), size), profile);
@@ -1441,58 +1343,57 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  for (const auto &profile : all_consan_replacement_profiles()) {
+  for (const auto &profile : all_replacement_profiles()) {
     SCOPED_TRACE(profile.name);
-    const ConSanTransformArtifacts valid = test_lower_consan(bytes, profile.options);
-    ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
-    EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
-    EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
+    const TransformArtifacts valid = test_lower_consan(bytes, profile.options);
+    ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
+    EXPECT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
+    EXPECT_TRUE(validate_modified_elf(bytes, valid).empty());
 
-    ConSanTransformArtifacts wrong_target = valid;
+    TransformArtifacts wrong_target = valid;
     mutate_elf_header(wrong_target.replacement, [](Elf64_Ehdr &header) { header.e_flags = 0; });
-    EXPECT_FALSE(validate_consan_modified_elf(bytes, wrong_target).empty());
+    EXPECT_FALSE(validate_modified_elf(bytes, wrong_target).empty());
 
-    ConSanTransformArtifacts stale_text = valid;
+    TransformArtifacts stale_text = valid;
     mutate_elf_section(stale_text.replacement, 1, [&](Elf64_Shdr &section) {
       section.sh_size = stale_text.replacement.size();
     });
-    EXPECT_FALSE(validate_consan_modified_elf(bytes, stale_text).empty());
+    EXPECT_FALSE(validate_modified_elf(bytes, stale_text).empty());
 
-    ConSanTransformArtifacts unaccounted_change = valid;
+    TransformArtifacts unaccounted_change = valid;
     unaccounted_change.replacement[0x100u + 48u] ^= 1u;
     const std::vector<std::string> unaccounted_errors =
-        validate_consan_modified_elf(bytes, unaccounted_change);
+        validate_modified_elf(bytes, unaccounted_change);
     ASSERT_FALSE(unaccounted_errors.empty());
     EXPECT_TRUE(std::ranges::any_of(unaccounted_errors, [](const std::string &error) {
       return error.find("unaccounted executable byte change") != std::string::npos;
     }));
 
-    ConSanTransformArtifacts overlapping_inventory = valid;
-    ConSanPatchInfo overlap = overlapping_inventory.patches.front();
+    TransformArtifacts overlapping_inventory = valid;
+    PatchInfo overlap = overlapping_inventory.patches.front();
     overlap.anchor_offset += sizeof(uint32_t);
     overlapping_inventory.patches.push_back(overlap);
     const std::vector<std::string> overlap_errors =
-        validate_consan_modified_elf(bytes, overlapping_inventory);
+        validate_modified_elf(bytes, overlapping_inventory);
     ASSERT_FALSE(overlap_errors.empty());
     EXPECT_TRUE(std::ranges::any_of(overlap_errors, [](const std::string &error) {
       return error.find("partially overlapping patch ranges") != std::string::npos;
     }));
 
-    ConSanTransformArtifacts stale_inventory = valid;
+    TransformArtifacts stale_inventory = valid;
     stale_inventory.patches.front().anchor_offset = UINT64_MAX;
     const std::vector<std::string> stale_inventory_errors =
-        validate_consan_modified_elf(bytes, stale_inventory);
+        validate_modified_elf(bytes, stale_inventory);
     ASSERT_FALSE(stale_inventory_errors.empty());
     EXPECT_TRUE(std::ranges::any_of(stale_inventory_errors, [](const std::string &error) {
       return error.find("stale or unaligned patch range") != std::string::npos;
     }));
 
-    ConSanTransformArtifacts undecodable_patch = valid;
+    TransformArtifacts undecodable_patch = valid;
     const uint32_t invalid_instruction = 0xffffffffu;
     std::memcpy(undecodable_patch.replacement.data() + 0x100u + valid.patches.front().anchor_offset,
                 &invalid_instruction, sizeof(invalid_instruction));
-    const std::vector<std::string> decode_errors =
-        validate_consan_modified_elf(bytes, undecodable_patch);
+    const std::vector<std::string> decode_errors = validate_modified_elf(bytes, undecodable_patch);
     ASSERT_FALSE(decode_errors.empty());
     EXPECT_TRUE(std::ranges::any_of(decode_errors, [](const std::string &error) {
       return error.find("re-decode patch anchor") != std::string::npos;
@@ -1507,7 +1408,7 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "many_disjoint_patch_ranges");
 
-  ConSanTransformArtifacts result;
+  TransformArtifacts result;
   result.mark_modified();
   result.replacement = bytes;
   AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
@@ -1519,15 +1420,15 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
     const uint64_t anchor = index * sizeof(uint32_t);
     std::memcpy(result.replacement.data() + text_file_offset + anchor, &replacement_word,
                 sizeof(replacement_word));
-    ConSanPatchInfo patch;
-    patch.kind = ConSanPatchKind::InlineBarrierNopRewrite;
+    PatchInfo patch;
+    patch.kind = PatchKind::InlineBarrierNopRewrite;
     patch.anchor_offset = anchor;
     patch.original_size = sizeof(uint32_t);
     result.patches.push_back(std::move(patch));
   }
 
-  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  EXPECT_TRUE(validate_modified_elf(bytes, result).empty());
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

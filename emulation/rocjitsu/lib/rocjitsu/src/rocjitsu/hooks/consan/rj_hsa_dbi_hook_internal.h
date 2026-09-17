@@ -7,9 +7,9 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_analyzer.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_snapshot.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_trust.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_analyzer.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_snapshot.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_trust.h"
 
 #include <algorithm>
 #include <array>
@@ -23,7 +23,7 @@
 #include <tuple>
 #include <vector>
 
-namespace rocjitsu::consan_hook {
+namespace rocjitsu::consan::hook {
 
 enum HookLogLevel : int {
   kLogDisabled = 0,
@@ -38,7 +38,7 @@ enum class CheckTrapMode : uint8_t {
   Flat,
 };
 
-enum class ScReportMode : uint8_t {
+enum class SuperColliderReportMode : uint8_t {
   Auto,
   Trap,
 };
@@ -48,15 +48,15 @@ enum class HookPolicy : uint8_t {
   Strict,
 };
 
-enum class ConSanEpochCheckpointStatus : uint32_t {
+enum class EpochCheckpointStatus : uint32_t {
   Complete = 0,
   Inactive = 1,
-  NotMoi = 2,
+  ModeDoesNotUseReports = 2,
   ReportSnapshotFailed = 3,
 };
 
-struct AutoMoiReportCheckpointResult {
-  ConSanEpochCheckpointStatus status = ConSanEpochCheckpointStatus::Complete;
+struct ReportCheckpointResult {
+  EpochCheckpointStatus status = EpochCheckpointStatus::Complete;
   uint64_t report_count = 0;
 };
 
@@ -64,11 +64,11 @@ struct AutoMoiReportCheckpointResult {
 // policy. It avoids the unbounded vector reservations that UINT32_MAX would
 // trigger in planners while exceeding the supported-site count of current
 // production code objects by orders of magnitude.
-constexpr uint32_t kConSanAllSupportedPatchBudget = 65536;
+constexpr uint32_t kAllSupportedPatchBudget = 65536;
 // Bound an interposed loader wait so a stalled owner cannot deadlock the
 // process. Campaigns whose individual code-object load can legitimately hold
 // the reservation longer must raise this alongside their workload deadline.
-constexpr uint32_t kConSanDefaultFaultReservationTimeoutMs = 30000;
+constexpr uint32_t kDefaultFaultReservationTimeoutMs = 30000;
 
 /// Fully parsed hook configuration.
 ///
@@ -78,207 +78,197 @@ constexpr uint32_t kConSanDefaultFaultReservationTimeoutMs = 30000;
 /// forwarded to legacy lowering. Inheritance preserves the existing parser's
 /// concise field spelling while allowing production callers to pass each
 /// immutable contract independently.
-struct HookConfig : rocjitsu::ConSanRequest,
-                    rocjitsu::TransformPolicy,
-                    rocjitsu::RuntimePolicy,
-                    rocjitsu::ConSanDebugOverrides,
-                    rocjitsu::MutationRequest,
-                    rocjitsu::BoundRuntimeResources {
+struct HookConfig : Request,
+                    TransformPolicy,
+                    RuntimePolicy,
+                    DebugOverrides,
+                    MutationRequest,
+                    BoundRuntimeResources {
   HookPolicy policy = HookPolicy::Default;
   CheckTrapMode check_trap_mode = CheckTrapMode::All;
-  ScReportMode sc_report_mode = ScReportMode::Auto;
-  bool moi_auto_report_buffer_size_explicit = false;
+  SuperColliderReportMode supercollider_report_mode = SuperColliderReportMode::Auto;
+  bool auto_report_buffer_size_explicit = false;
   bool max_patches_explicit = false;
-  bool moi_runtime_sample_stride_explicit = false;
-  const char *moi_sampled_preset = "default";
-  bool moi_allow_uniform_lds_stores = false;
-  uint32_t moi_sampled_conflict_limit = 8;
-  uint32_t moi_sampled_total_conflict_limit = 64;
-  enum class MoiEpochAnalysisKind : uint8_t { Every, Nth, Periodic, Manual };
-  struct MoiEpochAnalysisPolicy {
-    MoiEpochAnalysisKind kind = MoiEpochAnalysisKind::Every;
+  bool runtime_sample_stride_explicit = false;
+  const char *preset = "default";
+  bool allow_uniform_lds_stores = false;
+  uint32_t conflict_limit = 8;
+  uint32_t total_conflict_limit = 64;
+  enum class EpochAnalysisKind : uint8_t { Every, Nth, Periodic, Manual };
+  struct EpochAnalysisPolicy {
+    EpochAnalysisKind kind = EpochAnalysisKind::Every;
     uint64_t value = 1;
     uint64_t offset = 1;
 
     [[nodiscard]] bool selects(uint64_t epoch, bool manual_window_open) const {
       switch (kind) {
-      case MoiEpochAnalysisKind::Every:
+      case EpochAnalysisKind::Every:
         return true;
-      case MoiEpochAnalysisKind::Nth:
+      case EpochAnalysisKind::Nth:
         return epoch == value;
-      case MoiEpochAnalysisKind::Periodic:
+      case EpochAnalysisKind::Periodic:
         return epoch >= offset && (epoch - offset) % value == 0;
-      case MoiEpochAnalysisKind::Manual:
+      case EpochAnalysisKind::Manual:
         return manual_window_open;
       }
       return false;
     }
   };
-  MoiEpochAnalysisPolicy moi_epoch_analysis;
+  EpochAnalysisPolicy epoch_analysis;
   int log_level = kLogDisabled;
   std::string dump_dir;
 
   HookConfig() {
-    max_patches = kConSanAllSupportedPatchBudget;
+    max_patches = kAllSupportedPatchBudget;
     max_patches_is_expert_limit = false;
-    fault_reservation_timeout_ms = kConSanDefaultFaultReservationTimeoutMs;
+    fault_reservation_timeout_ms = kDefaultFaultReservationTimeoutMs;
   }
 };
 
-constexpr std::string_view kMoiStandardProfile = "standard-v1";
+constexpr std::string_view kStandardProfile = "standard-v1";
 
-inline constexpr auto kFaultSiteKinds = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanFaultSiteKind::Barrier, "barrier"),
-    consan_enum(ConSanFaultSiteKind::Atomic, "atomic"),
-    consan_enum(ConSanFaultSiteKind::LdsAccess, "lds-access"),
-    consan_enum(ConSanFaultSiteKind::OrdinaryMemory, "ordinary-memory"));
+inline constexpr auto kFaultSiteKinds = make_enum_vocabulary(
+    "unknown", enum_entry(FaultSiteKind::Barrier, "barrier"),
+    enum_entry(FaultSiteKind::Atomic, "atomic"), enum_entry(FaultSiteKind::LdsAccess, "lds-access"),
+    enum_entry(FaultSiteKind::OrdinaryMemory, "ordinary-memory"));
 
-[[nodiscard]] inline const char *fault_site_kind_name(rocjitsu::ConSanFaultSiteKind kind) {
+[[nodiscard]] inline const char *fault_site_kind_name(FaultSiteKind kind) {
   return kFaultSiteKinds.name(kind).data();
 }
 
-inline constexpr auto kOrdinaryMemorySupportReasons = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanOrdinaryMemorySupportReason::NotApplicable, "not-applicable"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::Supported, "supported"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly,
-                "supported-synchronization-only"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture,
-                "unsupported-architecture"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize,
-                "unsupported-encoding-size"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::MalformedEncoding, "malformed-encoding"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::MissingAddressVgpr, "missing-address-vgpr"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr,
-                "missing-destination-vgpr"),
-    consan_enum(ConSanOrdinaryMemorySupportReason::MissingValueVgpr, "missing-value-vgpr"));
+inline constexpr auto kOrdinaryMemorySupportReasons = make_enum_vocabulary(
+    "unknown", enum_entry(OrdinaryMemorySupportReason::NotApplicable, "not-applicable"),
+    enum_entry(OrdinaryMemorySupportReason::Supported, "supported"),
+    enum_entry(OrdinaryMemorySupportReason::SupportedSynchronizationOnly,
+               "supported-synchronization-only"),
+    enum_entry(OrdinaryMemorySupportReason::UnsupportedArchitecture, "unsupported-architecture"),
+    enum_entry(OrdinaryMemorySupportReason::UnsupportedEncodingSize, "unsupported-encoding-size"),
+    enum_entry(OrdinaryMemorySupportReason::MalformedEncoding, "malformed-encoding"),
+    enum_entry(OrdinaryMemorySupportReason::MissingAddressVgpr, "missing-address-vgpr"),
+    enum_entry(OrdinaryMemorySupportReason::MissingDestinationVgpr, "missing-destination-vgpr"),
+    enum_entry(OrdinaryMemorySupportReason::MissingValueVgpr, "missing-value-vgpr"));
 
 [[nodiscard]] inline const char *
-ordinary_memory_support_reason_name(rocjitsu::ConSanOrdinaryMemorySupportReason reason) {
+ordinary_memory_support_reason_name(OrdinaryMemorySupportReason reason) {
   return kOrdinaryMemorySupportReasons.name(reason).data();
 }
 
-inline constexpr auto kFaultMutationKinds = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanFaultMutationKind::DropBarrier, "drop-barrier"),
-    consan_enum(ConSanFaultMutationKind::MoveBarrierPair, "move-barrier-pair"),
-    consan_enum(ConSanFaultMutationKind::BarrierIdScope, "barrier-id-scope"),
-    consan_enum(ConSanFaultMutationKind::BarrierParticipantCount, "barrier-participant-count"),
-    consan_enum(ConSanFaultMutationKind::AtomicWrongAddress, "atomic-wrong-address"),
-    consan_enum(ConSanFaultMutationKind::AtomicWeakenOrder, "atomic-weaken-order"),
-    consan_enum(ConSanFaultMutationKind::AtomicWeakenScope, "atomic-weaken-scope"),
-    consan_enum(ConSanFaultMutationKind::LdsWrongAddress, "lds-wrong-address"),
-    consan_enum(ConSanFaultMutationKind::OrdinaryWeakenOrder, "ordinary-weaken-order"),
-    consan_enum(ConSanFaultMutationKind::OrdinaryWrongAddress, "ordinary-wrong-address"),
-    consan_enum(ConSanFaultMutationKind::OrdinaryWeakenScope, "ordinary-weaken-scope"));
+inline constexpr auto kFaultMutationKinds = make_enum_vocabulary(
+    "unknown", enum_entry(FaultMutationKind::DropBarrier, "drop-barrier"),
+    enum_entry(FaultMutationKind::MoveBarrierPair, "move-barrier-pair"),
+    enum_entry(FaultMutationKind::BarrierIdScope, "barrier-id-scope"),
+    enum_entry(FaultMutationKind::BarrierParticipantCount, "barrier-participant-count"),
+    enum_entry(FaultMutationKind::AtomicWrongAddress, "atomic-wrong-address"),
+    enum_entry(FaultMutationKind::AtomicWeakenOrder, "atomic-weaken-order"),
+    enum_entry(FaultMutationKind::AtomicWeakenScope, "atomic-weaken-scope"),
+    enum_entry(FaultMutationKind::LdsWrongAddress, "lds-wrong-address"),
+    enum_entry(FaultMutationKind::OrdinaryWeakenOrder, "ordinary-weaken-order"),
+    enum_entry(FaultMutationKind::OrdinaryWrongAddress, "ordinary-wrong-address"),
+    enum_entry(FaultMutationKind::OrdinaryWeakenScope, "ordinary-weaken-scope"));
 
-[[nodiscard]] inline const char *fault_mutation_kind_name(rocjitsu::ConSanFaultMutationKind kind) {
+[[nodiscard]] inline const char *fault_mutation_kind_name(FaultMutationKind kind) {
   return kFaultMutationKinds.name(kind).data();
 }
 
-inline constexpr auto kBarrierMoveDirections = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanBarrierMoveDirection::LegacyMarker, "legacy-marker"),
-    consan_enum(ConSanBarrierMoveDirection::Earlier, "earlier"),
-    consan_enum(ConSanBarrierMoveDirection::Later, "later"));
+inline constexpr auto kBarrierMoveDirections =
+    make_enum_vocabulary("unknown", enum_entry(BarrierMoveDirection::LegacyMarker, "legacy-marker"),
+                         enum_entry(BarrierMoveDirection::Earlier, "earlier"),
+                         enum_entry(BarrierMoveDirection::Later, "later"));
 
-[[nodiscard]] inline const char *
-barrier_move_direction_name(rocjitsu::ConSanBarrierMoveDirection direction) {
+[[nodiscard]] inline const char *barrier_move_direction_name(BarrierMoveDirection direction) {
   return kBarrierMoveDirections.name(direction).data();
 }
 
-inline constexpr auto kBarrierMoveCfgContracts = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanBarrierMoveCfgContract::SameBlock, "same-block"),
-    consan_enum(ConSanBarrierMoveCfgContract::CompletingStructuredDiamond,
-                "completing-structured-diamond"),
-    consan_enum(ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond,
-                "destructive-structured-exec-diamond"));
+inline constexpr auto kBarrierMoveCfgContracts =
+    make_enum_vocabulary("unknown", enum_entry(BarrierMoveCfgContract::SameBlock, "same-block"),
+                         enum_entry(BarrierMoveCfgContract::CompletingStructuredDiamond,
+                                    "completing-structured-diamond"),
+                         enum_entry(BarrierMoveCfgContract::DestructiveStructuredExecDiamond,
+                                    "destructive-structured-exec-diamond"));
 
-[[nodiscard]] inline const char *
-barrier_move_cfg_contract_name(rocjitsu::ConSanBarrierMoveCfgContract contract) {
+[[nodiscard]] inline const char *barrier_move_cfg_contract_name(BarrierMoveCfgContract contract) {
   return kBarrierMoveCfgContracts.name(contract).data();
 }
 
-inline constexpr auto kSyncSequenceKinds = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanSyncKind::Barrier, "barrier"),
-    consan_enum(ConSanSyncKind::Fence, "fence"), consan_enum(ConSanSyncKind::Atomic, "atomic"),
-    consan_enum(ConSanSyncKind::OrdinaryMemory, "ordinary-memory"));
+inline constexpr auto kSyncSequenceKinds = make_enum_vocabulary(
+    "unknown", enum_entry(SyncKind::Barrier, "barrier"), enum_entry(SyncKind::Fence, "fence"),
+    enum_entry(SyncKind::Atomic, "atomic"),
+    enum_entry(SyncKind::OrdinaryMemory, "ordinary-memory"));
 
-[[nodiscard]] inline const char *sync_sequence_kind_name(rocjitsu::ConSanSyncKind kind) {
+[[nodiscard]] inline const char *sync_sequence_kind_name(SyncKind kind) {
   return kSyncSequenceKinds.name(kind).data();
 }
 
-inline constexpr auto kSyncOperations = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanSyncOperation::Unknown, "unknown"),
-    consan_enum(ConSanSyncOperation::BarrierSignal, "barrier-signal"),
-    consan_enum(ConSanSyncOperation::BarrierWait, "barrier-wait"),
-    consan_enum(ConSanSyncOperation::BarrierFull, "barrier-full"),
-    consan_enum(ConSanSyncOperation::BarrierInit, "barrier-init"),
-    consan_enum(ConSanSyncOperation::BarrierJoin, "barrier-join"),
-    consan_enum(ConSanSyncOperation::BarrierLeave, "barrier-leave"),
-    consan_enum(ConSanSyncOperation::BarrierWakeup, "barrier-wakeup"),
-    consan_enum(ConSanSyncOperation::BarrierStateQuery, "barrier-state-query"),
-    consan_enum(ConSanSyncOperation::Fence, "fence"),
-    consan_enum(ConSanSyncOperation::AtomicRmw, "atomic-rmw"),
-    consan_enum(ConSanSyncOperation::AtomicCompareExchange, "atomic-compare-exchange"),
-    consan_enum(ConSanSyncOperation::OrdinaryLoad, "ordinary-load"),
-    consan_enum(ConSanSyncOperation::OrdinaryStore, "ordinary-store"));
+inline constexpr auto kSyncOperations = make_enum_vocabulary(
+    "unknown", enum_entry(SyncOperation::Unknown, "unknown"),
+    enum_entry(SyncOperation::BarrierSignal, "barrier-signal"),
+    enum_entry(SyncOperation::BarrierWait, "barrier-wait"),
+    enum_entry(SyncOperation::BarrierFull, "barrier-full"),
+    enum_entry(SyncOperation::BarrierInit, "barrier-init"),
+    enum_entry(SyncOperation::BarrierJoin, "barrier-join"),
+    enum_entry(SyncOperation::BarrierLeave, "barrier-leave"),
+    enum_entry(SyncOperation::BarrierWakeup, "barrier-wakeup"),
+    enum_entry(SyncOperation::BarrierStateQuery, "barrier-state-query"),
+    enum_entry(SyncOperation::Fence, "fence"), enum_entry(SyncOperation::AtomicRmw, "atomic-rmw"),
+    enum_entry(SyncOperation::AtomicCompareExchange, "atomic-compare-exchange"),
+    enum_entry(SyncOperation::OrdinaryLoad, "ordinary-load"),
+    enum_entry(SyncOperation::OrdinaryStore, "ordinary-store"));
 
-[[nodiscard]] inline const char *sync_operation_name(rocjitsu::ConSanSyncOperation operation) {
+[[nodiscard]] inline const char *sync_operation_name(SyncOperation operation) {
   return kSyncOperations.name(operation).data();
 }
 
-inline constexpr auto kSyncAddressSources = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanSyncAddressSource::NotApplicable, "not-applicable"),
-    consan_enum(ConSanSyncAddressSource::Unknown, "unknown"),
-    consan_enum(ConSanSyncAddressSource::LdsVector, "lds-vector"),
-    consan_enum(ConSanSyncAddressSource::FlatVector, "flat-vector"),
-    consan_enum(ConSanSyncAddressSource::GlobalScalarVector, "global-scalar-vector"),
-    consan_enum(ConSanSyncAddressSource::BufferResource, "buffer-resource"),
-    consan_enum(ConSanSyncAddressSource::ScratchVector, "scratch-vector"));
+inline constexpr auto kSyncAddressSources =
+    make_enum_vocabulary("unknown", enum_entry(SyncAddressSource::NotApplicable, "not-applicable"),
+                         enum_entry(SyncAddressSource::Unknown, "unknown"),
+                         enum_entry(SyncAddressSource::LdsVector, "lds-vector"),
+                         enum_entry(SyncAddressSource::FlatVector, "flat-vector"),
+                         enum_entry(SyncAddressSource::GlobalScalarVector, "global-scalar-vector"),
+                         enum_entry(SyncAddressSource::BufferResource, "buffer-resource"),
+                         enum_entry(SyncAddressSource::ScratchVector, "scratch-vector"));
 
-[[nodiscard]] inline const char *
-sync_address_source_name(rocjitsu::ConSanSyncAddressSource source) {
+[[nodiscard]] inline const char *sync_address_source_name(SyncAddressSource source) {
   return kSyncAddressSources.name(source).data();
 }
 
-inline constexpr auto kSyncMemoryRoles = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanSyncMemoryRole::Unknown, "unknown"),
-    consan_enum(ConSanSyncMemoryRole::None, "none"),
-    consan_enum(ConSanSyncMemoryRole::Acquire, "acquire"),
-    consan_enum(ConSanSyncMemoryRole::Release, "release"),
-    consan_enum(ConSanSyncMemoryRole::AcquireRelease, "acquire-release"),
-    consan_enum(ConSanSyncMemoryRole::SequentiallyConsistent, "sequentially-consistent"));
+inline constexpr auto kSyncMemoryRoles = make_enum_vocabulary(
+    "unknown", enum_entry(SyncMemoryRole::Unknown, "unknown"),
+    enum_entry(SyncMemoryRole::None, "none"), enum_entry(SyncMemoryRole::Acquire, "acquire"),
+    enum_entry(SyncMemoryRole::Release, "release"),
+    enum_entry(SyncMemoryRole::AcquireRelease, "acquire-release"),
+    enum_entry(SyncMemoryRole::SequentiallyConsistent, "sequentially-consistent"));
 
-[[nodiscard]] inline const char *sync_memory_role_name(rocjitsu::ConSanSyncMemoryRole role) {
+[[nodiscard]] inline const char *sync_memory_role_name(SyncMemoryRole role) {
   return kSyncMemoryRoles.name(role).data();
 }
 
-inline constexpr auto kSyncRmwOutcomes = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanSyncRmwOutcome::NotApplicable, "not-applicable"),
-    consan_enum(ConSanSyncRmwOutcome::Unknown, "unknown"),
-    consan_enum(ConSanSyncRmwOutcome::NoReturn, "no-return"),
-    consan_enum(ConSanSyncRmwOutcome::ReturnsOldValue, "returns-old-value"),
-    consan_enum(ConSanSyncRmwOutcome::CompareExchange, "compare-exchange"));
+inline constexpr auto kSyncRmwOutcomes =
+    make_enum_vocabulary("unknown", enum_entry(SyncRmwOutcome::NotApplicable, "not-applicable"),
+                         enum_entry(SyncRmwOutcome::Unknown, "unknown"),
+                         enum_entry(SyncRmwOutcome::NoReturn, "no-return"),
+                         enum_entry(SyncRmwOutcome::ReturnsOldValue, "returns-old-value"),
+                         enum_entry(SyncRmwOutcome::CompareExchange, "compare-exchange"));
 
-[[nodiscard]] inline const char *sync_rmw_outcome_name(rocjitsu::ConSanSyncRmwOutcome outcome) {
+[[nodiscard]] inline const char *sync_rmw_outcome_name(SyncRmwOutcome outcome) {
   return kSyncRmwOutcomes.name(outcome).data();
 }
 
 inline constexpr auto kSyncConfidences =
-    make_consan_enum_vocabulary("unknown", consan_enum(ConSanSemanticConfidence::Exact, "exact"),
-                                consan_enum(ConSanSemanticConfidence::Conservative, "conservative"),
-                                consan_enum(ConSanSemanticConfidence::Ambiguous, "ambiguous"),
-                                consan_enum(ConSanSemanticConfidence::Unsupported, "unsupported"));
+    make_enum_vocabulary("unknown", enum_entry(SemanticConfidence::Exact, "exact"),
+                         enum_entry(SemanticConfidence::Conservative, "conservative"),
+                         enum_entry(SemanticConfidence::Ambiguous, "ambiguous"),
+                         enum_entry(SemanticConfidence::Unsupported, "unsupported"));
 
-[[nodiscard]] inline const char *
-sync_confidence_name(rocjitsu::ConSanSemanticConfidence confidence) {
+[[nodiscard]] inline const char *sync_confidence_name(SemanticConfidence confidence) {
   return kSyncConfidences.name(confidence).data();
 }
 
-inline constexpr auto kOwnerProofs = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanOwnerProofKind::KernelLocal, "kernel-local"),
-    consan_enum(ConSanOwnerProofKind::DirectCall, "direct-call"),
-    consan_enum(ConSanOwnerProofKind::RecoveredIndirectCall, "recovered-indirect-call"));
+inline constexpr auto kOwnerProofs = make_enum_vocabulary(
+    "unknown", enum_entry(OwnerProofKind::KernelLocal, "kernel-local"),
+    enum_entry(OwnerProofKind::DirectCall, "direct-call"),
+    enum_entry(OwnerProofKind::RecoveredIndirectCall, "recovered-indirect-call"));
 
-[[nodiscard]] inline const char *owner_proof_name(rocjitsu::ConSanOwnerProofKind proof) {
+[[nodiscard]] inline const char *owner_proof_name(OwnerProofKind proof) {
   return kOwnerProofs.name(proof).data();
 }
 
@@ -287,19 +277,18 @@ struct OwnerLogFields {
   std::string proofs = "-";
 };
 
-[[nodiscard]] inline OwnerLogFields
-owner_log_fields(std::span<const rocjitsu::ConSanExecutionOwner> owners,
-                 std::span<const rocjitsu::ConSanProgramContainer> kernels) {
+[[nodiscard]] inline OwnerLogFields owner_log_fields(std::span<const ExecutionOwner> owners,
+                                                     std::span<const ProgramContainer> kernels) {
   OwnerLogFields fields;
   if (owners.empty())
     return fields;
   fields.names.clear();
   fields.proofs.clear();
-  for (const rocjitsu::ConSanExecutionOwner &owner : owners) {
+  for (const ExecutionOwner &owner : owners) {
     if (!owner.kernel.valid() || owner.kernel.ordinal >= kernels.size() ||
         kernels[owner.kernel.ordinal].id != owner.kernel)
       return {};
-    const rocjitsu::ConSanProgramContainer &kernel = kernels[owner.kernel.ordinal];
+    const ProgramContainer &kernel = kernels[owner.kernel.ordinal];
     if (!fields.names.empty()) {
       fields.names += ',';
       fields.proofs += ',';
@@ -310,103 +299,98 @@ owner_log_fields(std::span<const rocjitsu::ConSanExecutionOwner> owners,
   return fields;
 }
 
-inline constexpr auto kPatchedImageGrowthLimitKinds = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanPatchedImageGrowthLimitKind::AbsoluteBytes, "absolute-bytes"),
-    consan_enum(ConSanPatchedImageGrowthLimitKind::InputPercent, "input-percent"));
+inline constexpr auto kPatchedImageGrowthLimitKinds = make_enum_vocabulary(
+    "unknown", enum_entry(PatchedImageGrowthLimitKind::AbsoluteBytes, "absolute-bytes"),
+    enum_entry(PatchedImageGrowthLimitKind::InputPercent, "input-percent"));
 
 [[nodiscard]] inline const char *
-patched_image_growth_limit_kind_name(rocjitsu::ConSanPatchedImageGrowthLimitKind kind) {
+patched_image_growth_limit_kind_name(PatchedImageGrowthLimitKind kind) {
   return kPatchedImageGrowthLimitKinds.name(kind).data();
 }
 
 [[nodiscard]] inline uint64_t
-patched_image_growth_limit_value(const rocjitsu::ConSanPatchedImageGrowthLimit &limit) {
-  return limit.kind == rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent
-             ? limit.input_percent
-             : limit.absolute_bytes;
+patched_image_growth_limit_value(const PatchedImageGrowthLimit &limit) {
+  return limit.kind == PatchedImageGrowthLimitKind::InputPercent ? limit.input_percent
+                                                                 : limit.absolute_bytes;
 }
 
-inline constexpr auto kOwnerSources = make_consan_enum_vocabulary(
-    "unknown", consan_enum(ConSanMoiOwnerSource::Automatic, "automatic"),
-    consan_enum(ConSanMoiOwnerSource::WorkitemId, "workitem_id"),
-    consan_enum(ConSanMoiOwnerSource::HwId, "hw_id"));
+inline constexpr auto kOwnerSources = make_enum_vocabulary(
+    "unknown", enum_entry(OwnerSource::Automatic, "automatic"),
+    enum_entry(OwnerSource::WorkitemId, "workitem_id"), enum_entry(OwnerSource::HwId, "hw_id"));
 
-[[nodiscard]] inline const char *owner_source_name(rocjitsu::ConSanMoiOwnerSource source) {
+[[nodiscard]] inline const char *owner_source_name(OwnerSource source) {
   return kOwnerSources.name(source).data();
 }
 
 inline constexpr auto kFlatProvenanceModes =
-    make_consan_enum_vocabulary("unknown", consan_enum(ConSanFlatProvenanceMode::Likely, "likely"),
-                                consan_enum(ConSanFlatProvenanceMode::Strict, "strict"));
+    make_enum_vocabulary("unknown", enum_entry(FlatProvenanceMode::Likely, "likely"),
+                         enum_entry(FlatProvenanceMode::Strict, "strict"));
 
-[[nodiscard]] inline const char *
-flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
+[[nodiscard]] inline const char *flat_provenance_mode_name(FlatProvenanceMode mode) {
   return kFlatProvenanceModes.name(mode).data();
 }
 
-inline constexpr auto kCheckTrapModes = make_consan_enum_vocabulary(
-    "unknown", consan_enum(CheckTrapMode::All, "all"), consan_enum(CheckTrapMode::Lds, "lds"),
-    consan_enum(CheckTrapMode::Flat, "flat"));
+inline constexpr auto kCheckTrapModes = make_enum_vocabulary(
+    "unknown", enum_entry(CheckTrapMode::All, "all"), enum_entry(CheckTrapMode::Lds, "lds"),
+    enum_entry(CheckTrapMode::Flat, "flat"));
 
 [[nodiscard]] inline const char *check_trap_mode_name(CheckTrapMode mode) {
   return kCheckTrapModes.name(mode).data();
 }
 
-[[nodiscard]] inline const char *sc_report_mode_name(ScReportMode mode) {
-  return mode == ScReportMode::Auto ? "auto" : "trap";
+[[nodiscard]] inline const char *supercollider_report_mode_name(SuperColliderReportMode mode) {
+  return mode == SuperColliderReportMode::Auto ? "auto" : "trap";
 }
 
 [[nodiscard]] inline const char *hook_policy_name(HookPolicy policy) {
   return policy == HookPolicy::Default ? "default" : "strict";
 }
-void reject_auto_moi_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
-                                 std::string_view reason);
-[[nodiscard]] bool allocate_auto_moi_report_buffer(
-    CoreApiTable *core, hsa_agent_t agent, uint64_t reader, uint64_t required_size,
-    uint64_t requested_size, uint64_t configured_cap, const ConSanMoiReportBufferLayout &layout,
-    bool track_barriers, bool track_atomics, bool test_seed_inline_exact_odd, uint64_t *address,
-    uint64_t *registered_size, uint64_t *registered_generation);
-void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
-                                       std::string_view input_fingerprint,
-                                       const ConSanRuntimeStaticMapping &static_mapping);
-void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,
-                                               hsa_executable_t executable);
-void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);
-void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable);
-void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy,
-                                       uint32_t sampled_conflict_limit = 8,
-                                       uint32_t sampled_total_conflict_limit = 64,
-                                       bool allow_uniform_lds_stores = false);
-[[nodiscard]] bool begin_auto_moi_epoch_analysis_window();
-[[nodiscard]] bool end_auto_moi_epoch_analysis_window();
-/// Analyze and recycle every live automatic MOI report after the caller has
+void reject_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
+                        std::string_view reason);
+[[nodiscard]] bool allocate_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
+                                          uint64_t required_size, uint64_t requested_size,
+                                          uint64_t configured_cap, const ReportBufferLayout &layout,
+                                          bool track_barriers, bool track_atomics,
+                                          uint64_t *address, uint64_t *registered_size,
+                                          uint64_t *registered_generation);
+void register_report_metadata(uint64_t reader, uint64_t generation,
+                              std::string_view input_fingerprint,
+                              const RuntimeStaticMapping &static_mapping);
+void bind_report_buffer_to_executable(uint64_t reader, uint64_t generation,
+                                      hsa_executable_t executable);
+void discard_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);
+void retire_report_buffers(CoreApiTable *core, hsa_executable_t executable);
+void configure_epoch_analysis(HookConfig::EpochAnalysisPolicy policy, uint32_t conflict_limit = 8,
+                              uint32_t total_conflict_limit = 64,
+                              bool allow_uniform_lds_stores = false);
+[[nodiscard]] bool begin_epoch_analysis_window();
+[[nodiscard]] bool end_epoch_analysis_window();
+/// Analyze and recycle every live automatic ConSan report after the caller has
 /// established device-wide quiescence. The operation is transactional: no
 /// report is reset unless every live report has a complete host snapshot.
-[[nodiscard]] AutoMoiReportCheckpointResult
-checkpoint_auto_moi_report_buffers_after_device_synchronize(CoreApiTable *core);
-[[nodiscard]] AutoMoiReportCheckpointResult
-checkpoint_auto_moi_report_buffers_automatically(CoreApiTable *core);
-[[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
+[[nodiscard]] ReportCheckpointResult
+checkpoint_report_buffers_after_device_synchronize(CoreApiTable *core);
+[[nodiscard]] ReportCheckpointResult checkpoint_report_buffers_automatically(CoreApiTable *core);
+[[nodiscard]] ReportSummary summarize_and_clear_report_buffers(CoreApiTable *core);
 
 /// Fully typed transform seam observed by HSA-hook unit tests. A test double
 /// receives the same immutable contracts and returns the same production
 /// result as the real transformer; raw mechanism fixtures never cross this
 /// hook boundary.
-using ConSanTransformOverride = TransformResult (*)(std::span<const uint8_t>, const ConSanRequest &,
-                                                    const TransformPolicy &, const RuntimePolicy &,
-                                                    const ConSanDebugOverrides &,
-                                                    const MutationRequest &,
-                                                    const RuntimeCapabilities &,
-                                                    const BoundRuntimeResources &);
+using TransformOverride = TransformResult (*)(std::span<const uint8_t>, const Request &,
+                                              const TransformPolicy &, const RuntimePolicy &,
+                                              const DebugOverrides &, const MutationRequest &,
+                                              const RuntimeCapabilities &,
+                                              const BoundRuntimeResources &);
 using LogSinkOverride = void (*)(const char *, size_t);
 
 extern std::atomic<int> g_log_level;
 extern std::atomic<uint64_t> g_dump_sequence;
-extern std::atomic<ConSanTransformOverride> g_test_consan_transform_override;
+extern std::atomic<TransformOverride> g_test_transform_override;
 
 [[nodiscard]] std::optional<HookConfig> parse_config();
 [[nodiscard]] bool refresh_report_config_from_env(HookConfig *config);
 
 [[gnu::format(printf, 2, 3)]] void log_message(int required_level, const char *format, ...);
 
-} // namespace rocjitsu::consan_hook
+} // namespace rocjitsu::consan::hook

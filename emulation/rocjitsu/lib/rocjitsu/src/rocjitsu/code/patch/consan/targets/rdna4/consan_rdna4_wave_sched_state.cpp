@@ -10,13 +10,12 @@
 
 #include <cstring>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-std::optional<uint16_t> consan_wave_sched_mode_at(rj_code_arch_t arch,
-                                                  std::span<const uint8_t> bytes,
-                                                  uint64_t text_file_offset,
-                                                  uint64_t container_entry_text_offset,
-                                                  uint64_t site_file_offset) {
+std::optional<uint16_t> wave_sched_mode_at(rj_code_arch_t arch, std::span<const uint8_t> bytes,
+                                           uint64_t text_file_offset,
+                                           uint64_t container_entry_text_offset,
+                                           uint64_t site_file_offset) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4 || text_file_offset > bytes.size() ||
       container_entry_text_offset > bytes.size() - text_file_offset) {
     return std::nullopt;
@@ -41,4 +40,4 @@ std::optional<uint16_t> consan_wave_sched_mode_at(rj_code_arch_t arch,
   return mode;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

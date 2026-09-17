@@ -11,12 +11,11 @@
 #include <cstdint>
 #include <span>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Convert a staged transformation into its terminal result after independent
 /// structural, semantic, resource, ABI, and mutation proof validation.
-[[nodiscard]] ConSanTransformArtifacts
-finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
-                       uint64_t expected_moi_report_dispatch_id = 0);
+[[nodiscard]] TransformArtifacts finalize_result(TransformArtifacts result,
+                                                 std::span<const uint8_t> original_bytes);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -9,7 +9,7 @@
 #include <ranges>
 #include <tuple>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 /// Unique logical sequence claiming one synchronization-event identity.
@@ -17,16 +17,15 @@ namespace {
 /// The pointer borrows immutable inventory for the duration of a pure policy
 /// call. `ambiguous` is distinct from a missing pointer so policy can preserve
 /// whether no sequence or multiple incompatible sequences caused rejection.
-[[nodiscard]] bool owner_semantics_equal(std::span<const ConSanExecutionOwner> lhs,
-                                         std::span<const ConSanExecutionOwner> rhs) {
-  return consan_execution_owners_equal(lhs, rhs);
+[[nodiscard]] bool owner_semantics_equal(std::span<const ExecutionOwner> lhs,
+                                         std::span<const ExecutionOwner> rhs) {
+  return execution_owners_equal(lhs, rhs);
 }
 
 [[nodiscard]] bool event_policy_semantics_equal(const SynchronizationInventoryView &inventory,
-                                                const ConSanSyncEvent &lhs,
-                                                const ConSanSyncEvent &rhs) {
-  const ConSanProgramSite *lhs_source = inventory.source(lhs);
-  const ConSanProgramSite *rhs_source = inventory.source(rhs);
+                                                const SyncEvent &lhs, const SyncEvent &rhs) {
+  const ProgramSite *lhs_source = inventory.source(lhs);
+  const ProgramSite *rhs_source = inventory.source(rhs);
   return lhs_source != nullptr && rhs_source != nullptr && lhs_source->same_payload(*rhs_source) &&
          lhs.semantic_id.physical == rhs.semantic_id.physical &&
          std::tie(lhs.kind, lhs.operation, lhs.address_source, lhs.memory_role, lhs.rmw_outcome,
@@ -36,8 +35,8 @@ namespace {
          owner_semantics_equal(inventory.execution_owners(lhs), inventory.execution_owners(rhs));
 }
 
-[[nodiscard]] bool fence_policy_semantics_equal(const ConSanMoiFenceCandidate &lhs,
-                                                const ConSanMoiFenceCandidate &rhs) {
+[[nodiscard]] bool fence_policy_semantics_equal(const FenceCandidate &lhs,
+                                                const FenceCandidate &rhs) {
   return lhs.fence_event == rhs.fence_event && lhs.sequence == rhs.sequence &&
          lhs.communication_event == rhs.communication_event && lhs.memory_role == rhs.memory_role &&
          lhs.association == rhs.association;
@@ -49,24 +48,24 @@ namespace {
          });
 }
 
-[[nodiscard]] bool directional_access_window_available(std::span<const ConSanExecutionOwner> owners,
-                                                   ConSanSyncMemoryRole role,
-                                                   const ConSanAtomicFencePolicyRequest &request) {
-  return std::ranges::any_of(owners, [&](const ConSanExecutionOwner &owner) {
+[[nodiscard]] bool directional_access_window_available(std::span<const ExecutionOwner> owners,
+                                                       SyncMemoryRole role,
+                                                       const AtomicFencePolicyRequest &request) {
+  return std::ranges::any_of(owners, [&](const ExecutionOwner &owner) {
     const auto availability = std::ranges::find(request.directional_access_windows, owner.kernel,
-                                                &ConSanDirectionalAccessAvailability::owner);
+                                                &DirectionalAccessAvailability::owner);
     if (availability == request.directional_access_windows.end())
       return false;
     switch (role) {
-    case ConSanSyncMemoryRole::Release:
+    case SyncMemoryRole::Release:
       return availability->write;
-    case ConSanSyncMemoryRole::Acquire:
+    case SyncMemoryRole::Acquire:
       return availability->read;
-    case ConSanSyncMemoryRole::AcquireRelease:
+    case SyncMemoryRole::AcquireRelease:
       return availability->read || availability->write;
-    case ConSanSyncMemoryRole::Unknown:
-    case ConSanSyncMemoryRole::None:
-    case ConSanSyncMemoryRole::SequentiallyConsistent:
+    case SyncMemoryRole::Unknown:
+    case SyncMemoryRole::None:
+    case SyncMemoryRole::SequentiallyConsistent:
       return false;
     }
     return false;
@@ -74,186 +73,176 @@ namespace {
 }
 
 [[nodiscard]] SemanticSiteId event_semantic_id(const ProgramInventory &inventory,
-                                               const ConSanSyncEvent &event) {
+                                               const SyncEvent &event) {
   if (event.semantic_id.valid())
     return event.semantic_id;
   return {
       .physical = {.code_object = inventory.code_object_id(),
                    .original_text_offset = event.text_offset()},
-      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+      .domain = SemanticSiteDomain::SynchronizationEvent,
   };
 }
 
-[[nodiscard]] const ConSanAtomicSite *find_atomic_site(const ProgramInventory &inventory,
-                                                       const ConSanSyncEvent &event) {
-  return inventory.program_site<ConSanAtomicSite>(event.source_site);
+[[nodiscard]] const AtomicSite *find_atomic_site(const ProgramInventory &inventory,
+                                                 const SyncEvent &event) {
+  return inventory.program_site<AtomicSite>(event.source_site);
 }
 
-[[nodiscard]] const ConSanOrdinaryMemorySite *find_ordinary_site(const ProgramInventory &inventory,
-                                                                 const ConSanSyncEvent &event) {
-  return inventory.program_site<ConSanOrdinaryMemorySite>(event.source_site);
+[[nodiscard]] const OrdinaryMemorySite *find_ordinary_site(const ProgramInventory &inventory,
+                                                           const SyncEvent &event) {
+  return inventory.program_site<OrdinaryMemorySite>(event.source_site);
 }
 
-[[nodiscard]] std::optional<ConSanCapabilityForm>
-atomic_capability_form(const SynchronizationInventoryView &inventory,
-                       const ConSanSyncEvent &event) {
-  if (event.kind == ConSanSyncKind::OrdinaryMemory)
-    return ConSanCapabilityForm::AddressedOrdinaryFence;
-  if (event.kind != ConSanSyncKind::Atomic)
+[[nodiscard]] std::optional<CapabilityForm>
+atomic_capability_form(const SynchronizationInventoryView &inventory, const SyncEvent &event) {
+  if (event.kind == SyncKind::OrdinaryMemory)
+    return CapabilityForm::AddressedOrdinaryFence;
+  if (event.kind != SyncKind::Atomic)
     return std::nullopt;
-  const ConSanProgramSite *source = inventory.source(event);
-  if (event.address_source == ConSanSyncAddressSource::LdsVector ||
+  const ProgramSite *source = inventory.source(event);
+  if (event.address_source == SyncAddressSource::LdsVector ||
       (source != nullptr && source->mnemonic_view().starts_with("ds_"))) {
-    return ConSanCapabilityForm::OrderedLdsAtomic;
+    return CapabilityForm::OrderedLdsAtomic;
   }
-  if (event.address_source == ConSanSyncAddressSource::FlatVector)
-    return ConSanCapabilityForm::OrderedFlatAtomic;
-  if (event.address_source == ConSanSyncAddressSource::GlobalScalarVector)
-    return ConSanCapabilityForm::OrderedVglobalAtomic;
+  if (event.address_source == SyncAddressSource::FlatVector)
+    return CapabilityForm::OrderedFlatAtomic;
+  if (event.address_source == SyncAddressSource::GlobalScalarVector)
+    return CapabilityForm::OrderedVglobalAtomic;
   return std::nullopt;
 }
 
-[[nodiscard]] ConSanDynamicResultRequirement dynamic_requirement(const ConSanSyncEvent &event) {
+[[nodiscard]] DynamicResultRequirement dynamic_requirement(const SyncEvent &event) {
   switch (event.rmw_outcome) {
-  case ConSanSyncRmwOutcome::NotApplicable:
-  case ConSanSyncRmwOutcome::NoReturn:
-    return ConSanDynamicResultRequirement::None;
-  case ConSanSyncRmwOutcome::ReturnsOldValue:
-    return ConSanDynamicResultRequirement::ReturnedOldValue;
-  case ConSanSyncRmwOutcome::CompareExchange:
-    return ConSanDynamicResultRequirement::CompareExchangeSuccess;
-  case ConSanSyncRmwOutcome::Unknown:
-    return ConSanDynamicResultRequirement::Count;
+  case SyncRmwOutcome::NotApplicable:
+  case SyncRmwOutcome::NoReturn:
+    return DynamicResultRequirement::None;
+  case SyncRmwOutcome::ReturnsOldValue:
+    return DynamicResultRequirement::ReturnedOldValue;
+  case SyncRmwOutcome::CompareExchange:
+    return DynamicResultRequirement::CompareExchangeSuccess;
+  case SyncRmwOutcome::Unknown:
+    return DynamicResultRequirement::Count;
   }
-  return ConSanDynamicResultRequirement::Count;
+  return DynamicResultRequirement::Count;
 }
 
-[[nodiscard]] ConSanAtomicPolicyReason
-atomic_classifier_reason(ConSanAtomicClassifierReason reason) {
+[[nodiscard]] AtomicPolicyReason atomic_classifier_reason(AtomicClassifierReason reason) {
   switch (reason) {
-  case ConSanAtomicClassifierReason::None:
-    return ConSanAtomicPolicyReason::None;
-  case ConSanAtomicClassifierReason::UnsupportedAddressSource:
-    return ConSanAtomicPolicyReason::UnsupportedAddressSource;
-  case ConSanAtomicClassifierReason::InvalidAccessWidth:
-    return ConSanAtomicPolicyReason::InvalidAccessWidth;
-  case ConSanAtomicClassifierReason::UnsupportedEncoding:
-  case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
-    return ConSanAtomicPolicyReason::UnsupportedEncoding;
-  case ConSanAtomicClassifierReason::MissingOperands:
-    return ConSanAtomicPolicyReason::MissingOperands;
-  case ConSanAtomicClassifierReason::UnsupportedInputWidth:
-  case ConSanAtomicClassifierReason::ResultAddressAlias:
-    return ConSanAtomicPolicyReason::MissingOperands;
-  case ConSanAtomicClassifierReason::UnsupportedOffset:
-    return ConSanAtomicPolicyReason::UnsupportedEncoding;
-  case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
-    return ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable;
-  case ConSanAtomicClassifierReason::MissingOrderingMetadata:
-    return ConSanAtomicPolicyReason::MissingScope;
-  case ConSanAtomicClassifierReason::UnsupportedScope:
-    return ConSanAtomicPolicyReason::UnsupportedScope;
-  case ConSanAtomicClassifierReason::TargetUnavailable:
-  case ConSanAtomicClassifierReason::Count:
-    return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
+  case AtomicClassifierReason::None:
+    return AtomicPolicyReason::None;
+  case AtomicClassifierReason::UnsupportedAddressSource:
+    return AtomicPolicyReason::UnsupportedAddressSource;
+  case AtomicClassifierReason::InvalidAccessWidth:
+    return AtomicPolicyReason::InvalidAccessWidth;
+  case AtomicClassifierReason::UnsupportedEncoding:
+  case AtomicClassifierReason::NonzeroImmediateOffset:
+    return AtomicPolicyReason::UnsupportedEncoding;
+  case AtomicClassifierReason::MissingOperands:
+    return AtomicPolicyReason::MissingOperands;
+  case AtomicClassifierReason::UnsupportedInputWidth:
+  case AtomicClassifierReason::ResultAddressAlias:
+    return AtomicPolicyReason::MissingOperands;
+  case AtomicClassifierReason::UnsupportedOffset:
+    return AtomicPolicyReason::UnsupportedEncoding;
+  case AtomicClassifierReason::CompareExchangeOutcomeUnavailable:
+    return AtomicPolicyReason::CompareExchangeOutcomeUnavailable;
+  case AtomicClassifierReason::MissingOrderingMetadata:
+    return AtomicPolicyReason::MissingScope;
+  case AtomicClassifierReason::UnsupportedScope:
+    return AtomicPolicyReason::UnsupportedScope;
+  case AtomicClassifierReason::TargetUnavailable:
+  case AtomicClassifierReason::Count:
+    return AtomicPolicyReason::TargetCapabilityUnavailable;
   }
-  return ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
+  return AtomicPolicyReason::TargetCapabilityUnavailable;
 }
 
 struct AtomicEncodingDecision {
-  ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
-  std::optional<ConSanAtomicLoweringForm> form;
+  AtomicPolicyReason reason = AtomicPolicyReason::TargetCapabilityUnavailable;
+  std::optional<AtomicLoweringForm> form;
 };
 
 [[nodiscard]] AtomicEncodingDecision classify_atomic_encoding(const ProgramInventory &inventory,
-                                                              const ConSanSyncEvent &event,
-                                                              const ConSanSyncSequence &sequence,
-                                                              ConSanCapabilityEngine engine) {
-  const bool ordinary = event.kind == ConSanSyncKind::OrdinaryMemory;
-  const ConSanAtomicSite *native = ordinary ? nullptr : find_atomic_site(inventory, event);
-  const ConSanOrdinaryMemorySite *ordinary_site =
+                                                              const SyncEvent &event,
+                                                              const SyncSequence &sequence,
+                                                              Mode mode) {
+  const bool ordinary = event.kind == SyncKind::OrdinaryMemory;
+  const AtomicSite *native = ordinary ? nullptr : find_atomic_site(inventory, event);
+  const OrdinaryMemorySite *ordinary_site =
       ordinary ? find_ordinary_site(inventory, event) : nullptr;
   if ((ordinary && ordinary_site == nullptr) || (!ordinary && native == nullptr))
-    return {.reason = ConSanAtomicPolicyReason::MissingOperands, .form = std::nullopt};
-  ConSanAtomicSite site = ordinary ? consan_atomic_communication_site(*ordinary_site) : *native;
+    return {.reason = AtomicPolicyReason::MissingOperands, .form = std::nullopt};
+  AtomicSite site = ordinary ? atomic_communication_site(*ordinary_site) : *native;
 
   // Synchronization analysis owns normalized semantic scope. It may preserve
   // an encoded value or derive a stronger fact from address-space provenance
   // and sequence association; policy always classifies that single contract.
   site.scope = sequence.scope;
 
-  const ConSanAtomicLoweringClassification classification =
-      classify_consan_atomic_lowering(site, inventory.arch(), !ordinary);
+  const AtomicLoweringClassification classification =
+      classify_atomic_lowering(site, inventory.arch(), !ordinary);
   const bool causal_buffer_ordinary =
-      ordinary &&
-      (engine == ConSanCapabilityEngine::RecordReplay ||
-       engine == ConSanCapabilityEngine::Sampled) &&
-      classification.form &&
-      classification.form->kind == ConSanAtomicLoweringFormKind::BufferResourceVectorOffset;
-  const ConSanAtomicClassifierReason reason =
-      engine == ConSanCapabilityEngine::InlineShadow || (ordinary && !causal_buffer_ordinary)
-          ? classification.exact_ordering_reason
-          : classification.causal_ordering_reason;
-  const ConSanAtomicPolicyReason policy_reason = atomic_classifier_reason(reason);
+      ordinary && mode == Mode::Default && classification.form &&
+      classification.form->kind == AtomicLoweringFormKind::BufferResourceVectorOffset;
+  const AtomicClassifierReason reason = ordinary && !causal_buffer_ordinary
+                                            ? classification.exact_ordering_reason
+                                            : classification.causal_ordering_reason;
+  const AtomicPolicyReason policy_reason = atomic_classifier_reason(reason);
   return {
       .reason = policy_reason,
-      .form = policy_reason == ConSanAtomicPolicyReason::None ? classification.form : std::nullopt,
+      .form = policy_reason == AtomicPolicyReason::None ? classification.form : std::nullopt,
   };
 }
 
-[[nodiscard]] bool sequence_is_atomic_contract(const ConSanSyncEvent &event,
-                                               const ConSanSyncSequence &sequence) {
-  if (event.kind == ConSanSyncKind::Atomic)
-    return sequence.kind == ConSanSyncKind::Atomic;
-  return event.kind == ConSanSyncKind::OrdinaryMemory &&
-         sequence.kind == ConSanSyncKind::OrdinaryMemory;
+[[nodiscard]] bool sequence_is_atomic_contract(const SyncEvent &event,
+                                               const SyncSequence &sequence) {
+  if (event.kind == SyncKind::Atomic)
+    return sequence.kind == SyncKind::Atomic;
+  return event.kind == SyncKind::OrdinaryMemory && sequence.kind == SyncKind::OrdinaryMemory;
 }
 
-[[nodiscard]] ConSanAtomicPolicyReason classify_atomic_semantics(const ConSanSyncEvent &event,
-                                                                 const ConSanSyncSequence *sequence,
-                                                                 bool ambiguous_membership) {
+[[nodiscard]] AtomicPolicyReason classify_atomic_semantics(const SyncEvent &event,
+                                                           const SyncSequence *sequence,
+                                                           bool ambiguous_membership) {
   if (ambiguous_membership)
-    return ConSanAtomicPolicyReason::AmbiguousSequenceMembership;
+    return AtomicPolicyReason::AmbiguousSequenceMembership;
   if (sequence == nullptr || !sequence_is_atomic_contract(event, *sequence) ||
-      !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
-      !consan_sync_confidence_meets(sequence->memory_role_confidence,
-                                    ConSanSemanticConfidence::Conservative)) {
-    return ConSanAtomicPolicyReason::UnqualifiedSyncSequence;
+      !sync_confidence_meets(sequence->confidence, SemanticConfidence::Conservative) ||
+      !sync_confidence_meets(sequence->memory_role_confidence, SemanticConfidence::Conservative)) {
+    return AtomicPolicyReason::UnqualifiedSyncSequence;
   }
   switch (sequence->memory_role) {
-  case ConSanSyncMemoryRole::Release:
-  case ConSanSyncMemoryRole::Acquire:
-  case ConSanSyncMemoryRole::AcquireRelease:
+  case SyncMemoryRole::Release:
+  case SyncMemoryRole::Acquire:
+  case SyncMemoryRole::AcquireRelease:
     break;
-  case ConSanSyncMemoryRole::Unknown:
-  case ConSanSyncMemoryRole::None:
-  case ConSanSyncMemoryRole::SequentiallyConsistent:
-    return ConSanAtomicPolicyReason::UnsupportedMemoryRole;
+  case SyncMemoryRole::Unknown:
+  case SyncMemoryRole::None:
+  case SyncMemoryRole::SequentiallyConsistent:
+    return AtomicPolicyReason::UnsupportedMemoryRole;
   }
-  const std::optional<ConSanMemoryScope> semantic_scope = sequence->scope;
+  const std::optional<MemoryScope> semantic_scope = sequence->scope;
   if (!semantic_scope)
-    return ConSanAtomicPolicyReason::MissingScope;
-  if (!consan_memory_scope_is_supported(*semantic_scope) ||
-      *semantic_scope == ConSanMemoryScope::Wavefront)
-    return ConSanAtomicPolicyReason::UnsupportedScope;
-  if (event.kind == ConSanSyncKind::Atomic &&
-      dynamic_requirement(event) == ConSanDynamicResultRequirement::Count) {
-    return ConSanAtomicPolicyReason::UnsupportedDynamicOutcome;
+    return AtomicPolicyReason::MissingScope;
+  if (!memory_scope_is_supported(*semantic_scope) || *semantic_scope == MemoryScope::Wavefront)
+    return AtomicPolicyReason::UnsupportedScope;
+  if (event.kind == SyncKind::Atomic &&
+      dynamic_requirement(event) == DynamicResultRequirement::Count) {
+    return AtomicPolicyReason::UnsupportedDynamicOutcome;
   }
-  return ConSanAtomicPolicyReason::None;
+  return AtomicPolicyReason::None;
 }
 
-ConSanProbeIntentId
-add_intent(ConSanObservationPlan &plan, ConSanProgramSiteId source_site,
-           const PhysicalSiteId &physical_site, std::vector<SemanticSiteId> covered_sites,
-           ConSanProbeIntentKind kind, ConSanProbePosition position,
-           const ConSanSynchronizationAssociationId &association,
-           ConSanDynamicResultRequirement dynamic_result,
-           std::optional<ConSanAtomicLoweringForm> lowering_form = std::nullopt) {
-  const ConSanProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
+ProbeIntentId add_intent(ObservationPlan &plan, ProgramSiteId source_site,
+                         const PhysicalSiteId &physical_site,
+                         std::vector<SemanticSiteId> covered_sites, ProbeIntentKind kind,
+                         ProbePosition position, const SynchronizationAssociationId &association,
+                         DynamicResultRequirement dynamic_result,
+                         std::optional<AtomicLoweringForm> lowering_form = std::nullopt) {
+  const ProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
   plan.probe_intents.push_back({
       .id = id,
-      .engine = plan.engine,
+      .mode = plan.mode,
       .source_site = source_site,
       .physical_site = physical_site,
       .covered_semantic_sites = std::move(covered_sites),
@@ -266,8 +255,7 @@ add_intent(ConSanObservationPlan &plan, ConSanProgramSiteId source_site,
   return id;
 }
 
-void add_covered_site(ConSanObservationPlan &plan, ConSanProbeIntentId id,
-                      const SemanticSiteId &site) {
+void add_covered_site(ObservationPlan &plan, ProbeIntentId id, const SemanticSiteId &site) {
   if (id.value >= plan.probe_intents.size())
     return;
   std::vector<SemanticSiteId> &covered = plan.probe_intents[id.value].covered_semantic_sites;
@@ -275,168 +263,152 @@ void add_covered_site(ConSanObservationPlan &plan, ConSanProbeIntentId id,
     covered.push_back(site);
 }
 
-[[nodiscard]] bool intent_covers(const ConSanProbeIntent &intent, const SemanticSiteId &site) {
+[[nodiscard]] bool intent_covers(const ProbeIntent &intent, const SemanticSiteId &site) {
   return std::ranges::find(intent.covered_semantic_sites, site) !=
          intent.covered_semantic_sites.end();
 }
 
-[[nodiscard]] std::optional<ConSanProbeIntentId>
-find_intent(const ConSanObservationPlan &plan, const SemanticSiteId &site,
-            const ConSanSynchronizationAssociationId &association, ConSanProbeIntentKind kind) {
-  const auto found = std::ranges::find_if(plan.probe_intents, [&](const ConSanProbeIntent &intent) {
+[[nodiscard]] std::optional<ProbeIntentId>
+find_intent(const ObservationPlan &plan, const SemanticSiteId &site,
+            const SynchronizationAssociationId &association, ProbeIntentKind kind) {
+  const auto found = std::ranges::find_if(plan.probe_intents, [&](const ProbeIntent &intent) {
     return intent.kind == kind && intent.synchronization_association == association &&
            intent_covers(intent, site);
   });
   return found == plan.probe_intents.end() ? std::nullopt : std::optional{found->id};
 }
 
-[[nodiscard]] bool has_qualified_fence_for(const SynchronizationInventoryView &inventory,
-                                           ConSanSyncEventId communication) {
-  return std::ranges::any_of(
-      inventory.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
-        return fence.eligible() && fence.communication_event == communication;
-      });
-}
-
 } // namespace
 
-ConSanAtomicFencePolicyResult
-plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
-                                     const ConSanAtomicFencePolicyRequest &request) {
-  ConSanAtomicFencePolicyResult result;
-  result.plan.engine = request.engine;
-  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(request.engine);
+AtomicFencePolicyResult plan_atomic_fence_observation(const ProgramInventory &inventory,
+                                                      const AtomicFencePolicyRequest &request) {
+  AtomicFencePolicyResult result;
+  result.plan.mode = request.mode;
+  const ModeProbeVocabulary *vocabulary = mode_probe_vocabulary(request.mode);
   if (vocabulary == nullptr || inventory.empty())
     return result;
 
   const SynchronizationInventoryView synchronization = inventory.sync();
-  std::map<std::pair<ConSanSyncKind, uint64_t>, std::vector<const ConSanSyncEvent *>>
-      aliases_by_site;
-  for (const ConSanSyncEvent &event : synchronization.sync_events) {
-    if (event.kind == ConSanSyncKind::Atomic || event.kind == ConSanSyncKind::OrdinaryMemory) {
+  std::map<std::pair<SyncKind, uint64_t>, std::vector<const SyncEvent *>> aliases_by_site;
+  for (const SyncEvent &event : synchronization.sync_events) {
+    if (event.kind == SyncKind::Atomic || event.kind == SyncKind::OrdinaryMemory) {
       aliases_by_site[{event.kind, event.text_offset()}].push_back(&event);
     }
   }
 
   for (const auto &[site_key, aliases] : aliases_by_site) {
     (void)site_key;
-    const ConSanSyncEvent &event = *aliases.front();
-    const ConSanSyncEventId event_id = synchronization.event_id(event);
-    const ConSanSyncSequenceMembership membership = synchronization.sequence_membership(event_id);
-    const ConSanSyncSequence *sequence = synchronization.find_unique_sequence_containing(event_id);
+    const SyncEvent &event = *aliases.front();
+    const SyncEventId event_id = synchronization.event_id(event);
+    const SyncSequenceMembership membership = synchronization.sequence_membership(event_id);
+    const SyncSequence *sequence = synchronization.find_unique_sequence_containing(event_id);
     const bool ambiguous_membership = membership.ambiguous;
     // Ordinary memory belongs to access policy unless synchronization
     // analysis associated an acquire/release sequence around it.
-    if (event.kind == ConSanSyncKind::OrdinaryMemory &&
-        (sequence == nullptr || sequence->kind != ConSanSyncKind::OrdinaryMemory ||
-         sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
-         sequence->memory_role == ConSanSyncMemoryRole::None)) {
+    if (event.kind == SyncKind::OrdinaryMemory &&
+        (sequence == nullptr || sequence->kind != SyncKind::OrdinaryMemory ||
+         sequence->memory_role == SyncMemoryRole::Unknown ||
+         sequence->memory_role == SyncMemoryRole::None)) {
       continue;
     }
 
     const SemanticSiteId semantic_id = event_semantic_id(inventory, event);
     const std::vector<std::string> names =
         synchronization.source_container_names(event.semantic_id.physical);
-    const bool conflicting_alias = std::ranges::any_of(aliases, [&](const ConSanSyncEvent *alias) {
+    const bool conflicting_alias = std::ranges::any_of(aliases, [&](const SyncEvent *alias) {
       return !event_policy_semantics_equal(synchronization, event, *alias);
     });
-    const std::optional<ConSanCapabilityForm> form = atomic_capability_form(synchronization, event);
-    const ConSanCapabilityDisposition capability =
-        form ? consan_capability_disposition(inventory.target(), request.engine, *form)
-             : ConSanCapabilityDisposition::OutOfContract;
+    const std::optional<CapabilityForm> form = atomic_capability_form(synchronization, event);
+    const CapabilityDisposition capability =
+        form ? capability_disposition(inventory.target(), request.mode, *form)
+             : CapabilityDisposition::OutOfContract;
     const std::vector<uint64_t> owner_descriptors =
         synchronization.execution_owner_descriptors(aliases);
-    ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
-    ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
-    std::optional<ConSanAtomicLoweringForm> lowering_form;
+    SiteDecisionKind kind = SiteDecisionKind::NotApplicable;
+    AtomicPolicyReason reason = AtomicPolicyReason::TrackingDisabled;
+    std::optional<AtomicLoweringForm> lowering_form;
 
     if (!request.tracking_enabled) {
-      reason = ConSanAtomicPolicyReason::TrackingDisabled;
-    } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
-      reason = ConSanAtomicPolicyReason::EngineMutationOnly;
+      reason = AtomicPolicyReason::TrackingDisabled;
+    } else if (request.mode == Mode::SuperCollider) {
+      reason = AtomicPolicyReason::ModeMutationOnly;
     } else if (!filter_matches(names, request.container_filter) ||
-               !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
-                                                     request.kernel_name_allowlist)) {
-      reason = ConSanAtomicPolicyReason::ContainerFilterExcluded;
+               !site_matches_kernel_allowlist(inventory, owner_descriptors, names,
+                                              request.kernel_name_allowlist)) {
+      reason = AtomicPolicyReason::ContainerFilterExcluded;
     } else if (synchronization.execution_owners(event).empty()) {
-      reason = ConSanAtomicPolicyReason::MissingExecutionOwner;
+      reason = AtomicPolicyReason::MissingExecutionOwner;
     } else if (vocabulary->ordering_requires_directional_access_window && sequence != nullptr &&
                !directional_access_window_available(synchronization.execution_owners(event),
-                                                sequence->memory_role, request)) {
-      reason = ConSanAtomicPolicyReason::MissingDirectionalAccessWindow;
-    } else if (!form || (capability != ConSanCapabilityDisposition::Supported &&
-                         capability != ConSanCapabilityDisposition::AssociatedOnly)) {
-      reason = ConSanAtomicPolicyReason::TargetCapabilityUnavailable;
+                                                    sequence->memory_role, request)) {
+      reason = AtomicPolicyReason::MissingDirectionalAccessWindow;
+    } else if (!form || (capability != CapabilityDisposition::Supported &&
+                         capability != CapabilityDisposition::AssociatedOnly)) {
+      reason = AtomicPolicyReason::TargetCapabilityUnavailable;
     } else if (conflicting_alias) {
-      kind = ConSanSiteDecisionKind::Unsupported;
-      reason = ConSanAtomicPolicyReason::ConflictingPhysicalAliases;
+      kind = SiteDecisionKind::Unsupported;
+      reason = AtomicPolicyReason::ConflictingPhysicalAliases;
       result.atomic_errors.push_back(reason);
     } else {
       reason = classify_atomic_semantics(event, sequence, ambiguous_membership);
-      if (reason == ConSanAtomicPolicyReason::None) {
+      if (reason == AtomicPolicyReason::None) {
         AtomicEncodingDecision encoding =
-            classify_atomic_encoding(inventory, event, *sequence, request.engine);
+            classify_atomic_encoding(inventory, event, *sequence, request.mode);
         reason = encoding.reason;
         lowering_form = std::move(encoding.form);
       }
       const bool semantic_not_applicable =
-          reason == ConSanAtomicPolicyReason::UnqualifiedSyncSequence ||
-          (reason == ConSanAtomicPolicyReason::UnsupportedMemoryRole && sequence &&
-           (sequence->memory_role == ConSanSyncMemoryRole::Unknown ||
-            sequence->memory_role == ConSanSyncMemoryRole::None)) ||
-          (reason == ConSanAtomicPolicyReason::UnsupportedScope && sequence &&
-           sequence->scope == ConSanMemoryScope::Wavefront);
-      kind = reason == ConSanAtomicPolicyReason::None ? ConSanSiteDecisionKind::Admitted
-             : semantic_not_applicable                ? ConSanSiteDecisionKind::NotApplicable
-                                                      : ConSanSiteDecisionKind::Unsupported;
+          reason == AtomicPolicyReason::UnqualifiedSyncSequence ||
+          (reason == AtomicPolicyReason::UnsupportedMemoryRole && sequence &&
+           (sequence->memory_role == SyncMemoryRole::Unknown ||
+            sequence->memory_role == SyncMemoryRole::None)) ||
+          (reason == AtomicPolicyReason::UnsupportedScope && sequence &&
+           sequence->scope == MemoryScope::Wavefront);
+      kind = reason == AtomicPolicyReason::None ? SiteDecisionKind::Admitted
+             : semantic_not_applicable          ? SiteDecisionKind::NotApplicable
+                                                : SiteDecisionKind::Unsupported;
     }
 
-    ConSanDynamicResultRequirement required_dynamic_result =
-        event.kind == ConSanSyncKind::Atomic ? dynamic_requirement(event)
-                                             : ConSanDynamicResultRequirement::None;
-    if (required_dynamic_result == ConSanDynamicResultRequirement::Count)
-      required_dynamic_result = ConSanDynamicResultRequirement::None;
-    const std::optional<ConSanSynchronizationAssociationId> association =
+    DynamicResultRequirement required_dynamic_result = event.kind == SyncKind::Atomic
+                                                           ? dynamic_requirement(event)
+                                                           : DynamicResultRequirement::None;
+    if (required_dynamic_result == DynamicResultRequirement::Count)
+      required_dynamic_result = DynamicResultRequirement::None;
+    const std::optional<SynchronizationAssociationId> association =
         sequence == nullptr ? std::nullopt
-                            : std::optional{ConSanSynchronizationAssociationId{sequence->identity}};
-    ConSanAtomicSiteDecision decision{
+                            : std::optional{SynchronizationAssociationId{sequence->identity}};
+    AtomicSiteDecision decision{
         .semantic_site = semantic_id,
         .kind = kind,
         .capability = capability,
         .reason = reason,
     };
 
-    if (decision.kind == ConSanSiteDecisionKind::Admitted && association) {
+    if (decision.kind == SiteDecisionKind::Admitted && association) {
       add_intent(result.plan, event.source_site, semantic_id.physical, {semantic_id},
-                 ConSanProbeIntentKind::AtomicAddressCapture, ConSanProbePosition::Before,
-                 *association, ConSanDynamicResultRequirement::None, lowering_form);
-      const bool independent_fence_owns_ordinary =
-          vocabulary->fence != ConSanProbeIntentKind::Count &&
-          event.kind == ConSanSyncKind::OrdinaryMemory &&
-          has_qualified_fence_for(synchronization, synchronization.event_id(event));
-      if (!independent_fence_owns_ordinary) {
-        add_intent(result.plan, event.source_site, semantic_id.physical, {semantic_id},
-                   vocabulary->atomic, ConSanProbePosition::After, *association,
-                   required_dynamic_result);
-      }
+                 ProbeIntentKind::AtomicAddressCapture, ProbePosition::Before, *association,
+                 DynamicResultRequirement::None, lowering_form);
+
+      add_intent(result.plan, event.source_site, semantic_id.physical, {semantic_id},
+                 vocabulary->atomic, ProbePosition::After, *association, required_dynamic_result);
     }
     result.plan.atomic_site_decisions.push_back(std::move(decision));
   }
 
-  std::map<uint64_t, std::vector<const ConSanMoiFenceCandidate *>> fence_aliases_by_site;
-  for (const ConSanMoiFenceCandidate &fence : synchronization.moi_fence_candidates) {
-    if (const ConSanSyncEvent *event = synchronization.find_event(fence.fence_event))
+  std::map<uint64_t, std::vector<const FenceCandidate *>> fence_aliases_by_site;
+  for (const FenceCandidate &fence : synchronization.fence_candidates) {
+    if (const SyncEvent *event = synchronization.find_event(fence.fence_event))
       fence_aliases_by_site[event->text_offset()].push_back(&fence);
   }
 
   for (const auto &fence_aliases : fence_aliases_by_site) {
     const auto &aliases = fence_aliases.second;
-    const ConSanMoiFenceCandidate &fence = *aliases.front();
-    const ConSanSyncEvent *fence_event = synchronization.find_event(fence.fence_event);
-    std::vector<const ConSanSyncEvent *> fence_events;
+    const FenceCandidate &fence = *aliases.front();
+    const SyncEvent *fence_event = synchronization.find_event(fence.fence_event);
+    std::vector<const SyncEvent *> fence_events;
     fence_events.reserve(aliases.size());
-    for (const ConSanMoiFenceCandidate *alias : aliases) {
-      if (const ConSanSyncEvent *event = synchronization.find_event(alias->fence_event)) {
+    for (const FenceCandidate *alias : aliases) {
+      if (const SyncEvent *event = synchronization.find_event(alias->fence_event)) {
         fence_events.push_back(event);
       }
     }
@@ -446,141 +418,92 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         fence_event == nullptr
             ? std::vector<std::string>{}
             : synchronization.source_container_names(fence_event->semantic_id.physical);
-    const ConSanCapabilityDisposition capability = consan_capability_disposition(
-        inventory.target(), request.engine, ConSanCapabilityForm::AddressedOrdinaryFence);
-    const bool conflicting_alias =
-        std::ranges::any_of(aliases, [&](const ConSanMoiFenceCandidate *alias) {
-          return !fence_policy_semantics_equal(fence, *alias);
-        });
-    ConSanFenceSiteDecision decision{
+    const CapabilityDisposition capability = capability_disposition(
+        inventory.target(), request.mode, CapabilityForm::AddressedOrdinaryFence);
+    const bool conflicting_alias = std::ranges::any_of(aliases, [&](const FenceCandidate *alias) {
+      return !fence_policy_semantics_equal(fence, *alias);
+    });
+    FenceSiteDecision decision{
         .semantic_site = fence_id,
-        .kind = ConSanSiteDecisionKind::NotApplicable,
+        .kind = SiteDecisionKind::NotApplicable,
         .capability = capability,
-        .reason = ConSanFencePolicyReason::TrackingDisabled,
+        .reason = FencePolicyReason::TrackingDisabled,
         .inventory_association = fence.association,
     };
-    const ConSanSyncSequence *fence_sequence = synchronization.find_sequence(fence.sequence);
-    const std::optional<ConSanSynchronizationAssociationId> association =
+    const SyncSequence *fence_sequence = synchronization.find_sequence(fence.sequence);
+    const std::optional<SynchronizationAssociationId> association =
         fence_sequence == nullptr
             ? std::nullopt
-            : std::optional{ConSanSynchronizationAssociationId{fence_sequence->identity}};
+            : std::optional{SynchronizationAssociationId{fence_sequence->identity}};
     const std::vector<uint64_t> owner_descriptors =
         synchronization.execution_owner_descriptors(fence_events);
 
     if (!request.tracking_enabled) {
-      decision.reason = ConSanFencePolicyReason::TrackingDisabled;
-    } else if (request.engine == ConSanCapabilityEngine::SuperCollider) {
-      decision.reason = ConSanFencePolicyReason::EngineMutationOnly;
+      decision.reason = FencePolicyReason::TrackingDisabled;
+    } else if (request.mode == Mode::SuperCollider) {
+      decision.reason = FencePolicyReason::ModeMutationOnly;
     } else if (!filter_matches(names, request.container_filter) ||
-               !consan_site_matches_kernel_allowlist(inventory, owner_descriptors, names,
-                                                     request.kernel_name_allowlist)) {
-      decision.reason = ConSanFencePolicyReason::ContainerFilterExcluded;
+               !site_matches_kernel_allowlist(inventory, owner_descriptors, names,
+                                              request.kernel_name_allowlist)) {
+      decision.reason = FencePolicyReason::ContainerFilterExcluded;
     } else if (conflicting_alias) {
-      decision.kind = ConSanSiteDecisionKind::Unsupported;
-      decision.reason = ConSanFencePolicyReason::ConflictingPhysicalAliases;
+      decision.kind = SiteDecisionKind::Unsupported;
+      decision.reason = FencePolicyReason::ConflictingPhysicalAliases;
       result.fence_errors.push_back(decision.reason);
     } else if (!fence.eligible()) {
-      decision.reason = ConSanFencePolicyReason::AssociationUnavailable;
-    } else if (capability != ConSanCapabilityDisposition::Supported &&
-               capability != ConSanCapabilityDisposition::AssociatedOnly) {
-      decision.reason = ConSanFencePolicyReason::TargetCapabilityUnavailable;
+      decision.reason = FencePolicyReason::AssociationUnavailable;
+    } else if (capability != CapabilityDisposition::Supported &&
+               capability != CapabilityDisposition::AssociatedOnly) {
+      decision.reason = FencePolicyReason::TargetCapabilityUnavailable;
     } else {
-      const ConSanSyncEvent *communication =
-          fence.communication_event ? synchronization.find_event(*fence.communication_event)
-                                    : nullptr;
+      const SyncEvent *communication = fence.communication_event
+                                           ? synchronization.find_event(*fence.communication_event)
+                                           : nullptr;
       const auto communication_decision =
           communication == nullptr
               ? result.plan.atomic_site_decisions.end()
               : std::ranges::find_if(result.plan.atomic_site_decisions,
-                                     [&](const ConSanAtomicSiteDecision &candidate) {
+                                     [&](const AtomicSiteDecision &candidate) {
                                        return candidate.semantic_site.physical ==
                                               event_semantic_id(inventory, *communication).physical;
                                      });
       const bool communication_admitted =
           communication_decision != result.plan.atomic_site_decisions.end() &&
-          communication_decision->kind == ConSanSiteDecisionKind::Admitted && association &&
+          communication_decision->kind == SiteDecisionKind::Admitted && association &&
           find_intent(result.plan, communication_decision->semantic_site, *association,
-                      ConSanProbeIntentKind::AtomicAddressCapture);
+                      ProbeIntentKind::AtomicAddressCapture);
       if (fence_event != nullptr && communication != nullptr &&
           (synchronization.execution_owners(*fence_event).empty() ||
            synchronization.execution_owners(*communication).empty())) {
-        decision.reason = ConSanFencePolicyReason::MissingExecutionOwner;
+        decision.reason = FencePolicyReason::MissingExecutionOwner;
       } else if (communication_decision != result.plan.atomic_site_decisions.end() &&
-                 communication_decision->kind == ConSanSiteDecisionKind::NotApplicable &&
+                 communication_decision->kind == SiteDecisionKind::NotApplicable &&
                  communication_decision->reason ==
-                     ConSanAtomicPolicyReason::MissingDirectionalAccessWindow) {
-        decision.reason = ConSanFencePolicyReason::CommunicationNotApplicable;
+                     AtomicPolicyReason::MissingDirectionalAccessWindow) {
+        decision.reason = FencePolicyReason::CommunicationNotApplicable;
       } else if (fence_event == nullptr || communication == nullptr || !association ||
                  !communication_admitted) {
-        decision.kind = ConSanSiteDecisionKind::Unsupported;
-        decision.reason = ConSanFencePolicyReason::MissingCommunicationEvent;
+        decision.kind = SiteDecisionKind::Unsupported;
+        decision.reason = FencePolicyReason::MissingCommunicationEvent;
       } else {
-        decision.kind = ConSanSiteDecisionKind::Admitted;
-        decision.reason = ConSanFencePolicyReason::None;
-        const ConSanProbeIntentId capture =
-            *find_intent(result.plan, communication_decision->semantic_site, *association,
-                         ConSanProbeIntentKind::AtomicAddressCapture);
-        if (vocabulary->fence != ConSanProbeIntentKind::Count) {
-          add_covered_site(result.plan, capture, fence_id);
-          add_intent(result.plan, fence_event->source_site, fence_id.physical,
-                     {communication_decision->semantic_site, fence_id}, vocabulary->fence,
-                     ConSanProbePosition::After, *association,
-                     ConSanDynamicResultRequirement::None);
-        } else {
-          std::vector<ConSanProbeIntentId> associated_intents;
-          for (const ConSanProbeIntent &intent : result.plan.probe_intents) {
-            if (intent.synchronization_association == association &&
-                intent_covers(intent, communication_decision->semantic_site)) {
-              associated_intents.push_back(intent.id);
-            }
+        decision.kind = SiteDecisionKind::Admitted;
+        decision.reason = FencePolicyReason::None;
+
+        std::vector<ProbeIntentId> associated_intents;
+        for (const ProbeIntent &intent : result.plan.probe_intents) {
+          if (intent.synchronization_association == association &&
+              intent_covers(intent, communication_decision->semantic_site)) {
+            associated_intents.push_back(intent.id);
           }
-          for (ConSanProbeIntentId id : associated_intents)
-            add_covered_site(result.plan, id, fence_id);
         }
+        for (ProbeIntentId id : associated_intents)
+          add_covered_site(result.plan, id, fence_id);
       }
     }
     result.plan.fence_site_decisions.push_back(std::move(decision));
   }
 
-  // An engine with independent fence evidence normally delegates a qualified
-  // ordinary sequence's after evidence to that fence. If a corrupt inventory
-  // claimed a qualified candidate but no usable fence decision survived, fall
-  // back to the engine's direct atomic evidence rather than publishing a
-  // before-only admitted contract.
-  if (vocabulary->fence != ConSanProbeIntentKind::Count) {
-    for (const ConSanAtomicSiteDecision &decision : result.plan.atomic_site_decisions) {
-      if (decision.kind != ConSanSiteDecisionKind::Admitted)
-        continue;
-      const ConSanSyncEvent *event = synchronization.find_event(decision.semantic_site);
-      const ConSanSyncSequence *sequence =
-          event == nullptr
-              ? nullptr
-              : synchronization.find_unique_sequence_containing(synchronization.event_id(*event));
-      if (sequence == nullptr || event == nullptr)
-        continue;
-      const ConSanSynchronizationAssociationId association{sequence->identity};
-      const std::optional<ConSanProbeIntentId> capture_id =
-          find_intent(result.plan, decision.semantic_site, association,
-                      ConSanProbeIntentKind::AtomicAddressCapture);
-      const bool has_after_evidence =
-          std::ranges::any_of(result.plan.probe_intents, [&](const ConSanProbeIntent &intent) {
-            return intent.position == ConSanProbePosition::After &&
-                   intent.synchronization_association == association &&
-                   intent_covers(intent, decision.semantic_site);
-          });
-      if (capture_id && !has_after_evidence) {
-        const ConSanProbeIntent *capture = result.plan.intent(*capture_id);
-        ConSanDynamicResultRequirement dynamic_result = dynamic_requirement(*event);
-        if (dynamic_result == ConSanDynamicResultRequirement::Count)
-          dynamic_result = ConSanDynamicResultRequirement::None;
-        add_intent(result.plan, capture->source_site, decision.semantic_site.physical,
-                   {decision.semantic_site}, vocabulary->atomic, ConSanProbePosition::After,
-                   association, dynamic_result);
-      }
-    }
-  }
-
   return result;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -6,7 +6,7 @@
 #include <optional>
 #include <string_view>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 void append_decoded_operand(std::string &summary, std::string_view name,
@@ -22,7 +22,7 @@ void append_decoded_operand(std::string &summary, std::string_view name,
 
 } // namespace
 
-std::string consan_fixed_hex(uint64_t value, unsigned digits) {
+std::string fixed_hex(uint64_t value, unsigned digits) {
   constexpr char kHex[] = "0123456789abcdef";
   std::string result(digits, '0');
   for (unsigned i = 0; i < digits; ++i) {
@@ -32,20 +32,20 @@ std::string consan_fixed_hex(uint64_t value, unsigned digits) {
   return result;
 }
 
-std::string consan_atomic_semantic_role(const ConSanAtomicSite &site) {
+std::string atomic_semantic_role(const AtomicSite &site) {
   if (site.raw_th.value_or(0) != 0 || site.returns_old_value.value_or(false))
     return "atomic-acquire-rmw";
   return "atomic-release-rmw";
 }
 
-std::string consan_barrier_decoded_operands(const ConSanBarrierSite &site, uint32_t encoding) {
-  std::string result = "encoding=0x" + consan_fixed_hex(encoding, 8);
+std::string barrier_decoded_operands(const BarrierSite &site, uint32_t encoding) {
+  std::string result = "encoding=0x" + fixed_hex(encoding, 8);
   result += ",barrier_id=";
   result += site.barrier_id ? std::to_string(*site.barrier_id) : "-";
   result += ",operand_source=";
-  result += consan_barrier_operand_source_name(site.operand_source);
+  result += barrier_operand_source_name(site.operand_source);
   result += ",scope=";
-  result += consan_barrier_scope_name(site.scope);
+  result += barrier_scope_name(site.scope);
   result += ",raw_selector=";
   result += site.raw_operand_selector ? std::to_string(*site.raw_operand_selector) : "-";
   result += ",literal_width_bits=";
@@ -57,7 +57,7 @@ std::string consan_barrier_decoded_operands(const ConSanBarrierSite &site, uint3
   return result;
 }
 
-std::string consan_atomic_decoded_operands(const ConSanAtomicSite &site) {
+std::string atomic_decoded_operands(const AtomicSite &site) {
   std::string result;
   append_decoded_operand(result, "dst_vgpr", site.destination_vgpr);
   append_decoded_operand(result, "addr_vgpr", site.address_vgpr);
@@ -79,7 +79,7 @@ std::string consan_atomic_decoded_operands(const ConSanAtomicSite &site) {
   return result.empty() ? "-" : result;
 }
 
-std::string consan_lds_decoded_operands(const ConSanAccessOperandFacts &operands) {
+std::string lds_decoded_operands(const AccessOperandFacts &operands) {
   std::string result;
   append_decoded_operand(result, "dst_vgpr", operands.destination_vgpr);
   append_decoded_operand(result, "dst_accvgpr", operands.destination_accvgpr);
@@ -89,13 +89,13 @@ std::string consan_lds_decoded_operands(const ConSanAccessOperandFacts &operands
   return result.empty() ? "-" : result;
 }
 
-std::string consan_ordinary_memory_decoded_operands(const ConSanOrdinaryMemorySite &site) {
+std::string ordinary_memory_decoded_operands(const OrdinaryMemorySite &site) {
   std::string result;
   append_decoded_operand(result, "dst_vgpr", site.destination_vgpr);
   append_decoded_operand(result, "addr_vgpr", site.address_vgpr);
   append_decoded_operand(result, "addr_sgpr", site.scalar_address_sgpr);
   append_decoded_operand(result, "value_vgpr",
-                         site.operation == ConSanOrdinaryMemoryOperation::Store
+                         site.operation == OrdinaryMemoryOperation::Store
                              ? site.data_vgpr
                              : std::optional<uint16_t>{});
   append_decoded_operand(result, "raw_saddr", site.raw_saddr);
@@ -112,4 +112,4 @@ std::string consan_ordinary_memory_decoded_operands(const ConSanOrdinaryMemorySi
   return result.empty() ? "-" : result;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

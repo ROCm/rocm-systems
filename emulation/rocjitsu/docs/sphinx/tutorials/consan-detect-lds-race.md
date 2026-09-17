@@ -103,11 +103,13 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
 ```
 
 `RJ_CONSAN_LOG=1` enables compact diagnostic output. You can also run
-the three MOI engines for structured race detection:
+ConSan for attributed race detection. For this small testcase, use the
+`max` preset to remove workgroup and cell sampling filters:
 
 ``` bash
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=inline-shadow \
+  RJ_CONSAN_MODE=default \
+  RJ_CONSAN_PRESET=max \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example
 ```
@@ -134,16 +136,16 @@ ConSan coverage ... access=... barrier=... atomic=... fence=...
 ConSan analysis verdict ... static_complete=... dynamic_complete=...
 ```
 
-When a race is detected, the Inline Shadow engine emits bounded
-diagnostic records containing:
+When retained accesses demonstrate a race, ConSan emits bounded host-built
+conflict examples containing:
 
 -   **LDS byte range** --- the four-byte-aligned cell range of the
     conflicting access.
 -   **Owner** --- the workitem-derived identity of the wave that
     performed the access.
 -   **Epoch** --- a monotonically incrementing value that advances after
-    barrier synchronization. Two accesses in the same epoch with
-    different owners and at least one write constitute a conflict.
+    barrier synchronization. Overlapping unordered accesses from different waves conflict when at least
+    one writes. Qualified atomic metadata can establish additional ordering.
 -   **Access kind** --- read or write.
 -   **Instruction offset** --- the `.text` byte offset of the
     conflicting instruction.
@@ -158,7 +160,7 @@ into a failure:
 
 ``` bash
 export RJ_CONSAN_REQUIRE_PATCH=1          # reject if no patches were applied
-export RJ_CONSAN_MOI_REQUIRE_RECORDS=1    # MOI: require visible runtime evidence
+export RJ_CONSAN_REQUIRE_RECORDS=1    # ConSan: require visible runtime evidence
 ```
 
 ## Fix the bug and verify
@@ -181,14 +183,16 @@ Recompile and rerun:
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx1201
 
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=inline-shadow \
-  RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1 \
+  RJ_CONSAN_MODE=default \
+  RJ_CONSAN_PRESET=max \
+  RJ_CONSAN_FORBID_DIAGNOSTICS=1 \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example
 ```
 
-`RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1` causes the process to fail if any
-conflict diagnostic is emitted, giving you a clear pass or fail signal.
+`RJ_CONSAN_FORBID_DIAGNOSTICS=1` causes the process to fail if any
+conflict diagnostic is emitted. Bounded retention still applies, even at
+`max`; absence of a diagnostic does not prove race freedom.
 With the barrier in place, the output should show `modified=true` with
 patched sites and zero diagnostics.
 
@@ -200,6 +204,6 @@ patched sites and zero diagnostics.
 -   See [Execution plugin system](../conceptual/execution-plugins.md)
     for an overview of rocJITsu's plugin architecture and how ConSan
     fits into the DBI hooks system.
--   Explore the other instrumentation profiles (Record/Replay, Sampled)
-    to understand the precision and overhead tradeoffs, described in
+-   Explore ConSan presets and SuperCollider to understand their coverage
+    and overhead tradeoffs, described in
     [ConSan GPU LDS sanitizer reference](../reference/consan.md).

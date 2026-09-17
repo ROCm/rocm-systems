@@ -15,15 +15,15 @@
 #include <string_view>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 [[nodiscard]] inline std::string
-consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLimit &policy,
-                                               size_t input_image_bytes) {
+patched_image_growth_policy_description(const PatchedImageGrowthLimit &policy,
+                                        size_t input_image_bytes) {
   switch (policy.kind) {
-  case ConSanPatchedImageGrowthLimitKind::AbsoluteBytes:
+  case PatchedImageGrowthLimitKind::AbsoluteBytes:
     return "absolute-bytes=" + std::to_string(policy.absolute_bytes);
-  case ConSanPatchedImageGrowthLimitKind::InputPercent:
+  case PatchedImageGrowthLimitKind::InputPercent:
     return "input-percent=" + std::to_string(policy.input_percent) +
            ", original-input-image-bytes=" + std::to_string(input_image_bytes);
   }
@@ -34,10 +34,10 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
 /// limit rejection. Other transactional patcher failures remain distinct so a
 /// malformed ELF or allocation failure is not mislabeled as a policy decision.
 [[nodiscard]] inline bool
-replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
-                    const ConSanPatchedImageGrowthLimit &growth_limit, std::string_view operation,
-                    const ConSanCodeObjectId &input_id, std::vector<std::string> &errors,
-                    std::optional<ConSanTransformFailureCause> *failure_cause = nullptr) {
+replace_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_text,
+             const PatchedImageGrowthLimit &growth_limit, std::string_view operation,
+             const CodeObjectId &input_id, std::vector<std::string> &errors,
+             std::optional<TransformFailureCause> *failure_cause = nullptr) {
   const size_t current_image_bytes = patcher.image_bytes().size();
   if (!input_id.valid()) {
     errors.emplace_back("ConSan " + std::string(operation) +
@@ -46,9 +46,9 @@ replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_tex
   }
   const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
   const auto budget =
-      consan_patched_image_growth_budget(growth_limit, input_image_bytes, current_image_bytes);
+      patched_image_growth_budget(growth_limit, input_image_bytes, current_image_bytes);
   const std::string policy =
-      consan_patched_image_growth_policy_description(growth_limit, input_image_bytes);
+      patched_image_growth_policy_description(growth_limit, input_image_bytes);
   if (!budget) {
     errors.emplace_back("ConSan " + std::string(operation) +
                         " has an invalid patched-image growth policy (" + policy + ")");
@@ -56,7 +56,7 @@ replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_tex
   }
   if (budget->already_exceeded) {
     if (failure_cause)
-      *failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
+      *failure_cause = TransformFailureCause::PatchedImageGrowthLimit;
     errors.emplace_back("ConSan " + std::string(operation) +
                         " rejected patched-image file growth: required total " +
                         std::to_string(budget->existing_growth_bytes) + " bytes, limit " +
@@ -72,7 +72,7 @@ replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_tex
 
   if (replacement.outcome() == TextReplacementOutcome::FileGrowthLimitExceeded) {
     if (failure_cause)
-      *failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
+      *failure_cause = TransformFailureCause::PatchedImageGrowthLimit;
     const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
         util::saturating_add(budget->existing_growth_bytes, transaction_growth);
@@ -113,4 +113,4 @@ replace_consan_text(CodeObjectPatcher &patcher, std::span<const uint8_t> new_tex
   return false;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

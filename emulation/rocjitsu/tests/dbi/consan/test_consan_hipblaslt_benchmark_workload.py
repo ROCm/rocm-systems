@@ -62,7 +62,7 @@ class ConSanHipblasltBenchmarkWorkloadTest(unittest.TestCase):
         )
         with mock.patch.dict(
             os.environ,
-            {"HSA_TOOLS_LIB": "/hook", "RJ_CONSAN_MODE": "sampled"},
+            {"HSA_TOOLS_LIB": "/hook", "RJ_CONSAN_MODE": "default"},
             clear=True,
         ):
             self.assertEqual(workload._instrumentation_ms(output), 123.456789)

@@ -10,7 +10,7 @@
 #include <string_view>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 std::unique_ptr<Instruction> decode_bounded_instruction(Decoder &decoder,
                                                         std::span<const uint32_t> words,
@@ -29,26 +29,26 @@ bool is_barrier_instruction(const Instruction &instruction) {
          mnemonic.find("barrier") != std::string_view::npos;
 }
 
-ConSanBarrierSite::Scope barrier_scope_for_id(int32_t barrier_id) {
+BarrierSite::Scope barrier_scope_for_id(int32_t barrier_id) {
   switch (barrier_id) {
   case -4:
   case -3:
-    return ConSanBarrierSite::Scope::Cluster;
+    return BarrierSite::Scope::Cluster;
   case -2:
   case -1:
-    return ConSanBarrierSite::Scope::Workgroup;
+    return BarrierSite::Scope::Workgroup;
   default:
-    return barrier_id >= 1 && barrier_id <= 16 ? ConSanBarrierSite::Scope::Workgroup
-                                               : ConSanBarrierSite::Scope::Unknown;
+    return barrier_id >= 1 && barrier_id <= 16 ? BarrierSite::Scope::Workgroup
+                                               : BarrierSite::Scope::Unknown;
   }
 }
 
 void decode_barrier_operand(const Instruction &instruction,
-                            std::span<const uint8_t> instruction_bytes, ConSanBarrierSite &site) {
+                            std::span<const uint8_t> instruction_bytes, BarrierSite &site) {
   if (instruction.mnemonic() == "s_barrier") {
     site.barrier_id = -1;
-    site.operand_source = ConSanBarrierSite::OperandSource::Immediate;
-    site.scope = ConSanBarrierSite::Scope::Workgroup;
+    site.operand_source = BarrierSite::OperandSource::Immediate;
+    site.scope = BarrierSite::Scope::Workgroup;
     return;
   }
   if (instruction.mnemonic() == "s_barrier_wait") {
@@ -58,7 +58,7 @@ void decode_barrier_operand(const Instruction &instruction,
     std::memcpy(&word, instruction_bytes.data(), sizeof(word));
     site.raw_simm16 = static_cast<uint16_t>(word);
     site.barrier_id = static_cast<int16_t>(word & 0xffffu);
-    site.operand_source = ConSanBarrierSite::OperandSource::Immediate;
+    site.operand_source = BarrierSite::OperandSource::Immediate;
     site.scope = barrier_scope_for_id(*site.barrier_id);
     return;
   }
@@ -82,7 +82,7 @@ void decode_barrier_operand(const Instruction &instruction,
   const uint32_t source = word & 0xffu;
   site.raw_operand_selector = source;
   if (source == 125u) {
-    site.operand_source = ConSanBarrierSite::OperandSource::DynamicM0;
+    site.operand_source = BarrierSite::OperandSource::DynamicM0;
     return;
   }
   if (source >= 128u && source <= 192u) {
@@ -93,7 +93,7 @@ void decode_barrier_operand(const Instruction &instruction,
     int32_t literal = 0;
     std::memcpy(&literal, instruction_bytes.data() + sizeof(uint32_t), sizeof(literal));
     site.barrier_id = literal;
-    site.operand_source = ConSanBarrierSite::OperandSource::Literal32;
+    site.operand_source = BarrierSite::OperandSource::Literal32;
     site.literal_width_bits = 32u;
     site.literal_value = static_cast<uint32_t>(literal);
     site.scope = barrier_scope_for_id(*site.barrier_id);
@@ -101,14 +101,14 @@ void decode_barrier_operand(const Instruction &instruction,
   } else if (source == 254u && instruction_bytes.size() >= 3u * sizeof(uint32_t)) {
     uint64_t literal = 0;
     std::memcpy(&literal, instruction_bytes.data() + sizeof(uint32_t), sizeof(literal));
-    site.operand_source = ConSanBarrierSite::OperandSource::Literal64;
+    site.operand_source = BarrierSite::OperandSource::Literal64;
     site.literal_width_bits = 64u;
     site.literal_value = literal;
     return;
   } else {
     return;
   }
-  site.operand_source = ConSanBarrierSite::OperandSource::Immediate;
+  site.operand_source = BarrierSite::OperandSource::Immediate;
   site.scope = barrier_scope_for_id(*site.barrier_id);
 }
 
@@ -123,4 +123,4 @@ uint32_t s_clause_following_instruction_count(const Instruction &instruction) {
   return (word & 0xffffu) + 1u;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

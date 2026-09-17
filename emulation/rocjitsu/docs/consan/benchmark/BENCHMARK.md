@@ -14,7 +14,7 @@ The prepared MI350X campaign invocation and evidence layout are in
 
 ## Measurement contract
 
-The runner executes a native baseline and all four ConSan modes on one physical
+The runner executes a native baseline and both ConSan modes on one physical
 GPU. GPU work must be serialized: do not run two cells concurrently, and use
 `-j1` if the surrounding test driver has a job-count option. Each cell runs in a
 fresh process and performs the same bounded, synchronized operation twice.
@@ -116,7 +116,7 @@ For each workload, use this order:
 1. `rocprofv3` native kernel-inventory pass and allowlist conversion;
 2. two native timing processes, each containing Run1 and Run2, used immediately
    to establish a separate median for each run ordinal;
-3. `SuperCollider`, `RecordReplay`, `Sampled`, and `InlineShadow`, updating the
+3. `SuperCollider` and `ConSan`, updating the
    target status row after each completed mode; and
 4. one final native timing sample used only as a post-validation drift check.
 
@@ -150,8 +150,8 @@ values, then reports two values per ConSan mode:
 
 The first operation is therefore both a correctness-checked warm-up and part of
 the reported Startup latency; none of its cost is discarded. Its host evidence
-analysis is included there as well. For the three MOI modes, the harness uses
-`RJ_CONSAN_MOI_EPOCH_ANALYSIS=manual` and keeps an explicit analysis window open
+analysis is included there as well. For ConSan, the harness uses
+`RJ_CONSAN_EPOCH_ANALYSIS=manual` and keeps an explicit analysis window open
 from immediately before Run1 through its final synchronization. This includes
 every internal synchronized epoch belonging to Run1. Opaque subprocess
 payloads that cannot call the window API select their first automatic report

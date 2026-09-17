@@ -12,39 +12,39 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_program_analysis_target_detail {
+namespace rocjitsu::consan::program_analysis_target_detail {
 
-ConSanCacheOperationEncoding classify_cdna5_cache_operation(std::string_view mnemonic) {
+CacheOperationEncoding classify_cdna5_cache_operation(std::string_view mnemonic) {
   return classify_rdna4_cdna5_cache_operation(mnemonic, false);
 }
 
-std::optional<ConSanScratchComponentEncoding>
+std::optional<ScratchComponentEncoding>
 decode_cdna5_scratch_component(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_scratch_component<cdna5::VscratchMachineInst>(instruction);
 }
 
-std::optional<ConSanLaneTransferEncoding>
+std::optional<LaneTransferEncoding>
 decode_cdna5_lane_transfer(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_lane_transfer<cdna5::Vop3MachineInst>(instruction, 0);
 }
 
-ConSanVectorMemoryDecode decode_cdna5_flat_memory(std::span<const uint8_t> instruction) {
+VectorMemoryDecode decode_cdna5_flat_memory(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_vector_memory<cdna5::VflatMachineInst>(
       instruction, cdna5::OPR_SREG_NULL, 0xecu, false, 0u);
 }
 
-ConSanVectorMemoryDecode decode_cdna5_global_memory(std::span<const uint8_t> instruction) {
+VectorMemoryDecode decode_cdna5_global_memory(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_vector_memory<cdna5::VglobalMachineInst>(
       instruction, cdna5::OPR_SREG_NULL, 0xeeu, false, 0u);
 }
 
-ConSanBufferMemoryDecode decode_cdna5_buffer_memory(std::span<const uint8_t> instruction) {
+BufferMemoryDecode decode_cdna5_buffer_memory(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna5::VbufferMachineInst))
-    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+    return {.status = TargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   cdna5::VbufferMachineInst raw{};
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   return {
-      .status = ConSanTargetDecodeStatus::Decoded,
+      .status = TargetDecodeStatus::Decoded,
       .encoding =
           {
               .raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset)),
@@ -67,7 +67,7 @@ ConSanBufferMemoryDecode decode_cdna5_buffer_memory(std::span<const uint8_t> ins
   };
 }
 
-std::optional<ConSanDirectLdsTransferEncoding>
+std::optional<DirectLdsTransferEncoding>
 decode_cdna5_direct_lds_transfer(std::string_view mnemonic, std::span<const uint8_t> instruction) {
   const bool async_load = mnemonic.starts_with("global_load_async_to_lds_b");
   const bool async_store = mnemonic.starts_with("global_store_async_from_lds_b");
@@ -79,38 +79,35 @@ decode_cdna5_direct_lds_transfer(std::string_view mnemonic, std::span<const uint
   // reproduce VGLOBAL's signed immediate, so admit only the exact zero form.
   if (sign_extend_24(static_cast<uint32_t>(raw.ioffset)) != 0)
     return std::nullopt;
-  return ConSanDirectLdsTransferEncoding{
+  return DirectLdsTransferEncoding{
       .writes_lds = async_load,
       .address_source_operand = static_cast<uint8_t>(async_load ? 0u : 1u),
       .memory_address_vgpr = std::nullopt,
   };
 }
 
-bool decode_cdna5_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+bool decode_cdna5_atomic_site(AtomicSite &site, std::string_view mnemonic,
                               std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_atomic_site<cdna5::VdsMachineInst, cdna5::VflatMachineInst,
                                         cdna5::VglobalMachineInst, cdna5::VscratchMachineInst,
                                         cdna5::VbufferMachineInst>(site, mnemonic, instruction);
 }
 
-} // namespace rocjitsu::consan_program_analysis_target_detail
+} // namespace rocjitsu::consan::program_analysis_target_detail
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-extern const ConSanProgramAnalysisTargetOperations kConSanCdna5ProgramAnalysisOperations = {
-    .classify_cache_operation =
-        consan_program_analysis_target_detail::classify_cdna5_cache_operation,
+extern const ProgramAnalysisTargetOperations kCdna5ProgramAnalysisOperations = {
+    .classify_cache_operation = program_analysis_target_detail::classify_cdna5_cache_operation,
     .classify_wait_instruction =
-        consan_program_analysis_target_detail::classify_rdna4_cdna5_wait_instruction,
-    .decode_scratch_component =
-        consan_program_analysis_target_detail::decode_cdna5_scratch_component,
-    .decode_lane_transfer = consan_program_analysis_target_detail::decode_cdna5_lane_transfer,
-    .decode_flat_memory = consan_program_analysis_target_detail::decode_cdna5_flat_memory,
-    .decode_global_memory = consan_program_analysis_target_detail::decode_cdna5_global_memory,
-    .decode_buffer_memory = consan_program_analysis_target_detail::decode_cdna5_buffer_memory,
-    .decode_direct_lds_transfer =
-        consan_program_analysis_target_detail::decode_cdna5_direct_lds_transfer,
-    .decode_atomic_site = consan_program_analysis_target_detail::decode_cdna5_atomic_site,
+        program_analysis_target_detail::classify_rdna4_cdna5_wait_instruction,
+    .decode_scratch_component = program_analysis_target_detail::decode_cdna5_scratch_component,
+    .decode_lane_transfer = program_analysis_target_detail::decode_cdna5_lane_transfer,
+    .decode_flat_memory = program_analysis_target_detail::decode_cdna5_flat_memory,
+    .decode_global_memory = program_analysis_target_detail::decode_cdna5_global_memory,
+    .decode_buffer_memory = program_analysis_target_detail::decode_cdna5_buffer_memory,
+    .decode_direct_lds_transfer = program_analysis_target_detail::decode_cdna5_direct_lds_transfer,
+    .decode_atomic_site = program_analysis_target_detail::decode_cdna5_atomic_site,
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

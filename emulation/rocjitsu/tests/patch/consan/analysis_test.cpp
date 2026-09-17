@@ -3,8 +3,8 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
-#include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
-#include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/consan_access_target.h"
+#include "rocjitsu/code/patch/consan/consan_packed_fields.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -13,40 +13,39 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
-ConSanVectorMemoryDecode decode_hypothetical_target_flat(std::span<const uint8_t>) {
-  ConSanVectorMemoryDecode decoded;
-  decoded.status = ConSanTargetDecodeStatus::Decoded;
+VectorMemoryDecode decode_hypothetical_target_flat(std::span<const uint8_t>) {
+  VectorMemoryDecode decoded;
+  decoded.status = TargetDecodeStatus::Decoded;
   decoded.encoding.raw_op = 0x5aU;
   return decoded;
 }
 
 template <size_t N>
-ConSanVectorMemoryDecode decode_flat_words(const std::array<uint32_t, N> &words,
-                                           rj_code_arch_t arch) {
-  return decode_consan_flat_memory_encoding(
+VectorMemoryDecode decode_flat_words(const std::array<uint32_t, N> &words, rj_code_arch_t arch) {
+  return decode_flat_memory_encoding(
       {reinterpret_cast<const uint8_t *>(words.data()), words.size() * sizeof(uint32_t)}, arch);
 }
 
 TEST(ConSan, MemoryScopeIsOneNormalizedCrossTargetContract) {
-  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::Wavefront));
-  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::Workgroup));
-  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::Agent));
-  EXPECT_TRUE(consan_memory_scope_is_supported(ConSanMemoryScope::System));
-  EXPECT_FALSE(consan_memory_scope_is_supported(static_cast<ConSanMemoryScope>(4u)));
-  EXPECT_FALSE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::Workgroup));
-  EXPECT_TRUE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::Agent));
-  EXPECT_TRUE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::System));
+  EXPECT_TRUE(memory_scope_is_supported(MemoryScope::Wavefront));
+  EXPECT_TRUE(memory_scope_is_supported(MemoryScope::Workgroup));
+  EXPECT_TRUE(memory_scope_is_supported(MemoryScope::Agent));
+  EXPECT_TRUE(memory_scope_is_supported(MemoryScope::System));
+  EXPECT_FALSE(memory_scope_is_supported(static_cast<MemoryScope>(4u)));
+  EXPECT_FALSE(memory_scope_is_agent_or_system(MemoryScope::Workgroup));
+  EXPECT_TRUE(memory_scope_is_agent_or_system(MemoryScope::Agent));
+  EXPECT_TRUE(memory_scope_is_agent_or_system(MemoryScope::System));
 }
 
 TEST(ConSan, Rdna4Cdna5TargetsPublishRawAndNormalizedScopeIndependently) {
   constexpr std::array expected = {
-      ConSanMemoryScope::Wavefront,
-      ConSanMemoryScope::Workgroup,
-      ConSanMemoryScope::Agent,
-      ConSanMemoryScope::System,
+      MemoryScope::Wavefront,
+      MemoryScope::Workgroup,
+      MemoryScope::Agent,
+      MemoryScope::System,
   };
   for (uint8_t raw_scope = 0; raw_scope < expected.size(); ++raw_scope) {
     SCOPED_TRACE(raw_scope);
@@ -61,7 +60,7 @@ TEST(ConSan, Rdna4Cdna5TargetsPublishRawAndNormalizedScopeIndependently) {
                     decode_flat_words(rdna4_load, ROCJITSU_CODE_ARCH_RDNA4)},
           std::pair{ROCJITSU_CODE_ARCH_CDNA5,
                     decode_flat_words(cdna5_load, ROCJITSU_CODE_ARCH_CDNA5)}}) {
-      ASSERT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded) << arch;
+      ASSERT_EQ(decoded.status, TargetDecodeStatus::Decoded) << arch;
       EXPECT_EQ(decoded.encoding.raw_scope, raw_scope) << arch;
       EXPECT_EQ(decoded.encoding.scope, expected[raw_scope]) << arch;
     }
@@ -69,16 +68,16 @@ TEST(ConSan, Rdna4Cdna5TargetsPublishRawAndNormalizedScopeIndependently) {
     const auto buffer = cdna5::build_vbuffer(
         cdna5::kBufferLoadB32Vbuffer,
         {.soffset = 4u, .vdata = 2u, .rsrc = 8u, .scope = raw_scope, .vaddr = 1u});
-    const ConSanBufferMemoryDecode buffer_decoded = decode_consan_buffer_memory_encoding(
+    const BufferMemoryDecode buffer_decoded = decode_buffer_memory_encoding(
         {reinterpret_cast<const uint8_t *>(buffer.data()), sizeof(buffer)},
         ROCJITSU_CODE_ARCH_CDNA5);
-    ASSERT_EQ(buffer_decoded.status, ConSanTargetDecodeStatus::Decoded);
+    ASSERT_EQ(buffer_decoded.status, TargetDecodeStatus::Decoded);
     EXPECT_EQ(buffer_decoded.encoding.raw_scope, raw_scope);
     EXPECT_EQ(buffer_decoded.encoding.scope, expected[raw_scope]);
 
     const auto check_atomic = [&](const auto &words, rj_code_arch_t arch) {
-      ConSanAtomicSite site;
-      ASSERT_TRUE(decode_consan_atomic_site_encoding(
+      AtomicSite site;
+      ASSERT_TRUE(decode_atomic_site_encoding(
           site, "flat_atomic_add_u32",
           {reinterpret_cast<const uint8_t *>(words.data()), sizeof(words)}, arch));
       EXPECT_EQ(site.raw_scope, raw_scope) << arch;
@@ -103,38 +102,37 @@ TEST(ConSan, Rdna4Cdna5TargetsPublishRawAndNormalizedScopeIndependently) {
 
 TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
   enum class HypotheticalTargetKey : uint8_t { GfxFuture, GfxFutureSibling, Unregistered };
-  const ConSanProgramAnalysisTargetOperations operations{
+  const ProgramAnalysisTargetOperations operations{
       .decode_flat_memory = decode_hypothetical_target_flat,
   };
-  const ConSanProgramAnalysisTargetOperations sibling_operations{
+  const ProgramAnalysisTargetOperations sibling_operations{
       .classify_cache_operation =
           [](std::string_view) {
-            return ConSanCacheOperationEncoding{.operation = ConSanCacheOperation::Release};
+            return CacheOperationEncoding{.operation = CacheOperation::Release};
           },
   };
   const std::array registrations{
-      ConSanProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
-          HypotheticalTargetKey::GfxFuture, &operations},
-      ConSanProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
+      ProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{HypotheticalTargetKey::GfxFuture,
+                                                                  &operations},
+      ProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
           HypotheticalTargetKey::GfxFutureSibling, &sibling_operations},
   };
 
-  const ConSanProgramAnalysisTargetOperations *selected =
-      find_consan_program_analysis_target_operations<HypotheticalTargetKey>(
+  const ProgramAnalysisTargetOperations *selected =
+      find_program_analysis_target_operations<HypotheticalTargetKey>(
           registrations, HypotheticalTargetKey::GfxFuture);
   ASSERT_EQ(selected, &operations);
   ASSERT_NE(selected->decode_flat_memory, nullptr);
-  const ConSanVectorMemoryDecode decoded = selected->decode_flat_memory({});
-  EXPECT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded);
+  const VectorMemoryDecode decoded = selected->decode_flat_memory({});
+  EXPECT_EQ(decoded.status, TargetDecodeStatus::Decoded);
   EXPECT_EQ(decoded.encoding.raw_op, 0x5aU);
 
-  const auto *sibling = find_consan_program_analysis_target_operations<HypotheticalTargetKey>(
+  const auto *sibling = find_program_analysis_target_operations<HypotheticalTargetKey>(
       registrations, HypotheticalTargetKey::GfxFutureSibling);
   ASSERT_EQ(sibling, &sibling_operations);
   ASSERT_NE(sibling->classify_cache_operation, nullptr);
-  EXPECT_EQ(sibling->classify_cache_operation("future_release").operation,
-            ConSanCacheOperation::Release);
-  EXPECT_EQ(find_consan_program_analysis_target_operations<HypotheticalTargetKey>(
+  EXPECT_EQ(sibling->classify_cache_operation("future_release").operation, CacheOperation::Release);
+  EXPECT_EQ(find_program_analysis_target_operations<HypotheticalTargetKey>(
                 registrations, HypotheticalTargetKey::Unregistered),
             nullptr);
 }
@@ -142,18 +140,18 @@ TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
 TEST(ConSan, AtomicMnemonicWidthConventionIsTargetOwned) {
   for (const rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3}) {
-    EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add", arch), 32u) << arch;
-    EXPECT_EQ(classify_consan_atomic_width_bits("global_atomic_add", arch), 32u) << arch;
+    EXPECT_EQ(classify_atomic_width_bits("flat_atomic_add", arch), 32u) << arch;
+    EXPECT_EQ(classify_atomic_width_bits("global_atomic_add", arch), 32u) << arch;
   }
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add", arch), 0u) << arch;
-    EXPECT_EQ(classify_consan_atomic_width_bits("global_atomic_add", arch), 0u) << arch;
+    EXPECT_EQ(classify_atomic_width_bits("flat_atomic_add", arch), 0u) << arch;
+    EXPECT_EQ(classify_atomic_width_bits("global_atomic_add", arch), 0u) << arch;
   }
   for (const rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
         ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    EXPECT_EQ(classify_consan_atomic_width_bits("flat_atomic_add_u32", arch), 32u) << arch;
-    EXPECT_EQ(classify_consan_atomic_width_bits("ds_add_u64", arch), 64u) << arch;
+    EXPECT_EQ(classify_atomic_width_bits("flat_atomic_add_u32", arch), 32u) << arch;
+    EXPECT_EQ(classify_atomic_width_bits("ds_add_u64", arch), 64u) << arch;
   }
 }
 
@@ -179,7 +177,7 @@ TEST(ConSan, EveryTargetNormalizesItsWorkgroupAcquireOrdering) {
       std::pair{ROCJITSU_CODE_ARCH_CDNA5, decode_flat_words(gfx1250, ROCJITSU_CODE_ARCH_CDNA5)},
   };
   for (const auto &[arch, decoded] : cases) {
-    EXPECT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded) << arch;
+    EXPECT_EQ(decoded.status, TargetDecodeStatus::Decoded) << arch;
     EXPECT_TRUE(decoded.encoding.workgroup_acquire_ordering) << arch;
   }
 
@@ -196,10 +194,10 @@ TEST(ConSan, EveryTargetNormalizesItsWorkgroupAcquireOrdering) {
 }
 
 TEST(ConSan, EveryTargetOwnsItsCacheOperationVocabulary) {
-  using Operation = ConSanCacheOperation;
+  using Operation = CacheOperation;
   const auto expect = [](rj_code_arch_t arch, std::string_view mnemonic, Operation operation,
                          bool ordinary_mutation = false) {
-    const ConSanCacheOperationEncoding encoding = classify_consan_cache_operation(mnemonic, arch);
+    const CacheOperationEncoding encoding = classify_cache_operation(mnemonic, arch);
     EXPECT_EQ(encoding.operation, operation) << arch << ": " << mnemonic;
     EXPECT_EQ(encoding.ordinary_acquire_mutation_supported, ordinary_mutation)
         << arch << ": " << mnemonic;
@@ -230,7 +228,7 @@ TEST(ConSan, EveryTargetOwnsItsCacheOperationVocabulary) {
 
 TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   namespace ib = instrumentation;
-  const auto is_exact_zero = [](const ConSanWaitInstructionEncoding &wait) {
+  const auto is_exact_zero = [](const WaitInstructionEncoding &wait) {
     return wait.drains_load || wait.drains_store || wait.drains_lds;
   };
   constexpr std::array kArchitectures = {
@@ -241,8 +239,7 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   for (const rj_code_arch_t arch : kArchitectures) {
     const auto flat_load = ib::build_s_wait_flat_load0(arch);
     ASSERT_TRUE(flat_load) << arch;
-    const ConSanWaitInstructionEncoding wait =
-        classify_consan_wait_instruction({}, *flat_load, arch);
+    const WaitInstructionEncoding wait = classify_wait_instruction({}, *flat_load, arch);
     EXPECT_TRUE(is_exact_zero(wait)) << arch;
     EXPECT_TRUE(wait.drains_load) << arch;
     EXPECT_TRUE(wait.drains_lds) << arch;
@@ -252,7 +249,7 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     const auto store = ib::build_s_wait_global_store0(arch);
     ASSERT_TRUE(store) << arch;
-    const ConSanWaitInstructionEncoding wait = classify_consan_wait_instruction({}, *store, arch);
+    const WaitInstructionEncoding wait = classify_wait_instruction({}, *store, arch);
     EXPECT_TRUE(is_exact_zero(wait)) << arch;
     EXPECT_TRUE(wait.drains_store) << arch;
     EXPECT_FALSE(wait.release_boundary) << arch;
@@ -260,14 +257,14 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
 
   const auto rdna3_release_wait = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_TRUE(rdna3_release_wait);
-  const ConSanWaitInstructionEncoding rdna3 = classify_consan_wait_instruction(
-      "s_waitcnt_vscnt", *rdna3_release_wait, ROCJITSU_CODE_ARCH_RDNA3);
+  const WaitInstructionEncoding rdna3 =
+      classify_wait_instruction("s_waitcnt_vscnt", *rdna3_release_wait, ROCJITSU_CODE_ARCH_RDNA3);
   EXPECT_TRUE(rdna3.bounded_release_counter_form);
   EXPECT_TRUE(is_exact_zero(rdna3));
   EXPECT_TRUE(rdna3.drains_store);
   EXPECT_TRUE(rdna3.drains_lds || rdna3.release_boundary);
   EXPECT_TRUE(rdna3.release_boundary);
-  const ConSanWaitInstructionEncoding rdna3_nonzero = classify_consan_wait_instruction(
+  const WaitInstructionEncoding rdna3_nonzero = classify_wait_instruction(
       "s_waitcnt_vscnt", *rdna3_release_wait | 1u, ROCJITSU_CODE_ARCH_RDNA3);
   EXPECT_TRUE(rdna3_nonzero.bounded_release_counter_form);
   EXPECT_FALSE(is_exact_zero(rdna3_nonzero));
@@ -278,22 +275,22 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
     const auto store_lds = build_s_wait_storecnt_dscnt0(arch);
     ASSERT_TRUE(store) << arch;
     ASSERT_TRUE(store_lds) << arch;
-    const ConSanWaitInstructionEncoding release =
-        classify_consan_wait_instruction("s_wait_storecnt", *store, arch);
+    const WaitInstructionEncoding release =
+        classify_wait_instruction("s_wait_storecnt", *store, arch);
     EXPECT_TRUE(release.bounded_release_counter_form) << arch;
     EXPECT_TRUE(is_exact_zero(release)) << arch;
     EXPECT_TRUE(release.drains_store) << arch;
     EXPECT_FALSE(release.drains_lds) << arch;
     EXPECT_TRUE(release.drains_lds || release.release_boundary) << arch;
     EXPECT_TRUE(release.release_boundary) << arch;
-    const ConSanWaitInstructionEncoding release_lds =
-        classify_consan_wait_instruction("s_wait_storecnt_dscnt", *store_lds, arch);
+    const WaitInstructionEncoding release_lds =
+        classify_wait_instruction("s_wait_storecnt_dscnt", *store_lds, arch);
     EXPECT_TRUE(is_exact_zero(release_lds)) << arch;
     EXPECT_TRUE(release_lds.drains_store) << arch;
     EXPECT_TRUE(release_lds.drains_lds) << arch;
     EXPECT_TRUE(release_lds.release_boundary) << arch;
-    const ConSanWaitInstructionEncoding nonzero =
-        classify_consan_wait_instruction("s_wait_storecnt", *store | 1u, arch);
+    const WaitInstructionEncoding nonzero =
+        classify_wait_instruction("s_wait_storecnt", *store | 1u, arch);
     EXPECT_TRUE(nonzero.bounded_release_counter_form) << arch;
     EXPECT_FALSE(is_exact_zero(nonzero)) << arch;
     EXPECT_FALSE(nonzero.release_boundary) << arch;
@@ -329,29 +326,29 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
       unsupported_nonzero[2],
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  TestOptions options = test_options();
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(words, "global_async_to_lds_inventory"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_write_count, 4u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 4u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 4u);
   constexpr std::array<uint32_t, 4> expected_widths = {8u, 32u, 64u, 128u};
   constexpr std::array<uint16_t, 4> expected_addresses = {7u, 9u, 11u, 13u};
   for (size_t index = 0; index < expected_widths.size(); ++index) {
-    const ConSanProgramSite &site = result.program_inventory.access_sites()[index];
-    EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
-    EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
+    const ProgramSite &site = result.program_inventory.access_sites()[index];
+    EXPECT_EQ(site.kind, LdsAccessKind::Write);
+    EXPECT_EQ(site.origin, AccessOrigin::DirectToLds);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_EQ(site.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(site.operands.address_vgpr, expected_addresses[index]);
-    const ConSanProgramSite candidate = test_admitted_accesses(result)[index];
-    EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
-    EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
+    const ProgramSite candidate = test_admitted_accesses(result)[index];
+    EXPECT_EQ(candidate.origin, AccessOrigin::DirectToLds);
+    EXPECT_EQ(candidate.kind, LdsAccessKind::Write);
     EXPECT_EQ(candidate.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
   }
@@ -387,28 +384,28 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
       unsupported_nonzero[2],
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  TestOptions options = test_options();
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(words, "global_async_from_lds_inventory"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_read_count, 4u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 4u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 4u);
   constexpr std::array<uint32_t, 4> expected_widths = {8u, 32u, 64u, 128u};
   constexpr std::array<uint16_t, 4> expected_addresses = {11u, 12u, 13u, 14u};
   for (size_t index = 0; index < expected_widths.size(); ++index) {
-    const ConSanProgramSite &site = result.program_inventory.access_sites()[index];
-    EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
-    EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
+    const ProgramSite &site = result.program_inventory.access_sites()[index];
+    EXPECT_EQ(site.kind, LdsAccessKind::Read);
+    EXPECT_EQ(site.origin, AccessOrigin::DirectToLds);
     EXPECT_TRUE(site.lowering.replay_guest_access.available());
     EXPECT_EQ(site.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(site.operands.address_vgpr, expected_addresses[index]);
-    const ConSanProgramSite candidate = test_admitted_accesses(result)[index];
-    EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
+    const ProgramSite candidate = test_admitted_accesses(result)[index];
+    EXPECT_EQ(candidate.kind, LdsAccessKind::Read);
     EXPECT_EQ(candidate.decoded_width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.operands.address_vgpr, expected_addresses[index]);
   }
@@ -436,19 +433,19 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
                                           ordinary_load[0],
                                           ordinary_load[1],
                                           build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
-  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  TestOptions options = test_options();
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(words, "direct_to_lds_inventory"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_write_count, 2u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
-  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Write);
-  EXPECT_TRUE(result.program_inventory.access_sites()[0].origin == ConSanAccessOrigin::DirectToLds);
+  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, LdsAccessKind::Write);
+  EXPECT_TRUE(result.program_inventory.access_sites()[0].origin == AccessOrigin::DirectToLds);
   EXPECT_EQ(result.program_inventory.access_sites()[0].decoded_width_bits, 32u);
   EXPECT_FALSE(result.program_inventory.access_sites()[0].operands.address_vgpr.has_value());
   EXPECT_EQ(result.program_inventory.access_sites()[0].operands.direct_memory_address_vgpr, 3u);
@@ -457,9 +454,9 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   EXPECT_EQ(result.program_inventory.access_sites()[1].operands.direct_memory_address_vgpr, 4u);
   for (const auto &site : result.program_inventory.access_sites())
     EXPECT_EQ(site.operands.direct_m0_address_mask, 0x3ffffu);
-  for (const ConSanProgramSite &candidate : test_admitted_accesses(result)) {
-    EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
-    EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
+  for (const ProgramSite &candidate : test_admitted_accesses(result)) {
+    EXPECT_EQ(candidate.origin, AccessOrigin::DirectToLds);
+    EXPECT_EQ(candidate.kind, LdsAccessKind::Write);
   }
 }
 
@@ -469,16 +466,15 @@ TEST(ConSan, InventoriesGfx950GlobalLoadLdsDwordx4) {
   // opcode 125 has no corresponding FLAT opcode in the vendor MR ISA.
   const std::array<uint32_t, 3> words = {0xDDF48000u, 0x007F0036u,
                                          build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
-  const ConSanTransformArtifacts result =
-      test_lower_consan(make_cdna4_lds_code_object(words, "gfx950_global_load_lds_dwordx4"),
-                        moi_options(ConSanMoiEngine::RecordReplay));
+  const TransformArtifacts result = test_lower_consan(
+      make_cdna4_lds_code_object(words, "gfx950_global_load_lds_dwordx4"), test_options());
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-  const ConSanProgramSite &site = result.program_inventory.access_sites().front();
+  const ProgramSite &site = result.program_inventory.access_sites().front();
   EXPECT_EQ(site.decoded_site().mnemonic, "global_load_lds_dwordx4");
-  EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
-  EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
+  EXPECT_EQ(site.kind, LdsAccessKind::Write);
+  EXPECT_EQ(site.origin, AccessOrigin::DirectToLds);
   EXPECT_EQ(site.decoded_width_bits, 128u);
   EXPECT_FALSE(site.operands.address_vgpr.has_value());
   EXPECT_EQ(site.operands.direct_memory_address_vgpr, 54u);
@@ -515,10 +511,10 @@ TEST(ConSan, Gfx950GlobalDirectLdsDecodePreservesDependenciesAndRejectsReservedF
 }
 
 TEST(ConSan, Gfx950DirectLdsAddressExecutesMaskedM0OffsetAndPhysicalLaneStride) {
-  ConSanProgramSite site;
+  ProgramSite site;
   site.lowering.form.emplace();
   auto &form = *site.lowering.form;
-  form.kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  form.kind = AccessLoweringFormKind::DirectToLdsLaneAddressed;
   form.direct_m0_address_mask = 0x3fffcu;
   amdgpu::GpuMemory memory("consan_direct_lds_address_mem");
   amdgpu::L2Cache l2("consan_direct_lds_address_l2");
@@ -541,8 +537,8 @@ TEST(ConSan, Gfx950DirectLdsAddressExecutesMaskedM0OffsetAndPhysicalLaneStride) 
       form.element_width_bits = width;
       form.immediate_byte_offset = offset;
       std::vector<uint32_t> words;
-      ASSERT_TRUE(consan_moi_impl::append_materialize_direct_to_lds_address(words, site, 20u, 21u,
-                                                                            30u, config.arch));
+      ASSERT_TRUE(detail::append_materialize_direct_to_lds_address(words, site, 20u, 21u, 30u,
+                                                                   config.arch));
       for (size_t i = 0; i < words.size(); ++i)
         memory.write32(i * sizeof(uint32_t), words[i]);
       wave->pc = 0u;
@@ -573,10 +569,10 @@ TEST(ConSan, Gfx950DirectLdsAddressExecutesMaskedM0OffsetAndPhysicalLaneStride) 
 }
 
 TEST(ConSan, Gfx950DirectLdsAddressPreservesInactiveSpillVictims) {
-  ConSanProgramSite site;
+  ProgramSite site;
   site.lowering.form.emplace();
   auto &form = *site.lowering.form;
-  form.kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  form.kind = AccessLoweringFormKind::DirectToLdsLaneAddressed;
   form.direct_m0_address_mask = 0x3fffcu;
   amdgpu::GpuMemory memory("consan_direct_lds_address_mem");
   amdgpu::L2Cache l2("consan_direct_lds_address_l2");
@@ -599,8 +595,8 @@ TEST(ConSan, Gfx950DirectLdsAddressPreservesInactiveSpillVictims) {
       form.element_width_bits = width;
       form.immediate_byte_offset = offset;
       std::vector<uint32_t> words;
-      ASSERT_TRUE(consan_moi_impl::append_materialize_direct_to_lds_address(words, site, 20u, 21u,
-                                                                            30u, config.arch));
+      ASSERT_TRUE(detail::append_materialize_direct_to_lds_address(words, site, 20u, 21u, 30u,
+                                                                   config.arch));
       for (size_t i = 0; i < words.size(); ++i)
         memory.write32(i * sizeof(uint32_t), words[i]);
       for (uint32_t lane = 0; lane < 64u; ++lane) {
@@ -640,64 +636,6 @@ TEST(ConSan, Gfx950DirectLdsAddressPreservesInactiveSpillVictims) {
   wave->halt();
 }
 
-TEST(ConSan, InlineBorrowedOwnerPreservesInactiveLanesAndEmptyExec) {
-  amdgpu::GpuMemory memory("consan_inline_owner_mem");
-  amdgpu::L2Cache l2("consan_inline_owner_l2");
-  l2.set_backing_memory(&memory);
-  amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
-  config.num_wf_slots = 1;
-  config.sgprs_per_wf = 106;
-  config.vgprs_per_wf = 256;
-  config.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("consan_inline_owner", config, &memory, &l2);
-  ASSERT_NE(cu, nullptr);
-  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
-  ASSERT_NE(wave, nullptr);
-  const consan_moi_impl::MoiInlineShadowOwnerFieldPlan plan{
-      .owner_vgpr = std::nullopt,
-      .persistent_owner_sgpr = std::nullopt,
-      .automatic_private_epoch = true,
-      .private_owner_source = ConSanMoiOwnerSource::HwId,
-      .resident_wave_owner_sgpr = 30u,
-      .borrowed_resident_wave_owner_sgpr = true,
-  };
-  std::vector<uint32_t> words;
-  std::vector<std::string> errors;
-  ASSERT_TRUE(consan_moi_impl::append_inline_shadow_owner_field(words, plan, 20u, 22u, 21u,
-                                                                config.arch, std::nullopt, errors))
-      << testing::PrintToString(errors);
-  for (size_t i = 0; i < words.size(); ++i)
-    memory.write32(i * sizeof(uint32_t), words[i]);
-  for (const uint64_t exec :
-       {uint64_t{0}, uint64_t{1} << 31u, uint64_t{1} << 63u, ~uint64_t{1}, ~uint64_t{0}}) {
-    SCOPED_TRACE(exec);
-    for (uint32_t lane = 0; lane < 64u; ++lane) {
-      cu->write_vgpr(wave->vgpr_alloc().base + 20u, lane, 0u);
-      cu->write_vgpr(wave->vgpr_alloc().base + 21u, lane, 0xabcdef00u + lane);
-      cu->write_vgpr(wave->vgpr_alloc().base + 22u, lane, 0x12345600u + lane);
-    }
-    wave->pc = 0u;
-    wave->set_exec(exec);
-    wave->debug_write_sgpr(30u, 0xfedcba98u);
-    size_t steps = 0;
-    while (wave->pc < words.size() * sizeof(uint32_t)) {
-      ASSERT_LT(steps++, words.size());
-      cu->step();
-    }
-    cu->flush_all();
-    EXPECT_EQ(wave->debug_read_sgpr(30u), 0xfedcba98u);
-    EXPECT_EQ(wave->exec(), exec);
-    for (uint32_t lane = 0; lane < 64u; ++lane) {
-      if ((exec >> lane) & 1u)
-        continue;
-      EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 21u, lane), 0xabcdef00u + lane);
-      EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 22u, lane), 0x12345600u + lane);
-    }
-  }
-  wave->halt();
-}
-
 TEST(ConSan, InventoriesGfx1250VflatRawFields) {
   constexpr auto store = cdna5::build_vflat(cdna5::kFlatStoreB128Vflat, {.saddr = 124,
                                                                          .nv = 1,
@@ -710,16 +648,16 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
                                                                          .ioffset = 0xFFFFFC});
   const std::array<uint32_t, 4> text_words = {store[0], store[1], store[2],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-  const ConSanProgramSite site = result.program_inventory.access_sites().front();
+  const ProgramSite site = result.program_inventory.access_sites().front();
   EXPECT_EQ(site.operands.raw_op, cdna5::kFlatStoreB128Vflat);
   EXPECT_EQ(site.operands.raw_saddr, 124u);
   ASSERT_TRUE(site.operands.raw_scale_offset);
@@ -740,17 +678,17 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
   constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
   const std::array<uint32_t, 4> function_words = {store[0], store[1], store[2],
                                                   return_to_caller[0]};
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object_with_local_function(kernel_words, function_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  const auto access = std::ranges::find_if(
-      result.program_inventory.access_sites(), [&](const ConSanProgramSite &site) {
-        const ConSanProgramContainer *container = test_program_container(result, site);
+  const auto access =
+      std::ranges::find_if(result.program_inventory.access_sites(), [&](const ProgramSite &site) {
+        const ProgramContainer *container = test_program_container(result, site);
         return container != nullptr && !container->is_kernel();
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
@@ -772,17 +710,17 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
   constexpr auto return_to_caller = cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 30});
   const std::array<uint32_t, 4> function_words = {store[0], store[1], store[2],
                                                   return_to_caller[0]};
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object_with_local_function(kernel_words, function_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  const auto access = std::ranges::find_if(
-      result.program_inventory.access_sites(), [&](const ConSanProgramSite &site) {
-        const ConSanProgramContainer *container = test_program_container(result, site);
+  const auto access =
+      std::ranges::find_if(result.program_inventory.access_sites(), [&](const ProgramSite &site) {
+        const ProgramContainer *container = test_program_container(result, site);
         return container != nullptr && !container->is_kernel();
       });
   ASSERT_NE(access, result.program_inventory.access_sites().end());
@@ -803,20 +741,20 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
       0x00000000u, // global_inv scope:device
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words, "cache_and_lds"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
-  const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
+  const auto fence_sites = test_decoded_sites<FenceSite>(result.program_inventory, kernel);
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.fence_like_count, 2u);
   EXPECT_EQ(fence_sites.size(), 2u);
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Candidate);
 }
 
 TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
@@ -825,20 +763,20 @@ TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
       cdna5::build_vds(cdna5::kDsBpermuteB32Vds, {.addr = 3, .data0 = 4, .vdst = 5});
   const std::array<uint32_t, 5> text_words = {load[0], load[1], bpermute[0], bpermute[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.ds_other_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().mnemonic_view(), "ds_load_b32");
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Candidate);
 }
 
 TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
@@ -858,39 +796,38 @@ TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
   for (const auto &instruction : instructions)
     text_words.insert(text_words.end(), instruction.begin(), instruction.end());
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3));
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_rdna3_lds_code_object(text_words, "gfx1100_native_lds_widths"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const auto sites = result.program_inventory.access_sites();
   ASSERT_EQ(sites.size(), instructions.size());
-  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Write, &ConSanProgramSite::kind), 5u);
-  EXPECT_EQ(std::ranges::count(sites, ConSanLdsAccessKind::Read, &ConSanProgramSite::kind), 5u);
+  EXPECT_EQ(std::ranges::count(sites, LdsAccessKind::Write, &ProgramSite::kind), 5u);
+  EXPECT_EQ(std::ranges::count(sites, LdsAccessKind::Read, &ProgramSite::kind), 5u);
   for (uint32_t width : std::array{8u, 16u, 32u, 64u, 128u}) {
-    EXPECT_EQ(std::ranges::count(sites, width, &ConSanProgramSite::decoded_width_bits), 2u)
-        << width;
+    EXPECT_EQ(std::ranges::count(sites, width, &ProgramSite::decoded_width_bits), 2u) << width;
   }
-  EXPECT_TRUE(std::ranges::all_of(sites, [](const ConSanProgramSite &site) {
+  EXPECT_TRUE(std::ranges::all_of(sites, [](const ProgramSite &site) {
     return site.lowering.replay_guest_access.available();
   }));
 }
 
 TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_memory_code_object();
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_FALSE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 52u);
   EXPECT_EQ(kernel.stats.instruction_count, 5u);
@@ -909,21 +846,21 @@ TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 2u);
   EXPECT_EQ(kernel.stats.global_memory_count, 1u);
   EXPECT_EQ(kernel.stats.scratch_memory_count, 1u);
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Skip);
   ASSERT_GE(kernel.preflight_reasons.size(), 4u);
   EXPECT_EQ(kernel.preflight_reasons[0], "no supported non-atomic LDS reads or writes");
   EXPECT_EQ(kernel.preflight_reasons[1], "flat/generic memory instructions observed: 2");
   EXPECT_EQ(kernel.preflight_reasons[2], "global memory instructions observed: 1");
   EXPECT_EQ(kernel.preflight_reasons[3], "scratch memory instructions observed: 1");
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, LdsAccessKind::Read);
   EXPECT_EQ(result.program_inventory.access_sites()[0].mnemonic_view(), "flat_load_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[0].physical_id.original_text_offset, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].decoded_file_offset(), 0x100u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].size(), 12u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].decoded_width_bits, 32u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Unknown);
+            FlatAddressSpaceHint::Unknown);
   ASSERT_TRUE(result.program_inventory.access_sites()[0].operands.destination_vgpr);
   ASSERT_TRUE(result.program_inventory.access_sites()[0].operands.address_vgpr);
   EXPECT_FALSE(result.program_inventory.access_sites()[0].operands.data_vgpr);
@@ -936,14 +873,14 @@ TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.raw_saddr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.raw_vdst, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.raw_ioffset, 0);
-  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, LdsAccessKind::Write);
   EXPECT_EQ(result.program_inventory.access_sites()[1].mnemonic_view(), "flat_store_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 12u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_file_offset(), 0x10cu);
   EXPECT_EQ(result.program_inventory.access_sites()[1].size(), 12u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_width_bits, 32u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Unknown);
+            FlatAddressSpaceHint::Unknown);
   EXPECT_FALSE(result.program_inventory.access_sites()[1].operands.destination_vgpr);
   ASSERT_TRUE(result.program_inventory.access_sites()[1].operands.address_vgpr);
   ASSERT_TRUE(result.program_inventory.access_sites()[1].operands.data_vgpr);
@@ -969,16 +906,16 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_FALSE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 36u);
   EXPECT_EQ(kernel.stats.instruction_count, 5u);
@@ -989,10 +926,10 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
   EXPECT_EQ(kernel.stats.flat_private_hint_count, 0u);
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-  EXPECT_EQ(result.program_inventory.access_sites().front().kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(result.program_inventory.access_sites().front().kind, LdsAccessKind::Read);
   EXPECT_EQ(result.program_inventory.access_sites().front().mnemonic_view(), "flat_load_b32");
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   ASSERT_TRUE(result.program_inventory.access_sites().front().operands.address_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites().front().operands.address_vgpr, 0u);
   ASSERT_TRUE(result.program_inventory.access_sites().front().operands.destination_vgpr);
@@ -1010,23 +947,23 @@ TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_FALSE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.flat_read_count, 1u);
   EXPECT_EQ(kernel.stats.flat_group_hint_count, 1u);
   EXPECT_EQ(kernel.stats.flat_maybe_group_hint_count, 0u);
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
@@ -1042,15 +979,15 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.flat_read_count, 1u);
   EXPECT_EQ(kernel.stats.flat_group_hint_count, 0u);
@@ -1058,7 +995,7 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
@@ -1072,8 +1009,8 @@ TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
       0xDC500000u, 0x04000000u, // flat_load_dword v4, v[0:1]
       0xBF810000u,              // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -1081,13 +1018,13 @@ TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_low_half_add")
             : make_cdna4_lds_code_object(text_words, "cdna_low_half_add");
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_TRUE(patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Group);
+              FlatAddressSpaceHint::Group);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_group_hint_count, 1u);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_maybe_group_hint_count, 0u);
   }
@@ -1102,8 +1039,8 @@ TEST(ConSan, CdnaDppLowHalfArithmeticRetainsExactSharedAperture) {
       0xDC500000u, 0x04000000u, // flat_load_dword v4, v[0:1]
       0xBF810000u,              // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -1111,13 +1048,13 @@ TEST(ConSan, CdnaDppLowHalfArithmeticRetainsExactSharedAperture) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_dpp_low_half_add")
             : make_cdna4_lds_code_object(text_words, "cdna_dpp_low_half_add");
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_TRUE(patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Group);
+              FlatAddressSpaceHint::Group);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_group_hint_count, 1u);
   }
 }
@@ -1133,17 +1070,17 @@ TEST(ConSan, PropagatesSharedPointerThroughExactScratchSlot) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_EQ(kernel.stats.flat_group_hint_count, 1u);
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 0u);
 }
@@ -1164,17 +1101,17 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughExactScratchSlot) {
       0x00000003u, // flat_load_b32 v5, v[3:4]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_group_hint_count, 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_unknown_hint_count, 0u);
 }
@@ -1196,8 +1133,8 @@ TEST(ConSan, PropagatesCdnaSharedPointerThroughExactScratchSlot) {
       0x08000006u, // flat_load_dword v8, v[6:7]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -1205,15 +1142,15 @@ TEST(ConSan, PropagatesCdnaSharedPointerThroughExactScratchSlot) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_scratch_slot")
             : make_cdna4_lds_code_object(text_words, "cdna_scratch_slot");
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_TRUE(patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
     EXPECT_EQ(result.program_inventory.access_sites()[0].flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Group);
+              FlatAddressSpaceHint::Group);
     EXPECT_EQ(result.program_inventory.access_sites()[1].flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Unknown);
+              FlatAddressSpaceHint::Unknown);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_group_hint_count, 1u);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_unknown_hint_count, 1u);
   }
@@ -1232,17 +1169,17 @@ TEST(ConSan, PropagatesGfx1250SharedHighHalfThroughVectorAddU64) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_maybe_group_hint_count, 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_unknown_hint_count, 0u);
 }
@@ -1263,17 +1200,17 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128ScratchSequence) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
   EXPECT_EQ(kernel.stats.flat_maybe_group_hint_count, 1u);
   EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 0u);
 }
@@ -1302,16 +1239,16 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128AddressConstruction) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
 }
 
 TEST(ConSan, PropagatesSharedPointerThroughExactPrivateFrameSlot) {
@@ -1330,20 +1267,20 @@ TEST(ConSan, PropagatesSharedPointerThroughExactPrivateFrameSlot) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 3u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Private);
+            FlatAddressSpaceHint::Private);
   EXPECT_EQ(result.program_inventory.access_sites()[1].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Private);
+            FlatAddressSpaceHint::Private);
   EXPECT_EQ(result.program_inventory.access_sites()[2].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
 }
 
 TEST(ConSan, PropagatesSharedPointerThroughScalarLaneReservoir) {
@@ -1359,16 +1296,16 @@ TEST(ConSan, PropagatesSharedPointerThroughScalarLaneReservoir) {
       0xBFB00000u,                           // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
 }
 
 TEST(ConSan, PropagatesGfx1250SharedPointerThroughScalarLaneReservoir) {
@@ -1389,17 +1326,17 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughScalarLaneReservoir) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
 }
 
 TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
@@ -1415,19 +1352,19 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().name, "lds_probe");
   EXPECT_EQ(result.program_inventory.kernels().front().code_size, 4u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_group_hint_count, 0u);
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
 
-  const ConSanProgramContainer &function = result.program_inventory.functions().front();
+  const ProgramContainer &function = result.program_inventory.functions().front();
   EXPECT_EQ(function.name, "lds_helper");
   EXPECT_TRUE(function.decoded);
   EXPECT_EQ(function.entry_text_offset, 4u);
@@ -1439,7 +1376,7 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   EXPECT_EQ(function.stats.flat_unknown_hint_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_EQ(result.program_inventory.access_sites().front().physical_id.original_text_offset, 24u);
   EXPECT_EQ(result.program_inventory.access_sites().front().decoded_file_offset(), 0x118u);
   EXPECT_FALSE(result.modified());
@@ -1480,19 +1417,19 @@ TEST(ConSan, PropagatesCdna4LaneStateThroughAccVgpr) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(text_words, "accvgpr_lane_state"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_EQ(result.program_inventory.access_sites()[1].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Unknown);
+            FlatAddressSpaceHint::Unknown);
 }
 
 TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
@@ -1512,8 +1449,8 @@ TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -1521,13 +1458,13 @@ TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_dynamic_lane")
             : make_cdna4_lds_code_object(text_words, "cdna_dynamic_lane");
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_TRUE(patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Unknown);
+              FlatAddressSpaceHint::Unknown);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_unknown_hint_count, 1u);
   }
 }
@@ -1550,8 +1487,8 @@ TEST(ConSan, RejectsRdna4AndGfx1250DynamicLaneSelectorProvenance) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -1559,13 +1496,13 @@ TEST(ConSan, RejectsRdna4AndGfx1250DynamicLaneSelectorProvenance) {
         arch == ROCJITSU_CODE_ARCH_RDNA4
             ? make_rdna4_lds_code_object(text_words, "rdna4_dynamic_lane")
             : make_gfx1250_code_object(text_words, "gfx1250_dynamic_lane");
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_TRUE(patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Unknown);
+              FlatAddressSpaceHint::Unknown);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_unknown_hint_count, 1u);
   }
 }
@@ -1594,8 +1531,8 @@ TEST(ConSan, ClearsRdna4AndGfx1250LaneProvenanceOnWideLiteralWrite) {
       0x00000000u, // flat_load_b32 v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(static_cast<uint32_t>(arch));
@@ -1603,13 +1540,13 @@ TEST(ConSan, ClearsRdna4AndGfx1250LaneProvenanceOnWideLiteralWrite) {
         arch == ROCJITSU_CODE_ARCH_RDNA4
             ? make_rdna4_lds_code_object(text_words, "rdna4_wide_lane")
             : make_gfx1250_code_object(text_words, "gfx1250_wide_lane");
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_TRUE(patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Unknown);
+              FlatAddressSpaceHint::Unknown);
     EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_unknown_hint_count, 1u);
   }
 }
@@ -1628,17 +1565,17 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorShift) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_shift"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_maybe_group_hint_count, 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_private_hint_count, 0u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_maybe_private_hint_count, 0u);
@@ -1656,17 +1593,17 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorLeftShift) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_left_shift"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_maybe_group_hint_count, 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_private_hint_count, 0u);
   EXPECT_EQ(result.program_inventory.kernels().front().stats.flat_maybe_private_hint_count, 0u);
@@ -1698,17 +1635,17 @@ TEST(ConSan, PropagatesCdna4AccVgprPointerAcrossHelperCall) {
       0x04000000u, // flat_load_dword v4, v[0:1]
       build_s_setpc_b64(/*ssrc0=*/30, ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_cdna4_code_object_with_local_function(kernel_words, function_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_EQ(result.program_inventory.functions().front().stats.flat_group_hint_count, 1u);
   EXPECT_EQ(result.program_inventory.functions().front().stats.flat_unknown_hint_count, 0u);
 }
@@ -1770,21 +1707,21 @@ TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
   };
   const std::vector<uint8_t> bytes =
       make_cdna4_code_object_with_local_function(kernel_words, function_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  const ConSanProgramContainer &function = result.program_inventory.functions().front();
+  const ProgramContainer &function = result.program_inventory.functions().front();
   ASSERT_EQ(result.program_inventory.access_sites().size(), 3u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Private);
+            FlatAddressSpaceHint::Private);
   EXPECT_EQ(result.program_inventory.access_sites()[1].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Private);
+            FlatAddressSpaceHint::Private);
   EXPECT_EQ(result.program_inventory.access_sites()[2].flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::MaybeGroup);
+            FlatAddressSpaceHint::MaybeGroup);
   EXPECT_EQ(function.stats.flat_private_hint_count, 2u);
   EXPECT_EQ(function.stats.flat_maybe_group_hint_count, 1u);
   EXPECT_EQ(function.stats.flat_unknown_hint_count, 0u);
@@ -1792,20 +1729,20 @@ TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
 
 TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
   const auto preflight = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(consan_patch_succeeded(preflight));
+  ASSERT_TRUE(patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(preflight));
   ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.name, "lds_probe");
   EXPECT_TRUE(kernel.has_text_range);
   EXPECT_TRUE(kernel.decoded);
@@ -1820,7 +1757,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(kernel.stats.fence_like_count, 1u);
   EXPECT_EQ(kernel.stats.decode_error_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 3u);
-  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, LdsAccessKind::Write);
   EXPECT_TRUE(result.program_inventory.access_sites()[0].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[0].mnemonic_view(), "ds_store_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[0].physical_id.original_text_offset, 0u);
@@ -1832,7 +1769,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(result.program_inventory.access_sites()[0].operands.destination_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.address_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.data_vgpr, 0u);
-  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, LdsAccessKind::Read);
   EXPECT_TRUE(result.program_inventory.access_sites()[1].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[1].mnemonic_view(), "ds_load_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 8u);
@@ -1844,7 +1781,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(result.program_inventory.access_sites()[1].operands.data_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.destination_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.address_vgpr, 0u);
-  EXPECT_EQ(result.program_inventory.access_sites()[2].kind, ConSanLdsAccessKind::Atomic);
+  EXPECT_EQ(result.program_inventory.access_sites()[2].kind, LdsAccessKind::Atomic);
   EXPECT_TRUE(result.program_inventory.access_sites()[2].lowering.replay_guest_access.available());
   EXPECT_FALSE(
       result.program_inventory.access_sites()[2].lowering.compare_observed_value.available());
@@ -1857,25 +1794,24 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(result.program_inventory.access_sites()[2].operands.data_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites()[2].operands.address_vgpr, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[2].operands.data_vgpr, 0u);
-  const auto barrier_sites =
-      test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
-  const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
-  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
+  const auto barrier_sites = test_decoded_sites<BarrierSite>(result.program_inventory, kernel);
+  const auto fence_sites = test_decoded_sites<FenceSite>(result.program_inventory, kernel);
+  const auto atomic_sites = test_decoded_sites<AtomicSite>(result.program_inventory, kernel);
   ASSERT_EQ(barrier_sites.size(), 1u);
   EXPECT_EQ(barrier_sites[0].mnemonic, "s_barrier_wait");
   EXPECT_EQ(barrier_sites[0].text_offset, 24u);
   ASSERT_TRUE(barrier_sites[0].barrier_id);
   EXPECT_EQ(*barrier_sites[0].barrier_id, 0);
-  EXPECT_EQ(barrier_sites[0].operand_source, ConSanBarrierSite::OperandSource::Immediate);
-  EXPECT_EQ(barrier_sites[0].scope, ConSanBarrierSite::Scope::Unknown);
+  EXPECT_EQ(barrier_sites[0].operand_source, BarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(barrier_sites[0].scope, BarrierSite::Scope::Unknown);
   ASSERT_EQ(fence_sites.size(), 1u);
   EXPECT_EQ(fence_sites[0].mnemonic, "s_dcache_inv");
   EXPECT_EQ(fence_sites[0].text_offset, 32u);
   EXPECT_EQ(fence_sites[0].file_offset, 0x120u);
   EXPECT_EQ(fence_sites[0].size, 8u);
   ASSERT_EQ(atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = atomic_sites.front();
-  EXPECT_EQ(atomic.address_space_hint, ConSanAtomicAddressSpaceHint::Lds);
+  const AtomicSite &atomic = atomic_sites.front();
+  EXPECT_EQ(atomic.address_space_hint, AtomicAddressSpaceHint::Lds);
   EXPECT_EQ(atomic.mnemonic, "ds_add_u32");
   EXPECT_EQ(atomic.text_offset, 16u);
   EXPECT_EQ(atomic.file_offset, 0x110u);
@@ -1900,53 +1836,53 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_FALSE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
   EXPECT_FALSE(*atomic.returns_old_value);
-  const ConSanProgramContainer &preflight_kernel = preflight.program_inventory.kernels().front();
-  EXPECT_EQ(preflight_kernel.preflight_action, ConSanPreflightAction::Candidate);
+  const ProgramContainer &preflight_kernel = preflight.program_inventory.kernels().front();
+  EXPECT_EQ(preflight_kernel.preflight_action, PreflightAction::Candidate);
   EXPECT_TRUE(
       std::ranges::any_of(preflight_kernel.preflight_reasons, [](const std::string &reason) {
         return reason == "atomic LDS accesses excluded: 1";
       }));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   const auto atomic_event_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &atomic_event = atomic_event_view[0];
-  EXPECT_EQ(atomic_event.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(atomic_event.operation, ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(atomic_event.address_source, ConSanSyncAddressSource::LdsVector);
-  EXPECT_EQ(atomic_event.memory_role, ConSanSyncMemoryRole::Unknown);
-  EXPECT_EQ(atomic_event.rmw_outcome, ConSanSyncRmwOutcome::NoReturn);
-  EXPECT_EQ(atomic_event.confidence, ConSanSemanticConfidence::Conservative);
+  const SyncEvent &atomic_event = atomic_event_view[0];
+  EXPECT_EQ(atomic_event.kind, SyncKind::Atomic);
+  EXPECT_EQ(atomic_event.operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(atomic_event.address_source, SyncAddressSource::LdsVector);
+  EXPECT_EQ(atomic_event.memory_role, SyncMemoryRole::Unknown);
+  EXPECT_EQ(atomic_event.rmw_outcome, SyncRmwOutcome::NoReturn);
+  EXPECT_EQ(atomic_event.confidence, SemanticConfidence::Conservative);
   EXPECT_FALSE(atomic_event.confidence_reason.empty());
   EXPECT_EQ(atomic_event.text_offset(), 16u);
-  const ConSanAtomicSite *atomic_source =
-      result.program_inventory.sync().source_as<ConSanAtomicSite>(atomic_event);
+  const AtomicSite *atomic_source =
+      result.program_inventory.sync().source_as<AtomicSite>(atomic_event);
   ASSERT_NE(atomic_source, nullptr);
   EXPECT_EQ(atomic_source->width_bits, 32u);
   EXPECT_EQ(atomic_source->raw_ioffset, 0);
   EXPECT_FALSE(atomic_event.scope);
 
   const auto barrier_event_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &barrier_event = barrier_event_view[1];
-  EXPECT_EQ(barrier_event.kind, ConSanSyncKind::Barrier);
-  EXPECT_EQ(barrier_event.operation, ConSanSyncOperation::BarrierWait);
-  EXPECT_EQ(barrier_event.memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(barrier_event.confidence, ConSanSemanticConfidence::Unsupported);
+  const SyncEvent &barrier_event = barrier_event_view[1];
+  EXPECT_EQ(barrier_event.kind, SyncKind::Barrier);
+  EXPECT_EQ(barrier_event.operation, SyncOperation::BarrierWait);
+  EXPECT_EQ(barrier_event.memory_role, SyncMemoryRole::Acquire);
+  EXPECT_EQ(barrier_event.confidence, SemanticConfidence::Unsupported);
   EXPECT_EQ(barrier_event.text_offset(), 24u);
-  const ConSanBarrierSite *barrier_source =
-      result.program_inventory.sync().source_as<ConSanBarrierSite>(barrier_event);
+  const BarrierSite *barrier_source =
+      result.program_inventory.sync().source_as<BarrierSite>(barrier_event);
   ASSERT_NE(barrier_source, nullptr);
   ASSERT_TRUE(barrier_source->barrier_id);
   EXPECT_EQ(*barrier_source->barrier_id, 0);
-  EXPECT_EQ(barrier_source->operand_source, ConSanBarrierSite::OperandSource::Immediate);
-  EXPECT_EQ(barrier_source->scope, ConSanBarrierSite::Scope::Unknown);
+  EXPECT_EQ(barrier_source->operand_source, BarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(barrier_source->scope, BarrierSite::Scope::Unknown);
   EXPECT_FALSE(barrier_source->participant_count);
   EXPECT_FALSE(barrier_source->participant_mask);
 
   const auto fence_event_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &fence_event = fence_event_view[2];
-  EXPECT_EQ(fence_event.kind, ConSanSyncKind::Fence);
-  EXPECT_EQ(fence_event.operation, ConSanSyncOperation::Fence);
-  EXPECT_EQ(fence_event.memory_role, ConSanSyncMemoryRole::Unknown);
-  EXPECT_EQ(fence_event.confidence, ConSanSemanticConfidence::Conservative);
+  const SyncEvent &fence_event = fence_event_view[2];
+  EXPECT_EQ(fence_event.kind, SyncKind::Fence);
+  EXPECT_EQ(fence_event.operation, SyncOperation::Fence);
+  EXPECT_EQ(fence_event.memory_role, SyncMemoryRole::Unknown);
+  EXPECT_EQ(fence_event.confidence, SemanticConfidence::Conservative);
   EXPECT_EQ(fence_event.text_offset(), 32u);
   EXPECT_EQ(fence_event.semantic_id.physical.code_object,
             atomic_event.semantic_id.physical.code_object);
@@ -1955,27 +1891,27 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
             result.program_inventory.sync().sync_events.size());
   for (size_t i = 0; i < result.program_inventory.sync().sync_sequences.size(); ++i) {
     const auto sequence_view = result.program_inventory.sync().sync_sequences;
-    const ConSanSyncSequence &sequence = sequence_view[i];
+    const SyncSequence &sequence = sequence_view[i];
     ASSERT_TRUE(sequence.basic_block_index);
     ASSERT_EQ(sequence.member_event_ids.size(), 1u);
-    EXPECT_EQ(sequence.member_event_ids.front(), ConSanSyncEventId{static_cast<uint32_t>(i)});
+    EXPECT_EQ(sequence.member_event_ids.front(), SyncEventId{static_cast<uint32_t>(i)});
     EXPECT_EQ(sequence.begin_text_offset,
               result.program_inventory.sync().sync_events[i].text_offset());
-    const ConSanProgramSite *source =
+    const ProgramSite *source =
         result.program_inventory.sync().source(result.program_inventory.sync().sync_events[i]);
     ASSERT_NE(source, nullptr);
     EXPECT_EQ(sequence.end_text_offset,
               result.program_inventory.sync().sync_events[i].text_offset() + source->size());
   }
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, ConSanSyncKind::Barrier);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, ConSanSyncKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, SyncKind::Atomic);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, SyncKind::Barrier);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, SyncKind::Fence);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Conservative);
+            SemanticConfidence::Conservative);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Unsupported);
+            SemanticConfidence::Unsupported);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].confidence,
-            ConSanSemanticConfidence::Conservative);
+            SemanticConfidence::Conservative);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
 }
@@ -2013,26 +1949,20 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
           .bytes = make_gfx1250_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)}),
       },
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (const TargetCase &target_case : cases) {
     SCOPED_TRACE(rj_code_target_name(target_case.target));
-    EXPECT_EQ(consan_arch_for_target(target_case.target), target_case.arch);
-    const ConSanTransformArtifacts result = test_lower_consan(target_case.bytes, options);
-    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    EXPECT_EQ(arch_for_target(target_case.target), target_case.arch);
+    const TransformArtifacts result = test_lower_consan(target_case.bytes, options);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.program_inventory.code_object_parsed());
     EXPECT_EQ(result.program_inventory.target(), target_case.target);
     EXPECT_EQ(result.program_inventory.arch(), target_case.arch);
   }
-  EXPECT_EQ(consan_capability_engine(ConSanFlavor::SuperCollider, ConSanMoiEngine::RecordReplay),
-            ConSanCapabilityEngine::SuperCollider);
-  EXPECT_EQ(consan_capability_engine(ConSanFlavor::Moi, ConSanMoiEngine::RecordReplay),
-            ConSanCapabilityEngine::RecordReplay);
-  EXPECT_EQ(consan_capability_engine(ConSanFlavor::Moi, ConSanMoiEngine::Sampled),
-            ConSanCapabilityEngine::Sampled);
-  EXPECT_EQ(consan_capability_engine(ConSanFlavor::Moi, ConSanMoiEngine::InlineShadow),
-            ConSanCapabilityEngine::InlineShadow);
+  EXPECT_EQ(enabled_mode(Mode::SuperCollider), Mode::SuperCollider);
+  EXPECT_EQ(enabled_mode(Mode::Default), Mode::Default);
 }
 
 TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
@@ -2044,23 +1974,23 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
   ASSERT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.instruction_count, 3u);
   EXPECT_EQ(kernel.stats.lds_write_count, 1u);
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.decode_error_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, LdsAccessKind::Write);
   EXPECT_EQ(result.program_inventory.access_sites()[0].mnemonic_view(), "ds_write_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[0].physical_id.original_text_offset, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].size(), 8u);
@@ -2069,7 +1999,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.address_vgpr, 2u);
   EXPECT_EQ(*result.program_inventory.access_sites()[0].operands.data_vgpr, 3u);
   EXPECT_TRUE(result.program_inventory.access_sites()[0].lowering.replay_guest_access.available());
-  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, LdsAccessKind::Read);
   EXPECT_EQ(result.program_inventory.access_sites()[1].mnemonic_view(), "ds_read_b32");
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 8u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].size(), 8u);
@@ -2078,7 +2008,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.address_vgpr, 2u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.destination_vgpr, 4u);
   EXPECT_TRUE(result.program_inventory.access_sites()[1].lowering.replay_guest_access.available());
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Candidate);
   EXPECT_FALSE(result.modified());
 }
 
@@ -2106,15 +2036,15 @@ TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
       cmpst[1],
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_cdna4_lds_code_object(text_words, "cdna4_histogram_lds_atomics"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_EQ(kernel.stats.lds_atomic_count, 5u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 5u);
   const std::array<std::string_view, 5> expected_mnemonics = {
@@ -2122,7 +2052,7 @@ TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
   const std::array<uint32_t, 5> expected_widths = {32u, 64u, 32u, 64u, 32u};
   for (size_t i = 0; i < result.program_inventory.access_sites().size(); ++i) {
     SCOPED_TRACE(i);
-    EXPECT_EQ(result.program_inventory.access_sites()[i].kind, ConSanLdsAccessKind::Atomic);
+    EXPECT_EQ(result.program_inventory.access_sites()[i].kind, LdsAccessKind::Atomic);
     EXPECT_EQ(result.program_inventory.access_sites()[i].mnemonic_view(), expected_mnemonics[i]);
     EXPECT_EQ(result.program_inventory.access_sites()[i].decoded_width_bits, expected_widths[i]);
     EXPECT_TRUE(result.program_inventory.access_sites()[i].operands.address_vgpr);
@@ -2154,33 +2084,33 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   };
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "gfx950_flat_inventory");
-  MoiOptions options;
-  options.flavor = ConSanFlavor::Moi;
+  TestOptions options;
+  options.mode = Mode::Default;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  const ConSanProgramSite group_load = result.program_inventory.access_sites()[0];
-  EXPECT_EQ(group_load.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
+  const ProgramSite group_load = result.program_inventory.access_sites()[0];
+  EXPECT_EQ(group_load.flat_address_space_hint, FlatAddressSpaceHint::Group);
   EXPECT_EQ(group_load.size(), 2u * sizeof(uint32_t));
   EXPECT_EQ(group_load.operands.raw_vaddr, 0u);
   EXPECT_EQ(group_load.operands.raw_vdst, 2u);
   EXPECT_EQ(group_load.operands.raw_segment, 0u);
   EXPECT_EQ(group_load.operands.raw_ioffset, 0);
   EXPECT_TRUE(group_load.operands.raw_op.has_value());
-  const ConSanProgramSite unknown_store = result.program_inventory.access_sites()[1];
-  EXPECT_EQ(unknown_store.flat_address_space_hint, ConSanFlatAddressSpaceHint::Unknown);
+  const ProgramSite unknown_store = result.program_inventory.access_sites()[1];
+  EXPECT_EQ(unknown_store.flat_address_space_hint, FlatAddressSpaceHint::Unknown);
   EXPECT_EQ(unknown_store.operands.raw_vaddr, 4u);
   EXPECT_EQ(unknown_store.operands.raw_vsrc, 5u);
   EXPECT_EQ(unknown_store.operands.raw_segment, 0u);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-  EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, AccessOrigin::Flat);
   EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
-            ConSanFlatAddressSpaceHint::Group);
+            FlatAddressSpaceHint::Group);
   EXPECT_EQ(test_admitted_accesses(result).front().operands.raw_segment, 0u);
-  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  ASSERT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 1u);
 }
 
 std::vector<uint8_t> make_cdna4_padded_group_flat_code_object() {
@@ -2218,7 +2148,7 @@ struct FlatD16LoadForm {
   std::array<uint16_t, 5> opcodes;
   std::array<std::string_view, 5> mnemonics;
   uint32_t memory_width_bits;
-  ConSanFlatSubwordPlacement placement;
+  FlatSubwordPlacement placement;
 };
 
 constexpr std::array<FlatD16LoadForm, 6> kFlatD16LoadForms = {{
@@ -2227,44 +2157,44 @@ constexpr std::array<FlatD16LoadForm, 6> kFlatD16LoadForms = {{
      {"flat_load_d16_u8", "flat_load_d16_u8", "flat_load_ubyte_d16", "flat_load_ubyte_d16",
       "flat_load_d16_u8"},
      8,
-     ConSanFlatSubwordPlacement::Low16},
+     FlatSubwordPlacement::Low16},
     {{rdna4::kFlatLoadD16I8Vflat, cdna5::kFlatLoadD16I8Vflat, cdna3::kFlatLoadSbyteD16Flat,
       cdna4::kFlatLoadSbyteD16Flat, rdna3::kFlatLoadD16I8Flat},
      {"flat_load_d16_i8", "flat_load_d16_i8", "flat_load_sbyte_d16", "flat_load_sbyte_d16",
       "flat_load_d16_i8"},
      8,
-     ConSanFlatSubwordPlacement::Low16},
+     FlatSubwordPlacement::Low16},
     {{rdna4::kFlatLoadD16B16Vflat, cdna5::kFlatLoadD16B16Vflat, cdna3::kFlatLoadShortD16Flat,
       cdna4::kFlatLoadShortD16Flat, rdna3::kFlatLoadD16B16Flat},
      {"flat_load_d16_b16", "flat_load_d16_b16", "flat_load_short_d16", "flat_load_short_d16",
       "flat_load_d16_b16"},
      16,
-     ConSanFlatSubwordPlacement::Low16},
+     FlatSubwordPlacement::Low16},
     {{rdna4::kFlatLoadD16HiU8Vflat, cdna5::kFlatLoadD16HiU8Vflat, cdna3::kFlatLoadUbyteD16HiFlat,
       cdna4::kFlatLoadUbyteD16HiFlat, rdna3::kFlatLoadD16HiU8Flat},
      {"flat_load_d16_hi_u8", "flat_load_d16_hi_u8", "flat_load_ubyte_d16_hi",
       "flat_load_ubyte_d16_hi", "flat_load_d16_hi_u8"},
      8,
-     ConSanFlatSubwordPlacement::High16},
+     FlatSubwordPlacement::High16},
     {{rdna4::kFlatLoadD16HiI8Vflat, cdna5::kFlatLoadD16HiI8Vflat, cdna3::kFlatLoadSbyteD16HiFlat,
       cdna4::kFlatLoadSbyteD16HiFlat, rdna3::kFlatLoadD16HiI8Flat},
      {"flat_load_d16_hi_i8", "flat_load_d16_hi_i8", "flat_load_sbyte_d16_hi",
       "flat_load_sbyte_d16_hi", "flat_load_d16_hi_i8"},
      8,
-     ConSanFlatSubwordPlacement::High16},
+     FlatSubwordPlacement::High16},
     {{rdna4::kFlatLoadD16HiB16Vflat, cdna5::kFlatLoadD16HiB16Vflat, cdna3::kFlatLoadShortD16HiFlat,
       cdna4::kFlatLoadShortD16HiFlat, rdna3::kFlatLoadD16HiB16Flat},
      {"flat_load_d16_hi_b16", "flat_load_d16_hi_b16", "flat_load_short_d16_hi",
       "flat_load_short_d16_hi", "flat_load_d16_hi_b16"},
      16,
-     ConSanFlatSubwordPlacement::High16},
+     FlatSubwordPlacement::High16},
 }};
 
 struct FlatSubwordStoreForm {
   std::array<uint16_t, 5> opcodes;
   std::array<std::string_view, 5> mnemonics;
   uint32_t memory_width_bits;
-  ConSanFlatSubwordPlacement placement;
+  FlatSubwordPlacement placement;
 };
 
 constexpr std::array<FlatSubwordStoreForm, 4> kFlatSubwordStoreForms = {{
@@ -2272,25 +2202,25 @@ constexpr std::array<FlatSubwordStoreForm, 4> kFlatSubwordStoreForms = {{
       cdna4::kFlatStoreByteFlat, rdna3::kFlatStoreB8Flat},
      {"flat_store_b8", "flat_store_b8", "flat_store_byte", "flat_store_byte", "flat_store_b8"},
      8,
-     ConSanFlatSubwordPlacement::Low16},
+     FlatSubwordPlacement::Low16},
     {{rdna4::kFlatStoreB16Vflat, cdna5::kFlatStoreB16Vflat, cdna3::kFlatStoreShortFlat,
       cdna4::kFlatStoreShortFlat, rdna3::kFlatStoreB16Flat},
      {"flat_store_b16", "flat_store_b16", "flat_store_short", "flat_store_short", "flat_store_b16"},
      16,
-     ConSanFlatSubwordPlacement::Low16},
+     FlatSubwordPlacement::Low16},
     {{rdna4::kFlatStoreD16HiB8Vflat, cdna5::kFlatStoreD16HiB8Vflat, cdna3::kFlatStoreByteD16HiFlat,
       cdna4::kFlatStoreByteD16HiFlat, rdna3::kFlatStoreD16HiB8Flat},
      {"flat_store_d16_hi_b8", "flat_store_d16_hi_b8", "flat_store_byte_d16_hi",
       "flat_store_byte_d16_hi", "flat_store_d16_hi_b8"},
      8,
-     ConSanFlatSubwordPlacement::High16},
+     FlatSubwordPlacement::High16},
     {{rdna4::kFlatStoreD16HiB16Vflat, cdna5::kFlatStoreD16HiB16Vflat,
       cdna3::kFlatStoreShortD16HiFlat, cdna4::kFlatStoreShortD16HiFlat,
       rdna3::kFlatStoreD16HiB16Flat},
      {"flat_store_d16_hi_b16", "flat_store_d16_hi_b16", "flat_store_short_d16_hi",
       "flat_store_short_d16_hi", "flat_store_d16_hi_b16"},
      16,
-     ConSanFlatSubwordPlacement::High16},
+     FlatSubwordPlacement::High16},
 }};
 
 std::vector<uint8_t> make_group_flat_load_code_object(const FlatSubwordTarget &target,
@@ -2467,7 +2397,7 @@ std::vector<uint32_t> expected_group_flat_store_readback(const FlatSubwordTarget
   }
 }
 
-std::optional<uint16_t> flat_check_trap_vcc_save_sgpr(const ConSanPatchInfo &patch) {
+std::optional<uint16_t> flat_check_trap_vcc_save_sgpr(const PatchInfo &patch) {
   if (patch.required_sgpr_count < 2u)
     return std::nullopt;
   return static_cast<uint16_t>(patch.required_sgpr_count - 2u);
@@ -2487,7 +2417,7 @@ void execute_emitted_flat_mismatch_sequence(const FlatSubwordTarget &target,
                                             std::string_view case_label,
                                             std::span<const uint32_t> patched_words,
                                             std::span<const uint32_t> normalization,
-                                            const ConSanPatchInfo &patch, uint16_t original_vgpr,
+                                            const PatchInfo &patch, uint16_t original_vgpr,
                                             uint16_t compare_lhs_vgpr, uint16_t duplicate_vgpr,
                                             std::span<const FlatMismatchExecutionCase> cases) {
   const auto sequence_begin = std::search(patched_words.begin(), patched_words.end(),
@@ -2572,31 +2502,31 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
 
   for (const FlatSubwordTarget &target : kFlatSubwordTargets) {
     for (const FlatD16LoadForm &form : kFlatD16LoadForms) {
-      if (form.placement != ConSanFlatSubwordPlacement::High16)
+      if (form.placement != FlatSubwordPlacement::High16)
         continue;
       const std::string_view mnemonic = form.mnemonics[target.target_index];
       SCOPED_TRACE(std::string(target.label) + " " + std::string(mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      MoiOptions options;
-      options.flavor = ConSanFlavor::SuperCollider;
+      TestOptions options;
+      options.mode = Mode::SuperCollider;
       options.probe_flat_check_trap = true;
-      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-      options.report_buffer_address = kFlatMismatchReportAddress;
-      options.report_marker = kFlatMismatchReportMarker;
+      options.flat_provenance_mode = FlatProvenanceMode::Strict;
+      options.supercollider_report_buffer_address = kFlatMismatchReportAddress;
+      options.supercollider_report_marker = kFlatMismatchReportMarker;
       options.max_patches = 1;
 
-      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+      const TransformArtifacts result = test_lower_consan(bytes, options);
 
-      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-      ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanProgramSite site = result.program_inventory.access_sites().front();
+      const ProgramSite site = result.program_inventory.access_sites().front();
       ASSERT_TRUE(site.operands.destination_vgpr);
-      const auto patch = std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap,
-                                           &ConSanPatchInfo::kind);
+      const auto patch =
+          std::ranges::find(result.patches, PatchKind::FlatLoadCheckTrap, &PatchInfo::kind);
       ASSERT_NE(patch, result.patches.end());
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_LT(*patch->scratch_vgpr, 255u);
@@ -2622,31 +2552,31 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
     }
 
     for (const FlatSubwordStoreForm &form : kFlatSubwordStoreForms) {
-      if (form.placement != ConSanFlatSubwordPlacement::High16)
+      if (form.placement != FlatSubwordPlacement::High16)
         continue;
       const std::string_view mnemonic = form.mnemonics[target.target_index];
       SCOPED_TRACE(std::string(target.label) + " " + std::string(mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_store_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      MoiOptions options;
-      options.flavor = ConSanFlavor::SuperCollider;
+      TestOptions options;
+      options.mode = Mode::SuperCollider;
       options.probe_flat_check_trap = true;
-      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-      options.report_buffer_address = kFlatMismatchReportAddress;
-      options.report_marker = kFlatMismatchReportMarker;
+      options.flat_provenance_mode = FlatProvenanceMode::Strict;
+      options.supercollider_report_buffer_address = kFlatMismatchReportAddress;
+      options.supercollider_report_marker = kFlatMismatchReportMarker;
       options.max_patches = 1;
 
-      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+      const TransformArtifacts result = test_lower_consan(bytes, options);
 
-      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-      ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanProgramSite site = result.program_inventory.access_sites().front();
+      const ProgramSite site = result.program_inventory.access_sites().front();
       ASSERT_TRUE(site.operands.data_vgpr);
-      const auto patch = std::ranges::find(result.patches, ConSanPatchKind::FlatStoreCheckTrap,
-                                           &ConSanPatchInfo::kind);
+      const auto patch =
+          std::ranges::find(result.patches, PatchKind::FlatStoreCheckTrap, &PatchInfo::kind);
       ASSERT_NE(patch, result.patches.end());
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_LT(*patch->scratch_vgpr, 255u);
@@ -2692,33 +2622,33 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      MoiOptions options;
-      options.flavor = ConSanFlavor::SuperCollider;
+      TestOptions options;
+      options.mode = Mode::SuperCollider;
       options.probe_flat_check_trap = true;
-      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-      options.report_buffer_address = 0x100000000ull;
+      options.flat_provenance_mode = FlatProvenanceMode::Strict;
+      options.supercollider_report_buffer_address = 0x100000000ull;
       options.max_patches = 1;
 
-      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+      const TransformArtifacts result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanProgramSite site = result.program_inventory.access_sites().front();
+      const ProgramSite site = result.program_inventory.access_sites().front();
       EXPECT_EQ(site.mnemonic_view(), expected_mnemonic);
-      EXPECT_EQ(site.kind, ConSanLdsAccessKind::Read);
+      EXPECT_EQ(site.kind, LdsAccessKind::Read);
       EXPECT_EQ(site.decoded_width_bits, form.memory_width_bits);
-      EXPECT_EQ(site.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
-      const auto semantics = consan_flat_load_subword_semantics(site.mnemonic_view());
+      EXPECT_EQ(site.flat_address_space_hint, FlatAddressSpaceHint::Group);
+      const auto semantics = flat_load_subword_semantics(site.mnemonic_view());
       ASSERT_TRUE(semantics);
       EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
       EXPECT_EQ(semantics->placement, form.placement);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
       EXPECT_TRUE(site.lowering.compare_observed_value.available());
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      const auto patch = std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap,
-                                           &ConSanPatchInfo::kind);
+      EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
+      const auto patch =
+          std::ranges::find(result.patches, PatchKind::FlatLoadCheckTrap, &PatchInfo::kind);
       ASSERT_NE(patch, result.patches.end());
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_TRUE(site.operands.destination_vgpr);
@@ -2739,7 +2669,7 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       EXPECT_NE(std::ranges::find(words, *restore_vcc), words.end());
 
       uint16_t compare_lhs = *site.operands.destination_vgpr;
-      if (form.placement == ConSanFlatSubwordPlacement::High16) {
+      if (form.placement == FlatSubwordPlacement::High16) {
         ASSERT_LT(*patch->scratch_vgpr, 255u);
         compare_lhs = static_cast<uint16_t>(*patch->scratch_vgpr + 1u);
         const auto select_original_high =
@@ -2761,51 +2691,41 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
   }
 }
 
-TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
-  constexpr std::array<ConSanMoiEngine, 3> kEngines = {
-      ConSanMoiEngine::RecordReplay,
-      ConSanMoiEngine::Sampled,
-      ConSanMoiEngine::InlineShadow,
-  };
+TEST(ConSan, SupportsEveryD16GroupFlatLoadOnEveryTarget) {
   for (const FlatSubwordTarget &target : kFlatSubwordTargets) {
     for (const FlatD16LoadForm &form : kFlatD16LoadForms) {
       const std::string_view expected_mnemonic = form.mnemonics[target.target_index];
       const std::vector<uint8_t> bytes = make_group_flat_d16_load_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      for (ConSanMoiEngine engine : kEngines) {
-        SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic) +
-                     " engine=" + std::to_string(static_cast<uint32_t>(engine)));
-        MoiOptions options = moi_options(engine);
-        options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-        options.scratch_vgpr = 8;
-        options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
-        options.set_moi_owner_epoch_vgprs(40, 41);
-        options.moi_report_buffer_address = 0x100000000ull;
-        options.moi_report_buffer_size =
-            engine == ConSanMoiEngine::RecordReplay ? consan_moi_report_buffer_min_bytes(1, 0, 0, 0)
-            : engine == ConSanMoiEngine::Sampled    ? direct_sampled_report_bytes(1)
-                                                    : kInlineShadowFullLdsReportBufferSize;
-        options.moi_track_barriers = false;
-        options.moi_track_atomics = false;
-        options.max_patches = 1;
 
-        const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+      SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
+      TestOptions options = test_options();
+      options.flat_provenance_mode = FlatProvenanceMode::Strict;
+      options.scratch_vgpr = 8;
+      options.exec_save_sgpr = 80u;
+      options.set_owner_epoch_vgprs(40, 41);
+      options.report_buffer_address = 0x100000000ull;
+      options.report_buffer_size = direct_report_bytes(1);
+      options.track_barriers = false;
+      options.track_atomics = false;
+      options.max_patches = 1;
 
-        ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-        ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-        const ConSanProgramSite candidate = test_admitted_accesses(result).front();
-        EXPECT_EQ(candidate.mnemonic_view(), expected_mnemonic);
-        EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
-        EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
-        EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
-        EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
-        EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
-        ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
-        ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u)
-            << testing::PrintToString(result.warnings);
-        ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-        EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      }
+      const TransformArtifacts result = test_lower_consan(bytes, options);
+
+      ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+      ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+      const ProgramSite candidate = test_admitted_accesses(result).front();
+      EXPECT_EQ(candidate.mnemonic_view(), expected_mnemonic);
+      EXPECT_EQ(candidate.origin, AccessOrigin::Flat);
+      EXPECT_EQ(candidate.flat_address_space_hint, FlatAddressSpaceHint::Group);
+      EXPECT_EQ(candidate.kind, LdsAccessKind::Read);
+      EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
+      EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
+      ASSERT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 1u);
+      ASSERT_EQ(access_lowering_count(result, LoweringOutcomeKind::Instrumented), 1u)
+          << testing::PrintToString(result.warnings);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+      EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
     }
   }
 }
@@ -2817,35 +2737,35 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
       const std::vector<uint8_t> bytes = make_group_flat_d16_store_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      MoiOptions options;
-      options.flavor = ConSanFlavor::SuperCollider;
+      TestOptions options;
+      options.mode = Mode::SuperCollider;
       options.probe_flat_check_trap = true;
-      options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-      options.report_buffer_address = 0x100000000ull;
+      options.flat_provenance_mode = FlatProvenanceMode::Strict;
+      options.supercollider_report_buffer_address = 0x100000000ull;
       options.max_patches = 1;
 
-      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+      const TransformArtifacts result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
-      const ConSanProgramSite site = result.program_inventory.access_sites().front();
+      const ProgramSite site = result.program_inventory.access_sites().front();
       EXPECT_EQ(site.mnemonic_view(), expected_mnemonic);
-      EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
+      EXPECT_EQ(site.kind, LdsAccessKind::Write);
       EXPECT_EQ(site.decoded_width_bits, form.memory_width_bits);
-      EXPECT_EQ(site.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
+      EXPECT_EQ(site.flat_address_space_hint, FlatAddressSpaceHint::Group);
       ASSERT_TRUE(site.operands.data_vgpr);
       EXPECT_EQ(*site.operands.data_vgpr, 2u);
-      const auto semantics = consan_flat_store_subword_semantics(site.mnemonic_view());
+      const auto semantics = flat_store_subword_semantics(site.mnemonic_view());
       ASSERT_TRUE(semantics);
       EXPECT_EQ(semantics->memory_width_bits, form.memory_width_bits);
       EXPECT_EQ(semantics->placement, form.placement);
       ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
       EXPECT_TRUE(site.lowering.compare_observed_value.available());
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      const auto patch = std::ranges::find(result.patches, ConSanPatchKind::FlatStoreCheckTrap,
-                                           &ConSanPatchInfo::kind);
+      EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
+      const auto patch =
+          std::ranges::find(result.patches, PatchKind::FlatStoreCheckTrap, &PatchInfo::kind);
       ASSERT_NE(patch, result.patches.end());
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_FALSE(result.replacement.empty());
@@ -2870,10 +2790,10 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       EXPECT_TRUE(contains_subsequence(words, readback));
 
       uint16_t compare_lhs = *site.operands.data_vgpr;
-      if (form.placement == ConSanFlatSubwordPlacement::High16 || form.memory_width_bits == 8u) {
+      if (form.placement == FlatSubwordPlacement::High16 || form.memory_width_bits == 8u) {
         ASSERT_LT(*patch->scratch_vgpr, 255u);
         const uint16_t comparison_scratch = static_cast<uint16_t>(*patch->scratch_vgpr + 1u);
-        if (form.placement == ConSanFlatSubwordPlacement::High16) {
+        if (form.placement == FlatSubwordPlacement::High16) {
           const auto select_high = instrumentation::build_v_lshrrev_b32(
               comparison_scratch, scalar_positive_inline_u32(16u), *site.operands.data_vgpr,
               target.arch);
@@ -2897,59 +2817,48 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
   }
 }
 
-TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
-  constexpr std::array<ConSanMoiEngine, 3> kEngines = {
-      ConSanMoiEngine::RecordReplay,
-      ConSanMoiEngine::Sampled,
-      ConSanMoiEngine::InlineShadow,
-  };
+TEST(ConSan, SupportsEverySubwordGroupFlatStoreOnEveryTarget) {
   for (const FlatSubwordTarget &target : kFlatSubwordTargets) {
     for (const FlatSubwordStoreForm &form : kFlatSubwordStoreForms) {
       const std::string_view expected_mnemonic = form.mnemonics[target.target_index];
       const std::vector<uint8_t> bytes = make_group_flat_d16_store_code_object(target, form);
       ASSERT_FALSE(bytes.empty());
-      for (ConSanMoiEngine engine : kEngines) {
-        SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic) +
-                     " engine=" + std::to_string(static_cast<uint32_t>(engine)));
-        MoiOptions options = moi_options(engine);
-        options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-        options.scratch_vgpr = 8;
-        options.moi_exec_save_sgpr = engine == ConSanMoiEngine::InlineShadow ? 60u : 80u;
-        options.set_moi_owner_epoch_vgprs(40, 41);
-        options.moi_report_buffer_address = 0x100000000ull;
-        options.moi_report_buffer_size =
-            engine == ConSanMoiEngine::RecordReplay ? consan_moi_report_buffer_min_bytes(1, 0, 0, 0)
-            : engine == ConSanMoiEngine::Sampled    ? direct_sampled_report_bytes(1)
-                                                    : kInlineShadowFullLdsReportBufferSize;
-        options.moi_track_barriers = false;
-        options.moi_track_atomics = false;
-        options.max_patches = 1;
 
-        const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+      SCOPED_TRACE(std::string(target.label) + " " + std::string(expected_mnemonic));
+      TestOptions options = test_options();
+      options.flat_provenance_mode = FlatProvenanceMode::Strict;
+      options.scratch_vgpr = 8;
+      options.exec_save_sgpr = 80u;
+      options.set_owner_epoch_vgprs(40, 41);
+      options.report_buffer_address = 0x100000000ull;
+      options.report_buffer_size = direct_report_bytes(1);
+      options.track_barriers = false;
+      options.track_atomics = false;
+      options.max_patches = 1;
 
-        ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-        ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-        const ConSanProgramSite candidate = test_admitted_accesses(result).front();
-        EXPECT_EQ(candidate.mnemonic_view(), expected_mnemonic);
-        EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
-        EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
-        EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
-        EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
-        const auto semantics = consan_flat_store_subword_semantics(candidate.mnemonic_view());
-        ASSERT_TRUE(semantics);
-        EXPECT_EQ(semantics->placement, form.placement);
-        EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
-        ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
-        ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
-                  1u);
-        ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-        EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      }
+      const TransformArtifacts result = test_lower_consan(bytes, options);
+
+      ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+      ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+      const ProgramSite candidate = test_admitted_accesses(result).front();
+      EXPECT_EQ(candidate.mnemonic_view(), expected_mnemonic);
+      EXPECT_EQ(candidate.origin, AccessOrigin::Flat);
+      EXPECT_EQ(candidate.flat_address_space_hint, FlatAddressSpaceHint::Group);
+      EXPECT_EQ(candidate.kind, LdsAccessKind::Write);
+      EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
+      const auto semantics = flat_store_subword_semantics(candidate.mnemonic_view());
+      ASSERT_TRUE(semantics);
+      EXPECT_EQ(semantics->placement, form.placement);
+      EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
+      ASSERT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 1u);
+      ASSERT_EQ(access_lowering_count(result, LoweringOutcomeKind::Instrumented), 1u);
+      ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+      EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
     }
   }
 }
 
-TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates) {
+TEST(ConSan, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates) {
   const auto target_it =
       std::ranges::find(kFlatSubwordTargets, ROCJITSU_CODE_ARCH_CDNA4, &FlatSubwordTarget::arch);
   ASSERT_NE(target_it, kFlatSubwordTargets.end());
@@ -2957,23 +2866,22 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
   const std::vector<uint8_t> bytes =
       make_group_flat_load_code_object(target, cdna4::kFlatLoadDwordx3Flat);
   ASSERT_FALSE(bytes.empty());
-  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  TestOptions options = test_options();
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
   options.max_patches = 1;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(test_admitted_accesses(result).empty());
   ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(result.program_inventory.access_sites().front().lowering.replay_guest_access.reason,
-            ConSanAccessClassifierReason::UnsupportedMnemonic);
+            AccessClassifierReason::UnsupportedMnemonic);
   ASSERT_EQ(result.observation_plan().site_decisions.size(), 1u);
-  EXPECT_EQ(result.observation_plan().site_decisions.front().kind,
-            ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(result.observation_plan().site_decisions.front().kind, SiteDecisionKind::Unsupported);
   EXPECT_EQ(result.observation_plan().site_decisions.front().reason,
-            ConSanAccessPolicyReason::UnsupportedMnemonic);
+            AccessPolicyReason::UnsupportedMnemonic);
   EXPECT_TRUE(result.observation_plan().probe_intents.empty());
   EXPECT_TRUE(result.coverage_ledger.intent_entries().empty());
 }
@@ -2981,31 +2889,31 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
 TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   const std::vector<uint8_t> bytes = make_cdna4_padded_group_flat_code_object();
   ASSERT_FALSE(bytes.empty());
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   options.probe_flat_check_trap = true;
-  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-  options.report_buffer_address = 0x100000000ull;
-  options.report_marker = 0x51c0u;
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
+  options.supercollider_report_buffer_address = 0x100000000ull;
+  options.supercollider_report_marker = 0x51c0u;
   options.max_patches = 1;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::FlatLoadCheckTrap);
+  EXPECT_EQ(result.patches.front().kind, PatchKind::FlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 3u * sizeof(uint32_t));
   EXPECT_EQ(result.patches.front().scratch_vgpr, 3u);
   EXPECT_EQ(result.patches.front().original_size, 2u * sizeof(uint32_t));
   ASSERT_EQ(result.observation_plan().probe_intents.size(), 1u);
   EXPECT_EQ(result.observation_plan().probe_intents.front().kind,
-            ConSanProbeIntentKind::RedundantAccessObservation);
+            ProbeIntentKind::RedundantAccessObservation);
   ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
-            ConSanLoweringOutcomeKind::Instrumented);
-  EXPECT_TRUE(all_consan_intents_instrumented(result.coverage_ledger));
+            LoweringOutcomeKind::Instrumented);
+  EXPECT_TRUE(all_intents_instrumented(result.coverage_ledger));
   ASSERT_FALSE(result.replacement.empty());
   AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);
@@ -3049,18 +2957,18 @@ TEST(ConSan, Cdna4SuperColliderComparesGroupFlatShortValuesAsU16) {
     text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
     const std::vector<uint8_t> bytes =
         make_cdna4_lds_code_object(text_words, "gfx950_flat_short_supercollider");
-    MoiOptions options;
-    options.flavor = ConSanFlavor::SuperCollider;
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
     options.probe_flat_check_trap = true;
-    options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-    options.report_buffer_address = 0x100000000ull;
+    options.flat_provenance_mode = FlatProvenanceMode::Strict;
+    options.supercollider_report_buffer_address = 0x100000000ull;
     options.max_patches = 1;
 
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+    EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
     AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
     const Section *text = replacement.text_sections().front();
@@ -3109,12 +3017,12 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatUsesRelocatedInlineBody) {
       kernel_words, function_words, {}, /*vgpr_granulated=*/0u);
   mutate_elf_header(bytes,
                     [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   options.probe_flat_check_trap = true;
-  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
   options.max_patches = 1;
-  ConSanPreappliedMutationLayout preapplied_mutation;
+  PreappliedMutationLayout preapplied_mutation;
   // Keep this test specific to the scalar-indirect fallback. The first five
   // filler words remain available for the displaced entry island; the rest models
   // text already owned by an earlier composition phase and cannot donate a
@@ -3123,64 +3031,50 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatUsesRelocatedInlineBody) {
       {.text_offset = sizeof(uint32_t) + kFunctionDelta + 10u * sizeof(uint32_t),
        .size = static_cast<uint32_t>((function_words.size() - 11u) * sizeof(uint32_t))});
 
-  const ConSanTransformArtifacts result =
-      test_lower_consan_with_preapplied_mutation(bytes, options, preapplied_mutation);
+  const TransformArtifacts result =
+      test_lower_with_preapplied_mutation(bytes, options, preapplied_mutation);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   const auto body =
-      std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap, &ConSanPatchInfo::kind);
+      std::ranges::find(result.patches, PatchKind::FlatLoadCheckTrap, &PatchInfo::kind);
   ASSERT_NE(body, result.patches.end());
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_GE(body->trampoline_offset, result.text_relocation->source_text_size);
 }
 
-TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
+TEST(ConSan, Cdna4EmitStronglyClassifiedGroupFlatAccess) {
   const std::vector<uint8_t> bytes = make_cdna4_padded_group_flat_code_object();
   ASSERT_FALSE(bytes.empty());
-  for (ConSanMoiEngine engine : {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::InlineShadow}) {
-    SCOPED_TRACE(static_cast<uint32_t>(engine));
-    MoiOptions options = moi_options(engine);
-    options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-    options.scratch_vgpr = 8;
-    options.set_moi_owner_epoch_vgprs(24, 25);
-    if (engine == ConSanMoiEngine::InlineShadow) {
-      options.moi_workgroup_key_vgpr = 26;
-      options.moi_init_owner_epoch = true;
-    }
-    options.moi_report_buffer_address = 0x100000000ull;
-    options.moi_report_buffer_size = engine == ConSanMoiEngine::InlineShadow
-                                         ? kInlineShadowFullLdsReportBufferSize
-                                         : consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  TestOptions options = test_options();
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
+  options.scratch_vgpr = 8;
+  options.set_owner_epoch_vgprs(24, 25);
 
-    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-    ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
-    EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::Flat);
-    EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
-              ConSanFlatAddressSpaceHint::Group);
-    EXPECT_EQ(test_admitted_accesses(result).front().size(), 2u * sizeof(uint32_t));
-    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "flat_load_dword");
-    EXPECT_EQ(test_admitted_accesses(result).front().operands.raw_segment, 0u);
-    ASSERT_TRUE(test_admitted_accesses(result).front().operands.address_vgpr);
-    EXPECT_EQ(*test_admitted_accesses(result).front().operands.address_vgpr, 0u);
-    EXPECT_EQ(test_admitted_accesses(result).front().operands.raw_ioffset, 0);
-    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-    if (engine == ConSanMoiEngine::InlineShadow) {
-      EXPECT_TRUE(test_moi_workgroup_key_vgpr(result));
-      EXPECT_EQ(std::ranges::count(result.patches,
-                                   ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
-                                   &ConSanPatchInfo::kind),
-                1);
-    }
-  }
+  options.report_buffer_address = 0x100000000ull;
+  options.report_buffer_size = direct_report_bytes(1);
+
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, AccessOrigin::Flat);
+  EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
+            FlatAddressSpaceHint::Group);
+  EXPECT_EQ(test_admitted_accesses(result).front().size(), 2u * sizeof(uint32_t));
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic_view(), "flat_load_dword");
+  EXPECT_EQ(test_admitted_accesses(result).front().operands.raw_segment, 0u);
+  ASSERT_TRUE(test_admitted_accesses(result).front().operands.address_vgpr);
+  EXPECT_EQ(*test_admitted_accesses(result).front().operands.address_vgpr, 0u);
+  EXPECT_EQ(test_admitted_accesses(result).front().operands.raw_ioffset, 0);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
+TEST(ConSan, Cdna4EmitsGroupFlatShortAccesses) {
   constexpr std::array<uint32_t, 2> kLoadUshort = {
       0xDC480000u, // flat_load_ushort v2, v[0:1]
       0x02000000u,
@@ -3202,15 +3096,15 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "gfx950_flat_short_emission");
-  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  TestOptions options = test_options();
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
   options.scratch_vgpr = 8;
-  options.set_moi_owner_epoch_vgprs(24, 25);
+  options.set_owner_epoch_vgprs(24, 25);
   options.max_patches = 2;
-  options.moi_report_buffer_address = 0x100000000ull;
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  options.report_buffer_address = 0x100000000ull;
+  options.report_buffer_size = direct_report_bytes(2);
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
@@ -3218,21 +3112,20 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   EXPECT_EQ(test_admitted_accesses(result)[0].decoded_width_bits, 16u);
   EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic_view(), "flat_load_ushort");
   EXPECT_EQ(test_admitted_accesses(result)[1].decoded_width_bits, 16u);
-  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
-  EXPECT_EQ(
-      std::ranges::count_if(result.patches,
-                            [](const ConSanPatchInfo &patch) {
-                              return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-                                     patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
-                            }),
-      2)
+  EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 2u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const PatchInfo &patch) {
+                                    return patch.kind == PatchKind::InlineWatchpointStore ||
+                                           patch.kind == PatchKind::TrampolineWatchpointStore;
+                                  }),
+            2)
       << "patches=" << testing::PrintToString(result.patches)
       << " warnings=" << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
 }
 
-TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
+TEST(ConSan, Gfx1250EmitsGroupFlatShortAccesses) {
   constexpr std::array<uint32_t, 3> kLoadU16 = {
       0xEC048000u, // flat_load_u16 v2, v[0:1]
       0x00000002u,
@@ -3258,15 +3151,15 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
   const std::vector<uint8_t> bytes =
       make_gfx1250_code_object(text_words, "gfx1250_flat_short_emission");
-  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  TestOptions options = test_options();
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
   options.scratch_vgpr = 8;
-  options.set_moi_owner_epoch_vgprs(24, 25);
+  options.set_owner_epoch_vgprs(24, 25);
   options.max_patches = 2;
-  options.moi_report_buffer_address = 0x100000000ull;
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  options.report_buffer_address = 0x100000000ull;
+  options.report_buffer_size = direct_report_bytes(2);
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
@@ -3274,18 +3167,17 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   EXPECT_EQ(test_admitted_accesses(result)[0].decoded_width_bits, 16u);
   EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic_view(), "flat_load_u16");
   EXPECT_EQ(test_admitted_accesses(result)[1].decoded_width_bits, 16u);
-  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
-  EXPECT_EQ(
-      std::ranges::count_if(result.patches,
-                            [](const ConSanPatchInfo &patch) {
-                              return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-                                     patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
-                            }),
-      2)
+  EXPECT_EQ(access_decision_count(result, SiteDecisionKind::Admitted), 2u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const PatchInfo &patch) {
+                                    return patch.kind == PatchKind::InlineWatchpointStore ||
+                                           patch.kind == PatchKind::TrampolineWatchpointStore;
+                                  }),
+            2)
       << "patches=" << testing::PrintToString(result.patches)
       << " warnings=" << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
 }
 
 TEST(ConSan, Gfx1250SuperColliderChecksGroupFlatShortValues) {
@@ -3306,18 +3198,18 @@ TEST(ConSan, Gfx1250SuperColliderChecksGroupFlatShortValues) {
     text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
     const std::vector<uint8_t> bytes =
         make_gfx1250_code_object(text_words, "gfx1250_flat_short_supercollider");
-    MoiOptions options;
-    options.flavor = ConSanFlavor::SuperCollider;
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
     options.probe_flat_check_trap = true;
-    options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
-    options.report_buffer_address = 0x100000000ull;
+    options.flat_provenance_mode = FlatProvenanceMode::Strict;
+    options.supercollider_report_buffer_address = 0x100000000ull;
     options.max_patches = 1;
 
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+    const TransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+    EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
   }
 }
@@ -3333,20 +3225,20 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
   const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words, "flat_atomic_probe");
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
-  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
+  const auto atomic_sites = test_decoded_sites<AtomicSite>(result.program_inventory, kernel);
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.stats.instruction_count, 2u);
   EXPECT_EQ(kernel.stats.flat_atomic_count, 1u);
   ASSERT_EQ(atomic_sites.size(), 1u);
-  const ConSanAtomicSite &site = atomic_sites.front();
+  const AtomicSite &site = atomic_sites.front();
   EXPECT_EQ(site.mnemonic, "flat_atomic_add");
   EXPECT_EQ(site.size, 8u);
   EXPECT_EQ(site.width_bits, 32u);
@@ -3361,15 +3253,15 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
   EXPECT_EQ(*site.raw_vsrc, 4u);
   EXPECT_EQ(*site.raw_vdst, 5u);
   EXPECT_EQ(*site.raw_ioffset, 0);
-  EXPECT_EQ(*site.scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*site.scope, MemoryScope::Agent);
   EXPECT_TRUE(*site.returns_old_value);
 
-  const ConSanMoiAtomicAddressPlan plan = plan_consan_moi_atomic_address(
-      site, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/24, ConSanRegisterAllocationSource::Explicit,
-      ROCJITSU_CODE_ARCH_CDNA4);
+  const AtomicAddressPlan plan =
+      plan_atomic_address(site, /*scratch_vgpr=*/8, /*scratch_vgpr_count=*/24,
+                          RegisterAllocationSource::Explicit, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(plan.supported());
-  EXPECT_EQ(plan.kind, ConSanMoiAtomicAddressKind::FlatGuestPair);
-  const auto materialization = build_consan_moi_atomic_address_materialization(
+  EXPECT_EQ(plan.kind, AtomicAddressKind::FlatGuestPair);
+  const auto materialization = build_atomic_address_materialization(
       plan, /*vcc_save_sgpr=*/80, /*scc_save_sgpr=*/82, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(materialization);
   EXPECT_TRUE(materialization->empty());
@@ -3392,12 +3284,12 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "atomic_acquire_release");
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_semantic_inventory(bytes, options);
+  const TransformArtifacts result = test_semantic_inventory(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   EXPECT_EQ(result.program_inventory.sync()
                 .source(result.program_inventory.sync().sync_events[0])
@@ -3413,13 +3305,13 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
             "buffer_inv");
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const auto sequence_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &sequence = sequence_view.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(sequence.operation, ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(sequence.confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(sequence.rmw_outcome, ConSanSyncRmwOutcome::ReturnsOldValue);
+  const SyncSequence &sequence = sequence_view.front();
+  EXPECT_EQ(sequence.kind, SyncKind::Atomic);
+  EXPECT_EQ(sequence.operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(sequence.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(sequence.memory_role_confidence, SemanticConfidence::Conservative);
+  EXPECT_EQ(sequence.confidence, SemanticConfidence::Conservative);
+  EXPECT_EQ(sequence.rmw_outcome, SyncRmwOutcome::ReturnsOldValue);
   ASSERT_EQ(sequence.member_event_ids.size(), 3u);
   EXPECT_EQ(sequence.begin_text_offset, 0u);
   EXPECT_EQ(sequence.end_text_offset, 32u);
@@ -3427,17 +3319,17 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
 
 TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   const std::vector<uint8_t> bytes = make_rdna4_global_atomic_code_object();
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
-  const auto fence_sites = test_decoded_sites<ConSanFenceSite>(result.program_inventory, kernel);
-  const auto atomic_sites = test_decoded_sites<ConSanAtomicSite>(result.program_inventory, kernel);
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
+  const auto fence_sites = test_decoded_sites<FenceSite>(result.program_inventory, kernel);
+  const auto atomic_sites = test_decoded_sites<AtomicSite>(result.program_inventory, kernel);
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 16u);
   EXPECT_EQ(kernel.stats.instruction_count, 2u);
@@ -3447,8 +3339,8 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   EXPECT_TRUE(fence_sites.empty());
   ASSERT_EQ(atomic_sites.size(), 1u);
 
-  const ConSanAtomicSite &atomic = atomic_sites.front();
-  EXPECT_EQ(atomic.address_space_hint, ConSanAtomicAddressSpaceHint::Global);
+  const AtomicSite &atomic = atomic_sites.front();
+  EXPECT_EQ(atomic.address_space_hint, AtomicAddressSpaceHint::Global);
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   EXPECT_EQ(atomic.text_offset, 0u);
   EXPECT_EQ(atomic.file_offset, 0x100u);
@@ -3475,53 +3367,52 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   EXPECT_EQ(*atomic.raw_vsrc, 1u);
   EXPECT_EQ(*atomic.raw_vdst, 0u);
   EXPECT_EQ(*atomic.raw_ioffset, 0);
-  EXPECT_EQ(*atomic.scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*atomic.scope, MemoryScope::Agent);
   EXPECT_EQ(*atomic.raw_th, 1u);
   EXPECT_TRUE(*atomic.returns_old_value);
 
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   const auto event_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &event = event_view.front();
-  EXPECT_EQ(event.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(event.operation, ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(event.address_source, ConSanSyncAddressSource::GlobalScalarVector);
-  EXPECT_EQ(event.memory_role, ConSanSyncMemoryRole::Unknown);
-  EXPECT_EQ(event.rmw_outcome, ConSanSyncRmwOutcome::ReturnsOldValue);
-  EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Conservative);
-  const ConSanAtomicSite *source =
-      result.program_inventory.sync().source_as<ConSanAtomicSite>(event);
+  const SyncEvent &event = event_view.front();
+  EXPECT_EQ(event.kind, SyncKind::Atomic);
+  EXPECT_EQ(event.operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(event.address_source, SyncAddressSource::GlobalScalarVector);
+  EXPECT_EQ(event.memory_role, SyncMemoryRole::Unknown);
+  EXPECT_EQ(event.rmw_outcome, SyncRmwOutcome::ReturnsOldValue);
+  EXPECT_EQ(event.confidence, SemanticConfidence::Conservative);
+  const AtomicSite *source = result.program_inventory.sync().source_as<AtomicSite>(event);
   ASSERT_NE(source, nullptr);
   ASSERT_TRUE(source->raw_ioffset);
   EXPECT_EQ(*source->raw_ioffset, 0);
   ASSERT_TRUE(event.scope);
-  EXPECT_EQ(*event.scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*event.scope, MemoryScope::Agent);
   EXPECT_NE(event.identity.find("|kernel=lds_probe|event=atomic|"), std::string::npos);
 }
 
 TEST(ConSan, SyncInventoryRetainsUnsupportedFlatAtomicWithoutProvenance) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_code_object();
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                 result.program_inventory.kernels().front())
+  ASSERT_EQ(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
                 .size(),
             1u);
-  EXPECT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                 result.program_inventory.kernels().front())
+  EXPECT_EQ(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
                 .front()
                 .address_space_hint,
-            ConSanAtomicAddressSpaceHint::FlatUnknown);
+            AtomicAddressSpaceHint::FlatUnknown);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   const auto event_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &event = event_view.front();
-  EXPECT_EQ(event.address_source, ConSanSyncAddressSource::FlatVector);
-  EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Unsupported);
-  EXPECT_EQ(event.memory_role_confidence, ConSanSemanticConfidence::Unsupported);
+  const SyncEvent &event = event_view.front();
+  EXPECT_EQ(event.address_source, SyncAddressSource::FlatVector);
+  EXPECT_EQ(event.confidence, SemanticConfidence::Unsupported);
+  EXPECT_EQ(event.memory_role_confidence, SemanticConfidence::Unsupported);
   EXPECT_NE(event.confidence_reason.find("no usable provenance"), std::string::npos);
 }
 
@@ -3535,29 +3426,29 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const auto sequence_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &sequence = sequence_view.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(sequence.operation, ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(sequence.address_source, ConSanSyncAddressSource::GlobalScalarVector);
-  EXPECT_EQ(sequence.rmw_outcome, ConSanSyncRmwOutcome::ReturnsOldValue);
-  EXPECT_EQ(sequence.confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &sequence = sequence_view.front();
+  EXPECT_EQ(sequence.kind, SyncKind::Atomic);
+  EXPECT_EQ(sequence.operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(sequence.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(sequence.address_source, SyncAddressSource::GlobalScalarVector);
+  EXPECT_EQ(sequence.rmw_outcome, SyncRmwOutcome::ReturnsOldValue);
+  EXPECT_EQ(sequence.confidence, SemanticConfidence::Conservative);
+  EXPECT_EQ(sequence.memory_role_confidence, SemanticConfidence::Conservative);
   ASSERT_EQ(sequence.member_event_ids.size(), 3u);
   for (size_t index = 0; index < sequence.member_event_ids.size(); ++index) {
-    EXPECT_EQ(sequence.member_event_ids[index], ConSanSyncEventId{static_cast<uint32_t>(index)});
+    EXPECT_EQ(sequence.member_event_ids[index], SyncEventId{static_cast<uint32_t>(index)});
   }
   ASSERT_TRUE(sequence.scope);
-  EXPECT_EQ(*sequence.scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*sequence.scope, MemoryScope::Agent);
 
   const std::array<uint32_t, 7> release_words = {
       0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
@@ -3569,7 +3460,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(release.program_inventory.sync().sync_sequences.front().memory_role,
-            ConSanSyncMemoryRole::Release);
+            SyncMemoryRole::Release);
 
   const std::array<uint32_t, 7> acquire_words = {
       0xEE158004u, 0x00980000u,
@@ -3581,7 +3472,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(acquire.program_inventory.sync().sync_sequences.front().memory_role,
-            ConSanSyncMemoryRole::Acquire);
+            SyncMemoryRole::Acquire);
 }
 
 TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
@@ -3610,41 +3501,39 @@ TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
       make_rdna4_bounded_atomic_acquire_code_object(failed_cas, short_bookkeeping,
                                                     "failed_cas_acquire"),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   for (size_t index = 0; index < fixtures.size(); ++index) {
     SCOPED_TRACE(index);
-    const ConSanTransformArtifacts result = test_semantic_inventory(fixtures[index], options);
-    ASSERT_TRUE(consan_patch_succeeded(result));
+    const TransformArtifacts result = test_semantic_inventory(fixtures[index], options);
+    ASSERT_TRUE(patch_succeeded(result));
     const auto sequence =
         std::ranges::find_if(result.program_inventory.sync().sync_sequences, [](const auto &item) {
-          return item.kind == ConSanSyncKind::Atomic &&
-                 item.memory_role == ConSanSyncMemoryRole::Acquire;
+          return item.kind == SyncKind::Atomic && item.memory_role == SyncMemoryRole::Acquire;
         });
     ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end());
-    EXPECT_EQ(sequence->memory_role_confidence, ConSanSemanticConfidence::Conservative);
+    EXPECT_EQ(sequence->memory_role_confidence, SemanticConfidence::Conservative);
     EXPECT_EQ(sequence->member_event_ids.size(), 2u);
     EXPECT_NE(sequence->identity.find("|acquire-cache="), std::string::npos);
   }
 }
 
 TEST(ConSan, SyncSequencesAssociateBoundedAtomicAcquireAtFallthroughJoin) {
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_atomic_acquire_fallthrough_join_code_object(), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   const auto sequence =
       std::ranges::find_if(result.program_inventory.sync().sync_sequences, [](const auto &item) {
-        return item.kind == ConSanSyncKind::Atomic &&
-               item.memory_role == ConSanSyncMemoryRole::Acquire;
+        return item.kind == SyncKind::Atomic && item.memory_role == SyncMemoryRole::Acquire;
       });
   ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end());
-  EXPECT_EQ(sequence->operation, ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(sequence->memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  EXPECT_EQ(sequence->operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(sequence->memory_role_confidence, SemanticConfidence::Conservative);
   EXPECT_EQ(sequence->member_event_ids.size(), 2u);
   EXPECT_NE(sequence->identity.find("|acquire-cache="), std::string::npos);
 }
@@ -3653,14 +3542,13 @@ TEST(ConSan, BoundedAtomicAcquireAssociationRejectsUnprovenShapes) {
   constexpr std::array<uint32_t, 3> atomic = {0xEE0D400Cu, 0x01980002u, 0x00000002u};
   constexpr std::array<uint32_t, 3> load = {0xEE050006u, 0x00080001u, 0x00000000u};
   const auto acquire_count = [](const std::vector<uint8_t> &bytes) {
-    MoiOptions options;
-    options.flavor = ConSanFlavor::SuperCollider;
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-    return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
-                                 [](const auto &item) {
-                                   return item.kind == ConSanSyncKind::Atomic &&
-                                          item.memory_role == ConSanSyncMemoryRole::Acquire;
-                                 });
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
+    const TransformArtifacts result = test_lower_consan(bytes, options);
+    return std::ranges::count_if(
+        result.program_inventory.sync().sync_sequences, [](const auto &item) {
+          return item.kind == SyncKind::Atomic && item.memory_role == SyncMemoryRole::Acquire;
+        });
   };
   const auto fixture = [&](std::span<const uint32_t> middle,
                            std::string_view name = "rejected_atomic_acquire") {
@@ -3685,36 +3573,36 @@ TEST(ConSan, BoundedAtomicAcquireAssociationRejectsUnprovenShapes) {
 }
 
 TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_release_wait_no_return_bitwise_code_object(), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const auto sequence_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &sequence = sequence_view.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(sequence.operation, ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
-  EXPECT_EQ(sequence.rmw_outcome, ConSanSyncRmwOutcome::NoReturn);
+  const SyncSequence &sequence = sequence_view.front();
+  EXPECT_EQ(sequence.kind, SyncKind::Atomic);
+  EXPECT_EQ(sequence.operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(sequence.memory_role, SyncMemoryRole::Release);
+  EXPECT_EQ(sequence.memory_role_confidence, SemanticConfidence::Conservative);
+  EXPECT_EQ(sequence.rmw_outcome, SyncRmwOutcome::NoReturn);
   ASSERT_TRUE(sequence.release_wait_text_offset);
   EXPECT_EQ(*sequence.release_wait_text_offset, 0u);
   EXPECT_EQ(sequence.begin_text_offset, 0u);
   EXPECT_EQ(sequence.end_text_offset, 16u);
   ASSERT_EQ(sequence.member_event_ids.size(), 1u);
-  EXPECT_EQ(sequence.member_event_ids.front(), ConSanSyncEventId{0});
+  EXPECT_EQ(sequence.member_event_ids.front(), SyncEventId{0});
   EXPECT_NE(sequence.identity.find("|release-wait=pc=0x"), std::string::npos);
 
-  const ConSanTransformArtifacts nonzero = test_semantic_inventory(
+  const TransformArtifacts nonzero = test_semantic_inventory(
       make_rdna4_release_wait_no_return_bitwise_code_object(0xbfc90001u), options);
   ASSERT_TRUE(nonzero.errors.empty()) << testing::PrintToString(nonzero.errors);
   ASSERT_EQ(nonzero.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(nonzero.program_inventory.sync().sync_sequences.front().memory_role,
-            ConSanSyncMemoryRole::Unknown);
+            SyncMemoryRole::Unknown);
   EXPECT_FALSE(nonzero.program_inventory.sync().sync_sequences.front().release_wait_text_offset);
 }
 
@@ -3728,19 +3616,19 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
       0xBFC80000u, // s_wait_loadcnt_dscnt 0
       0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const auto sequence_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &sequence = sequence_view.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &sequence = sequence_view.front();
+  EXPECT_EQ(sequence.kind, SyncKind::Atomic);
+  EXPECT_EQ(sequence.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(sequence.memory_role_confidence, SemanticConfidence::Conservative);
   ASSERT_TRUE(sequence.release_wait_text_offset);
   EXPECT_EQ(*sequence.release_wait_text_offset, 0u);
   EXPECT_EQ(sequence.begin_text_offset, 0u);
@@ -3759,19 +3647,19 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
       *wait_store, 0xdcd64000u, 0x01080201u, // global_atomic_add_u32 v1, v1, v2, s[8:9] glc
       *wait_load,  gl1[0],      gl1[1],      gl0[0], gl0[1],
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna3_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const auto sequence_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &sequence = sequence_view.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &sequence = sequence_view.front();
+  EXPECT_EQ(sequence.kind, SyncKind::Atomic);
+  EXPECT_EQ(sequence.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(sequence.memory_role_confidence, SemanticConfidence::Conservative);
   ASSERT_TRUE(sequence.release_wait_text_offset);
   EXPECT_EQ(*sequence.release_wait_text_offset, 0u);
   EXPECT_EQ(sequence.begin_text_offset, 0u);
@@ -3781,12 +3669,12 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
 
   std::array<uint32_t, 8> nonzero = text_words;
   nonzero[0] |= 1u;
-  const ConSanTransformArtifacts rejected =
+  const TransformArtifacts rejected =
       test_semantic_inventory(make_rdna3_lds_code_object(nonzero, "nonzero_vscnt"), options);
   ASSERT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
   ASSERT_EQ(rejected.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(rejected.program_inventory.sync().sync_sequences.front().memory_role,
-            ConSanSyncMemoryRole::Acquire);
+            SyncMemoryRole::Acquire);
   EXPECT_FALSE(rejected.program_inventory.sync().sync_sequences.front().release_wait_text_offset);
 }
 
@@ -3796,16 +3684,16 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     const RdnaWorkgroupClauseReleaseFixture fixture =
         make_rdna_workgroup_clause_release_code_object(arch);
     ASSERT_FALSE(fixture.bytes.empty());
-    MoiOptions options;
-    options.flavor = ConSanFlavor::SuperCollider;
+    TestOptions options;
+    options.mode = Mode::SuperCollider;
 
-    const ConSanTransformArtifacts result = test_semantic_inventory(fixture.bytes, options);
+    const TransformArtifacts result = test_semantic_inventory(fixture.bytes, options);
 
-    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
     const auto sequence =
         std::ranges::find_if(result.program_inventory.sync().sync_sequences, [&](const auto &item) {
-          return item.kind == ConSanSyncKind::Atomic && item.member_event_ids.size() == 1u &&
-                 item.memory_role == ConSanSyncMemoryRole::Release &&
+          return item.kind == SyncKind::Atomic && item.member_event_ids.size() == 1u &&
+                 item.memory_role == SyncMemoryRole::Release &&
                  item.scalar_clause_text_offset == fixture.clause_text_offset;
         });
     ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end())
@@ -3818,20 +3706,20 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     const RdnaWorkgroupClauseReleaseFixture interrupted =
         make_rdna_workgroup_clause_release_code_object(arch, /*contiguous_wait_prefix=*/false);
     ASSERT_FALSE(interrupted.bytes.empty());
-    const ConSanTransformArtifacts rejected = test_semantic_inventory(interrupted.bytes, options);
-    ASSERT_TRUE(consan_patch_succeeded(rejected)) << testing::PrintToString(rejected.errors);
+    const TransformArtifacts rejected = test_semantic_inventory(interrupted.bytes, options);
+    ASSERT_TRUE(patch_succeeded(rejected)) << testing::PrintToString(rejected.errors);
     const auto rejected_sequence = std::ranges::find_if(
         rejected.program_inventory.sync().sync_sequences, [&](const auto &item) {
-          return item.kind == ConSanSyncKind::Atomic &&
+          return item.kind == SyncKind::Atomic &&
                  item.scalar_clause_text_offset == interrupted.clause_text_offset;
         });
     ASSERT_NE(rejected_sequence, rejected.program_inventory.sync().sync_sequences.end());
-    EXPECT_EQ(rejected_sequence->memory_role, ConSanSyncMemoryRole::Unknown);
+    EXPECT_EQ(rejected_sequence->memory_role, SyncMemoryRole::Unknown);
     EXPECT_FALSE(rejected_sequence->release_wait_text_offset);
   }
 }
 
-TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
+TEST(ConSan, FenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
   const std::vector<uint32_t> text_words = {
@@ -3841,32 +3729,32 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  MoiOptions options = moi_options();
+  TestOptions options = test_options();
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
+  ASSERT_EQ(result.program_inventory.sync().fence_candidates.size(), 2u);
   const auto communication_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &communication = communication_view[1];
-  const auto release_view = result.program_inventory.sync().moi_fence_candidates;
-  const ConSanMoiFenceCandidate &release = release_view[0];
-  const auto acquire_view = result.program_inventory.sync().moi_fence_candidates;
-  const ConSanMoiFenceCandidate &acquire = acquire_view[1];
+  const SyncEvent &communication = communication_view[1];
+  const auto release_view = result.program_inventory.sync().fence_candidates;
+  const FenceCandidate &release = release_view[0];
+  const auto acquire_view = result.program_inventory.sync().fence_candidates;
+  const FenceCandidate &acquire = acquire_view[1];
   EXPECT_TRUE(release.eligible());
   EXPECT_TRUE(acquire.eligible());
-  EXPECT_EQ(release.memory_role, ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(acquire.memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(release.sequence, ConSanSyncSequenceId{0});
-  EXPECT_EQ(acquire.sequence, ConSanSyncSequenceId{0});
-  EXPECT_EQ(release.communication_event, ConSanSyncEventId{1});
-  EXPECT_EQ(acquire.communication_event, ConSanSyncEventId{1});
-  EXPECT_EQ(communication.address_source, ConSanSyncAddressSource::GlobalScalarVector);
+  EXPECT_EQ(release.memory_role, SyncMemoryRole::Release);
+  EXPECT_EQ(acquire.memory_role, SyncMemoryRole::Acquire);
+  EXPECT_EQ(release.sequence, SyncSequenceId{0});
+  EXPECT_EQ(acquire.sequence, SyncSequenceId{0});
+  EXPECT_EQ(release.communication_event, SyncEventId{1});
+  EXPECT_EQ(acquire.communication_event, SyncEventId{1});
+  EXPECT_EQ(communication.address_source, SyncAddressSource::GlobalScalarVector);
   ASSERT_TRUE(communication.scope);
-  EXPECT_EQ(*communication.scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*communication.scope, MemoryScope::Agent);
   EXPECT_TRUE(release.fence_event.valid());
   EXPECT_TRUE(acquire.fence_event.valid());
 }
@@ -3886,39 +3774,37 @@ TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
       0x00000000u, // buffer_inv sc1
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options = moi_options();
-  options.moi_track_atomics = true;
+  TestOptions options = test_options();
+  options.track_atomics = true;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(text_words, "cas_ordinary_acquire"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 4u)
       << "fault sites: " << testing::PrintToString(result.fault_sites)
       << "\nkernels: " << testing::PrintToString(result.program_inventory.kernels())
       << "\nwarnings: " << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
-  const auto release =
-      std::ranges::find(result.program_inventory.sync().sync_sequences,
-                        ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);
-  const auto acquire =
-      std::ranges::find(result.program_inventory.sync().sync_sequences,
-                        ConSanSyncMemoryRole::Acquire, &ConSanSyncSequence::memory_role);
+  const auto release = std::ranges::find(result.program_inventory.sync().sync_sequences,
+                                         SyncMemoryRole::Release, &SyncSequence::memory_role);
+  const auto acquire = std::ranges::find(result.program_inventory.sync().sync_sequences,
+                                         SyncMemoryRole::Acquire, &SyncSequence::memory_role);
   ASSERT_NE(release, result.program_inventory.sync().sync_sequences.end());
   ASSERT_NE(acquire, result.program_inventory.sync().sync_sequences.end());
-  EXPECT_EQ(release->kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(release->operation, ConSanSyncOperation::AtomicCompareExchange);
-  EXPECT_EQ(acquire->kind, ConSanSyncKind::OrdinaryMemory);
-  EXPECT_EQ(acquire->operation, ConSanSyncOperation::OrdinaryLoad);
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
-  EXPECT_TRUE(std::ranges::all_of(result.program_inventory.sync().moi_fence_candidates,
-                                  &ConSanMoiFenceCandidate::eligible))
-      << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates);
-  EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates[0].memory_role,
-            ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates[1].memory_role,
-            ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(release->kind, SyncKind::Atomic);
+  EXPECT_EQ(release->operation, SyncOperation::AtomicCompareExchange);
+  EXPECT_EQ(acquire->kind, SyncKind::OrdinaryMemory);
+  EXPECT_EQ(acquire->operation, SyncOperation::OrdinaryLoad);
+  ASSERT_EQ(result.program_inventory.sync().fence_candidates.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(result.program_inventory.sync().fence_candidates,
+                                  &FenceCandidate::eligible))
+      << testing::PrintToString(result.program_inventory.sync().fence_candidates);
+  EXPECT_EQ(result.program_inventory.sync().fence_candidates[0].memory_role,
+            SyncMemoryRole::Release);
+  EXPECT_EQ(result.program_inventory.sync().fence_candidates[1].memory_role,
+            SyncMemoryRole::Acquire);
 }
 
 TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
@@ -3930,50 +3816,50 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
       0x00000100u, // global_store_dword v0, v1, s[0:1] offset:4 sc1
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
-  MoiOptions options = moi_options();
-  options.moi_track_atomics = true;
+  TestOptions options = test_options();
+  options.track_atomics = true;
   options.fault_dry_run = true;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(text_words, "ordinary_release_store"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
   const auto release_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &release = release_view.front();
-  EXPECT_EQ(release.kind, ConSanSyncKind::OrdinaryMemory);
-  EXPECT_EQ(release.operation, ConSanSyncOperation::OrdinaryStore);
-  EXPECT_EQ(release.memory_role, ConSanSyncMemoryRole::Release);
+  const SyncSequence &release = release_view.front();
+  EXPECT_EQ(release.kind, SyncKind::OrdinaryMemory);
+  EXPECT_EQ(release.operation, SyncOperation::OrdinaryStore);
+  EXPECT_EQ(release.memory_role, SyncMemoryRole::Release);
   EXPECT_EQ(release.begin_text_offset, 0u);
   EXPECT_EQ(release.end_text_offset, 5u * sizeof(uint32_t));
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u)
-      << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates);
-  const auto candidate_view = result.program_inventory.sync().moi_fence_candidates;
-  const ConSanMoiFenceCandidate &candidate = candidate_view.front();
+  ASSERT_EQ(result.program_inventory.sync().fence_candidates.size(), 1u)
+      << testing::PrintToString(result.program_inventory.sync().fence_candidates);
+  const auto candidate_view = result.program_inventory.sync().fence_candidates;
+  const FenceCandidate &candidate = candidate_view.front();
   EXPECT_TRUE(candidate.eligible());
-  EXPECT_EQ(candidate.memory_role, ConSanSyncMemoryRole::Release);
+  EXPECT_EQ(candidate.memory_role, SyncMemoryRole::Release);
   ASSERT_TRUE(candidate.communication_event);
   EXPECT_EQ(
       *candidate.communication_event,
       result.program_inventory.sync().event_id(result.program_inventory.sync().sync_events.back()));
-  const ConSanSyncEvent *communication =
+  const SyncEvent *communication =
       result.program_inventory.sync().find_event(*candidate.communication_event);
   ASSERT_NE(communication, nullptr);
-  const ConSanOrdinaryMemorySite *communication_source =
-      result.program_inventory.sync().source_as<ConSanOrdinaryMemorySite>(*communication);
+  const OrdinaryMemorySite *communication_source =
+      result.program_inventory.sync().source_as<OrdinaryMemorySite>(*communication);
   ASSERT_NE(communication_source, nullptr);
   EXPECT_EQ(communication_source->raw_ioffset, 4u);
   ASSERT_TRUE(communication->scope);
-  EXPECT_EQ(*communication->scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*communication->scope, MemoryScope::Agent);
 }
 
 TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
   const auto rdna3_wait = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
   const auto rdna4_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(rdna3_wait && rdna4_wait);
-  MoiOptions options = moi_options();
-  options.moi_track_atomics = true;
+  TestOptions options = test_options();
+  options.track_atomics = true;
 
   const std::array<uint32_t, 4> rdna3_words = {
       *rdna3_wait,
@@ -3981,15 +3867,14 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
       0x00000100u, // global_store_b32 v0, v1, s[0:1] offset:4
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3),
   };
-  const ConSanTransformArtifacts rdna3 =
+  const TransformArtifacts rdna3 =
       test_lower_consan(make_rdna3_lds_code_object(rdna3_words, "rdna3_release_store"), options);
-  ASSERT_TRUE(consan_patch_succeeded(rdna3)) << testing::PrintToString(rdna3.errors);
-  const auto rdna3_release =
-      std::ranges::find(rdna3.program_inventory.sync().sync_sequences,
-                        ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);
+  ASSERT_TRUE(patch_succeeded(rdna3)) << testing::PrintToString(rdna3.errors);
+  const auto rdna3_release = std::ranges::find(rdna3.program_inventory.sync().sync_sequences,
+                                               SyncMemoryRole::Release, &SyncSequence::memory_role);
   ASSERT_NE(rdna3_release, rdna3.program_inventory.sync().sync_sequences.end())
       << testing::PrintToString(rdna3.program_inventory.sync().sync_sequences);
-  EXPECT_EQ(rdna3_release->kind, ConSanSyncKind::OrdinaryMemory);
+  EXPECT_EQ(rdna3_release->kind, SyncKind::OrdinaryMemory);
   EXPECT_EQ(rdna3_release->begin_text_offset, 0u);
   EXPECT_EQ(rdna3_release->end_text_offset, 3u * sizeof(uint32_t));
   EXPECT_EQ(rdna3_release->release_wait_text_offset, 0u);
@@ -4001,15 +3886,14 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
       0x00000400u, // global_store_b32 v0, v1, s[0:1] offset:4 scope:SCOPE_DEV
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
-  const ConSanTransformArtifacts rdna4 =
+  const TransformArtifacts rdna4 =
       test_lower_consan(make_rdna4_lds_code_object(rdna4_words, "rdna4_release_store"), options);
-  ASSERT_TRUE(consan_patch_succeeded(rdna4)) << testing::PrintToString(rdna4.errors);
-  const auto rdna4_release =
-      std::ranges::find(rdna4.program_inventory.sync().sync_sequences,
-                        ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);
+  ASSERT_TRUE(patch_succeeded(rdna4)) << testing::PrintToString(rdna4.errors);
+  const auto rdna4_release = std::ranges::find(rdna4.program_inventory.sync().sync_sequences,
+                                               SyncMemoryRole::Release, &SyncSequence::memory_role);
   ASSERT_NE(rdna4_release, rdna4.program_inventory.sync().sync_sequences.end())
       << testing::PrintToString(rdna4.program_inventory.sync().sync_sequences);
-  EXPECT_EQ(rdna4_release->kind, ConSanSyncKind::OrdinaryMemory);
+  EXPECT_EQ(rdna4_release->kind, SyncKind::OrdinaryMemory);
   EXPECT_EQ(rdna4_release->begin_text_offset, 0u);
   EXPECT_EQ(rdna4_release->end_text_offset, 4u * sizeof(uint32_t));
   EXPECT_EQ(rdna4_release->release_wait_text_offset, 0u);
@@ -4036,48 +3920,46 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
       store[2], // global_store_b32 scope:SCOPE_DEV
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options = moi_options();
-  options.moi_track_atomics = true;
+  TestOptions options = test_options();
+  options.track_atomics = true;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(words, "gfx1250_release_store"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
-                                                         result.program_inventory.kernels().front())
+  ASSERT_EQ(test_decoded_sites<OrdinaryMemorySite>(result.program_inventory,
+                                                   result.program_inventory.kernels().front())
                 .size(),
             1u);
-  const ConSanOrdinaryMemorySite store_site =
-      test_decoded_sites<ConSanOrdinaryMemorySite>(result.program_inventory,
-                                                   result.program_inventory.kernels().front())
+  const OrdinaryMemorySite store_site =
+      test_decoded_sites<OrdinaryMemorySite>(result.program_inventory,
+                                             result.program_inventory.kernels().front())
           .front();
-  EXPECT_EQ(store_site.support_reason,
-            ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
+  EXPECT_EQ(store_site.support_reason, OrdinaryMemorySupportReason::SupportedSynchronizationOnly);
   ASSERT_TRUE(store_site.raw_scale_offset);
   EXPECT_TRUE(*store_site.raw_scale_offset);
-  const auto store_event = std::ranges::find_if(
-      result.program_inventory.sync().sync_events, [](const ConSanSyncEvent &event) {
-        return event.kind == ConSanSyncKind::OrdinaryMemory &&
-               event.operation == ConSanSyncOperation::OrdinaryStore;
+  const auto store_event =
+      std::ranges::find_if(result.program_inventory.sync().sync_events, [](const SyncEvent &event) {
+        return event.kind == SyncKind::OrdinaryMemory &&
+               event.operation == SyncOperation::OrdinaryStore;
       });
   ASSERT_NE(store_event, result.program_inventory.sync().sync_events.end())
       << testing::PrintToString(result.program_inventory.sync().sync_events);
-  EXPECT_EQ(store_event->confidence, ConSanSemanticConfidence::Conservative);
-  const ConSanOrdinaryMemorySite *store_source =
-      result.program_inventory.sync().source_as<ConSanOrdinaryMemorySite>(*store_event);
+  EXPECT_EQ(store_event->confidence, SemanticConfidence::Conservative);
+  const OrdinaryMemorySite *store_source =
+      result.program_inventory.sync().source_as<OrdinaryMemorySite>(*store_event);
   ASSERT_NE(store_source, nullptr);
   EXPECT_EQ(store_source->width_bits, 32u);
   ASSERT_TRUE(store_event->scope);
-  EXPECT_EQ(*store_event->scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(*store_event->scope, MemoryScope::Agent);
   EXPECT_FALSE(result.program_inventory.sync().execution_owners(*store_event).empty());
-  const auto release =
-      std::ranges::find(result.program_inventory.sync().sync_sequences,
-                        ConSanSyncMemoryRole::Release, &ConSanSyncSequence::memory_role);
+  const auto release = std::ranges::find(result.program_inventory.sync().sync_sequences,
+                                         SyncMemoryRole::Release, &SyncSequence::memory_role);
   ASSERT_NE(release, result.program_inventory.sync().sync_sequences.end())
       << testing::PrintToString(result.program_inventory.sync().sync_sequences)
       << testing::PrintToString(result.program_inventory.sync().sync_events);
-  EXPECT_EQ(release->kind, ConSanSyncKind::OrdinaryMemory);
+  EXPECT_EQ(release->kind, SyncKind::OrdinaryMemory);
   EXPECT_EQ(release->begin_text_offset, sizeof(uint32_t));
   EXPECT_EQ(release->end_text_offset, 8u * sizeof(uint32_t));
   EXPECT_EQ(release->member_event_ids.size(), 2u);
@@ -4095,50 +3977,50 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
       0x027C0000u, // global_load_b32 v2, v[0:1], off offset:4 glc
       *wait,       gl1[0], gl1[1], gl0[0], gl0[1], build_s_endpgm(kArch),
   };
-  MoiOptions options = moi_options();
-  options.moi_track_atomics = true;
+  TestOptions options = test_options();
+  options.track_atomics = true;
 
-  const ConSanTransformArtifacts result = test_lower_consan(
+  const TransformArtifacts result = test_lower_consan(
       make_rdna3_lds_code_object(text_words, "ordinary_acquire_cache_pair"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u)
       << testing::PrintToString(result.program_inventory.sync().sync_events);
-  const ConSanFenceSite *prefix_site = result.program_inventory.sync().source_as<ConSanFenceSite>(
+  const FenceSite *prefix_site = result.program_inventory.sync().source_as<FenceSite>(
       result.program_inventory.sync().sync_events[1]);
-  const ConSanFenceSite *completion = result.program_inventory.sync().source_as<ConSanFenceSite>(
+  const FenceSite *completion = result.program_inventory.sync().source_as<FenceSite>(
       result.program_inventory.sync().sync_events[2]);
   ASSERT_NE(prefix_site, nullptr);
   ASSERT_NE(completion, nullptr);
-  EXPECT_EQ(prefix_site->cache_operation, ConSanCacheOperation::AcquirePairPrefix);
-  EXPECT_EQ(completion->cache_operation, ConSanCacheOperation::AcquirePairCompletion);
+  EXPECT_EQ(prefix_site->cache_operation, CacheOperation::AcquirePairPrefix);
+  EXPECT_EQ(completion->cache_operation, CacheOperation::AcquirePairCompletion);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
       << testing::PrintToString(result.program_inventory.sync().sync_sequences);
   const auto sequence_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &sequence = sequence_view.front();
-  EXPECT_EQ(sequence.kind, ConSanSyncKind::OrdinaryMemory);
-  EXPECT_EQ(sequence.operation, ConSanSyncOperation::OrdinaryLoad);
-  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &sequence = sequence_view.front();
+  EXPECT_EQ(sequence.kind, SyncKind::OrdinaryMemory);
+  EXPECT_EQ(sequence.operation, SyncOperation::OrdinaryLoad);
+  EXPECT_EQ(sequence.memory_role, SyncMemoryRole::Acquire);
+  EXPECT_EQ(sequence.memory_role_confidence, SemanticConfidence::Conservative);
   EXPECT_NE(sequence.identity.find("|acquire-cache="), std::string::npos);
   EXPECT_NE(sequence.identity.find("|acquire-cache-tail="), std::string::npos);
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
-  const auto admitted = std::ranges::find(result.program_inventory.sync().moi_fence_candidates,
-                                          true, &ConSanMoiFenceCandidate::eligible);
-  ASSERT_NE(admitted, result.program_inventory.sync().moi_fence_candidates.end())
-      << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates);
-  EXPECT_EQ(std::ranges::count(result.program_inventory.sync().moi_fence_candidates, true,
-                               &ConSanMoiFenceCandidate::eligible),
+  ASSERT_EQ(result.program_inventory.sync().fence_candidates.size(), 2u);
+  const auto admitted = std::ranges::find(result.program_inventory.sync().fence_candidates, true,
+                                          &FenceCandidate::eligible);
+  ASSERT_NE(admitted, result.program_inventory.sync().fence_candidates.end())
+      << testing::PrintToString(result.program_inventory.sync().fence_candidates);
+  EXPECT_EQ(std::ranges::count(result.program_inventory.sync().fence_candidates, true,
+                               &FenceCandidate::eligible),
             1u);
-  EXPECT_EQ(admitted->memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(admitted->communication_event, ConSanSyncEventId{0});
-  const auto prefix = std::ranges::find(result.program_inventory.sync().moi_fence_candidates, false,
-                                        &ConSanMoiFenceCandidate::eligible);
-  ASSERT_NE(prefix, result.program_inventory.sync().moi_fence_candidates.end());
-  EXPECT_EQ(prefix->association, ConSanFenceAssociation::AcquirePairPrefixCoveredByTail);
+  EXPECT_EQ(admitted->memory_role, SyncMemoryRole::Acquire);
+  EXPECT_EQ(admitted->communication_event, SyncEventId{0});
+  const auto prefix = std::ranges::find(result.program_inventory.sync().fence_candidates, false,
+                                        &FenceCandidate::eligible);
+  ASSERT_NE(prefix, result.program_inventory.sync().fence_candidates.end());
+  EXPECT_EQ(prefix->association, FenceAssociation::AcquirePairPrefixCoveredByTail);
 }
 
-TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
+TEST(ConSan, FenceSelectionRejectsUnassociatedCacheOperations) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
   const std::array<uint32_t, 11> text_words = {
@@ -4149,17 +4031,16 @@ TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  MoiOptions options = moi_options();
+  TestOptions options = test_options();
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
-  for (const ConSanMoiFenceCandidate &candidate :
-       result.program_inventory.sync().moi_fence_candidates) {
+  ASSERT_TRUE(patch_succeeded(result));
+  ASSERT_EQ(result.program_inventory.sync().fence_candidates.size(), 2u);
+  for (const FenceCandidate &candidate : result.program_inventory.sync().fence_candidates) {
     EXPECT_FALSE(candidate.eligible());
-    EXPECT_EQ(candidate.association, ConSanFenceAssociation::NotAddressedCommunication);
+    EXPECT_EQ(candidate.association, FenceAssociation::NotAddressedCommunication);
     EXPECT_FALSE(candidate.communication_event);
   }
 }
@@ -4175,23 +4056,22 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5]
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Fence);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, ConSanSyncKind::Atomic);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
-            ConSanSyncMemoryRole::Unknown);
-  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
-  EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
-  EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates.front().association,
-            ConSanFenceAssociation::NotAddressedCommunication);
-  EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.front().communication_event);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, SyncKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].kind, SyncKind::Atomic);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role, SyncMemoryRole::Unknown);
+  ASSERT_EQ(result.program_inventory.sync().fence_candidates.size(), 1u);
+  EXPECT_FALSE(result.program_inventory.sync().fence_candidates.front().eligible());
+  EXPECT_EQ(result.program_inventory.sync().fence_candidates.front().association,
+            FenceAssociation::NotAddressedCommunication);
+  EXPECT_FALSE(result.program_inventory.sync().fence_candidates.front().communication_event);
 }
 
 TEST(ConSan, SyncSequencesDoNotPairBarrierAcrossAtomic) {
@@ -4202,25 +4082,23 @@ TEST(ConSan, SyncSequencesDoNotPairBarrierAcrossAtomic) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Ambiguous);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::AtomicRmw);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
-            ConSanSyncMemoryRole::Unknown);
+            SemanticConfidence::Ambiguous);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation, SyncOperation::AtomicRmw);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role, SyncMemoryRole::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
 }
 
 TEST(ConSan, SyncSequencesDoNotAssociateCacheOperationAcrossBarrier) {
@@ -4236,26 +4114,24 @@ TEST(ConSan, SyncSequencesDoNotAssociateCacheOperationAcrossBarrier) {
       0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                           // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Fence);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role,
-            ConSanSyncMemoryRole::Unknown);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, SyncKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role, SyncMemoryRole::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierFull);
+            SyncOperation::BarrierFull);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
-            ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].operation,
-            ConSanSyncOperation::AtomicRmw);
+            SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].operation, SyncOperation::AtomicRmw);
   // The global_wb remains separated by the barrier, while the exact wait
   // immediately before the atomic independently proves its release half.
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].memory_role,
-            ConSanSyncMemoryRole::AcquireRelease);
+            SyncMemoryRole::AcquireRelease);
   EXPECT_NE(result.program_inventory.sync().sync_sequences[2].identity.find("|release-wait=pc=0x"),
             std::string::npos);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences[2].member_event_ids.size(), 2u);
@@ -4273,22 +4149,21 @@ TEST(ConSan, SyncSequencesRetainAtomicCacheAssociationBeforeBarrier) {
       0xBF94FFFFu,                                        // s_barrier_wait -1
       0xBFB00000u,                                        // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::AtomicRmw);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation, SyncOperation::AtomicRmw);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role,
-            ConSanSyncMemoryRole::AcquireRelease);
+            SyncMemoryRole::AcquireRelease);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences[0].member_event_ids.size(), 3u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierFull);
+            SyncOperation::BarrierFull);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
-            ConSanSyncMemoryRole::AcquireRelease);
+            SyncMemoryRole::AcquireRelease);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences[1].member_event_ids.size(), 2u);
 }
 
@@ -4303,23 +4178,21 @@ TEST(ConSan, SyncSequencesKeepCacheOperationsSeparateAroundBarrier) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, ConSanSyncKind::Fence);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role,
-            ConSanSyncMemoryRole::Unknown);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].kind, SyncKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].memory_role, SyncMemoryRole::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierFull);
+            SyncOperation::BarrierFull);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].memory_role,
-            ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, ConSanSyncKind::Fence);
-  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].memory_role,
-            ConSanSyncMemoryRole::Unknown);
+            SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].kind, SyncKind::Fence);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].memory_role, SyncMemoryRole::Unknown);
 }
 
 TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
@@ -4339,27 +4212,27 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                 result.program_inventory.kernels().front())
+  ASSERT_EQ(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
                 .size(),
             1u);
-  EXPECT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                 result.program_inventory.kernels().front())
+  EXPECT_EQ(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
                 .front()
                 .address_space_hint,
-            ConSanAtomicAddressSpaceHint::FlatMaybeGroup);
+            AtomicAddressSpaceHint::FlatMaybeGroup);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   const auto event_view = result.program_inventory.sync().sync_events;
-  const ConSanSyncEvent &event = event_view.front();
-  EXPECT_EQ(event.address_source, ConSanSyncAddressSource::FlatVector);
-  EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Ambiguous);
+  const SyncEvent &event = event_view.front();
+  EXPECT_EQ(event.address_source, SyncAddressSource::FlatVector);
+  EXPECT_EQ(event.confidence, SemanticConfidence::Ambiguous);
   EXPECT_NE(event.confidence_reason.find("not statically distinguishable"), std::string::npos);
 }
 
@@ -4375,22 +4248,21 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
       (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                 result.program_inventory.kernels().front())
+  ASSERT_EQ(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
                 .size(),
             1u);
-  const ConSanAtomicSite site =
-      test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                           result.program_inventory.kernels().front())
-          .front();
+  const AtomicSite site = test_decoded_sites<AtomicSite>(result.program_inventory,
+                                                         result.program_inventory.kernels().front())
+                              .front();
   EXPECT_EQ(site.mnemonic, "flat_atomic_add_u32");
   EXPECT_EQ(site.size, 3u * sizeof(uint32_t));
   EXPECT_EQ(site.width_bits, 32u);
@@ -4402,7 +4274,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   EXPECT_EQ(site.raw_vsrc, 4u);
   EXPECT_EQ(site.raw_vdst, 2u);
   EXPECT_EQ(site.raw_ioffset, 0);
-  EXPECT_EQ(site.scope, ConSanMemoryScope::Agent);
+  EXPECT_EQ(site.scope, MemoryScope::Agent);
   EXPECT_EQ(site.raw_th, 1u);
   EXPECT_EQ(site.returns_old_value, true);
 }
@@ -4415,12 +4287,12 @@ TEST(ConSan, SyncSequencesPreserveBasicBlockBoundaryBetweenAdjacentEvents) {
       0xBFB00000u,                                 // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_semantic_inventory(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
   ASSERT_TRUE(result.program_inventory.sync().sync_sequences[0].basic_block_index);
@@ -4430,9 +4302,9 @@ TEST(ConSan, SyncSequencesPreserveBasicBlockBoundaryBetweenAdjacentEvents) {
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].member_event_ids.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].member_event_ids.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
 }
 
 TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
@@ -4441,30 +4313,29 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   const auto paired = test_semantic_inventory(make_rdna4_lds_code_object(paired_words), options);
 
   ASSERT_TRUE(paired.errors.empty()) << (paired.errors.empty() ? "" : paired.errors.front());
   ASSERT_EQ(paired.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(paired.program_inventory.sync().sync_sequences.size(), 1u);
   const auto barrier_view = paired.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &barrier = barrier_view.front();
-  EXPECT_EQ(barrier.kind, ConSanSyncKind::Barrier);
-  EXPECT_EQ(barrier.operation, ConSanSyncOperation::BarrierFull);
-  EXPECT_EQ(barrier.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(barrier.confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &barrier = barrier_view.front();
+  EXPECT_EQ(barrier.kind, SyncKind::Barrier);
+  EXPECT_EQ(barrier.operation, SyncOperation::BarrierFull);
+  EXPECT_EQ(barrier.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(barrier.confidence, SemanticConfidence::Conservative);
   ASSERT_TRUE(barrier.barrier_id);
   EXPECT_EQ(*barrier.barrier_id, -1);
-  EXPECT_EQ(barrier.barrier_operand_source, ConSanBarrierSite::OperandSource::Immediate);
-  EXPECT_EQ(barrier.barrier_scope, ConSanBarrierSite::Scope::Workgroup);
+  EXPECT_EQ(barrier.barrier_operand_source, BarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(barrier.barrier_scope, BarrierSite::Scope::Workgroup);
   ASSERT_EQ(barrier.member_event_ids.size(), 2u);
   for (size_t index = 0; index < barrier.member_event_ids.size(); ++index) {
-    EXPECT_EQ(barrier.member_event_ids[index], ConSanSyncEventId{static_cast<uint32_t>(index)});
+    EXPECT_EQ(barrier.member_event_ids[index], SyncEventId{static_cast<uint32_t>(index)});
   }
   ASSERT_EQ(paired.fault_sites.size(), 2u);
-  const ConSanFaultSiteDiagnostic first_fault =
-      test_fault_diagnostic(paired, paired.fault_sites[0]);
+  const FaultSiteDiagnostic first_fault = test_fault_diagnostic(paired, paired.fault_sites[0]);
   EXPECT_EQ(test_sync_sequence(paired, paired.fault_sites[0]), &barrier);
   EXPECT_EQ(test_sync_sequence(paired, paired.fault_sites[1]), &barrier);
   EXPECT_NE(first_fault.decoded_operands.find("barrier_id=-1"), std::string::npos);
@@ -4486,13 +4357,13 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       << (intervened.errors.empty() ? "" : intervened.errors.front());
   ASSERT_EQ(intervened.program_inventory.sync().sync_sequences.size(), 2u);
   EXPECT_EQ(intervened.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(intervened.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(intervened.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   EXPECT_EQ(intervened.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
 
   const std::array<uint32_t, 3> reversed_words = {
       0xBF94FFFFu, // s_barrier_wait -1
@@ -4504,13 +4375,13 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
   ASSERT_TRUE(reversed.errors.empty()) << (reversed.errors.empty() ? "" : reversed.errors.front());
   ASSERT_EQ(reversed.program_inventory.sync().sync_sequences.size(), 2u);
   EXPECT_EQ(reversed.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(reversed.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(reversed.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   EXPECT_EQ(reversed.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
 }
 
 TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively) {
@@ -4523,28 +4394,28 @@ TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively)
       0xBF94FFFFu,              // s_barrier_wait -1
       0xBFB00000u,              // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts retained =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts retained =
       test_semantic_inventory(make_rdna4_lds_code_object(retained_words), options);
 
   ASSERT_TRUE(retained.errors.empty()) << testing::PrintToString(retained.errors);
   ASSERT_EQ(retained.program_inventory.sync().sync_sequences.size(), 1u);
   const auto pair_view = retained.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &pair = pair_view.front();
-  EXPECT_EQ(pair.operation, ConSanSyncOperation::BarrierFull);
-  EXPECT_EQ(pair.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(pair.confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &pair = pair_view.front();
+  EXPECT_EQ(pair.operation, SyncOperation::BarrierFull);
+  EXPECT_EQ(pair.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(pair.confidence, SemanticConfidence::Conservative);
   EXPECT_EQ(pair.member_event_ids.size(), 2u);
   EXPECT_EQ(pair.begin_text_offset, 0u);
   EXPECT_EQ(pair.end_text_offset, 7u * sizeof(uint32_t));
   EXPECT_NE(pair.confidence_reason.find("bounded same-block"), std::string::npos);
 
   const auto full_pair_count = [&](std::span<const uint32_t> words) {
-    const ConSanTransformArtifacts result =
+    const TransformArtifacts result =
         test_semantic_inventory(make_rdna4_lds_code_object(words), options);
     return std::ranges::count(result.program_inventory.sync().sync_sequences,
-                              ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+                              SyncOperation::BarrierFull, &SyncSequence::operation);
   };
   const std::array<uint32_t, 4> intervening_barrier = {
       0xBE804EC1u, // s_barrier_signal -1
@@ -4594,25 +4465,18 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
   };
   const std::vector<uint8_t> unmatched =
       make_rdna4_lds_code_object(unmatched_words, "unmatched_wait_abort");
-  const std::array<ConSanMoiEngine, 3> engines = {
-      ConSanMoiEngine::RecordReplay,
-      ConSanMoiEngine::InlineShadow,
-      ConSanMoiEngine::Sampled,
-  };
-  for (size_t profile = 0; profile != 4; ++profile) {
-    MoiOptions options;
-    options.flavor = profile == 0 ? ConSanFlavor::SuperCollider : ConSanFlavor::Moi;
-    if (profile != 0)
-      options.moi_engine = engines[profile - 1];
+  for (size_t profile = 0; profile != 2; ++profile) {
+    TestOptions options;
+    options.mode = profile == 0 ? Mode::SuperCollider : Mode::Default;
     options.abort_unmatched_barrier_wait = true;
-    const ConSanTransformArtifacts result = test_lower_consan(unmatched, options);
-    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+    const TransformArtifacts result = test_lower_consan(unmatched, options);
+    ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid)
         << profile << testing::PrintToString(result.errors)
         << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.patches.size(), 1u) << profile;
-    const ConSanPatchInfo &patch = result.patches.front();
-    EXPECT_EQ(patch.kind, ConSanPatchKind::InlineMalformedBarrierAbort);
-    EXPECT_EQ(patch.phase, ConSanPatchPhase::Instrumentation);
+    const PatchInfo &patch = result.patches.front();
+    EXPECT_EQ(patch.kind, PatchKind::InlineMalformedBarrierAbort);
+    EXPECT_EQ(patch.phase, PatchPhase::Instrumentation);
     EXPECT_EQ(patch.anchor_offset, 0u);
     EXPECT_EQ(patch.original_size, sizeof(uint32_t));
     AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
@@ -4621,7 +4485,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
     std::memcpy(&replacement_word, replacement.text_sections().front()->data(),
                 sizeof(replacement_word));
     EXPECT_EQ(replacement_word, build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
-    EXPECT_TRUE(validate_consan_modified_elf(unmatched, result).empty());
+    EXPECT_TRUE(validate_modified_elf(unmatched, result).empty());
   }
 
   const std::array<uint32_t, 5> matched_words = {
@@ -4631,21 +4495,21 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions matched_options;
-  matched_options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions matched_options;
+  matched_options.mode = Mode::SuperCollider;
   matched_options.abort_unmatched_barrier_wait = true;
-  const ConSanTransformArtifacts matched =
+  const TransformArtifacts matched =
       test_lower_consan(make_rdna4_lds_code_object(matched_words, "matched_wait"), matched_options);
-  EXPECT_EQ(matched.outcome, ConSanTransformOutcome::Unchanged);
+  EXPECT_EQ(matched.outcome, TransformOutcome::Unchanged);
   EXPECT_TRUE(matched.patches.empty());
 
   const std::array<uint32_t, 2> signal_only_words = {
       0xBE804EC1u, // unmatched signal is completing and must not be rewritten
       0xBFB00000u,
   };
-  const ConSanTransformArtifacts signal_only = test_lower_consan(
+  const TransformArtifacts signal_only = test_lower_consan(
       make_rdna4_lds_code_object(signal_only_words, "unmatched_signal"), matched_options);
-  EXPECT_EQ(signal_only.outcome, ConSanTransformOutcome::Unchanged);
+  EXPECT_EQ(signal_only.outcome, TransformOutcome::Unchanged);
   EXPECT_TRUE(signal_only.patches.empty());
 }
 
@@ -4655,17 +4519,17 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
       0xBF94FFFEu, // s_barrier_wait -2
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  const ConSanBarrierSite *signal = result.program_inventory.sync().source_as<ConSanBarrierSite>(
+  const BarrierSite *signal = result.program_inventory.sync().source_as<BarrierSite>(
       result.program_inventory.sync().sync_events[0]);
-  const ConSanBarrierSite *wait = result.program_inventory.sync().source_as<ConSanBarrierSite>(
+  const BarrierSite *wait = result.program_inventory.sync().source_as<BarrierSite>(
       result.program_inventory.sync().sync_events[1]);
   ASSERT_NE(signal, nullptr);
   ASSERT_NE(wait, nullptr);
@@ -4673,16 +4537,16 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
   ASSERT_TRUE(wait->barrier_id);
   EXPECT_EQ(*signal->barrier_id, -1);
   EXPECT_EQ(*wait->barrier_id, -2);
-  EXPECT_EQ(signal->scope, ConSanBarrierSite::Scope::Workgroup);
-  EXPECT_EQ(wait->scope, ConSanBarrierSite::Scope::Workgroup);
+  EXPECT_EQ(signal->scope, BarrierSite::Scope::Workgroup);
+  EXPECT_EQ(wait->scope, BarrierSite::Scope::Workgroup);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
 }
 
 TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
@@ -4693,25 +4557,25 @@ TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
       0xBF940001u, // s_barrier_wait 1
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
   ASSERT_TRUE(result.program_inventory.sync().sync_sequences[0].barrier_id);
   EXPECT_EQ(*result.program_inventory.sync().sync_sequences[0].barrier_id, -2);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].barrier_scope,
-            ConSanBarrierSite::Scope::Workgroup);
+            BarrierSite::Scope::Workgroup);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierFull);
+            SyncOperation::BarrierFull);
   ASSERT_TRUE(result.program_inventory.sync().sync_sequences[1].barrier_id);
   EXPECT_EQ(*result.program_inventory.sync().sync_sequences[1].barrier_id, 1);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].barrier_scope,
-            ConSanBarrierSite::Scope::Workgroup);
+            BarrierSite::Scope::Workgroup);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierFull);
+            SyncOperation::BarrierFull);
 }
 
 TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
@@ -4725,17 +4589,17 @@ TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
       0xBF94FFFDu,    // s_barrier_wait -3
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  const ConSanTransformArtifacts result =
-      test_lower_consan(make_gfx1250_code_object(text_words, "cluster_triangle"), moi_options());
+  const TransformArtifacts result =
+      test_lower_consan(make_gfx1250_code_object(text_words, "cluster_triangle"), test_options());
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   const auto pair_view = result.program_inventory.sync().sync_sequences;
-  const ConSanSyncSequence &pair = pair_view.front();
-  EXPECT_EQ(pair.operation, ConSanSyncOperation::BarrierFull);
-  EXPECT_EQ(pair.barrier_scope, ConSanBarrierSite::Scope::Cluster);
-  EXPECT_EQ(pair.memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  EXPECT_EQ(pair.confidence, ConSanSemanticConfidence::Conservative);
+  const SyncSequence &pair = pair_view.front();
+  EXPECT_EQ(pair.operation, SyncOperation::BarrierFull);
+  EXPECT_EQ(pair.barrier_scope, BarrierSite::Scope::Cluster);
+  EXPECT_EQ(pair.memory_role, SyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(pair.confidence, SemanticConfidence::Conservative);
   EXPECT_EQ(pair.member_event_ids.size(), 2u);
   EXPECT_NE(pair.confidence_reason.find("conditional CFG triangle"), std::string::npos);
   ASSERT_EQ(result.program_inventory.sync().execution_owners(pair).size(), 1u);
@@ -4753,21 +4617,21 @@ TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {
       0xBF94FFFDu, // s_barrier_wait -3
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result = test_semantic_inventory(
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result = test_semantic_inventory(
       make_gfx1250_code_object(text_words, "nontrivial_cluster_triangle"), options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
 }
 
 TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
@@ -4776,28 +4640,28 @@ TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_rdna4_lds_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
-  const ConSanBarrierSite *dynamic = result.program_inventory.sync().source_as<ConSanBarrierSite>(
+  const BarrierSite *dynamic = result.program_inventory.sync().source_as<BarrierSite>(
       result.program_inventory.sync().sync_events[0]);
   ASSERT_NE(dynamic, nullptr);
   EXPECT_FALSE(dynamic->barrier_id);
-  EXPECT_EQ(dynamic->operand_source, ConSanBarrierSite::OperandSource::DynamicM0);
-  EXPECT_EQ(dynamic->scope, ConSanBarrierSite::Scope::Unknown);
+  EXPECT_EQ(dynamic->operand_source, BarrierSite::OperandSource::DynamicM0);
+  EXPECT_EQ(dynamic->scope, BarrierSite::Scope::Unknown);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].confidence,
-            ConSanSemanticConfidence::Unsupported);
+            SemanticConfidence::Unsupported);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   ASSERT_FALSE(result.fault_sites.empty());
   EXPECT_NE(test_fault_diagnostic(result, result.fault_sites[0])
                 .decoded_operands.find("operand_source=dynamic-m0"),
@@ -4815,72 +4679,68 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
       0xBE84507Du, // s_get_barrier_state s4, m0
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
-  const auto barrier_sites =
-      test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
+  const auto barrier_sites = test_decoded_sites<BarrierSite>(result.program_inventory, kernel);
   ASSERT_EQ(barrier_sites.size(), 7u);
-  EXPECT_EQ(barrier_sites[0].operation, ConSanBarrierSite::Operation::Init);
-  EXPECT_EQ(barrier_sites[1].operation, ConSanBarrierSite::Operation::Join);
-  EXPECT_EQ(barrier_sites[2].operation, ConSanBarrierSite::Operation::Signal);
-  EXPECT_EQ(barrier_sites[3].operation, ConSanBarrierSite::Operation::Wait);
-  EXPECT_EQ(barrier_sites[4].operation, ConSanBarrierSite::Operation::Leave);
-  EXPECT_EQ(barrier_sites[5].operation, ConSanBarrierSite::Operation::Wakeup);
-  EXPECT_EQ(barrier_sites[6].operation, ConSanBarrierSite::Operation::StateQuery);
+  EXPECT_EQ(barrier_sites[0].operation, BarrierSite::Operation::Init);
+  EXPECT_EQ(barrier_sites[1].operation, BarrierSite::Operation::Join);
+  EXPECT_EQ(barrier_sites[2].operation, BarrierSite::Operation::Signal);
+  EXPECT_EQ(barrier_sites[3].operation, BarrierSite::Operation::Wait);
+  EXPECT_EQ(barrier_sites[4].operation, BarrierSite::Operation::Leave);
+  EXPECT_EQ(barrier_sites[5].operation, BarrierSite::Operation::Wakeup);
+  EXPECT_EQ(barrier_sites[6].operation, BarrierSite::Operation::StateQuery);
   for (const size_t index : {0u, 1u, 5u, 6u}) {
-    EXPECT_EQ(barrier_sites[index].operand_source, ConSanBarrierSite::OperandSource::DynamicM0);
+    EXPECT_EQ(barrier_sites[index].operand_source, BarrierSite::OperandSource::DynamicM0);
     EXPECT_FALSE(barrier_sites[index].barrier_id);
   }
-  EXPECT_EQ(barrier_sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(barrier_sites[2].operand_source, BarrierSite::OperandSource::Immediate);
   ASSERT_TRUE(barrier_sites[2].barrier_id);
   EXPECT_EQ(*barrier_sites[2].barrier_id, -1);
-  EXPECT_EQ(barrier_sites[4].operand_source, ConSanBarrierSite::OperandSource::Unknown);
+  EXPECT_EQ(barrier_sites[4].operand_source, BarrierSite::OperandSource::Unknown);
 
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 7u);
-  const std::array<ConSanSyncOperation, 7> expected_operations = {
-      ConSanSyncOperation::BarrierInit,       ConSanSyncOperation::BarrierJoin,
-      ConSanSyncOperation::BarrierSignal,     ConSanSyncOperation::BarrierWait,
-      ConSanSyncOperation::BarrierLeave,      ConSanSyncOperation::BarrierWakeup,
-      ConSanSyncOperation::BarrierStateQuery,
+  const std::array<SyncOperation, 7> expected_operations = {
+      SyncOperation::BarrierInit,       SyncOperation::BarrierJoin,  SyncOperation::BarrierSignal,
+      SyncOperation::BarrierWait,       SyncOperation::BarrierLeave, SyncOperation::BarrierWakeup,
+      SyncOperation::BarrierStateQuery,
   };
   for (size_t i = 0; i < expected_operations.size(); ++i)
     EXPECT_EQ(result.program_inventory.sync().sync_events[i].operation, expected_operations[i]);
 
   for (const size_t index : {0u, 1u, 4u, 5u, 6u}) {
     const auto event_view = result.program_inventory.sync().sync_events;
-    const ConSanSyncEvent &event = event_view[index];
-    EXPECT_EQ(event.memory_role, ConSanSyncMemoryRole::Unknown);
-    EXPECT_EQ(event.memory_role_confidence, ConSanSemanticConfidence::Unsupported);
-    EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Unsupported);
+    const SyncEvent &event = event_view[index];
+    EXPECT_EQ(event.memory_role, SyncMemoryRole::Unknown);
+    EXPECT_EQ(event.memory_role_confidence, SemanticConfidence::Unsupported);
+    EXPECT_EQ(event.confidence, SemanticConfidence::Unsupported);
     EXPECT_NE(event.confidence_reason.find("participant semantics are unavailable"),
               std::string::npos);
   }
-  EXPECT_EQ(result.program_inventory.sync().sync_events[2].memory_role,
-            ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(result.program_inventory.sync().sync_events[3].memory_role,
-            ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(result.program_inventory.sync().sync_events[2].memory_role, SyncMemoryRole::Release);
+  EXPECT_EQ(result.program_inventory.sync().sync_events[3].memory_role, SyncMemoryRole::Acquire);
 
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 6u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[0].operation,
-            ConSanSyncOperation::BarrierInit);
+            SyncOperation::BarrierInit);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[1].operation,
-            ConSanSyncOperation::BarrierJoin);
+            SyncOperation::BarrierJoin);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].operation,
-            ConSanSyncOperation::BarrierFull);
+            SyncOperation::BarrierFull);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[3].operation,
-            ConSanSyncOperation::BarrierLeave);
+            SyncOperation::BarrierLeave);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[4].operation,
-            ConSanSyncOperation::BarrierWakeup);
+            SyncOperation::BarrierWakeup);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[5].operation,
-            ConSanSyncOperation::BarrierStateQuery);
+            SyncOperation::BarrierStateQuery);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].memory_role,
-            ConSanSyncMemoryRole::AcquireRelease);
+            SyncMemoryRole::AcquireRelease);
 }
 
 TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
@@ -4891,47 +4751,46 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
       0xBF951234u, // s_barrier_leave raw simm16 0x1234
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const auto sites = test_decoded_sites<ConSanBarrierSite>(
-      result.program_inventory, result.program_inventory.kernels().front());
+  const auto sites = test_decoded_sites<BarrierSite>(result.program_inventory,
+                                                     result.program_inventory.kernels().front());
   ASSERT_EQ(sites.size(), 4u);
 
   EXPECT_EQ(sites[0].size, 4u);
-  EXPECT_EQ(sites[0].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(sites[0].operand_source, BarrierSite::OperandSource::Immediate);
   EXPECT_EQ(sites[0].raw_operand_selector, 129u);
   EXPECT_EQ(sites[0].barrier_id, 1);
 
   EXPECT_EQ(sites[1].size, 4u);
-  EXPECT_EQ(sites[1].operand_source, ConSanBarrierSite::OperandSource::DynamicM0);
+  EXPECT_EQ(sites[1].operand_source, BarrierSite::OperandSource::DynamicM0);
   EXPECT_EQ(sites[1].raw_operand_selector, 125u);
   EXPECT_FALSE(sites[1].barrier_id);
 
   EXPECT_EQ(sites[2].size, 4u);
-  EXPECT_EQ(sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(sites[2].operand_source, BarrierSite::OperandSource::Immediate);
   EXPECT_EQ(sites[2].raw_operand_selector, 195u);
   EXPECT_EQ(sites[2].barrier_id, -3);
-  EXPECT_EQ(sites[2].scope, ConSanBarrierSite::Scope::Cluster);
+  EXPECT_EQ(sites[2].scope, BarrierSite::Scope::Cluster);
 
   EXPECT_EQ(sites[3].size, 4u);
-  EXPECT_EQ(sites[3].operation, ConSanBarrierSite::Operation::Leave);
+  EXPECT_EQ(sites[3].operation, BarrierSite::Operation::Leave);
   EXPECT_EQ(sites[3].raw_simm16, 0x1234u);
   EXPECT_FALSE(sites[3].barrier_id);
 
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), sites.size());
-  EXPECT_EQ(sites[2].operand_source, ConSanBarrierSite::OperandSource::Immediate);
+  EXPECT_EQ(sites[2].operand_source, BarrierSite::OperandSource::Immediate);
   EXPECT_EQ(sites[2].raw_operand_selector, 195u);
   EXPECT_EQ(sites[2].barrier_id, -3);
   EXPECT_EQ(sites[3].raw_simm16, 0x1234u);
-  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
-    EXPECT_EQ(event.confidence, ConSanSemanticConfidence::Unsupported);
-    const ConSanBarrierSite *source =
-        result.program_inventory.sync().source_as<ConSanBarrierSite>(event);
+  for (const SyncEvent &event : result.program_inventory.sync().sync_events) {
+    EXPECT_EQ(event.confidence, SemanticConfidence::Unsupported);
+    const BarrierSite *source = result.program_inventory.sync().source_as<BarrierSite>(event);
     ASSERT_NE(source, nullptr);
     EXPECT_FALSE(source->participant_count);
     EXPECT_FALSE(source->participant_mask);
@@ -4944,16 +4803,16 @@ TEST(ConSan, DecodedSitesUseFinalContainerFactsDiscoveredLaterInTheRange) {
       build_s_mov_b32(/*sdst=*/10u, ttmp_scalar_operand(/*ttmp=*/6u), ROCJITSU_CODE_ARCH_CDNA5),
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts result =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts result =
       test_semantic_inventory(make_gfx1250_code_object(text_words, "late_container_fact"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   ASSERT_TRUE(kernel.uses_cluster_workgroup_id);
-  const auto sites = test_decoded_sites<ConSanBarrierSite>(result.program_inventory, kernel);
+  const auto sites = test_decoded_sites<BarrierSite>(result.program_inventory, kernel);
   ASSERT_EQ(sites.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().text_offset(), 0u);
@@ -4968,32 +4827,32 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
       0xBF950000u, // s_barrier_leave (fixed-zero encoding)
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   options.fault_dry_run = true;
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   const auto group_view = result.program_inventory.sync().barrier_lifecycle_groups;
-  const ConSanBarrierLifecycleGroup &group = group_view.front();
+  const BarrierLifecycleGroup &group = group_view.front();
   EXPECT_TRUE(group.admissible());
-  const ConSanSyncEvent *initialization =
+  const SyncEvent *initialization =
       result.program_inventory.sync().barrier_lifecycle_initialization(group);
   ASSERT_NE(initialization, nullptr);
-  const ConSanBarrierSite *initialization_source =
-      result.program_inventory.sync().source_as<ConSanBarrierSite>(*initialization);
+  const BarrierSite *initialization_source =
+      result.program_inventory.sync().source_as<BarrierSite>(*initialization);
   ASSERT_NE(initialization_source, nullptr);
   EXPECT_EQ(initialization_source->barrier_id, 1);
-  EXPECT_EQ(initialization_source->scope, ConSanBarrierSite::Scope::Workgroup);
+  EXPECT_EQ(initialization_source->scope, BarrierSite::Scope::Workgroup);
   EXPECT_EQ(group.member_event_ids.size(), 5u);
-  EXPECT_EQ(group.issue, ConSanBarrierLifecycleIssue::None);
+  EXPECT_EQ(group.issue, BarrierLifecycleIssue::None);
 }
 
 TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   options.fault_dry_run = true;
 
   const std::array<uint32_t, 6> dynamic_words = {
@@ -5004,11 +4863,11 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
       0xBF950000u, // s_barrier_leave
       0xBFB00000u,
   };
-  const ConSanTransformArtifacts dynamic =
+  const TransformArtifacts dynamic =
       test_lower_consan(make_gfx1250_code_object(dynamic_words), options);
   ASSERT_EQ(dynamic.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_EQ(dynamic.program_inventory.sync().barrier_lifecycle_groups[0].issue,
-            ConSanBarrierLifecycleIssue::InitMissingStaticIdOrScope);
+            BarrierLifecycleIssue::InitMissingStaticIdOrScope);
 
   const std::array<uint32_t, 6> mismatched_words = {
       0xBE805181u, // s_barrier_init 1
@@ -5018,11 +4877,11 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
       0xBF950000u, // s_barrier_leave
       0xBFB00000u,
   };
-  const ConSanTransformArtifacts mismatched =
+  const TransformArtifacts mismatched =
       test_lower_consan(make_gfx1250_code_object(mismatched_words), options);
   ASSERT_EQ(mismatched.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_EQ(mismatched.program_inventory.sync().barrier_lifecycle_groups[0].issue,
-            ConSanBarrierLifecycleIssue::MemberIdOrScopeMismatch);
+            BarrierLifecycleIssue::MemberIdOrScopeMismatch);
 
   const std::array<uint32_t, 7> cross_block_words = {
       0xBE805181u, // s_barrier_init 1
@@ -5033,16 +4892,16 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
       0xBF950001u, // s_barrier_leave
       0xBFB00000u,
   };
-  const ConSanTransformArtifacts cross_block =
+  const TransformArtifacts cross_block =
       test_lower_consan(make_gfx1250_code_object(cross_block_words), options);
   ASSERT_EQ(cross_block.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_EQ(cross_block.program_inventory.sync().barrier_lifecycle_groups[0].issue,
-            ConSanBarrierLifecycleIssue::NonContiguousRun);
+            BarrierLifecycleIssue::NonContiguousRun);
 }
 
 TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   options.fault_dry_run = true;
 
   const std::array<uint32_t, 5> no_join_words = {
@@ -5052,12 +4911,12 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
       0xBF950000u, // s_barrier_leave
       0xBFB00000u,
   };
-  const ConSanTransformArtifacts no_join =
+  const TransformArtifacts no_join =
       test_lower_consan(make_gfx1250_code_object(no_join_words), options);
   ASSERT_EQ(no_join.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_FALSE(no_join.program_inventory.sync().barrier_lifecycle_groups[0].admissible());
   EXPECT_EQ(no_join.program_inventory.sync().barrier_lifecycle_groups[0].issue,
-            ConSanBarrierLifecycleIssue::MissingJoin);
+            BarrierLifecycleIssue::MissingJoin);
 
   const std::array<uint32_t, 6> nonzero_leave_words = {
       0xBE805181u, // s_barrier_init 1
@@ -5067,12 +4926,12 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
       0xBF950001u, // invalid non-zero fixed simm16
       0xBFB00000u,
   };
-  const ConSanTransformArtifacts nonzero_leave =
+  const TransformArtifacts nonzero_leave =
       test_lower_consan(make_gfx1250_code_object(nonzero_leave_words), options);
   ASSERT_EQ(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_FALSE(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].admissible());
   EXPECT_EQ(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].issue,
-            ConSanBarrierLifecycleIssue::InvalidLeaveEncoding);
+            BarrierLifecycleIssue::InvalidLeaveEncoding);
 }
 
 TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
@@ -5086,22 +4945,21 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
-  MoiOptions inventory_options;
-  inventory_options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions inventory_options;
+  inventory_options.mode = Mode::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
-  const auto barrier =
-      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
-                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  const TransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const auto barrier = std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                                         SyncOperation::BarrierFull, &SyncSequence::operation);
   ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
-  MoiOptions options = inventory_options;
+  TestOptions options = inventory_options;
   options.fault_dry_run = false;
   options.fault_mutate_barrier_id_scope = true;
   options.fault_barrier_sequence_identity = barrier->identity;
   options.fault_barrier_target_id = 16;
   options.fault_require_exactly_one = true;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid)
       << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_EQ(valid.patches.size(), 5u);
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
@@ -5112,16 +4970,16 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
       original.text_sections().front()->size());
   const uint64_t text_file_offset = valid.program_inventory.text_sections().front().file_offset;
 
-  const auto expect_invalid = [&](const ConSanTransformArtifacts &corrupted) {
-    EXPECT_FALSE(validate_consan_modified_elf(bytes, corrupted).empty());
+  const auto expect_invalid = [&](const TransformArtifacts &corrupted) {
+    EXPECT_FALSE(validate_modified_elf(bytes, corrupted).empty());
   };
   for (size_t i = 0; i < valid.patches.size(); ++i) {
-    const ConSanPatchInfo &patch = valid.patches[i];
-    ASSERT_EQ(patch.kind, ConSanPatchKind::InlineBarrierIdScopeRewrite);
+    const PatchInfo &patch = valid.patches[i];
+    ASSERT_EQ(patch.kind, PatchKind::InlineBarrierIdScopeRewrite);
 
     // Every init/join/signal/wait member is required and must name the same
     // decoded target ID and scope.
-    ConSanTransformArtifacts wrong_target = valid;
+    TransformArtifacts wrong_target = valid;
     const uint64_t operand_offset =
         patch.original_size == 2u * sizeof(uint32_t) ? sizeof(uint32_t) : 0u;
     uint32_t word = 0;
@@ -5143,7 +5001,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
 
     // Restoring bytes while omitting the corresponding record defeats generic
     // byte accounting alone; pristine group derivation must still reject it.
-    ConSanTransformArtifacts omitted = valid;
+    TransformArtifacts omitted = valid;
     std::memcpy(omitted.replacement.data() + text_file_offset + patch.anchor_offset,
                 original_text.data() + patch.anchor_offset, patch.original_size);
     omitted.patches.erase(omitted.patches.begin() + static_cast<ptrdiff_t>(i));
@@ -5151,7 +5009,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
 
     // No opcode or non-operand bit may change, and the decoded instruction
     // must retain its original size and encoding class.
-    ConSanTransformArtifacts wrong_shape = valid;
+    TransformArtifacts wrong_shape = valid;
     uint32_t first_word = 0;
     std::memcpy(&first_word,
                 wrong_shape.replacement.data() + text_file_offset + patch.anchor_offset,
@@ -5162,15 +5020,15 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
     expect_invalid(wrong_shape);
   }
 
-  ConSanTransformArtifacts wrong_member_size = valid;
+  TransformArtifacts wrong_member_size = valid;
   wrong_member_size.patches.front().original_size = 2u * sizeof(uint32_t);
   expect_invalid(wrong_member_size);
 
   // A consistent cluster target would pass simple equality checks, but it is
   // invalid metadata for a named-barrier lifecycle.
-  ConSanTransformArtifacts wrong_scope = valid;
+  TransformArtifacts wrong_scope = valid;
   for (size_t i = 0; i < wrong_scope.patches.size(); ++i) {
-    const ConSanPatchInfo &patch = wrong_scope.patches[i];
+    const PatchInfo &patch = wrong_scope.patches[i];
     const uint64_t operand_offset =
         patch.original_size == 2u * sizeof(uint32_t) ? sizeof(uint32_t) : 0u;
     uint32_t word = 0;
@@ -5189,7 +5047,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
                     operand_offset,
                 &word, sizeof(word));
   }
-  const std::vector<std::string> scope_errors = validate_consan_modified_elf(bytes, wrong_scope);
+  const std::vector<std::string> scope_errors = validate_modified_elf(bytes, wrong_scope);
   EXPECT_TRUE(std::ranges::any_of(scope_errors, [](const std::string &error) {
     return error.find("invalid lifecycle target ID/scope metadata") != std::string::npos;
   }));
@@ -5197,29 +5055,28 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
   // Account the leave range under a fake non-mutation record so that semantic
   // validation, not merely unaccounted-byte detection, proves it remains the
   // pristine fixed-zero instruction.
-  ConSanTransformArtifacts changed_leave = valid;
+  TransformArtifacts changed_leave = valid;
   const uint64_t leave_offset = 5u * sizeof(uint32_t);
   uint32_t nonzero_leave = 0xBF950001u;
   std::memcpy(changed_leave.replacement.data() + text_file_offset + leave_offset, &nonzero_leave,
               sizeof(nonzero_leave));
-  ConSanPatchInfo fake_leave_accounting;
-  fake_leave_accounting.phase = ConSanPatchPhase::Instrumentation;
-  fake_leave_accounting.kind = ConSanPatchKind::InlineBarrierNopRewrite;
+  PatchInfo fake_leave_accounting;
+  fake_leave_accounting.phase = PatchPhase::Instrumentation;
+  fake_leave_accounting.kind = PatchKind::InlineBarrierNopRewrite;
   fake_leave_accounting.anchor_offset = leave_offset;
   fake_leave_accounting.trampoline_offset = leave_offset;
   fake_leave_accounting.original_size = sizeof(uint32_t);
   changed_leave.patches.push_back(fake_leave_accounting);
-  const std::vector<std::string> leave_errors = validate_consan_modified_elf(bytes, changed_leave);
+  const std::vector<std::string> leave_errors = validate_modified_elf(bytes, changed_leave);
   EXPECT_TRUE(std::ranges::any_of(leave_errors, [](const std::string &error) {
     return error.find("fixed-zero lifecycle leave") != std::string::npos;
   }));
 
-  ConSanTransformArtifacts unaccounted = valid;
+  TransformArtifacts unaccounted = valid;
   uint32_t changed_endpgm = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
   std::memcpy(unaccounted.replacement.data() + text_file_offset + 6u * sizeof(uint32_t),
               &changed_endpgm, sizeof(changed_endpgm));
-  const std::vector<std::string> accounting_errors =
-      validate_consan_modified_elf(bytes, unaccounted);
+  const std::vector<std::string> accounting_errors = validate_modified_elf(bytes, unaccounted);
   EXPECT_TRUE(std::ranges::any_of(accounting_errors, [](const std::string &error) {
     return error.find("unaccounted executable byte change") != std::string::npos;
   }));
@@ -5234,24 +5091,24 @@ TEST(ConSan, SyncSequencesInventoryUnmatchedBarrierComponentsWithoutPairing) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts signal =
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
+  const TransformArtifacts signal =
       test_semantic_inventory(make_rdna4_lds_code_object(signal_words), options);
-  const ConSanTransformArtifacts wait =
+  const TransformArtifacts wait =
       test_semantic_inventory(make_rdna4_lds_code_object(wait_words), options);
 
   ASSERT_EQ(signal.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(signal.program_inventory.sync().sync_sequences.front().operation,
-            ConSanSyncOperation::BarrierSignal);
+            SyncOperation::BarrierSignal);
   EXPECT_EQ(signal.program_inventory.sync().sync_sequences.front().confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   ASSERT_EQ(signal.program_inventory.sync().sync_sequences.front().member_event_ids.size(), 1u);
   ASSERT_EQ(wait.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(wait.program_inventory.sync().sync_sequences.front().operation,
-            ConSanSyncOperation::BarrierWait);
+            SyncOperation::BarrierWait);
   EXPECT_EQ(wait.program_inventory.sync().sync_sequences.front().confidence,
-            ConSanSemanticConfidence::Ambiguous);
+            SemanticConfidence::Ambiguous);
   ASSERT_EQ(wait.program_inventory.sync().sync_sequences.front().member_event_ids.size(), 1u);
 }
 
@@ -5277,40 +5134,40 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "validate_structured_divergent_move");
-  MoiOptions inventory_options;
-  inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanTransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
+  TestOptions inventory_options;
+  inventory_options.mode = Mode::SuperCollider;
+  const TransformArtifacts inventory = test_barrier_move_inventory(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 12u,
-                                             &ConSanBarrierMoveDestination::text_offset);
+                                             &BarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
 
-  MoiOptions options = inventory_options;
+  TestOptions options = inventory_options;
   options.fault_move_barrier = true;
   options.fault_allow_destructive_divergent_barrier_move = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Earlier;
+  options.fault_barrier_move_direction = BarrierMoveDirection::Earlier;
   options.fault_barrier_destination_identity = destination->identity;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
 
-  ConSanTransformArtifacts stale_inventory = valid;
+  TransformArtifacts stale_inventory = valid;
   ASSERT_FALSE(stale_inventory.program_inventory.kernels().empty());
   ProgramInventoryBuilder stale_builder(bytes);
   stale_builder.text_sections().assign(valid.program_inventory.text_sections().begin(),
                                        valid.program_inventory.text_sections().end());
-  for (const ConSanProgramContainer &kernel : valid.program_inventory.kernels())
+  for (const ProgramContainer &kernel : valid.program_inventory.kernels())
     stale_builder.add_kernel(kernel);
-  for (const ConSanProgramContainer &function : valid.program_inventory.functions())
+  for (const ProgramContainer &function : valid.program_inventory.functions())
     stale_builder.add_function(function);
   stale_builder.kernels().front().entry_text_offset += sizeof(uint32_t);
   stale_builder.publish_decoded_accesses(bytes);
   stale_inventory.program_inventory = stale_builder.view();
-  EXPECT_TRUE(validate_consan_modified_elf(bytes, stale_inventory).empty());
+  EXPECT_TRUE(validate_modified_elf(bytes, stale_inventory).empty());
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   ASSERT_TRUE(corrupted.patches.back().structured_guard_offset);
   ++*corrupted.patches.back().structured_guard_offset;
-  const auto errors = validate_consan_modified_elf(bytes, corrupted);
+  const auto errors = validate_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("could not rederive its structured CFG contract") != std::string::npos;
   }));
@@ -5318,21 +5175,21 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
   corrupted = valid;
   ASSERT_TRUE(corrupted.patches.back().structured_destination_block_index);
   --*corrupted.patches.back().structured_destination_block_index;
-  const auto block_errors = validate_consan_modified_elf(bytes, corrupted);
+  const auto block_errors = validate_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(block_errors, [](const std::string &error) {
     return error.find("block metadata that does not contain") != std::string::npos;
   }));
 
   corrupted = valid;
-  ConSanPatchInfo &target = corrupted.patches.back();
-  target.barrier_move_cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
+  PatchInfo &target = corrupted.patches.back();
+  target.barrier_move_cfg_contract = BarrierMoveCfgContract::SameBlock;
   target.structured_guard_block_index.reset();
   target.structured_destination_block_index.reset();
   target.structured_source_block_index.reset();
   target.structured_guard_offset.reset();
   target.structured_destination_offset.reset();
   target.structured_source_offset.reset();
-  const auto missing_errors = validate_consan_modified_elf(bytes, corrupted);
+  const auto missing_errors = validate_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(missing_errors, [](const std::string &error) {
     return error.find("cross-block move without a structured CFG contract and metadata") !=
            std::string::npos;
@@ -5350,19 +5207,19 @@ TEST(ConSan, FinalValidationRejectsMissingMovedBarrierTarget) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
   options.fault_move_barrier = true;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 4u);
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   const size_t target_file_offset =
       valid.program_inventory.text_sections().front().file_offset + valid.patches[2].anchor_offset;
   const uint32_t marker = build_s_nop(42, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(corrupted.replacement.data() + target_file_offset, &marker, sizeof(marker));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("mutation proof did not place a barrier at the relocation target") !=
@@ -5372,16 +5229,16 @@ TEST(ConSan, FinalValidationRejectsMissingMovedBarrierTarget) {
 
 TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
 
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.code_size, 24u);
   EXPECT_EQ(kernel.stats.instruction_count, 4u);
@@ -5390,15 +5247,15 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_EQ(kernel.stats.lds_atomic_count, 0u);
   EXPECT_EQ(kernel.stats.fence_like_count, 0u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(result.program_inventory.access_sites()[0].kind, LdsAccessKind::Write);
   EXPECT_TRUE(result.program_inventory.access_sites()[0].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[0].physical_id.original_text_offset, 0u);
   EXPECT_EQ(result.program_inventory.access_sites()[0].decoded_width_bits, 32u);
-  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(result.program_inventory.access_sites()[1].kind, LdsAccessKind::Read);
   EXPECT_TRUE(result.program_inventory.access_sites()[1].lowering.replay_guest_access.available());
   EXPECT_EQ(result.program_inventory.access_sites()[1].physical_id.original_text_offset, 8u);
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_width_bits, 32u);
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Candidate);
   EXPECT_GE(kernel.preflight_reasons.size(), 2u);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
@@ -5412,16 +5269,16 @@ TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
   };
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "preflight_decode_blocker");
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(result.outcome, TransformOutcome::Unsupported);
   EXPECT_TRUE(result.errors.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Blocked);
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Blocked);
   EXPECT_EQ(kernel.stats.ds_other_count, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("ConSan preflight blocked kernel") != std::string::npos;
@@ -5430,20 +5287,20 @@ TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
 
 TEST(ConSan, PreflightAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
-  MoiOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  TestOptions options;
+  options.mode = Mode::SuperCollider;
 
   const auto result = test_lower_consan(bytes, options);
 
   EXPECT_TRUE(result.errors.empty());
-  EXPECT_NE(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_NE(result.outcome, TransformOutcome::Unsupported);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  const ConSanProgramContainer &kernel = result.program_inventory.kernels().front();
-  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
+  const ProgramContainer &kernel = result.program_inventory.kernels().front();
+  EXPECT_EQ(kernel.preflight_action, PreflightAction::Candidate);
   EXPECT_TRUE(std::ranges::any_of(kernel.preflight_reasons, [](const std::string &reason) {
     return reason == "atomic LDS accesses excluded: 1";
   }));
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

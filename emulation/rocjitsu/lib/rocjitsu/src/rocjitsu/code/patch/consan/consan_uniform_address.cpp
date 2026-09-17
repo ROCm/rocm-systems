@@ -11,8 +11,8 @@
 #include <optional>
 #include <string_view>
 
-namespace rocjitsu {
-void ConSanUniformAddressTracker::observe(const Instruction &inst) {
+namespace rocjitsu::consan {
+void UniformAddressTracker::observe(const Instruction &inst) {
   // Relative destination writes can clobber a different VGPR from the
   // encoded destination; ordinary def/use facts do not identify that register.
   if (inst.mnemonic().starts_with("v_movrel")) {
@@ -72,4 +72,4 @@ void ConSanUniformAddressTracker::observe(const Instruction &inst) {
     if (destination)
       uniform_.expand({RegClass::VGPR, *destination, 1});
 }
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

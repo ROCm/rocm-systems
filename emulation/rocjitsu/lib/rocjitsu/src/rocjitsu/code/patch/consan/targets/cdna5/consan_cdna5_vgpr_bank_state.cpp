@@ -8,7 +8,7 @@
 
 #include <cstring>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 [[nodiscard]] bool is_selectable_vgpr_bank_transition(uint32_t word) {
@@ -17,11 +17,11 @@ namespace {
 
 } // namespace
 
-std::optional<uint16_t> consan_selectable_vgpr_bank_mode_at(rj_code_arch_t arch,
-                                                            std::span<const uint8_t> bytes,
-                                                            uint64_t text_file_offset,
-                                                            uint64_t container_entry_text_offset,
-                                                            uint64_t site_file_offset) {
+std::optional<uint16_t> selectable_vgpr_bank_mode_at(rj_code_arch_t arch,
+                                                     std::span<const uint8_t> bytes,
+                                                     uint64_t text_file_offset,
+                                                     uint64_t container_entry_text_offset,
+                                                     uint64_t site_file_offset) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || text_file_offset > bytes.size() ||
       container_entry_text_offset > bytes.size() - text_file_offset) {
     return std::nullopt;
@@ -42,10 +42,9 @@ std::optional<uint16_t> consan_selectable_vgpr_bank_mode_at(rj_code_arch_t arch,
   return mode;
 }
 
-bool consan_selectable_vgpr_bank_transition_in_range(rj_code_arch_t arch,
-                                                     std::span<const uint8_t> bytes,
-                                                     uint64_t begin_file_offset,
-                                                     uint64_t end_file_offset) {
+bool selectable_vgpr_bank_transition_in_range(rj_code_arch_t arch, std::span<const uint8_t> bytes,
+                                              uint64_t begin_file_offset,
+                                              uint64_t end_file_offset) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || begin_file_offset > end_file_offset ||
       end_file_offset > bytes.size() ||
       (end_file_offset - begin_file_offset) % sizeof(uint32_t) != 0u) {
@@ -60,4 +59,4 @@ bool consan_selectable_vgpr_bank_transition_in_range(rj_code_arch_t arch,
   return false;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

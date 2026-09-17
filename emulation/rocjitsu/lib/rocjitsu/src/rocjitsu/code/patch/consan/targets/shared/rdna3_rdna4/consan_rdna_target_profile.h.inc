@@ -2,20 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 /// Target-profile facts shared by RDNA3 and RDNA4.
-[[nodiscard]] constexpr ConSanTargetProfile consan_rdna_target_profile_defaults() {
-  ConSanTargetProfile profile;
-  profile.dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral;
+[[nodiscard]] constexpr TargetProfile rdna_target_profile_defaults() {
+  TargetProfile profile;
+  profile.dispatch_identity = DispatchIdentitySource::CodeObjectLiteral;
   profile.resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10};
-  profile.moi_dispatch_identity_placement =
-      ConSanMoiDispatchIdentityPlacement::PersistentVectorPreferred;
   profile.vgpr_allocation_granularity_wave64 = 4;
   profile.ordinary_sgpr_limit = 106;
   profile.user_sgpr_initialization_limit = 16;
   profile.max_group_segment_bytes = 64u * 1024u;
   profile.vector_memory.flat_vector_only_saddr = 0x7cu;
   profile.vector_memory.global_vector_only_saddr = 0x7cu;
-  profile.moi_access.native_lds_spill_recovery = true;
-  profile.semantic_form_mask = kConSanCommonSemanticFormMask;
+  profile.access.native_lds_spill_recovery = true;
+  profile.semantic_form_mask = kCommonSemanticFormMask;
   profile.requires_raw_memory_order_qualifier = true;
   return profile;
 }

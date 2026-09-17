@@ -5,12 +5,12 @@
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 TEST(ConSanPlacement, NormalizedAccessScratchContractCoversEveryOperandTuple) {
-  ConSanProgramSite access;
-  ConSanAccessLoweringForm &form = access.lowering.form.emplace();
+  ProgramSite access;
+  AccessLoweringForm &form = access.lowering.form.emplace();
   form.data_register_count = 4u;
   form.element_register_count = 2u;
   form.data_register_alignment = 2u;
@@ -26,14 +26,13 @@ TEST(ConSanPlacement, NormalizedAccessScratchContractCoversEveryOperandTuple) {
   EXPECT_TRUE(access_scratch_tuple_base_is_valid(access, 10u));
   EXPECT_FALSE(access_scratch_tuple_base_is_valid(access, 11u));
 
-  ConSanOptions options;
+  Options options;
   options.scratch_vgpr = 8u;
-  EXPECT_FALSE(
-      choose_scratch_vgpr(access, options.scratch_vgpr, nullptr, nullptr, std::nullopt,
-                          std::nullopt, 2u));
+  EXPECT_FALSE(choose_scratch_vgpr(access, options.scratch_vgpr, nullptr, nullptr, std::nullopt,
+                                   std::nullopt, 2u));
   options.scratch_vgpr = 10u;
   EXPECT_EQ(choose_scratch_vgpr(access, options.scratch_vgpr, nullptr, nullptr, std::nullopt,
-                               std::nullopt, 2u),
+                                std::nullopt, 2u),
             10u);
   EXPECT_EQ(choose_spill_scratch_vgpr(access, 12u, 2u), 10u);
 }
@@ -153,10 +152,10 @@ TEST(ConSanInstructionBuilder, SignExtendsCdnaVgprOffsetBefore64BitAdd) {
 TEST(ConSanResourcePlan, PrefersDeadWindowInsideCurrentAllocation) {
   RegisterSet live;
   live.expand({RegClass::VGPR, 0, 4});
-  const ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  const RegisterRequest request = vgpr_request(3, 8, 8);
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::LivenessDead);
   EXPECT_EQ(plan.base, 4);
   EXPECT_EQ(plan.required_descriptor_count, 8);
 }
@@ -164,10 +163,10 @@ TEST(ConSanResourcePlan, PrefersDeadWindowInsideCurrentAllocation) {
 TEST(ConSanResourcePlan, GrowsAboveGuestReferencesAfterDeadSearchFails) {
   RegisterSet live;
   live.expand({RegClass::VGPR, 0, 8});
-  const ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  const RegisterRequest request = vgpr_request(3, 8, 8);
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::DescriptorGrowth);
   EXPECT_EQ(plan.base, 8);
   EXPECT_EQ(plan.required_descriptor_count, 11);
 }
@@ -175,11 +174,11 @@ TEST(ConSanResourcePlan, GrowsAboveGuestReferencesAfterDeadSearchFails) {
 TEST(ConSanResourcePlan, GrowsPastReservedTailWindow) {
   RegisterSet live;
   live.expand({RegClass::VGPR, 0, 8});
-  ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  RegisterRequest request = vgpr_request(3, 8, 8);
   request.forbidden.expand({RegClass::VGPR, 8, 2});
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::DescriptorGrowth);
   EXPECT_EQ(plan.base, 10);
   EXPECT_EQ(plan.required_descriptor_count, 13);
 }
@@ -188,10 +187,10 @@ TEST(ConSanResourcePlan, GrowsIntoDeadWindowBelowHighGuestReference) {
   RegisterSet live;
   live.expand({RegClass::VGPR, 0, 8});
   live.expand({RegClass::VGPR, 18, 230});
-  ConSanRegisterRequest request = vgpr_request(10, 8, 248);
+  RegisterRequest request = vgpr_request(10, 8, 248);
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::DescriptorGrowth);
   EXPECT_EQ(plan.base, 8);
   EXPECT_EQ(plan.required_descriptor_count, 18);
 }
@@ -199,13 +198,13 @@ TEST(ConSanResourcePlan, GrowsIntoDeadWindowBelowHighGuestReference) {
 TEST(ConSanResourcePlan, SpillWindowCanGrowMixedOwnerDescriptors) {
   RegisterSet live;
   expand_all_vgprs(live);
-  ConSanRegisterRequest request = vgpr_request(10, 8, 248);
+  RegisterRequest request = vgpr_request(10, 8, 248);
   request.force_spill = true;
   request.allow_spill_descriptor_growth = true;
   request.forbidden.expand({RegClass::VGPR, 248, 2});
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.base, 0);
   EXPECT_EQ(plan.required_descriptor_count, 10);
 }
@@ -213,35 +212,35 @@ TEST(ConSanResourcePlan, SpillWindowCanGrowMixedOwnerDescriptors) {
 TEST(ConSanResourcePlan, ForceSpillWithoutGrowthRejectsWindowAboveAllocation) {
   RegisterSet live;
   expand_all_vgprs(live);
-  ConSanRegisterRequest request = vgpr_request(10, 8, 248);
+  RegisterRequest request = vgpr_request(10, 8, 248);
   request.force_spill = true;
   request.forbidden.expand({RegClass::VGPR, 248, 2});
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, RegisterPlanReason::NoLegalWindow);
 }
 
 TEST(ConSanResourcePlan, FullRegisterFileSelectsAllowedLiveVictim) {
   RegisterSet live;
   expand_all_vgprs(live);
-  ConSanRegisterRequest request = vgpr_request(3, 256, 256);
+  RegisterRequest request = vgpr_request(3, 256, 256);
   request.forbidden.expand({RegClass::VGPR, 0, 2});
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.base, 2);
   EXPECT_EQ(plan.required_descriptor_count, 256);
 }
 
 TEST(ConSanResourcePlan, ForceSpillBypassesDeadAndGrowthWindows) {
   RegisterSet live;
-  ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  RegisterRequest request = vgpr_request(3, 8, 8);
   request.force_spill = true;
   request.forbidden.expand({RegClass::VGPR, 0, 1});
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.base, 1);
   EXPECT_EQ(plan.required_descriptor_count, 8);
 }
@@ -249,22 +248,22 @@ TEST(ConSanResourcePlan, ForceSpillBypassesDeadAndGrowthWindows) {
 TEST(ConSanResourcePlan, ExplicitOverrideCannotClobberLiveGuestValue) {
   RegisterSet live;
   live.expand({RegClass::VGPR, 4, 1});
-  ConSanRegisterRequest request = vgpr_request(1, 8, 8);
+  RegisterRequest request = vgpr_request(1, 8, 8);
   request.explicit_base = 4;
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::ExplicitLive);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, RegisterPlanReason::ExplicitLive);
 }
 
 TEST(ConSanResourcePlan, ExplicitFreshOverrideCarriesDescriptorRequirement) {
   RegisterSet live;
-  ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  RegisterRequest request = vgpr_request(3, 8, 8);
   request.alignment = 2;
   request.explicit_base = 10;
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Explicit);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::Explicit);
   EXPECT_EQ(plan.base, 10);
   EXPECT_EQ(plan.required_descriptor_count, 13);
 }
@@ -272,47 +271,47 @@ TEST(ConSanResourcePlan, ExplicitFreshOverrideCarriesDescriptorRequirement) {
 TEST(ConSanResourcePlan, ForbiddenFullFileHasTypedFailure) {
   RegisterSet live;
   expand_all_vgprs(live);
-  ConSanRegisterRequest request = vgpr_request(3, 256, 256);
+  RegisterRequest request = vgpr_request(3, 256, 256);
   expand_all_vgprs(request.forbidden);
 
-  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
-  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
+  const RegisterPlan plan = plan_registers(request, live);
+  EXPECT_EQ(plan.source, RegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, RegisterPlanReason::NoLegalWindow);
 }
 
-TEST(ConSanResourcePlanSummary, DerivesEveryPlanAndAlternativeOutcome) {
-  std::array<ConSanCandidateResourcePlan, 5> plans;
-  plans[0].source = ConSanRegisterAllocationSource::Explicit;
+TEST(ResourcePlanSummary, DerivesEveryPlanAndAlternativeOutcome) {
+  std::array<CandidateResourcePlan, 5> plans;
+  plans[0].source = RegisterAllocationSource::Explicit;
   plans[0].alternatives = {
-      {.outcome = ConSanResourcePlanAlternativeOutcome::Selected},
-      {.outcome = ConSanResourcePlanAlternativeOutcome::Rejected},
+      {.outcome = ResourcePlanAlternativeOutcome::Selected},
+      {.outcome = ResourcePlanAlternativeOutcome::Rejected},
   };
-  plans[1].source = ConSanRegisterAllocationSource::LivenessDead;
+  plans[1].source = RegisterAllocationSource::LivenessDead;
   plans[1].alternatives = {
-      {.outcome = ConSanResourcePlanAlternativeOutcome::Superseded},
+      {.outcome = ResourcePlanAlternativeOutcome::Superseded},
   };
-  plans[2].source = ConSanRegisterAllocationSource::DescriptorGrowth;
+  plans[2].source = RegisterAllocationSource::DescriptorGrowth;
   plans[2].alternatives = {
-      {.outcome = ConSanResourcePlanAlternativeOutcome::Contributed},
+      {.outcome = ResourcePlanAlternativeOutcome::Contributed},
   };
-  plans[3].source = ConSanRegisterAllocationSource::SpillRequired;
+  plans[3].source = RegisterAllocationSource::SpillRequired;
   plans[3].scratch_vgpr_count = 3;
   plans[3].alternatives = {
-      {.outcome = ConSanResourcePlanAlternativeOutcome::Vetoed},
+      {.outcome = ResourcePlanAlternativeOutcome::Vetoed},
   };
-  plans[4].source = ConSanRegisterAllocationSource::Unsupported;
+  plans[4].source = RegisterAllocationSource::Unsupported;
   // A nominally selected fallback cannot remain selected when the complete
   // resource plan is unsupported; the derived report classifies it as vetoed.
   plans[4].alternatives = {
-      {.outcome = ConSanResourcePlanAlternativeOutcome::Selected},
+      {.outcome = ResourcePlanAlternativeOutcome::Selected},
   };
-  std::array<ConSanPatchAbiEffects, 3> effects;
+  std::array<PatchAbiEffects, 3> effects;
   effects[0].spilled_vgpr_count = 2;
   effects[2].spilled_vgpr_count = 5;
 
-  ConSanResourcePlanSummary summary = summarize_consan_resource_plans(plans);
-  for (const ConSanPatchAbiEffects &effect : effects)
-    accumulate_consan_emitted_spill(summary, effect);
+  ResourcePlanSummary summary = summarize_resource_plans(plans);
+  for (const PatchAbiEffects &effect : effects)
+    accumulate_emitted_spill(summary, effect);
 
   EXPECT_EQ(summary.explicit_plans, 1u);
   EXPECT_EQ(summary.dead_plans, 1u);
@@ -330,8 +329,8 @@ TEST(ConSanResourcePlanSummary, DerivesEveryPlanAndAlternativeOutcome) {
   EXPECT_EQ(summary.alternative_vetoed, 2u);
 }
 
-TEST(ConSanResourcePlanSummary, EmptyInputProducesEmptySummary) {
-  const ConSanResourcePlanSummary summary = summarize_consan_resource_plans({});
+TEST(ResourcePlanSummary, EmptyInputProducesEmptySummary) {
+  const ResourcePlanSummary summary = summarize_resource_plans({});
 
   EXPECT_EQ(summary.explicit_plans, 0u);
   EXPECT_EQ(summary.dead_plans, 0u);
@@ -350,4 +349,4 @@ TEST(ConSanResourcePlanSummary, EmptyInputProducesEmptySummary) {
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

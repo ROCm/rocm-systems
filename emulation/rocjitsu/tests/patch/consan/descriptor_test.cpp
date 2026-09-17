@@ -9,7 +9,7 @@
 #include <array>
 #include <unordered_map>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 namespace kd = rocr::llvm::amdhsa;
@@ -41,8 +41,8 @@ TEST(ConSanDescriptor, MutationTransactionResolvesMovedOwnerAndPublishesEveryFie
   };
   const std::vector<uint8_t> original_bytes =
       make_cdna4_lds_code_object(words, "moved_descriptor", /*vgpr_granulated=*/0u);
-  MoiOptions options = moi_options();
-  const ConSanTransformArtifacts inventory = test_semantic_inventory(original_bytes, options);
+  TestOptions options = test_options();
+  const TransformArtifacts inventory = test_semantic_inventory(original_bytes, options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_EQ(inventory.program_inventory.kernels().size(), 1u);
   const uint64_t original_owner =
@@ -62,12 +62,12 @@ TEST(ConSanDescriptor, MutationTransactionResolvesMovedOwnerAndPublishesEveryFie
   ASSERT_EQ(moved.kernels().size(), 1u);
   ASSERT_NE(moved.kernels().front().descriptor_file_offset, original_owner);
 
-  const ConSanDescriptorRegisterRequirements vgprs = {{original_owner, 20u}};
-  const ConSanDescriptorRegisterRequirements sgprs = {{original_owner, 20u}};
-  const ConSanDescriptorMemoryRequirements private_bytes = {{original_owner, 96u}};
-  const ConSanDescriptorMemoryRequirements lds_bytes = {{original_owner, 128u}};
+  const DescriptorRegisterRequirements vgprs = {{original_owner, 20u}};
+  const DescriptorRegisterRequirements sgprs = {{original_owner, 20u}};
+  const DescriptorMemoryRequirements private_bytes = {{original_owner, 96u}};
+  const DescriptorMemoryRequirements lds_bytes = {{original_owner, 128u}};
   std::vector<std::string> errors;
-  ASSERT_TRUE(apply_consan_descriptor_mutations_to_bytes(
+  ASSERT_TRUE(apply_descriptor_mutations_to_bytes(
       moved_bytes, inventory.program_inventory, {vgprs, sgprs, private_bytes, lds_bytes},
       {.maximum_ordinary_vgpr_count = 256u,
        .inventory_proves_empty_accumulator_bank = true,
@@ -107,12 +107,12 @@ TEST(ConSanDescriptor, ResourceFactsShareTargetWaveAndAccumulatorSemantics) {
   EXPECT_EQ(descriptor_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4), 32u);
   EXPECT_EQ(descriptor_ordinary_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4), 16u);
   EXPECT_EQ(descriptor_ordinary_vgpr_allocation_count(descriptor, ROCJITSU_CODE_ARCH_CDNA5), 64u);
-  const ConSanDescriptorVgprAllocation cdna4 =
+  const DescriptorVgprAllocation cdna4 =
       descriptor_vgpr_allocation(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(cdna4.unified_count, 32u);
   EXPECT_EQ(cdna4.ordinary_count, 16u);
   EXPECT_EQ(cdna4.accumulator_base, 16u);
-  const ConSanDescriptorVgprAllocation gfx1250 =
+  const DescriptorVgprAllocation gfx1250 =
       descriptor_vgpr_allocation(descriptor, ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_FALSE(gfx1250.accumulator_base);
 
@@ -256,4 +256,4 @@ TEST(ConSanDescriptor, SgprGrowthRejectsUnrepresentableOrdinaryRegistersWithoutM
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

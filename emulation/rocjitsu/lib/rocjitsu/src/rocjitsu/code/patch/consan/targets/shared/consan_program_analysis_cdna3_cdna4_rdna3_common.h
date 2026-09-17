@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_program_analysis_target_detail {
+namespace rocjitsu::consan::program_analysis_target_detail {
 
 [[nodiscard]] inline uint32_t
 implicit_cdna3_cdna4_rdna3_atomic_width_bits(std::string_view mnemonic) {
@@ -19,11 +19,10 @@ implicit_cdna3_cdna4_rdna3_atomic_width_bits(std::string_view mnemonic) {
 }
 
 template <typename Raw>
-ConSanVectorMemoryDecode
-decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction, bool global,
-                                       uint32_t null_saddr) {
+VectorMemoryDecode decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction,
+                                                          bool global, uint32_t null_saddr) {
   if (instruction.size() < sizeof(Raw))
-    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+    return {.status = TargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   Raw raw{};
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   const int32_t ioffset = [&] {
@@ -45,14 +44,14 @@ decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction, boo
     else
       return true;
   }();
-  ConSanEncodedFlatSegment segment = ConSanEncodedFlatSegment::Unspecified;
+  EncodedFlatSegment segment = EncodedFlatSegment::Unspecified;
   if (!global && raw.seg == 1u)
-    segment = ConSanEncodedFlatSegment::Private;
+    segment = EncodedFlatSegment::Private;
   else if (!global && raw.seg == 2u)
-    segment = ConSanEncodedFlatSegment::Global;
+    segment = EncodedFlatSegment::Global;
   const bool exact_size = instruction.size() == sizeof(raw);
   return {
-      .status = ConSanTargetDecodeStatus::Decoded,
+      .status = TargetDecodeStatus::Decoded,
       .encoding =
           {
               .raw_op = static_cast<uint32_t>(raw.op),
@@ -71,7 +70,7 @@ decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction, boo
               .raw_segment = static_cast<uint32_t>(raw.seg),
               .raw_scope = global ? 2u : 0u,
               .raw_th = th,
-              .scope = global ? std::optional{ConSanMemoryScope::Agent} : std::nullopt,
+              .scope = global ? std::optional{MemoryScope::Agent} : std::nullopt,
               .encoded_segment = segment,
               .scalar_provenance_sgpr =
                   global && raw.saddr != null_saddr
@@ -89,7 +88,7 @@ decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction, boo
 }
 
 template <typename Raw>
-void fill_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool global,
+void fill_cdna3_cdna4_rdna3_atomic_site(AtomicSite &site, const Raw &raw, bool global,
                                         uint32_t null_saddr) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
@@ -108,7 +107,7 @@ void fill_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, const Raw &raw, 
   }
   // Preserve the legacy diagnostic spelling of this implicit device scope.
   site.raw_scope = 2u;
-  site.scope = ConSanMemoryScope::Agent;
+  site.scope = MemoryScope::Agent;
   if (global) {
     site.scalar_address_sgpr = raw.saddr == null_saddr
                                    ? std::nullopt
@@ -117,7 +116,7 @@ void fill_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, const Raw &raw, 
 }
 
 template <typename FlatRaw, typename GlobalRaw>
-bool decode_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+bool decode_cdna3_cdna4_rdna3_atomic_site(AtomicSite &site, std::string_view mnemonic,
                                           std::span<const uint8_t> instruction,
                                           uint32_t null_saddr) {
   if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(FlatRaw)) {
@@ -135,4 +134,4 @@ bool decode_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, std::string_vi
   return false;
 }
 
-} // namespace rocjitsu::consan_program_analysis_target_detail
+} // namespace rocjitsu::consan::program_analysis_target_detail

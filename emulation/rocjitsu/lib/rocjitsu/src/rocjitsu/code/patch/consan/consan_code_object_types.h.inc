@@ -1,11 +1,11 @@
-struct ConSanTextSection {
+struct TextSection {
   std::string name;
   uint64_t file_offset = 0;
   uint64_t virtual_address = 0;
   uint64_t size = 0;
 };
 
-struct ConSanKernelStats {
+struct KernelStats {
   uint64_t instruction_count = 0;
   uint64_t decode_error_count = 0;
   uint64_t lds_read_count = 0;
@@ -28,7 +28,7 @@ struct ConSanKernelStats {
   uint64_t fence_like_count = 0;
 };
 
-enum class ConSanFlatAddressSpaceHint : uint8_t {
+enum class FlatAddressSpaceHint : uint8_t {
   Unknown,
   Group,
   Private,
@@ -37,7 +37,7 @@ enum class ConSanFlatAddressSpaceHint : uint8_t {
   Global,
 };
 
-enum class ConSanAtomicAddressSpaceHint : uint8_t {
+enum class AtomicAddressSpaceHint : uint8_t {
   Unknown,
   Lds,
   FlatGroup,
@@ -58,7 +58,7 @@ enum class ConSanAtomicAddressSpaceHint : uint8_t {
 /// does not decide whether the runtime loads the pristine image or rejects the
 /// code-object load; `RuntimePolicy` makes that decision from the completed
 /// transform outcome.
-enum class ConSanPreflightAction : uint8_t {
+enum class PreflightAction : uint8_t {
   /// Inventory has not yet assigned a disposition.
   NotRun,
   /// The kernel contains at least one supported native-LDS candidate.
@@ -71,20 +71,20 @@ enum class ConSanPreflightAction : uint8_t {
   Blocked,
 };
 
-enum class ConSanTransformOutcome : uint8_t {
+enum class TransformOutcome : uint8_t {
   Unchanged,
   ModifiedValid,
   Unsupported,
   Invalid,
 };
 
-enum class ConSanInstallAction : uint8_t {
+enum class InstallAction : uint8_t {
   LoadOriginal,
   LoadReplacement,
   Reject,
 };
 
-enum class ConSanPatchKind : uint8_t {
+enum class PatchKind : uint8_t {
   LdsLoadCheckTrap,
   LdsStoreCheckTrap,
   FlatLoadCheckTrap,
@@ -101,33 +101,24 @@ enum class ConSanPatchKind : uint8_t {
   InlineOrdinaryAddressRewrite,
   InlineOrdinaryOrderRewrite,
   InlineOrdinaryScopeRewrite,
-  InlineMoiAccessRecordStore,
-  TrampolineMoiAccessRecordStore,
-  InlineMoiExactShadowStore,
-  TrampolineMoiExactShadowStore,
-  InlineMoiSampledWatchpointStore,
-  TrampolineMoiSampledWatchpointStore,
-  KernelEntryMoiOwnerEpochPrologue,
-  KernelEntryMoiPrivateEpochPrologue,
-  TrampolineMoiBarrierRecord,
-  TrampolineMoiInlineEpochBarrier,
-  TrampolineMoiInlineAtomicOrdering,
-  TrampolineMoiAtomicRecord,
-  TrampolineMoiSampledSyncMetadata,
-  TrampolineMoiFenceRecord,
+  InlineWatchpointStore,
+  TrampolineWatchpointStore,
+  KernelEntryOwnerEpochPrologue,
+  KernelEntryPrivateEpochPrologue,
+  TrampolineSyncMetadata,
   InlineMalformedBarrierAbort,
-  TrampolineScPerturbation,
+  TrampolineSuperColliderPerturbation,
   /// An s_clause scheduling hint neutralized because one of its covered
   /// memory instructions is replaced by an instrumentation trampoline.
   InlineScalarClauseNopRewrite,
 };
 
-enum class ConSanPatchPhase : uint8_t {
+enum class PatchPhase : uint8_t {
   Mutation,
   Instrumentation,
 };
 
-enum class ConSanOrdinaryMemoryOperation : uint8_t {
+enum class OrdinaryMemoryOperation : uint8_t {
   Load,
   Store,
 };
@@ -135,7 +126,7 @@ enum class ConSanOrdinaryMemoryOperation : uint8_t {
 /// A typed result for the bounded ordinary-memory decode used by fault
 /// sequence discovery. Unsupported records remain in inventory; consumers
 /// must never infer support merely from a mnemonic match.
-enum class ConSanOrdinaryMemorySupportReason : uint8_t {
+enum class OrdinaryMemorySupportReason : uint8_t {
   NotApplicable,
   Supported,
   SupportedSynchronizationOnly,
@@ -148,19 +139,19 @@ enum class ConSanOrdinaryMemorySupportReason : uint8_t {
 };
 
 /// Source location shared by every decoded program-site kind.
-struct ConSanDecodedSite {
+struct DecodedSite {
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;
   uint32_t size = 0;
   std::string mnemonic;
 
-  bool operator==(const ConSanDecodedSite &) const = default;
+  bool operator==(const DecodedSite &) const = default;
 };
 
 /// Register and raw-encoding vocabulary shared by access, ordinary-memory,
 /// and atomic decoding. Individual semantic records add only their
 /// irreducible operands and interpretation.
-struct ConSanDecodedMemoryOperands {
+struct DecodedMemoryOperands {
   std::optional<uint16_t> destination_vgpr;
   std::optional<uint16_t> address_vgpr;
   std::optional<uint16_t> data_vgpr;
@@ -182,29 +173,28 @@ struct ConSanDecodedMemoryOperands {
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
 
-  bool operator==(const ConSanDecodedMemoryOperands &) const = default;
+  bool operator==(const DecodedMemoryOperands &) const = default;
 };
 
 /// Location and semantic memory vocabulary shared by ordinary-memory and
 /// atomic decoding. Both kinds feed the same addressed-communication
 /// classifiers, so policy can transfer this base rather than rebuilding an
 /// atomic-shaped field bag.
-struct ConSanDecodedMemorySite : ConSanDecodedSite, ConSanDecodedMemoryOperands {
+struct DecodedMemorySite : DecodedSite, DecodedMemoryOperands {
   uint32_t width_bits = 0;
-  std::optional<ConSanMemoryScope> scope;
+  std::optional<MemoryScope> scope;
 
-  bool operator==(const ConSanDecodedMemorySite &) const = default;
+  bool operator==(const DecodedMemorySite &) const = default;
 };
 
-struct ConSanOrdinaryMemorySite : ConSanDecodedMemorySite {
-  ConSanOrdinaryMemoryOperation operation = ConSanOrdinaryMemoryOperation::Load;
-  ConSanOrdinaryMemorySupportReason support_reason =
-      ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture;
+struct OrdinaryMemorySite : DecodedMemorySite {
+  OrdinaryMemoryOperation operation = OrdinaryMemoryOperation::Load;
+  OrdinaryMemorySupportReason support_reason = OrdinaryMemorySupportReason::UnsupportedArchitecture;
   // FLAT ordinary instructions can be the load/store half of a
   // language-level atomic sequence. Preserve their segment provenance so
   // synchronization analysis can distinguish a bounded group-FLAT sequence
   // from an otherwise identical global/private instruction.
-  ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
+  FlatAddressSpaceHint flat_address_space_hint = FlatAddressSpaceHint::Unknown;
   std::optional<uint32_t> raw_nv;
   std::optional<uint32_t> raw_sve;
   /// Target-normalized exact ordering qualifier for a compiler-generated
@@ -213,10 +203,10 @@ struct ConSanOrdinaryMemorySite : ConSanDecodedMemorySite {
   /// not reinterpret them by target family.
   bool workgroup_acquire_ordering = false;
 
-  bool operator==(const ConSanOrdinaryMemorySite &) const = default;
+  bool operator==(const OrdinaryMemorySite &) const = default;
 };
 
-struct ConSanBarrierSite : ConSanDecodedSite {
+struct BarrierSite : DecodedSite {
   uint32_t raw_encoding = 0;
   enum class Operation : uint8_t {
     Unknown,
@@ -256,52 +246,51 @@ struct ConSanBarrierSite : ConSanDecodedSite {
   std::optional<uint64_t> participant_setup_text_offset;
   std::optional<uint64_t> participant_setup_file_offset;
   std::optional<uint32_t> participant_setup_literal;
-  bool operator==(const ConSanBarrierSite &) const = default;
+  bool operator==(const BarrierSite &) const = default;
 };
 
-struct ConSanFenceSite : ConSanDecodedSite {
-  ConSanCacheOperation cache_operation = ConSanCacheOperation::Unsupported;
+struct FenceSite : DecodedSite {
+  CacheOperation cache_operation = CacheOperation::Unsupported;
   bool ordinary_acquire_mutation_supported = false;
 
-  bool operator==(const ConSanFenceSite &) const = default;
+  bool operator==(const FenceSite &) const = default;
 };
 
-struct ConSanAtomicSite : ConSanDecodedMemorySite {
-  ConSanAtomicAddressSpaceHint address_space_hint = ConSanAtomicAddressSpaceHint::Unknown;
+struct AtomicSite : DecodedMemorySite {
+  AtomicAddressSpaceHint address_space_hint = AtomicAddressSpaceHint::Unknown;
   std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_addr;
   std::optional<uint32_t> raw_data0;
   std::optional<uint32_t> raw_data1;
   std::optional<bool> returns_old_value;
 
-  bool operator==(const ConSanAtomicSite &) const = default;
+  bool operator==(const AtomicSite &) const = default;
 };
 
 /// Access-only payload for a decoded site with no synchronization/fault
 /// facet. Keeping this concrete first variant alternative gives every arena
 /// record one location owner without a parallel outer fallback.
-struct ConSanAccessSite : ConSanDecodedSite {
-  bool operator==(const ConSanAccessSite &) const = default;
+struct AccessSite : DecodedSite {
+  bool operator==(const AccessSite &) const = default;
 };
 
 /// Present an ordinary load/store through the shared communication shape used
 /// by atomic policy and native lowering. Only genuinely atomic facets need
 /// normalization; the location and operand base transfers as one value.
-[[nodiscard]] inline ConSanAtomicSite
-consan_atomic_communication_site(const ConSanOrdinaryMemorySite &site) {
-  ConSanAtomicSite result;
-  static_cast<ConSanDecodedMemorySite &>(result) = site;
-  if (site.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group)
-    result.address_space_hint = ConSanAtomicAddressSpaceHint::FlatGroup;
-  if (!result.data_vgpr && site.operation == ConSanOrdinaryMemoryOperation::Load)
+[[nodiscard]] inline AtomicSite atomic_communication_site(const OrdinaryMemorySite &site) {
+  AtomicSite result;
+  static_cast<DecodedMemorySite &>(result) = site;
+  if (site.flat_address_space_hint == FlatAddressSpaceHint::Group)
+    result.address_space_hint = AtomicAddressSpaceHint::FlatGroup;
+  if (!result.data_vgpr && site.operation == OrdinaryMemoryOperation::Load)
     result.data_vgpr = result.destination_vgpr;
-  if (!result.raw_vdata && site.operation == ConSanOrdinaryMemoryOperation::Load)
+  if (!result.raw_vdata && site.operation == OrdinaryMemoryOperation::Load)
     result.raw_vdata = result.raw_vdst;
   result.returns_old_value = false;
   return result;
 }
 
-[[nodiscard]] constexpr bool consan_atomic_is_compare_exchange(const ConSanAtomicSite &site) {
+[[nodiscard]] constexpr bool atomic_is_compare_exchange(const AtomicSite &site) {
   return site.mnemonic.find("cmpswap") != std::string::npos ||
          site.mnemonic.find("cmpxchg") != std::string::npos;
 }
@@ -312,7 +301,7 @@ consan_atomic_communication_site(const ConSanOrdinaryMemorySite &site) {
 /// Multiple symbols can alias the same physical instruction. The container is
 /// therefore attribution and ownership evidence, not part of
 /// `PhysicalSiteId` and not permission to instrument the instruction twice.
-enum class ConSanProgramContainerKind : uint8_t {
+enum class ProgramContainerKind : uint8_t {
   /// A dispatchable kernel descriptor and its executable text range.
   Kernel,
   /// A non-kernel function symbol, commonly a helper reached by one or more
@@ -325,22 +314,22 @@ enum class ConSanProgramContainerKind : uint8_t {
 
 /// Stable handle into one immutable `ProgramInventory`'s executable-container
 /// arena. Containers are finalized before their decoded sites are published.
-struct ConSanProgramContainerId {
+struct ProgramContainerId {
   static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
   uint32_t ordinal = kInvalidOrdinal;
 
   [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
 
-  auto operator<=>(const ConSanProgramContainerId &) const = default;
+  auto operator<=>(const ProgramContainerId &) const = default;
 };
 
 /// Instruction family from which one normalized access fact originated.
 ///
-/// This is decoder provenance, not engine applicability. `DirectToLds` names
+/// This is decoder provenance, not mode applicability. `DirectToLds` names
 /// a global-memory instruction whose architectural destination is LDS; it is
 /// kept distinct because its address and payload operands differ from an
 /// ordinary DS instruction even though both access group memory.
-enum class ConSanAccessOrigin : uint8_t {
+enum class AccessOrigin : uint8_t {
   /// Native DS/LDS instruction.
   NativeLds,
   /// FLAT instruction with separately classified address-space provenance.
@@ -358,9 +347,9 @@ enum class ConSanAccessOrigin : uint8_t {
 /// Optional fields preserve “not encoded/not decoded” rather than inventing a
 /// register or immediate. Raw FLAT fields remain target-neutral facts here;
 /// interpreting whether a particular combination is instrumentable belongs to
-/// engine policy and target lowering. The MOI lowering candidate embeds this
+/// mode policy and target lowering. The ConSan lowering candidate embeds this
 /// same record rather than copying selected operands into a parallel schema.
-struct ConSanAccessOperandFacts : ConSanDecodedMemoryOperands {
+struct AccessOperandFacts : DecodedMemoryOperands {
   std::optional<uint16_t> destination_accvgpr;
   /// Memory-side vector address of a direct LDS transfer. Direct transfers
   /// can also have an explicit LDS address, so this cannot share
@@ -375,7 +364,7 @@ struct ConSanAccessOperandFacts : ConSanDecodedMemoryOperands {
   std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_segment;
 
-  bool operator==(const ConSanAccessOperandFacts &) const = default;
+  bool operator==(const AccessOperandFacts &) const = default;
 };
 
 /// Shared access-stage record, completed by `ProgramInventoryBuilder` after
@@ -385,7 +374,7 @@ struct ConSanAccessOperandFacts : ConSanDecodedMemoryOperands {
 /// builder-owned inventory collection without reviving container-owned LDS or
 /// FLAT representations. The complete type and its construction-state
 /// contract are declared by the program-inventory layer later in `consan.h`.
-struct ConSanProgramSite;
+struct ProgramSite;
 
 /// Immutable original-program facts for one executable symbol container.
 ///
@@ -394,13 +383,12 @@ struct ConSanProgramSite;
 /// metadata remain unused for function records; that small representational
 /// slack avoids parallel container storage and lets common analysis traverse
 /// one stable arena. The `kind` tag is authoritative.
-struct ConSanProgramContainer {
-  ConSanProgramContainer() = default;
-  explicit ConSanProgramContainer(ConSanProgramContainerKind container_kind)
-      : kind(container_kind) {}
+struct ProgramContainer {
+  ProgramContainer() = default;
+  explicit ProgramContainer(ProgramContainerKind container_kind) : kind(container_kind) {}
 
-  ConSanProgramContainerId id;
-  ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
+  ProgramContainerId id;
+  ProgramContainerKind kind = ProgramContainerKind::Count;
   std::string name;
   /// Kernel-only descriptor identity. Zero for a function.
   uint64_t descriptor_file_offset = 0;
@@ -421,18 +409,18 @@ struct ConSanProgramContainer {
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
   bool decoded = false;
   bool uses_cluster_workgroup_id = false;
-  ConSanKernelStats stats;
-  ConSanPreflightAction preflight_action = ConSanPreflightAction::NotRun;
+  KernelStats stats;
+  PreflightAction preflight_action = PreflightAction::NotRun;
   std::vector<std::string> preflight_reasons;
 
-  [[nodiscard]] bool is_kernel() const { return kind == ConSanProgramContainerKind::Kernel; }
+  [[nodiscard]] bool is_kernel() const { return kind == ProgramContainerKind::Kernel; }
 };
 
 /// Byte ranges and stable identity of one committed patch. This is the only
 /// slice needed to publish an intent-bound lowering location.
-struct ConSanCommittedPatchGeometry {
-  ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
-  ConSanPatchKind kind = ConSanPatchKind::LdsLoadCheckTrap;
+struct CommittedPatchGeometry {
+  PatchPhase phase = PatchPhase::Instrumentation;
+  PatchKind kind = PatchKind::LdsLoadCheckTrap;
   uint64_t anchor_offset = 0;
   uint64_t trampoline_offset = 0;
   uint32_t original_size = 0;
@@ -445,7 +433,7 @@ struct ConSanCommittedPatchGeometry {
 
 /// Exact control-flow routing proof retained for final validation. Emitters
 /// populate this slice, but semantic policy and runtime reporting never see it.
-struct ConSanPatchRoutingProof {
+struct PatchRoutingProof {
   /// Full dispatch-ID initialization bodies reached through paired
   /// kernarg-preload entry relays. Absent when initialization is inline in
   /// the two 256-byte hardware entry slots.
@@ -454,62 +442,58 @@ struct ConSanPatchRoutingProof {
 };
 
 /// Validation-only description of a deliberately mutated guest operation.
-struct ConSanPatchMutationProof {
+struct PatchMutationProof {
   /// Whole-pair markerless barrier moves record whether the exact barrier
   /// bytes precede or follow the displaced destination instruction.
-  std::optional<ConSanBarrierMoveDirection> barrier_move_direction;
-  ConSanBarrierMoveCfgContract barrier_move_cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
+  std::optional<BarrierMoveDirection> barrier_move_direction;
+  BarrierMoveCfgContract barrier_move_cfg_contract = BarrierMoveCfgContract::SameBlock;
   std::optional<uint32_t> structured_guard_block_index;
   std::optional<uint32_t> structured_destination_block_index;
   std::optional<uint32_t> structured_source_block_index;
   std::optional<uint64_t> structured_guard_offset;
   std::optional<uint64_t> structured_destination_offset;
   std::optional<uint64_t> structured_source_offset;
-  std::optional<ConSanPerturbationEdge> perturbation_edge;
-  std::string perturbation_sequence_identity;
+  std::optional<SuperColliderPerturbationEdge> supercollider_perturbation_edge;
+  std::string supercollider_perturbation_sequence_identity;
   std::optional<uint32_t> original_participant_count;
   std::optional<uint32_t> target_participant_count;
   /// Pristine sequence identity retained only across a staged mutation.
-  std::string perturbation_source_sequence_identity;
-  bool perturbation_composite_atomic_overlap = false;
-  bool perturbation_composite_removed_boundary = false;
+  std::string supercollider_perturbation_source_sequence_identity;
+  bool supercollider_perturbation_composite_atomic_overlap = false;
+  bool supercollider_perturbation_composite_removed_boundary = false;
 };
 
 /// Register, private-memory, group-memory, and descriptor effects committed by
 /// instrumentation. Descriptor mutation consumes this slice independently of
 /// byte geometry and validation identities.
-struct ConSanPatchAbiEffects {
+struct PatchAbiEffects {
   std::optional<uint16_t> scratch_vgpr;
   /// SuperCollider-only preservation of a borrowed live scalar VCC-save
   /// range. One optional owns the scalar source, vector reservoir, and exact
   /// preservation strategy; other engines leave it absent.
-  std::optional<ConSanScalarVccSpill> scalar_vcc_spill;
+  std::optional<ScalarVccSpill> scalar_vcc_spill;
   /// Complete vector-register state initialized or consumed by this patch.
   /// The typed lifetime distinguishes persistent state from transient
   /// owner/epoch scratch and prevents an incomplete pair or contradictory
   /// owner-local/ABI flags.
-  std::optional<ConSanMoiVgprStateEffect> moi_vgpr_state;
+  std::optional<VgprStateEffect> vgpr_state;
   /// Scalar-persistent state initialized by this entry prologue. Access and
   /// synchronization patches consume this exact ABI; other patch kinds leave
   /// the aggregate empty.
-  ConSanMoiPersistentSgprState persistent_sgpr_state;
+  PersistentSgprState persistent_sgpr_state;
   /// Entry-local carrier and contiguous guest-SGPR window preserved while an
   /// owner/epoch or private-state prologue borrows scalar ABI state. The
   /// carrier is dead again before any displaced guest instruction executes.
-  std::optional<ConSanMoiEntryScalarBackup> entry_scalar_backup;
+  std::optional<EntryScalarBackup> entry_scalar_backup;
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;
   /// Complete owner-local persistent identity layout and the distinct,
   /// target-normalized base available to ephemeral spill state.
-  std::optional<ConSanMoiPrivateStateLayout> private_state_layout;
+  std::optional<PrivateStateLayout> private_state_layout;
   /// Exact preload transformation and unique persistent register
   /// representation proved by an emitted dispatch-ID entry prologue.
-  std::optional<ConSanMoiDispatchIdPrologueEffect> dispatch_id_prologue;
-  /// Exact dispatch-ID source consumed by this patch after owner-local
-  /// placement. Final validation must inspect this committed decision rather
-  /// than reconstructing it from the code-object-wide operating point.
-  std::optional<ConSanMoiDispatchIdentitySource> moi_dispatch_identity_source;
+  std::optional<DispatchIdPrologueEffect> dispatch_id_prologue;
   uint16_t spilled_vgpr_count = 0;
   /// Absolute per-workitem private-segment minimum encoded into the owning
   /// kernel descriptor.
@@ -519,13 +503,7 @@ struct ConSanPatchAbiEffects {
   /// addend rather than a sum because their frames are never simultaneously
   /// active.
   uint32_t dynamic_private_segment_addend = 0;
-  /// Exact workgroup-local shadow ABI emitted by this patch. Keeping the typed
-  /// layout intact prevents prologue composition and final validation from
-  /// reconstructing it from a flattened mode-specific field replica.
-  std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
-  [[nodiscard]] uint32_t required_group_segment_size() const {
-    return workgroup_shadow ? workgroup_shadow->required_group_segment_size : 0u;
-  }
+
   /// Kernel descriptors whose dispatches can execute this patch. Shared
   /// helper patches name every reachable owner.
   std::vector<uint64_t> owner_descriptor_file_offsets;
@@ -533,15 +511,17 @@ struct ConSanPatchAbiEffects {
 
 /// Placement's complete mechanical output: control-flow proof plus the ABI
 /// effects that make the emitted route executable by every owner.
-struct ConSanPatchPlacementEffects : ConSanPatchRoutingProof, ConSanPatchAbiEffects {};
+struct PatchPlacementEffects : PatchRoutingProof, PatchAbiEffects {};
 
 /// Complete product visible to ordinary lowering composition. Validation-only
 /// mutation and fault identities are deliberately absent from this contract.
-struct ConSanPatchLoweringProduct : ConSanCommittedPatchGeometry, ConSanPatchPlacementEffects {};
+struct PatchLoweringProduct : CommittedPatchGeometry, PatchPlacementEffects {};
+
+static_assert(sizeof(PatchLoweringProduct) <= 448);
 
 /// Pristine identities and decoded operands used only to validate fault
 /// mutations against the original code object.
-struct ConSanPatchFaultProof {
+struct PatchFaultProof {
   /// Pristine identities retained for exact ordinary-load mutation proof.
   std::string fault_primary_identity;
   std::string fault_companion_identity;
@@ -555,23 +535,23 @@ struct ConSanPatchFaultProof {
 
 /// Product visible to staged mutation composition. It can translate and
 /// reserve mutation geometry without seeing pristine fault identities.
-struct ConSanPatchMutationProduct : ConSanPatchLoweringProduct, ConSanPatchMutationProof {};
+struct PatchMutationProduct : PatchLoweringProduct, PatchMutationProof {};
 
 /// Private construction record joining the independently owned patch products.
 /// Consumers should accept the narrow base contract they need; only final
 /// validation is expected to inspect the complete joined proof.
-struct ConSanPatchInfo : ConSanPatchMutationProduct, ConSanPatchFaultProof {};
+struct PatchInfo : PatchMutationProduct, PatchFaultProof {};
 
 /// Image-level proof for one whole-text relocation transaction. This is not a
 /// semantic site patch: it accounts for the active relocated bodies while the
 /// ordinary patch inventory continues to describe only instrumented sites.
-struct ConSanTextRelocationDescriptorDelta {
+struct TextRelocationDescriptorDelta {
   uint64_t descriptor_file_offset = 0;
   uint32_t original_compute_pgm_rsrc1 = 0;
   uint32_t replacement_compute_pgm_rsrc1 = 0;
 };
 
-struct ConSanTextRelocationProof {
+struct TextRelocationProof {
   uint64_t source_text_size = 0;
-  std::vector<ConSanTextRelocationDescriptorDelta> descriptor_rsrc1_deltas;
+  std::vector<TextRelocationDescriptorDelta> descriptor_rsrc1_deltas;
 };

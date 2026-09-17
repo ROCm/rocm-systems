@@ -135,13 +135,13 @@ exhaustive load-time waitcheck first. A waitcheck diagnostic is printed with a
 `rocjitsu-waitcheck:` prefix, then ConSan continues with DBI. Add
 `RJ_CONSAN_LOG=1` only when you want verbose pass and instrumentation summaries.
 
-Sampled is the default, using bounded sampled evidence and probabilistic
-detection. Select another analysis with `RJ_CONSAN_MODE=record-replay`,
-`inline-shadow`, or `supercollider`. For a focused
+ConSan uses bounded sampled evidence and probabilistic
+detection. Select the complementary analysis with
+`RJ_CONSAN_MODE=supercollider`. For a focused
 test where incomplete instrumentation must fail, add
 `RJ_CONSAN_POLICY=strict`; race diagnostics themselves remain non-fatal.
 
-For ConSan engines, diagnostics, coverage, and expert controls, continue with
+For default modes, diagnostics, coverage, and expert controls, continue with
 the [ConSan tutorial](consan/TUTORIAL.md) or [ConSan usage reference](consan/USAGE.md).
 
 ## Run waitcheck on a saved object
@@ -222,7 +222,7 @@ env \
   "$BUILD/tools/rocjitsu/rocjitsu" \
     --config emulation/rocjitsu/configs/gfx1250_mi455x.json -- \
     /tmp/gfx1250-sanitizer-repro 2>&1 | \
-  grep -E 'rocjitsu-waitcheck:.*(missing|consumer)|ConSan MOI auto replay diagnostic|ConSan analysis verdict'
+  grep -E 'rocjitsu-waitcheck:.*(missing|consumer)|ConSan conflict|ConSan analysis verdict'
 ```
 
 Expected output (IDs, registers, and code offsets may vary):
@@ -230,7 +230,7 @@ Expected output (IDs, registers, and code offsets may vary):
 ```text
 rocjitsu-waitcheck: .text+0x...: missing s_wait_loadcnt <= 0 ... global_load_b32 ...
 rocjitsu-waitcheck:   consumer: v_mov_b32_e32 ...
-[rocjitsu-dbi-hooks] ConSan MOI auto replay diagnostic ... kind=1 ... first_lds=[0,4) second_lds=[0,4) first_kind=2 second_kind=1 ...
+[rocjitsu-dbi-hooks] ConSan conflict ... kind=1 ... first_lds=[0,4) second_lds=[0,4) first_kind=2 second_kind=1 ...
 [rocjitsu-dbi-hooks] ConSan analysis verdict applicable=true analysis_complete=true static_complete=true dynamic_complete=true ...
 ```
 

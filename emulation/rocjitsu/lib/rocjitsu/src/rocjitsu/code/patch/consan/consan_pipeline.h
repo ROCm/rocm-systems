@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report_contract.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include <variant>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Runtime dispatch facts required by the validated replacement of one kernel.
 ///
@@ -29,7 +29,7 @@ namespace rocjitsu {
 /// `Instrumented` lowering outcome. The runtime uses that fact only to
 /// distinguish dispatches of instrumented kernels from unrelated dispatches;
 /// it must not rediscover it from emitted patch kinds.
-struct ConSanKernelDispatchRequirement {
+struct KernelDispatchRequirement {
   /// Original kernel symbol name used to bind this requirement after loading.
   std::string kernel_name;
   /// Absolute minimum private-segment bytes required by the replacement.
@@ -53,7 +53,7 @@ struct ConSanKernelDispatchRequirement {
            dynamic_private_addend <= required_private_bytes;
   }
 
-  bool operator==(const ConSanKernelDispatchRequirement &) const = default;
+  bool operator==(const KernelDispatchRequirement &) const = default;
 };
 
 /// Complete per-kernel runtime-dispatch contract for one replacement image.
@@ -65,13 +65,13 @@ struct ConSanKernelDispatchRequirement {
 /// dispatch attribution. This value owns no executable, symbol, or kernel
 /// object handles; the HSA adapter adds those runtime-lifetime identities only
 /// after the replacement has loaded successfully.
-struct ConSanDispatchRequirements {
+struct DispatchRequirements {
   /// Deterministic, name-unique requirements for affected kernels.
-  std::vector<ConSanKernelDispatchRequirement> kernels;
+  std::vector<KernelDispatchRequirement> kernels;
 
   /// Return whether any dynamic frame requires dispatch-packet interception.
   [[nodiscard]] bool requires_packet_interception() const {
-    return std::ranges::any_of(kernels, [](const ConSanKernelDispatchRequirement &requirement) {
+    return std::ranges::any_of(kernels, [](const KernelDispatchRequirement &requirement) {
       return requirement.dynamic_private_addend != 0u;
     });
   }
@@ -87,25 +87,23 @@ struct ConSanDispatchRequirements {
     return true;
   }
 
-  bool operator==(const ConSanDispatchRequirements &) const = default;
+  bool operator==(const DispatchRequirements &) const = default;
 };
 
 class TransformResult;
-struct ConSanTransformDiagnosticReport;
-class ConSanDeferredBinding;
-class ConSanTransformTransaction;
+struct TransformDiagnosticReport;
+class DeferredBinding;
+class TransformTransaction;
 
-[[nodiscard]] ConSanTransformDiagnosticReport
-consan_transform_diagnostic_report(const TransformResult &result);
+[[nodiscard]] TransformDiagnosticReport transform_diagnostic_report(const TransformResult &result);
 
 /// Optional injected transform executor used by test/runtime adapters while
 /// the library retains automatic preparation and resume ownership.
-using ConSanTransformExecutor = TransformResult (*)(std::span<const uint8_t>, const ConSanRequest &,
-                                                    const TransformPolicy &, const RuntimePolicy &,
-                                                    const ConSanDebugOverrides &,
-                                                    const MutationRequest &,
-                                                    const RuntimeCapabilities &,
-                                                    const BoundRuntimeResources &);
+using TransformExecutor = TransformResult (*)(std::span<const uint8_t>, const Request &,
+                                              const TransformPolicy &, const RuntimePolicy &,
+                                              const DebugOverrides &, const MutationRequest &,
+                                              const RuntimeCapabilities &,
+                                              const BoundRuntimeResources &);
 
 /// Static output of one typed ConSan transformation attempt.
 ///
@@ -114,46 +112,46 @@ using ConSanTransformExecutor = TransformResult (*)(std::span<const uint8_t>, co
 /// retaining the transform's transient execution history. A result never
 /// contains runtime conflict evidence and makes no race-free claim. Public
 /// fields allow precise construction and invariant testing during the
-/// migration, while production creates values only through `transform_consan`
-/// or `transform_consan_with_mutation`.
+/// migration, while production creates values only through `transform`
+/// or `transform_with_mutation`.
 class TransformResult {
 public:
   TransformResult() = default;
 
   /// Collision-aware identity of the pristine input image.
-  ConSanCodeObjectId code_object;
-  /// Address-free engine-specific report/marker contract when applicable.
-  std::optional<ConSanEvidenceRequirements> evidence_requirements;
+  CodeObjectId code_object;
+  /// Address-free mode-specific report/marker contract when applicable.
+  std::optional<EvidenceRequirements> evidence_requirements;
   /// Runtime dispatch contract derived once from validated lowering and typed
   /// semantic coverage, then bound to executable symbols by the HSA adapter.
-  ConSanDispatchRequirements dispatch_requirements;
+  DispatchRequirements dispatch_requirements;
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
   /// Sole ownership of target-neutral semantic policy and authoritative
   /// lowering outcomes.
-  ConSanCoverageLedger coverage_ledger;
+  CoverageLedger coverage_ledger;
   /// Validation-only mutation result and stable applied identity.
-  ConSanMutationOutcome mutation;
+  MutationOutcome mutation;
   /// Independently validated replacement image, or empty when not installable.
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
-  ConSanTransformOutcome outcome = ConSanTransformOutcome::Invalid;
+  TransformOutcome outcome = TransformOutcome::Invalid;
   /// Typed request, capability, or runtime-binding rejection, when present.
-  ConSanContractIssue contract_issue = ConSanContractIssue::None;
+  ContractIssue contract_issue = ContractIssue::None;
   /// Stable machine-readable cause for loader-visible transform rejection.
-  std::optional<ConSanTransformFailureCause> transform_failure_cause;
+  std::optional<TransformFailureCause> transform_failure_cause;
   /// Non-fatal diagnostics from analysis, lowering, and binding.
   std::vector<std::string> warnings;
   /// Fatal static-transform diagnostics.
   std::vector<std::string> errors;
 
   /// Return the immutable semantic plan owned by the coverage ledger.
-  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+  [[nodiscard]] const ObservationPlan &observation_plan() const {
     return coverage_ledger.observation_plan();
   }
 
   /// Derive the runtime-facing projection from authoritative lowering commits.
-  [[nodiscard]] ConSanRuntimeStaticMapping runtime_static_mapping() const {
+  [[nodiscard]] RuntimeStaticMapping runtime_static_mapping() const {
     return coverage_ledger.runtime_static_mapping();
   }
 
@@ -162,7 +160,7 @@ public:
   [[nodiscard]] bool well_formed() const;
 
   /// Derive loader policy solely from the split static result.
-  [[nodiscard]] ConSanInstallAction install_action(bool fail_closed) const;
+  [[nodiscard]] InstallAction install_action(bool fail_closed) const;
 
   /// Demote an otherwise installable transform after a runtime-owned resource
   /// operation fails. This keeps the outcome, stage records, replacement
@@ -173,44 +171,42 @@ public:
 
 private:
   friend struct TransformResultTestAccess;
-  friend class ConSanDeferredBinding;
-  friend class ConSanTransformTransaction;
-  friend ConSanTransformDiagnosticReport
-  consan_transform_diagnostic_report(const TransformResult &);
-  friend TransformResult transform_consan(std::span<const uint8_t>, const ConSanRequest &,
-                                          const TransformPolicy &, const RuntimePolicy &,
-                                          const ConSanDebugOverrides &, const RuntimeCapabilities &,
-                                          const BoundRuntimeResources &);
-  friend TransformResult
-  transform_consan_with_mutation(std::span<const uint8_t>, const ConSanRequest &,
-                                 const TransformPolicy &, const RuntimePolicy &,
-                                 const ConSanDebugOverrides &, const MutationRequest &,
-                                 const RuntimeCapabilities &, const BoundRuntimeResources &);
-  friend TransformResult resume_consan_automatic_transform(std::span<const uint8_t>,
-                                                           const BoundRuntimeResources &,
-                                                           ConSanDeferredBinding);
-  friend TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding, std::string);
+  friend class DeferredBinding;
+  friend class TransformTransaction;
+  friend TransformDiagnosticReport transform_diagnostic_report(const TransformResult &);
+  friend TransformResult transform(std::span<const uint8_t>, const Request &,
+                                   const TransformPolicy &, const RuntimePolicy &,
+                                   const DebugOverrides &, const RuntimeCapabilities &,
+                                   const BoundRuntimeResources &);
+  friend TransformResult transform_with_mutation(std::span<const uint8_t>, const Request &,
+                                                 const TransformPolicy &, const RuntimePolicy &,
+                                                 const DebugOverrides &, const MutationRequest &,
+                                                 const RuntimeCapabilities &,
+                                                 const BoundRuntimeResources &);
+  friend TransformResult resume_automatic_transform(std::span<const uint8_t>,
+                                                    const BoundRuntimeResources &, DeferredBinding);
+  friend TransformResult cancel_automatic_transform(DeferredBinding, std::string);
 
   /// Test-only ingress for a synthetic lowerer product. Production entry
   /// points construct the same transaction directly.
   [[nodiscard]] static TransformResult
-  execute_test_transaction(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+  execute_test_transaction(std::span<const uint8_t> code_object_bytes, const Request &request,
                            const TransformPolicy &transform_policy,
-                           const RuntimePolicy &runtime_policy, const ConSanDebugOverrides &debug,
+                           const RuntimePolicy &runtime_policy, const DebugOverrides &debug,
                            const MutationRequest &mutation, const RuntimeCapabilities &capabilities,
                            const BoundRuntimeResources &resources,
-                           ConSanTransformArtifacts lowering_artifacts);
+                           TransformArtifacts lowering_artifacts);
 
   /// Move a lowerer aggregate into the reviewed public products and private
   /// diagnostic storage. Only the transaction publication boundary calls it.
-  void publish_lowering_artifacts(ConSanTransformArtifacts lowering);
+  void publish_lowering_artifacts(TransformArtifacts lowering);
 
   struct PrivateLoweringArtifacts {
-    std::vector<ConSanFaultSite> fault_sites;
-    std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
-    std::vector<ConSanFaultMutationPlan> fault_plans;
-    std::vector<ConSanCandidateResourcePlan> resource_plans;
-    std::vector<ConSanPatchInfo> patches;
+    std::vector<FaultSite> fault_sites;
+    std::vector<BarrierMoveDestination> barrier_move_destinations;
+    std::vector<FaultMutationPlan> fault_plans;
+    std::vector<CandidateResourcePlan> resource_plans;
+    std::vector<PatchInfo> patches;
   } private_lowering_;
 };
 
@@ -221,25 +217,23 @@ private:
 /// records, and any private inventory retained by the library's selected
 /// resume strategy. A runtime may inspect the address-free contract to size
 /// and allocate resources, but it cannot select or access retry artifacts.
-class ConSanDeferredBinding {
+class DeferredBinding {
 public:
-  ConSanDeferredBinding(const ConSanDeferredBinding &) = delete;
-  ConSanDeferredBinding &operator=(const ConSanDeferredBinding &) = delete;
-  ConSanDeferredBinding(ConSanDeferredBinding &&) noexcept = default;
-  ConSanDeferredBinding &operator=(ConSanDeferredBinding &&) noexcept = default;
+  DeferredBinding(const DeferredBinding &) = delete;
+  DeferredBinding &operator=(const DeferredBinding &) = delete;
+  DeferredBinding(DeferredBinding &&) noexcept = default;
+  DeferredBinding &operator=(DeferredBinding &&) noexcept = default;
 
-  [[nodiscard]] const ConSanCodeObjectId &code_object() const {
-    return inventory_result_.code_object;
-  }
+  [[nodiscard]] const CodeObjectId &code_object() const { return inventory_result_.code_object; }
   [[nodiscard]] const MutationRequest &requested_mutation() const { return requested_mutation_; }
   [[nodiscard]] const MutationRequest &inventory_mutation() const { return inventory_mutation_; }
   [[nodiscard]] const ProgramInventory &program_inventory() const {
     return inventory_result_.program_inventory;
   }
-  [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
+  [[nodiscard]] const ObservationPlan &observation_plan() const {
     return inventory_result_.observation_plan();
   }
-  [[nodiscard]] const std::optional<ConSanEvidenceRequirements> &evidence_requirements() const {
+  [[nodiscard]] const std::optional<EvidenceRequirements> &evidence_requirements() const {
     return inventory_result_.evidence_requirements;
   }
 
@@ -250,84 +244,83 @@ public:
 private:
   enum class ResumeStrategy : uint8_t {
     RelowerFromInput,
-    RetryMoiInventory,
+    RetryInventory,
     InvokeExecutor,
   };
 
-  friend std::variant<TransformResult, ConSanDeferredBinding>
-  prepare_consan_automatic_transform(std::span<const uint8_t>, const ConSanRequest &,
-                                     const TransformPolicy &, const RuntimePolicy &,
-                                     const ConSanDebugOverrides &, const MutationRequest &,
-                                     const RuntimeCapabilities &, ConSanTransformExecutor);
-  friend TransformResult resume_consan_automatic_transform(std::span<const uint8_t>,
-                                                           const BoundRuntimeResources &,
-                                                           ConSanDeferredBinding);
-  friend TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding, std::string);
+  friend std::variant<TransformResult, DeferredBinding>
+  prepare_automatic_transform(std::span<const uint8_t>, const Request &, const TransformPolicy &,
+                              const RuntimePolicy &, const DebugOverrides &,
+                              const MutationRequest &, const RuntimeCapabilities &,
+                              TransformExecutor);
+  friend TransformResult resume_automatic_transform(std::span<const uint8_t>,
+                                                    const BoundRuntimeResources &, DeferredBinding);
+  friend TransformResult cancel_automatic_transform(DeferredBinding, std::string);
 
-  ConSanDeferredBinding(ConSanRequest request, TransformPolicy transform_policy,
-                        RuntimePolicy runtime_policy, ConSanDebugOverrides debug,
-                        MutationRequest requested_mutation, MutationRequest inventory_mutation,
-                        RuntimeCapabilities capabilities, ResumeStrategy strategy,
-                        ConSanTransformExecutor executor, TransformResult inventory_result)
+  DeferredBinding(Request request, TransformPolicy transform_policy, RuntimePolicy runtime_policy,
+                  DebugOverrides debug, MutationRequest requested_mutation,
+                  MutationRequest inventory_mutation, RuntimeCapabilities capabilities,
+                  ResumeStrategy strategy, TransformExecutor executor,
+                  TransformResult inventory_result)
       : request_(std::move(request)), transform_policy_(std::move(transform_policy)),
         runtime_policy_(std::move(runtime_policy)), debug_(std::move(debug)),
         requested_mutation_(std::move(requested_mutation)),
         inventory_mutation_(std::move(inventory_mutation)), capabilities_(std::move(capabilities)),
         strategy_(strategy), executor_(executor), inventory_result_(std::move(inventory_result)) {}
 
-  ConSanRequest request_;
+  Request request_;
   TransformPolicy transform_policy_;
   RuntimePolicy runtime_policy_;
-  ConSanDebugOverrides debug_;
+  DebugOverrides debug_;
   MutationRequest requested_mutation_;
   MutationRequest inventory_mutation_;
   RuntimeCapabilities capabilities_;
   ResumeStrategy strategy_ = ResumeStrategy::RelowerFromInput;
-  ConSanTransformExecutor executor_ = nullptr;
+  TransformExecutor executor_ = nullptr;
   TransformResult inventory_result_;
 };
 
 /// Result of beginning an automatic-binding transform. A completed/failed
 /// result needs no allocation; a deferred value publishes the exact
-/// address-free contract that `resume_consan_automatic_transform` consumes.
-using ConSanAutomaticTransformPreparation = std::variant<TransformResult, ConSanDeferredBinding>;
+/// address-free contract that `resume_automatic_transform` consumes.
+using AutomaticTransformPreparation = std::variant<TransformResult, DeferredBinding>;
 
 /// Execute a transform through evidence planning, returning a typed deferred
 /// binding value exactly when runtime-owned allocation is required.
-[[nodiscard]] ConSanAutomaticTransformPreparation prepare_consan_automatic_transform(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+[[nodiscard]] AutomaticTransformPreparation prepare_automatic_transform(
+    std::span<const uint8_t> code_object_bytes, const Request &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-    const RuntimeCapabilities &capabilities, ConSanTransformExecutor executor = nullptr);
+    const DebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, TransformExecutor executor = nullptr);
 
 /// Bind runtime-owned resources and execute the resume strategy selected by
 /// the library. The caller cannot substitute inventory or retry mechanics.
-[[nodiscard]] TransformResult
-resume_consan_automatic_transform(std::span<const uint8_t> code_object_bytes,
-                                  const BoundRuntimeResources &resources,
-                                  ConSanDeferredBinding deferred);
+[[nodiscard]] TransformResult resume_automatic_transform(std::span<const uint8_t> code_object_bytes,
+                                                         const BoundRuntimeResources &resources,
+                                                         DeferredBinding deferred);
 
 /// End a deferred transaction after runtime allocation fails, publishing the
 /// same coherent non-installable result shape as other binding failures.
-[[nodiscard]] TransformResult cancel_consan_automatic_transform(ConSanDeferredBinding deferred,
-                                                                std::string warning);
+[[nodiscard]] TransformResult cancel_automatic_transform(DeferredBinding deferred,
+                                                         std::string warning);
 
 /// Run the ordinary observation pipeline. Fault mutation and timing
 /// perturbation are deliberately absent from this entry point.
 [[nodiscard]] TransformResult
-transform_consan(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-                 const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-                 const ConSanDebugOverrides &debug, const RuntimeCapabilities &capabilities,
-                 const BoundRuntimeResources &resources);
+transform(std::span<const uint8_t> code_object_bytes, const Request &request,
+          const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+          const DebugOverrides &debug, const RuntimeCapabilities &capabilities,
+          const BoundRuntimeResources &resources);
 
 /// Run validation-only mutation/perturbation composition through a distinct
 /// entry point. The internal native lowerer owns staged-image mechanics; the
 /// returned result obeys the same static pipeline contract as an ordinary
 /// transform.
-[[nodiscard]] TransformResult transform_consan_with_mutation(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
+[[nodiscard]] TransformResult
+transform_with_mutation(std::span<const uint8_t> code_object_bytes, const Request &request,
+                        const TransformPolicy &transform_policy,
+                        const RuntimePolicy &runtime_policy, const DebugOverrides &debug,
+                        const MutationRequest &mutation, const RuntimeCapabilities &capabilities,
+                        const BoundRuntimeResources &resources);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

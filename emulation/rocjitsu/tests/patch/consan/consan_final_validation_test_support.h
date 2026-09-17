@@ -10,14 +10,13 @@
 #include <string>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Re-run production's independent final proof against a deliberately
 /// corrupted lowerer artifact. The expected dispatch identity must match the
 /// value used for lowering when a fixture supplies a nonzero literal.
 [[nodiscard]] std::vector<std::string>
-validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
-                             const ConSanTransformArtifacts &modified_result,
-                             uint64_t expected_moi_report_dispatch_id = 0);
+validate_modified_elf(std::span<const uint8_t> original_bytes,
+                      const TransformArtifacts &modified_result);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

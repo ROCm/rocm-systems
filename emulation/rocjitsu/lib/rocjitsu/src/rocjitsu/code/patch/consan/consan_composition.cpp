@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 // This translation unit owns only top-level ConSan composition. Analysis,
-// placement, mutation, and engine mechanics enter through compiled contracts;
+// placement, mutation, and mode mechanics enter through compiled contracts;
 // their implementation details are not textually visible here.
 
 #include "rocjitsu/code/patch/consan/consan_composition.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
 #include "rocjitsu/code/analysis/liveness.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/major_image_ownership.h"
@@ -25,11 +25,9 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
+#include "rocjitsu/code/patch/consan/consan_instrumentation.h"
+#include "rocjitsu/code/patch/consan/consan_internal.h"
 #include "rocjitsu/code/patch/consan/consan_inventory_diagnostics.h"
-#include "rocjitsu/code/patch/consan/consan_moi.h"
-#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
-#include "rocjitsu/code/patch/consan/consan_perturbation.h"
-#include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis.h"
@@ -40,8 +38,10 @@
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_sync_metadata.h"
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
-#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider.h"
-#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_support.h"
+#include "rocjitsu/code/patch/consan/supercollider/consan_supercollider.h"
+#include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_perturbation.h"
+#include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_perturbation_policy.h"
+#include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_support.h"
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -75,25 +75,26 @@ RJ_DIAGNOSTIC_POP
 #include <unordered_set>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 namespace kd = rocr::llvm::amdhsa;
 
 #include "rocjitsu/code/patch/consan/consan_composition.inc"
 
-ConSanTransformArtifacts
-compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                        const ConSanMoiOperatingPoint &initial_operating_point,
-                        ConSanPerturbationPlanningState *inspected_perturbation,
-                        const ConSanPreappliedMutationLayout &preapplied_mutation,
-                        ConSanLoweringExtent extent, const ConSanLoweringObservation *observation) {
-  return try_patch_consan_impl(code_object_bytes, options, initial_operating_point,
-                               inspected_perturbation, preapplied_mutation, extent, observation);
+TransformArtifacts
+compose_lowering(std::span<const uint8_t> code_object_bytes, const Options &options,
+                 const OperatingPoint &initial_operating_point,
+                 SuperColliderPerturbationPlanningState *inspected_supercollider_perturbation,
+                 const PreappliedMutationLayout &preapplied_mutation, LoweringExtent extent,
+                 const LoweringObservation *observation) {
+  return try_patch_impl(code_object_bytes, options, initial_operating_point,
+                        inspected_supercollider_perturbation, preapplied_mutation, extent,
+                        observation);
 }
 
-bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,
-                                const ConSanLoweringObservation *prepared_observation) {
-  return initialize_consan_lowering_observation(options, result, prepared_observation);
+bool compose_observation(const Options &options, TransformArtifacts &result,
+                         const LoweringObservation *prepared_observation) {
+  return initialize_lowering_observation(options, result, prepared_observation);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

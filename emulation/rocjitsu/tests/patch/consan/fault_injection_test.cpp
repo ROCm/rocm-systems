@@ -6,7 +6,7 @@
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 TEST(ConSan, Rdna4Cdna5AtomicFaultTargetOperationsOwnRawAddressAndScopeRewrites) {
@@ -17,50 +17,43 @@ TEST(ConSan, Rdna4Cdna5AtomicFaultTargetOperationsOwnRawAddressAndScopeRewrites)
   rdna4::VflatMachineInst flat{};
   flat.ioffset = 0xfffffcu; // -4
   flat.scope = 3u;
-  auto rewrite = rewrite_consan_atomic_fault_address(bytes_of(flat),
-                                                     ConSanAtomicFaultEncoding::FlatLike, 32u, 8u);
+  auto rewrite =
+      rewrite_atomic_fault_address(bytes_of(flat), AtomicFaultEncoding::FlatLike, 32u, 8u);
   ASSERT_TRUE(rewrite.rewritten());
   EXPECT_EQ(flat.ioffset, 4u);
-  rewrite = rewrite_consan_atomic_fault_scope_to_wave(bytes_of(flat),
-                                                      ConSanAtomicFaultEncoding::FlatLike);
+  rewrite = rewrite_atomic_fault_scope_to_wave(bytes_of(flat), AtomicFaultEncoding::FlatLike);
   ASSERT_TRUE(rewrite.rewritten());
   EXPECT_EQ(rewrite.previous_value, 3u);
   EXPECT_EQ(flat.scope, 0u);
   EXPECT_EQ(
-      rewrite_consan_atomic_fault_scope_to_wave(bytes_of(flat), ConSanAtomicFaultEncoding::FlatLike)
-          .status,
-      ConSanAtomicFaultRewriteStatus::AlreadyWaveScope);
+      rewrite_atomic_fault_scope_to_wave(bytes_of(flat), AtomicFaultEncoding::FlatLike).status,
+      AtomicFaultRewriteStatus::AlreadyWaveScope);
 
   rdna4::VbufferMachineInst buffer{};
   buffer.ioffset = 0x7ffffcu;
   buffer.scope = 2u;
   const rdna4::VbufferMachineInst original_buffer = buffer;
-  rewrite = rewrite_consan_atomic_fault_address(bytes_of(buffer), ConSanAtomicFaultEncoding::Buffer,
-                                                32u, 4u);
-  EXPECT_EQ(rewrite.status, ConSanAtomicFaultRewriteStatus::OffsetOverflow);
+  rewrite = rewrite_atomic_fault_address(bytes_of(buffer), AtomicFaultEncoding::Buffer, 32u, 4u);
+  EXPECT_EQ(rewrite.status, AtomicFaultRewriteStatus::OffsetOverflow);
   EXPECT_EQ(std::memcmp(&buffer, &original_buffer, sizeof(buffer)), 0);
 
   rdna4::VdsMachineInst ds{};
   ds.offset0 = 4u;
-  rewrite =
-      rewrite_consan_atomic_fault_address(bytes_of(ds), ConSanAtomicFaultEncoding::Ds, 32u, 4u);
+  rewrite = rewrite_atomic_fault_address(bytes_of(ds), AtomicFaultEncoding::Ds, 32u, 4u);
   ASSERT_TRUE(rewrite.rewritten());
   EXPECT_EQ(ds.offset0, 8u);
   ds.offset0 = 0u;
-  rewrite =
-      rewrite_consan_atomic_fault_address(bytes_of(ds), ConSanAtomicFaultEncoding::Ds, 64u, 4u);
-  EXPECT_EQ(rewrite.status, ConSanAtomicFaultRewriteStatus::MisalignedOffset);
+  rewrite = rewrite_atomic_fault_address(bytes_of(ds), AtomicFaultEncoding::Ds, 64u, 4u);
+  EXPECT_EQ(rewrite.status, AtomicFaultRewriteStatus::MisalignedOffset);
   EXPECT_EQ(ds.offset0, 0u);
   ds.offset0 = 252u;
-  rewrite =
-      rewrite_consan_atomic_fault_address(bytes_of(ds), ConSanAtomicFaultEncoding::Ds, 32u, 4u);
-  EXPECT_EQ(rewrite.status, ConSanAtomicFaultRewriteStatus::OffsetOverflow);
+  rewrite = rewrite_atomic_fault_address(bytes_of(ds), AtomicFaultEncoding::Ds, 32u, 4u);
+  EXPECT_EQ(rewrite.status, AtomicFaultRewriteStatus::OffsetOverflow);
   EXPECT_EQ(ds.offset0, 252u);
 
-  EXPECT_EQ(rewrite_consan_atomic_fault_address(bytes_of(flat), ConSanAtomicFaultEncoding::CdnaFlat,
-                                                32u, 4u)
-                .status,
-            ConSanAtomicFaultRewriteStatus::InvalidEncoding);
+  EXPECT_EQ(
+      rewrite_atomic_fault_address(bytes_of(flat), AtomicFaultEncoding::CdnaFlat, 32u, 4u).status,
+      AtomicFaultRewriteStatus::InvalidEncoding);
 }
 
 TEST(ConSan, ExactBarrierDropIssuesAreTypedAndRenderEstablishedDiagnostics) {
@@ -167,62 +160,61 @@ TEST(ConSan, FaultApplicationCommitsOneCandidateAcrossIndependentMechanisms) {
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(words, "independent_fault_transaction");
 
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_lds_wrong_address = true;
   options.fault_lds_address_vgpr = 12u;
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_address_delta = 4u;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(result.mutation.fault.requested, 2u);
   EXPECT_EQ(result.mutation.fault.planned, 2u);
   EXPECT_EQ(result.mutation.fault.applied, 2u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineAtomicAddressRewrite,
-                               &ConSanPatchInfo::kind),
-            1u);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineLdsAddressRewrite,
-                               &ConSanPatchInfo::kind),
-            1u);
+  EXPECT_EQ(
+      std::ranges::count(result.patches, PatchKind::InlineAtomicAddressRewrite, &PatchInfo::kind),
+      1u);
+  EXPECT_EQ(
+      std::ranges::count(result.patches, PatchKind::InlineLdsAddressRewrite, &PatchInfo::kind), 1u);
 }
 
 TEST(ConSan, FaultInventoryProvesDirectSharedHelperOwnersAndFiltersExactDispatch) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
-  ConSanOptions inventory_options;
-  inventory_options.flavor = ConSanFlavor::Moi;
+  Options inventory_options;
+  inventory_options.mode = Mode::Default;
   inventory_options.fault_dry_run = true;
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
-  const auto site = std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &item) {
-    const ConSanProgramSite *source = test_fault_source(inventory, item);
-    return item.kind == ConSanFaultSiteKind::Atomic && source != nullptr &&
+  const TransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+  const auto site = std::ranges::find_if(inventory.fault_sites, [&](const FaultSite &item) {
+    const ProgramSite *source = test_fault_source(inventory, item);
+    return item.kind == FaultSiteKind::Atomic && source != nullptr &&
            test_program_container_name(inventory, *source) == "shared_lds_helper";
   });
   ASSERT_NE(site, inventory.fault_sites.end());
-  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
+  const FaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
   ASSERT_EQ(diagnostic.execution_owners.size(), 2u);
-  for (const ConSanExecutionOwner &owner : diagnostic.execution_owners)
-    EXPECT_EQ(owner.proof, ConSanOwnerProofKind::DirectCall);
+  for (const ExecutionOwner &owner : diagnostic.execution_owners)
+    EXPECT_EQ(owner.proof, OwnerProofKind::DirectCall);
 
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
-    ConSanOptions options = inventory_options;
+    Options options = inventory_options;
     options.fault_atomic_wrong_address = true;
     options.fault_site_identity = site->identity;
     options.test_kernel_name_filter = owner_name;
-    const ConSanTransformArtifacts selected = test_lower_consan(bytes, options);
+    const TransformArtifacts selected = test_lower_consan(bytes, options);
     ASSERT_EQ(selected.fault_plans.size(), 1u) << testing::PrintToString(selected.warnings);
     EXPECT_EQ(selected.fault_plans.front().primary_identity, site->identity);
   }
 
   for (std::string_view rejected_filter : {"unrelated_kernel", "shared_owner_"}) {
-    ConSanOptions options = inventory_options;
+    Options options = inventory_options;
     options.fault_atomic_wrong_address = true;
     options.fault_site_identity = site->identity;
     options.test_kernel_name_filter = rejected_filter;
-    const ConSanTransformArtifacts rejected = test_lower_consan(bytes, options);
+    const TransformArtifacts rejected = test_lower_consan(bytes, options);
     EXPECT_TRUE(rejected.fault_plans.empty());
   }
 }
@@ -232,38 +224,37 @@ TEST(ConSan, FaultInventoryProvesRecoveredIndirectSharedHelperOwners) {
   fixture.helper_has_ordered_atomic = true;
   fixture.use_indirect_calls = true;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
-  ConSanOptions options = moi_options();
+  Options options = test_options();
   options.fault_dry_run = true;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &item) {
-    const ConSanProgramSite *source = test_fault_source(result, item);
-    return item.kind == ConSanFaultSiteKind::Atomic && source != nullptr &&
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  const auto site = std::ranges::find_if(result.fault_sites, [&](const FaultSite &item) {
+    const ProgramSite *source = test_fault_source(result, item);
+    return item.kind == FaultSiteKind::Atomic && source != nullptr &&
            test_program_container_name(result, *source) == "shared_lds_helper";
   });
   ASSERT_NE(site, result.fault_sites.end());
-  const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
+  const FaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, *site);
   ASSERT_EQ(diagnostic.execution_owners.size(), 2u);
-  for (const ConSanExecutionOwner &owner : diagnostic.execution_owners)
-    EXPECT_EQ(owner.proof, ConSanOwnerProofKind::RecoveredIndirectCall);
+  for (const ExecutionOwner &owner : diagnostic.execution_owners)
+    EXPECT_EQ(owner.proof, OwnerProofKind::RecoveredIndirectCall);
 }
 
 TEST(ConSan, FaultInventoryMarksKernelLocalOwner) {
   const std::vector<uint8_t> bytes = make_rdna4_global_atomic_code_object();
-  ConSanOptions options = moi_options();
+  Options options = test_options();
   options.fault_dry_run = true;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.fault_sites.size(), 1u);
-  const ConSanFaultSiteDiagnostic diagnostic =
-      test_fault_diagnostic(result, result.fault_sites.front());
+  const FaultSiteDiagnostic diagnostic = test_fault_diagnostic(result, result.fault_sites.front());
   ASSERT_EQ(diagnostic.execution_owners.size(), 1u);
-  EXPECT_EQ(diagnostic.execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);
+  EXPECT_EQ(diagnostic.execution_owners.front().proof, OwnerProofKind::KernelLocal);
 }
 
 TEST(ConSan, FaultLoadSelectorSelectsOneStableOneBasedOccurrence) {
-  ConSanFaultLoadSelector selector(/*requested_occurrence=*/2);
-  const ConSanFaultLoadSelection first = selector.observe();
-  const ConSanFaultLoadSelection second = selector.observe();
-  const ConSanFaultLoadSelection third = selector.observe();
+  FaultLoadSelector selector(/*requested_occurrence=*/2);
+  const FaultLoadSelection first = selector.observe();
+  const FaultLoadSelection second = selector.observe();
+  const FaultLoadSelection third = selector.observe();
   EXPECT_EQ(first.occurrence, 1u);
   EXPECT_FALSE(first.selected);
   EXPECT_EQ(second.occurrence, 2u);
@@ -276,7 +267,7 @@ TEST(ConSan, FaultLoadSelectorSelectsOneStableOneBasedOccurrence) {
 }
 
 TEST(ConSan, FaultLoadSelectorFailsClosedWhenOccurrenceIsAbsent) {
-  ConSanFaultLoadSelector selector(/*requested_occurrence=*/2);
+  FaultLoadSelector selector(/*requested_occurrence=*/2);
   EXPECT_FALSE(selector.accepted());
   EXPECT_FALSE(selector.observe().selected);
   EXPECT_FALSE(selector.accepted());
@@ -284,19 +275,19 @@ TEST(ConSan, FaultLoadSelectorFailsClosedWhenOccurrenceIsAbsent) {
 
 TEST(ConSan, FaultMutationCardinalityReportsZeroAndEnforcesGuard) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_index = 99;
 
-  const ConSanTransformArtifacts unguarded = test_lower_consan(bytes, options);
-  EXPECT_EQ(unguarded.outcome, ConSanTransformOutcome::Unchanged);
+  const TransformArtifacts unguarded = test_lower_consan(bytes, options);
+  EXPECT_EQ(unguarded.outcome, TransformOutcome::Unchanged);
   EXPECT_EQ(unguarded.mutation.fault.requested, 1u);
   EXPECT_EQ(unguarded.mutation.fault.applied, 0u);
 
   options.fault_require_exactly_one = true;
-  const ConSanTransformArtifacts guarded = test_lower_consan(bytes, options);
-  EXPECT_EQ(guarded.outcome, ConSanTransformOutcome::Invalid);
+  const TransformArtifacts guarded = test_lower_consan(bytes, options);
+  EXPECT_EQ(guarded.outcome, TransformOutcome::Invalid);
   EXPECT_EQ(guarded.mutation.fault.requested, 1u);
   EXPECT_EQ(guarded.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(guarded.errors, [](const std::string &error) {
@@ -306,17 +297,17 @@ TEST(ConSan, FaultMutationCardinalityReportsZeroAndEnforcesGuard) {
 
 TEST(ConSan, FaultMutationCardinalityExcludesRetiredThOrderMutation) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.moi_track_atomics = true;
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  Options options = test_options();
+  options.track_atomics = true;
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(32);
   options.max_patches = 8;
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_weaken_order = true;
   options.fault_atomic_index = 1;
 
-  const ConSanTransformArtifacts unguarded = test_lower_consan(bytes, options);
-  EXPECT_EQ(unguarded.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts unguarded = test_lower_consan(bytes, options);
+  EXPECT_EQ(unguarded.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(unguarded.mutation.fault.requested, 2u);
   EXPECT_EQ(unguarded.mutation.fault.applied, 2u);
   EXPECT_TRUE(std::ranges::any_of(unguarded.warnings, [](const std::string &warning) {
@@ -324,8 +315,8 @@ TEST(ConSan, FaultMutationCardinalityExcludesRetiredThOrderMutation) {
   }));
 
   options.fault_require_exactly_one = true;
-  const ConSanTransformArtifacts guarded = test_lower_consan(bytes, options);
-  EXPECT_EQ(guarded.outcome, ConSanTransformOutcome::Invalid);
+  const TransformArtifacts guarded = test_lower_consan(bytes, options);
+  EXPECT_EQ(guarded.outcome, TransformOutcome::Invalid);
   EXPECT_EQ(guarded.mutation.fault.requested, 2u);
   EXPECT_EQ(guarded.mutation.fault.applied, 2u);
 }
@@ -342,88 +333,86 @@ TEST(ConSan, LdsAddressFaultInventoryAndExactMutationAreTargetNeutral) {
     const std::vector<uint8_t> bytes = make_lds_address_fault_code_object(arch);
     ASSERT_FALSE(bytes.empty());
 
-    ConSanOptions inventory_options;
-    inventory_options.flavor = ConSanFlavor::SuperCollider;
+    Options inventory_options;
+    inventory_options.mode = Mode::SuperCollider;
     inventory_options.probe_lds_check_trap = true;
     inventory_options.scratch_vgpr = 8u;
-    inventory_options.delay_nops = 1u;
+    inventory_options.supercollider_delay_nops = 1u;
     inventory_options.fault_lds_wrong_address = true;
     inventory_options.fault_lds_address_vgpr = 6u;
     inventory_options.fault_dry_run = true;
-    const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
-    const auto site = std::ranges::find(inventory.fault_sites, ConSanFaultSiteKind::LdsAccess,
-                                        &ConSanFaultSite::kind);
+    const TransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
+    const auto site =
+        std::ranges::find(inventory.fault_sites, FaultSiteKind::LdsAccess, &FaultSite::kind);
     ASSERT_NE(site, inventory.fault_sites.end());
-    const ConSanProgramSite *source = test_fault_source(inventory, *site);
+    const ProgramSite *source = test_fault_source(inventory, *site);
     ASSERT_NE(source, nullptr);
     EXPECT_EQ(source->operands.address_vgpr, 2u);
-    const ConSanFaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
+    const FaultSiteDiagnostic diagnostic = test_fault_diagnostic(inventory, *site);
     EXPECT_EQ(diagnostic.semantic_role, "lds-write");
     ASSERT_EQ(diagnostic.execution_owners.size(), 1u);
     ASSERT_EQ(inventory.fault_plans.size(), 1u);
-    EXPECT_EQ(inventory.fault_plans.front().kind, ConSanFaultMutationKind::LdsWrongAddress);
+    EXPECT_EQ(inventory.fault_plans.front().kind, FaultMutationKind::LdsWrongAddress);
     EXPECT_EQ(inventory.fault_plans.front().primary_identity, site->identity);
 
-    ConSanOptions live_options = inventory_options;
+    Options live_options = inventory_options;
     live_options.fault_dry_run = false;
     live_options.fault_require_exactly_one = true;
     live_options.fault_site_identity = site->identity;
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, live_options);
-    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+    const TransformArtifacts result = test_lower_consan(bytes, live_options);
+    ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.mutation.fault.requested, 1u);
     EXPECT_EQ(result.mutation.fault.planned, 1u);
     EXPECT_EQ(result.mutation.fault.applied, 1u);
     EXPECT_EQ(result.mutation.applied_fault_logical_identity, site->identity);
-    const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-      return patch.phase == ConSanPatchPhase::Mutation &&
-             patch.kind == ConSanPatchKind::InlineLdsAddressRewrite;
+    const auto mutation = std::ranges::find_if(result.patches, [](const PatchInfo &patch) {
+      return patch.phase == PatchPhase::Mutation &&
+             patch.kind == PatchKind::InlineLdsAddressRewrite;
     });
     ASSERT_NE(mutation, result.patches.end());
     EXPECT_EQ(mutation->fault_primary_identity, site->identity);
     EXPECT_EQ(mutation->fault_original_address_vgpr, 2u);
     EXPECT_EQ(mutation->fault_target_address_vgpr, 6u);
-    EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+    EXPECT_TRUE(validate_modified_elf(bytes, result).empty());
   }
 }
 
 TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDrift) {
   const std::vector<uint8_t> bytes = make_lds_address_fault_code_object(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_FALSE(bytes.empty());
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 8u;
-  options.delay_nops = 1u;
+  options.supercollider_delay_nops = 1u;
   options.fault_lds_wrong_address = true;
   options.fault_lds_address_vgpr = 2u;
   options.fault_require_exactly_one = true;
-  const ConSanTransformArtifacts rejected = test_lower_consan(bytes, options);
-  EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Invalid);
+  const TransformArtifacts rejected = test_lower_consan(bytes, options);
+  EXPECT_EQ(rejected.outcome, TransformOutcome::Invalid);
   EXPECT_EQ(rejected.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(rejected.errors, [](const std::string &error) {
     return error.find("requires a distinct 8-bit replacement VGPR") != std::string::npos;
   }));
 
   options.fault_lds_address_vgpr = 6u;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(valid.errors);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid) << testing::PrintToString(valid.errors);
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
-  const auto mutation = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &patch) {
-    return patch.phase == ConSanPatchPhase::Mutation &&
-           patch.kind == ConSanPatchKind::InlineLdsAddressRewrite;
+  const auto mutation = std::ranges::find_if(valid.patches, [](const PatchInfo &patch) {
+    return patch.phase == PatchPhase::Mutation && patch.kind == PatchKind::InlineLdsAddressRewrite;
   });
   ASSERT_NE(mutation, valid.patches.end());
   const auto instrumentation_patch =
-      std::ranges::find_if(valid.patches, [&](const ConSanPatchInfo &patch) {
-        return patch.phase == ConSanPatchPhase::Instrumentation &&
+      std::ranges::find_if(valid.patches, [&](const PatchInfo &patch) {
+        return patch.phase == PatchPhase::Instrumentation &&
                patch.anchor_offset == mutation->anchor_offset &&
                patch.relocated_guest_instruction_offset.has_value();
       });
   ASSERT_NE(instrumentation_patch, valid.patches.end());
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   const uint64_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                      *instrumentation_patch->relocated_guest_instruction_offset +
                                      sizeof(uint32_t);
@@ -431,7 +420,7 @@ TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDri
   std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u << 8u;
   std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("fields other than the selected LDS address VGPR") != std::string::npos;
   })) << testing::PrintToString(errors);
@@ -445,13 +434,13 @@ TEST(ConSan, LdsAddressFaultRequiresExplicitAllocatedReplacement) {
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(words, "lds_address_allocation", /*vgpr_granulated=*/0u);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_lds_wrong_address = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanTransformArtifacts missing = test_lower_consan(bytes, options);
-  EXPECT_EQ(missing.outcome, ConSanTransformOutcome::Invalid);
+  const TransformArtifacts missing = test_lower_consan(bytes, options);
+  EXPECT_EQ(missing.outcome, TransformOutcome::Invalid);
   EXPECT_TRUE(std::ranges::any_of(missing.errors, [](const std::string &error) {
     return error.find("requires an explicit replacement VGPR") != std::string::npos;
   })) << testing::PrintToString(missing.errors);
@@ -459,8 +448,8 @@ TEST(ConSan, LdsAddressFaultRequiresExplicitAllocatedReplacement) {
   // A zero-granulated RDNA4 wave64 descriptor allocates v0..v3. The boundary
   // register v4 must be rejected rather than read as undefined input.
   options.fault_lds_address_vgpr = 4u;
-  const ConSanTransformArtifacts outside_allocation = test_lower_consan(bytes, options);
-  EXPECT_EQ(outside_allocation.outcome, ConSanTransformOutcome::Invalid);
+  const TransformArtifacts outside_allocation = test_lower_consan(bytes, options);
+  EXPECT_EQ(outside_allocation.outcome, TransformOutcome::Invalid);
   EXPECT_EQ(outside_allocation.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(outside_allocation.errors, [](const std::string &error) {
     return error.find("outside an execution owner's allocated VGPR window") != std::string::npos;
@@ -472,15 +461,15 @@ TEST(ConSan, Gfx1250TwoAddressLdsAccessIsNotAdvertisedForExactAddressRewrite) {
   const std::array<uint32_t, 3> words = {load[0], load[1],
                                          build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(words, "two_address_fault_inventory");
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_lds_wrong_address = true;
   options.fault_lds_address_vgpr = 4u;
   options.fault_dry_run = true;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  EXPECT_TRUE(std::ranges::none_of(result.fault_sites, [](const ConSanFaultSite &site) {
-    return site.kind == ConSanFaultSiteKind::LdsAccess;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  EXPECT_TRUE(std::ranges::none_of(result.fault_sites, [](const FaultSite &site) {
+    return site.kind == FaultSiteKind::LdsAccess;
   }));
   EXPECT_TRUE(result.fault_plans.empty());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
@@ -488,40 +477,33 @@ TEST(ConSan, Gfx1250TwoAddressLdsAccessIsNotAdvertisedForExactAddressRewrite) {
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, LdsAddressFaultComposesWithEveryMoiAccessEngine) {
+TEST(ConSan, LdsAddressFaultComposesWithAccess) {
   const std::vector<uint8_t> bytes = make_lds_address_fault_code_object(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_FALSE(bytes.empty());
-  constexpr std::array engines = {
-      ConSanMoiEngine::RecordReplay,
-      ConSanMoiEngine::Sampled,
-      ConSanMoiEngine::InlineShadow,
-  };
-  for (ConSanMoiEngine engine : engines) {
-    SCOPED_TRACE(static_cast<uint32_t>(engine));
-    ConSanOptions options = moi_options(engine);
-    options.moi_report_buffer_address = 0x123456780000ull;
-    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-    options.max_patches = 4u;
-    options.fault_lds_wrong_address = true;
-    options.fault_lds_address_vgpr = 6u;
-    options.fault_require_exactly_one = true;
 
-    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
-        << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-    EXPECT_EQ(result.mutation.fault.applied, 1u);
-    const auto mutation = std::ranges::find(
-        result.patches, ConSanPatchKind::InlineLdsAddressRewrite, &ConSanPatchInfo::kind);
-    ASSERT_NE(mutation, result.patches.end());
-    const auto relocated = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.phase == ConSanPatchPhase::Instrumentation &&
-             patch.anchor_offset == mutation->anchor_offset &&
-             patch.relocated_guest_instruction_offset.has_value();
-    });
-    ASSERT_NE(relocated, result.patches.end());
-    EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
-  }
+  Options options = test_options();
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(32);
+  options.max_patches = 4u;
+  options.fault_lds_wrong_address = true;
+  options.fault_lds_address_vgpr = 6u;
+  options.fault_require_exactly_one = true;
+
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  const auto mutation =
+      std::ranges::find(result.patches, PatchKind::InlineLdsAddressRewrite, &PatchInfo::kind);
+  ASSERT_NE(mutation, result.patches.end());
+  const auto relocated = std::ranges::find_if(result.patches, [&](const PatchInfo &patch) {
+    return patch.phase == PatchPhase::Instrumentation &&
+           patch.anchor_offset == mutation->anchor_offset &&
+           patch.relocated_guest_instruction_offset.has_value();
+  });
+  ASSERT_NE(relocated, result.patches.end());
+  EXPECT_TRUE(validate_modified_elf(bytes, result).empty());
 }
 
 TEST(ConSan, FinalValidationRejectsUnprovenBarrierMutation) {
@@ -530,18 +512,18 @@ TEST(ConSan, FinalValidationRejectsUnprovenBarrierMutation) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_drop_barrier = true;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   std::memcpy(corrupted.replacement.data() +
                   valid.program_inventory.text_sections().front().file_offset,
               text_words.data(), sizeof(uint32_t));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("mutation proof did not replace the selected barrier") != std::string::npos;
@@ -550,22 +532,22 @@ TEST(ConSan, FinalValidationRejectsUnprovenBarrierMutation) {
 
 TEST(ConSan, FinalValidationRejectsWrongAtomicMutationDisplacement) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_atomic_wrong_address = true;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 1u);
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   const size_t word2_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    valid.patches.front().anchor_offset + 2 * sizeof(uint32_t);
   uint32_t word2 = 0;
   std::memcpy(&word2, corrupted.replacement.data() + word2_file_offset, sizeof(word2));
   word2 = (word2 & 0xffu) | (2u << 8u);
   std::memcpy(corrupted.replacement.data() + word2_file_offset, &word2, sizeof(word2));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("mutation proof found the wrong atomic address displacement") !=
@@ -575,35 +557,34 @@ TEST(ConSan, FinalValidationRejectsWrongAtomicMutationDisplacement) {
 
 TEST(ConSan, FinalValidationRejectsScopeMutationThatChangesTh) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_release_acquire_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.moi_track_atomics = true;
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  Options options = test_options();
+  options.track_atomics = true;
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(32);
   options.max_patches = 8;
   options.fault_atomic_weaken_scope = true;
   options.fault_atomic_index = 0;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(valid.mutation.fault.requested, 1u);
   EXPECT_EQ(valid.mutation.fault.planned, 1u);
   EXPECT_EQ(valid.mutation.fault.applied, 1u);
   ASSERT_EQ(valid.fault_plans.size(), 1u);
-  EXPECT_EQ(valid.fault_plans.front().kind, ConSanFaultMutationKind::AtomicWeakenScope);
+  EXPECT_EQ(valid.fault_plans.front().kind, FaultMutationKind::AtomicWeakenScope);
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
-  const auto scope_patch = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &patch) {
-    return patch.phase == ConSanPatchPhase::Mutation &&
-           patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
+  const auto scope_patch = std::ranges::find_if(valid.patches, [](const PatchInfo &patch) {
+    return patch.phase == PatchPhase::Mutation && patch.kind == PatchKind::InlineAtomicScopeRewrite;
   });
   ASSERT_NE(scope_patch, valid.patches.end());
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   const size_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    scope_patch->anchor_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
   std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u << 16u;
   std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("changed fields other than the selected atomic scope") != std::string::npos;
@@ -612,21 +593,21 @@ TEST(ConSan, FinalValidationRejectsScopeMutationThatChangesTh) {
 
 TEST(ConSan, FinalValidationRejectsCorruptedDsAtomicAddressMutation) {
   const std::vector<uint8_t> bytes = make_rdna4_ds_atomic_code_object();
-  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  Options options = test_options();
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_address_delta = 4;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 1u);
 
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   const size_t word1_file_offset =
       valid.program_inventory.text_sections().front().file_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
   std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u;
   std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("wrong atomic address displacement") != std::string::npos;
@@ -634,4 +615,4 @@ TEST(ConSan, FinalValidationRejectsCorruptedDsAtomicAddressMutation) {
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

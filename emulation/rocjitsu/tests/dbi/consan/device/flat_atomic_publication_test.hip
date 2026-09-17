@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// LDS publication through target-native FLAT atomic release/acquire forms.
-/// This is distilled from the Hip-MOI Stream-K/tree workloads and the gfx1250
+/// This is distilled from the Hip-ConSan Stream-K/tree workloads and the gfx1250
 /// fault manifests. The incorrect member retains both atomic operations but
 /// acquires an already-ready, unrelated object, so it imports no publication
 /// edge for the producer's LDS payload.

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
-#include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
+#include "rocjitsu/code/patch/consan/consan_evidence_planning.h"
 
 #include <functional>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 const std::vector<uint8_t> &atomic_policy_bytes() {
@@ -22,15 +22,13 @@ struct AtomicPolicyTarget {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_GFX1201;
 };
 
-ConSanAtomicSite
-make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset = 32,
-                        std::string mnemonic = "global_atomic_add_u32",
-                        ConSanSyncRmwOutcome outcome = ConSanSyncRmwOutcome::ReturnsOldValue) {
-  ConSanAtomicSite site;
+AtomicSite make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset = 32,
+                                   std::string mnemonic = "global_atomic_add_u32",
+                                   SyncRmwOutcome outcome = SyncRmwOutcome::ReturnsOldValue) {
+  AtomicSite site;
   site.text_offset = offset;
   site.file_offset = offset;
-  site.size =
-      consan_target_profile(target.arch)->vector_memory.instruction_word_count * sizeof(uint32_t);
+  site.size = target_profile(target.arch)->vector_memory.instruction_word_count * sizeof(uint32_t);
   site.width_bits = 32;
   site.destination_vgpr = 1;
   site.address_vgpr = 0;
@@ -42,16 +40,16 @@ make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset =
   site.raw_vaddr = 0;
   site.raw_vdata = 2;
   site.raw_ioffset = 0;
-  site.scope = ConSanMemoryScope::Agent;
+  site.scope = MemoryScope::Agent;
   site.raw_th = 0;
-  site.returns_old_value = outcome != ConSanSyncRmwOutcome::NoReturn;
+  site.returns_old_value = outcome != SyncRmwOutcome::NoReturn;
   site.mnemonic = std::move(mnemonic);
   return site;
 }
 
-ConSanAtomicSite make_lds_atomic_site(uint64_t offset = 32) {
-  ConSanAtomicSite site;
-  site.address_space_hint = ConSanAtomicAddressSpaceHint::Lds;
+AtomicSite make_lds_atomic_site(uint64_t offset = 32) {
+  AtomicSite site;
+  site.address_space_hint = AtomicAddressSpaceHint::Lds;
   site.text_offset = offset;
   site.file_offset = offset;
   site.size = 8;
@@ -59,7 +57,7 @@ ConSanAtomicSite make_lds_atomic_site(uint64_t offset = 32) {
   site.destination_vgpr = 1;
   site.address_vgpr = 0;
   site.data_vgpr = 2;
-  site.scope = ConSanMemoryScope::Workgroup;
+  site.scope = MemoryScope::Workgroup;
   site.raw_addr = 0;
   site.raw_data0 = 2;
   site.raw_ioffset = 0;
@@ -68,15 +66,13 @@ ConSanAtomicSite make_lds_atomic_site(uint64_t offset = 32) {
   return site;
 }
 
-ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target,
-                                                uint64_t offset = 32) {
-  ConSanOrdinaryMemorySite site;
-  site.operation = ConSanOrdinaryMemoryOperation::Store;
-  site.support_reason = ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
+OrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target, uint64_t offset = 32) {
+  OrdinaryMemorySite site;
+  site.operation = OrdinaryMemoryOperation::Store;
+  site.support_reason = OrdinaryMemorySupportReason::SupportedSynchronizationOnly;
   site.text_offset = offset;
   site.file_offset = offset;
-  site.size =
-      consan_target_profile(target.arch)->vector_memory.instruction_word_count * sizeof(uint32_t);
+  site.size = target_profile(target.arch)->vector_memory.instruction_word_count * sizeof(uint32_t);
   site.width_bits = 32;
   site.address_vgpr = 0;
   site.scalar_address_sgpr = 4;
@@ -87,16 +83,16 @@ ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target
   site.raw_vaddr = 0;
   site.raw_vsrc = 2;
   site.raw_ioffset = 0;
-  site.scope = ConSanMemoryScope::Agent;
+  site.scope = MemoryScope::Agent;
   site.raw_th = 0;
   site.mnemonic = "global_store_b32";
   return site;
 }
 
-ConSanOrdinaryMemorySite make_cdna5_buffer_load_site(uint64_t offset = 32) {
-  ConSanOrdinaryMemorySite site;
-  site.operation = ConSanOrdinaryMemoryOperation::Load;
-  site.support_reason = ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
+OrdinaryMemorySite make_cdna5_buffer_load_site(uint64_t offset = 32) {
+  OrdinaryMemorySite site;
+  site.operation = OrdinaryMemoryOperation::Load;
+  site.support_reason = OrdinaryMemorySupportReason::SupportedSynchronizationOnly;
   site.text_offset = offset;
   site.file_offset = offset;
   site.size = 12;
@@ -109,74 +105,74 @@ ConSanOrdinaryMemorySite make_cdna5_buffer_load_site(uint64_t offset = 32) {
   site.raw_vaddr = 5;
   site.raw_vdst = 4;
   site.raw_ioffset = 0;
-  site.scope = ConSanMemoryScope::Agent;
+  site.scope = MemoryScope::Agent;
   site.raw_offen = true;
   site.raw_idxen = false;
   site.mnemonic = "buffer_load_b32";
   return site;
 }
 
-ConSanSyncEvent make_atomic_event(
-    uint64_t offset = 32, ConSanSyncRmwOutcome outcome = ConSanSyncRmwOutcome::ReturnsOldValue,
-    ConSanSyncAddressSource address_source = ConSanSyncAddressSource::GlobalScalarVector,
-    std::string mnemonic = "global_atomic_add_u32", std::string container = "atomic_kernel") {
-  ConSanSyncEvent event;
+SyncEvent
+make_atomic_event(uint64_t offset = 32, SyncRmwOutcome outcome = SyncRmwOutcome::ReturnsOldValue,
+                  SyncAddressSource address_source = SyncAddressSource::GlobalScalarVector,
+                  std::string mnemonic = "global_atomic_add_u32",
+                  std::string container = "atomic_kernel") {
+  SyncEvent event;
   event.semantic_id = {
       .physical =
           {
-              .code_object = make_consan_code_object_id(atomic_policy_bytes()),
+              .code_object = make_code_object_id(atomic_policy_bytes()),
               .original_text_offset = offset,
           },
-      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+      .domain = SemanticSiteDomain::SynchronizationEvent,
   };
-  event.kind = ConSanSyncKind::Atomic;
+  event.kind = SyncKind::Atomic;
   event.operation = mnemonic.find("cmp") == std::string::npos
-                        ? ConSanSyncOperation::AtomicRmw
-                        : ConSanSyncOperation::AtomicCompareExchange;
+                        ? SyncOperation::AtomicRmw
+                        : SyncOperation::AtomicCompareExchange;
   event.address_source = address_source;
-  event.memory_role = ConSanSyncMemoryRole::AcquireRelease;
+  event.memory_role = SyncMemoryRole::AcquireRelease;
   event.rmw_outcome = outcome;
-  event.confidence = ConSanSemanticConfidence::Exact;
-  event.memory_role_confidence = ConSanSemanticConfidence::Exact;
+  event.confidence = SemanticConfidence::Exact;
+  event.memory_role_confidence = SemanticConfidence::Exact;
   event.identity = container + "|atomic=" + std::to_string(offset);
-  event.scope = address_source == ConSanSyncAddressSource::LdsVector ? ConSanMemoryScope::Workgroup
-                                                                     : ConSanMemoryScope::Agent;
+  event.scope =
+      address_source == SyncAddressSource::LdsVector ? MemoryScope::Workgroup : MemoryScope::Agent;
   return event;
 }
 
-ConSanSyncEvent make_ordinary_store_event(uint64_t offset = 32) {
-  ConSanSyncEvent event =
-      make_atomic_event(offset, ConSanSyncRmwOutcome::NotApplicable,
-                        ConSanSyncAddressSource::GlobalScalarVector, "global_store_b32");
-  event.kind = ConSanSyncKind::OrdinaryMemory;
-  event.operation = ConSanSyncOperation::OrdinaryStore;
-  event.memory_role = ConSanSyncMemoryRole::Release;
+SyncEvent make_ordinary_store_event(uint64_t offset = 32) {
+  SyncEvent event = make_atomic_event(offset, SyncRmwOutcome::NotApplicable,
+                                      SyncAddressSource::GlobalScalarVector, "global_store_b32");
+  event.kind = SyncKind::OrdinaryMemory;
+  event.operation = SyncOperation::OrdinaryStore;
+  event.memory_role = SyncMemoryRole::Release;
   event.identity = "atomic_kernel|ordinary-store=" + std::to_string(offset);
   return event;
 }
 
-ConSanSyncEvent make_fence_event(uint64_t offset = 48) {
-  ConSanSyncEvent event = make_atomic_event(offset, ConSanSyncRmwOutcome::NotApplicable,
-                                            ConSanSyncAddressSource::NotApplicable, "global_wb");
-  event.kind = ConSanSyncKind::Fence;
-  event.operation = ConSanSyncOperation::Fence;
-  event.memory_role = ConSanSyncMemoryRole::Release;
+SyncEvent make_fence_event(uint64_t offset = 48) {
+  SyncEvent event = make_atomic_event(offset, SyncRmwOutcome::NotApplicable,
+                                      SyncAddressSource::NotApplicable, "global_wb");
+  event.kind = SyncKind::Fence;
+  event.operation = SyncOperation::Fence;
+  event.memory_role = SyncMemoryRole::Release;
   event.identity = "atomic_kernel|fence=" + std::to_string(offset);
   event.scope.reset();
   return event;
 }
 
-ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
-                                        std::string identity = "atomic-sequence") {
-  ConSanSyncSequence sequence;
-  sequence.kind = event.kind == ConSanSyncKind::OrdinaryMemory ? ConSanSyncKind::OrdinaryMemory
-                                                               : ConSanSyncKind::Atomic;
+SyncSequence make_atomic_sequence(const SyncEvent &event,
+                                  std::string identity = "atomic-sequence") {
+  SyncSequence sequence;
+  sequence.kind =
+      event.kind == SyncKind::OrdinaryMemory ? SyncKind::OrdinaryMemory : SyncKind::Atomic;
   sequence.operation = event.operation;
   sequence.address_source = event.address_source;
   sequence.memory_role = event.memory_role;
   sequence.rmw_outcome = event.rmw_outcome;
-  sequence.confidence = ConSanSemanticConfidence::Exact;
-  sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
+  sequence.confidence = SemanticConfidence::Exact;
+  sequence.memory_role_confidence = SemanticConfidence::Exact;
   sequence.identity = std::move(identity);
   sequence.begin_text_offset = event.text_offset();
   sequence.end_text_offset = event.text_offset() + 12u;
@@ -186,117 +182,110 @@ ConSanSyncSequence make_atomic_sequence(const ConSanSyncEvent &event,
   return sequence;
 }
 
-ConSanMoiFenceCandidate
-make_fence_candidate([[maybe_unused]] const ConSanSyncEvent &communication,
-                     [[maybe_unused]] const ConSanSyncEvent &fence,
-                     [[maybe_unused]] const ConSanSyncSequence &sequence,
-                     ConSanFenceAssociation association = ConSanFenceAssociation::Qualified) {
+FenceCandidate make_fence_candidate([[maybe_unused]] const SyncEvent &communication,
+                                    [[maybe_unused]] const SyncEvent &fence,
+                                    [[maybe_unused]] const SyncSequence &sequence,
+                                    FenceAssociation association = FenceAssociation::Qualified) {
   return {
       .fence_event = {1},
       .sequence = {0},
-      .communication_event = ConSanSyncEventId{0},
+      .communication_event = SyncEventId{0},
       .memory_role = fence.memory_role,
       .association = association,
   };
 }
 
-ProgramInventory build_atomic_inventory(std::vector<ConSanSyncEvent> events,
-                                        std::vector<ConSanSyncSequence> sequences,
-                                        std::vector<ConSanAtomicSite> atomic_sites,
-                                        std::vector<ConSanOrdinaryMemorySite> ordinary_sites = {},
-                                        std::vector<ConSanMoiFenceCandidate> fences = {},
-                                        const AtomicPolicyTarget &target = {},
-                                        std::vector<uint64_t> unowned_offsets = {},
-                                        std::vector<ConSanProgramSite> access_sites = {}) {
+ProgramInventory build_atomic_inventory(
+    std::vector<SyncEvent> events, std::vector<SyncSequence> sequences,
+    std::vector<AtomicSite> atomic_sites, std::vector<OrdinaryMemorySite> ordinary_sites = {},
+    std::vector<FenceCandidate> fences = {}, const AtomicPolicyTarget &target = {},
+    std::vector<uint64_t> unowned_offsets = {}, std::vector<ProgramSite> access_sites = {}) {
   ProgramInventoryBuilder builder(atomic_policy_bytes());
   builder.set_code_object_facts(true, 0, target.arch, target.target);
-  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
+  ProgramContainer kernel{ProgramContainerKind::Kernel};
   kernel.name = "atomic_kernel";
   kernel.descriptor_file_offset = 384;
   kernel.entry_text_offset = 0;
   builder.add_kernel(std::move(kernel));
-  for (const ConSanSyncEvent &event : events) {
+  for (const SyncEvent &event : events) {
     const std::string name = event.identity.substr(0, event.identity.find('|'));
-    if (std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name) !=
+    if (std::ranges::find(builder.kernels(), name, &ProgramContainer::name) !=
         builder.kernels().end())
       continue;
-    ConSanProgramContainer event_kernel{ConSanProgramContainerKind::Kernel};
+    ProgramContainer event_kernel{ProgramContainerKind::Kernel};
     event_kernel.name = name;
     event_kernel.descriptor_file_offset = 384u + 64u * builder.kernels().size();
     event_kernel.entry_text_offset = 0;
     builder.add_kernel(std::move(event_kernel));
   }
-  for (ConSanProgramSite &site : access_sites) {
+  for (ProgramSite &site : access_sites) {
     site.container = builder.kernels().back().id;
     builder.add_access_site(std::move(site));
   }
-  for (ConSanAtomicSite &site : atomic_sites)
+  for (AtomicSite &site : atomic_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
-  for (ConSanOrdinaryMemorySite &site : ordinary_sites)
+  for (OrdinaryMemorySite &site : ordinary_sites)
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
-  for (const ConSanSyncEvent &event : events) {
-    if (event.kind != ConSanSyncKind::Fence)
+  for (const SyncEvent &event : events) {
+    if (event.kind != SyncKind::Fence)
       continue;
-    ConSanFenceSite site;
+    FenceSite site;
     site.text_offset = event.text_offset();
     site.file_offset = event.text_offset();
     site.size =
-        consan_target_profile(target.arch)->vector_memory.instruction_word_count * sizeof(uint32_t);
-    site.cache_operation = event.memory_role == ConSanSyncMemoryRole::Acquire
-                               ? ConSanCacheOperation::Acquire
-                               : ConSanCacheOperation::Release;
-    site.mnemonic =
-        site.cache_operation == ConSanCacheOperation::Acquire ? "global_inv" : "global_wb";
+        target_profile(target.arch)->vector_memory.instruction_word_count * sizeof(uint32_t);
+    site.cache_operation = event.memory_role == SyncMemoryRole::Acquire ? CacheOperation::Acquire
+                                                                        : CacheOperation::Release;
+    site.mnemonic = site.cache_operation == CacheOperation::Acquire ? "global_inv" : "global_wb";
     stage_decoded_site(builder, builder.kernels().back(), std::move(site));
   }
   builder.publish_decoded_accesses(atomic_policy_bytes());
-  const std::span<const ConSanProgramSite> program_sites = builder.view().program_sites();
-  for (ConSanSyncEvent &event : events) {
+  const std::span<const ProgramSite> program_sites = builder.view().program_sites();
+  for (SyncEvent &event : events) {
     if (event.source_site.valid())
       continue;
-    std::optional<ConSanProgramSiteId> match;
+    std::optional<ProgramSiteId> match;
     for (size_t index = 0; index < program_sites.size(); ++index) {
-      const ConSanProgramSite &decoded = program_sites[index];
+      const ProgramSite &decoded = program_sites[index];
       const bool kind_matches =
-          (event.kind == ConSanSyncKind::Atomic && decoded.get_if<ConSanAtomicSite>() != nullptr) ||
-          (event.kind == ConSanSyncKind::OrdinaryMemory &&
-           decoded.get_if<ConSanOrdinaryMemorySite>() != nullptr) ||
-          (event.kind == ConSanSyncKind::Fence && decoded.get_if<ConSanFenceSite>() != nullptr);
+          (event.kind == SyncKind::Atomic && decoded.get_if<AtomicSite>() != nullptr) ||
+          (event.kind == SyncKind::OrdinaryMemory &&
+           decoded.get_if<OrdinaryMemorySite>() != nullptr) ||
+          (event.kind == SyncKind::Fence && decoded.get_if<FenceSite>() != nullptr);
       if (!kind_matches || decoded.text_offset() != event.text_offset())
         continue;
       if (match) {
         match.reset();
         break;
       }
-      match = ConSanProgramSiteId{static_cast<uint32_t>(index)};
+      match = ProgramSiteId{static_cast<uint32_t>(index)};
     }
     if (match)
       event.source_site = *match;
   }
-  for (ConSanProgramSite &site : builder.program_sites()) {
+  for (ProgramSite &site : builder.program_sites()) {
     if (std::ranges::find(unowned_offsets, site.text_offset()) == unowned_offsets.end())
       site.execution_owners.push_back({});
   }
-  for (const ConSanSyncEvent &event : events) {
+  for (const SyncEvent &event : events) {
     if (!event.source_site.valid() || event.source_site.ordinal >= builder.program_sites().size())
       continue;
     const std::string_view name =
         std::string_view(event.identity).substr(0, event.identity.find('|'));
-    const auto container =
-        std::ranges::find(builder.kernels(), name, &ConSanProgramContainer::name);
+    const auto container = std::ranges::find(builder.kernels(), name, &ProgramContainer::name);
     if (container != builder.kernels().end())
       builder.program_sites()[event.source_site.ordinal].container = container->id;
   }
   SynchronizationInventoryBuildView synchronization = builder.synchronization();
   synchronization.sync_events = std::move(events);
   synchronization.sync_sequences = std::move(sequences);
-  synchronization.moi_fence_candidates = std::move(fences);
+  synchronization.fence_candidates = std::move(fences);
   return builder.view();
 }
 
-ConSanProgramSite make_lds_access(ConSanLdsAccessKind kind, uint64_t offset = 96) {
-  ConSanProgramSite site;
-  site.origin = ConSanAccessOrigin::NativeLds;
+ProgramSite make_lds_access(LdsAccessKind kind, uint64_t offset = 96) {
+  ProgramSite site;
+  site.origin = AccessOrigin::NativeLds;
   site.kind = kind;
   site.physical_id.original_text_offset = offset;
   site.decoded_site().text_offset = offset;
@@ -305,26 +294,26 @@ ConSanProgramSite make_lds_access(ConSanLdsAccessKind kind, uint64_t offset = 96
   site.decoded_width_bits = 32;
   site.operands.address_vgpr = 3;
   site.operands.data_vgpr = 4;
-  site.decoded_site().mnemonic = kind == ConSanLdsAccessKind::Read ? "ds_load_b32" : "ds_store_b32";
+  site.decoded_site().mnemonic = kind == LdsAccessKind::Read ? "ds_load_b32" : "ds_store_b32";
   return site;
 }
 
-ProgramInventory one_atomic_inventory(
-    const AtomicPolicyTarget &target = {},
-    ConSanSyncRmwOutcome outcome = ConSanSyncRmwOutcome::ReturnsOldValue,
-    std::string mnemonic = "global_atomic_add_u32",
-    ConSanSyncAddressSource address_source = ConSanSyncAddressSource::GlobalScalarVector) {
+ProgramInventory
+one_atomic_inventory(const AtomicPolicyTarget &target = {},
+                     SyncRmwOutcome outcome = SyncRmwOutcome::ReturnsOldValue,
+                     std::string mnemonic = "global_atomic_add_u32",
+                     SyncAddressSource address_source = SyncAddressSource::GlobalScalarVector) {
   std::vector events{make_atomic_event(32, outcome, address_source, mnemonic)};
   std::vector sequences{make_atomic_sequence(events.front())};
-  ConSanAtomicSite site = address_source == ConSanSyncAddressSource::LdsVector
-                              ? make_lds_atomic_site()
-                              : make_global_atomic_site(target, 32, std::move(mnemonic), outcome);
+  AtomicSite site = address_source == SyncAddressSource::LdsVector
+                        ? make_lds_atomic_site()
+                        : make_global_atomic_site(target, 32, std::move(mnemonic), outcome);
   return build_atomic_inventory(std::move(events), std::move(sequences), {std::move(site)}, {}, {},
                                 target);
 }
 
 ProgramInventory
-ordinary_fence_inventory(ConSanFenceAssociation association = ConSanFenceAssociation::Qualified,
+ordinary_fence_inventory(FenceAssociation association = FenceAssociation::Qualified,
                          const AtomicPolicyTarget &target = {}) {
   std::vector events{make_ordinary_store_event(), make_fence_event()};
   std::vector sequences{make_atomic_sequence(events.front())};
@@ -333,75 +322,72 @@ ordinary_fence_inventory(ConSanFenceAssociation association = ConSanFenceAssocia
                                 {make_global_store_site(target)}, std::move(fences), target);
 }
 
-ConSanAtomicFencePolicyRequest atomic_request(ConSanCapabilityEngine engine) {
-  static constexpr std::array kSampledWindows = {
-      ConSanDirectionalAccessAvailability{
-          .owner = ConSanProgramContainerId{},
+AtomicFencePolicyRequest atomic_request(Mode mode) {
+  static constexpr std::array kWindows = {
+      DirectionalAccessAvailability{
+          .owner = ProgramContainerId{},
           .read = true,
           .write = true,
       },
   };
   return {
-      .engine = engine,
+      .mode = mode,
       .tracking_enabled = true,
-      .directional_access_windows = kSampledWindows,
+      .directional_access_windows = kWindows,
       .container_filter = {},
       .kernel_name_allowlist = {},
   };
 }
 
-TEST(ConSanAtomicFencePolicy, InvalidEngineFailsValidationButEmptyInventoryIsAValidEmptyPlan) {
-  const ConSanAtomicFencePolicyResult invalid = plan_consan_atomic_fence_observation(
-      one_atomic_inventory(), atomic_request(ConSanCapabilityEngine::Count));
+TEST(ConSanAtomicFencePolicy, InvalidModeFailsValidationButEmptyInventoryIsAValidEmptyPlan) {
+  const AtomicFencePolicyResult invalid =
+      plan_atomic_fence_observation(one_atomic_inventory(), atomic_request(Mode::None));
   EXPECT_FALSE(invalid.valid());
   EXPECT_FALSE(invalid.plan.valid());
 
-  const ConSanAtomicFencePolicyResult empty = plan_consan_atomic_fence_observation(
-      ProgramInventory{}, atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult empty =
+      plan_atomic_fence_observation(ProgramInventory{}, atomic_request(Mode::Default));
   EXPECT_TRUE(empty.valid());
   EXPECT_TRUE(empty.plan.atomic_site_decisions.empty());
   EXPECT_TRUE(empty.plan.fence_site_decisions.empty());
   EXPECT_TRUE(empty.plan.probe_intents.empty());
 }
 
-TEST(ConSanAtomicFencePolicy, AllEnginesExpressTheirAtomicObservationContract) {
+TEST(ConSanAtomicFencePolicy, AllModesExpressTheirAtomicObservationContract) {
   const ProgramInventory inventory = one_atomic_inventory();
-  const ConSanAtomicFencePolicyResult supercollider = plan_consan_atomic_fence_observation(
-      inventory, atomic_request(ConSanCapabilityEngine::SuperCollider));
+  const AtomicFencePolicyResult supercollider =
+      plan_atomic_fence_observation(inventory, atomic_request(Mode::SuperCollider));
   ASSERT_TRUE(supercollider.valid());
   ASSERT_EQ(supercollider.plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(supercollider.plan.atomic_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(supercollider.plan.atomic_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(supercollider.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::EngineMutationOnly);
+            AtomicPolicyReason::ModeMutationOnly);
   EXPECT_TRUE(supercollider.plan.probe_intents.empty());
 
   constexpr std::array expected = {
-      std::pair{ConSanCapabilityEngine::RecordReplay, ConSanProbeIntentKind::AtomicRecord},
-      std::pair{ConSanCapabilityEngine::Sampled, ConSanProbeIntentKind::SampledAtomicOrdering},
-      std::pair{ConSanCapabilityEngine::InlineShadow, ConSanProbeIntentKind::ExactAtomicOrdering},
+      std::pair{Mode::Default, ProbeIntentKind::AtomicOrdering},
   };
-  for (const auto &[engine, evidence_kind] : expected) {
-    SCOPED_TRACE(consan_capability_engine_name(engine));
-    const ConSanAtomicFencePolicyResult policy =
-        plan_consan_atomic_fence_observation(inventory, atomic_request(engine));
+  for (const auto &[mode, evidence_kind] : expected) {
+    SCOPED_TRACE(mode_label(mode));
+    const AtomicFencePolicyResult policy =
+        plan_atomic_fence_observation(inventory, atomic_request(mode));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
     ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
-    const ConSanAtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
-    EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Admitted);
-    EXPECT_EQ(decision.reason, ConSanAtomicPolicyReason::None);
+    const AtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
+    EXPECT_EQ(decision.kind, SiteDecisionKind::Admitted);
+    EXPECT_EQ(decision.reason, AtomicPolicyReason::None);
     ASSERT_TRUE(policy.plan.probe_intents[0].synchronization_association.has_value());
     ASSERT_TRUE(policy.plan.probe_intents[0].atomic_lowering_form.has_value());
     EXPECT_EQ(policy.plan.probe_intents[0].atomic_lowering_form->kind,
-              ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress);
-    EXPECT_EQ(policy.plan.probe_intents[0].kind, ConSanProbeIntentKind::AtomicAddressCapture);
-    EXPECT_EQ(policy.plan.probe_intents[0].position, ConSanProbePosition::Before);
-    EXPECT_EQ(policy.plan.probe_intents[0].dynamic_result, ConSanDynamicResultRequirement::None);
+              AtomicLoweringFormKind::GlobalScalarVectorAddress);
+    EXPECT_EQ(policy.plan.probe_intents[0].kind, ProbeIntentKind::AtomicAddressCapture);
+    EXPECT_EQ(policy.plan.probe_intents[0].position, ProbePosition::Before);
+    EXPECT_EQ(policy.plan.probe_intents[0].dynamic_result, DynamicResultRequirement::None);
     EXPECT_EQ(policy.plan.probe_intents[1].kind, evidence_kind);
-    EXPECT_EQ(policy.plan.probe_intents[1].position, ConSanProbePosition::After);
+    EXPECT_EQ(policy.plan.probe_intents[1].position, ProbePosition::After);
     EXPECT_EQ(policy.plan.probe_intents[1].dynamic_result,
-              ConSanDynamicResultRequirement::ReturnedOldValue);
+              DynamicResultRequirement::ReturnedOldValue);
     EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
               policy.plan.probe_intents[1].synchronization_association);
   }
@@ -409,18 +395,16 @@ TEST(ConSanAtomicFencePolicy, AllEnginesExpressTheirAtomicObservationContract) {
 
 TEST(ConSanAtomicFencePolicy, DynamicAtomicOutcomesBecomeExplicitAfterIntentRequirements) {
   constexpr std::array cases = {
-      std::tuple{ConSanSyncRmwOutcome::NoReturn, "global_atomic_add_u32",
-                 ConSanDynamicResultRequirement::None},
-      std::tuple{ConSanSyncRmwOutcome::ReturnsOldValue, "global_atomic_add_u32",
-                 ConSanDynamicResultRequirement::ReturnedOldValue},
-      std::tuple{ConSanSyncRmwOutcome::CompareExchange, "global_atomic_cmpswap_u32",
-                 ConSanDynamicResultRequirement::CompareExchangeSuccess},
+      std::tuple{SyncRmwOutcome::NoReturn, "global_atomic_add_u32", DynamicResultRequirement::None},
+      std::tuple{SyncRmwOutcome::ReturnsOldValue, "global_atomic_add_u32",
+                 DynamicResultRequirement::ReturnedOldValue},
+      std::tuple{SyncRmwOutcome::CompareExchange, "global_atomic_cmpswap_u32",
+                 DynamicResultRequirement::CompareExchangeSuccess},
   };
   for (const auto &[outcome, mnemonic, expected] : cases) {
     SCOPED_TRACE(mnemonic);
-    const ConSanAtomicFencePolicyResult policy =
-        plan_consan_atomic_fence_observation(one_atomic_inventory({}, outcome, mnemonic),
-                                             atomic_request(ConSanCapabilityEngine::InlineShadow));
+    const AtomicFencePolicyResult policy = plan_atomic_fence_observation(
+        one_atomic_inventory({}, outcome, mnemonic), atomic_request(Mode::Default));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
     EXPECT_EQ(policy.plan.probe_intents[1].dynamic_result, expected);
@@ -429,111 +413,103 @@ TEST(ConSanAtomicFencePolicy, DynamicAtomicOutcomesBecomeExplicitAfterIntentRequ
 
 TEST(ConSanAtomicFencePolicy, RequestExclusionsRemainTypedAndDoNotCreateIntents) {
   const ProgramInventory inventory = one_atomic_inventory();
-  using Mutation = std::function<void(ConSanAtomicFencePolicyRequest &)>;
-  const std::vector<
-      std::tuple<std::string_view, ConSanCapabilityEngine, Mutation, ConSanAtomicPolicyReason>>
-      cases = {
-          {"disabled", ConSanCapabilityEngine::RecordReplay,
-           [](auto &request) { request.tracking_enabled = false; },
-           ConSanAtomicPolicyReason::TrackingDisabled},
-          {"filtered", ConSanCapabilityEngine::RecordReplay,
-           [](auto &request) { request.container_filter = "different"; },
-           ConSanAtomicPolicyReason::ContainerFilterExcluded},
-          {"sampled-window", ConSanCapabilityEngine::Sampled,
-           [](auto &request) { request.directional_access_windows = {}; },
-           ConSanAtomicPolicyReason::MissingDirectionalAccessWindow},
-      };
-  for (const auto &[name, engine, mutate, expected] : cases) {
+  using Mutation = std::function<void(AtomicFencePolicyRequest &)>;
+  const std::vector<std::tuple<std::string_view, Mode, Mutation, AtomicPolicyReason>> cases = {
+      {"disabled", Mode::Default, [](auto &request) { request.tracking_enabled = false; },
+       AtomicPolicyReason::TrackingDisabled},
+      {"filtered", Mode::Default, [](auto &request) { request.container_filter = "different"; },
+       AtomicPolicyReason::ContainerFilterExcluded},
+      {"sampled-window", Mode::Default,
+       [](auto &request) { request.directional_access_windows = {}; },
+       AtomicPolicyReason::MissingDirectionalAccessWindow},
+  };
+  for (const auto &[name, mode, mutate, expected] : cases) {
     SCOPED_TRACE(name);
-    ConSanAtomicFencePolicyRequest request = atomic_request(engine);
+    AtomicFencePolicyRequest request = atomic_request(mode);
     mutate(request);
-    const ConSanAtomicFencePolicyResult policy =
-        plan_consan_atomic_fence_observation(inventory, request);
+    const AtomicFencePolicyResult policy = plan_atomic_fence_observation(inventory, request);
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-    EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind,
-              ConSanSiteDecisionKind::NotApplicable);
+    EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
     EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, expected);
     EXPECT_TRUE(policy.plan.probe_intents.empty());
   }
 }
 
-TEST(ConSanAtomicFencePolicy, SampledExcludesReleaseWithoutOwnerLocalWriteWindow) {
+TEST(ConSanAtomicFencePolicy, ExcludesReleaseWithoutOwnerLocalWriteWindow) {
   static constexpr std::array kReadOnlyWindows = {
-      ConSanDirectionalAccessAvailability{
-          .owner = ConSanProgramContainerId{},
+      DirectionalAccessAvailability{
+          .owner = ProgramContainerId{},
           .read = true,
           .write = false,
       },
   };
-  ConSanAtomicFencePolicyRequest request = atomic_request(ConSanCapabilityEngine::Sampled);
+  AtomicFencePolicyRequest request = atomic_request(Mode::Default);
   request.directional_access_windows = kReadOnlyWindows;
 
-  const ConSanAtomicFencePolicyResult policy =
-      plan_consan_atomic_fence_observation(ordinary_fence_inventory(), request);
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(ordinary_fence_inventory(), request);
 
   ASSERT_TRUE(policy.valid());
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::MissingDirectionalAccessWindow);
+            AtomicPolicyReason::MissingDirectionalAccessWindow);
   ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(policy.plan.fence_site_decisions.front().reason,
-            ConSanFencePolicyReason::CommunicationNotApplicable);
+            FencePolicyReason::CommunicationNotApplicable);
   EXPECT_TRUE(policy.plan.probe_intents.empty());
 }
 
-TEST(ConSanAtomicFencePolicy, AssembledSampledPolicyDerivesDirectionalOwnerLocalWindows) {
-  const auto assemble = [](ConSanLdsAccessKind access_kind) {
+TEST(ConSanAtomicFencePolicy, AssembledPolicyDerivesDirectionalOwnerLocalWindows) {
+  const auto assemble = [](LdsAccessKind access_kind) {
     std::vector events{make_ordinary_store_event(), make_fence_event()};
     std::vector sequences{make_atomic_sequence(events.front())};
     std::vector fences{make_fence_candidate(events[0], events[1], sequences[0])};
     ProgramInventoryBuilder builder(build_atomic_inventory(
         std::move(events), std::move(sequences), {}, {make_global_store_site({})},
         std::move(fences), {}, {}, {make_lds_access(access_kind)}));
-    for (ConSanProgramSite &site : builder.program_sites()) {
+    for (ProgramSite &site : builder.program_sites()) {
       site.execution_owners.clear();
       site.execution_owners.push_back({.kernel = builder.kernels().front().id});
     }
-    return assemble_consan_observation_product(
-        builder.view(), {.engine = ConSanCapabilityEngine::Sampled,
-                         .native_lds_enabled = true,
-                         .group_flat_enabled = true,
-                         .flat_provenance_mode = ConSanFlatProvenanceMode::Likely,
-                         .barrier_tracking_enabled = true,
-                         .include_atomic_fence_policy = true,
-                         .atomic_fence_tracking_enabled = true,
-                         .container_filter = {},
-                         .kernel_name_allowlist = {},
-                         .reserved_for_synchronization = {}});
+    return assemble_observation_product(builder.view(),
+                                        {.mode = Mode::Default,
+                                         .native_lds_enabled = true,
+                                         .group_flat_enabled = true,
+                                         .flat_provenance_mode = FlatProvenanceMode::Likely,
+                                         .barrier_tracking_enabled = true,
+                                         .include_atomic_fence_policy = true,
+                                         .atomic_fence_tracking_enabled = true,
+                                         .container_filter = {},
+                                         .kernel_name_allowlist = {},
+                                         .reserved_for_synchronization = {}});
   };
 
-  const ConSanObservationProduct read_only = assemble(ConSanLdsAccessKind::Read);
+  const ObservationProduct read_only = assemble(LdsAccessKind::Read);
   ASSERT_TRUE(read_only.valid());
   ASSERT_EQ(read_only.plan().site_decisions.size(), 1u);
-  EXPECT_EQ(read_only.plan().site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(read_only.plan().site_decisions.front().kind, SiteDecisionKind::Admitted);
   ASSERT_EQ(read_only.plan().atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(read_only.plan().atomic_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(read_only.plan().atomic_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(read_only.plan().atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::MissingDirectionalAccessWindow);
+            AtomicPolicyReason::MissingDirectionalAccessWindow);
   ASSERT_EQ(read_only.plan().fence_site_decisions.size(), 1u);
-  EXPECT_EQ(read_only.plan().fence_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(read_only.plan().fence_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(read_only.plan().fence_site_decisions.front().reason,
-            ConSanFencePolicyReason::CommunicationNotApplicable);
-  EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ConSanProbeIntentKind::SampledAccess,
-                               &ConSanProbeIntent::kind),
+            FencePolicyReason::CommunicationNotApplicable);
+  EXPECT_EQ(std::ranges::count(read_only.plan().probe_intents, ProbeIntentKind::Access,
+                               &ProbeIntent::kind),
             1u);
   EXPECT_EQ(read_only.plan().probe_intents.size(), 1u);
 
-  const ConSanObservationProduct write = assemble(ConSanLdsAccessKind::Write);
+  const ObservationProduct write = assemble(LdsAccessKind::Write);
   ASSERT_TRUE(write.valid());
   ASSERT_EQ(write.plan().atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(write.plan().atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(write.plan().atomic_site_decisions.front().kind, SiteDecisionKind::Admitted);
   ASSERT_EQ(write.plan().fence_site_decisions.size(), 1u);
-  EXPECT_EQ(write.plan().fence_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(write.plan().fence_site_decisions.front().kind, SiteDecisionKind::Admitted);
   EXPECT_EQ(write.plan().probe_intents.size(), 3u);
 }
 
@@ -547,265 +523,222 @@ TEST(ConSanAtomicFencePolicy, GlobalAtomicContractTransportsAcrossEverySupported
   };
   for (const AtomicPolicyTarget &target : targets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
-    const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-        one_atomic_inventory(target), atomic_request(ConSanCapabilityEngine::InlineShadow));
+    const AtomicFencePolicyResult policy =
+        plan_atomic_fence_observation(one_atomic_inventory(target), atomic_request(Mode::Default));
     ASSERT_TRUE(policy.valid());
-    const ConSanAtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
-    EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Admitted);
-    EXPECT_EQ(decision.capability, ConSanCapabilityDisposition::Supported);
+    const AtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
+    EXPECT_EQ(decision.kind, SiteDecisionKind::Admitted);
+    EXPECT_EQ(decision.capability, CapabilityDisposition::Supported);
     ASSERT_TRUE(policy.plan.probe_intents.front().atomic_lowering_form.has_value());
     EXPECT_EQ(policy.plan.probe_intents.front().atomic_lowering_form->kind,
-              ConSanAtomicLoweringFormKind::GlobalScalarVectorAddress);
+              AtomicLoweringFormKind::GlobalScalarVectorAddress);
   }
 }
 
 TEST(ConSanAtomicFencePolicy, OrderedLdsAtomicIsTargetGatedToGfx1250) {
   constexpr AtomicPolicyTarget gfx1201{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201};
-  const ConSanAtomicFencePolicyResult unsupported = plan_consan_atomic_fence_observation(
-      one_atomic_inventory(gfx1201, ConSanSyncRmwOutcome::ReturnsOldValue, "ds_add_u32",
-                           ConSanSyncAddressSource::LdsVector),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult unsupported = plan_atomic_fence_observation(
+      one_atomic_inventory(gfx1201, SyncRmwOutcome::ReturnsOldValue, "ds_add_u32",
+                           SyncAddressSource::LdsVector),
+      atomic_request(Mode::Default));
   ASSERT_TRUE(unsupported.valid());
-  EXPECT_EQ(unsupported.plan.atomic_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(unsupported.plan.atomic_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(unsupported.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::TargetCapabilityUnavailable);
+            AtomicPolicyReason::TargetCapabilityUnavailable);
 
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
-  const ConSanAtomicFencePolicyResult supported = plan_consan_atomic_fence_observation(
-      one_atomic_inventory(gfx1250, ConSanSyncRmwOutcome::ReturnsOldValue, "ds_add_u32",
-                           ConSanSyncAddressSource::LdsVector),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult supported = plan_atomic_fence_observation(
+      one_atomic_inventory(gfx1250, SyncRmwOutcome::ReturnsOldValue, "ds_add_u32",
+                           SyncAddressSource::LdsVector),
+      atomic_request(Mode::Default));
   ASSERT_TRUE(supported.valid());
-  EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted);
   EXPECT_EQ(supported.plan.atomic_site_decisions.front().capability,
-            ConSanCapabilityDisposition::Supported);
+            CapabilityDisposition::Supported);
   ASSERT_TRUE(supported.plan.probe_intents.front().atomic_lowering_form.has_value());
   EXPECT_EQ(supported.plan.probe_intents.front().atomic_lowering_form->kind,
-            ConSanAtomicLoweringFormKind::LdsVectorOffset);
+            AtomicLoweringFormKind::LdsVectorOffset);
 }
 
 TEST(ConSanAtomicFencePolicy, Gfx1250OrderedLdsRequiresGraphNormalizedWorkgroupScope) {
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
-  std::vector events{make_atomic_event(32, ConSanSyncRmwOutcome::ReturnsOldValue,
-                                       ConSanSyncAddressSource::LdsVector, "ds_add_u32")};
+  std::vector events{make_atomic_event(32, SyncRmwOutcome::ReturnsOldValue,
+                                       SyncAddressSource::LdsVector, "ds_add_u32")};
   std::vector sequences{make_atomic_sequence(events.front())};
   events.front().scope.reset();
   sequences.front().scope.reset();
-  ConSanAtomicSite site = make_lds_atomic_site();
+  AtomicSite site = make_lds_atomic_site();
   site.scope.reset();
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      build_atomic_inventory(std::move(events), std::move(sequences), {std::move(site)}, {}, {},
-                             gfx1250),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(build_atomic_inventory(std::move(events), std::move(sequences),
+                                                           {std::move(site)}, {}, {}, gfx1250),
+                                    atomic_request(Mode::Default));
   ASSERT_TRUE(policy.valid());
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::MissingScope);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, AtomicPolicyReason::MissingScope);
 }
 
 TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope) {
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
-  ConSanSyncEvent event = make_ordinary_store_event();
-  event.operation = ConSanSyncOperation::OrdinaryLoad;
-  event.memory_role = ConSanSyncMemoryRole::Acquire;
-  event.scope = ConSanMemoryScope::Wavefront;
-  ConSanSyncSequence sequence = make_atomic_sequence(event);
-  sequence.memory_role = ConSanSyncMemoryRole::Acquire;
-  sequence.scope = ConSanMemoryScope::Workgroup;
-  ConSanOrdinaryMemorySite site = make_global_store_site(gfx1250);
-  site.operation = ConSanOrdinaryMemoryOperation::Load;
+  SyncEvent event = make_ordinary_store_event();
+  event.operation = SyncOperation::OrdinaryLoad;
+  event.memory_role = SyncMemoryRole::Acquire;
+  event.scope = MemoryScope::Wavefront;
+  SyncSequence sequence = make_atomic_sequence(event);
+  sequence.memory_role = SyncMemoryRole::Acquire;
+  sequence.scope = MemoryScope::Workgroup;
+  OrdinaryMemorySite site = make_global_store_site(gfx1250);
+  site.operation = OrdinaryMemoryOperation::Load;
   site.destination_vgpr = 2;
   site.data_vgpr.reset();
   site.raw_vsrc.reset();
   site.raw_vdst = 2;
   site.raw_saddr = 0x7cu;
-  site.scope = ConSanMemoryScope::Wavefront;
+  site.scope = MemoryScope::Wavefront;
   site.mnemonic = "flat_load_b32";
 
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+  const AtomicFencePolicyResult policy = plan_atomic_fence_observation(
       build_atomic_inventory({std::move(event)}, {std::move(sequence)}, {}, {std::move(site)}, {},
                              gfx1250),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+      atomic_request(Mode::Default));
   ASSERT_TRUE(policy.valid());
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, ConSanAtomicPolicyReason::None);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, AtomicPolicyReason::None);
 }
 
 TEST(ConSanAtomicFencePolicy, CommunicationMaterializationUsesCanonicalSiteAndSequenceHandles) {
-  ConSanSyncEvent event = make_ordinary_store_event();
-  ConSanSyncSequence sequence = make_atomic_sequence(event);
-  sequence.scope = ConSanMemoryScope::Workgroup;
+  SyncEvent event = make_ordinary_store_event();
+  SyncSequence sequence = make_atomic_sequence(event);
+  sequence.scope = MemoryScope::Workgroup;
   const ProgramInventory inventory =
       build_atomic_inventory({event}, {sequence}, {}, {make_global_store_site({})});
   const SynchronizationInventoryView sync = inventory.sync();
-  const ConSanSyncEvent &published_event = sync.sync_events.front();
+  const SyncEvent &published_event = sync.sync_events.front();
 
-  const std::optional<ConSanAtomicSite> communication =
-      consan_moi_impl::materialize_moi_communication_site(inventory, published_event.source_site,
-                                                          ConSanSyncSequenceId{0u});
+  const std::optional<AtomicSite> communication = detail::materialize_communication_site(
+      inventory, published_event.source_site, SyncSequenceId{0u});
   ASSERT_TRUE(communication.has_value());
   EXPECT_EQ(communication->text_offset, event.text_offset());
   EXPECT_EQ(communication->width_bits, 32u);
-  EXPECT_EQ(communication->scope, ConSanMemoryScope::Workgroup);
+  EXPECT_EQ(communication->scope, MemoryScope::Workgroup);
 
-  consan_detail::MoiAtomicEvidenceSitePlan plan;
+  detail::AtomicEvidenceSitePlan plan;
   plan.event = {0u};
   plan.sequence = {0u};
   plan.source_site = published_event.source_site;
   plan.address_capture_intent = {.value = 1u};
   plan.evidence_intent = {.value = 2u};
-  plan.lowering_form.kind = ConSanAtomicLoweringFormKind::FlatVectorAddress;
-  const std::optional<consan_moi_impl::MoiAtomicEvidenceSourceView> source =
-      consan_moi_impl::resolve_moi_atomic_evidence_source(inventory, plan);
+  plan.lowering_form.kind = AtomicLoweringFormKind::FlatVectorAddress;
+  const std::optional<detail::AtomicEvidenceSourceView> source =
+      detail::resolve_atomic_evidence_source(inventory, plan);
   ASSERT_TRUE(source.has_value());
   EXPECT_EQ(source->event, &published_event);
   EXPECT_EQ(source->sequence, &inventory.sync().sync_sequences.front());
   EXPECT_FALSE(source->is_rmw());
   EXPECT_EQ(source->site, *communication);
 
-  consan_detail::MoiAtomicEvidenceSitePlan mismatched = plan;
+  detail::AtomicEvidenceSitePlan mismatched = plan;
   mismatched.event = {1u};
+  EXPECT_FALSE(detail::resolve_atomic_evidence_source(inventory, mismatched).has_value());
   EXPECT_FALSE(
-      consan_moi_impl::resolve_moi_atomic_evidence_source(inventory, mismatched).has_value());
-  EXPECT_FALSE(
-      consan_moi_impl::materialize_moi_communication_site(inventory, {}, ConSanSyncSequenceId{0u})
-          .has_value());
-  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(inventory,
-                                                                   published_event.source_site, {})
+      detail::materialize_communication_site(inventory, {}, SyncSequenceId{0u}).has_value());
+  EXPECT_FALSE(detail::materialize_communication_site(inventory, published_event.source_site, {})
                    .has_value());
 
   ProgramInventoryBuilder unsupported(inventory);
-  ConSanOrdinaryMemorySite *ordinary =
-      unsupported.program_sites()[published_event.source_site.ordinal]
-          .get_if<ConSanOrdinaryMemorySite>();
+  OrdinaryMemorySite *ordinary =
+      unsupported.program_sites()[published_event.source_site.ordinal].get_if<OrdinaryMemorySite>();
   ASSERT_NE(ordinary, nullptr);
-  ordinary->support_reason = ConSanOrdinaryMemorySupportReason::MissingAddressVgpr;
-  EXPECT_FALSE(consan_moi_impl::materialize_moi_communication_site(
-                   unsupported.view(), published_event.source_site, ConSanSyncSequenceId{0u})
+  ordinary->support_reason = OrdinaryMemorySupportReason::MissingAddressVgpr;
+  EXPECT_FALSE(detail::materialize_communication_site(
+                   unsupported.view(), published_event.source_site, SyncSequenceId{0u})
                    .has_value());
 }
 
-TEST(ConSanAtomicFencePolicy, FenceEvidenceSourceDerivesGeometryFromCanonicalHandles) {
-  const ProgramInventory inventory = ordinary_fence_inventory();
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
-  ASSERT_TRUE(policy.valid());
-
-  std::vector<std::string> errors;
-  const std::vector<consan_detail::MoiFenceEvidenceSitePlan> plans =
-      consan_moi_impl::build_moi_fence_evidence_site_plans(inventory, policy.plan, errors);
-  ASSERT_TRUE(errors.empty());
-  ASSERT_EQ(plans.size(), 1u);
-
-  const std::optional<consan_moi_impl::MoiFenceEvidenceSourceView> source =
-      consan_moi_impl::resolve_moi_fence_evidence_source(inventory, plans.front());
-  ASSERT_TRUE(source.has_value());
-  EXPECT_TRUE(source->is_resolved());
-  EXPECT_EQ(source->association->memory_role, ConSanSyncMemoryRole::Release);
-  EXPECT_EQ(source->communication_event, &inventory.sync().sync_events[0]);
-  EXPECT_EQ(source->fence_event, &inventory.sync().sync_events[1]);
-  EXPECT_EQ(source->sequence, &inventory.sync().sync_sequences[0]);
-  EXPECT_EQ(source->communication_site.text_offset, 32u);
-  EXPECT_FALSE(source->captures_address_before_guest());
-  EXPECT_EQ(source->patch_text_offset(), 48u);
-  EXPECT_EQ(source->patch_file_offset(), 48u);
-  EXPECT_EQ(source->patch_size(), 12u);
-  EXPECT_FALSE(source->scalar_clause_text_offset().has_value());
-
-  consan_detail::MoiFenceEvidenceSitePlan stale = plans.front();
-  stale.source_site = inventory.sync().sync_events[1].source_site;
-  EXPECT_FALSE(consan_moi_impl::resolve_moi_fence_evidence_source(inventory, stale).has_value());
-  stale = plans.front();
-  stale.sequence = {99u};
-  EXPECT_FALSE(consan_moi_impl::resolve_moi_fence_evidence_source(inventory, stale).has_value());
-}
-
-TEST(ConSanAtomicFencePolicy, Gfx1250CausalModesAdmitExactBufferOrdinaryFenceCommunication) {
+TEST(ConSanAtomicFencePolicy, Gfx1250AdmitsExactBufferOrdinaryFenceCommunication) {
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
-  ConSanSyncEvent communication = make_ordinary_store_event();
-  communication.operation = ConSanSyncOperation::OrdinaryLoad;
-  communication.address_source = ConSanSyncAddressSource::BufferResource;
-  communication.memory_role = ConSanSyncMemoryRole::Acquire;
-  ConSanSyncEvent fence = make_fence_event();
-  fence.memory_role = ConSanSyncMemoryRole::Acquire;
-  ConSanSyncSequence sequence = make_atomic_sequence(communication);
-  sequence.memory_role = ConSanSyncMemoryRole::Acquire;
-  ConSanMoiFenceCandidate candidate = make_fence_candidate(communication, fence, sequence);
-  candidate.memory_role = ConSanSyncMemoryRole::Acquire;
+  SyncEvent communication = make_ordinary_store_event();
+  communication.operation = SyncOperation::OrdinaryLoad;
+  communication.address_source = SyncAddressSource::BufferResource;
+  communication.memory_role = SyncMemoryRole::Acquire;
+  SyncEvent fence = make_fence_event();
+  fence.memory_role = SyncMemoryRole::Acquire;
+  SyncSequence sequence = make_atomic_sequence(communication);
+  sequence.memory_role = SyncMemoryRole::Acquire;
+  FenceCandidate candidate = make_fence_candidate(communication, fence, sequence);
+  candidate.memory_role = SyncMemoryRole::Acquire;
 
-  const auto make_inventory = [&](ConSanOrdinaryMemorySite site) {
+  const auto make_inventory = [&](OrdinaryMemorySite site) {
     return build_atomic_inventory({communication, fence}, {sequence}, {}, {std::move(site)},
                                   {candidate}, gfx1250);
   };
-  for (const ConSanCapabilityEngine engine :
-       {ConSanCapabilityEngine::RecordReplay, ConSanCapabilityEngine::Sampled}) {
-    const ConSanAtomicFencePolicyResult supported = plan_consan_atomic_fence_observation(
-        make_inventory(make_cdna5_buffer_load_site()), atomic_request(engine));
+  for (const Mode mode : {Mode::Default}) {
+    const AtomicFencePolicyResult supported = plan_atomic_fence_observation(
+        make_inventory(make_cdna5_buffer_load_site()), atomic_request(mode));
     ASSERT_TRUE(supported.valid());
     ASSERT_EQ(supported.plan.atomic_site_decisions.size(), 1u);
     ASSERT_EQ(supported.plan.fence_site_decisions.size(), 1u);
-    EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
-    EXPECT_EQ(supported.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+    EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted);
+    EXPECT_EQ(supported.plan.fence_site_decisions.front().kind, SiteDecisionKind::Admitted);
 
-    ConSanOrdinaryMemorySite malformed = make_cdna5_buffer_load_site();
+    OrdinaryMemorySite malformed = make_cdna5_buffer_load_site();
     malformed.raw_rsrc.reset();
-    const ConSanAtomicFencePolicyResult rejected = plan_consan_atomic_fence_observation(
-        make_inventory(std::move(malformed)), atomic_request(engine));
+    const AtomicFencePolicyResult rejected =
+        plan_atomic_fence_observation(make_inventory(std::move(malformed)), atomic_request(mode));
     ASSERT_TRUE(rejected.valid());
-    EXPECT_EQ(rejected.plan.atomic_site_decisions.front().kind,
-              ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(rejected.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
     EXPECT_EQ(rejected.plan.atomic_site_decisions.front().reason,
-              ConSanAtomicPolicyReason::UnsupportedEncoding);
-    EXPECT_EQ(rejected.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+              AtomicPolicyReason::UnsupportedEncoding);
+    EXPECT_EQ(rejected.plan.fence_site_decisions.front().kind, SiteDecisionKind::Unsupported);
     EXPECT_EQ(rejected.plan.fence_site_decisions.front().reason,
-              ConSanFencePolicyReason::MissingCommunicationEvent);
+              FencePolicyReason::MissingCommunicationEvent);
   }
 }
 
 TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTypedReason) {
-  using Mutation = std::function<void(ConSanSyncEvent &, ConSanSyncSequence &)>;
-  const std::vector<std::tuple<std::string_view, Mutation, ConSanAtomicPolicyReason>> cases = {
-      {"owner", [](auto &, auto &) {}, ConSanAtomicPolicyReason::MissingExecutionOwner},
+  using Mutation = std::function<void(SyncEvent &, SyncSequence &)>;
+  const std::vector<std::tuple<std::string_view, Mutation, AtomicPolicyReason>> cases = {
+      {"owner", [](auto &, auto &) {}, AtomicPolicyReason::MissingExecutionOwner},
       {"confidence",
-       [](auto &, auto &sequence) { sequence.confidence = ConSanSemanticConfidence::Unsupported; },
-       ConSanAtomicPolicyReason::UnqualifiedSyncSequence},
+       [](auto &, auto &sequence) { sequence.confidence = SemanticConfidence::Unsupported; },
+       AtomicPolicyReason::UnqualifiedSyncSequence},
       {"role",
        [](auto &, auto &sequence) {
-         sequence.memory_role = ConSanSyncMemoryRole::SequentiallyConsistent;
+         sequence.memory_role = SyncMemoryRole::SequentiallyConsistent;
        },
-       ConSanAtomicPolicyReason::UnsupportedMemoryRole},
+       AtomicPolicyReason::MissingDirectionalAccessWindow},
       {"missing-scope", [](auto &, auto &sequence) { sequence.scope.reset(); },
-       ConSanAtomicPolicyReason::MissingScope},
-      {"scope", [](auto &, auto &sequence) { sequence.scope = ConSanMemoryScope::Wavefront; },
-       ConSanAtomicPolicyReason::UnsupportedScope},
+       AtomicPolicyReason::MissingScope},
+      {"scope", [](auto &, auto &sequence) { sequence.scope = MemoryScope::Wavefront; },
+       AtomicPolicyReason::UnsupportedScope},
       {"outcome",
        [](auto &event, auto &sequence) {
-         event.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
-         sequence.rmw_outcome = ConSanSyncRmwOutcome::Unknown;
+         event.rmw_outcome = SyncRmwOutcome::Unknown;
+         sequence.rmw_outcome = SyncRmwOutcome::Unknown;
        },
-       ConSanAtomicPolicyReason::UnsupportedDynamicOutcome},
+       AtomicPolicyReason::UnsupportedDynamicOutcome},
   };
   for (const auto &[name, mutate, expected] : cases) {
     SCOPED_TRACE(name);
     std::vector events{make_atomic_event()};
     std::vector sequences{make_atomic_sequence(events.front())};
     mutate(events.front(), sequences.front());
-    const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+    const AtomicFencePolicyResult policy = plan_atomic_fence_observation(
         build_atomic_inventory(
             std::move(events), std::move(sequences), {make_global_atomic_site()}, {}, {}, {},
             name == "owner" ? std::vector<uint64_t>{32u} : std::vector<uint64_t>{}),
-        atomic_request(ConSanCapabilityEngine::RecordReplay));
+        atomic_request(Mode::Default));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
     EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind,
-              expected == ConSanAtomicPolicyReason::MissingExecutionOwner ||
-                      expected == ConSanAtomicPolicyReason::UnqualifiedSyncSequence ||
-                      expected == ConSanAtomicPolicyReason::UnsupportedScope
-                  ? ConSanSiteDecisionKind::NotApplicable
-                  : ConSanSiteDecisionKind::Unsupported);
+              expected == AtomicPolicyReason::MissingExecutionOwner ||
+                      expected == AtomicPolicyReason::UnqualifiedSyncSequence ||
+                      expected == AtomicPolicyReason::UnsupportedScope ||
+                      expected == AtomicPolicyReason::MissingDirectionalAccessWindow
+                  ? SiteDecisionKind::NotApplicable
+                  : SiteDecisionKind::Unsupported);
     EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, expected);
     EXPECT_TRUE(policy.plan.probe_intents.empty());
   }
@@ -815,156 +748,147 @@ TEST(ConSanAtomicFencePolicy, AmbiguousSequenceMembershipFailsClosed) {
   std::vector events{make_atomic_event()};
   std::vector sequences{make_atomic_sequence(events.front(), "first"),
                         make_atomic_sequence(events.front(), "second")};
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+  const AtomicFencePolicyResult policy = plan_atomic_fence_observation(
       build_atomic_inventory(std::move(events), std::move(sequences), {make_global_atomic_site()}),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+      atomic_request(Mode::Default));
   ASSERT_TRUE(policy.valid());
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
   EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason,
-            ConSanAtomicPolicyReason::AmbiguousSequenceMembership);
+            AtomicPolicyReason::AmbiguousSequenceMembership);
 }
 
 TEST(ConSanAtomicFencePolicy, EncodingAndOperandFailuresRemainPolicyNotLoweringFacts) {
-  using Mutation = std::function<void(ConSanAtomicSite &)>;
-  const std::vector<std::tuple<std::string_view, Mutation, ConSanAtomicPolicyReason>> cases = {
+  using Mutation = std::function<void(AtomicSite &)>;
+  const std::vector<std::tuple<std::string_view, Mutation, AtomicPolicyReason>> cases = {
       {"address-source", [](auto &site) { site.mnemonic = "buffer_atomic_add_u32"; },
-       ConSanAtomicPolicyReason::UnsupportedAddressSource},
+       AtomicPolicyReason::UnsupportedAddressSource},
       {"width-zero", [](auto &site) { site.width_bits = 0; },
-       ConSanAtomicPolicyReason::InvalidAccessWidth},
+       AtomicPolicyReason::InvalidAccessWidth},
       {"width-bits", [](auto &site) { site.width_bits = 31; },
-       ConSanAtomicPolicyReason::InvalidAccessWidth},
-      {"size", [](auto &site) { site.size = 4; }, ConSanAtomicPolicyReason::UnsupportedEncoding},
+       AtomicPolicyReason::InvalidAccessWidth},
+      {"size", [](auto &site) { site.size = 4; }, AtomicPolicyReason::UnsupportedEncoding},
       {"offset", [](auto &site) { site.raw_ioffset.reset(); },
-       ConSanAtomicPolicyReason::UnsupportedEncoding},
+       AtomicPolicyReason::UnsupportedEncoding},
       {"address", [](auto &site) { site.address_vgpr.reset(); },
-       ConSanAtomicPolicyReason::MissingOperands},
-      {"scope", [](auto &site) { site.scope.reset(); }, ConSanAtomicPolicyReason::MissingScope},
+       AtomicPolicyReason::MissingOperands},
+      {"scope", [](auto &site) { site.scope.reset(); }, AtomicPolicyReason::MissingScope},
   };
   for (const auto &[name, mutate, expected] : cases) {
     SCOPED_TRACE(name);
     std::vector events{make_atomic_event()};
     std::vector sequences{make_atomic_sequence(events.front())};
-    if (expected == ConSanAtomicPolicyReason::MissingScope) {
+    if (expected == AtomicPolicyReason::MissingScope) {
       events.front().scope.reset();
       sequences.front().scope.reset();
     }
-    ConSanAtomicSite site = make_global_atomic_site();
+    AtomicSite site = make_global_atomic_site();
     mutate(site);
-    const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
+    const AtomicFencePolicyResult policy = plan_atomic_fence_observation(
         build_atomic_inventory(std::move(events), std::move(sequences), {std::move(site)}),
-        atomic_request(ConSanCapabilityEngine::InlineShadow));
+        atomic_request(Mode::Default));
     ASSERT_TRUE(policy.valid());
-    EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
     EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason, expected);
     EXPECT_TRUE(policy.plan.probe_intents.empty());
   }
 }
 
 TEST(ConSanAtomicFencePolicy, PlanValidationEnforcesAtomicAndFenceTypeRelationships) {
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      ordinary_fence_inventory(), atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(ordinary_fence_inventory(), atomic_request(Mode::Default));
   ASSERT_TRUE(policy.valid());
 
-  ConSanObservationPlan broken = policy.plan;
+  ObservationPlan broken = policy.plan;
   broken.probe_intents.front().synchronization_association.reset();
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.probe_intents.front().synchronization_association = ConSanSynchronizationAssociationId{};
+  broken.probe_intents.front().synchronization_association = SynchronizationAssociationId{};
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.probe_intents.front().position = ConSanProbePosition::After;
+  broken.probe_intents.front().position = ProbePosition::After;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.probe_intents.front().dynamic_result = ConSanDynamicResultRequirement::ReturnedOldValue;
+  broken.probe_intents.front().dynamic_result = DynamicResultRequirement::ReturnedOldValue;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.probe_intents.back().position = ConSanProbePosition::Before;
+  broken.probe_intents.back().position = ProbePosition::Before;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
   broken.probe_intents.front().atomic_lowering_form.reset();
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.probe_intents.front().atomic_lowering_form->kind = ConSanAtomicLoweringFormKind::Count;
+  broken.probe_intents.front().atomic_lowering_form->kind = AtomicLoweringFormKind::Count;
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.atomic_site_decisions.front().capability = static_cast<ConSanCapabilityDisposition>(255);
+  broken.atomic_site_decisions.front().capability = static_cast<CapabilityDisposition>(255);
   EXPECT_FALSE(broken.valid());
   broken = policy.plan;
-  broken.fence_site_decisions.front().inventory_association = ConSanFenceAssociation::Count;
+  broken.fence_site_decisions.front().inventory_association = FenceAssociation::Count;
   EXPECT_FALSE(broken.valid());
 }
 
 TEST(ConSanAtomicFencePolicy, AppendAndCoverageLedgerOwnDecisionsAndRebaseIntents) {
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      ordinary_fence_inventory(), atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(ordinary_fence_inventory(), atomic_request(Mode::Default));
   ASSERT_TRUE(policy.valid());
-  ConSanObservationPlan combined = policy.plan;
+  ObservationPlan combined = policy.plan;
   ASSERT_TRUE(combined.append(policy.plan));
   ASSERT_TRUE(combined.valid());
   ASSERT_EQ(combined.probe_intents.size(), 4u);
   ASSERT_EQ(combined.atomic_site_decisions.size(), 2u);
   ASSERT_EQ(combined.fence_site_decisions.size(), 2u);
-  EXPECT_EQ(combined.probe_intents[2].id, ConSanProbeIntentId{2});
-  EXPECT_EQ(combined.probe_intents[3].id, ConSanProbeIntentId{3});
+  EXPECT_EQ(combined.probe_intents[2].id, ProbeIntentId{2});
+  EXPECT_EQ(combined.probe_intents[3].id, ProbeIntentId{3});
 
-  ConSanCoverageLedger ledger(combined);
+  CoverageLedger ledger(combined);
   EXPECT_TRUE(std::ranges::equal(ledger.atomic_site_decisions(), combined.atomic_site_decisions));
   EXPECT_TRUE(std::ranges::equal(ledger.fence_site_decisions(), combined.fence_site_decisions));
   ASSERT_EQ(ledger.intent_entries().size(), combined.probe_intents.size());
-  EXPECT_TRUE(publish_test_lowering_outcome(ledger, {3}, ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_TRUE(publish_test_lowering_outcome(ledger, {3}, LoweringOutcomeKind::Instrumented));
   ASSERT_NE(ledger.intent({3}), nullptr);
-  EXPECT_EQ(ledger.intent({3})->kind, ConSanProbeIntentKind::FenceRecord);
+  EXPECT_EQ(ledger.intent({3})->kind, ProbeIntentKind::AtomicOrdering);
 }
 
-TEST(ConSanAtomicFencePolicy, OrdinaryFenceAssociationDefinesEachEngineEvidenceContract) {
+TEST(ConSanAtomicFencePolicy, OrdinaryFenceAssociationDefinesEachModeEvidenceContract) {
   const ProgramInventory inventory = ordinary_fence_inventory();
-  for (ConSanCapabilityEngine engine :
-       {ConSanCapabilityEngine::RecordReplay, ConSanCapabilityEngine::Sampled,
-        ConSanCapabilityEngine::InlineShadow}) {
-    SCOPED_TRACE(consan_capability_engine_name(engine));
-    const ConSanAtomicFencePolicyResult policy =
-        plan_consan_atomic_fence_observation(inventory, atomic_request(engine));
+  for (Mode mode : {Mode::Default}) {
+    SCOPED_TRACE(mode_label(mode));
+    const AtomicFencePolicyResult policy =
+        plan_atomic_fence_observation(inventory, atomic_request(mode));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
     ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
-    const ConSanAtomicSiteDecision &atomic = policy.plan.atomic_site_decisions.front();
-    const ConSanFenceSiteDecision &fence = policy.plan.fence_site_decisions.front();
-    EXPECT_EQ(atomic.kind, ConSanSiteDecisionKind::Admitted);
-    EXPECT_EQ(fence.kind, ConSanSiteDecisionKind::Admitted);
+    const AtomicSiteDecision &atomic = policy.plan.atomic_site_decisions.front();
+    const FenceSiteDecision &fence = policy.plan.fence_site_decisions.front();
+    EXPECT_EQ(atomic.kind, SiteDecisionKind::Admitted);
+    EXPECT_EQ(fence.kind, SiteDecisionKind::Admitted);
     EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
               policy.plan.probe_intents[1].synchronization_association);
     ASSERT_TRUE(policy.plan.probe_intents.front().atomic_lowering_form.has_value());
-    EXPECT_EQ(fence.inventory_association, ConSanFenceAssociation::Qualified);
-    EXPECT_EQ(fence.capability, engine == ConSanCapabilityEngine::RecordReplay
-                                    ? ConSanCapabilityDisposition::Supported
-                                    : ConSanCapabilityDisposition::AssociatedOnly);
+    EXPECT_EQ(fence.inventory_association, FenceAssociation::Qualified);
+    EXPECT_EQ(fence.capability, CapabilityDisposition::AssociatedOnly);
     ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
-    EXPECT_EQ(policy.plan.probe_intents[0].kind, ConSanProbeIntentKind::AtomicAddressCapture);
-    EXPECT_EQ(policy.plan.probe_intents[1].kind, engine == ConSanCapabilityEngine::RecordReplay
-                                                     ? ConSanProbeIntentKind::FenceRecord
-                                                 : engine == ConSanCapabilityEngine::Sampled
-                                                     ? ConSanProbeIntentKind::SampledAtomicOrdering
-                                                     : ConSanProbeIntentKind::ExactAtomicOrdering);
+    EXPECT_EQ(policy.plan.probe_intents[0].kind, ProbeIntentKind::AtomicAddressCapture);
+    EXPECT_EQ(policy.plan.probe_intents[1].kind, ProbeIntentKind::AtomicOrdering);
   }
 }
 
 TEST(ConSanAtomicFencePolicy, EveryFenceAssociationRejectionRemainsTypedInventoryEvidence) {
-  for (uint8_t value = 0; value < static_cast<uint8_t>(ConSanFenceAssociation::Count); ++value) {
-    const auto association = static_cast<ConSanFenceAssociation>(value);
+  for (uint8_t value = 0; value < static_cast<uint8_t>(FenceAssociation::Count); ++value) {
+    const auto association = static_cast<FenceAssociation>(value);
     SCOPED_TRACE(value);
-    const ConSanAtomicFencePolicyResult policy =
-        plan_consan_atomic_fence_observation(ordinary_fence_inventory(association),
-                                             atomic_request(ConSanCapabilityEngine::RecordReplay));
+    const AtomicFencePolicyResult policy = plan_atomic_fence_observation(
+        ordinary_fence_inventory(association), atomic_request(Mode::Default));
     ASSERT_TRUE(policy.valid());
     ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
-    const ConSanFenceSiteDecision &decision = policy.plan.fence_site_decisions.front();
+    const FenceSiteDecision &decision = policy.plan.fence_site_decisions.front();
     EXPECT_EQ(decision.inventory_association, association);
-    if (association == ConSanFenceAssociation::Qualified) {
-      EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Admitted);
-      EXPECT_EQ(decision.reason, ConSanFencePolicyReason::None);
+    if (association == FenceAssociation::Qualified) {
+      EXPECT_EQ(decision.kind, SiteDecisionKind::Admitted);
+      EXPECT_EQ(decision.reason, FencePolicyReason::None);
     } else {
-      EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::NotApplicable);
-      EXPECT_EQ(decision.reason, ConSanFencePolicyReason::AssociationUnavailable);
+      EXPECT_EQ(decision.kind, SiteDecisionKind::NotApplicable);
+      EXPECT_EQ(decision.reason, FencePolicyReason::AssociationUnavailable);
     }
   }
 }
@@ -972,78 +896,73 @@ TEST(ConSanAtomicFencePolicy, EveryFenceAssociationRejectionRemainsTypedInventor
 TEST(ConSanAtomicFencePolicy, FenceRequestExclusionsAndMissingFactsRemainTyped) {
   const ProgramInventory inventory = ordinary_fence_inventory();
 
-  ConSanAtomicFencePolicyRequest disabled = atomic_request(ConSanCapabilityEngine::RecordReplay);
+  AtomicFencePolicyRequest disabled = atomic_request(Mode::Default);
   disabled.tracking_enabled = false;
-  EXPECT_EQ(plan_consan_atomic_fence_observation(inventory, disabled)
+  EXPECT_EQ(
+      plan_atomic_fence_observation(inventory, disabled).plan.fence_site_decisions.front().reason,
+      FencePolicyReason::TrackingDisabled);
+
+  EXPECT_EQ(plan_atomic_fence_observation(inventory, atomic_request(Mode::SuperCollider))
                 .plan.fence_site_decisions.front()
                 .reason,
-            ConSanFencePolicyReason::TrackingDisabled);
+            FencePolicyReason::ModeMutationOnly);
 
-  EXPECT_EQ(plan_consan_atomic_fence_observation(
-                inventory, atomic_request(ConSanCapabilityEngine::SuperCollider))
-                .plan.fence_site_decisions.front()
-                .reason,
-            ConSanFencePolicyReason::EngineMutationOnly);
-
-  ConSanAtomicFencePolicyRequest filtered = atomic_request(ConSanCapabilityEngine::RecordReplay);
+  AtomicFencePolicyRequest filtered = atomic_request(Mode::Default);
   filtered.container_filter = "different";
-  EXPECT_EQ(plan_consan_atomic_fence_observation(inventory, filtered)
-                .plan.fence_site_decisions.front()
-                .reason,
-            ConSanFencePolicyReason::ContainerFilterExcluded);
+  EXPECT_EQ(
+      plan_atomic_fence_observation(inventory, filtered).plan.fence_site_decisions.front().reason,
+      FencePolicyReason::ContainerFilterExcluded);
 
   std::vector owner_events{make_ordinary_store_event(), make_fence_event()};
   std::vector owner_sequences{make_atomic_sequence(owner_events.front())};
   std::vector owner_fences{
       make_fence_candidate(owner_events[0], owner_events[1], owner_sequences[0])};
-  const ConSanAtomicFencePolicyResult missing_owner = plan_consan_atomic_fence_observation(
+  const AtomicFencePolicyResult missing_owner = plan_atomic_fence_observation(
       build_atomic_inventory(std::move(owner_events), std::move(owner_sequences), {},
                              {make_global_store_site({})}, std::move(owner_fences), {}, {48u}),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+      atomic_request(Mode::Default));
   ASSERT_TRUE(missing_owner.valid());
-  EXPECT_EQ(missing_owner.plan.fence_site_decisions.front().kind,
-            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(missing_owner.plan.fence_site_decisions.front().kind, SiteDecisionKind::NotApplicable);
   EXPECT_EQ(missing_owner.plan.fence_site_decisions.front().reason,
-            ConSanFencePolicyReason::MissingExecutionOwner);
+            FencePolicyReason::MissingExecutionOwner);
 
   std::vector missing_events{make_ordinary_store_event(), make_fence_event()};
   std::vector missing_sequences{make_atomic_sequence(missing_events.front())};
-  ConSanMoiFenceCandidate missing_fence =
+  FenceCandidate missing_fence =
       make_fence_candidate(missing_events[0], missing_events[1], missing_sequences[0]);
-  missing_fence.communication_event = ConSanSyncEventId{999u};
-  const ConSanAtomicFencePolicyResult missing_communication = plan_consan_atomic_fence_observation(
+  missing_fence.communication_event = SyncEventId{999u};
+  const AtomicFencePolicyResult missing_communication = plan_atomic_fence_observation(
       build_atomic_inventory(std::move(missing_events), std::move(missing_sequences), {},
                              {make_global_store_site({})}, {std::move(missing_fence)}),
-      atomic_request(ConSanCapabilityEngine::RecordReplay));
+      atomic_request(Mode::Default));
   ASSERT_TRUE(missing_communication.valid());
   EXPECT_EQ(missing_communication.plan.fence_site_decisions.front().kind,
-            ConSanSiteDecisionKind::Unsupported);
+            SiteDecisionKind::Unsupported);
   EXPECT_EQ(missing_communication.plan.fence_site_decisions.front().reason,
-            ConSanFencePolicyReason::MissingCommunicationEvent);
+            FencePolicyReason::MissingCommunicationEvent);
 }
 
 TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
   std::vector events{make_ordinary_store_event(), make_fence_event()};
   std::vector sequences{make_atomic_sequence(events.front())};
   events[1].source_site = {1};
-  ConSanSyncEvent fence_alias = events[1];
+  SyncEvent fence_alias = events[1];
   fence_alias.source_site = {2};
   fence_alias.identity = "aliased_kernel|fence=48";
   events.push_back(std::move(fence_alias));
-  ConSanMoiFenceCandidate first = make_fence_candidate(events[0], events[1], sequences[0]);
-  ConSanMoiFenceCandidate conflict = first;
-  conflict.memory_role = ConSanSyncMemoryRole::Acquire;
+  FenceCandidate first = make_fence_candidate(events[0], events[1], sequences[0]);
+  FenceCandidate conflict = first;
+  conflict.memory_role = SyncMemoryRole::Acquire;
   const ProgramInventory inventory = build_atomic_inventory(
       std::move(events), std::move(sequences), {}, {make_global_store_site({})}, {first, conflict});
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(inventory, atomic_request(Mode::Default));
   EXPECT_FALSE(policy.valid());
-  EXPECT_EQ(policy.fence_errors,
-            (std::vector{ConSanFencePolicyReason::ConflictingPhysicalAliases}));
+  EXPECT_EQ(policy.fence_errors, (std::vector{FencePolicyReason::ConflictingPhysicalAliases}));
   ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(policy.plan.fence_site_decisions.front().kind, SiteDecisionKind::Unsupported);
   EXPECT_EQ(policy.plan.fence_site_decisions.front().reason,
-            ConSanFencePolicyReason::ConflictingPhysicalAliases);
+            FencePolicyReason::ConflictingPhysicalAliases);
   EXPECT_EQ(inventory.source_container_names(
                 policy.plan.fence_site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"aliased_kernel", "atomic_kernel"}));
@@ -1051,24 +970,23 @@ TEST(ConSanAtomicFencePolicy, ConflictingFenceAliasesProduceTypedFatalError) {
 
 TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) {
   std::vector events{make_atomic_event()};
-  ConSanSyncEvent alias = events.front();
+  SyncEvent alias = events.front();
   alias.identity = "aliased_kernel|atomic=32";
   events.front().source_site = {0};
   alias.source_site = {1};
   events.push_back(std::move(alias));
   std::vector sequences{make_atomic_sequence(events.front())};
-  ConSanAtomicSite conflicting_site = make_global_atomic_site();
+  AtomicSite conflicting_site = make_global_atomic_site();
   conflicting_site.width_bits = 64;
   const ProgramInventory inventory =
       build_atomic_inventory(std::move(events), std::move(sequences),
                              {make_global_atomic_site(), std::move(conflicting_site)});
-  const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(
-      inventory, atomic_request(ConSanCapabilityEngine::RecordReplay));
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(inventory, atomic_request(Mode::Default));
   EXPECT_FALSE(policy.valid());
-  EXPECT_EQ(policy.atomic_errors,
-            (std::vector{ConSanAtomicPolicyReason::ConflictingPhysicalAliases}));
+  EXPECT_EQ(policy.atomic_errors, (std::vector{AtomicPolicyReason::ConflictingPhysicalAliases}));
   ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
   EXPECT_EQ(inventory.source_container_names(
                 policy.plan.atomic_site_decisions.front().semantic_site.physical),
             (std::vector<std::string>{"aliased_kernel", "atomic_kernel"}));
@@ -1079,29 +997,26 @@ TEST(ConSanAtomicFencePolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInve
   const ProgramInventory inventory = ordinary_fence_inventory();
   const SynchronizationInventoryView before = inventory.sync();
   std::vector<std::string> event_identities_before;
-  for (const ConSanSyncEvent &event : before.sync_events)
+  for (const SyncEvent &event : before.sync_events)
     event_identities_before.push_back(event.identity);
   std::vector<std::string> sequence_identities_before;
-  for (const ConSanSyncSequence &sequence : before.sync_sequences)
+  for (const SyncSequence &sequence : before.sync_sequences)
     sequence_identities_before.push_back(sequence.identity);
-  const ConSanAtomicFencePolicyRequest request =
-      atomic_request(ConSanCapabilityEngine::InlineShadow);
-  const ConSanAtomicFencePolicyResult first =
-      plan_consan_atomic_fence_observation(inventory, request);
-  const ConSanAtomicFencePolicyResult second =
-      plan_consan_atomic_fence_observation(inventory, request);
+  const AtomicFencePolicyRequest request = atomic_request(Mode::Default);
+  const AtomicFencePolicyResult first = plan_atomic_fence_observation(inventory, request);
+  const AtomicFencePolicyResult second = plan_atomic_fence_observation(inventory, request);
   EXPECT_EQ(first, second);
   EXPECT_TRUE(first.valid());
   const SynchronizationInventoryView after = inventory.sync();
   std::vector<std::string> event_identities_after;
-  for (const ConSanSyncEvent &event : after.sync_events)
+  for (const SyncEvent &event : after.sync_events)
     event_identities_after.push_back(event.identity);
   std::vector<std::string> sequence_identities_after;
-  for (const ConSanSyncSequence &sequence : after.sync_sequences)
+  for (const SyncSequence &sequence : after.sync_sequences)
     sequence_identities_after.push_back(sequence.identity);
   EXPECT_EQ(event_identities_after, event_identities_before);
   EXPECT_EQ(sequence_identities_after, sequence_identities_before);
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

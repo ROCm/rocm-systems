@@ -3,9 +3,9 @@
 
 #include "consan_test_support.h"
 
-#include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
+#include "rocjitsu/code/patch/consan/supercollider/consan_supercollider_perturbation_policy.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
@@ -15,74 +15,80 @@ TEST(ConSan, PerturbationPlansStableBarrierReleaseAndAcquireEdges) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions release_options;
-  release_options.flavor = ConSanFlavor::SuperCollider;
-  release_options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  release_options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  release_options.sc_perturb_sleep = 7;
-  release_options.sc_perturb_required_count = 1;
+  Options release_options;
+  release_options.mode = Mode::SuperCollider;
+  release_options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  release_options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  release_options.supercollider_perturb_sleep = 7;
+  release_options.supercollider_perturb_required_count = 1;
   release_options.fault_dry_run = true;
-  ConSanPerturbationPlanningState release_perturbation;
-  const ConSanTransformArtifacts release =
-      test_lower_consan(bytes, release_options, &release_perturbation);
+  SuperColliderPerturbationPlanningState release_supercollider_perturbation;
+  const TransformArtifacts release =
+      test_lower_consan(bytes, release_options, &release_supercollider_perturbation);
 
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
-  ASSERT_EQ(release_perturbation.candidates.size(), 2u);
-  ASSERT_EQ(release_perturbation.plans.size(), 1u);
-  const ConSanPerturbationCandidate &release_candidate = release_perturbation.candidates[0];
+  ASSERT_EQ(release_supercollider_perturbation.candidates.size(), 2u);
+  ASSERT_EQ(release_supercollider_perturbation.plans.size(), 1u);
+  const SuperColliderPerturbationCandidate &release_candidate =
+      release_supercollider_perturbation.candidates[0];
   EXPECT_TRUE(release_candidate.eligible);
-  EXPECT_EQ(release_candidate.edge, ConSanPerturbationEdge::Release);
-  const ConSanSyncSequence *release_sequence =
+  EXPECT_EQ(release_candidate.edge, SuperColliderPerturbationEdge::Release);
+  const SyncSequence *release_sequence =
       release.program_inventory.sync().find_sequence(release_candidate.sequence);
   ASSERT_NE(release_sequence, nullptr);
   ASSERT_EQ(release_sequence->member_event_ids.size(), 2u);
-  EXPECT_EQ(test_perturbation_anchor(release, release_candidate)->identity,
+  EXPECT_EQ(test_supercollider_perturbation_anchor(release, release_candidate)->identity,
             release.program_inventory.sync()
                 .find_event(release_sequence->member_event_ids.front())
                 ->identity);
-  EXPECT_EQ(test_perturbation_identity(release, release_perturbation.plans[0].candidate),
-            test_perturbation_identity(release, release_candidate));
-  EXPECT_EQ(release_perturbation.plans[0].anchor_text_offset, 0u);
-  EXPECT_EQ(release_perturbation.plans[0].sleep_imm, 7u);
+  EXPECT_EQ(test_supercollider_perturbation_identity(
+                release, release_supercollider_perturbation.plans[0].candidate),
+            test_supercollider_perturbation_identity(release, release_candidate));
+  EXPECT_EQ(release_supercollider_perturbation.plans[0].anchor_text_offset, 0u);
+  EXPECT_EQ(release_supercollider_perturbation.plans[0].sleep_imm, 7u);
   EXPECT_FALSE(release.modified());
   EXPECT_TRUE(release.replacement.empty());
 
-  ConSanOptions acquire_options = release_options;
-  acquire_options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
-  ConSanPerturbationPlanningState acquire_perturbation;
-  const ConSanTransformArtifacts acquire =
-      test_lower_consan(bytes, acquire_options, &acquire_perturbation);
+  Options acquire_options = release_options;
+  acquire_options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Acquire;
+  SuperColliderPerturbationPlanningState acquire_supercollider_perturbation;
+  const TransformArtifacts acquire =
+      test_lower_consan(bytes, acquire_options, &acquire_supercollider_perturbation);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
-  ASSERT_EQ(acquire_perturbation.plans.size(), 1u);
-  const ConSanPerturbationCandidate &acquire_candidate = acquire_perturbation.candidates[1];
+  ASSERT_EQ(acquire_supercollider_perturbation.plans.size(), 1u);
+  const SuperColliderPerturbationCandidate &acquire_candidate =
+      acquire_supercollider_perturbation.candidates[1];
   EXPECT_TRUE(acquire_candidate.eligible);
-  const ConSanSyncSequence *acquire_sequence =
+  const SyncSequence *acquire_sequence =
       acquire.program_inventory.sync().find_sequence(acquire_candidate.sequence);
   ASSERT_NE(acquire_sequence, nullptr);
-  EXPECT_EQ(test_perturbation_anchor(acquire, acquire_candidate)->identity,
+  EXPECT_EQ(test_supercollider_perturbation_anchor(acquire, acquire_candidate)->identity,
             acquire.program_inventory.sync()
                 .find_event(acquire_sequence->member_event_ids.back())
                 ->identity);
-  EXPECT_EQ(acquire_perturbation.plans[0].anchor_text_offset, 4u);
+  EXPECT_EQ(acquire_supercollider_perturbation.plans[0].anchor_text_offset, 4u);
 
-  ConSanOptions identity_options = acquire_options;
-  identity_options.sc_perturb_identity = test_perturbation_identity(acquire, acquire_candidate);
-  identity_options.sc_perturb_index = 99;
-  ConSanPerturbationPlanningState identity_perturbation;
-  const ConSanTransformArtifacts identity_selected =
-      test_lower_consan(bytes, identity_options, &identity_perturbation);
+  Options identity_options = acquire_options;
+  identity_options.supercollider_perturb_identity =
+      test_supercollider_perturbation_identity(acquire, acquire_candidate);
+  identity_options.supercollider_perturb_index = 99;
+  SuperColliderPerturbationPlanningState identity_supercollider_perturbation;
+  const TransformArtifacts identity_selected =
+      test_lower_consan(bytes, identity_options, &identity_supercollider_perturbation);
   ASSERT_TRUE(identity_selected.errors.empty())
       << (identity_selected.errors.empty() ? "" : identity_selected.errors.front());
-  ASSERT_EQ(identity_perturbation.plans.size(), 1u);
-  EXPECT_EQ(test_perturbation_identity(identity_selected,
-                                       identity_perturbation.plans[0].candidate),
-            test_perturbation_identity(acquire, acquire_candidate));
-  ConSanPerturbationPlanningState repeated_perturbation;
-  const ConSanTransformArtifacts repeated =
-      test_lower_consan(bytes, acquire_options, &repeated_perturbation);
-  ASSERT_EQ(repeated_perturbation.plans.size(), 1u);
-  EXPECT_EQ(test_perturbation_identity(repeated, repeated_perturbation.plans[0].candidate),
-            test_perturbation_identity(acquire, acquire_perturbation.plans[0].candidate));
+  ASSERT_EQ(identity_supercollider_perturbation.plans.size(), 1u);
+  EXPECT_EQ(test_supercollider_perturbation_identity(
+                identity_selected, identity_supercollider_perturbation.plans[0].candidate),
+            test_supercollider_perturbation_identity(acquire, acquire_candidate));
+  SuperColliderPerturbationPlanningState repeated_supercollider_perturbation;
+  const TransformArtifacts repeated =
+      test_lower_consan(bytes, acquire_options, &repeated_supercollider_perturbation);
+  ASSERT_EQ(repeated_supercollider_perturbation.plans.size(), 1u);
+  EXPECT_EQ(test_supercollider_perturbation_identity(
+                repeated, repeated_supercollider_perturbation.plans[0].candidate),
+            test_supercollider_perturbation_identity(
+                acquire, acquire_supercollider_perturbation.plans[0].candidate));
 }
 
 TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
@@ -95,38 +101,42 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
       *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                                        // s_endpgm
   };
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
   options.fault_dry_run = true;
-  ConSanPerturbationPlanningState release_perturbation;
-  const ConSanTransformArtifacts release =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options, &release_perturbation);
+  SuperColliderPerturbationPlanningState release_supercollider_perturbation;
+  const TransformArtifacts release = test_lower_consan(
+      make_rdna4_lds_code_object(text_words), options, &release_supercollider_perturbation);
 
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
-  ASSERT_EQ(release_perturbation.plans.size(), 1u);
+  ASSERT_EQ(release_supercollider_perturbation.plans.size(), 1u);
   ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
-  const ConSanSyncEvent *release_anchor = release.program_inventory.sync().find_event(
+  const SyncEvent *release_anchor = release.program_inventory.sync().find_event(
       release.program_inventory.sync().sync_sequences[0].member_event_ids.front());
   ASSERT_NE(release_anchor, nullptr);
-  EXPECT_EQ(test_perturbation_anchor(release, release_perturbation.plans[0].candidate)->identity,
+  EXPECT_EQ(test_supercollider_perturbation_anchor(
+                release, release_supercollider_perturbation.plans[0].candidate)
+                ->identity,
             release_anchor->identity);
-  EXPECT_EQ(release_perturbation.plans[0].anchor_text_offset, 0u);
+  EXPECT_EQ(release_supercollider_perturbation.plans[0].anchor_text_offset, 0u);
 
-  options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
-  ConSanPerturbationPlanningState acquire_perturbation;
-  const ConSanTransformArtifacts acquire =
-      test_lower_consan(make_rdna4_lds_code_object(text_words), options, &acquire_perturbation);
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Acquire;
+  SuperColliderPerturbationPlanningState acquire_supercollider_perturbation;
+  const TransformArtifacts acquire = test_lower_consan(
+      make_rdna4_lds_code_object(text_words), options, &acquire_supercollider_perturbation);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
-  ASSERT_EQ(acquire_perturbation.plans.size(), 1u);
-  const ConSanSyncEvent *acquire_anchor = acquire.program_inventory.sync().find_event(
+  ASSERT_EQ(acquire_supercollider_perturbation.plans.size(), 1u);
+  const SyncEvent *acquire_anchor = acquire.program_inventory.sync().find_event(
       acquire.program_inventory.sync().sync_sequences[0].member_event_ids.back());
   ASSERT_NE(acquire_anchor, nullptr);
-  EXPECT_EQ(test_perturbation_anchor(acquire, acquire_perturbation.plans[0].candidate)->identity,
+  EXPECT_EQ(test_supercollider_perturbation_anchor(
+                acquire, acquire_supercollider_perturbation.plans[0].candidate)
+                ->identity,
             acquire_anchor->identity);
-  EXPECT_EQ(acquire_perturbation.plans[0].anchor_text_offset, 32u);
+  EXPECT_EQ(acquire_supercollider_perturbation.plans[0].anchor_text_offset, 32u);
 }
 
 TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
@@ -136,30 +146,30 @@ TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_sleep = 7;
-  options.sc_perturb_required_count = 1;
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_sleep = 7;
+  options.supercollider_perturb_required_count = 1;
 
-  const ConSanTransformArtifacts release = test_lower_consan(bytes, options);
+  const TransformArtifacts release = test_lower_consan(bytes, options);
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
-  EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(release.outcome, TransformOutcome::ModifiedValid);
   EXPECT_TRUE(release.modified());
-  EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(release.mutation.perturbation.planned, 1u);
-  EXPECT_EQ(release.mutation.perturbation.applied, 1u);
+  EXPECT_EQ(release.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(release.mutation.supercollider_perturbation.planned, 1u);
+  EXPECT_EQ(release.mutation.supercollider_perturbation.applied, 1u);
   ASSERT_EQ(release.patches.size(), 1u);
-  const ConSanPatchInfo &release_patch = release.patches.front();
-  EXPECT_EQ(release_patch.kind, ConSanPatchKind::TrampolineScPerturbation);
+  const PatchInfo &release_patch = release.patches.front();
+  EXPECT_EQ(release_patch.kind, PatchKind::TrampolineSuperColliderPerturbation);
   EXPECT_EQ(release_patch.anchor_offset, 0u);
   EXPECT_EQ(release_patch.trampoline_offset, 12u);
   EXPECT_EQ(release_patch.original_size, 4u);
   EXPECT_EQ(release_patch.trampoline_size, 12u);
-  ASSERT_TRUE(release_patch.perturbation_edge);
-  EXPECT_EQ(*release_patch.perturbation_edge, ConSanPerturbationEdge::Release);
-  EXPECT_FALSE(release_patch.perturbation_sequence_identity.empty());
+  ASSERT_TRUE(release_patch.supercollider_perturbation_edge);
+  EXPECT_EQ(*release_patch.supercollider_perturbation_edge, SuperColliderPerturbationEdge::Release);
+  EXPECT_FALSE(release_patch.supercollider_perturbation_sequence_identity.empty());
   EXPECT_FALSE(release_patch.scratch_vgpr);
   EXPECT_EQ(release_patch.required_private_segment_size, 0u);
   ASSERT_EQ(release_patch.owner_descriptor_file_offsets.size(), 1u);
@@ -182,14 +192,15 @@ TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
   };
   EXPECT_EQ(release_words, expected_release);
 
-  options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
-  const ConSanTransformArtifacts acquire = test_lower_consan(bytes, options);
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Acquire;
+  const TransformArtifacts acquire = test_lower_consan(bytes, options);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire.patches.size(), 1u);
-  EXPECT_EQ(acquire.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(acquire.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(acquire.patches.front().anchor_offset, 4u);
-  ASSERT_TRUE(acquire.patches.front().perturbation_edge);
-  EXPECT_EQ(*acquire.patches.front().perturbation_edge, ConSanPerturbationEdge::Acquire);
+  ASSERT_TRUE(acquire.patches.front().supercollider_perturbation_edge);
+  EXPECT_EQ(*acquire.patches.front().supercollider_perturbation_edge,
+            SuperColliderPerturbationEdge::Acquire);
   AmdGpuCodeObject acquire_object(acquire.replacement.data(), acquire.replacement.size());
   ASSERT_EQ(acquire_object.text_sections().size(), 1u);
   std::array<uint32_t, 6> acquire_words{};
@@ -215,17 +226,17 @@ TEST(ConSan, PerturbationEmissionRelocatesTwelveAndEightByteAtomicEdges) {
       0x00000002u, // global_atomic_add_f32 scope:device
       0xBFB00000u,
   };
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_sleep = 3;
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts release =
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_sleep = 3;
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts release =
       test_lower_consan(make_rdna4_lds_code_object(release_words), options);
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   ASSERT_EQ(release.patches.size(), 1u);
-  EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(release.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(release.patches.front().anchor_offset, 0u);
   EXPECT_EQ(release.patches.front().original_size, 12u);
   EXPECT_EQ(release.patches.front().trampoline_size, 20u);
@@ -244,12 +255,12 @@ TEST(ConSan, PerturbationEmissionRelocatesTwelveAndEightByteAtomicEdges) {
       *wait_store, 0xF4042000u, 0x00000000u, // s_dcache_inv
       0xBFB00000u,
   };
-  options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
-  const ConSanTransformArtifacts acquire =
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Acquire;
+  const TransformArtifacts acquire =
       test_lower_consan(make_rdna4_lds_code_object(acquire_words), options);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire.patches.size(), 1u);
-  EXPECT_EQ(acquire.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(acquire.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(acquire.patches.front().anchor_offset, 16u);
   EXPECT_EQ(acquire.patches.front().original_size, 8u);
   EXPECT_EQ(acquire.patches.front().trampoline_size, 16u);
@@ -273,32 +284,31 @@ TEST(ConSan, AtomicOrderFaultComposesWithPerturbationAndAccessInstrumentation) {
       0xBFB00000u,
   };
   const auto bytes = make_rdna4_lds_code_object(words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_atomic_weaken_order = true;
   options.fault_require_exactly_one = true;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
   options.probe_lds_check_trap = true;
   options.max_patches = 2;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
-  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
+  EXPECT_EQ(result.mutation.supercollider_perturbation.applied, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::InlineAtomicOrderRewrite;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::TrampolineSuperColliderPerturbation;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::LdsLoadCheckTrap ||
-           patch.kind == ConSanPatchKind::LdsLoadCheckTrap;
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::LdsLoadCheckTrap || patch.kind == PatchKind::LdsLoadCheckTrap;
   }));
-  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  EXPECT_TRUE(validate_modified_elf(bytes, result).empty());
 }
 
 TEST(ConSan, AtomicScopeFaultComposesWithPerturbationAndAccessInstrumentation) {
@@ -311,32 +321,31 @@ TEST(ConSan, AtomicScopeFaultComposesWithPerturbationAndAccessInstrumentation) {
       0xBFB00000u,
   };
   const auto bytes = make_rdna4_lds_code_object(words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_atomic_weaken_scope = true;
   options.fault_require_exactly_one = true;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
   options.probe_lds_check_trap = true;
   options.max_patches = 2;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_EQ(result.outcome, TransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
-  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
+  EXPECT_EQ(result.mutation.supercollider_perturbation.applied, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::InlineAtomicScopeRewrite;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::TrampolineSuperColliderPerturbation;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::LdsLoadCheckTrap ||
-           patch.kind == ConSanPatchKind::LdsLoadCheckTrap;
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+    return patch.kind == PatchKind::LdsLoadCheckTrap || patch.kind == PatchKind::LdsLoadCheckTrap;
   }));
-  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  EXPECT_TRUE(validate_modified_elf(bytes, result).empty());
 }
 
 TEST(ConSan, PerturbationEmissionPrefersLocalCaveAndReservesMultipleAppendedBodies) {
@@ -353,29 +362,29 @@ TEST(ConSan, PerturbationEmissionPrefersLocalCaveAndReservesMultipleAppendedBodi
   };
   const std::vector<uint8_t> local_bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts local = test_lower_consan(local_bytes, options);
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts local = test_lower_consan(local_bytes, options);
   ASSERT_TRUE(local.errors.empty()) << (local.errors.empty() ? "" : local.errors.front());
   ASSERT_EQ(local.patches.size(), 1u);
-  EXPECT_EQ(local.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(local.outcome, TransformOutcome::ModifiedValid);
   EXPECT_EQ(local.patches.front().trampoline_offset, 16u);
   EXPECT_EQ(local.replacement.size(), local_bytes.size());
 
   const std::array<uint32_t, 5> two_pair_words = {
       0xBE804EC2u, 0xBF94FFFEu, 0xBE804E81u, 0xBF940001u, 0xBFB00000u,
   };
-  options.sc_perturb_max = 2;
-  options.sc_perturb_required_count = 2;
+  options.supercollider_perturb_max = 2;
+  options.supercollider_perturb_required_count = 2;
   options.max_patches = 2;
-  const ConSanTransformArtifacts multiple =
+  const TransformArtifacts multiple =
       test_lower_consan(make_rdna4_lds_code_object(two_pair_words), options);
   ASSERT_TRUE(multiple.errors.empty()) << (multiple.errors.empty() ? "" : multiple.errors.front());
-  EXPECT_EQ(multiple.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(multiple.mutation.perturbation.applied, 2u);
+  EXPECT_EQ(multiple.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(multiple.mutation.supercollider_perturbation.applied, 2u);
   ASSERT_EQ(multiple.patches.size(), 2u);
   EXPECT_EQ(multiple.patches[0].trampoline_offset, 20u);
   EXPECT_EQ(multiple.patches[1].trampoline_offset, 32u);
@@ -388,26 +397,27 @@ TEST(ConSan, PerturbationEmissionFailsClosedWithoutReachableCaveAndRollsBackComp
   text_words[0] = 0xBE804EC1u;
   text_words[1] = 0xBF94FFFFu;
   text_words.back() = 0xBFB00000u;
-  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "sc_perturb_far");
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts unreachable = test_lower_consan(bytes, options);
-  EXPECT_EQ(unreachable.outcome, ConSanTransformOutcome::Unsupported);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "supercollider_perturb_far");
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts unreachable = test_lower_consan(bytes, options);
+  EXPECT_EQ(unreachable.outcome, TransformOutcome::Unsupported);
   EXPECT_FALSE(unreachable.modified());
   EXPECT_TRUE(unreachable.replacement.empty());
   EXPECT_TRUE(unreachable.errors.empty());
-  EXPECT_EQ(unreachable.mutation.perturbation.planned, 1u);
-  EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
+  EXPECT_EQ(unreachable.mutation.supercollider_perturbation.planned, 1u);
+  EXPECT_EQ(unreachable.mutation.supercollider_perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(unreachable.warnings, [](const std::string &warning) {
     return warning.find("no reachable local or appended cave") != std::string::npos;
   }));
 
   options.fault_drop_barrier = true;
-  const ConSanTransformArtifacts composed = test_lower_consan(bytes, options);
-  EXPECT_EQ(composed.outcome, ConSanTransformOutcome::Unsupported);
+  const TransformArtifacts composed = test_lower_consan(bytes, options);
+  EXPECT_EQ(composed.outcome, TransformOutcome::Unsupported);
   EXPECT_FALSE(composed.modified());
   EXPECT_TRUE(composed.replacement.empty());
   EXPECT_TRUE(std::ranges::any_of(composed.warnings, [](const std::string &warning) {
@@ -423,37 +433,40 @@ TEST(ConSan, BarrierCompositeRollsBackWhenDropDestroysSelectedEdge) {
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions inventory_options;
-  inventory_options.flavor = ConSanFlavor::SuperCollider;
-  ConSanPerturbationPlanningState perturbation;
-  const ConSanTransformArtifacts inventory =
-      test_semantic_inventory(bytes, inventory_options, &perturbation);
+  Options inventory_options;
+  inventory_options.mode = Mode::SuperCollider;
+  SuperColliderPerturbationPlanningState supercollider_perturbation;
+  const TransformArtifacts inventory =
+      test_semantic_inventory(bytes, inventory_options, &supercollider_perturbation);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
-  const auto perturb = std::ranges::find_if(
-      perturbation.candidates, [](const ConSanPerturbationCandidate &candidate) {
-        return candidate.eligible && candidate.kind == ConSanPerturbationKind::Barrier &&
-               candidate.edge == ConSanPerturbationEdge::Release;
-      });
-  ASSERT_NE(perturb, perturbation.candidates.end());
+  const auto perturb =
+      std::ranges::find_if(supercollider_perturbation.candidates,
+                           [](const SuperColliderPerturbationCandidate &candidate) {
+                             return candidate.eligible &&
+                                    candidate.kind == SuperColliderPerturbationKind::Barrier &&
+                                    candidate.edge == SuperColliderPerturbationEdge::Release;
+                           });
+  ASSERT_NE(perturb, supercollider_perturbation.candidates.end());
 
-  ConSanOptions options = inventory_options;
+  Options options = inventory_options;
   options.fault_drop_barrier = true;
   options.fault_allow_destructive_incomplete_barrier_drop = true;
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_identity = test_perturbation_identity(inventory, *perturb);
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_identity =
+      test_supercollider_perturbation_identity(inventory, *perturb);
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(result.outcome, TransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified());
-  EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_NE(result.outcome, TransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.mutation.fault.applied, 0u);
-  EXPECT_EQ(result.mutation.perturbation.applied, 0u);
+  EXPECT_EQ(result.mutation.supercollider_perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("selected perturbation edge was destroyed") != std::string::npos;
   }));
@@ -468,70 +481,71 @@ TEST(ConSan, FinalValidationRejectsCorruptedBarrierCompositeIdentityOwnershipAnd
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions inventory_options;
-  inventory_options.flavor = ConSanFlavor::SuperCollider;
-  ConSanPerturbationPlanningState perturbation;
-  const ConSanTransformArtifacts inventory =
-      test_barrier_move_inventory(bytes, inventory_options, &perturbation);
+  Options inventory_options;
+  inventory_options.mode = Mode::SuperCollider;
+  SuperColliderPerturbationPlanningState supercollider_perturbation;
+  const TransformArtifacts inventory =
+      test_barrier_move_inventory(bytes, inventory_options, &supercollider_perturbation);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 0u,
-                                             &ConSanBarrierMoveDestination::text_offset);
-  const auto perturb = std::ranges::find_if(
-      perturbation.candidates, [](const ConSanPerturbationCandidate &candidate) {
-        return candidate.eligible && candidate.kind == ConSanPerturbationKind::Barrier &&
-               candidate.edge == ConSanPerturbationEdge::Release;
-      });
+                                             &BarrierMoveDestination::text_offset);
+  const auto perturb =
+      std::ranges::find_if(supercollider_perturbation.candidates,
+                           [](const SuperColliderPerturbationCandidate &candidate) {
+                             return candidate.eligible &&
+                                    candidate.kind == SuperColliderPerturbationKind::Barrier &&
+                                    candidate.edge == SuperColliderPerturbationEdge::Release;
+                           });
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_NE(perturb, perturbation.candidates.end());
+  ASSERT_NE(perturb, supercollider_perturbation.candidates.end());
 
-  ConSanOptions options = inventory_options;
+  Options options = inventory_options;
   options.fault_move_barrier = true;
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Earlier;
+  options.fault_barrier_move_direction = BarrierMoveDirection::Earlier;
   options.fault_barrier_destination_identity = destination->identity;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_identity = test_perturbation_identity(inventory, *perturb);
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(valid.errors);
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_identity =
+      test_supercollider_perturbation_identity(inventory, *perturb);
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid) << testing::PrintToString(valid.errors);
   ASSERT_EQ(valid.patches.size(), 4u);
   AmdGpuCodeObject replacement(valid.replacement.data(), valid.replacement.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
 
-  const auto expect_rejected = [&](ConSanTransformArtifacts corrupted,
-                                   std::string_view expected_error) {
-    const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const auto expect_rejected = [&](TransformArtifacts corrupted, std::string_view expected_error) {
+    const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
     EXPECT_TRUE(std::ranges::any_of(
         errors,
         [&](const std::string &error) { return error.find(expected_error) != std::string::npos; }))
         << expected_error << testing::PrintToString(errors);
   };
 
-  ConSanTransformArtifacts stale_sequence = valid;
-  stale_sequence.patches.back().perturbation_source_sequence_identity += "|stale";
+  TransformArtifacts stale_sequence = valid;
+  stale_sequence.patches.back().supercollider_perturbation_source_sequence_identity += "|stale";
   expect_rejected(std::move(stale_sequence), "match one pristine admitted sequence edge");
 
-  ConSanTransformArtifacts wrong_owner = valid;
+  TransformArtifacts wrong_owner = valid;
   ASSERT_EQ(wrong_owner.patches.back().owner_descriptor_file_offsets.size(), 1u);
   wrong_owner.patches.back().owner_descriptor_file_offsets.front() += sizeof(uint32_t);
   expect_rejected(std::move(wrong_owner), "exact kernel owner");
 
-  ConSanTransformArtifacts missing_instrumentation_phase = valid;
-  for (ConSanPatchInfo &patch : missing_instrumentation_phase.patches)
-    patch.phase = ConSanPatchPhase::Mutation;
+  TransformArtifacts missing_instrumentation_phase = valid;
+  for (PatchInfo &patch : missing_instrumentation_phase.patches)
+    patch.phase = PatchPhase::Mutation;
   expect_rejected(std::move(missing_instrumentation_phase), "partially overlapping patch ranges");
 
-  ConSanTransformArtifacts corrupted_sleep = valid;
-  const ConSanPatchInfo &patch = corrupted_sleep.patches.back();
+  TransformArtifacts corrupted_sleep = valid;
+  const PatchInfo &patch = corrupted_sleep.patches.back();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(corrupted_sleep.replacement.data() + text_file_offset + patch.trampoline_offset, &nop,
               sizeof(nop));
   expect_rejected(std::move(corrupted_sleep), "single bounded sleep on the declared side");
 
-  ConSanTransformArtifacts corrupted_mutation = valid;
+  TransformArtifacts corrupted_mutation = valid;
   std::memcpy(corrupted_mutation.replacement.data() + text_file_offset +
                   valid.patches.front().anchor_offset,
               &text_words[2], sizeof(uint32_t));
@@ -545,36 +559,35 @@ TEST(ConSan, FinalValidationProvesPerturbationBytesAndPristineSequenceSemantics)
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_sleep = 7;
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_sleep = 7;
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid)
       << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_EQ(valid.patches.size(), 1u);
-  const ConSanPatchInfo &patch = valid.patches.front();
+  const PatchInfo &patch = valid.patches.front();
   AmdGpuCodeObject replacement(valid.replacement.data(), valid.replacement.size());
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
 
-  ConSanTransformArtifacts rederived = valid;
+  TransformArtifacts rederived = valid;
   ProgramInventoryBuilder rederived_inventory(rederived.program_inventory);
   rederived_inventory.synchronization().sync_events.clear();
   rederived_inventory.synchronization().sync_sequences.clear();
   rederived.program_inventory = rederived_inventory.view();
-  EXPECT_TRUE(validate_consan_modified_elf(bytes, rederived).empty());
+  EXPECT_TRUE(validate_modified_elf(bytes, rederived).empty());
 
-  const auto expect_rejected = [&](ConSanTransformArtifacts corrupted,
-                                   std::string_view expected_error) {
-    const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const auto expect_rejected = [&](TransformArtifacts corrupted, std::string_view expected_error) {
+    const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
     EXPECT_TRUE(std::ranges::any_of(errors, [&](const std::string &error) {
       return error.find(expected_error) != std::string::npos;
     })) << expected_error;
   };
   const auto replace_body_word = [&](uint64_t body_offset, uint32_t word) {
-    ConSanTransformArtifacts corrupted = valid;
+    TransformArtifacts corrupted = valid;
     std::memcpy(corrupted.replacement.data() + text_file_offset + patch.trampoline_offset +
                     body_offset,
                 &word, sizeof(word));
@@ -586,7 +599,7 @@ TEST(ConSan, FinalValidationProvesPerturbationBytesAndPristineSequenceSemantics)
   expect_rejected(replace_body_word(0u, build_s_sleep(0, ROCJITSU_CODE_ARCH_RDNA4)),
                   "single bounded sleep on the declared side");
 
-  ConSanTransformArtifacts wrong_side = valid;
+  TransformArtifacts wrong_side = valid;
   const uint32_t original = text_words.front();
   const uint32_t sleep = build_s_sleep(7, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(wrong_side.replacement.data() + text_file_offset + patch.trampoline_offset, &original,
@@ -596,36 +609,37 @@ TEST(ConSan, FinalValidationProvesPerturbationBytesAndPristineSequenceSemantics)
               &sleep, sizeof(sleep));
   expect_rejected(std::move(wrong_side), "single bounded sleep on the declared side");
 
-  ConSanTransformArtifacts stale_identity = valid;
-  stale_identity.patches.front().perturbation_sequence_identity += "|stale";
+  TransformArtifacts stale_identity = valid;
+  stale_identity.patches.front().supercollider_perturbation_sequence_identity += "|stale";
   expect_rejected(std::move(stale_identity), "one pristine admitted sequence edge");
 
-  ConSanTransformArtifacts wrong_count = valid;
-  wrong_count.mutation.perturbation.applied = 0;
+  TransformArtifacts wrong_count = valid;
+  wrong_count.mutation.supercollider_perturbation.applied = 0;
   expect_rejected(std::move(wrong_count), "inconsistent applied patch count");
 
-  ConSanTransformArtifacts duplicate = valid;
+  TransformArtifacts duplicate = valid;
   duplicate.patches.push_back(duplicate.patches.front());
-  duplicate.mutation.perturbation.applied = 2;
+  duplicate.mutation.supercollider_perturbation.applied = 2;
   expect_rejected(std::move(duplicate), "duplicate sequence edge");
 
   expect_rejected(replace_body_word(patch.trampoline_size - sizeof(uint32_t),
                                     build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)),
                   "invalid exact boundary return");
 
-  ConSanTransformArtifacts out_of_range = valid;
+  TransformArtifacts out_of_range = valid;
   out_of_range.patches.front().trampoline_offset =
       replacement.text_sections().front()->size() + sizeof(uint32_t);
   expect_rejected(std::move(out_of_range), "out-of-range patch");
 
-  ConSanTransformArtifacts bad_anchor = valid;
+  TransformArtifacts bad_anchor = valid;
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(bad_anchor.replacement.data() + text_file_offset + patch.anchor_offset, &nop,
               sizeof(nop));
   expect_rejected(std::move(bad_anchor), "invalid anchor branch");
 
-  ConSanTransformArtifacts wrong_outer_edge = valid;
-  wrong_outer_edge.patches.front().perturbation_edge = ConSanPerturbationEdge::Acquire;
+  TransformArtifacts wrong_outer_edge = valid;
+  wrong_outer_edge.patches.front().supercollider_perturbation_edge =
+      SuperColliderPerturbationEdge::Acquire;
   expect_rejected(std::move(wrong_outer_edge), "preserve the exact original boundary bytes");
 }
 
@@ -639,23 +653,23 @@ TEST(ConSan, FinalValidationRejectsPerturbationNonNopWideAnchorTail) {
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
-  ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts valid = test_lower_consan(bytes, options);
+  ASSERT_EQ(valid.outcome, TransformOutcome::ModifiedValid)
       << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_EQ(valid.patches.size(), 1u);
   ASSERT_EQ(valid.patches.front().original_size, 12u);
   AmdGpuCodeObject replacement(valid.replacement.data(), valid.replacement.size());
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
-  ConSanTransformArtifacts corrupted = valid;
+  TransformArtifacts corrupted = valid;
   const uint32_t non_nop = build_s_nop(1, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(corrupted.replacement.data() + text_file_offset + sizeof(uint32_t), &non_nop,
               sizeof(non_nop));
-  const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+  const std::vector<std::string> errors = validate_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("non-NOP anchor tail") != std::string::npos;
   }));
@@ -671,25 +685,25 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3;
-  options.delay_nops = 2;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  options.supercollider_delay_nops = 2;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
   options.max_patches = 2;
-  const ConSanTransformArtifacts composed = test_lower_consan(bytes, options);
+  const TransformArtifacts composed = test_lower_consan(bytes, options);
   ASSERT_TRUE(composed.errors.empty()) << testing::PrintToString(composed.errors);
-  EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(composed.mutation.perturbation.applied, 1u);
+  EXPECT_EQ(composed.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(composed.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(composed.mutation.supercollider_perturbation.applied, 1u);
   ASSERT_EQ(composed.patches.size(), 2u);
   const auto perturb = std::ranges::find(
-      composed.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
-  const auto lds = std::ranges::find(composed.patches, ConSanPatchKind::LdsLoadCheckTrap,
-                                     &ConSanPatchInfo::kind);
+      composed.patches, PatchKind::TrampolineSuperColliderPerturbation, &PatchInfo::kind);
+  const auto lds =
+      std::ranges::find(composed.patches, PatchKind::LdsLoadCheckTrap, &PatchInfo::kind);
   ASSERT_NE(perturb, composed.patches.end());
   ASSERT_NE(lds, composed.patches.end());
   EXPECT_EQ(perturb->anchor_offset, 0u);
@@ -698,27 +712,26 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   EXPECT_GE(lds->trampoline_offset, composed.text_relocation->source_text_size);
 
   options.max_patches = 1;
-  const ConSanTransformArtifacts capped = test_lower_consan(bytes, options);
+  const TransformArtifacts capped = test_lower_consan(bytes, options);
   ASSERT_TRUE(capped.errors.empty()) << testing::PrintToString(capped.errors);
-  EXPECT_EQ(capped.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(capped.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(capped.patches.size(), 1u);
-  EXPECT_EQ(capped.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);
+  EXPECT_EQ(capped.patches.front().kind, PatchKind::TrampolineSuperColliderPerturbation);
   EXPECT_TRUE(std::ranges::any_of(capped.warnings, [](const std::string &warning) {
     return warning.find("shared patch budget consumed") != std::string::npos;
   })) << testing::PrintToString(capped.warnings);
 
   options.max_patches_is_expert_limit = false;
-  const ConSanTransformArtifacts all_supported = test_lower_consan(bytes, options);
+  const TransformArtifacts all_supported = test_lower_consan(bytes, options);
   ASSERT_TRUE(all_supported.errors.empty()) << testing::PrintToString(all_supported.errors);
-  EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(all_supported.mutation.perturbation.applied, 1u);
+  EXPECT_EQ(all_supported.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(all_supported.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(all_supported.mutation.supercollider_perturbation.applied, 1u);
   ASSERT_EQ(all_supported.patches.size(), 2u);
-  EXPECT_NE(std::ranges::find(all_supported.patches, ConSanPatchKind::LdsLoadCheckTrap,
-                              &ConSanPatchInfo::kind),
+  EXPECT_NE(std::ranges::find(all_supported.patches, PatchKind::LdsLoadCheckTrap, &PatchInfo::kind),
             all_supported.patches.end());
-  EXPECT_NE(std::ranges::find(all_supported.patches, ConSanPatchKind::TrampolineScPerturbation,
-                              &ConSanPatchInfo::kind),
+  EXPECT_NE(std::ranges::find(all_supported.patches, PatchKind::TrampolineSuperColliderPerturbation,
+                              &PatchInfo::kind),
             all_supported.patches.end());
 }
 
@@ -731,23 +744,23 @@ TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan
   tail_words.fill(build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3;
-  options.delay_nops = 2;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  options.supercollider_delay_nops = 2;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
   options.max_patches = 2;
-  const ConSanTransformArtifacts local = test_lower_consan(bytes, options);
+  const TransformArtifacts local = test_lower_consan(bytes, options);
   ASSERT_TRUE(local.errors.empty()) << testing::PrintToString(local.errors);
-  EXPECT_EQ(local.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(local.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(local.patches.size(), 2u);
   const auto local_lds =
-      std::ranges::find(local.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind);
+      std::ranges::find(local.patches, PatchKind::LdsLoadCheckTrap, &PatchInfo::kind);
   const auto local_perturb = std::ranges::find(
-      local.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
+      local.patches, PatchKind::TrampolineSuperColliderPerturbation, &PatchInfo::kind);
   ASSERT_NE(local_lds, local.patches.end());
   ASSERT_NE(local_perturb, local.patches.end());
   EXPECT_TRUE(local_lds->trampoline_offset + local_lds->trampoline_size <=
@@ -761,13 +774,13 @@ TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan
   far_words[2] = 0xD8D80000u;
   far_words[3] = 0x01000002u;
   far_words.back() = 0xBFB00000u;
-  const ConSanTransformArtifacts unreachable =
+  const TransformArtifacts unreachable =
       test_lower_consan(make_rdna4_lds_code_object(far_words, "composed_far"), options);
-  EXPECT_EQ(unreachable.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(unreachable.outcome, TransformOutcome::Unsupported);
   EXPECT_FALSE(unreachable.modified());
   EXPECT_TRUE(unreachable.replacement.empty());
   EXPECT_TRUE(unreachable.patches.empty());
-  EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
+  EXPECT_EQ(unreachable.mutation.supercollider_perturbation.applied, 0u);
 }
 
 TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
@@ -787,29 +800,29 @@ TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
   const std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
       kernel_words, function_words, {}, kRdna4Wave64AllVgprsGranulated,
       /*function_is_kernel=*/true);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.probe_flat_check_trap = true;
-  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.flat_provenance_mode = FlatProvenanceMode::Strict;
   options.scratch_vgpr = 5;
-  options.delay_nops = 1;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
-  options.sc_perturb_required_count = 1;
+  options.supercollider_delay_nops = 1;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Acquire;
+  options.supercollider_perturb_required_count = 1;
   options.max_patches = 2;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid)
       << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 2u);
   const auto flat =
-      std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap, &ConSanPatchInfo::kind);
-  const auto perturbation = std::ranges::find(
-      result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind);
+      std::ranges::find(result.patches, PatchKind::FlatLoadCheckTrap, &PatchInfo::kind);
+  const auto supercollider_perturbation = std::ranges::find(
+      result.patches, PatchKind::TrampolineSuperColliderPerturbation, &PatchInfo::kind);
   ASSERT_NE(flat, result.patches.end());
-  ASSERT_NE(perturbation, result.patches.end());
+  ASSERT_NE(supercollider_perturbation, result.patches.end());
   EXPECT_EQ(flat->anchor_offset, 32u);
-  EXPECT_EQ(perturbation->anchor_offset, 4u);
+  EXPECT_EQ(supercollider_perturbation->anchor_offset, 4u);
   ASSERT_TRUE(result.text_relocation);
   EXPECT_GE(flat->trampoline_offset, result.text_relocation->source_text_size);
 }
@@ -827,62 +840,62 @@ TEST(ConSan, PerturbationEmissionAcceptsReturningOrderedCasReleaseEdge) {
       (*atomic)[0], (*atomic)[1], (*atomic)[2], 0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
-  ConSanPerturbationPlanningState perturbation;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options, &perturbation);
-  ASSERT_TRUE(consan_patch_succeeded(result))
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
+  SuperColliderPerturbationPlanningState supercollider_perturbation;
+  const TransformArtifacts result = test_lower_consan(bytes, options, &supercollider_perturbation);
+  ASSERT_TRUE(patch_succeeded(result))
       << "errors=" << testing::PrintToString(result.errors)
       << " warnings=" << testing::PrintToString(result.warnings)
       << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
-      << " candidates=" << testing::PrintToString(perturbation.candidates);
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+      << " candidates=" << testing::PrintToString(supercollider_perturbation.candidates);
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);
+  EXPECT_EQ(result.patches.front().kind, PatchKind::TrampolineSuperColliderPerturbation);
   EXPECT_EQ(result.patches.front().anchor_offset, 20u);
   EXPECT_EQ(result.patches.front().original_size, 12u);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().operation,
-            ConSanSyncOperation::AtomicCompareExchange);
+            SyncOperation::AtomicCompareExchange);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().rmw_outcome,
-            ConSanSyncRmwOutcome::CompareExchange);
+            SyncRmwOutcome::CompareExchange);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().address_source,
-            ConSanSyncAddressSource::FlatVector);
-  EXPECT_TRUE(consan_sync_confidence_meets(
-      result.program_inventory.sync().sync_sequences.front().confidence,
-      ConSanSemanticConfidence::Conservative));
+            SyncAddressSource::FlatVector);
+  EXPECT_TRUE(
+      sync_confidence_meets(result.program_inventory.sync().sync_sequences.front().confidence,
+                            SemanticConfidence::Conservative));
 }
 
 TEST(ConSan, PerturbationAcceptsExactOrderedCasWithoutStaticFlatProvenance) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_cas_code_object();
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
 
-  ConSanPerturbationPlanningState perturbation;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options, &perturbation);
+  SuperColliderPerturbationPlanningState supercollider_perturbation;
+  const TransformArtifacts result = test_lower_consan(bytes, options, &supercollider_perturbation);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  ASSERT_TRUE(patch_succeeded(result));
+  EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
   EXPECT_EQ(result.program_inventory.sync().sync_events[1].operation,
-            ConSanSyncOperation::AtomicCompareExchange);
+            SyncOperation::AtomicCompareExchange);
   EXPECT_EQ(result.program_inventory.sync().sync_events[1].confidence,
-            ConSanSemanticConfidence::Unsupported);
+            SemanticConfidence::Unsupported);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().address_source,
-            ConSanSyncAddressSource::FlatVector);
+            SyncAddressSource::FlatVector);
   EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().confidence,
-            ConSanSemanticConfidence::Conservative);
-  ASSERT_EQ(perturbation.plans.size(), 1u);
-  EXPECT_EQ(perturbation.plans.front().anchor_text_offset, 0u);
+            SemanticConfidence::Conservative);
+  ASSERT_EQ(supercollider_perturbation.plans.size(), 1u);
+  EXPECT_EQ(supercollider_perturbation.plans.front().anchor_text_offset, 0u);
   ASSERT_EQ(result.patches.size(), 1u);
-  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);
+  EXPECT_EQ(result.patches.front().kind, PatchKind::TrampolineSuperColliderPerturbation);
 }
 
 TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
@@ -892,73 +905,71 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(two_pair_words);
-  ConSanOptions disabled_options;
-  disabled_options.flavor = ConSanFlavor::SuperCollider;
-  ConSanPerturbationPlanningState disabled_first_perturbation;
-  ConSanPerturbationPlanningState disabled_second_perturbation;
-  const ConSanTransformArtifacts disabled_first =
-      test_lower_consan(bytes, disabled_options, &disabled_first_perturbation);
-  const ConSanTransformArtifacts disabled_second =
-      test_lower_consan(bytes, disabled_options, &disabled_second_perturbation);
+  Options disabled_options;
+  disabled_options.mode = Mode::SuperCollider;
+  SuperColliderPerturbationPlanningState disabled_first_supercollider_perturbation;
+  SuperColliderPerturbationPlanningState disabled_second_supercollider_perturbation;
+  const TransformArtifacts disabled_first =
+      test_lower_consan(bytes, disabled_options, &disabled_first_supercollider_perturbation);
+  const TransformArtifacts disabled_second =
+      test_lower_consan(bytes, disabled_options, &disabled_second_supercollider_perturbation);
   ASSERT_TRUE(disabled_first.errors.empty()) << testing::PrintToString(disabled_first.errors);
   ASSERT_TRUE(disabled_second.errors.empty()) << testing::PrintToString(disabled_second.errors);
-  EXPECT_EQ(disabled_first.outcome, ConSanTransformOutcome::Unchanged);
+  EXPECT_EQ(disabled_first.outcome, TransformOutcome::Unchanged);
   EXPECT_FALSE(disabled_first.modified());
   EXPECT_TRUE(disabled_first.replacement.empty());
   EXPECT_TRUE(disabled_first.patches.empty());
-  EXPECT_EQ(disabled_first.mutation.perturbation.planned, 0u);
-  EXPECT_EQ(disabled_first.mutation.perturbation.applied, 0u);
-  ASSERT_EQ(disabled_first_perturbation.candidates.size(),
-            disabled_second_perturbation.candidates.size());
-  for (size_t i = 0; i < disabled_first_perturbation.candidates.size(); ++i) {
-    EXPECT_EQ(test_perturbation_identity(disabled_first,
-                                         disabled_first_perturbation.candidates[i]),
-              test_perturbation_identity(disabled_second,
-                                         disabled_second_perturbation.candidates[i]));
-    EXPECT_EQ(disabled_first_perturbation.candidates[i].eligible,
-              disabled_second_perturbation.candidates[i].eligible);
+  EXPECT_EQ(disabled_first.mutation.supercollider_perturbation.planned, 0u);
+  EXPECT_EQ(disabled_first.mutation.supercollider_perturbation.applied, 0u);
+  ASSERT_EQ(disabled_first_supercollider_perturbation.candidates.size(),
+            disabled_second_supercollider_perturbation.candidates.size());
+  for (size_t i = 0; i < disabled_first_supercollider_perturbation.candidates.size(); ++i) {
+    EXPECT_EQ(test_supercollider_perturbation_identity(
+                  disabled_first, disabled_first_supercollider_perturbation.candidates[i]),
+              test_supercollider_perturbation_identity(
+                  disabled_second, disabled_second_supercollider_perturbation.candidates[i]));
+    EXPECT_EQ(disabled_first_supercollider_perturbation.candidates[i].eligible,
+              disabled_second_supercollider_perturbation.candidates[i].eligible);
   }
 
-  ConSanOptions enabled = disabled_options;
-  enabled.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  enabled.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  enabled.sc_perturb_required_count = 1;
+  Options enabled = disabled_options;
+  enabled.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  enabled.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  enabled.supercollider_perturb_required_count = 1;
   enabled.max_patches = 1;
-  const ConSanTransformArtifacts one = test_lower_consan(bytes, enabled);
-  ASSERT_EQ(one.outcome, ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(one.errors);
-  EXPECT_EQ(one.mutation.perturbation.planned, 1u);
-  EXPECT_EQ(one.mutation.perturbation.applied, 1u);
+  const TransformArtifacts one = test_lower_consan(bytes, enabled);
+  ASSERT_EQ(one.outcome, TransformOutcome::ModifiedValid) << testing::PrintToString(one.errors);
+  EXPECT_EQ(one.mutation.supercollider_perturbation.planned, 1u);
+  EXPECT_EQ(one.mutation.supercollider_perturbation.applied, 1u);
   EXPECT_EQ(one.patches.size(), 1u);
 
-  enabled.sc_perturb_max = 2;
-  enabled.sc_perturb_required_count = 2;
+  enabled.supercollider_perturb_max = 2;
+  enabled.supercollider_perturb_required_count = 2;
   enabled.max_patches = 2;
-  const ConSanTransformArtifacts two = test_lower_consan(bytes, enabled);
-  ASSERT_EQ(two.outcome, ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(two.errors);
-  EXPECT_EQ(two.mutation.perturbation.planned, 2u);
-  EXPECT_EQ(two.mutation.perturbation.applied, 2u);
+  const TransformArtifacts two = test_lower_consan(bytes, enabled);
+  ASSERT_EQ(two.outcome, TransformOutcome::ModifiedValid) << testing::PrintToString(two.errors);
+  EXPECT_EQ(two.mutation.supercollider_perturbation.planned, 2u);
+  EXPECT_EQ(two.mutation.supercollider_perturbation.applied, 2u);
   EXPECT_EQ(two.patches.size(), 2u);
 
   std::vector<uint32_t> far_words(40000u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   far_words[0] = 0xBE804EC1u;
   far_words[1] = 0xBF94FFFFu;
   far_words.back() = 0xBFB00000u;
-  ConSanOptions unreachable_options = disabled_options;
-  unreachable_options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  unreachable_options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  unreachable_options.sc_perturb_required_count = 1;
-  const ConSanTransformArtifacts unreachable = test_lower_consan(
+  Options unreachable_options = disabled_options;
+  unreachable_options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  unreachable_options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  unreachable_options.supercollider_perturb_required_count = 1;
+  const TransformArtifacts unreachable = test_lower_consan(
       make_rdna4_lds_code_object(far_words, "sc2b1_unreachable"), unreachable_options);
-  EXPECT_EQ(unreachable.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(unreachable.outcome, TransformOutcome::Unsupported);
   EXPECT_TRUE(unreachable.errors.empty());
   EXPECT_FALSE(unreachable.modified());
   EXPECT_TRUE(unreachable.replacement.empty());
   EXPECT_TRUE(unreachable.patches.empty());
-  EXPECT_NE(unreachable.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(unreachable.mutation.perturbation.planned, 1u);
-  EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
+  EXPECT_NE(unreachable.outcome, TransformOutcome::ModifiedValid);
+  EXPECT_EQ(unreachable.mutation.supercollider_perturbation.planned, 1u);
+  EXPECT_EQ(unreachable.mutation.supercollider_perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(unreachable.warnings, [](const std::string &warning) {
     return warning.find("no reachable local or appended cave") != std::string::npos;
   }));
@@ -971,29 +982,30 @@ TEST(ConSan, PerturbationControlsAreBoundedAndRequiredCountFailsClosed) {
       0xBFB00000u,
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
   options.fault_dry_run = true;
 
-  ConSanOptions wrong_flavor = options;
-  wrong_flavor.flavor = ConSanFlavor::Moi;
-  EXPECT_FALSE(test_lower_consan(bytes, wrong_flavor).errors.empty());
+  Options wrong_mode = options;
+  wrong_mode.mode = Mode::Default;
+  EXPECT_FALSE(test_lower_consan(bytes, wrong_mode).errors.empty());
 
-  options.sc_perturb_max = 3;
+  options.supercollider_perturb_max = 3;
   EXPECT_FALSE(test_lower_consan(bytes, options).errors.empty());
-  options.sc_perturb_max = 1;
-  options.sc_perturb_sleep = 0;
+  options.supercollider_perturb_max = 1;
+  options.supercollider_perturb_sleep = 0;
   EXPECT_FALSE(test_lower_consan(bytes, options).errors.empty());
-  options.sc_perturb_sleep = 16;
+  options.supercollider_perturb_sleep = 16;
   EXPECT_FALSE(test_lower_consan(bytes, options).errors.empty());
-  options.sc_perturb_sleep = 1;
-  options.sc_perturb_identity = "stale-sequence-identity";
-  options.sc_perturb_required_count = 1;
-  ConSanPerturbationPlanningState stale_perturbation;
-  const ConSanTransformArtifacts stale = test_lower_consan(bytes, options, &stale_perturbation);
+  options.supercollider_perturb_sleep = 1;
+  options.supercollider_perturb_identity = "stale-sequence-identity";
+  options.supercollider_perturb_required_count = 1;
+  SuperColliderPerturbationPlanningState stale_supercollider_perturbation;
+  const TransformArtifacts stale =
+      test_lower_consan(bytes, options, &stale_supercollider_perturbation);
   ASSERT_FALSE(stale.errors.empty());
-  EXPECT_TRUE(stale_perturbation.plans.empty());
+  EXPECT_TRUE(stale_supercollider_perturbation.plans.empty());
   EXPECT_FALSE(stale.modified());
 
   const std::array<uint32_t, 5> two_pair_words = {
@@ -1001,54 +1013,58 @@ TEST(ConSan, PerturbationControlsAreBoundedAndRequiredCountFailsClosed) {
       0xBE804E81u, 0xBF940001u, // workgroup barrier 1
       0xBFB00000u,
   };
-  options.sc_perturb_identity.clear();
-  options.sc_perturb_max = 2;
-  options.sc_perturb_required_count = 2;
-  ConSanPerturbationPlanningState two_perturbation;
-  const ConSanTransformArtifacts two =
-      test_lower_consan(make_rdna4_lds_code_object(two_pair_words), options, &two_perturbation);
+  options.supercollider_perturb_identity.clear();
+  options.supercollider_perturb_max = 2;
+  options.supercollider_perturb_required_count = 2;
+  SuperColliderPerturbationPlanningState two_supercollider_perturbation;
+  const TransformArtifacts two = test_lower_consan(make_rdna4_lds_code_object(two_pair_words),
+                                                   options, &two_supercollider_perturbation);
   ASSERT_TRUE(two.errors.empty()) << (two.errors.empty() ? "" : two.errors.front());
-  ASSERT_EQ(two_perturbation.plans.size(), 2u);
-  EXPECT_NE(test_perturbation_identity(two, two_perturbation.plans[0].candidate),
-            test_perturbation_identity(two, two_perturbation.plans[1].candidate));
+  ASSERT_EQ(two_supercollider_perturbation.plans.size(), 2u);
+  EXPECT_NE(test_supercollider_perturbation_identity(
+                two, two_supercollider_perturbation.plans[0].candidate),
+            test_supercollider_perturbation_identity(
+                two, two_supercollider_perturbation.plans[1].candidate));
 
-  options.sc_perturb_index = 1;
-  options.sc_perturb_max = 1;
-  options.sc_perturb_required_count = 1;
-  ConSanPerturbationPlanningState indexed_perturbation;
-  const ConSanTransformArtifacts indexed =
-      test_lower_consan(make_rdna4_lds_code_object(two_pair_words), options, &indexed_perturbation);
+  options.supercollider_perturb_index = 1;
+  options.supercollider_perturb_max = 1;
+  options.supercollider_perturb_required_count = 1;
+  SuperColliderPerturbationPlanningState indexed_supercollider_perturbation;
+  const TransformArtifacts indexed = test_lower_consan(
+      make_rdna4_lds_code_object(two_pair_words), options, &indexed_supercollider_perturbation);
   ASSERT_TRUE(indexed.errors.empty()) << (indexed.errors.empty() ? "" : indexed.errors.front());
-  ASSERT_EQ(indexed_perturbation.plans.size(), 1u);
-  EXPECT_EQ(test_perturbation_identity(indexed, indexed_perturbation.plans[0].candidate),
-            test_perturbation_identity(two, two_perturbation.plans[1].candidate));
+  ASSERT_EQ(indexed_supercollider_perturbation.plans.size(), 1u);
+  EXPECT_EQ(test_supercollider_perturbation_identity(
+                indexed, indexed_supercollider_perturbation.plans[0].candidate),
+            test_supercollider_perturbation_identity(
+                two, two_supercollider_perturbation.plans[1].candidate));
 }
 
 TEST(ConSan, PerturbationRejectsUnpairedDynamicAmbiguousAndCyclicSequences) {
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Barrier;
-  options.sc_perturb_required_count = 1;
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Barrier;
+  options.supercollider_perturb_required_count = 1;
 
   const std::array<uint32_t, 3> dynamic_words = {
       0xBE804E7Du, // s_barrier_signal m0
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u,
   };
-  ConSanPerturbationPlanningState dynamic_perturbation;
-  const ConSanTransformArtifacts dynamic =
-      test_lower_consan(make_rdna4_lds_code_object(dynamic_words), options, &dynamic_perturbation);
-  EXPECT_TRUE(dynamic_perturbation.plans.empty());
+  SuperColliderPerturbationPlanningState dynamic_supercollider_perturbation;
+  const TransformArtifacts dynamic = test_lower_consan(
+      make_rdna4_lds_code_object(dynamic_words), options, &dynamic_supercollider_perturbation);
+  EXPECT_TRUE(dynamic_supercollider_perturbation.plans.empty());
   EXPECT_FALSE(dynamic.errors.empty());
 
   const std::array<uint32_t, 2> unpaired_words = {
       0xBE804EC1u, // s_barrier_signal -1
       0xBFB00000u,
   };
-  ConSanPerturbationPlanningState unpaired_perturbation;
-  const ConSanTransformArtifacts unpaired = test_lower_consan(
-      make_rdna4_lds_code_object(unpaired_words), options, &unpaired_perturbation);
-  EXPECT_TRUE(unpaired_perturbation.plans.empty());
+  SuperColliderPerturbationPlanningState unpaired_supercollider_perturbation;
+  const TransformArtifacts unpaired = test_lower_consan(
+      make_rdna4_lds_code_object(unpaired_words), options, &unpaired_supercollider_perturbation);
+  EXPECT_TRUE(unpaired_supercollider_perturbation.plans.empty());
   EXPECT_FALSE(unpaired.errors.empty());
 
   const std::array<uint32_t, 3> runtime_words = {
@@ -1056,12 +1072,12 @@ TEST(ConSan, PerturbationRejectsUnpairedDynamicAmbiguousAndCyclicSequences) {
       0xBF94FFFFu,
       0xBFB00000u,
   };
-  ConSanPerturbationPlanningState runtime_perturbation;
-  const ConSanTransformArtifacts runtime =
+  SuperColliderPerturbationPlanningState runtime_supercollider_perturbation;
+  const TransformArtifacts runtime =
       test_lower_consan(make_rdna4_lds_code_object(runtime_words, "__amd_rocclr_runtime_helper"),
-                        options, &runtime_perturbation);
-  EXPECT_TRUE(runtime_perturbation.candidates.empty());
-  EXPECT_TRUE(runtime_perturbation.plans.empty());
+                        options, &runtime_supercollider_perturbation);
+  EXPECT_TRUE(runtime_supercollider_perturbation.candidates.empty());
+  EXPECT_TRUE(runtime_supercollider_perturbation.plans.empty());
   EXPECT_FALSE(runtime.errors.empty());
 
   const std::array<uint32_t, 4> cyclic_words = {
@@ -1070,34 +1086,34 @@ TEST(ConSan, PerturbationRejectsUnpairedDynamicAmbiguousAndCyclicSequences) {
       build_s_branch(-3, ROCJITSU_CODE_ARCH_RDNA4), // back to signal
       0xBFB00000u,
   };
-  ConSanPerturbationPlanningState cyclic_perturbation;
-  const ConSanTransformArtifacts cyclic =
-      test_lower_consan(make_rdna4_lds_code_object(cyclic_words), options, &cyclic_perturbation);
-  ASSERT_FALSE(cyclic_perturbation.candidates.empty());
-  EXPECT_TRUE(
-      std::ranges::none_of(cyclic_perturbation.candidates, &ConSanPerturbationCandidate::eligible));
-  EXPECT_EQ(cyclic_perturbation.candidates.front().rejection_reason,
-            ConSanPerturbationRejectionReason::CyclicCfgComponent);
-  EXPECT_TRUE(cyclic_perturbation.plans.empty());
+  SuperColliderPerturbationPlanningState cyclic_supercollider_perturbation;
+  const TransformArtifacts cyclic = test_lower_consan(make_rdna4_lds_code_object(cyclic_words),
+                                                      options, &cyclic_supercollider_perturbation);
+  ASSERT_FALSE(cyclic_supercollider_perturbation.candidates.empty());
+  EXPECT_TRUE(std::ranges::none_of(cyclic_supercollider_perturbation.candidates,
+                                   &SuperColliderPerturbationCandidate::eligible));
+  EXPECT_EQ(cyclic_supercollider_perturbation.candidates.front().rejection_reason,
+            SuperColliderPerturbationRejectionReason::CyclicCfgComponent);
+  EXPECT_TRUE(cyclic_supercollider_perturbation.plans.empty());
   EXPECT_FALSE(cyclic.errors.empty());
 
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  ConSanPerturbationPlanningState ambiguous_perturbation;
-  const ConSanTransformArtifacts ambiguous =
-      test_lower_consan(make_rdna4_flat_atomic_code_object(), options, &ambiguous_perturbation);
-  ASSERT_FALSE(ambiguous_perturbation.candidates.empty());
-  EXPECT_TRUE(std::ranges::none_of(ambiguous_perturbation.candidates,
-                                   &ConSanPerturbationCandidate::eligible));
-  EXPECT_TRUE(ambiguous_perturbation.plans.empty());
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  SuperColliderPerturbationPlanningState ambiguous_supercollider_perturbation;
+  const TransformArtifacts ambiguous = test_lower_consan(
+      make_rdna4_flat_atomic_code_object(), options, &ambiguous_supercollider_perturbation);
+  ASSERT_FALSE(ambiguous_supercollider_perturbation.candidates.empty());
+  EXPECT_TRUE(std::ranges::none_of(ambiguous_supercollider_perturbation.candidates,
+                                   &SuperColliderPerturbationCandidate::eligible));
+  EXPECT_TRUE(ambiguous_supercollider_perturbation.plans.empty());
   EXPECT_FALSE(ambiguous.errors.empty());
 }
 
 TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
-  options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
-  options.sc_perturb_edge = ConSanPerturbationEdge::Release;
-  options.sc_perturb_required_count = 1;
+  Options options;
+  options.mode = Mode::SuperCollider;
+  options.supercollider_perturb_kind = SuperColliderPerturbationKind::Atomic;
+  options.supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  options.supercollider_perturb_required_count = 1;
 
   const std::array<uint32_t, 8> clause_words = {
       0xBF850000u,                           // s_clause 0
@@ -1106,24 +1122,24 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
       0x00000002u, // global_atomic_add_f32 scope:device
       0xBFB00000u,
   };
-  ConSanPerturbationPlanningState clause_perturbation;
-  const ConSanTransformArtifacts clause =
-      test_lower_consan(make_rdna4_lds_code_object(clause_words), options, &clause_perturbation);
-  ASSERT_FALSE(clause_perturbation.candidates.empty());
-  EXPECT_TRUE(
-      std::ranges::none_of(clause_perturbation.candidates, &ConSanPerturbationCandidate::eligible));
-  EXPECT_EQ(clause_perturbation.candidates.front().rejection_reason,
-            ConSanPerturbationRejectionReason::InsideScalarClause);
+  SuperColliderPerturbationPlanningState clause_supercollider_perturbation;
+  const TransformArtifacts clause = test_lower_consan(make_rdna4_lds_code_object(clause_words),
+                                                      options, &clause_supercollider_perturbation);
+  ASSERT_FALSE(clause_supercollider_perturbation.candidates.empty());
+  EXPECT_TRUE(std::ranges::none_of(clause_supercollider_perturbation.candidates,
+                                   &SuperColliderPerturbationCandidate::eligible));
+  EXPECT_EQ(clause_supercollider_perturbation.candidates.front().rejection_reason,
+            SuperColliderPerturbationRejectionReason::InsideScalarClause);
   EXPECT_FALSE(clause.errors.empty());
 
-  ConSanPerturbationPlanningState unknown_role_perturbation;
-  const ConSanTransformArtifacts unknown_role = test_lower_consan(
-      make_rdna4_global_atomic_code_object(), options, &unknown_role_perturbation);
-  ASSERT_FALSE(unknown_role_perturbation.candidates.empty());
-  EXPECT_TRUE(std::ranges::none_of(unknown_role_perturbation.candidates,
-                                   &ConSanPerturbationCandidate::eligible));
-  EXPECT_EQ(unknown_role_perturbation.candidates.front().rejection_reason,
-            ConSanPerturbationRejectionReason::UnknownOrInapplicableMemoryRole);
+  SuperColliderPerturbationPlanningState unknown_role_supercollider_perturbation;
+  const TransformArtifacts unknown_role = test_lower_consan(
+      make_rdna4_global_atomic_code_object(), options, &unknown_role_supercollider_perturbation);
+  ASSERT_FALSE(unknown_role_supercollider_perturbation.candidates.empty());
+  EXPECT_TRUE(std::ranges::none_of(unknown_role_supercollider_perturbation.candidates,
+                                   &SuperColliderPerturbationCandidate::eligible));
+  EXPECT_EQ(unknown_role_supercollider_perturbation.candidates.front().rejection_reason,
+            SuperColliderPerturbationRejectionReason::UnknownOrInapplicableMemoryRole);
 
   const std::array<uint32_t, 7> wave_scope_words = {
       0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
@@ -1131,24 +1147,25 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
       0x00000002u, // global_atomic_add_f32 scope:wave
       0xBFB00000u,
   };
-  ConSanPerturbationPlanningState wave_scope_perturbation;
-  const ConSanTransformArtifacts wave_scope = test_lower_consan(
-      make_rdna4_lds_code_object(wave_scope_words), options, &wave_scope_perturbation);
+  SuperColliderPerturbationPlanningState wave_scope_supercollider_perturbation;
+  const TransformArtifacts wave_scope =
+      test_lower_consan(make_rdna4_lds_code_object(wave_scope_words), options,
+                        &wave_scope_supercollider_perturbation);
   ASSERT_EQ(wave_scope.program_inventory.sync().sync_events.size(), 2u);
   const auto atomic = std::ranges::find(wave_scope.program_inventory.sync().sync_events,
-                                        ConSanSyncKind::Atomic, &ConSanSyncEvent::kind);
+                                        SyncKind::Atomic, &SyncEvent::kind);
   ASSERT_NE(atomic, wave_scope.program_inventory.sync().sync_events.end());
   ASSERT_TRUE(atomic->scope);
-  EXPECT_EQ(*atomic->scope, ConSanMemoryScope::Wavefront);
+  EXPECT_EQ(*atomic->scope, MemoryScope::Wavefront);
   ASSERT_EQ(wave_scope.program_inventory.sync().sync_sequences.size(), 1u);
   ASSERT_TRUE(wave_scope.program_inventory.sync().sync_sequences.front().scope);
   EXPECT_EQ(*wave_scope.program_inventory.sync().sync_sequences.front().scope,
-            ConSanMemoryScope::Wavefront);
-  ASSERT_FALSE(wave_scope_perturbation.candidates.empty());
-  EXPECT_TRUE(std::ranges::none_of(wave_scope_perturbation.candidates,
-                                   &ConSanPerturbationCandidate::eligible));
-  EXPECT_EQ(wave_scope_perturbation.candidates.front().rejection_reason,
-            ConSanPerturbationRejectionReason::UnsupportedAtomicScope);
+            MemoryScope::Wavefront);
+  ASSERT_FALSE(wave_scope_supercollider_perturbation.candidates.empty());
+  EXPECT_TRUE(std::ranges::none_of(wave_scope_supercollider_perturbation.candidates,
+                                   &SuperColliderPerturbationCandidate::eligible));
+  EXPECT_EQ(wave_scope_supercollider_perturbation.candidates.front().rejection_reason,
+            SuperColliderPerturbationRejectionReason::UnsupportedAtomicScope);
 }
 
 TEST(ConSan, FaultCompositionRollsBackMutationWhenInstrumentationIsInvalid) {
@@ -1161,16 +1178,16 @@ TEST(ConSan, FaultCompositionRollsBackMutationWhenInstrumentationIsInvalid) {
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   const std::vector<uint8_t> original = bytes;
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.probe_lds_check_trap = true;
   options.fault_drop_barrier = true;
-  options.delay_mode = ConSanDelayMode::Sleep;
-  options.delay_nops = 65536;
+  options.supercollider_delay_mode = SuperColliderDelayMode::Sleep;
+  options.supercollider_delay_nops = 65536;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_EQ(result.outcome, TransformOutcome::Invalid);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
@@ -1205,22 +1222,20 @@ TEST(ConSan, ProbeLdsCheckTrapModeReusesDirectRelayReservoir) {
   ASSERT_FALSE(compute_sopp_branch_simm16(0u, kOriginalTextSize));
   ASSERT_EQ(kHostOffset - kAnchorOffset, 110000u);
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.probe_lds_check_trap = true;
   options.max_patches = 1;
   options.scratch_vgpr = 6;
 
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.modified());
   ASSERT_TRUE(result.text_relocation);
-  EXPECT_EQ(
-      std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap, &ConSanPatchInfo::kind),
-      1u);
+  EXPECT_EQ(std::ranges::count(result.patches, PatchKind::LdsLoadCheckTrap, &PatchInfo::kind), 1u);
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

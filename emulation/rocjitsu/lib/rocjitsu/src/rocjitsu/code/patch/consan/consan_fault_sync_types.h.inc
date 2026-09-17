@@ -1,6 +1,6 @@
-struct ConSanProgramSite;
+struct ProgramSite;
 
-enum class ConSanFaultSiteKind : uint8_t {
+enum class FaultSiteKind : uint8_t {
   Barrier,
   Atomic,
   LdsAccess,
@@ -13,7 +13,7 @@ enum class ConSanFaultSiteKind : uint8_t {
 /// Architecture-specific lowering can therefore consume the same intent while
 /// choosing different instruction rewrites. A new value must identify a
 /// distinct behavioral fault.
-enum class ConSanFaultMutationKind : uint8_t {
+enum class FaultMutationKind : uint8_t {
   /// Remove one barrier instruction or one explicitly selected logical group.
   DropBarrier,
   /// Move both members of a qualified full-barrier sequence as one operation.
@@ -38,7 +38,7 @@ enum class ConSanFaultMutationKind : uint8_t {
   OrdinaryWeakenScope,
 };
 
-enum class ConSanSyncMemoryRole : uint8_t {
+enum class SyncMemoryRole : uint8_t {
   Unknown,
   None,
   Acquire,
@@ -47,20 +47,20 @@ enum class ConSanSyncMemoryRole : uint8_t {
   SequentiallyConsistent,
 };
 
-enum class ConSanSemanticConfidence : uint8_t {
+enum class SemanticConfidence : uint8_t {
   Exact,
   Conservative,
   Ambiguous,
   Unsupported,
 };
 
-enum class ConSanOwnerProofKind : uint8_t {
+enum class OwnerProofKind : uint8_t {
   KernelLocal,
   DirectCall,
   RecoveredIndirectCall,
 };
 
-struct ConSanExecutionOwner {
+struct ExecutionOwner {
   /// Stable kernel handle in the owning ProgramInventory revision.
   ///
   /// Descriptor offsets are physical locations and can change when a prior
@@ -68,21 +68,20 @@ struct ConSanExecutionOwner {
   /// handle prevents analysis products from treating those locations as
   /// cross-revision identities.  Lowering resolves the current descriptor
   /// only when it must read or modify descriptor bytes.
-  ConSanProgramContainerId kernel;
-  ConSanOwnerProofKind proof = ConSanOwnerProofKind::KernelLocal;
+  ProgramContainerId kernel;
+  OwnerProofKind proof = OwnerProofKind::KernelLocal;
 
-  bool operator==(const ConSanExecutionOwner &) const = default;
+  bool operator==(const ExecutionOwner &) const = default;
 };
 
-[[nodiscard]] inline bool consan_execution_owners_equal(std::span<const ConSanExecutionOwner> lhs,
-                                                        std::span<const ConSanExecutionOwner> rhs) {
+[[nodiscard]] inline bool execution_owners_equal(std::span<const ExecutionOwner> lhs,
+                                                 std::span<const ExecutionOwner> rhs) {
   return std::ranges::equal(lhs, rhs);
 }
 
-[[nodiscard]] inline bool
-consan_nonempty_execution_owners_equal(std::span<const ConSanExecutionOwner> lhs,
-                                       std::span<const ConSanExecutionOwner> rhs) {
-  return !lhs.empty() && consan_execution_owners_equal(lhs, rhs);
+[[nodiscard]] inline bool nonempty_execution_owners_equal(std::span<const ExecutionOwner> lhs,
+                                                          std::span<const ExecutionOwner> rhs) {
+  return !lhs.empty() && execution_owners_equal(lhs, rhs);
 }
 
 /// Owned presentation snapshot for one currently injectable instruction.
@@ -90,8 +89,8 @@ consan_nonempty_execution_owners_equal(std::span<const ConSanExecutionOwner> lhs
 /// This is a diagnostic product, not the analysis representation. The live
 /// fault inventory retains a source-site handle and derives these facts from
 /// ProgramInventory when diagnostics are published.
-struct ConSanFaultSitePresentation : ConSanDecodedSite {
-  ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
+struct FaultSitePresentation : DecodedSite {
+  FaultSiteKind kind = FaultSiteKind::Barrier;
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
@@ -99,13 +98,13 @@ struct ConSanFaultSitePresentation : ConSanDecodedSite {
   uint32_t width_bits = 0;
   std::string semantic_role;
   std::string decoded_operands;
-  ConSanOrdinaryMemorySupportReason ordinary_memory_support_reason =
-      ConSanOrdinaryMemorySupportReason::NotApplicable;
-  ConSanSemanticConfidence sync_confidence = ConSanSemanticConfidence::Unsupported;
-  ConSanSyncMemoryRole sync_memory_role = ConSanSyncMemoryRole::Unknown;
-  std::vector<ConSanExecutionOwner> execution_owners;
+  OrdinaryMemorySupportReason ordinary_memory_support_reason =
+      OrdinaryMemorySupportReason::NotApplicable;
+  SemanticConfidence sync_confidence = SemanticConfidence::Unsupported;
+  SyncMemoryRole sync_memory_role = SyncMemoryRole::Unknown;
+  std::vector<ExecutionOwner> execution_owners;
 
-  bool operator==(const ConSanFaultSitePresentation &) const = default;
+  bool operator==(const FaultSitePresentation &) const = default;
 };
 
 /// A currently injectable facet of one authoritative program site.
@@ -114,17 +113,17 @@ struct ConSanFaultSitePresentation : ConSanDecodedSite {
 /// synchronization semantics remain owned by ProgramInventory. Keeping only
 /// selection identity and irreducible target state here prevents the fault
 /// planner from becoming a second program representation.
-struct ConSanFaultSite {
-  ConSanFaultSiteKind kind = ConSanFaultSiteKind::Barrier;
+struct FaultSite {
+  FaultSiteKind kind = FaultSiteKind::Barrier;
   std::string identity;
   uint32_t occurrence = 0;
   /// Exact decoded instruction from which this injectable projection was
   /// derived.
-  ConSanProgramSiteId source_site;
+  ProgramSiteId source_site;
   /// Target-defined selectable-bank state at this instruction.
   std::optional<uint16_t> selectable_vgpr_bank_mode;
 
-  bool operator==(const ConSanFaultSite &) const = default;
+  bool operator==(const FaultSite &) const = default;
 };
 
 /// Stable presentation facts for one selected validation-only corruption.
@@ -132,31 +131,31 @@ struct ConSanFaultSite {
 /// These fields describe the externally meaningful choice. Planning refines
 /// them with source binding and exact application proof below, while runtime
 /// diagnostics copy this facet without acquiring those mutation authorities.
-struct ConSanFaultMutationPresentation {
-  ConSanFaultMutationKind kind = ConSanFaultMutationKind::DropBarrier;
+struct FaultMutationPresentation {
+  FaultMutationKind kind = FaultMutationKind::DropBarrier;
   std::string primary_identity;
   std::optional<std::string> companion_identity;
   std::optional<std::string> logical_sequence_identity;
   std::vector<std::string> ordered_member_identities;
   std::optional<std::string> destination_identity;
-  ConSanBarrierMoveDirection barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker;
-  ConSanBarrierMoveCfgContract barrier_move_cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
+  BarrierMoveDirection barrier_move_direction = BarrierMoveDirection::LegacyMarker;
+  BarrierMoveCfgContract barrier_move_cfg_contract = BarrierMoveCfgContract::SameBlock;
   std::optional<int32_t> original_barrier_id;
   std::optional<int32_t> target_barrier_id;
-  ConSanBarrierSite::Scope original_barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  ConSanBarrierSite::Scope target_barrier_scope = ConSanBarrierSite::Scope::Unknown;
+  BarrierSite::Scope original_barrier_scope = BarrierSite::Scope::Unknown;
+  BarrierSite::Scope target_barrier_scope = BarrierSite::Scope::Unknown;
   std::optional<uint16_t> target_address_vgpr;
 
-  bool operator==(const ConSanFaultMutationPresentation &) const = default;
+  bool operator==(const FaultMutationPresentation &) const = default;
 };
 
 /// Diagnostic description of one validation-only corruption admitted by the
 /// private resolution-and-mutation transaction.
-struct ConSanFaultMutationPlan : ConSanFaultMutationPresentation {
-  bool operator==(const ConSanFaultMutationPlan &) const = default;
+struct FaultMutationPlan : FaultMutationPresentation {
+  bool operator==(const FaultMutationPlan &) const = default;
 };
 
-enum class ConSanBarrierMoveDestinationIssue : uint8_t {
+enum class BarrierMoveDestinationIssue : uint8_t {
   None,
   InsideScalarClause,
   BarrierSourceOrLifecycle,
@@ -166,50 +165,49 @@ enum class ConSanBarrierMoveDestinationIssue : uint8_t {
   Count,
 };
 
-[[nodiscard]] std::string
-consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue issue,
-                                              std::string_view detail = {});
+[[nodiscard]] std::string barrier_move_destination_issue_message(BarrierMoveDestinationIssue issue,
+                                                                 std::string_view detail = {});
 
 /// Stable presentation facts for a real-instruction barrier-move destination.
 ///
 /// Synchronization analysis adds the private code-object binding below;
 /// runtime diagnostics copy this facet directly and cannot apply a move.
-struct ConSanBarrierMoveDestinationPresentation : ConSanDecodedSite {
+struct BarrierMoveDestinationPresentation : DecodedSite {
   std::string identity;
   std::string container_name;
   bool in_kernel = true;
   uint32_t basic_block_index = 0;
   bool memory_operation = false;
-  ConSanBarrierMoveDestinationIssue issue = ConSanBarrierMoveDestinationIssue::None;
+  BarrierMoveDestinationIssue issue = BarrierMoveDestinationIssue::None;
   /// Decoder/relocator detail attached only to `NotRelocatable`. The stable
   /// semantic decision remains the typed issue above.
   std::string issue_detail;
-  ConSanBarrierMoveCfgContract cfg_contract = ConSanBarrierMoveCfgContract::SameBlock;
+  BarrierMoveCfgContract cfg_contract = BarrierMoveCfgContract::SameBlock;
   /// Present only for a narrowly proven acyclic structured CFG contract.
   std::optional<uint32_t> structured_guard_block_index;
   std::optional<uint32_t> structured_source_block_index;
   std::optional<uint64_t> structured_guard_offset;
   std::optional<uint64_t> structured_source_offset;
-  std::vector<ConSanExecutionOwner> execution_owners;
+  std::vector<ExecutionOwner> execution_owners;
 
-  [[nodiscard]] bool suitable() const { return issue == ConSanBarrierMoveDestinationIssue::None; }
-  bool operator==(const ConSanBarrierMoveDestinationPresentation &) const = default;
+  [[nodiscard]] bool suitable() const { return issue == BarrierMoveDestinationIssue::None; }
+  bool operator==(const BarrierMoveDestinationPresentation &) const = default;
 };
 
 /// Selection and diagnostics consume the same complete destination facts;
 /// code-object identity is already carried by the owning program inventory.
-using ConSanBarrierMoveDestination = ConSanBarrierMoveDestinationPresentation;
+using BarrierMoveDestination = BarrierMoveDestinationPresentation;
 
 /// Semantic category shared by a decoded synchronization event and every
 /// logical sequence derived from it.
-enum class ConSanSyncKind : uint8_t {
+enum class SyncKind : uint8_t {
   Barrier,
   Fence,
   Atomic,
   OrdinaryMemory,
 };
 
-enum class ConSanSyncOperation : uint8_t {
+enum class SyncOperation : uint8_t {
   Unknown,
   BarrierSignal,
   BarrierWait,
@@ -226,7 +224,7 @@ enum class ConSanSyncOperation : uint8_t {
   OrdinaryStore,
 };
 
-enum class ConSanSyncAddressSource : uint8_t {
+enum class SyncAddressSource : uint8_t {
   NotApplicable,
   Unknown,
   LdsVector,
@@ -236,7 +234,7 @@ enum class ConSanSyncAddressSource : uint8_t {
   ScratchVector,
 };
 
-enum class ConSanSyncRmwOutcome : uint8_t {
+enum class SyncRmwOutcome : uint8_t {
   NotApplicable,
   Unknown,
   NoReturn,
@@ -246,8 +244,8 @@ enum class ConSanSyncRmwOutcome : uint8_t {
 
 /// Returns the weaker of two semantic claims. Association must never improve
 /// the confidence of an input event.
-[[nodiscard]] constexpr ConSanSemanticConfidence
-combine_consan_sync_confidence(ConSanSemanticConfidence lhs, ConSanSemanticConfidence rhs) {
+[[nodiscard]] constexpr SemanticConfidence combine_sync_confidence(SemanticConfidence lhs,
+                                                                   SemanticConfidence rhs) {
   return static_cast<uint8_t>(lhs) >= static_cast<uint8_t>(rhs) ? lhs : rhs;
 }
 
@@ -255,18 +253,18 @@ combine_consan_sync_confidence(ConSanSemanticConfidence lhs, ConSanSemanticConfi
 /// sequence derived from it. Sequence association may refine this value, but
 /// never maintains a second field vocabulary or projects its members one fact
 /// at a time.
-struct ConSanSyncSemantics {
-  ConSanSyncKind kind = ConSanSyncKind::Fence;
-  ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
-  ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;
-  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
-  ConSanSyncRmwOutcome rmw_outcome = ConSanSyncRmwOutcome::NotApplicable;
-  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  ConSanSemanticConfidence memory_role_confidence = ConSanSemanticConfidence::Unsupported;
+struct SyncSemantics {
+  SyncKind kind = SyncKind::Fence;
+  SyncOperation operation = SyncOperation::Unknown;
+  SyncAddressSource address_source = SyncAddressSource::NotApplicable;
+  SyncMemoryRole memory_role = SyncMemoryRole::Unknown;
+  SyncRmwOutcome rmw_outcome = SyncRmwOutcome::NotApplicable;
+  SemanticConfidence confidence = SemanticConfidence::Unsupported;
+  SemanticConfidence memory_role_confidence = SemanticConfidence::Unsupported;
   std::string confidence_reason;
-  std::optional<ConSanMemoryScope> scope;
+  std::optional<MemoryScope> scope;
 
-  bool operator==(const ConSanSyncSemantics &) const = default;
+  bool operator==(const SyncSemantics &) const = default;
 };
 
 /// Stable handle into one immutable synchronization-event arena.
@@ -275,43 +273,43 @@ struct ConSanSyncSemantics {
 /// instead of copying content-stable code-object identities onto every edge.
 /// Stable semantic identities remain on events for diagnostics, mutation
 /// selection, and other boundaries that outlive one inventory revision.
-struct ConSanSyncEventId {
+struct SyncEventId {
   static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
   uint32_t ordinal = kInvalidOrdinal;
 
   [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
 
-  auto operator<=>(const ConSanSyncEventId &) const = default;
+  auto operator<=>(const SyncEventId &) const = default;
 };
 
 /// Stable handle into one immutable synchronization-sequence arena.
-struct ConSanSyncSequenceId {
+struct SyncSequenceId {
   static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
   uint32_t ordinal = kInvalidOrdinal;
 
   [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
 
-  auto operator<=>(const ConSanSyncSequenceId &) const = default;
+  auto operator<=>(const SyncSequenceId &) const = default;
 };
 
 /// Published unique-sequence membership for one synchronization event.
 /// Missing membership has an invalid sequence; ambiguous membership retains
 /// that distinction so consumers fail closed without rescanning the graph.
-struct ConSanSyncSequenceMembership {
-  ConSanSyncSequenceId sequence;
+struct SyncSequenceMembership {
+  SyncSequenceId sequence;
   bool ambiguous = false;
 };
 
-/// Flavor-independent decoded synchronization semantics. Unknown information
+/// Mode-independent decoded synchronization semantics. Unknown information
 /// stays explicit so later sequence association cannot silently invent it.
-struct ConSanSyncEvent : ConSanSyncSemantics {
+struct SyncEvent : SyncSemantics {
   /// Stable original-program identity shared by every symbol alias that
   /// decodes this same physical synchronization instruction.
   SemanticSiteId semantic_id;
   /// Exact source record from which synchronization analysis derived this
   /// event. Unlike container/name/offset joins, this remains unambiguous when
   /// several symbols alias one physical instruction.
-  ConSanProgramSiteId source_site;
+  ProgramSiteId source_site;
   std::string identity;
   /// Original text position is part of the event's canonical physical
   /// identity. Keeping a second mutable copy allowed the two identities to
@@ -322,7 +320,7 @@ struct ConSanSyncEvent : ConSanSyncSemantics {
 /// A logical synchronization operation associated from one or more decoded
 /// events. Member identities stay ordered and the sequence confidence cannot
 /// exceed its least-certain member.
-struct ConSanSyncSequence : ConSanSyncSemantics {
+struct SyncSequence : SyncSemantics {
   std::string identity;
   uint64_t begin_text_offset = 0;
   uint64_t end_text_offset = 0;
@@ -340,7 +338,7 @@ struct ConSanSyncSequence : ConSanSyncSemantics {
   bool in_cyclic_cfg_component = false;
   bool inside_scalar_clause = false;
   /// Exact scalar-clause instruction covering the addressed communication
-  /// instruction, when one exists. Engines that replace the communication
+  /// instruction, when one exists. Modes that replace the communication
   /// instruction with a trampoline must neutralize this scheduling hint: an
   /// s_clause may not have a control-flow instruction inserted between it and
   /// the memory operations that it covers.
@@ -348,11 +346,10 @@ struct ConSanSyncSequence : ConSanSyncSemantics {
   /// Inventory-local handles of the original synchronization events in
   /// semantic order. Stable names are resolved only at presentation and
   /// mutation-selection boundaries.
-  std::vector<ConSanSyncEventId> member_event_ids;
+  std::vector<SyncEventId> member_event_ids;
   std::optional<int32_t> barrier_id;
-  ConSanBarrierSite::OperandSource barrier_operand_source =
-      ConSanBarrierSite::OperandSource::Unknown;
-  ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
+  BarrierSite::OperandSource barrier_operand_source = BarrierSite::OperandSource::Unknown;
+  BarrierSite::Scope barrier_scope = BarrierSite::Scope::Unknown;
   std::optional<uint32_t> participant_count;
   std::optional<uint64_t> participant_mask;
 };
@@ -360,12 +357,12 @@ struct ConSanSyncSequence : ConSanSyncSemantics {
 /// Analysis outcome for associating one cache/fence instruction with an
 /// address-bearing synchronization sequence.
 ///
-/// This is an inventory fact, not an engine decision. `Qualified` means that
+/// This is an inventory fact, not an mode decision. `Qualified` means that
 /// shared analysis proved one sequence, one communication event, a compatible
 /// memory role, address source, and scope. Every other value preserves the
 /// first failed invariant. Policy can therefore make a typed disposition
 /// without interpreting human-readable diagnostics or rerunning association.
-enum class ConSanFenceAssociation : uint8_t {
+enum class FenceAssociation : uint8_t {
   /// The fence has one complete addressed communication association.
   Qualified,
   /// The fence has no unique synchronization-sequence membership.
@@ -394,33 +391,33 @@ enum class ConSanFenceAssociation : uint8_t {
 /// synchronization sequence.
 ///
 /// The two typed event identities refer back to the authoritative
-/// `ConSanSyncEvent` inventory. This record deliberately does not copy the
+/// `SyncEvent` inventory. This record deliberately does not copy the
 /// events' container, instruction, address, or scope facts. A qualified record
 /// names the unique address-bearing atomic or ordinary-memory event whose
 /// effective address a later policy may request. Non-qualified records retain
 /// no communication event and remain in inventory so policy can explain why
 /// the fence is outside the observation contract.
-struct ConSanMoiFenceCandidate {
+struct FenceCandidate {
   /// Original cache/fence event being associated.
-  ConSanSyncEventId fence_event;
+  SyncEventId fence_event;
   /// Inventory-local handle of the unique synchronization sequence, when one
   /// exists. Stable text identity is materialized only at external plan and
   /// diagnostic boundaries.
-  ConSanSyncSequenceId sequence;
+  SyncSequenceId sequence;
   /// Unique address-bearing event selected from the sequence when qualified.
-  std::optional<ConSanSyncEventId> communication_event;
+  std::optional<SyncEventId> communication_event;
   /// Release/acquire role contributed by this fence within the sequence.
-  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
+  SyncMemoryRole memory_role = SyncMemoryRole::Unknown;
   /// Typed result of shared sequence association.
-  ConSanFenceAssociation association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
+  FenceAssociation association = FenceAssociation::MissingOrAmbiguousSequence;
 
   /// Return whether all analysis-owned association invariants were proved.
   [[nodiscard]] constexpr bool eligible() const {
-    return association == ConSanFenceAssociation::Qualified;
+    return association == FenceAssociation::Qualified;
   }
 };
 
-enum class ConSanBarrierLifecycleIssue : uint8_t {
+enum class BarrierLifecycleIssue : uint8_t {
   None,
   InitMissingStaticIdOrScope,
   NonContiguousRun,
@@ -432,8 +429,7 @@ enum class ConSanBarrierLifecycleIssue : uint8_t {
   Count,
 };
 
-[[nodiscard]] std::string_view
-consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue);
+[[nodiscard]] std::string_view barrier_lifecycle_issue_message(BarrierLifecycleIssue issue);
 
 /// A contiguous, statically associated barrier lifecycle retained in semantic
 /// inventory.
@@ -445,30 +441,32 @@ consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue);
 /// later policy can explain the unsupported lifecycle without rediscovery.
 /// The initialization member remains authoritative for the lifecycle's stable
 /// name, source container, barrier ID, and scope.
-struct ConSanBarrierLifecycleGroup {
+struct BarrierLifecycleGroup {
   /// Inventory-local handles of every event in lifecycle order.
-  std::vector<ConSanSyncEventId> member_event_ids;
-  ConSanBarrierLifecycleIssue issue = ConSanBarrierLifecycleIssue::Count;
+  std::vector<SyncEventId> member_event_ids;
+  BarrierLifecycleIssue issue = BarrierLifecycleIssue::Count;
 
-  [[nodiscard]] bool admissible() const { return issue == ConSanBarrierLifecycleIssue::None; }
+  [[nodiscard]] bool admissible() const { return issue == BarrierLifecycleIssue::None; }
 };
 
 /// Checks the non-instruction metadata required before an ordinary load and
 /// `global_inv` may form a conservative acquire sequence. Exposed for bounded
 /// corruption tests; production association additionally proves the exact
 /// intervening instruction run.
-[[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
-    const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence);
+[[nodiscard]] bool ordinary_acquire_metadata_compatible(std::span<const ProgramSite> program_sites,
+                                                        const SyncEvent &load,
+                                                        const SyncSequence &load_sequence,
+                                                        const SyncEvent &cache,
+                                                        const SyncSequence &cache_sequence);
 
 /// Checks the non-instruction metadata required before a `global_wb` and
 /// ordinary store may form a conservative release sequence. Production
 /// association additionally proves one exact same-block instruction run.
-[[nodiscard]] bool consan_ordinary_release_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence, const ConSanSyncEvent &store,
-    const ConSanSyncSequence &store_sequence);
+[[nodiscard]] bool ordinary_release_metadata_compatible(std::span<const ProgramSite> program_sites,
+                                                        const SyncEvent &cache,
+                                                        const SyncSequence &cache_sequence,
+                                                        const SyncEvent &store,
+                                                        const SyncSequence &store_sequence);
 
 /// One admitted sequence boundary. The anchor remains an original sequence
 /// member: release delays are placed before the first member and acquire

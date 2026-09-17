@@ -16,7 +16,7 @@
 #include <span>
 #include <vector>
 
-namespace rocjitsu::consan_detail {
+namespace rocjitsu::consan::detail {
 
 /// Canonical structural inputs used to recover basic blocks for one ConSan
 /// program inventory.
@@ -27,7 +27,7 @@ namespace rocjitsu::consan_detail {
 /// kernel rather than claiming its blocks. `code_ranges` bounds decoding to
 /// parsed function symbols and already-applied transform bodies. All offset
 /// vectors are sorted and unique, and empty code ranges are omitted.
-struct ConSanCfgBuildInputs {
+struct CfgBuildInputs {
   /// Every known entry at which basic-block recovery must begin.
   std::vector<uint64_t> leaders;
   /// Kernel entries that form ownership boundaries during scope recovery.
@@ -44,21 +44,20 @@ struct ConSanCfgBuildInputs {
 /// its body is empty; only a nonempty body becomes a decoding range. Keeping
 /// that rule here prevents composition, ownership, and resource planning from
 /// recovering subtly different graphs for the same image.
-[[nodiscard]] inline ConSanCfgBuildInputs
-build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
-                        std::span<const ConSanProgramContainer> containers,
-                        std::span<const ConSanPreappliedCodeRange> preapplied_ranges = {}) {
-  ConSanCfgBuildInputs result;
+[[nodiscard]] inline CfgBuildInputs
+build_cfg_inputs(const AmdGpuCodeObject &code_object, std::span<const ProgramContainer> containers,
+                 std::span<const PreappliedCodeRange> preapplied_ranges = {}) {
+  CfgBuildInputs result;
   result.leaders.reserve(containers.size() + 2u * preapplied_ranges.size());
   result.kernel_entries.reserve(containers.size());
-  for (const ConSanProgramContainer &container : containers) {
+  for (const ProgramContainer &container : containers) {
     if (container.is_kernel() && !container.has_text_range)
       continue;
     result.leaders.push_back(container.entry_text_offset);
     if (container.is_kernel())
       result.kernel_entries.push_back(container.entry_text_offset);
   }
-  for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+  for (const PreappliedCodeRange &range : preapplied_ranges) {
     result.leaders.push_back(range.text_offset);
     if (range.continuation_text_offset)
       result.leaders.push_back(*range.continuation_text_offset);
@@ -76,7 +75,7 @@ build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
           {.start_offset = function.entry_text_offset, .size = function.code_size});
     }
   }
-  for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+  for (const PreappliedCodeRange &range : preapplied_ranges) {
     if (range.size != 0u)
       result.code_ranges.push_back({.start_offset = range.text_offset, .size = range.size});
   }
@@ -90,11 +89,12 @@ build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
 /// boundaries. When function containers exist, or no selection was requested,
 /// this returns the ordinary complete input set: ownership through a shared
 /// helper must be established before any sibling kernel can be discarded.
-[[nodiscard]] inline ConSanCfgBuildInputs build_consan_cfg_inputs_for_selection(
-    const AmdGpuCodeObject &code_object, std::span<const ConSanProgramContainer> containers,
-    std::span<const ConSanPreappliedCodeRange> preapplied_ranges, const ConSanRequest &request,
-    const ConSanDebugOverrides &debug) {
-  ConSanCfgBuildInputs result = build_consan_cfg_inputs(code_object, containers, preapplied_ranges);
+[[nodiscard]] inline CfgBuildInputs
+build_cfg_inputs_for_selection(const AmdGpuCodeObject &code_object,
+                               std::span<const ProgramContainer> containers,
+                               std::span<const PreappliedCodeRange> preapplied_ranges,
+                               const Request &request, const DebugOverrides &debug) {
+  CfgBuildInputs result = build_cfg_inputs(code_object, containers, preapplied_ranges);
   const bool has_selection =
       !request.kernel_name_allowlist.empty() || !debug.test_kernel_name_filter.empty();
   const bool has_function_container =
@@ -106,9 +106,9 @@ build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
   result.code_ranges.clear();
   result.leaders.reserve(containers.size() + 2u * preapplied_ranges.size());
   result.code_ranges.reserve(containers.size() + preapplied_ranges.size());
-  for (const ConSanProgramContainer &kernel : containers) {
+  for (const ProgramContainer &kernel : containers) {
     if (!kernel.is_kernel() || !kernel.has_text_range ||
-        !consan_container_selected(request, debug, kernel.name)) {
+        !container_selected(request, debug, kernel.name)) {
       continue;
     }
     result.leaders.push_back(kernel.entry_text_offset);
@@ -116,7 +116,7 @@ build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
       result.code_ranges.push_back(
           {.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
   }
-  for (const ConSanPreappliedCodeRange &range : preapplied_ranges) {
+  for (const PreappliedCodeRange &range : preapplied_ranges) {
     result.leaders.push_back(range.text_offset);
     if (range.continuation_text_offset)
       result.leaders.push_back(*range.continuation_text_offset);
@@ -128,4 +128,4 @@ build_consan_cfg_inputs(const AmdGpuCodeObject &code_object,
   return result;
 }
 
-} // namespace rocjitsu::consan_detail
+} // namespace rocjitsu::consan::detail

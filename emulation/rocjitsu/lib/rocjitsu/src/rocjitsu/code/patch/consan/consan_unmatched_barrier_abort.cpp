@@ -13,35 +13,34 @@
 #include <utility>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 struct UnmatchedBarrierWait {
-  const ConSanBarrierSite *site = nullptr;
+  const BarrierSite *site = nullptr;
   std::optional<uint64_t> owner_descriptor_file_offset;
 };
 
-void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSanRequest &request,
-                                   const ConSanDebugOverrides &debug,
-                                   const ProgramInventory &inventory,
+void append_unmatched_barrier_wait(const ProgramSite &decoded, const Request &request,
+                                   const DebugOverrides &debug, const ProgramInventory &inventory,
                                    std::vector<UnmatchedBarrierWait> &waits) {
-  const ConSanBarrierSite *site = decoded.get_if<ConSanBarrierSite>();
-  const ConSanProgramContainer *container = inventory.container(decoded.container);
+  const BarrierSite *site = decoded.get_if<BarrierSite>();
+  const ProgramContainer *container = inventory.container(decoded.container);
   if (site == nullptr || container == nullptr ||
-      !consan_container_selected(request, debug, container->name))
+      !container_selected(request, debug, container->name))
     return;
   const SynchronizationInventoryView synchronization = inventory.sync();
-  if (site->operation != ConSanBarrierSite::Operation::Wait || site->size != sizeof(uint32_t) ||
-      !site->barrier_id || site->operand_source != ConSanBarrierSite::OperandSource::Immediate)
+  if (site->operation != BarrierSite::Operation::Wait || site->size != sizeof(uint32_t) ||
+      !site->barrier_id || site->operand_source != BarrierSite::OperandSource::Immediate)
     return;
-  const ConSanSyncEvent *event = synchronization.find_event(decoded.id);
-  if (event == nullptr || event->operation != ConSanSyncOperation::BarrierWait ||
+  const SyncEvent *event = synchronization.find_event(decoded.id);
+  if (event == nullptr || event->operation != SyncOperation::BarrierWait ||
       synchronization.source(*event) != &decoded)
     return;
-  const ConSanSyncEventId member_identity = synchronization.event_id(*event);
+  const SyncEventId member_identity = synchronization.event_id(*event);
   const bool belongs_to_sequence =
-      std::ranges::any_of(synchronization.sync_sequences, [&](const ConSanSyncSequence &sequence) {
-        return sequence.kind == ConSanSyncKind::Barrier && sequence.member_event_ids.size() > 1u &&
+      std::ranges::any_of(synchronization.sync_sequences, [&](const SyncSequence &sequence) {
+        return sequence.kind == SyncKind::Barrier && sequence.member_event_ids.size() > 1u &&
                std::ranges::find(sequence.member_event_ids, member_identity) !=
                    sequence.member_event_ids.end();
       });
@@ -54,15 +53,14 @@ void append_unmatched_barrier_wait(const ConSanProgramSite &decoded, const ConSa
 } // namespace
 
 void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanRequest &request,
-                                            const ConSanDebugOverrides &debug,
+                                            const Request &request, const DebugOverrides &debug,
                                             const MutationRequest &mutation,
                                             const TransformPolicy &transform_policy,
-                                            ConSanTransformArtifacts &result) {
+                                            TransformArtifacts &result) {
   if (!debug.abort_unmatched_barrier_wait || mutation.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
-  for (const ConSanProgramSite &site : result.program_inventory.program_sites())
+  for (const ProgramSite &site : result.program_inventory.program_sites())
     append_unmatched_barrier_wait(site, request, debug, result.program_inventory, waits);
   if (waits.empty())
     return;
@@ -73,23 +71,22 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
     return;
   const uint32_t abort_word = build_s_endpgm(arch);
-  std::vector<ConSanTextFragment> fragments;
+  std::vector<TextFragment> fragments;
   fragments.reserve(waits.size());
   for (const UnmatchedBarrierWait &wait : waits) {
-    const ConSanBarrierSite &site = *wait.site;
-    ConSanPatchInfo patch;
-    patch.kind = ConSanPatchKind::InlineMalformedBarrierAbort;
+    const BarrierSite &site = *wait.site;
+    PatchInfo patch;
+    patch.kind = PatchKind::InlineMalformedBarrierAbort;
     patch.anchor_offset = site.text_offset;
     patch.trampoline_offset = site.text_offset;
     patch.original_size = site.size;
     if (wait.owner_descriptor_file_offset)
       patch.owner_descriptor_file_offsets.push_back(*wait.owner_descriptor_file_offset);
-    fragments.push_back(ConSanTextFragment::replacement({abort_word}, std::move(patch)));
+    fragments.push_back(TextFragment::replacement({abort_word}, std::move(patch)));
   }
-  if (!stage_consan_text_fragments(std::move(fragments), result) ||
-      !finalize_consan_text_rewrites(active_bytes, arch,
-                                     transform_policy.patched_image_growth_limit,
-                                     "unmatched barrier abort", result)) {
+  if (!stage_text_fragments(std::move(fragments), result) ||
+      !finalize_text_rewrites(active_bytes, arch, transform_policy.patched_image_growth_limit,
+                              "unmatched barrier abort", result)) {
     result.discard_candidate_modification();
     return;
   }
@@ -97,4 +94,4 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
                                " statically unmatched barrier wait(s)");
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

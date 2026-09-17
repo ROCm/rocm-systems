@@ -13,8 +13,10 @@
 #include <string_view>
 
 namespace rocjitsu {
-
 class Instruction;
+}
+
+namespace rocjitsu::consan {
 
 [[nodiscard]] bool starts_with_any(std::string_view value,
                                    std::initializer_list<std::string_view> prefixes);
@@ -22,10 +24,10 @@ class Instruction;
 [[nodiscard]] bool is_ds_read(std::string_view mnemonic);
 [[nodiscard]] bool is_ds_write(std::string_view mnemonic);
 [[nodiscard]] bool is_ds_register_lane_operation(std::string_view mnemonic);
-[[nodiscard]] ConSanLdsAccessKind lds_access_kind(std::string_view mnemonic);
-[[nodiscard]] ConSanLdsAccessKind flat_access_kind(std::string_view mnemonic);
+[[nodiscard]] LdsAccessKind lds_access_kind(std::string_view mnemonic);
+[[nodiscard]] LdsAccessKind flat_access_kind(std::string_view mnemonic);
 [[nodiscard]] uint32_t lds_width_bits(std::string_view mnemonic);
 [[nodiscard]] bool is_fence_like(std::string_view mnemonic);
 [[nodiscard]] bool is_atomic_instruction(const Instruction &instruction);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -9,7 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 
-namespace rocjitsu::consan_sc_target_detail {
+namespace rocjitsu::consan::supercollider_target_detail {
 
 std::optional<std::array<uint32_t, 3>>
 build_rdna3_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_bits,
@@ -41,4 +41,4 @@ build_rdna3_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_b
   return words;
 }
 
-} // namespace rocjitsu::consan_sc_target_detail
+} // namespace rocjitsu::consan::supercollider_target_detail

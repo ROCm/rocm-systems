@@ -30,7 +30,7 @@ __global__ __launch_bounds__(256) void tree_atomic_or_for_consan(DeviceState *st
 
   // Waves 1, 2, and 3 deliberately race to publish distinct release edges
   // through one direct-mapped atomic object. This is the small checked-in
-  // form of the concurrent producer pattern in Hip-MOI's Stream-K tree E2E
+  // form of the concurrent producer pattern in Hip-ConSan's Stream-K tree E2E
   // workload. The final wave must not turn ordinary publication contention
   // into ConSan overflow or lose any producer's causal edge.
   if (wave != 0u) {
@@ -47,7 +47,7 @@ __global__ __launch_bounds__(256) void tree_atomic_or_for_consan(DeviceState *st
     uint32_t sum = 0u;
 #pragma clang loop unroll(disable)
     for (uint32_t rank = 0; rank < state->wave_count; ++rank) {
-      // Visit a different wave's cell first. Sampled tracks one dynamic cell
+      // Visit a different wave's cell first. ConSan tracks one dynamic cell
       // at this static load site, so leading with the reader's own cell would
       // hide the intentionally unordered pair in the incorrect workload.
       const uint32_t producer = (rank + 1u) % state->wave_count;

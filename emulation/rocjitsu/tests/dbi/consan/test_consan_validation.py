@@ -34,7 +34,6 @@ import consan_sharktank_validation as sharktank_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
 from consan_validation_test_support import temporary_root
 
-
 TEST_CODE_OBJECT_FINGERPRINT = "fnv1a64:3833562345afa454"
 
 
@@ -50,24 +49,23 @@ class NativeGtestTargetExpectation:
     d128_block_fault_uses_oracle: bool = False
 
 
-def moi_auto_report(
+def auto_report(
     reader: int,
     generation: int,
     *,
     diagnostics: int = 0,
-    visible_records: int = 1,
-    visible_barriers: int = 0,
-    diagnostic_capacity: int = 1,
+    visible: int = 1,
+    visible_sync: int = 0,
     code_object_fingerprint: str = TEST_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     return (
-        f"ConSan MOI auto report reader={reader} addr=0x1000 bytes=4096 "
+        f"ConSan auto report reader={reader} addr=0x1000 bytes=4096 "
         f"generation={generation} "
         f"code_object={code_object_fingerprint} "
-        f"diagnostics={diagnostics} visible_records={visible_records} "
-        f"diagnostic_capacity={diagnostic_capacity} "
-        f"visible_barriers={visible_barriers} visible_atomics=0 visible_fences=0 "
-        "sampled_conflicts=0 sampled_immediate_conflicts=0"
+        f"event_counter={visible} diagnostics={diagnostics} "
+        f"watchpoints=1 visible={visible} "
+        f"sync_capacity=1 visible_sync={visible_sync} "
+        "conflicts=0 immediate_conflicts=0"
     )
 
 
@@ -83,17 +81,17 @@ def complete_coverage_log(*extra_lines: str) -> str:
     coverage = " ".join(f"{name}={counts[name]}" for name in _COVERAGE_COUNT_FIELDS)
     return "\n".join(
         (
-            "[rocjitsu-dbi-hooks] ConSan coverage reader=7 flavor=moi "
-            "engine=record_replay analysis_complete=true expert_limit=false "
+            "[rocjitsu-dbi-hooks] ConSan coverage reader=7 mode=default "
+            "analysis_complete=true expert_limit=false "
             f"{coverage}",
             "[rocjitsu-dbi-hooks] ConSan analysis verdict applicable=true "
             "analysis_complete=true static_complete=true dynamic_complete=true "
             "applicable_code_objects=1 incomplete_code_objects=0 "
             "access=1/1 barrier=0/0 atomic=0/0 fence=0/0 "
-            "dynamic_incomplete=0 replay_unsupported_access=0 "
-            "replay_unsupported_atomics=0 replay_unsupported_fences=0 "
-            "replay_metadata_full=0",
-            moi_auto_report(7, 1),
+            "dynamic_incomplete=0 "
+            ""
+            "",
+            auto_report(7, 1),
             *extra_lines,
         )
     )
@@ -122,86 +120,6 @@ def fault_reservation_evidence(
         "not_requested_records": 0,
         "unattributed_attempts": unattributed_attempts,
     }
-
-
-def moi_auto_replay(
-    reader: int,
-    generation: int,
-    diagnostics: int,
-    *,
-    conflict: bool | None = None,
-    metadata_full: bool = False,
-    capacity_exhausted: bool = False,
-    diagnostic_capacity: int = 1,
-    replay_input_access: int | None = None,
-    replay_scratch_diagnostic_capacity: int | None = None,
-    provenance_repaired: int = 0,
-    provenance_unresolved: int = 0,
-    code_object_fingerprint: str = TEST_CODE_OBJECT_FINGERPRINT,
-) -> str:
-    if conflict is None:
-        conflict = diagnostics != 0
-    scratch_capacity = (
-        ""
-        if replay_scratch_diagnostic_capacity is None
-        else "replay_scratch_diagnostic_capacity="
-        f"{replay_scratch_diagnostic_capacity} "
-    )
-    replay_input = (
-        ""
-        if replay_input_access is None
-        else f"replay_input_access={replay_input_access} "
-    )
-    return (
-        f"ConSan MOI auto replay reader={reader} generation={generation} "
-        f"code_object={code_object_fingerprint} diagnostics={diagnostics} "
-        f"{replay_input}"
-        f"conflict={'true' if conflict else 'false'} "
-        f"metadata_full={'true' if metadata_full else 'false'} "
-        "diagnostic_capacity_exhausted="
-        f"{'true' if capacity_exhausted else 'false'} "
-        f"diagnostic_capacity={diagnostic_capacity} "
-        f"{scratch_capacity}"
-        f"provenance_repaired={provenance_repaired} "
-        f"provenance_unresolved={provenance_unresolved}"
-    )
-
-
-def moi_auto_replay_diagnostic(
-    reader: int,
-    report_generation: int,
-    generation: int,
-    index: int,
-    *,
-    code_object_fingerprint: str = TEST_CODE_OBJECT_FINGERPRINT,
-) -> str:
-    return (
-        f"ConSan MOI auto replay diagnostic reader={reader} "
-        f"report_generation={report_generation} generation={generation} "
-        f"code_object={code_object_fingerprint} index={index} kind=1 "
-        "first_owner=1 second_owner=2 "
-        "first_inst=0xfe96c second_inst=0xfe974 "
-        "first_lds_known=true first_lds=[0,4) second_lds=[0,4) "
-        "first_kind=2 second_kind=2"
-    )
-
-
-def assert_current_replay_log(test: unittest.TestCase, log_text: str) -> None:
-    """Assert that test input already carries every producer-owned contract field."""
-    for line in log_text.splitlines():
-        if "ConSan MOI auto replay diagnostic reader=" in line:
-            for field in ("report_generation=", "generation=", "code_object="):
-                test.assertIn(field, line)
-        elif (
-            "ConSan MOI auto replay reader=" in line and " skipped " not in f" {line} "
-        ):
-            for field in (
-                "generation=",
-                "code_object=",
-                "diagnostic_capacity=",
-                "provenance_repaired=",
-            ):
-                test.assertIn(field, line)
 
 
 def create_llama_runtime_fixture(build_root: Path, executable_name: str) -> None:
@@ -386,10 +304,7 @@ class ConSanValidationTest(unittest.TestCase):
             value = int(command[0])
             return value, float(value), command[0]
 
-        runs = [
-            ([str(index)], {}, Path(f"/run-{index}.log"), 1)
-            for index in range(6)
-        ]
+        runs = [([str(index)], {}, Path(f"/run-{index}.log"), 1) for index in range(6)]
         with mock.patch.object(
             validation_execution, "_run_process", side_effect=fake_run_process
         ):
@@ -401,7 +316,7 @@ class ConSanValidationTest(unittest.TestCase):
         workload = validation._effective_workload(
             "gfx1250", validation.WORKLOAD_BY_ID["tensile-sk-mxf4gemm-tdm"]
         )
-        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+        log = complete_coverage_log()
 
         def run_process(command, environment, log_path, timeout, **kwargs):
             del command, environment, timeout, kwargs
@@ -413,7 +328,9 @@ class ConSanValidationTest(unittest.TestCase):
             hook = root / "hook.so"
             hook.write_bytes(b"hook")
             with (
-                mock.patch.object(validation_execution, "_hook_path", return_value=hook),
+                mock.patch.object(
+                    validation_execution, "_hook_path", return_value=hook
+                ),
                 mock.patch.object(
                     validation_execution, "_run_process", side_effect=run_process
                 ),
@@ -425,7 +342,7 @@ class ConSanValidationTest(unittest.TestCase):
                     root,
                     "gfx1250",
                     workload,
-                    "record-replay",
+                    "default",
                     "clean",
                     artifact_root,
                     workload.run_timeout_seconds,
@@ -506,7 +423,7 @@ class ConSanValidationTest(unittest.TestCase):
         coverage = " ".join(f"{name}={counts[name]}" for name in _COVERAGE_COUNT_FIELDS)
         log = "\n".join(
             (
-                "[rocjitsu-dbi-hooks] ConSan coverage reader=1 flavor=moi engine=record_replay "
+                "[rocjitsu-dbi-hooks] ConSan coverage reader=1 mode=default "
                 f"analysis_complete=false expert_limit=false {coverage}",
                 "[rocjitsu-dbi-hooks] ConSan coverage_site reader=1 kind=access "
                 "disposition=unsupported reason=unsupported_mnemonic outcome=unsupported "
@@ -516,9 +433,9 @@ class ConSanValidationTest(unittest.TestCase):
                 "analysis_complete=false "
                 "static_complete=false dynamic_complete=true applicable_code_objects=1 "
                 "incomplete_code_objects=1 access=0/0 barrier=0/0 atomic=0/0 fence=0/0 "
-                "visible_evidence=0 dynamic_incomplete=0 replay_unsupported_access=0 "
-                "replay_unsupported_atomics=0 replay_unsupported_fences=0 "
-                "replay_metadata_full=0",
+                "visible_evidence=0 dynamic_incomplete=0 "
+                ""
+                "",
             )
         )
         summary = validation._coverage_summary(log)
@@ -546,329 +463,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "exit_code": "92",
                 "cause": "patched-image-growth-limit",
             },
-        )
-
-    def test_record_replay_parser_normalizes_producer_output(self) -> None:
-        parsed = validation._parse_record_replay_diagnostic_output(
-            "\n".join(
-                (
-                    moi_auto_report(7, 1),
-                    moi_auto_replay(7, 1, 1, provenance_repaired=1),
-                    moi_auto_replay_diagnostic(7, 1, 99, 0),
-                )
-            )
-        )
-
-        self.assertEqual(parsed.profile, "record-replay")
-        self.assertEqual(parsed.structural_reasons, ())
-        self.assertEqual(parsed.diagnostic_count, 1)
-        self.assertEqual(parsed.sources[0].identity, "reader=7,generation=1")
-        self.assertEqual(
-            dict(parsed.sources[0].artifact_fields)["provenance_repaired"], 1
-        )
-        self.assertEqual(parsed.records[0].signature, "exact-lds-write-write")
-        self.assertEqual(parsed.records[0].first_instruction, 0xFE96C)
-        self.assertEqual(parsed.records[0].second_instruction, 0xFE974)
-        self.assertEqual(parsed.records[0].first_instruction_raw, "0xfe96c")
-        self.assertEqual(parsed.records[0].second_instruction_raw, "0xfe974")
-        self.assertEqual(dict(parsed.records[0].artifact_fields)["generation"], 99)
-
-    def test_diagnostic_output_dispatch_fails_closed(self) -> None:
-        with self.assertRaisesRegex(
-            validation.ValidationError,
-            "no complete diagnostic-output parser for profile: sampled",
-        ):
-            validation._diagnostic_output_summary("", "sampled")
-
-    def test_shared_diagnostic_evaluator_applies_clean_policy(self) -> None:
-        parsed = validation._parse_record_replay_diagnostic_output(
-            "\n".join(
-                (
-                    moi_auto_report(7, 1),
-                    moi_auto_replay(7, 1, 1, provenance_repaired=1),
-                    moi_auto_replay_diagnostic(7, 1, 99, 0),
-                )
-            )
-        )
-
-        clean = validation._evaluate_diagnostic_output(
-            parsed,
-            validation.DiagnosticPolicy.clean(),
-        )
-        self.assertFalse(clean["accepted"])
-        self.assertIn(
-            "replay diagnostics exceed declared maximum: observed=1, maximum=0",
-            clean["reasons"],
-        )
-
-    def test_shared_diagnostic_evaluator_owns_provenance_policy(self) -> None:
-        parsed = validation._parse_record_replay_diagnostic_output(
-            "\n".join(
-                (
-                    moi_auto_report(7, 1),
-                    moi_auto_replay(7, 1, 0, provenance_unresolved=1),
-                )
-            )
-        )
-
-        self.assertIn(
-            "replay provenance unresolved: reader=7,generation=1, count=1",
-            parsed.structural_reasons,
-        )
-        summary = validation._evaluate_diagnostic_output(
-            parsed,
-            validation.DiagnosticPolicy.clean(),
-        )
-        self.assertFalse(summary["accepted"])
-        self.assertIn(
-            "replay provenance unresolved: reader=7,generation=1, count=1",
-            summary["reasons"],
-        )
-
-    def test_ordinary_record_replay_validates_zero_diagnostic_structure(
-        self,
-    ) -> None:
-        valid_log = complete_coverage_log(moi_auto_replay(7, 1, 0))
-        valid = validation._coverage_summary(
-            valid_log,
-            profile="record-replay",
-        )
-        malformed = validation._coverage_summary(
-            valid_log.replace("diagnostic_capacity=1 ", "", 1),
-            profile="record-replay",
-        )
-
-        self.assertTrue(valid["accepted"], valid["reasons"])
-        self.assertEqual(valid["diagnostics"]["policy"]["kind"], "clean")
-        self.assertEqual(valid["diagnostics"]["replay_count"], 0)
-        self.assertFalse(malformed["accepted"])
-        self.assertTrue(
-            any(
-                "replay diagnostic capacity mismatch" in reason
-                for reason in malformed["reasons"]
-            ),
-            malformed["reasons"],
-        )
-
-    def test_record_replay_reports_full_and_clamped_diagnostic_capacities(
-        self,
-    ) -> None:
-        report = moi_auto_report(
-            7,
-            1,
-            visible_records=3,
-            diagnostic_capacity=18794,
-        )
-        valid_log = complete_coverage_log(
-            moi_auto_replay(
-                7,
-                1,
-                0,
-                diagnostic_capacity=18794,
-                replay_input_access=3,
-                replay_scratch_diagnostic_capacity=3,
-            )
-        ).replace(moi_auto_report(7, 1), report)
-        invalid_log = valid_log.replace(
-            "replay_scratch_diagnostic_capacity=3 ",
-            "replay_scratch_diagnostic_capacity=18794 ",
-            1,
-        )
-
-        valid = validation._coverage_summary(valid_log, profile="record-replay")
-        invalid = validation._coverage_summary(invalid_log, profile="record-replay")
-
-        self.assertTrue(valid["accepted"], valid["reasons"])
-        self.assertFalse(invalid["accepted"])
-        self.assertTrue(
-            any(
-                "replay scratch diagnostic capacity mismatch" in reason
-                and "expected=3" in reason
-                for reason in invalid["reasons"]
-            ),
-            invalid["reasons"],
-        )
-
-    def test_ordinary_record_replay_allows_an_empty_report_without_replay(
-        self,
-    ) -> None:
-        summary = validation._coverage_summary(
-            complete_coverage_log().replace("visible_records=1", "visible_records=0"),
-            profile="record-replay",
-        )
-
-        self.assertTrue(summary["accepted"], summary["reasons"])
-        self.assertEqual(summary["diagnostics"]["readers"], {})
-
-    def test_ordinary_record_replay_rejects_replay_for_an_empty_report(
-        self,
-    ) -> None:
-        summary = validation._coverage_summary(
-            complete_coverage_log(moi_auto_replay(7, 1, 0)).replace(
-                "visible_records=1", "visible_records=0"
-            ),
-            profile="record-replay",
-        )
-
-        self.assertFalse(summary["accepted"])
-        self.assertIn(
-            "unexpected replay summaries: reader=7,generation=1",
-            summary["reasons"],
-        )
-
-    def test_record_replay_rejects_duplicate_summary_fields(self) -> None:
-        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
-        for duplicated in (
-            log.replace("diagnostics=0 ", "diagnostics=999 diagnostics=0 ", 1),
-            log.replace(
-                "diagnostics=0 conflict=false",
-                "diagnostics=999 diagnostics=0 conflict=false",
-                1,
-            ),
-        ):
-            with self.subTest(line=duplicated.splitlines()[-1]):
-                summary = validation._coverage_summary(
-                    duplicated, profile="record-replay"
-                )
-                self.assertFalse(summary["accepted"])
-                self.assertTrue(
-                    any(
-                        "duplicate field 'diagnostics'" in reason
-                        for reason in summary["reasons"]
-                    ),
-                    summary["reasons"],
-                )
-
-    def test_record_replay_classifies_report_degradation_messages(self) -> None:
-        messages = {
-            "needs hsa_memory_copy for coarse-grained summary": (
-                "pre-replay report requires hsa_memory_copy: reader=7"
-            ),
-            "hsa_memory_copy failed status=1": (
-                "pre-replay hsa_memory_copy failed: reader=7, status=1"
-            ),
-            "has invalid header magic=0x0 abi=1 header_size=2": (
-                "pre-replay report header invalid: reader=7"
-            ),
-            "has inconsistent ABI-v2 layout": (
-                "pre-replay report layout inconsistent: reader=7"
-            ),
-        }
-        for suffix, expected in messages.items():
-            with self.subTest(suffix=suffix):
-                parsed = validation._parse_record_replay_diagnostic_output(
-                    f"ConSan MOI auto report reader=7 {suffix}"
-                )
-                self.assertIn(expected, parsed.structural_reasons)
-                self.assertNotIn(
-                    "malformed pre-replay diagnostic summary",
-                    parsed.structural_reasons,
-                )
-
-    def test_record_replay_skip_is_one_precise_structural_failure(self) -> None:
-        fixture = (
-            Path(__file__).with_name("fixtures")
-            / "gfx1201_topk_record_replay_current_runtime.log"
-        ).read_text(encoding="utf-8")
-        assert_current_replay_log(self, fixture)
-        replay_line = next(
-            line
-            for line in fixture.splitlines()
-            if "ConSan MOI auto replay reader=" in line
-        )
-        skipped = (
-            "[rocjitsu-dbi-hooks] ConSan MOI auto replay "
-            "reader=725954112 generation=3 "
-            f"code_object={TEST_CODE_OBJECT_FINGERPRINT} skipped "
-            "required_shadow_entries=1048577 limit=1048576"
-        )
-        summary = validation._diagnostic_output_summary(
-            fixture.replace(replay_line, skipped),
-            "record-replay",
-        )
-
-        self.assertFalse(summary["accepted"])
-        replay_reasons = [reason for reason in summary["reasons"] if "replay" in reason]
-        self.assertEqual(
-            replay_reasons,
-            [
-                "replay skipped: reader=725954112,generation=3, "
-                "required_shadow_entries=1048577, limit=1048576"
-            ],
-        )
-
-    def test_record_replay_preserves_malformed_instruction_tokens(self) -> None:
-        parsed = validation._parse_record_replay_diagnostic_output(
-            "\n".join(
-                (
-                    moi_auto_report(7, 1),
-                    moi_auto_replay(7, 1, 1),
-                    moi_auto_replay_diagnostic(7, 1, 1, 0).replace(
-                        "first_inst=0xfe96c", "first_inst=not-an-offset"
-                    ),
-                )
-            )
-        )
-
-        record = validation._diagnostic_record_result(parsed.records[0])
-        self.assertIsNone(record["first_instruction"])
-        self.assertEqual(record["first_instruction_raw"], "not-an-offset")
-
-    def test_non_replay_profiles_do_not_consume_replay_grammar(self) -> None:
-        summary = validation._coverage_summary(
-            complete_coverage_log(),
-            profile="sampled",
-        )
-
-        self.assertTrue(summary["accepted"], summary["reasons"])
-        self.assertNotIn("diagnostics", summary)
-
-    def test_coverage_summary_dispatches_through_diagnostic_registry(self) -> None:
-        parsed = validation.ParsedDiagnosticOutput(
-            profile="sampled",
-            sources=(),
-            records=(),
-            diagnostic_count=0,
-            pre_output_count=0,
-            structural_reasons=(),
-        )
-        parser = mock.Mock(return_value=parsed)
-        with mock.patch.dict(
-            validation.DIAGNOSTIC_OUTPUT_PARSERS,
-            {"sampled": parser},
-            clear=False,
-        ):
-            summary = validation._coverage_summary(
-                complete_coverage_log(),
-                profile="sampled",
-            )
-
-        self.assertTrue(summary["accepted"], summary["reasons"])
-        self.assertIn("diagnostics", summary)
-        parser.assert_called_once()
-
-    def test_diagnostic_policy_requires_qualified_sites(self) -> None:
-        parsed = validation._parse_record_replay_diagnostic_output(
-            "\n".join(
-                (
-                    moi_auto_report(7, 1),
-                    moi_auto_replay(7, 1, 1),
-                    moi_auto_replay_diagnostic(7, 1, 1, 0),
-                )
-            )
-        )
-        summary = validation._evaluate_diagnostic_output(
-            parsed,
-            validation.DiagnosticPolicy(
-                diagnostics=("exact-lds-write-write",),
-                max_diagnostics=1,
-            ),
-        )
-
-        self.assertFalse(summary["accepted"])
-        self.assertIn(
-            "policy declares diagnostics without qualified instruction groups",
-            summary["reasons"],
         )
 
     def test_manifest_is_the_complete_north_star_matrix(self) -> None:
@@ -942,20 +536,18 @@ class ConSanValidationTest(unittest.TestCase):
             with self.subTest(target=target):
                 status = (status_root / filename).read_text()
                 self.assertEqual(status.count("| Set | Priority |"), 1)
-                self.assertEqual(
-                    status.count("|---|---:|---|---|---|---|---|"), 1
-                )
+                self.assertEqual(status.count("| --- | ---: | --- | --- | --- |"), 1)
                 self.assertIn(yellow_rule, status)
                 rows = [
                     line
                     for line in status.splitlines()
                     if line.startswith("| ")
                     and not line.startswith("| Set |")
-                    and not line.startswith("|---")
+                    and not line.startswith("| ---")
                 ]
                 for row in rows:
                     fields = [field.strip() for field in row.strip("|").split("|")]
-                    self.assertEqual(len(fields), 7, row)
+                    self.assertEqual(len(fields), 5, row)
                     for cell in fields[3:]:
                         self.assertEqual(
                             sum(cell.count(color) for color in status_colors), 1, cell
@@ -969,9 +561,7 @@ class ConSanValidationTest(unittest.TestCase):
                             supported = int(match.group(1).replace(",", ""))
                             applicable = int(match.group(2).replace(",", ""))
                             if supported * 5 >= applicable * 4:
-                                self.assertTrue(
-                                    cell.startswith(("🟨", "🟩")), cell
-                                )
+                                self.assertTrue(cell.startswith(("🟨", "🟩")), cell)
 
                 for workload in validation._manifest(target)["workloads"]:
                     marker = f"`{workload['id']}`"
@@ -1016,8 +606,7 @@ class ConSanValidationTest(unittest.TestCase):
             for node in tree.body
             if isinstance(node, ast.Assign)
             and any(
-                isinstance(target, ast.Name)
-                and target.id == "SOFTMAX_REDUCTION_WIDTH"
+                isinstance(target, ast.Name) and target.id == "SOFTMAX_REDUCTION_WIDTH"
                 for target in node.targets
             )
         )
@@ -1072,7 +661,6 @@ class ConSanValidationTest(unittest.TestCase):
             row["command_arguments"], ("-m", "128", "-n", "128", "-k", "128")
         )
         self.assertEqual(row["command_environment"], (("FIXED_ITERATIONS", "1"),))
-        self.assertEqual(row["record_replay_runtime_sample_stride"], 1)
         self.assertEqual(row["fault_families"], ("barrier-drop",))
         self.assertNotIn(
             "hip-matmul-m128-n128-k128",
@@ -1108,15 +696,15 @@ class ConSanValidationTest(unittest.TestCase):
                 )
         with mock.patch.dict(os.environ, {}, clear=True):
             environment = validation._clean_environment(
-                "record-replay",
+                "default",
                 workload,
                 Path("/hook.so"),
                 "gfx950",
                 workspace,
             )
         self.assertEqual(environment["FIXED_ITERATIONS"], "1")
-        self.assertEqual(environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "1")
-        self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
+        self.assertNotIn("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", environment)
+        self.assertEqual(environment["RJ_CONSAN_MODE"], "default")
 
     def test_gfx950_manifest_registers_exact_hipkittens_rows(self) -> None:
         workloads = {
@@ -1158,7 +746,6 @@ class ConSanValidationTest(unittest.TestCase):
                 )
                 self.assertEqual(row["command_arguments"], arguments)
                 self.assertEqual(row["fault_families"], ("barrier-drop",))
-                self.assertEqual(row["record_replay_runtime_sample_stride"], 1)
 
     def test_hipkittens_native_commands_preserve_exact_corpus_arguments(self) -> None:
         workspace = Path("/workspace")
@@ -1198,7 +785,6 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(row["command_arguments"], ("64", "64", "32", "1", "1"))
         self.assertEqual(row["fault_families"], ("barrier-drop",))
-        self.assertEqual(row["record_replay_runtime_sample_stride"], 1)
 
         workload = validation.WORKLOAD_BY_ID[row["id"]]
         self.assertEqual(
@@ -1225,9 +811,7 @@ class ConSanValidationTest(unittest.TestCase):
         self,
     ) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
-        workload = validation.WORKLOAD_BY_ID[
-            "hipkittens-bf16fp32-cdna5-naive"
-        ]
+        workload = validation.WORKLOAD_BY_ID["hipkittens-bf16fp32-cdna5-naive"]
         fault = validation._load_fault(
             path,
             "gfx1250",
@@ -1237,9 +821,7 @@ class ConSanValidationTest(unittest.TestCase):
 
         kernel = "_Z17gemm_naive_kernelN12gfx1250_gemm12gemm_globalsEiii"
         site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        sequence = fault["environment"][
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"
-        ]
+        sequence = fault["environment"]["RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY"]
         self.assertIn(f"kernel={kernel}", site)
         self.assertIn("pc=0x00000000000009bc", site)
         self.assertIn("pc=0x00000000000009cc", sequence)
@@ -1248,24 +830,6 @@ class ConSanValidationTest(unittest.TestCase):
             "reviewed-unconditional-final-isa",
         )
         self.assertIn("All four waves", fault["reach_witness"]["evidence"])
-
-        inline_policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(inline_policy["detector"], "detected")
-        self.assertEqual(inline_policy["oracle"], "any")
-        self.assertEqual(
-            inline_policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
-            kernel,
-        )
-        self.assertEqual(trials, [{}])
-
-        replay_policy, trials = validation._fault_trials(fault, "record-replay")
-        self.assertEqual(replay_policy["detector"], "detected")
-        self.assertEqual(replay_policy["oracle"], "any")
-        self.assertEqual(
-            replay_policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"],
-            "1",
-        )
-        self.assertEqual(trials, [{}])
 
     def test_gfx950_manifest_registers_exact_hip_streamk_rows(self) -> None:
         workloads = {
@@ -1319,7 +883,6 @@ class ConSanValidationTest(unittest.TestCase):
                 )
                 self.assertEqual(row["command_arguments"], arguments)
                 self.assertEqual(row["fault_families"], ("barrier-drop",))
-                self.assertEqual(row["record_replay_runtime_sample_stride"], stride)
                 self.assertEqual(row["run_timeout_seconds"], 120)
 
                 workload = validation.WORKLOAD_BY_ID[workload_id]
@@ -1340,8 +903,7 @@ class ConSanValidationTest(unittest.TestCase):
                     )
 
         gfx942_ids = {
-            workload["id"]
-            for workload in validation._manifest("gfx942")["workloads"]
+            workload["id"] for workload in validation._manifest("gfx942")["workloads"]
         }
         self.assertTrue(expected.keys().isdisjoint(gfx942_ids))
 
@@ -1384,8 +946,7 @@ class ConSanValidationTest(unittest.TestCase):
             )
 
         gfx942_ids = {
-            workload["id"]
-            for workload in validation._manifest("gfx942")["workloads"]
+            workload["id"] for workload in validation._manifest("gfx942")["workloads"]
         }
         self.assertNotIn("rocblas-sgemm-square-64", gfx942_ids)
 
@@ -1666,30 +1227,10 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["pytorch-torch-histc"]["fault_families"],
             ("barrier-drop", "atomic-weaken-order"),
         )
-        self.assertEqual(
-            workloads["pytorch-torch-histc"][
-                "record_replay_runtime_sample_stride"
-            ],
-            1,
-        )
-        self.assertEqual(
-            workloads["pytorch-torch-histc"]["run_timeout_seconds"], 300
-        )
-        self.assertEqual(
-            workloads["pytorch-torch-sort"][
-                "record_replay_runtime_sample_stride"
-            ],
-            1,
-        )
-        self.assertEqual(
-            workloads["pytorch-torch-sort"]["run_timeout_seconds"], 300
-        )
-        self.assertEqual(
-            workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120
-        )
-        self.assertEqual(
-            workloads["pytorch-norm-softmax"]["run_timeout_seconds"], 60
-        )
+        self.assertEqual(workloads["pytorch-torch-histc"]["run_timeout_seconds"], 300)
+        self.assertEqual(workloads["pytorch-torch-sort"]["run_timeout_seconds"], 300)
+        self.assertEqual(workloads["pytorch-torch-mode"]["run_timeout_seconds"], 120)
+        self.assertEqual(workloads["pytorch-norm-softmax"]["run_timeout_seconds"], 60)
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
@@ -1806,9 +1347,7 @@ class ConSanValidationTest(unittest.TestCase):
             960,
         )
         self.assertEqual(
-            workloads["tensile-sk-mxf8gemm-explicit"][
-                "tensile_inner_timeout_seconds"
-            ],
+            workloads["tensile-sk-mxf8gemm-explicit"]["tensile_inner_timeout_seconds"],
             900,
         )
         self.assertEqual(
@@ -1816,9 +1355,7 @@ class ConSanValidationTest(unittest.TestCase):
             960,
         )
         self.assertEqual(
-            workloads["tensile-sk-mxf4gemm-explicit"][
-                "tensile_inner_timeout_seconds"
-            ],
+            workloads["tensile-sk-mxf4gemm-explicit"]["tensile_inner_timeout_seconds"],
             900,
         )
         self.assertEqual(
@@ -1833,10 +1370,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(workloads["tp1-decode-combined"]["sharktank_skip_warmup"])
         self.assertEqual(workloads["qwen-prefill"]["run_timeout_seconds"], 360)
         self.assertEqual(workloads["pytorch-torch-sort"]["run_timeout_seconds"], 360)
-        self.assertEqual(
-            workloads["tp1-prefill"]["record_replay_runtime_sample_stride"],
-            256,
-        )
         self.assertEqual(
             {
                 workload_id: workloads[workload_id]["sharktank_mode"]
@@ -1888,9 +1421,7 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["tensile-sk-mxf4gemm-tdm"]["run_timeout_seconds"], 1260
         )
         self.assertEqual(
-            workloads["tensile-sk-mxf4gemm-tdm"][
-                "tensile_inner_timeout_seconds"
-            ],
+            workloads["tensile-sk-mxf4gemm-tdm"]["tensile_inner_timeout_seconds"],
             1200,
         )
         self.assertEqual(
@@ -1992,7 +1523,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "--workload",
                     "pytorch-torch-histc",
                     "--profile",
-                    "record-replay",
+                    "default",
                     "--phase",
                     "clean",
                     "--artifact-root",
@@ -2291,10 +1822,7 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_qwen_prepare_pins_o3_overlay_and_hashes_the_artifact(self) -> None:
         with temporary_root() as workspace:
-            source = (
-                workspace
-                / "iree-test-suites/torch_models/qwen3-600m/model.mlir"
-            )
+            source = workspace / "iree-test-suites/torch_models/qwen3-600m/model.mlir"
             source.parent.mkdir(parents=True)
             source.write_text("module {}\n", encoding="utf-8")
             compiler = workspace / "tools/iree-compile"
@@ -2367,9 +1895,7 @@ class ConSanValidationTest(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"fixture")
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(
-                    workspace, "gfx1250", ("qwen-prefill",)
-                )
+                doctor = validation._doctor(workspace, "gfx1250", ("qwen-prefill",))
 
         self.assertFalse(doctor["ok"])
         self.assertFalse(doctor["artifacts"]["qwen-prefill"]["ok"])
@@ -2456,7 +1982,7 @@ class ConSanValidationTest(unittest.TestCase):
             clear=False,
         ):
             environment = validation._clean_environment(
-                "record-replay",
+                "default",
                 workload,
                 Path("/new/hook.so"),
                 None,
@@ -2466,15 +1992,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_TMP_VGPR", environment)
         self.assertEqual(environment["HSA_TOOLS_LIB"], "/new/hook.so")
         self.assertNotIn("HSA_TOOLS_ROCPROFILER_V1_TOOLS", environment)
-        self.assertEqual(environment["RJ_CONSAN_MODE"], "record-replay")
+        self.assertEqual(environment["RJ_CONSAN_MODE"], "default")
         self.assertEqual(environment["RJ_CONSAN_POLICY"], "strict")
-        self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
-        self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
+        self.assertNotIn("RJ_CONSAN_TRACK_BARRIERS", environment)
+        self.assertNotIn("RJ_CONSAN_TRACK_ATOMICS", environment)
         self.assertEqual(
             validation.ORDINARY_MOI_RUNTIME_DEFAULTS,
             {
-                "RJ_CONSAN_MOI_TRACK_BARRIERS": "1",
-                "RJ_CONSAN_MOI_TRACK_ATOMICS": "1",
+                "RJ_CONSAN_TRACK_BARRIERS": "1",
+                "RJ_CONSAN_TRACK_ATOMICS": "1",
             },
         )
 
@@ -2505,7 +2031,7 @@ class ConSanValidationTest(unittest.TestCase):
                 None, workload, None, None, Path("/workspace")
             )
             environment = validation._clean_environment(
-                "record-replay",
+                "default",
                 workload,
                 Path("/hook.so"),
                 None,
@@ -2538,91 +2064,37 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(setting["category"], "workload-tuning")
             self.assertTrue(setting["usability_exception"])
 
-    def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
+    def test_supercollider_does_not_receive_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
         environment = validation._clean_environment(
             "supercollider", workload, Path("/hook.so"), None, Path("/workspace")
         )
-        self.assertNotIn("RJ_CONSAN_MOI_TRACK_BARRIERS", environment)
-        self.assertNotIn("RJ_CONSAN_MOI_TRACK_ATOMICS", environment)
+        self.assertNotIn("RJ_CONSAN_TRACK_BARRIERS", environment)
+        self.assertNotIn("RJ_CONSAN_TRACK_ATOMICS", environment)
 
     def test_scatter_disables_strict_record_requirement_for_inapplicable_lds(
         self,
     ) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"]
-        for profile in ("record-replay", "inline-shadow"):
+        for profile in ("default", "default"):
             environment = validation._clean_environment(
                 profile, workload, Path("/hook.so"), None, Path("/workspace")
             )
-            self.assertEqual(environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "0")
+            self.assertEqual(environment["RJ_CONSAN_REQUIRE_RECORDS"], "0")
 
-    def test_qwen_sampled_relies_on_the_standard_runtime_operating_point(self) -> None:
+    def test_qwen_relies_on_the_standard_runtime_operating_point(self) -> None:
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
         tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
         qwen_environment = validation._clean_environment(
-            "sampled", qwen, Path("/hook.so"), None, Path("/workspace")
+            "default", qwen, Path("/hook.so"), None, Path("/workspace")
         )
         tp1_environment = validation._clean_environment(
-            "sampled", tp1, Path("/hook.so"), None, Path("/workspace")
+            "default", tp1, Path("/hook.so"), None, Path("/workspace")
         )
-        self.assertEqual(qwen_environment["RJ_CONSAN_MOI_REQUIRE_RECORDS"], "1")
-        self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", qwen_environment)
-        self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", qwen_environment)
-        self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", tp1_environment)
-
-    def test_compact_record_replay_uses_target_bounded_validation_stride(
-        self,
-    ) -> None:
-        for workload_id, target, expected_stride in (
-            ("tp1-prefill", "gfx942", None),
-            ("tp1-prefill", "gfx950", "256"),
-            ("tp1-prefill", "gfx1201", None),
-            ("tp1-prefill", "gfx1250", "256"),
-            ("tp2-family", "gfx950", "256"),
-            ("tp2-family", "gfx1250", "256"),
-            ("tp2-decode", "gfx950", "1"),
-            ("tp2-decode", "gfx1250", "1"),
-            ("tp2-combined", "gfx950", "256"),
-            ("tp2-combined", "gfx1250", "256"),
-            ("tp1-decode-combined", "gfx942", None),
-            ("tp1-decode-combined", "gfx950", "256"),
-            ("tp1-decode-combined", "gfx1201", None),
-            ("tp1-decode-combined", "gfx1250", None),
-            ("clip-bf16", "gfx942", None),
-            ("clip-bf16", "gfx950", "256"),
-            ("clip-bf16", "gfx1201", None),
-            ("clip-bf16", "gfx1250", None),
-            ("jakub-attention", "gfx942", None),
-            ("jakub-attention", "gfx950", "1"),
-            ("jakub-attention", "gfx1201", None),
-            ("jakub-attention", "gfx1250", None),
-            ("pytorch-torch-histc", "gfx942", None),
-            ("pytorch-torch-histc", "gfx950", "1"),
-            ("pytorch-torch-histc", "gfx1201", None),
-            ("pytorch-torch-histc", "gfx1250", None),
-            ("pytorch-torch-sort", "gfx942", None),
-            ("pytorch-torch-sort", "gfx950", "1"),
-            ("pytorch-torch-sort", "gfx1201", None),
-            ("pytorch-torch-sort", "gfx1250", None),
-        ):
-            with self.subTest(workload=workload_id, target=target):
-                workload = validation.WORKLOAD_BY_ID[workload_id]
-                environment = validation._clean_environment(
-                    "record-replay",
-                    workload,
-                    Path("/hook.so"),
-                    target,
-                    Path("/workspace"),
-                )
-                if expected_stride is None:
-                    self.assertNotIn(
-                        "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", environment
-                    )
-                else:
-                    self.assertEqual(
-                        environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
-                        expected_stride,
-                    )
+        self.assertEqual(qwen_environment["RJ_CONSAN_REQUIRE_RECORDS"], "1")
+        self.assertNotIn("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", qwen_environment)
+        self.assertNotIn("RJ_CONSAN_RUNTIME_SAMPLE_OFFSET", qwen_environment)
+        self.assertNotIn("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", tp1_environment)
 
     def test_qwen_gfx1250_overhead_uses_a_software_backend_median(self) -> None:
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
@@ -2791,56 +2263,12 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "10")
 
-    def test_topk_record_replay_is_a_strict_clean_and_overhead_gate(
-        self,
-    ) -> None:
-        hook = Path("/workspace/hook.so")
-        clean_gate = validation._clean_environment(
-            "record-replay",
-            validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
-            hook,
-            "gfx1201",
-            Path("/workspace"),
-        )
-        topk_clean = validation._run_environment(
-            "record-replay",
-            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
-            hook,
-            "gfx1201",
-            "clean",
-            Path("/workspace"),
-        )
-
-        self.assertEqual(clean_gate["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
-        self.assertEqual(topk_clean["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
-        self.assertEqual(topk_clean["RJ_CONSAN_POLICY"], "strict")
-        overhead = validation._run_environment(
-            "record-replay",
-            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
-            hook,
-            "gfx1201",
-            "overhead",
-            Path("/workspace"),
-        )
-        self.assertEqual(overhead["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
-        for profile in ("sampled", "inline-shadow"):
-            with self.subTest(profile=profile):
-                other_engine = validation._run_environment(
-                    profile,
-                    validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
-                    hook,
-                    "gfx1201",
-                    "clean",
-                    Path("/workspace"),
-                )
-                self.assertEqual(other_engine["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
-
     def test_run_environment_rejects_unknown_phase(self) -> None:
         with self.assertRaisesRegex(
             validation.ValidationError, "unsupported validation phase: fault"
         ):
             validation._run_environment(
-                "record-replay",
+                "default",
                 validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
                 Path("/workspace/hook.so"),
                 "gfx1201",
@@ -2902,74 +2330,6 @@ class ConSanValidationTest(unittest.TestCase):
 
             self.assertEqual(result["gtest_test_counts"], expected_counts)
             self.assertEqual(result["accepted"], expected_accepted)
-
-    def test_ordinary_record_replay_run_persists_structural_verdict(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
-        valid_log = complete_coverage_log(moi_auto_replay(7, 1, 0))
-        cases = (
-            ("valid", valid_log, True),
-            (
-                "malformed",
-                valid_log.replace("provenance_unresolved=0", "provenance_state=0"),
-                False,
-            ),
-        )
-        for name, log, expected in cases:
-            with self.subTest(name=name), temporary_root() as root:
-                artifact_root = root / "artifacts"
-                hook = root / "hook.so"
-                hook.write_bytes(b"hook")
-                with (
-                    mock.patch.object(
-                        validation_execution, "_hook_path", return_value=hook
-                    ),
-                    mock.patch.object(
-                        validation_commands,
-                        "_workload_command",
-                        return_value=["/bin/true"],
-                    ),
-                    mock.patch.object(
-                        validation_execution,
-                        "_run_process",
-                        return_value=(0, 0.1, log),
-                    ),
-                    mock.patch.object(
-                        validation_execution,
-                        "_source_identities",
-                        return_value=[],
-                    ),
-                ):
-                    result = validation._run_profile(
-                        root,
-                        "gfx1201",
-                        workload,
-                        "record-replay",
-                        "clean",
-                        artifact_root,
-                        30,
-                    )
-
-                persisted = json.loads(
-                    (
-                        artifact_root
-                        / workload.id
-                        / "clean"
-                        / "record-replay"
-                        / "result.json"
-                    ).read_text(encoding="utf-8")
-                )
-                self.assertEqual(result["accepted"], expected)
-                self.assertEqual(persisted["accepted"], expected)
-                self.assertEqual(
-                    persisted["coverage"]["diagnostics"]["policy"]["kind"],
-                    "clean",
-                )
-                if name == "malformed":
-                    self.assertIn(
-                        "replay provenance unresolved: "
-                        "reader=7,generation=1, count=None",
-                        persisted["coverage"]["diagnostics"]["reasons"],
-                    )
 
     def test_workload_provenance_is_shared_only_when_inputs_match(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
@@ -3285,24 +2645,22 @@ class ConSanValidationTest(unittest.TestCase):
             None,
         )
         workload = audit["workloads"][0]
-        record_replay = next(
-            profile
-            for profile in workload["profiles"]
-            if profile["id"] == "record-replay"
+        profile = next(
+            profile for profile in workload["profiles"] if profile["id"] == "default"
         )
         settings = {
-            setting["name"]: setting["value"] for setting in record_replay["settings"]
+            setting["name"]: setting["value"] for setting in profile["settings"]
         }
 
-        self.assertEqual(settings["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
-        self.assertEqual(record_replay["clean_result_phase"], "clean")
+        self.assertEqual(settings["RJ_CONSAN_FORBID_DIAGNOSTICS"], "1")
+        self.assertEqual(profile["clean_result_phase"], "clean")
         self.assertEqual(
-            record_replay["clean_artifact_root"],
-            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/clean/record-replay",
+            profile["clean_artifact_root"],
+            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/clean/default",
         )
         self.assertEqual(
-            workload["commands"]["clean"]["profile_artifact_roots"]["record-replay"],
-            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/clean/record-replay",
+            workload["commands"]["clean"]["profile_artifact_roots"]["default"],
+            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/clean/default",
         )
         self.assertEqual(
             workload["commands"]["clean"]["payload_argv"],
@@ -3313,7 +2671,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "clean",
                 Path(
                     "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/"
-                    "clean/record-replay/benchmark-0.json"
+                    "clean/sampled/benchmark-0.json"
                 ),
             ),
         )
@@ -3351,39 +2709,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn(
             shlex.join(audit["workloads"][0]["commands"]["clean"]["payload_argv"]),
             rendered,
-        )
-
-    def test_ordinary_record_replay_accepts_current_physical_runtime_fixture(
-        self,
-    ) -> None:
-        fixture = (
-            Path(__file__).with_name("fixtures")
-            / "gfx1201_topk_record_replay_current_runtime.log"
-        ).read_text(encoding="utf-8")
-        assert_current_replay_log(self, fixture)
-
-        summary = validation._diagnostic_output_summary(fixture, "record-replay")
-
-        self.assertTrue(summary["accepted"], summary["reasons"])
-        self.assertEqual(summary["diagnostic_count"], 0)
-        self.assertEqual(summary["records"], [])
-
-    def test_ordinary_record_replay_rejects_physical_diagnostic_fixture(
-        self,
-    ) -> None:
-        fixture = (
-            Path(__file__).with_name("fixtures")
-            / "gfx1201_topk_record_replay_current_diagnostics.log"
-        ).read_text(encoding="utf-8")
-        assert_current_replay_log(self, fixture)
-
-        summary = validation._diagnostic_output_summary(fixture, "record-replay")
-
-        self.assertFalse(summary["accepted"])
-        self.assertEqual(summary["diagnostic_count"], 3)
-        self.assertIn(
-            "unexpected diagnostics=exact-lds-write-write",
-            summary["reasons"],
         )
 
     def test_all_targets_scrub_software_model_environment(self) -> None:
@@ -3897,7 +3222,7 @@ class ConSanValidationTest(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "RJ_CONSAN_MODE": "inline-shadow",
+                "RJ_CONSAN_MODE": "default",
                 "HSA_TOOLS_LIB": "/hook.so",
                 "HSA_TOOLS_ROCPROFILER_V1_TOOLS": "1",
                 "HIP_TARGET": "gfx1201",
@@ -4070,26 +3395,17 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.tensile_fault_shard_index, 0)
         self.assertEqual(len(commands), 6)
         for index, command in enumerate(commands):
+            self.assertEqual(command[command.index("--timeout-seconds") + 1], "1200")
+            self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "16")
+            self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "1.0")
             self.assertEqual(
-                command[command.index("--timeout-seconds") + 1], "1200"
-            )
-            self.assertEqual(
-                command[command.index("--expect-numeric-rows") + 1], "16"
-            )
-            self.assertEqual(
-                command[command.index("--minimum-timed-ms") + 1], "1.0"
-            )
-            self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index("--expect-source-exact-problem-sizes-json")
-                        + 1
+                        command.index("--expect-source-exact-problem-sizes-json") + 1
                     ]
                 ),
                 expected_sizes,
@@ -4103,9 +3419,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads(
-                fault_command[
-                    fault_command.index("--exact-problem-sizes-json") + 1
-                ]
+                fault_command[fault_command.index("--exact-problem-sizes-json") + 1]
             ),
             [expected_sizes[0]],
         )
@@ -4143,23 +3457,16 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.tensile_fault_shard_index, 0)
         self.assertEqual(len(commands), 6)
         for index, command in enumerate(commands):
+            self.assertEqual(command[command.index("--timeout-seconds") + 1], "120")
+            self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "6")
             self.assertEqual(
-                command[command.index("--timeout-seconds") + 1], "120"
-            )
-            self.assertEqual(
-                command[command.index("--expect-numeric-rows") + 1], "6"
-            )
-            self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index("--expect-source-exact-problem-sizes-json")
-                        + 1
+                        command.index("--expect-source-exact-problem-sizes-json") + 1
                     ]
                 ),
                 expected_sizes,
@@ -4173,9 +3480,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads(
-                fault_command[
-                    fault_command.index("--exact-problem-sizes-json") + 1
-                ]
+                fault_command[fault_command.index("--exact-problem-sizes-json") + 1]
             ),
             [expected_sizes[0]],
         )
@@ -4206,23 +3511,16 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.tensile_fault_shard_index, 0)
         self.assertEqual(len(commands), 3)
         for index, command in enumerate(commands):
+            self.assertEqual(command[command.index("--timeout-seconds") + 1], "300")
+            self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "6")
             self.assertEqual(
-                command[command.index("--timeout-seconds") + 1], "300"
-            )
-            self.assertEqual(
-                command[command.index("--expect-numeric-rows") + 1], "6"
-            )
-            self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index("--expect-source-exact-problem-sizes-json")
-                        + 1
+                        command.index("--expect-source-exact-problem-sizes-json") + 1
                     ]
                 ),
                 expected_sizes,
@@ -4236,9 +3534,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads(
-                fault_command[
-                    fault_command.index("--exact-problem-sizes-json") + 1
-                ]
+                fault_command[fault_command.index("--exact-problem-sizes-json") + 1]
             ),
             [expected_sizes[0]],
         )
@@ -4274,20 +3570,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(len(commands), 6)
         for index, command in enumerate(commands):
             self.assertNotIn("--expect-numeric-rows", command)
+            self.assertEqual(command[command.index("--expect-client-passes") + 1], "2")
             self.assertEqual(
-                command[command.index("--expect-client-passes") + 1], "2"
-            )
-            self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index("--expect-source-exact-problem-sizes-json")
-                        + 1
+                        command.index("--expect-source-exact-problem-sizes-json") + 1
                     ]
                 ),
                 expected_sizes,
@@ -4301,9 +3592,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads(
-                fault_command[
-                    fault_command.index("--exact-problem-sizes-json") + 1
-                ]
+                fault_command[fault_command.index("--exact-problem-sizes-json") + 1]
             ),
             [expected_sizes[0]],
         )
@@ -4353,17 +3642,13 @@ class ConSanValidationTest(unittest.TestCase):
                 str(expected_clients[index]),
             )
             self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index(
-                            "--expect-source-exact-problem-size-blocks-json"
-                        )
+                        command.index("--expect-source-exact-problem-size-blocks-json")
                         + 1
                     ]
                 ),
@@ -4409,20 +3694,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(workload.tensile_fault_shard_index, 0)
         self.assertEqual(len(commands), 9)
         for index, command in enumerate(commands):
+            self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "12")
             self.assertEqual(
-                command[command.index("--expect-numeric-rows") + 1], "12"
-            )
-            self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index("--expect-source-exact-problem-sizes-json")
-                        + 1
+                        command.index("--expect-source-exact-problem-sizes-json") + 1
                     ]
                 ),
                 expected_sizes,
@@ -4436,9 +3716,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads(
-                fault_command[
-                    fault_command.index("--exact-problem-sizes-json") + 1
-                ]
+                fault_command[fault_command.index("--exact-problem-sizes-json") + 1]
             ),
             [expected_sizes[0]],
         )
@@ -4480,25 +3758,19 @@ class ConSanValidationTest(unittest.TestCase):
                 str(expected_clients[index]),
             )
             self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index(
-                            "--expect-source-exact-problem-size-blocks-json"
-                        )
+                        command.index("--expect-source-exact-problem-size-blocks-json")
                         + 1
                     ]
                 ),
                 expected_blocks,
             )
-            self.assertNotIn(
-                "--expect-source-exact-problem-sizes-json", command
-            )
+            self.assertNotIn("--expect-source-exact-problem-sizes-json", command)
 
         fault_command = validation._fault_workload_command(
             Path("/workspace"),
@@ -4535,23 +3807,16 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(len(commands), 3)
         for index, command in enumerate(commands):
             self.assertNotIn("--expect-numeric-rows", command)
+            self.assertEqual(command[command.index("--expect-client-passes") + 1], "8")
+            self.assertEqual(command[command.index("--minimum-timed-ms") + 1], "1.0")
             self.assertEqual(
-                command[command.index("--expect-client-passes") + 1], "8"
-            )
-            self.assertEqual(
-                command[command.index("--minimum-timed-ms") + 1], "1.0"
-            )
-            self.assertEqual(
-                json.loads(
-                    command[command.index("--exact-problem-sizes-json") + 1]
-                ),
+                json.loads(command[command.index("--exact-problem-sizes-json") + 1]),
                 [expected_sizes[index]],
             )
             self.assertEqual(
                 json.loads(
                     command[
-                        command.index("--expect-source-exact-problem-sizes-json")
-                        + 1
+                        command.index("--expect-source-exact-problem-sizes-json") + 1
                     ]
                 ),
                 expected_sizes,
@@ -4565,9 +3830,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             json.loads(
-                fault_command[
-                    fault_command.index("--exact-problem-sizes-json") + 1
-                ]
+                fault_command[fault_command.index("--exact-problem-sizes-json") + 1]
             ),
             [expected_sizes[0]],
         )
@@ -4832,9 +4095,9 @@ class ConSanValidationTest(unittest.TestCase):
         log = "\n".join(
             (
                 "ConSan waitcheck timing reader=7 elapsed_ms=1.5",
-                "ConSan MOI inventory end reader=7 elapsed_ms=2.5",
+                "ConSan inventory end reader=7 elapsed_ms=2.5",
                 "ConSan patch begin reader=7 bytes=100",
-                "ConSan MOI resources reader=7 explicit=1 dead=2 "
+                "ConSan resources reader=7 explicit=1 dead=2 "
                 "descriptor_growth=3 spill=4 unsupported=0 "
                 "planned_spill_slot_bytes=16 emitted_spill_patches=1 "
                 "emitted_spill_slot_bytes=16 alternative_attempts=2 "
@@ -4845,7 +4108,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "outcome=modified-valid errors=0 warnings=0 patches=8 "
                 "patch_ms=9.5",
                 "ConSan replacement reader=9 original_reader=7 bytes=140",
-                "ConSan MOI report memory required_bytes=10 allocated_bytes=12 "
+                "ConSan report memory required_bytes=10 allocated_bytes=12 "
                 "live_before_cleanup=12 live_after_cleanup=0 peak_live_bytes=12 "
                 "per_buffer_ceiling=99 process_ceiling=100 "
                 "allocation_failures=0 capacity_failures=0 cleanup_failures=0",
@@ -4996,30 +4259,28 @@ class ConSanValidationTest(unittest.TestCase):
         for forbidden in validation.ORDINARY_FORBIDDEN_ENVIRONMENT:
             self.assertNotIn(forbidden, settings)
         sampled = next(
-            profile for profile in workload["profiles"] if profile["id"] == "sampled"
+            profile for profile in workload["profiles"] if profile["id"] == "default"
         )
-        record_replay = next(
-            profile
-            for profile in workload["profiles"]
-            if profile["id"] == "record-replay"
+        profile = next(
+            profile for profile in workload["profiles"] if profile["id"] == "default"
         )
         self.assertEqual(
             {item["name"] for item in sampled["implicit_runtime_defaults"]},
             {
-                "RJ_CONSAN_MOI_TRACK_BARRIERS",
-                "RJ_CONSAN_MOI_TRACK_ATOMICS",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
+                "RJ_CONSAN_TRACK_BARRIERS",
+                "RJ_CONSAN_TRACK_ATOMICS",
+                "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
+                "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
             },
         )
         self.assertEqual(sampled["usability_exceptions"], [])
         self.assertEqual(
-            {item["name"] for item in record_replay["implicit_runtime_defaults"]},
+            {item["name"] for item in profile["implicit_runtime_defaults"]},
             {
-                "RJ_CONSAN_MOI_TRACK_BARRIERS",
-                "RJ_CONSAN_MOI_TRACK_ATOMICS",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
-                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
+                "RJ_CONSAN_TRACK_BARRIERS",
+                "RJ_CONSAN_TRACK_ATOMICS",
+                "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
+                "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
             },
         )
         self.assertEqual(
@@ -5029,38 +4290,29 @@ class ConSanValidationTest(unittest.TestCase):
             audit["usability_audit"]["explicit_event_family_overrides"], []
         )
         self.assertEqual(audit["usability_audit"]["workload_specific_tuning"], [])
-        sampled_defaults = next(
+        runtime_defaults = next(
             item
             for item in audit["usability_audit"]["automatic_profile_defaults"]
-            if item["profile"] == "sampled"
+            if item["profile"] == "default"
         )
         self.assertEqual(
-            sampled_defaults["settings"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
+            runtime_defaults["settings"]["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"],
             "256",
-        )
-        record_replay_defaults = next(
-            item
-            for item in audit["usability_audit"]["automatic_profile_defaults"]
-            if item["profile"] == "record-replay"
-        )
-        self.assertEqual(
-            record_replay_defaults["settings"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"],
-            "65536",
         )
 
     def test_explain_discloses_fault_only_kernel_filter_exception(self) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
+        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
         audit = validation._explain_contract(
             Path("/workspace"),
-            "gfx1250",
-            ("qwen-prefill",),
-            ("inline-shadow",),
+            "gfx950",
+            ("hip-matmul-m128-n128-k128",),
+            ("supercollider",),
             path,
         )
         [exception] = audit["usability_audit"]["fault_policy_exceptions"]
-        self.assertEqual(exception["workload"], "qwen-prefill")
-        self.assertEqual(exception["fault"], "barrier-drop")
-        self.assertEqual(exception["profile"], "inline-shadow")
+        self.assertEqual(exception["workload"], "hip-matmul-m128-n128-k128")
+        self.assertEqual(exception["fault"], "barrier-drop-fp16-tile-publication")
+        self.assertEqual(exception["profile"], "supercollider")
         self.assertEqual(exception["settings"], ["RJ_CONSAN_TEST_KERNEL_FILTER"])
         self.assertEqual(exception["unsets"], [])
 
@@ -5092,21 +4344,6 @@ class ConSanValidationTest(unittest.TestCase):
             "--gtest_filter=HipMoiRdna4D128AttentionBlock.*",
         )
 
-    def test_gfx1250_tp1_decode_inline_fault_contract_is_diagnostic_owned(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
-        workload = validation.WORKLOAD_BY_ID["tp1-decode-combined"]
-        fault = validation._load_fault(path, "gfx1250", workload, "barrier-move")
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(trials, [{}])
-        self.assertIn(
-            "decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32",
-            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
-        )
-
     def test_gfx1250_tp2_faults_distinguish_publication_and_dpp_phase(
         self,
     ) -> None:
@@ -5133,18 +4370,11 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(supercollider["detector"], "detected")
         self.assertEqual(supercollider["oracle"], "pass")
         self.assertEqual(trials, [{}])
-        sampled, trials = validation._fault_trials(fault, "sampled")
+        sampled, trials = validation._fault_trials(fault, "default")
         self.assertEqual(sampled["detector"], "detected")
         self.assertEqual(sampled["oracle"], "pass")
         self.assertEqual(
-            sampled["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
-        )
-        self.assertEqual(trials, [{}])
-        inline, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(inline["detector"], "detected")
-        self.assertEqual(inline["oracle"], "pass")
-        self.assertEqual(
-            inline["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
+            sampled["environment"]["RJ_CONSAN_REQUIRE_DIAGNOSTICS"], "1"
         )
         self.assertEqual(trials, [{}])
 
@@ -5168,44 +4398,9 @@ class ConSanValidationTest(unittest.TestCase):
             "reviewed-unconditional-final-isa",
         )
         self.assertIn(".text+0x90ac", dpp_fault["reach_witness"]["evidence"])
-        dpp_supercollider, trials = validation._fault_trials(
-            dpp_fault, "supercollider"
-        )
+        dpp_supercollider, trials = validation._fault_trials(dpp_fault, "supercollider")
         self.assertEqual(dpp_supercollider["detector"], "not_detected")
         self.assertEqual(dpp_supercollider["oracle"], "pass")
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_qwen_inline_fault_targets_matmul_publication(self) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["qwen-prefill"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "barrier-drop-matmul-publication",
-        )
-
-        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        kernel = "main$async_dispatch_14_matmul_like_5x1024x2048_f32"
-        self.assertIn(f"kernel={kernel}", site)
-        self.assertIn("pc=0x0000000000007dbc", site)
-        self.assertIn("occurrence=2", site)
-        self.assertEqual(
-            fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        self.assertIn(".text+0x7d44", fault["reach_witness"]["evidence"])
-        self.assertIn(".text+0x7dc0", fault["reach_witness"]["evidence"])
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "detected")
-        self.assertEqual(policy["oracle"], "any")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
-        )
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
         self.assertEqual(trials, [{}])
 
     def test_gfx950_hip_matmul_fault_targets_fp16_tile_publication(self) -> None:
@@ -5242,17 +4437,6 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(trials, [{}])
 
-        inline, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(inline["detector"], "detected")
-        self.assertEqual(inline["oracle"], "any")
-        self.assertEqual(
-            inline["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
-        )
-        self.assertEqual(
-            inline["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
-        self.assertEqual(trials, [{}])
-
     def test_gfx950_hipkittens_faults_target_prologue_publication(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
         cases = {
@@ -5263,7 +4447,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "waves": "eight waves",
                 "profiles": {
                     "supercollider": ("not_detected", "any"),
-                    "inline-shadow": ("not_detected", "any"),
                 },
             },
             "hipkittens-fp8fp32-4wave": {
@@ -5277,7 +4460,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "waves": "four waves",
                 "profiles": {
                     "supercollider": ("not_detected", "any"),
-                    "inline-shadow": ("detected", "any"),
                 },
             },
             "hipkittens-mxfp8-4wave": {
@@ -5291,7 +4473,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "waves": "four waves",
                 "profiles": {
                     "supercollider": ("not_detected", "any"),
-                    "inline-shadow": ("detected", "any"),
                 },
             },
         }
@@ -5317,15 +4498,13 @@ class ConSanValidationTest(unittest.TestCase):
                 self.assertIn(expected["waves"], evidence)
                 self.assertIn("peer LDS reads", evidence)
 
-                for profile in ("supercollider", "inline-shadow"):
+                for profile in expected["profiles"]:
                     policy, trials = validation._fault_trials(fault, profile)
                     detector, oracle = expected["profiles"][profile]
                     self.assertEqual(policy["detector"], detector)
                     self.assertEqual(policy["oracle"], oracle)
                     self.assertEqual(
-                        policy["environment"].get(
-                            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"
-                        ),
+                        policy["environment"].get("RJ_CONSAN_REQUIRE_DIAGNOSTICS"),
                         "1" if detector == "detected" else None,
                     )
                     self.assertEqual(
@@ -5336,9 +4515,7 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_gfx950_simple_streamk_fault_targets_initial_publication(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID[
-            "hip-streamk-simple-m256-n256-k256"
-        ]
+        workload = validation.WORKLOAD_BY_ID["hip-streamk-simple-m256-n256-k256"]
         fault = validation._load_fault(
             path,
             "gfx950",
@@ -5367,18 +4544,14 @@ class ConSanValidationTest(unittest.TestCase):
         policy, trials = validation._fault_trials(fault, "supercollider")
         self.assertEqual(policy["detector"], "not_detected")
         self.assertEqual(policy["oracle"], "any")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
+        self.assertEqual(policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
         self.assertEqual(trials, [{}])
 
     def test_gfx950_two_tile_streamk_fault_targets_initial_publication(
         self,
     ) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID[
-            "hip-streamk-two-tile-m256-n256-k256"
-        ]
+        workload = validation.WORKLOAD_BY_ID["hip-streamk-two-tile-m256-n256-k256"]
         fault = validation._load_fault(
             path,
             "gfx950",
@@ -5407,42 +4580,7 @@ class ConSanValidationTest(unittest.TestCase):
         policy, trials = validation._fault_trials(fault, "supercollider")
         self.assertEqual(policy["detector"], "not_detected")
         self.assertEqual(policy["oracle"], "any")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_torch_mode_inline_fault_targets_bitonic_stage(self) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "barrier-drop-bitonic-stage",
-        )
-
-        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        kernel = (
-            "_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfo"
-            "IS2_jEENS7_IljEEll"
-        )
-        self.assertIn(f"kernel={kernel}", site)
-        self.assertIn("pc=0x000000000006a904", site)
-        self.assertIn("occurrence=2", site)
-        self.assertEqual(
-            fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        self.assertIn(".text+0x6a8c4", fault["reach_witness"]["evidence"])
-        self.assertIn(".text+0x6a908", fault["reach_witness"]["evidence"])
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "not_detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
+        self.assertEqual(policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
         self.assertEqual(trials, [{}])
 
     def test_gfx950_torch_sort_fault_targets_key_load_retirement(self) -> None:
@@ -5470,191 +4608,13 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn("shared LoadKeys", fault["reach_witness"]["evidence"])
         self.assertIn("shared union", fault["reach_witness"]["evidence"])
 
-        sampled, trials = validation._fault_trials(fault, "sampled")
+        sampled, trials = validation._fault_trials(fault, "default")
         self.assertEqual(sampled["detector"], "not_detected")
         self.assertEqual(sampled["oracle"], "pass")
         self.assertEqual(
-            sampled["environment"]["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "1"
+            sampled["environment"]["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1"
         )
-        self.assertEqual(
-            sampled["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
-        self.assertEqual(trials, [{}])
-
-        inline, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(inline["detector"], "detected")
-        self.assertEqual(inline["oracle"], "any")
-        self.assertEqual(
-            inline["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
-        )
-        self.assertEqual(
-            inline["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_histc_inline_fault_targets_shared_bin_initialization(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["pytorch-torch-histc"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "barrier-drop-shared-bin-initialization",
-        )
-
-        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        kernel = (
-            "_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_"
-            "23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_"
-            "6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_"
-            "13TensorArgTypeES9_S9_EUllE_EEvNS0_6detail10TensorInfoIT_T1_EESF_"
-            "NSC_IKS6_SE_EElS8_S8_SE_T6_"
-        )
-        self.assertIn(f"kernel={kernel}", site)
-        self.assertIn("pc=0x0000000000038fc0", site)
-        self.assertIn("occurrence=0", site)
-        self.assertEqual(
-            fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        evidence = fault["reach_witness"]["evidence"]
-        self.assertIn("zero the shared histogram", evidence)
-        self.assertIn("atomic accumulation", evidence)
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "not_detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel
-        )
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_d128_pressure_inline_fault_is_redundant_barrier_miss(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["d128-pressure"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "barrier-drop-redundant-fast-context",
-        )
-
-        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        self.assertIn("FullKvDoubleBuffered16Key", site)
-        self.assertIn("FastContextPolicy", site)
-        self.assertIn("pc=0x000000000001c394", site)
-        self.assertIn("occurrence=1", site)
-        self.assertEqual(
-            fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        self.assertIn(
-            "adjacent second barrier", fault["reach_witness"]["evidence"]
-        )
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "not_detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_mfma_inline_fault_is_redundant_publication_miss(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["wmma-attention"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "barrier-drop-redundant-score-publication",
-        )
-
-        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        self.assertIn("mfma_attention_block_kernel", site)
-        self.assertIn("ExactContextPolicy", site)
-        self.assertIn("pc=0x0000000000001f88", site)
-        self.assertIn("occurrence=3", site)
-        self.assertEqual(
-            fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        self.assertIn(
-            "following source-level publication barrier",
-            fault["reach_witness"]["evidence"],
-        )
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "not_detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_tree_inline_fault_weakens_only_producer_release(
-        self,
-    ) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["tree-atomic-or"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "atomic-weaken-producer-release",
-        )
-
-        environment = fault["environment"]
-        self.assertEqual(
-            environment["RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE"], "release"
-        )
-        self.assertEqual(
-            environment["RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER"], "1"
-        )
-        site = environment["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        self.assertIn("atomic_memory_orderE2E", site)
-        self.assertIn("pc=0x00000000000185c8", site)
-        self.assertIn("mnemonic=global_atomic_or", site)
-        self.assertIn("occurrence=208", site)
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
-        )
-        self.assertEqual(trials, [{}])
-
-    def test_gfx950_jakub_inline_fault_targets_reader_retirement(self) -> None:
-        path = Path(__file__).with_name("consan_validation_faults_gfx950.json")
-        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
-        fault = validation._load_fault(
-            path,
-            "gfx950",
-            workload,
-            "barrier-drop-pipelined-reader-retirement-inline",
-        )
-
-        site = fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"]
-        self.assertIn("fp16_wmma_tiled_kernel", site)
-        self.assertIn("ELb1ELb0ELNS_8SyncModeE0E", site)
-        self.assertIn("pc=0x0000000000000ddc", site)
-        self.assertIn("occurrence=2", site)
-        self.assertEqual(
-            fault["reach_witness"]["kind"],
-            "reviewed-unconditional-final-isa",
-        )
-        self.assertIn(
-            "stores for the replacement stage immediately follow",
-            fault["reach_witness"]["evidence"],
-        )
-
-        policy, trials = validation._fault_trials(fault, "inline-shadow")
-        self.assertEqual(policy["detector"], "detected")
-        self.assertEqual(policy["oracle"], "pass")
-        self.assertEqual(
-            policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1"
-        )
+        self.assertEqual(sampled["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
         self.assertEqual(trials, [{}])
 
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
@@ -5663,9 +4623,7 @@ class ConSanValidationTest(unittest.TestCase):
         fault = validation._load_fault(path, "gfx1250", workload, "barrier-drop")
         expected_detectors = {
             "supercollider": "not_detected",
-            "record-replay": "detected",
-            "sampled": "detected",
-            "inline-shadow": "detected",
+            "default": "detected",
         }
         for profile, detector in expected_detectors.items():
             policy, trials = validation._fault_trials(fault, profile)
@@ -5676,13 +4634,13 @@ class ConSanValidationTest(unittest.TestCase):
             fault["profiles"]["supercollider"]["tracking_issue"],
             "bd-2sjm.1",
         )
-        self.assertNotIn("tracking_issue", fault["profiles"]["sampled"])
-        sampled_environment = fault["profiles"]["sampled"]["environment"]
+        self.assertNotIn("tracking_issue", fault["profiles"]["default"])
+        environment = fault["profiles"]["default"]["environment"]
         self.assertEqual(
-            sampled_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"], "1"
+            environment["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1"
         )
         self.assertEqual(
-            sampled_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET"], "0"
+            environment["RJ_CONSAN_RUNTIME_SAMPLE_OFFSET"], "0"
         )
         self.assertEqual(
             fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
@@ -5707,12 +4665,12 @@ class ConSanValidationTest(unittest.TestCase):
     def test_overhead_uses_bracketing_baseline_mean_and_maximum_mode(self) -> None:
         results = [
             {"profile": "baseline", "timing_median_ms": {"a": 2.0, "b": 4.0}},
-            {"profile": "sampled", "timing_median_ms": {"a": 6.0, "b": 10.0}},
+            {"profile": "default", "timing_median_ms": {"a": 6.0, "b": 10.0}},
             {"profile": "baseline", "timing_median_ms": {"a": 4.0, "b": 6.0}},
         ]
         summary = validation._overhead_summary(results)
         self.assertEqual(summary["paired_baseline_median_ms"], {"a": 3.0, "b": 5.0})
-        self.assertEqual(summary["profiles"]["sampled"]["cell_slowdown"], 2.0)
+        self.assertEqual(summary["profiles"]["default"]["cell_slowdown"], 2.0)
 
     def test_empirical_round_interpolates_baseline_by_randomized_position(
         self,
@@ -5728,12 +4686,12 @@ class ConSanValidationTest(unittest.TestCase):
         before = row("baseline", 100.0, 2.0)
         after = row("baseline", 102.0, 2.04)
         profiles = {
-            "sampled": row("sampled", 202.0, 4.04),
-            "record-replay": row("record-replay", 151.5, 3.03),
+            "supercollider": row("supercollider", 202.0, 4.04),
+            "default": row("default", 151.5, 3.03),
         }
         summary = validation._empirical_round_summary(
             3,
-            ["sampled", "record-replay"],
+            ["supercollider", "default"],
             before,
             profiles,
             after,
@@ -5741,14 +4699,14 @@ class ConSanValidationTest(unittest.TestCase):
         )
 
         self.assertTrue(summary["fully_accepted"])
-        self.assertEqual(summary["profile_order"], ["sampled", "record-replay"])
+        self.assertEqual(summary["profile_order"], ["supercollider", "default"])
         dispatch = summary["metrics"]["workload:dispatch"]
         self.assertAlmostEqual(
-            dispatch["profiles"]["sampled"]["interpolated_baseline_ms"],
+            dispatch["profiles"]["supercollider"]["interpolated_baseline_ms"],
             2.0 + (2.04 - 2.0) / 3.0,
         )
         self.assertAlmostEqual(
-            dispatch["profiles"]["record-replay"]["interpolated_baseline_ms"],
+            dispatch["profiles"]["default"]["interpolated_baseline_ms"],
             2.0 + 2.0 * (2.04 - 2.0) / 3.0,
         )
 
@@ -5770,9 +4728,9 @@ class ConSanValidationTest(unittest.TestCase):
         }
         summary = validation._empirical_round_summary(
             0,
-            ["sampled"],
+            ["default"],
             before,
-            {"sampled": profile},
+            {"default": profile},
             after,
             baseline_drift_limit=0.05,
         )
@@ -5799,9 +4757,9 @@ class ConSanValidationTest(unittest.TestCase):
         }
         summary = validation._empirical_round_summary(
             0,
-            ["sampled"],
+            ["default"],
             before,
-            {"sampled": profile},
+            {"default": profile},
             after,
             baseline_drift_limit=0.05,
         )
@@ -5821,9 +4779,9 @@ class ConSanValidationTest(unittest.TestCase):
 
         summary = validation._empirical_round_summary(
             0,
-            ["sampled"],
+            ["default"],
             row({"host": 1.0, "device": 0.5}),
-            {"sampled": row({"host": 2.0})},
+            {"default": row({"host": 2.0})},
             row({"host": 1.0, "device": 0.5}),
             baseline_drift_limit=0.05,
         )
@@ -5832,13 +4790,13 @@ class ConSanValidationTest(unittest.TestCase):
 
         timed_out = validation._empirical_round_summary(
             0,
-            ["sampled"],
+            ["default"],
             row({"host": 1.0}),
-            {"sampled": row({"host": 2.0}, returncode=124)},
+            {"default": row({"host": 2.0}, returncode=124)},
             row({"host": 1.0}),
             baseline_drift_limit=0.05,
         )
-        self.assertIn("sampled row timed out", timed_out["reasons"])
+        self.assertIn("default row timed out", timed_out["reasons"])
 
     def test_empirical_round_combines_disjoint_cold_and_warm_metrics(self) -> None:
         def row(process_ms: float, dispatch_ms: float) -> dict:
@@ -5850,18 +4808,18 @@ class ConSanValidationTest(unittest.TestCase):
 
         cold = validation._empirical_round_summary(
             2,
-            ["sampled"],
+            ["default"],
             row(100.0, 10.0),
-            {"sampled": row(200.0, 20.0)},
+            {"default": row(200.0, 20.0)},
             row(102.0, 10.2),
             baseline_drift_limit=0.05,
             metric_prefix="cold",
         )
         warm = validation._empirical_round_summary(
             2,
-            ["sampled"],
+            ["default"],
             row(300.0, 1.0),
-            {"sampled": row(400.0, 2.0)},
+            {"default": row(400.0, 2.0)},
             row(600.0, 1.02),
             baseline_drift_limit=0.05,
             include_process_metric=False,
@@ -5869,7 +4827,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         combined = validation._combine_empirical_round_summaries(
             2,
-            ["sampled"],
+            ["default"],
             {"cold": cold, "warm": warm},
         )
 
@@ -5883,7 +4841,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_empirical_round_rejects_duplicate_schedule_metrics(self) -> None:
         schedule = {
             "round": 0,
-            "profile_order": ["sampled"],
+            "profile_order": ["default"],
             "rows_accepted": True,
             "reasons": [],
             "metrics": {"workload:dispatch": {"accepted": True}},
@@ -5893,7 +4851,7 @@ class ConSanValidationTest(unittest.TestCase):
         ):
             validation._combine_empirical_round_summaries(
                 0,
-                ["sampled"],
+                ["default"],
                 {"first": schedule, "second": schedule},
             )
 
@@ -6120,9 +5078,9 @@ class ConSanValidationTest(unittest.TestCase):
 
         cold = validation._empirical_round_summary(
             0,
-            ["sampled"],
+            ["default"],
             row(100.0, 10.0, 1.0),
-            {"sampled": row(900.0, 90.0, 2.0)},
+            {"default": row(900.0, 90.0, 2.0)},
             row(300.0, 30.0, 1.0),
             baseline_drift_limit=0.05,
             metric_prefix="cold",
@@ -6130,9 +5088,9 @@ class ConSanValidationTest(unittest.TestCase):
         )
         warm = validation._empirical_round_summary(
             0,
-            ["sampled"],
+            ["default"],
             row(100.0, 10.0, 1.0),
-            {"sampled": row(900.0, 90.0, 2.0)},
+            {"default": row(900.0, 90.0, 2.0)},
             row(102.0, 40.0, 1.02),
             baseline_drift_limit=0.05,
             include_process_metric=False,
@@ -6140,7 +5098,7 @@ class ConSanValidationTest(unittest.TestCase):
             metric_prefix="warm",
         )
         combined = validation._combine_empirical_round_summaries(
-            0, ["sampled"], {"cold": cold, "warm": warm}
+            0, ["default"], {"cold": cold, "warm": warm}
         )
         self.assertTrue(combined["fully_accepted"])
         self.assertFalse(combined["metrics"]["cold:process"]["qualifying"])
@@ -6160,7 +5118,7 @@ class ConSanValidationTest(unittest.TestCase):
                         "accepted": True,
                         "qualifying": True,
                         "profiles": {
-                            "sampled": {
+                            "default": {
                                 "timing_ms": slowdown * 2.0,
                                 "interpolated_baseline_ms": 2.0,
                                 "slowdown": slowdown,
@@ -6173,21 +5131,21 @@ class ConSanValidationTest(unittest.TestCase):
         rounds = [accepted_round(0, 2.0), accepted_round(1, 3.0)]
         incomplete = validation._empirical_campaign_summary(
             rounds,
-            ("sampled",),
+            ("default",),
             required_accepted_rounds=3,
             bootstrap_resamples=100,
             bootstrap_seed=9,
         )
         complete = validation._empirical_campaign_summary(
             rounds,
-            ("sampled",),
+            ("default",),
             required_accepted_rounds=2,
             bootstrap_resamples=100,
             bootstrap_seed=9,
         )
         self.assertFalse(incomplete["accepted"])
         self.assertTrue(complete["accepted"])
-        slowdown = complete["profiles"]["sampled"]["metrics"]["workload:dispatch"][
+        slowdown = complete["profiles"]["default"]["metrics"]["workload:dispatch"][
             "slowdown"
         ]
         self.assertEqual(slowdown["count"], 2)
@@ -6305,7 +5263,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "complete_pairs": 1,
                     "metadata_complete_pairs": 1,
                 }
-                if profile == "record-replay":
+                if profile == "default":
                     result["accepted"] = False
             return result
 
@@ -6361,38 +5319,38 @@ class ConSanValidationTest(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
         self.assertTrue(campaign["summary"]["accepted"])
-        self.assertEqual(campaign["admission"]["rejected_profiles"], ["record-replay"])
+        self.assertEqual(campaign["admission"]["rejected_profiles"], ["default"])
         self.assertEqual(
             campaign["timed_profiles"],
-            ["supercollider", "sampled", "inline-shadow"],
+            ["supercollider"],
         )
-        record_replay_calls = [
-            call for call in calls if call["profile"] == "record-replay"
+        rejected_profile_calls = [
+            call for call in calls if call["profile"] == "default"
         ]
-        self.assertEqual(len(record_replay_calls), 1)
-        self.assertIn("admission", record_replay_calls[0]["row_dir"].parts)
+        self.assertEqual(len(rejected_profile_calls), 1)
+        self.assertIn("admission", rejected_profile_calls[0]["row_dir"].parts)
         warm_calls = [call for call in calls if "warm" in call["row_dir"].parts]
         self.assertTrue(warm_calls)
         self.assertTrue(all(call["inner"] == 250 for call in warm_calls))
         cold_profile = [
             call
             for call in calls
-            if "cold" in call["row_dir"].parts and call["profile"] == "sampled"
+            if "cold" in call["row_dir"].parts and call["profile"] == "supercollider"
         ]
         self.assertEqual(len(cold_profile), 1)
         self.assertTrue(cold_profile[0]["structural"])
 
     def test_empirical_resume_preserves_interrupted_rows(self) -> None:
         with temporary_root() as root:
-            row = root / "sampled"
+            row = root / "default"
             row.mkdir()
             (row / "run-0.log").write_text("partial", encoding="utf-8")
-            occupied = root / "sampled.incomplete-1"
+            occupied = root / "default.incomplete-1"
             occupied.mkdir()
 
             validation._preserve_incomplete_empirical_row(row)
 
-            preserved = root / "sampled.incomplete-2"
+            preserved = root / "default.incomplete-2"
             self.assertFalse(row.exists())
             self.assertEqual(
                 (preserved / "run-0.log").read_text(encoding="utf-8"), "partial"
@@ -6471,7 +5429,7 @@ class ConSanValidationTest(unittest.TestCase):
 
         detected_before_completion = json.loads(json.dumps(timed_out))
         detected_before_completion["sanitizer"]["outcome"] = "detected"
-        detected_before_completion["sanitizer"]["inline_diagnostics"] = 1
+        detected_before_completion["sanitizer"]["conflicts"] = 1
         admitted, reached, outcome, reasons = validation._fault_admission_and_reach(
             detected_before_completion, None
         )
@@ -6689,9 +5647,7 @@ class ConSanValidationTest(unittest.TestCase):
             ):
                 self.assertEqual(validation._inventory(args), 0)
         self.assertEqual(run_inventory.call_args.args[0], ["rocjitsu", "--", "payload"])
-        self.assertEqual(
-            write_provenance.call_args.args[4], ["rocjitsu", "--"]
-        )
+        self.assertEqual(write_provenance.call_args.args[4], ["rocjitsu", "--"])
 
     def test_fault_parser_accepts_paired_health_command_overrides(self) -> None:
         args = validation._parse_args(
@@ -6744,9 +5700,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
                 "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
             },
-            "profiles": {
-                "supercollider": {"detector": "detected", "oracle": "any"}
-            },
+            "profiles": {"supercollider": {"detector": "detected", "oracle": "any"}},
         }
         trial_environment = {
             "HIP_TARGET": "gfx1250",
@@ -6777,8 +5731,7 @@ class ConSanValidationTest(unittest.TestCase):
                         "spec": {
                             "corpus": workload.corpus,
                             "workload": workload.id,
-                            "flavor": validation.PROFILES["supercollider"].flavor,
-                            "engine": validation.PROFILES["supercollider"].engine,
+                            "mode": validation.PROFILES["supercollider"].mode,
                             "fault_family": fault["family"],
                             "row_role": "fault",
                         },
@@ -7253,7 +6206,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a",
             },
             "profiles": {
-                "record-replay": {
+                "default": {
                     "disposition": "not-applicable",
                     "reason": "profile has no qualified fault",
                     "tracking_issue": "bd-test",
@@ -7271,7 +6224,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "--workload",
                     workload.id,
                     "--profile",
-                    "record-replay",
+                    "default",
                     "--spec",
                     str(spec),
                     "--fault",
@@ -7320,7 +6273,7 @@ class ConSanValidationTest(unittest.TestCase):
                 {
                     "accepted": True,
                     "disposition": "not-applicable",
-                    "profile": "record-replay",
+                    "profile": "default",
                     "reason": "profile has no qualified fault",
                     "tracking_issue": "bd-test",
                 }
@@ -7409,9 +6362,7 @@ class ConSanValidationTest(unittest.TestCase):
 
         expected_detectors = {
             "supercollider": "not_detected",
-            "record-replay": "detected",
-            "sampled": "not_detected",
-            "inline-shadow": "detected",
+            "default": "not_detected",
         }
         for profile, detector in expected_detectors.items():
             policy, trials = validation._fault_trials(fault, profile)
@@ -7433,9 +6384,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "SN_1LDSB1_APM1_AF0EM2_AF1EM2_AMAS3",
                 environment["RJ_CONSAN_TEST_KERNEL_FILTER"],
             )
-        for profile in ("record-replay", "inline-shadow"):
-            policy, _ = validation._fault_trials(fault, profile)
-            self.assertEqual(policy["environment"]["RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS"], "1")
 
     def test_checked_in_gfx950_tensile_lds_control_policy_and_provenance(self) -> None:
         path = Path(__file__).with_name(
@@ -7450,9 +6398,7 @@ class ConSanValidationTest(unittest.TestCase):
         fault = validation._load_fault(path, "gfx950", workload, "lds-wrong-address")
         expected_detectors = {
             "supercollider": "detected",
-            "record-replay": "detected",
-            "sampled": "not_detected",
-            "inline-shadow": "detected",
+            "default": "not_detected",
         }
         for profile, detector in expected_detectors.items():
             policy, trials = validation._fault_trials(fault, profile)

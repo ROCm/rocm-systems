@@ -12,22 +12,22 @@
 #include <span>
 
 namespace rocjitsu {
-
 class AmdGpuCodeObject;
 class Decoder;
-struct ConSanProgramAnalysisResult;
+} // namespace rocjitsu
+
+namespace rocjitsu::consan {
+
+struct ProgramAnalysisResult;
 
 /// Build all synchronization semantics needed by the selected request and
 /// publish one immutable inventory view. Internal CFGs, indexes, association
 /// passes, and target-form screening do not cross this boundary.
-[[nodiscard]] bool analyze_consan_semantic_inventory(std::span<const uint8_t> code_object_bytes,
-                                                     const AmdGpuCodeObject &code_object,
-                                                     Decoder &decoder, rj_code_arch_t arch,
-                                                     const ConSanRequest &request,
-                                                     const ConSanDebugOverrides &debug,
-                                                     const MutationRequest &mutation,
-                                                     ProgramInventoryBuilder &inventory_builder,
-                                                     ConSanPerturbationPlanningState &perturbation,
-                                                     ConSanProgramAnalysisResult &result);
+[[nodiscard]] bool analyze_semantic_inventory(
+    std::span<const uint8_t> code_object_bytes, const AmdGpuCodeObject &code_object,
+    Decoder &decoder, rj_code_arch_t arch, const Request &request, const DebugOverrides &debug,
+    const MutationRequest &mutation, ProgramInventoryBuilder &inventory_builder,
+    SuperColliderPerturbationPlanningState &supercollider_perturbation,
+    ProgramAnalysisResult &result);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

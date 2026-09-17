@@ -4,8 +4,7 @@ This document defines ConSan's malformed-input and containment contract. It is
 deliberately separate from detection quality: a timeout, crash, reset, or
 application failure is never a ConSan race diagnostic.
 
-The contract applies to SuperCollider and to all three MOI modes:
-`record-replay`, `inline-shadow`, and `sampled`. It covers the public transform
+The contract applies to SuperCollider and ConSan. It covers the public transform
 boundary, the HSA hook's install decision, and carefully contained execution of
 structurally valid but semantically ill-formed GPU programs. Arbitrary
 structurally malformed bytes must never be submitted to a GPU.
@@ -87,7 +86,7 @@ bytes on a GPU.
 
 ## Optional unmatched-wait guard
 
-Every flavor supports the narrow opt-in guard
+Every mode supports the narrow opt-in guard
 `RJ_CONSAN_ABORT_UNMATCHED_BARRIER_WAIT=1`. It replaces only a statically unique
 immediate wait that belongs to no bounded multi-event barrier sequence with
 `s_endpgm`, and records an `inline-malformed-barrier-abort` patch. Bounded

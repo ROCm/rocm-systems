@@ -19,18 +19,19 @@ void require(bool condition) {
     std::abort();
 }
 
-void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOptions &options) {
-  const rocjitsu::ConSanTransformArtifacts result = rocjitsu::lower_consan(input, options);
-  require(result.program_inventory.code_object_id() == rocjitsu::make_consan_code_object_id(input));
-  if (result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid) {
+void exercise_transform(std::span<const uint8_t> input, const rocjitsu::consan::Options &options) {
+  const rocjitsu::consan::TransformArtifacts result = rocjitsu::consan::lower(input, options);
+  require(result.program_inventory.code_object_id() ==
+          rocjitsu::consan::make_code_object_id(input));
+  if (result.outcome == rocjitsu::consan::TransformOutcome::ModifiedValid) {
     require(!result.replacement.empty());
     require(!result.patches.empty());
-    require(rocjitsu::validate_consan_modified_elf(input, result).empty());
+    require(rocjitsu::consan::validate_modified_elf(input, result).empty());
 
     if (std::getenv("RJ_CONSAN_FUZZ_REQUIRE_UNMATCHED_WAIT_ABORT")) {
-      const rocjitsu::ConSanPatchInfo *abort_patch = nullptr;
-      for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
-        if (patch.kind != rocjitsu::ConSanPatchKind::InlineMalformedBarrierAbort)
+      const rocjitsu::consan::PatchInfo *abort_patch = nullptr;
+      for (const rocjitsu::consan::PatchInfo &patch : result.patches) {
+        if (patch.kind != rocjitsu::consan::PatchKind::InlineMalformedBarrierAbort)
           continue;
         require(abort_patch == nullptr);
         abort_patch = &patch;
@@ -65,31 +66,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
   const std::span<const uint8_t> input(data, size);
 #if defined(RJ_CONSAN_FUZZ_PROFILE_SUPERCOLLIDER)
-  rocjitsu::ConSanOptions supercollider;
-  supercollider.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  rocjitsu::consan::Options supercollider;
+  supercollider.mode = rocjitsu::consan::Mode::SuperCollider;
   supercollider.probe_lds_check_trap = true;
   supercollider.probe_flat_check_trap = true;
   supercollider.max_patches = 8;
   supercollider.abort_unmatched_barrier_wait = true;
   exercise_transform(input, supercollider);
-#elif defined(RJ_CONSAN_FUZZ_PROFILE_RECORD_REPLAY)
-  rocjitsu::ConSanOptions moi;
-  moi.flavor = rocjitsu::ConSanFlavor::Moi;
-  moi.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
-  moi.abort_unmatched_barrier_wait = true;
-  exercise_transform(input, moi);
-#elif defined(RJ_CONSAN_FUZZ_PROFILE_INLINE_SHADOW)
-  rocjitsu::ConSanOptions moi;
-  moi.flavor = rocjitsu::ConSanFlavor::Moi;
-  moi.moi_engine = rocjitsu::ConSanMoiEngine::InlineShadow;
-  moi.abort_unmatched_barrier_wait = true;
-  exercise_transform(input, moi);
-#elif defined(RJ_CONSAN_FUZZ_PROFILE_SAMPLED)
-  rocjitsu::ConSanOptions moi;
-  moi.flavor = rocjitsu::ConSanFlavor::Moi;
-  moi.moi_engine = rocjitsu::ConSanMoiEngine::Sampled;
-  moi.abort_unmatched_barrier_wait = true;
-  exercise_transform(input, moi);
+#elif defined(RJ_CONSAN_FUZZ_PROFILE_DEFAULT)
+  rocjitsu::consan::Options options;
+  options.mode = rocjitsu::consan::Mode::Default;
+  options.abort_unmatched_barrier_wait = true;
+  exercise_transform(input, options);
 #else
 #error "A single RJ_CONSAN_FUZZ_PROFILE_* definition is required"
 #endif

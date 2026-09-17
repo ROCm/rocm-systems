@@ -1,4 +1,4 @@
-enum class ConSanResourceSiteKind : uint8_t {
+enum class ResourceSiteKind : uint8_t {
   Access,
   Barrier,
   Atomic,
@@ -8,7 +8,7 @@ enum class ConSanResourceSiteKind : uint8_t {
 /// Number of directly encoded ordinary VGPRs in the ConSan instrumentation
 /// ABIs. REGISTER_SET_MAX_VGPRS is intentionally larger so analysis can also
 /// represent architecture-specific banks; it is not an emission bound.
-inline constexpr uint16_t kConSanOrdinaryVgprLimit = 256u;
+inline constexpr uint16_t kOrdinaryVgprLimit = 256u;
 
 /// A structurally distinct fallback considered after the primary resource plan.
 ///
@@ -16,13 +16,13 @@ inline constexpr uint16_t kConSanOrdinaryVgprLimit = 256u;
 /// superseded, contributing, and vetoed plans from sites that never had a
 /// correctness-preserving alternative. Producers stamp the outcome while the
 /// planning branch that made the decision is still available.
-enum class ConSanResourcePlanAlternativeKind : uint8_t {
+enum class ResourcePlanAlternativeKind : uint8_t {
   GuestOperandOverlapSpill,
   SpillBackedOperandRecovery,
   EmptyAccumulatorDescriptorGrowth,
 };
 
-enum class ConSanResourcePlanAlternativeOutcome : uint8_t {
+enum class ResourcePlanAlternativeOutcome : uint8_t {
   Selected,
   Rejected,
   Superseded,
@@ -30,20 +30,19 @@ enum class ConSanResourcePlanAlternativeOutcome : uint8_t {
   Vetoed,
 };
 
-struct ConSanResourcePlanAlternative {
-  ConSanResourcePlanAlternativeKind kind =
-      ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill;
-  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
-  ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
+struct ResourcePlanAlternative {
+  ResourcePlanAlternativeKind kind = ResourcePlanAlternativeKind::GuestOperandOverlapSpill;
+  RegisterAllocationSource source = RegisterAllocationSource::Unsupported;
+  RegisterPlanReason reason = RegisterPlanReason::None;
   uint16_t scratch_vgpr_count = 0;
-  ConSanResourcePlanAlternativeOutcome outcome = ConSanResourcePlanAlternativeOutcome::Rejected;
+  ResourcePlanAlternativeOutcome outcome = ResourcePlanAlternativeOutcome::Rejected;
 };
 
-struct ConSanCandidateResourcePlan {
-  ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
+struct CandidateResourcePlan {
+  ResourceSiteKind site_kind = ResourceSiteKind::Access;
   size_t candidate_index = 0;
   /// Semantic intents whose lowering is governed by this site-local plan.
-  std::vector<ConSanProbeIntentId> intent_ids;
+  std::vector<ProbeIntentId> intent_ids;
   /// Physical instruction where liveness and allocation were evaluated.
   uint64_t text_offset = 0;
   /// Logical synchronization site represented by a patch whose physical
@@ -56,14 +55,14 @@ struct ConSanCandidateResourcePlan {
   /// remains bound to the immutable inventory that produced it; descriptor byte
   /// offsets are materialized only by lowering that reads or mutates descriptor
   /// fields.
-  std::vector<ConSanProgramContainerId> owner_kernel_ids;
-  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
-  ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
+  std::vector<ProgramContainerId> owner_kernel_ids;
+  RegisterAllocationSource source = RegisterAllocationSource::Unsupported;
+  RegisterPlanReason reason = RegisterPlanReason::None;
   std::optional<uint16_t> scratch_vgpr;
   uint16_t scratch_vgpr_count = 0;
   uint16_t current_vgpr_count = 0;
   uint16_t max_referenced_vgpr_count = 0;
-  uint16_t ordinary_vgpr_limit = kConSanOrdinaryVgprLimit;
+  uint16_t ordinary_vgpr_limit = kOrdinaryVgprLimit;
   bool has_indirect_vgpr_access = false;
   uint16_t required_vgpr_count = 0;
   uint16_t current_sgpr_count = 0;
@@ -72,28 +71,27 @@ struct ConSanCandidateResourcePlan {
   /// Every structurally distinct fallback evaluated while producing this plan,
   /// in chronological planning order. At most one attempt is Selected; nested
   /// attempts that enable it are Contributed.
-  std::vector<ConSanResourcePlanAlternative> alternatives;
+  std::vector<ResourcePlanAlternative> alternatives;
 };
 
-/// Correctness-preserving operating-point fallback selected by MOI placement.
+/// Correctness-preserving operating-point fallback selected by ConSan placement.
 ///
 /// These values cross the solver/orchestrator boundary and therefore remain
 /// typed. User-facing wording is produced only after the caller accepts the
 /// associated operating point.
-enum class ConSanMoiFallbackKind : uint8_t {
+enum class FallbackKind : uint8_t {
   DynamicStackScalarSpill,
-  SampledLiteralDispatchId,
-  RecordReplayZeroGeneration,
+  LiteralDispatchId,
 };
 
 /// Accepted immutable resource solution consumed by native emission.
 ///
 /// The operating point and site plans move together so an emitter cannot pair
 /// plans from one solver iteration with register state from another.
-struct ConSanMoiAcceptedResources {
-  ConSanMoiOperatingPoint operating_point;
-  std::vector<ConSanCandidateResourcePlan> site_plans;
-  std::optional<ConSanMoiFallbackKind> selected_fallback;
+struct AcceptedResources {
+  OperatingPoint operating_point;
+  std::vector<CandidateResourcePlan> site_plans;
+  std::optional<FallbackKind> selected_fallback;
   std::vector<std::string> diagnostics;
 };
 
@@ -102,17 +100,16 @@ struct ConSanMoiAcceptedResources {
 /// A rejected attempt still records the exact point that was evaluated, but
 /// carries no fallback kind and publishes no diagnostics. An accepted attempt
 /// moves its operating point and diagnostics together into orchestration.
-struct ConSanMoiOperatingPointAttempt {
-  ConSanMoiOperatingPoint attempted_operating_point;
-  std::optional<ConSanMoiFallbackKind> accepted_fallback;
+struct OperatingPointAttempt {
+  OperatingPoint attempted_operating_point;
+  std::optional<FallbackKind> accepted_fallback;
   std::vector<std::string> diagnostics;
 
   [[nodiscard]] bool accepted() const { return accepted_fallback.has_value(); }
 };
 
 /// Typed reason that an operating-point placement step rejected its input.
-enum class ConSanMoiPlacementRejection : uint8_t {
-  DispatchIdSgprUnavailable,
+enum class PlacementRejection : uint8_t {
   AmbiguousWorkgroupCapture,
   PartialOwnerEpochVgprOverride,
   PersistentStateUnavailable,
@@ -124,9 +121,9 @@ enum class ConSanMoiPlacementRejection : uint8_t {
 /// cannot publish messages from an unselected mutation or retain only part of
 /// a placement decision. A rejection is explicit and leaves the caller, not
 /// the placement component, responsible for changing the transform outcome.
-struct ConSanMoiOperatingPointUpdate {
-  ConSanMoiOperatingPoint attempted_operating_point;
-  std::optional<ConSanMoiPlacementRejection> rejection;
+struct OperatingPointUpdate {
+  OperatingPoint attempted_operating_point;
+  std::optional<PlacementRejection> rejection;
   std::vector<std::string> diagnostics;
 
   [[nodiscard]] bool accepted() const { return !rejection.has_value(); }
@@ -137,16 +134,16 @@ struct ConSanMoiOperatingPointUpdate {
 /// Entry scratch belongs to the exact attempted operating point that required
 /// it. Keeping both in one result prevents orchestration from retaining
 /// prologue resources after rejecting or replacing the corresponding point.
-struct ConSanMoiPersistentPlacementUpdate {
-  ConSanMoiOperatingPoint attempted_operating_point;
-  std::optional<ConSanMoiPlacementRejection> rejection;
+struct PersistentPlacementUpdate {
+  OperatingPoint attempted_operating_point;
+  std::optional<PlacementRejection> rejection;
   std::vector<std::string> diagnostics;
-  std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments;
+  std::vector<PrologueScratchVgprAssignment> prologue_scratch_assignments;
 
   [[nodiscard]] bool accepted() const { return !rejection.has_value(); }
 };
 
-/// Complete, unpublished output of one MOI resource-planning attempt.
+/// Complete, unpublished output of one ConSan resource-planning attempt.
 ///
 /// `plans` contains every access and synchronization-site allocation derived
 /// for one operating point. `errors` contains structural failures discovered
@@ -155,15 +152,15 @@ struct ConSanMoiPersistentPlacementUpdate {
 /// prior plan set and append diagnostics in one explicit publication step.
 /// This prevents a retry from exposing a partial vector or mutating transform
 /// diagnostics while it is still evaluating a candidate operating point.
-struct ConSanMoiResourcePlanningResult {
+struct ResourcePlanningResult {
   /// Exact operating point against which every site plan was derived.
-  ConSanMoiOperatingPoint attempted_operating_point;
+  OperatingPoint attempted_operating_point;
   /// Resource alternatives and selected allocation for every planned site.
-  std::vector<ConSanCandidateResourcePlan> plans;
+  std::vector<CandidateResourcePlan> plans;
   /// Fatal structural diagnostics produced while deriving this plan set.
   std::vector<std::string> errors;
   /// Typed fallback selected while deriving this exact point, if any.
-  std::optional<ConSanMoiFallbackKind> selected_fallback;
+  std::optional<FallbackKind> selected_fallback;
   /// Diagnostics owned by this attempt. They are publishable only if the
   /// complete point/plan pair is accepted.
   std::vector<std::string> diagnostics;
@@ -174,10 +171,10 @@ struct ConSanMoiResourcePlanningResult {
 
   /// Accept a structurally complete attempt as one indivisible emission input.
   /// Typed Unsupported site plans remain part of a valid accepted solution.
-  [[nodiscard]] std::optional<ConSanMoiAcceptedResources> accept() && {
+  [[nodiscard]] std::optional<AcceptedResources> accept() && {
     if (!success())
       return std::nullopt;
-    return ConSanMoiAcceptedResources{
+    return AcceptedResources{
         .operating_point = std::move(attempted_operating_point),
         .site_plans = std::move(plans),
         .selected_fallback = selected_fallback,
@@ -189,9 +186,9 @@ struct ConSanMoiResourcePlanningResult {
 /// Aggregate telemetry derived from completed resource plans and emitted
 /// patches. Its counters describe planner outcomes and the spill storage used
 /// by emitted mechanics. This type owns no transform state; construct it with
-/// `summarize_consan_resource_plans` whenever a diagnostic or test needs the
+/// `summarize_resource_plans` whenever a diagnostic or test needs the
 /// reporting view.
-struct ConSanResourcePlanSummary {
+struct ResourcePlanSummary {
   size_t explicit_plans = 0;
   size_t dead_plans = 0;
   size_t descriptor_growth_plans = 0;
@@ -207,5 +204,5 @@ struct ConSanResourcePlanSummary {
   size_t alternative_contributed = 0;
   size_t alternative_vetoed = 0;
 
-  bool operator==(const ConSanResourcePlanSummary &) const = default;
+  bool operator==(const ResourcePlanSummary &) const = default;
 };

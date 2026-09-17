@@ -30,7 +30,7 @@ __host__ __device__ uint32_t producer_value(uint32_t producer, uint32_t lane) {
 }
 
 __host__ __device__ uint32_t producer_lane_for_slot(uint32_t producer, uint32_t slot) {
-  // The second producer's pair exchange retains the runtime-index flavor of
+  // The second producer's pair exchange retains the runtime-index mode of
   // selection and scatter kernels while remaining exactly invertible.
   return producer == 0u ? slot : slot ^ 1u;
 }

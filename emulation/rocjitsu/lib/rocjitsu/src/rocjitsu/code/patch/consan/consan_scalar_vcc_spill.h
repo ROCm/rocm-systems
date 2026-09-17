@@ -8,11 +8,11 @@
 
 #include <cstdint>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Representation used to preserve a borrowed scalar VCC-save range in
 /// VGPRs. The numeric value is the exact consecutive reservoir width.
-enum class ConSanScalarVccReservoir : uint16_t {
+enum class ScalarVccReservoir : uint16_t {
   PackedLanes = 1,
   PrivateSpill = 2,
   DynamicStackBootstrap = 4,
@@ -22,10 +22,10 @@ enum class ConSanScalarVccReservoir : uint16_t {
 /// Absence means no borrowed scalar state. This common artifact lets pipeline,
 /// diagnostics, and validation carry the effect without depending on the mode
 /// that selected it.
-struct ConSanScalarVccSpill {
+struct ScalarVccSpill {
   uint16_t vcc_save_sgpr;
   uint16_t reservoir_vgpr;
-  ConSanScalarVccReservoir reservoir;
+  ScalarVccReservoir reservoir;
 
   [[nodiscard]] uint16_t reservoir_vgpr_count() const { return static_cast<uint16_t>(reservoir); }
 
@@ -36,4 +36,4 @@ struct ConSanScalarVccSpill {
   }
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

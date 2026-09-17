@@ -12,18 +12,18 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_program_analysis_target_detail {
+namespace rocjitsu::consan::program_analysis_target_detail {
 
-ConSanCacheOperationEncoding classify_rdna4_cache_operation(std::string_view mnemonic) {
+CacheOperationEncoding classify_rdna4_cache_operation(std::string_view mnemonic) {
   return classify_rdna4_cdna5_cache_operation(mnemonic, true);
 }
 
-std::optional<ConSanScratchComponentEncoding>
+std::optional<ScratchComponentEncoding>
 decode_rdna4_scratch_component(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_scratch_component<rdna4::VscratchMachineInst>(instruction);
 }
 
-std::optional<ConSanPrivateComponentEncoding>
+std::optional<PrivateComponentEncoding>
 decode_rdna4_private_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(rdna4::VflatMachineInst))
     return std::nullopt;
@@ -31,7 +31,7 @@ decode_rdna4_private_component(std::span<const uint8_t> instruction) {
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   if (raw.encoding != 0xecu)
     return std::nullopt;
-  return ConSanPrivateComponentEncoding{
+  return PrivateComponentEncoding{
       .address_vgpr = static_cast<uint16_t>(raw.vaddr),
       .load_data_vgpr = static_cast<uint16_t>(raw.vdst),
       .store_data_vgpr = static_cast<uint16_t>(raw.vsrc),
@@ -39,47 +39,44 @@ decode_rdna4_private_component(std::span<const uint8_t> instruction) {
   };
 }
 
-std::optional<ConSanLaneTransferEncoding>
+std::optional<LaneTransferEncoding>
 decode_rdna4_lane_transfer(std::span<const uint8_t> instruction) {
   // The generated RDNA4 VOP3 operand table keeps the two architectural
   // sources first and appends vdst's lane-preservation use last.
   return decode_rdna4_cdna5_lane_transfer<rdna4::Vop3MachineInst>(instruction, 0);
 }
 
-ConSanVectorMemoryDecode decode_rdna4_flat_memory(std::span<const uint8_t> instruction) {
+VectorMemoryDecode decode_rdna4_flat_memory(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_vector_memory<rdna4::VflatMachineInst>(
       instruction, rdna4::OPR_SREG_NULL, 0xecu, true, 1u);
 }
 
-ConSanVectorMemoryDecode decode_rdna4_global_memory(std::span<const uint8_t> instruction) {
+VectorMemoryDecode decode_rdna4_global_memory(std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_vector_memory<rdna4::VglobalMachineInst>(
       instruction, rdna4::OPR_SREG_NULL, 0xeeu, true, 1u);
 }
 
-bool decode_rdna4_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+bool decode_rdna4_atomic_site(AtomicSite &site, std::string_view mnemonic,
                               std::span<const uint8_t> instruction) {
   return decode_rdna4_cdna5_atomic_site<rdna4::VdsMachineInst, rdna4::VflatMachineInst,
                                         rdna4::VglobalMachineInst, rdna4::VscratchMachineInst,
                                         rdna4::VbufferMachineInst>(site, mnemonic, instruction);
 }
 
-} // namespace rocjitsu::consan_program_analysis_target_detail
+} // namespace rocjitsu::consan::program_analysis_target_detail
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-extern const ConSanProgramAnalysisTargetOperations kConSanRdna4ProgramAnalysisOperations = {
-    .classify_cache_operation =
-        consan_program_analysis_target_detail::classify_rdna4_cache_operation,
+extern const ProgramAnalysisTargetOperations kRdna4ProgramAnalysisOperations = {
+    .classify_cache_operation = program_analysis_target_detail::classify_rdna4_cache_operation,
     .classify_wait_instruction =
-        consan_program_analysis_target_detail::classify_rdna4_cdna5_wait_instruction,
-    .decode_scratch_component =
-        consan_program_analysis_target_detail::decode_rdna4_scratch_component,
-    .decode_private_component =
-        consan_program_analysis_target_detail::decode_rdna4_private_component,
-    .decode_lane_transfer = consan_program_analysis_target_detail::decode_rdna4_lane_transfer,
-    .decode_flat_memory = consan_program_analysis_target_detail::decode_rdna4_flat_memory,
-    .decode_global_memory = consan_program_analysis_target_detail::decode_rdna4_global_memory,
-    .decode_atomic_site = consan_program_analysis_target_detail::decode_rdna4_atomic_site,
+        program_analysis_target_detail::classify_rdna4_cdna5_wait_instruction,
+    .decode_scratch_component = program_analysis_target_detail::decode_rdna4_scratch_component,
+    .decode_private_component = program_analysis_target_detail::decode_rdna4_private_component,
+    .decode_lane_transfer = program_analysis_target_detail::decode_rdna4_lane_transfer,
+    .decode_flat_memory = program_analysis_target_detail::decode_rdna4_flat_memory,
+    .decode_global_memory = program_analysis_target_detail::decode_rdna4_global_memory,
+    .decode_atomic_site = program_analysis_target_detail::decode_rdna4_atomic_site,
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

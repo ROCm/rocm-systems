@@ -14,7 +14,7 @@ rj_add_object_library(
         consan_instruction_semantics.cpp
         consan_inventory_diagnostics.cpp
         consan_observation_policy.cpp
-        consan_perturbation_policy.cpp
+        supercollider/consan_supercollider_perturbation_policy.cpp
         consan_semantic_classifiers.cpp
         consan_sync_event_index.cpp
         consan_sync_metadata.cpp
@@ -38,7 +38,7 @@ rj_add_object_library(
         targets/cdna5/consan_program_analysis_cdna5_target_ops.cpp
         targets/cdna5/consan_supercollider_cdna5_target_ops.cpp
         targets/shared/cdna3_cdna4/consan_fault_cdna3_cdna4_target_ops.cpp
-        targets/shared/cdna3_cdna4/consan_moi_cdna3_cdna4_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_cdna3_cdna4_target_ops.cpp
         targets/shared/cdna3_cdna4/consan_program_analysis_cdna3_cdna4_target_ops.cpp
         targets/shared/cdna3_cdna4/consan_supercollider_cdna3_cdna4_target_ops.cpp
         targets/shared/cdna3_cdna4/consan_validation_cdna3_cdna4_target_ops.cpp
@@ -65,55 +65,43 @@ rj_add_object_library(
         consan_barrier_move_proof.cpp
         consan_descriptor_growth.cpp
         consan_fault_injection.cpp
-        consan_moi.cpp
-        consan_moi_access_apply.cpp
-        consan_moi_access_target.cpp
-        consan_moi_barrier.cpp
-        consan_moi_candidate_projection.cpp
-        consan_moi_dynamic_record_emission.cpp
-        consan_moi_engine_contracts.cpp
-        consan_moi_evidence_planning.cpp
-        consan_moi_exact_shadow_emission.cpp
-        modes/inline_shadow/consan_moi_inline_shadow_emission.cpp
-        modes/inline_shadow/consan_moi_inline_atomic_emission.cpp
-        modes/inline_shadow/consan_moi_inline_shadow.cpp
-        modes/inline_shadow/consan_moi_inline_shadow_report_plan.cpp
-        consan_moi_memory_emission.cpp
-        consan_moi_mode_planning.cpp
-        consan_moi_native_abi.cpp
-        consan_moi_pipeline.cpp
-        consan_moi_placement.cpp
-        consan_moi_probe_contracts.cpp
-        consan_moi_probe_planning.cpp
-        consan_moi_prologue.cpp
-        consan_moi_report_plan.cpp
-        consan_moi_relocation.cpp
-        consan_moi_report_emission.cpp
-        modes/record_replay/consan_moi_record_event_emission.cpp
-        modes/record_replay/consan_moi_record_planning.cpp
-        modes/record_replay/consan_moi_record_replay.cpp
-        modes/record_replay/consan_moi_record_replay_access_emission.cpp
-        modes/record_replay/consan_moi_record_replay_model.cpp
-        modes/record_replay/consan_moi_record_replay_report_plan.cpp
-        consan_moi_runtime_workgroup_gate.cpp
-        modes/sampled/consan_moi_sampled_access_emission.cpp
-        modes/sampled/consan_moi_sampled_contracts.cpp
-        modes/sampled/consan_moi_sampled.cpp
-        modes/sampled/consan_moi_sampled_model.cpp
-        modes/sampled/consan_moi_sampled_report_plan.cpp
-        modes/sampled/consan_moi_sampled_atomic_emission.cpp
-        modes/sampled/consan_moi_sampled_window_emission.cpp
-        consan_moi_shared_lowering.cpp
-        consan_moi_support.cpp
-        consan_moi_sync_emission.cpp
-        consan_moi_target_address.cpp
-        consan_perturbation.cpp
+        consan_instrumentation.cpp
+        consan_access_apply.cpp
+        consan_access_target.cpp
+        consan_barrier.cpp
+        consan_candidate_projection.cpp
+        consan_device_primitives.cpp
+        consan_identity_contracts.cpp
+        consan_evidence_planning.cpp
+        consan_packed_fields.cpp
+        consan_memory_emission.cpp
+        consan_native_abi.cpp
+        consan_resource_planning.cpp
+        consan_register_allocation.cpp
+        consan_probe_contracts.cpp
+        consan_probe_planning.cpp
+        consan_prologue.cpp
+        consan_report_plan.cpp
+        consan_relocation.cpp
+        consan_report_emission.cpp
+        consan_runtime_workgroup_gate.cpp
+        consan_access_emission.cpp
+        consan_contracts.cpp
+        consan_probe_lowering.cpp
+        consan_model.cpp
+        consan_atomic_emission.cpp
+        consan_window_emission.cpp
+        consan_shared_lowering.cpp
+        consan_support.cpp
+        consan_sync_emission.cpp
+        consan_target_address.cpp
+        supercollider/consan_supercollider_perturbation.cpp
         consan_placement.cpp
         consan_resource.cpp
         consan_text_relocation.cpp
-        modes/supercollider/consan_supercollider.cpp
-        modes/supercollider/consan_supercollider_report_plan.cpp
-        modes/supercollider/consan_supercollider_support.cpp
+        supercollider/consan_supercollider.cpp
+        supercollider/consan_supercollider_report_plan.cpp
+        supercollider/consan_supercollider_support.cpp
         consan_unmatched_barrier_abort.cpp
 )
 target_link_libraries(
@@ -125,8 +113,7 @@ rj_add_object_library(
     rocjitsu_consan_validation
         consan_final_validation.cpp
         consan_validation_inventory.cpp
-        modes/inline_shadow/consan_moi_inline_shadow_final_validation.cpp
-        modes/supercollider/consan_supercollider_final_validation.cpp
+        supercollider/consan_supercollider_final_validation.cpp
 )
 target_link_libraries(
     rocjitsu_consan_validation

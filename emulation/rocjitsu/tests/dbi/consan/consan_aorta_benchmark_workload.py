@@ -61,7 +61,7 @@ def _instrumentation_control():
     end_window.restype = ctypes.c_uint32
 
     def set_analysis_window(open_window: bool) -> None:
-        if os.environ.get("RJ_CONSAN_MOI_EPOCH_ANALYSIS") != "manual":
+        if os.environ.get("RJ_CONSAN_EPOCH_ANALYSIS") != "manual":
             return
         status = begin_window() if open_window else end_window()
         if status != 0:

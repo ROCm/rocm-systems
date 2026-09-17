@@ -14,13 +14,12 @@
 
 #include <climits>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 std::optional<std::vector<uint32_t>>
-consan_build_split_two_address_lds_pair(const ConSanSplitTwoAddressLdsRequest &request,
-                                        rj_code_arch_t arch) {
-  if (!consan_arch_is_cdna5(arch) || request.address_vgpr > 255u ||
-      request.first_data_vgpr > 255u || request.second_data_vgpr > 255u ||
+build_split_two_address_lds_pair(const SplitTwoAddressLdsRequest &request, rj_code_arch_t arch) {
+  if (!arch_is_cdna5(arch) || request.address_vgpr > 255u || request.first_data_vgpr > 255u ||
+      request.second_data_vgpr > 255u ||
       (request.element_dwords == 2u &&
        (request.first_data_vgpr > 254u || request.second_data_vgpr > 254u)) ||
       (request.element_dwords != 1u && request.element_dwords != 2u)) {
@@ -71,4 +70,4 @@ consan_build_split_two_address_lds_pair(const ConSanSplitTwoAddressLdsRequest &r
   return words;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

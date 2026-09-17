@@ -12,8 +12,7 @@ def temporary_root():
 def coverage(reader: int = 7, **updates: str) -> str:
     fields = {
         "reader": str(reader),
-        "flavor": "moi",
-        "engine": "record_replay",
+        "mode": "default",
         "analysis_complete": "true",
         "expert_limit": "false",
         "access_discovered": "20",
@@ -79,10 +78,6 @@ def verdict(**updates: str) -> str:
         "atomic": "2/2",
         "fence": "1/1",
         "dynamic_incomplete": "0",
-        "replay_unsupported_access": "0",
-        "replay_unsupported_atomics": "0",
-        "replay_unsupported_fences": "0",
-        "replay_metadata_full": "0",
     }
     fields.update(updates)
     return "[rocjitsu-dbi-hooks] ConSan analysis verdict " + " ".join(
@@ -118,7 +113,9 @@ def log(*lines: str, synthesize_sites: bool = True) -> str:
             marker = "ConSan coverage_site "
             if marker not in line:
                 continue
-            fields = dict(token.split("=", 1) for token in line.split(marker, 1)[1].split())
+            fields = dict(
+                token.split("=", 1) for token in line.split(marker, 1)[1].split()
+            )
             key = (
                 fields["reader"],
                 fields.get("load", ""),
@@ -135,7 +132,7 @@ def log(*lines: str, synthesize_sites: bool = True) -> str:
             if any("=" not in token for token in tokens):
                 continue
             fields = dict(token.split("=", 1) for token in tokens)
-            if fields.get("flavor") != "moi":
+            if fields.get("mode") != "default":
                 continue
             reader = fields["reader"]
             load = fields.get("load")
@@ -152,7 +149,9 @@ def log(*lines: str, synthesize_sites: bool = True) -> str:
                 if omitted:
                     desired["placement_or_lowering_failed"] += omitted
                 for outcome, count in desired.items():
-                    missing = count - existing.get((reader, load or "", kind, outcome), 0)
+                    missing = count - existing.get(
+                        (reader, load or "", kind, outcome), 0
+                    )
                     for _ in range(max(missing, 0)):
                         serial += 4
                         if outcome == "unsupported":

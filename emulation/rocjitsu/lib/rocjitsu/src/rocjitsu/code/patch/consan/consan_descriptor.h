@@ -17,7 +17,7 @@
 #include <span>
 #include <unordered_map>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Accumulate one monotonic resource extent for a kernel descriptor.
 ///
@@ -89,20 +89,20 @@ read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
 /// Normalized ordinary/accumulator view of one target descriptor's unified
 /// VGPR allocation. A present accumulator base is the first physical AccVGPR;
 /// `ordinary_count` remains the currently allocated ordinary prefix.
-struct ConSanDescriptorVgprAllocation {
+struct DescriptorVgprAllocation {
   uint16_t unified_count = 0;
   uint16_t ordinary_count = 0;
   std::optional<uint16_t> accumulator_base;
 };
 
-[[nodiscard]] inline ConSanDescriptorVgprAllocation
+[[nodiscard]] inline DescriptorVgprAllocation
 descriptor_vgpr_allocation(const rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
                            rj_code_arch_t arch) {
-  ConSanDescriptorVgprAllocation result;
+  DescriptorVgprAllocation result;
   result.unified_count = descriptor_vgpr_allocation_count(descriptor, arch);
   result.ordinary_count = result.unified_count;
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (!profile || profile->accumulator_model != ConSanAccumulatorModel::DescriptorPartitioned)
+  const TargetProfile *profile = target_profile(arch);
+  if (!profile || profile->accumulator_model != AccumulatorModel::DescriptorPartitioned)
     return result;
 
   const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
@@ -130,16 +130,16 @@ descriptor_ordinary_vgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descr
 /// A descriptor encodes one unified allocation, while ConSan consumers can
 /// have narrower addressing limits and CDNA descriptors can divide that
 /// allocation between ordinary VGPRs and AccVGPRs. Keeping all three facts in
-/// one value prevents an engine from silently treating an accumulator bank as
+/// one value prevents an mode from silently treating an accumulator bank as
 /// ordinary scratch or growing beyond the register form it can emit.
-struct ConSanDescriptorVgprGrowthRequest {
+struct DescriptorVgprGrowthRequest {
   /// One past the highest ordinary VGPR that the transformed kernel must be
   /// able to address. This is the final extent, not the number of new VGPRs.
   uint32_t required_ordinary_count = 0;
 
   /// Largest ordinary-VGPR extent the requesting instrumentation path can
   /// address. Bank-aware CDNA5 mechanics may use RocJitsu's full analysis
-  /// range; ordinary MOI operand forms currently limit themselves to 256.
+  /// range; ordinary ConSan operand forms currently limit themselves to 256.
   uint32_t maximum_ordinary_count = 0;
 
   /// Trusted metadata proves that an encoded CDNA accumulator partition has
@@ -158,12 +158,11 @@ struct ConSanDescriptorVgprGrowthRequest {
 /// descriptor fields unchanged.
 [[nodiscard]] inline bool
 grow_descriptor_vgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
-                                const ConSanDescriptorVgprGrowthRequest &request,
-                                rj_code_arch_t arch) {
+                                const DescriptorVgprGrowthRequest &request, rj_code_arch_t arch) {
   constexpr uint32_t kDescriptorAllocationGranules = 64u;
   constexpr uint32_t kDirectOrdinaryVgprLimit = 256u;
 
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  const TargetProfile *profile = target_profile(arch);
   const uint32_t granularity = descriptor_vgpr_granularity(descriptor, arch);
   if (!profile || granularity == 0u || request.required_ordinary_count == 0u ||
       request.maximum_ordinary_count == 0u)
@@ -178,7 +177,7 @@ grow_descriptor_vgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descrip
   if (request.required_ordinary_count > maximum_ordinary_count)
     return false;
 
-  const ConSanDescriptorVgprAllocation allocation = descriptor_vgpr_allocation(descriptor, arch);
+  const DescriptorVgprAllocation allocation = descriptor_vgpr_allocation(descriptor, arch);
   const uint32_t ordinary_count = allocation.ordinary_count;
   if (request.required_ordinary_count <= ordinary_count)
     return true;
@@ -252,13 +251,13 @@ descriptor_sgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descriptor_t &
 grow_descriptor_sgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
                                 uint32_t required_ordinary_count, rj_code_arch_t arch) {
   constexpr uint32_t kCdnaAllocationTailSgprs = 6u;
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  const TargetProfile *profile = target_profile(arch);
   if (!profile || required_ordinary_count == 0u ||
       required_ordinary_count > profile->ordinary_sgpr_limit)
     return false;
 
   const bool descriptor_has_allocation_tail =
-      profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned;
+      profile->accumulator_model == AccumulatorModel::DescriptorPartitioned;
   const uint32_t allocation_tail = descriptor_has_allocation_tail ? kCdnaAllocationTailSgprs : 0u;
   const uint32_t required_allocation = required_ordinary_count + allocation_tail;
   if (required_allocation <= descriptor_sgpr_allocation_count(descriptor, arch))
@@ -279,4 +278,4 @@ grow_descriptor_sgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descrip
   return true;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

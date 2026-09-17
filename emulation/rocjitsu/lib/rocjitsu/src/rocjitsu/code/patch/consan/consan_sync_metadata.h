@@ -10,12 +10,12 @@
 
 #include <cstdint>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// The control-flow and target-form context in which acquire metadata is
 /// being screened. Instruction-run and path proofs remain the caller's
 /// responsibility.
-enum class ConSanOrdinaryAcquireMetadataPolicy : uint8_t {
+enum class OrdinaryAcquireMetadataPolicy : uint8_t {
   SameBlockSingleFence,
   BoundedPathSingleFence,
   SameBlockCachePairMember,
@@ -25,24 +25,28 @@ enum class ConSanOrdinaryAcquireMetadataPolicy : uint8_t {
 /// Classify the cache-maintenance endpoints that can carry an atomic or
 /// ordinary-memory release/acquire edge. Ordered multi-event target forms are
 /// deliberately handled by their exact sequence matchers instead.
-[[nodiscard]] bool is_release_cache_event(std::span<const ConSanProgramSite> program_sites,
-                                          const ConSanSyncEvent *event);
-[[nodiscard]] bool is_acquire_cache_event(std::span<const ConSanProgramSite> program_sites,
-                                          const ConSanSyncEvent *event);
+[[nodiscard]] bool is_release_cache_event(std::span<const ProgramSite> program_sites,
+                                          const SyncEvent *event);
+[[nodiscard]] bool is_acquire_cache_event(std::span<const ProgramSite> program_sites,
+                                          const SyncEvent *event);
 
-[[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
-    const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence, ConSanOrdinaryAcquireMetadataPolicy policy);
+[[nodiscard]] bool ordinary_acquire_metadata_compatible(std::span<const ProgramSite> program_sites,
+                                                        const SyncEvent &load,
+                                                        const SyncSequence &load_sequence,
+                                                        const SyncEvent &cache,
+                                                        const SyncSequence &cache_sequence,
+                                                        OrdinaryAcquireMetadataPolicy policy);
 
-[[nodiscard]] bool consan_ordinary_acquire_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &load,
-    const ConSanSyncSequence &load_sequence, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence);
+[[nodiscard]] bool ordinary_acquire_metadata_compatible(std::span<const ProgramSite> program_sites,
+                                                        const SyncEvent &load,
+                                                        const SyncSequence &load_sequence,
+                                                        const SyncEvent &cache,
+                                                        const SyncSequence &cache_sequence);
 
-[[nodiscard]] bool consan_ordinary_release_metadata_compatible(
-    std::span<const ConSanProgramSite> program_sites, const ConSanSyncEvent &cache,
-    const ConSanSyncSequence &cache_sequence, const ConSanSyncEvent &store,
-    const ConSanSyncSequence &store_sequence);
+[[nodiscard]] bool ordinary_release_metadata_compatible(std::span<const ProgramSite> program_sites,
+                                                        const SyncEvent &cache,
+                                                        const SyncSequence &cache_sequence,
+                                                        const SyncEvent &store,
+                                                        const SyncSequence &store_sequence);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

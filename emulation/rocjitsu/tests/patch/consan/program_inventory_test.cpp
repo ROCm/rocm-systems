@@ -8,7 +8,7 @@
 #include <tuple>
 #include <type_traits>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 template <typename Values, typename Enum, typename NameFunction>
@@ -25,11 +25,11 @@ void expect_complete_enum_contract(const Values &values, Enum count, NameFunctio
   EXPECT_EQ(name(static_cast<Enum>(255)), invalid_name);
 }
 
-ConSanProgramSite make_inventory_lds_site(std::string mnemonic, uint64_t text_offset = 16,
-                                          uint64_t file_offset = 0, uint32_t width_bits = 32) {
-  ConSanProgramSite site;
-  site.origin = ConSanAccessOrigin::NativeLds;
-  site.kind = ConSanLdsAccessKind::Write;
+ProgramSite make_inventory_lds_site(std::string mnemonic, uint64_t text_offset = 16,
+                                    uint64_t file_offset = 0, uint32_t width_bits = 32) {
+  ProgramSite site;
+  site.origin = AccessOrigin::NativeLds;
+  site.kind = LdsAccessKind::Write;
   site.physical_id.original_text_offset = text_offset;
   site.decoded_site().text_offset = text_offset;
   site.decoded_site().file_offset = file_offset;
@@ -41,11 +41,10 @@ ConSanProgramSite make_inventory_lds_site(std::string mnemonic, uint64_t text_of
   return site;
 }
 
-ConSanProgramSite make_inventory_flat_site(ConSanFlatAddressSpaceHint hint,
-                                           uint64_t text_offset = 16) {
-  ConSanProgramSite site;
-  site.origin = ConSanAccessOrigin::Flat;
-  site.kind = ConSanLdsAccessKind::Read;
+ProgramSite make_inventory_flat_site(FlatAddressSpaceHint hint, uint64_t text_offset = 16) {
+  ProgramSite site;
+  site.origin = AccessOrigin::Flat;
+  site.kind = LdsAccessKind::Read;
   site.physical_id.original_text_offset = text_offset;
   site.decoded_site().text_offset = text_offset;
   site.decoded_site().size = 8;
@@ -58,8 +57,8 @@ ConSanProgramSite make_inventory_flat_site(ConSanFlatAddressSpaceHint hint,
   return site;
 }
 
-ConSanProgramContainer make_inventory_kernel(std::string name = "inventory_kernel") {
-  ConSanProgramContainer kernel{ConSanProgramContainerKind::Kernel};
+ProgramContainer make_inventory_kernel(std::string name = "inventory_kernel") {
+  ProgramContainer kernel{ProgramContainerKind::Kernel};
   kernel.name = std::move(name);
   kernel.descriptor_file_offset = 512;
   kernel.declared_group_segment_bytes = 4096;
@@ -72,67 +71,67 @@ ConSanProgramContainer make_inventory_kernel(std::string name = "inventory_kerne
 
 template <typename Container>
 void stage_inventory_access(ProgramInventoryBuilder &builder, const Container &container,
-                            ConSanProgramSite site) {
+                            ProgramSite site) {
   // Several low-level fixtures stage decoded sites immediately before adding
   // their owner. Reserve the exact next arena identity explicitly; production
   // never infers this edge from presentation metadata.
   site.container =
       container.id.valid()
           ? container.id
-          : ConSanProgramContainerId{.ordinal = static_cast<uint32_t>(builder.kernels().size() +
-                                                                      builder.functions().size())};
+          : ProgramContainerId{.ordinal = static_cast<uint32_t>(builder.kernels().size() +
+                                                                builder.functions().size())};
   builder.add_access_site(std::move(site));
 }
 
-std::vector<ConSanInventoryExclusionReason> exclusion_reasons(const ConSanProgramSite &site) {
-  std::vector<ConSanInventoryExclusionReason> reasons;
-  for (const ConSanInventoryExclusion &exclusion : site.exclusions)
+std::vector<InventoryExclusionReason> exclusion_reasons(const ProgramSite &site) {
+  std::vector<InventoryExclusionReason> reasons;
+  for (const InventoryExclusion &exclusion : site.exclusions)
     reasons.push_back(exclusion.reason);
   return reasons;
 }
 
 TEST(ConSanProgramInventory, FenceCandidateEligibilityExactlyMatchesQualifiedAssociation) {
-  ConSanMoiFenceCandidate candidate;
-  for (uint8_t value = 0; value < static_cast<uint8_t>(ConSanFenceAssociation::Count); ++value) {
-    const auto association = static_cast<ConSanFenceAssociation>(value);
+  FenceCandidate candidate;
+  for (uint8_t value = 0; value < static_cast<uint8_t>(FenceAssociation::Count); ++value) {
+    const auto association = static_cast<FenceAssociation>(value);
     SCOPED_TRACE(value);
     candidate.association = association;
-    EXPECT_EQ(candidate.eligible(), association == ConSanFenceAssociation::Qualified);
+    EXPECT_EQ(candidate.eligible(), association == FenceAssociation::Qualified);
   }
 }
 
 TEST(ConSanProgramInventory, CodeObjectIdentityIsStableCompatibleAndCollisionAware) {
   const std::array<uint8_t, 5> bytes = {1, 2, 3, 4, 5};
-  const ConSanCodeObjectId first = make_consan_code_object_id(bytes);
-  const ConSanCodeObjectId again = make_consan_code_object_id(bytes);
+  const CodeObjectId first = make_code_object_id(bytes);
+  const CodeObjectId again = make_code_object_id(bytes);
   EXPECT_TRUE(first.valid());
   EXPECT_EQ(first, again);
   EXPECT_EQ(first.fingerprint, "fnv1a64:0f66dcbf4f6b7d88");
   EXPECT_EQ(first.byte_size, bytes.size());
 
   const std::array<uint8_t, 5> reversed = {5, 4, 3, 2, 1};
-  EXPECT_NE(first, make_consan_code_object_id(reversed));
-  ConSanCodeObjectId simulated_primary_collision = first;
+  EXPECT_NE(first, make_code_object_id(reversed));
+  CodeObjectId simulated_primary_collision = first;
   ++simulated_primary_collision.collision_verifier;
   EXPECT_NE(first, simulated_primary_collision);
-  ConSanCodeObjectId simulated_size_collision = first;
+  CodeObjectId simulated_size_collision = first;
   ++simulated_size_collision.byte_size;
   EXPECT_NE(first, simulated_size_collision);
-  EXPECT_FALSE(ConSanCodeObjectId{}.valid());
-  EXPECT_TRUE(make_consan_code_object_id(std::span<const uint8_t>{}).valid());
+  EXPECT_FALSE(CodeObjectId{}.valid());
+  EXPECT_TRUE(make_code_object_id(std::span<const uint8_t>{}).valid());
 }
 
 TEST(ConSanProgramInventory, PhysicalAndSemanticIdentitiesHaveExplicitValidityAndOrdinals) {
   PhysicalSiteId physical;
   EXPECT_FALSE(physical.valid());
-  physical.code_object = make_consan_code_object_id(std::array<uint8_t, 1>{42});
+  physical.code_object = make_code_object_id(std::array<uint8_t, 1>{42});
   physical.original_text_offset = 24;
   EXPECT_TRUE(physical.valid());
 
   SemanticSiteId semantic;
   semantic.physical = physical;
   EXPECT_FALSE(semantic.valid());
-  semantic.domain = ConSanSemanticSiteDomain::Access;
+  semantic.domain = SemanticSiteDomain::Access;
   EXPECT_TRUE(semantic.valid());
 
   SemanticSiteId other_range = semantic;
@@ -142,20 +141,20 @@ TEST(ConSanProgramInventory, PhysicalAndSemanticIdentitiesHaveExplicitValidityAn
   other_member.member_ordinal = 1;
   EXPECT_NE(semantic, other_member);
   SemanticSiteId other_domain = semantic;
-  other_domain.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
+  other_domain.domain = SemanticSiteDomain::SynchronizationEvent;
   EXPECT_NE(semantic, other_domain);
 }
 
 TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
-  ConSanProgramContainerId container;
+  ProgramContainerId container;
   container.ordinal = 1;
   EXPECT_TRUE(container.valid());
   EXPECT_EQ(container, container);
-  ConSanProgramContainerId other = container;
+  ProgramContainerId other = container;
   other.ordinal = 2;
   EXPECT_NE(container, other);
 
-  ConSanAccessOperandFacts operands;
+  AccessOperandFacts operands;
   operands.destination_vgpr = 1;
   operands.destination_accvgpr = 2;
   operands.address_vgpr = 3;
@@ -172,18 +171,18 @@ TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
   operands.raw_scope = 13;
   operands.raw_th = 14;
   EXPECT_EQ(operands, operands);
-  ConSanAccessOperandFacts changed_operands = operands;
+  AccessOperandFacts changed_operands = operands;
   changed_operands.raw_th = 15;
   EXPECT_NE(operands, changed_operands);
 
-  ConSanProgramSite site;
+  ProgramSite site;
   EXPECT_FALSE(site.complete());
-  ConSanAccessRange range;
+  AccessRange range;
   range.byte_width = 4;
   site.ranges.push_back(range);
   EXPECT_TRUE(site.complete());
-  ConSanInventoryExclusion exclusion;
-  exclusion.reason = ConSanInventoryExclusionReason::InvalidAccessWidth;
+  InventoryExclusion exclusion;
+  exclusion.reason = InventoryExclusionReason::InvalidAccessWidth;
   site.exclusions.push_back(exclusion);
   EXPECT_FALSE(site.complete());
   EXPECT_EQ(site.exclusions.front(), exclusion);
@@ -192,9 +191,9 @@ TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
 
 TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLifetime) {
   static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().access_sites()),
-                             std::span<const ConSanProgramSite>>);
+                             std::span<const ProgramSite>>);
   static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().kernels()),
-                             std::span<const ConSanProgramContainer>>);
+                             std::span<const ProgramContainer>>);
   static_assert(std::is_const_v<std::remove_reference_t<
                     decltype(std::declval<const ProgramInventory &>().kernels().front())>>);
 
@@ -223,25 +222,25 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
     ProgramInventoryBuilder builder(bytes);
     builder.set_code_object_facts(true, 3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
     builder.set_semantic_arch_required(true);
-    ConSanTextSection section;
+    TextSection section;
     section.name = ".text";
     builder.text_sections().push_back(section);
-    ConSanProgramContainer kernel = make_inventory_kernel();
+    ProgramContainer kernel = make_inventory_kernel();
     stage_inventory_access(builder, kernel, make_inventory_lds_site("ds_store_b32"));
     builder.add_kernel(std::move(kernel));
-    ConSanProgramContainer function{ConSanProgramContainerKind::Function};
+    ProgramContainer function{ProgramContainerKind::Function};
     function.name = "helper";
     builder.add_function(std::move(function));
     builder.publish_decoded_accesses(bytes);
 
-    ConSanTransformArtifacts result;
+    TransformArtifacts result;
     result.program_inventory = builder.view();
     return result;
   };
 
-  ConSanTransformArtifacts result = make_result();
-  ConSanTransformArtifacts copied = result;
-  ConSanTransformArtifacts moved = std::move(copied);
+  TransformArtifacts result = make_result();
+  TransformArtifacts copied = result;
+  TransformArtifacts moved = std::move(copied);
   EXPECT_FALSE(result.program_inventory.empty());
   EXPECT_TRUE(moved.program_inventory.code_object_parsed());
   EXPECT_TRUE(moved.program_inventory.kernel_metadata_trustworthy());
@@ -272,12 +271,12 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_THROW(invalid_order.add_kernel(), std::logic_error);
 
   ProgramInventoryBuilder builder;
-  ConSanProgramContainer first = make_inventory_kernel("kernel");
+  ProgramContainer first = make_inventory_kernel("kernel");
   builder.add_kernel(first);
-  ConSanProgramContainer duplicate = first;
+  ProgramContainer duplicate = first;
   duplicate.descriptor_file_offset = 768;
   builder.add_kernel(duplicate);
-  ConSanProgramContainer helper{ConSanProgramContainerKind::Function};
+  ProgramContainer helper{ProgramContainerKind::Function};
   helper.name = "helper";
   builder.add_function(helper);
   builder.add_function(helper);
@@ -288,10 +287,10 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   ASSERT_EQ(inventory.functions().size(), 2u);
   EXPECT_EQ(inventory.kernels().data(), inventory.containers().data());
   EXPECT_EQ(inventory.functions().data(), inventory.containers().data() + 2);
-  EXPECT_TRUE(std::ranges::all_of(inventory.kernels(), &ConSanProgramContainer::is_kernel));
-  EXPECT_TRUE(std::ranges::none_of(inventory.functions(), &ConSanProgramContainer::is_kernel));
+  EXPECT_TRUE(std::ranges::all_of(inventory.kernels(), &ProgramContainer::is_kernel));
+  EXPECT_TRUE(std::ranges::none_of(inventory.functions(), &ProgramContainer::is_kernel));
   for (size_t index = 0; index < inventory.containers().size(); ++index) {
-    const ConSanProgramContainer &container = inventory.containers()[index];
+    const ProgramContainer &container = inventory.containers()[index];
     EXPECT_EQ(container.id.ordinal, index);
     EXPECT_EQ(inventory.container(container.id), &container);
   }
@@ -305,29 +304,29 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
   EXPECT_EQ(inventory.kernel({.kernel = inventory.functions()[0].id}), nullptr);
   EXPECT_EQ(inventory.kernel({}), nullptr);
 
-  ConSanProgramSite owned;
+  ProgramSite owned;
   owned.container = inventory.kernels()[0].id;
   owned.execution_owners = {{.kernel = inventory.kernels()[1].id},
                             {.kernel = inventory.kernels()[0].id},
                             {.kernel = inventory.kernels()[1].id}};
-  EXPECT_EQ(inventory.execution_owner_kernels(owned),
-            (std::vector<ConSanProgramContainerId>{inventory.kernels()[0].id,
-                                                   inventory.kernels()[1].id}));
-  EXPECT_EQ(inventory.execution_owner_kernels(owned.execution_owners),
-            (std::vector<ConSanProgramContainerId>{inventory.kernels()[0].id,
-                                                   inventory.kernels()[1].id}));
+  EXPECT_EQ(
+      inventory.execution_owner_kernels(owned),
+      (std::vector<ProgramContainerId>{inventory.kernels()[0].id, inventory.kernels()[1].id}));
+  EXPECT_EQ(
+      inventory.execution_owner_kernels(owned.execution_owners),
+      (std::vector<ProgramContainerId>{inventory.kernels()[0].id, inventory.kernels()[1].id}));
   EXPECT_EQ(inventory.execution_owner_descriptors(owned), (std::vector<uint64_t>{512, 768}));
   EXPECT_TRUE(inventory.execution_owners_well_formed());
 
   ProgramInventoryBuilder stale_owner(builder.view());
-  ConSanProgramSite stale_site;
+  ProgramSite stale_site;
   stale_site.execution_owners = {{.kernel = {99}}};
   stale_owner.add_semantic_site(std::move(stale_site));
   EXPECT_FALSE(stale_owner.view().execution_owners_well_formed());
 
   // Sites without an authoritative container identity stay unattributed;
   // publication must not infer identity from presentation metadata.
-  ConSanProgramSite ambiguous = make_inventory_lds_site("ds_store_b32", 16);
+  ProgramSite ambiguous = make_inventory_lds_site("ds_store_b32", 16);
   builder.add_access_site(std::move(ambiguous));
   const std::array<uint8_t, 4> bytes = {};
   builder.publish_decoded_accesses(bytes);
@@ -336,12 +335,12 @@ TEST(ConSanProgramInventory, ContainerQueriesUseImmutableInventoryIdentity) {
 
 TEST(ConSanProgramInventory, PreappliedMutationGeometryBelongsToExactInputRevision) {
   const std::array<uint8_t, 8> bytes = {1, 2, 3, 4, 5, 6, 7, 8};
-  ConSanPreappliedMutationLayout staged{
+  PreappliedMutationLayout staged{
       .code_ranges =
           {{.text_offset = 64, .size = 16, .kernel_name = "owner", .continuation_text_offset = 32}},
       .reserved_ranges = {{.text_offset = 24, .size = 8}},
   };
-  const ConSanPreappliedMutationLayout expected = staged;
+  const PreappliedMutationLayout expected = staged;
   ProgramInventoryBuilder builder(bytes, staged);
   const ProgramInventory published = builder.view();
 
@@ -358,28 +357,28 @@ TEST(ConSanProgramInventory, PreappliedMutationGeometryBelongsToExactInputRevisi
 TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) {
   static_assert(
       std::same_as<typename decltype(SynchronizationInventoryView{}.sync_events)::element_type,
-                   const ConSanSyncEvent>);
+                   const SyncEvent>);
   static_assert(
       std::same_as<typename decltype(SynchronizationInventoryView{}.sync_sequences)::element_type,
-                   const ConSanSyncSequence>);
+                   const SyncSequence>);
   static_assert(std::same_as<typename decltype(SynchronizationInventoryView{}
                                                    .barrier_lifecycle_groups)::element_type,
-                             const ConSanBarrierLifecycleGroup>);
-  static_assert(std::same_as<typename decltype(SynchronizationInventoryView{}
-                                                   .moi_fence_candidates)::element_type,
-                             const ConSanMoiFenceCandidate>);
+                             const BarrierLifecycleGroup>);
+  static_assert(
+      std::same_as<typename decltype(SynchronizationInventoryView{}.fence_candidates)::element_type,
+                   const FenceCandidate>);
   static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().sync().sync_events),
-                             std::span<const ConSanSyncEvent>>);
+                             std::span<const SyncEvent>>);
   static_assert(
       std::same_as<decltype(std::declval<const ProgramInventory &>().sync().sync_sequences),
-                   std::span<const ConSanSyncSequence>>);
+                   std::span<const SyncSequence>>);
   static_assert(std::same_as<
                 decltype(std::declval<const ProgramInventory &>().sync().barrier_lifecycle_groups),
-                std::span<const ConSanBarrierLifecycleGroup>>);
+                std::span<const BarrierLifecycleGroup>>);
   static_assert(
-      std::same_as<decltype(std::declval<const ProgramInventory &>().sync().moi_fence_candidates),
-                   std::span<const ConSanMoiFenceCandidate>>);
-  static_assert(!std::is_base_of_v<SynchronizationInventoryView, ConSanTransformArtifacts>);
+      std::same_as<decltype(std::declval<const ProgramInventory &>().sync().fence_candidates),
+                   std::span<const FenceCandidate>>);
+  static_assert(!std::is_base_of_v<SynchronizationInventoryView, TransformArtifacts>);
 
   ProgramInventory empty;
   EXPECT_TRUE(empty.sync().empty());
@@ -388,34 +387,34 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_TRUE(empty.sync().sync_events.empty());
   EXPECT_TRUE(empty.sync().sync_sequences.empty());
   EXPECT_TRUE(empty.sync().barrier_lifecycle_groups.empty());
-  EXPECT_TRUE(empty.sync().moi_fence_candidates.empty());
+  EXPECT_TRUE(empty.sync().fence_candidates.empty());
 
   const std::array<uint8_t, 4> bytes = {4, 3, 2, 1};
   ProgramInventoryBuilder builder(bytes);
   SynchronizationInventoryBuildView build = builder.synchronization();
-  ConSanSyncEvent event;
-  event.operation = ConSanSyncOperation::BarrierInit;
+  SyncEvent event;
+  event.operation = SyncOperation::BarrierInit;
   event.identity = "event";
   event.semantic_id = {
-      .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 16},
-      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+      .physical = {.code_object = make_code_object_id(bytes), .original_text_offset = 16},
+      .domain = SemanticSiteDomain::SynchronizationEvent,
   };
   event.semantic_id.physical.original_text_offset = 16;
   build.sync_events.push_back(event);
-  ConSanSyncSequence sequence;
+  SyncSequence sequence;
   sequence.identity = "sequence";
-  const ConSanSyncEventId member{0};
+  const SyncEventId member{0};
   sequence.member_event_ids.push_back(member);
   build.sync_sequences.push_back(sequence);
-  ConSanBarrierLifecycleGroup lifecycle;
+  BarrierLifecycleGroup lifecycle;
   lifecycle.member_event_ids = {member};
   build.barrier_lifecycle_groups.push_back(lifecycle);
-  ConSanMoiFenceCandidate fence;
+  FenceCandidate fence;
   fence.fence_event = {0};
   fence.sequence = {0};
-  fence.communication_event = ConSanSyncEventId{0};
-  fence.association = ConSanFenceAssociation::Qualified;
-  build.moi_fence_candidates.push_back(fence);
+  fence.communication_event = SyncEventId{0};
+  fence.association = FenceAssociation::Qualified;
+  build.fence_candidates.push_back(fence);
 
   ProgramInventory published = builder.view();
   const SynchronizationInventoryView view = published.sync();
@@ -423,11 +422,11 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_EQ(view.sync_events.data(), published.sync().sync_events.data());
   EXPECT_EQ(view.sync_sequences.data(), published.sync().sync_sequences.data());
   EXPECT_EQ(view.barrier_lifecycle_groups.data(), published.sync().barrier_lifecycle_groups.data());
-  EXPECT_EQ(view.moi_fence_candidates.data(), published.sync().moi_fence_candidates.data());
+  EXPECT_EQ(view.fence_candidates.data(), published.sync().fence_candidates.data());
   ASSERT_EQ(view.sync_events.size(), 1u);
   ASSERT_EQ(view.sync_sequences.size(), 1u);
   ASSERT_EQ(view.barrier_lifecycle_groups.size(), 1u);
-  ASSERT_EQ(view.moi_fence_candidates.size(), 1u);
+  ASSERT_EQ(view.fence_candidates.size(), 1u);
   EXPECT_TRUE(view.sync_events.front().semantic_id.valid());
   EXPECT_EQ(view.find_event(event.semantic_id), &view.sync_events.front());
   EXPECT_EQ(view.find_event("event"), &view.sync_events.front());
@@ -441,19 +440,18 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   ++absent_event.physical.original_text_offset;
   EXPECT_EQ(view.find_event(absent_event), nullptr);
   EXPECT_TRUE(view.sync_sequences.front().member_event_ids.front().valid());
-  EXPECT_TRUE(view.moi_fence_candidates.front().eligible());
+  EXPECT_TRUE(view.fence_candidates.front().eligible());
 
-  ConSanTransformArtifacts result;
+  TransformArtifacts result;
   result.program_inventory = published;
-  ConSanTransformArtifacts copied = result;
-  ConSanTransformArtifacts moved = std::move(copied);
+  TransformArtifacts copied = result;
+  TransformArtifacts moved = std::move(copied);
   EXPECT_EQ(moved.program_inventory.sync().sync_events.front().identity, "event");
   EXPECT_EQ(moved.program_inventory.sync().sync_sequences.front().identity, "sequence");
   EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_identity(
                 moved.program_inventory.sync().barrier_lifecycle_groups.front()),
             "event|lifecycle-group=static-run");
-  EXPECT_EQ(moved.program_inventory.sync().moi_fence_candidates.front().fence_event,
-            ConSanSyncEventId{0});
+  EXPECT_EQ(moved.program_inventory.sync().fence_candidates.front().fence_event, SyncEventId{0});
 }
 
 TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
@@ -463,30 +461,30 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   builder.add_kernel(make_inventory_kernel("alias-container"));
   SynchronizationInventoryBuildView build = builder.synchronization();
 
-  ConSanSyncEvent first;
-  first.kind = ConSanSyncKind::Atomic;
+  SyncEvent first;
+  first.kind = SyncKind::Atomic;
   first.identity = "first";
   first.semantic_id.physical.original_text_offset = 12;
   first.semantic_id = {
-      .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 12},
-      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+      .physical = {.code_object = make_code_object_id(bytes), .original_text_offset = 12},
+      .domain = SemanticSiteDomain::SynchronizationEvent,
   };
-  ConSanSyncEvent alias = first;
+  SyncEvent alias = first;
   alias.identity = "alias";
   first.source_site = {0};
   alias.source_site = {1};
-  ConSanProgramSite first_source;
+  ProgramSite first_source;
   first_source.container = builder.kernels()[0].id;
-  ConSanProgramSite alias_source;
+  ProgramSite alias_source;
   alias_source.container = builder.kernels()[1].id;
   builder.add_semantic_site(std::move(first_source));
   builder.add_semantic_site(std::move(alias_source));
   build.sync_events = {first, alias};
 
-  ConSanSyncSequence sequence;
+  SyncSequence sequence;
   sequence.identity = "sequence";
   sequence.member_event_ids = {{0}};
-  ConSanSyncSequence ambiguous_sequence = sequence;
+  SyncSequence ambiguous_sequence = sequence;
   ambiguous_sequence.identity = "ambiguous-sequence";
   build.sync_sequences = {sequence, ambiguous_sequence};
 
@@ -501,7 +499,6 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   ProgramInventoryBuilder duplicate_sequence(builder.view());
   duplicate_sequence.synchronization().sync_sequences[1].identity = "sequence";
   EXPECT_EQ(duplicate_sequence.view().sync().find_unique_sequence("sequence"), nullptr);
-
 }
 
 TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
@@ -510,28 +507,28 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   builder.add_kernel(make_inventory_kernel("shared-owner"));
   builder.add_kernel(make_inventory_kernel("different-owner"));
   builder.add_kernel(make_inventory_kernel("third-owner"));
-  ConSanProgramSite first_source;
+  ProgramSite first_source;
   first_source.container = builder.kernels()[0].id;
   first_source.execution_owners = {
-      {.kernel = {0}, .proof = ConSanOwnerProofKind::KernelLocal},
-      {.kernel = {1}, .proof = ConSanOwnerProofKind::DirectCall},
+      {.kernel = {0}, .proof = OwnerProofKind::KernelLocal},
+      {.kernel = {1}, .proof = OwnerProofKind::DirectCall},
   };
-  ConSanProgramSite second_source;
+  ProgramSite second_source;
   second_source.container = first_source.container;
   second_source.execution_owners = {
-      {.kernel = {0}, .proof = ConSanOwnerProofKind::RecoveredIndirectCall},
-      {.kernel = {2}, .proof = ConSanOwnerProofKind::KernelLocal},
+      {.kernel = {0}, .proof = OwnerProofKind::RecoveredIndirectCall},
+      {.kernel = {2}, .proof = OwnerProofKind::KernelLocal},
   };
   builder.add_semantic_site(std::move(first_source));
   builder.add_semantic_site(std::move(second_source));
 
   SynchronizationInventoryBuildView build = builder.synchronization();
-  ConSanSyncEvent first;
+  SyncEvent first;
   first.source_site = {0};
-  ConSanSyncEvent second;
+  SyncEvent second;
   second.source_site = {1};
   build.sync_events = {first, second};
-  ConSanSyncSequence sequence;
+  SyncSequence sequence;
   sequence.member_event_ids = {{0}, {1}};
   build.sync_sequences = {sequence};
 
@@ -540,8 +537,8 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
   ASSERT_NE(graph.container(graph.sync_sequences.front()), nullptr);
   EXPECT_EQ(graph.container_name(graph.sync_sequences.front()), "shared-owner");
   EXPECT_EQ(graph.execution_owners(graph.sync_sequences.front()),
-            (std::vector<ConSanExecutionOwner>{
-                {.kernel = {0}, .proof = ConSanOwnerProofKind::RecoveredIndirectCall}}));
+            (std::vector<ExecutionOwner>{
+                {.kernel = {0}, .proof = OwnerProofKind::RecoveredIndirectCall}}));
 
   ProgramInventoryBuilder malformed(builder.view());
   malformed.synchronization().sync_sequences.front().member_event_ids.push_back({99});
@@ -560,24 +557,24 @@ TEST(ConSanProgramInventory, SequenceOwnersAreDerivedFromEveryMemberSource) {
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {
   const std::array<uint8_t, 128> bytes = {};
   ProgramInventoryBuilder original(bytes);
-  ConSanProgramContainer original_kernel = make_inventory_kernel("original");
+  ProgramContainer original_kernel = make_inventory_kernel("original");
   stage_inventory_access(original, original_kernel, make_inventory_lds_site("ds_store_b32", 16));
   original.add_kernel(std::move(original_kernel));
   ASSERT_EQ(original.view().access_sites().size(), 1u);
   EXPECT_FALSE(original.view().access_sites().front().physical_id.code_object.valid());
   EXPECT_EQ(original.view().container(original.view().access_sites().front().container)->name,
             "original");
-  ConSanSyncEvent event;
+  SyncEvent event;
   event.identity = "original-event";
   original.synchronization().sync_events.push_back(event);
-  ConSanSyncSequence sequence;
+  SyncSequence sequence;
   sequence.identity = "original-sequence";
   original.synchronization().sync_sequences.push_back(sequence);
-  ConSanBarrierLifecycleGroup group;
+  BarrierLifecycleGroup group;
   original.synchronization().barrier_lifecycle_groups.push_back(group);
-  ConSanMoiFenceCandidate fence;
+  FenceCandidate fence;
   fence.fence_event = {0};
-  original.synchronization().moi_fence_candidates.push_back(fence);
+  original.synchronization().fence_candidates.push_back(fence);
   original.publish_decoded_accesses(bytes);
   const ProgramInventory published = original.view();
   ASSERT_EQ(published.access_sites().size(), 1u);
@@ -586,19 +583,19 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
 
   ProgramInventoryBuilder revision(published);
   revision.kernels().front().name = "revision";
-  ConSanProgramContainer added_function;
+  ProgramContainer added_function;
   added_function.name = "added-function";
   added_function.entry_text_offset = 24;
   revision.add_function(std::move(added_function));
-  ConSanProgramSite added_access = make_inventory_lds_site("ds_load_b32", 24);
+  ProgramSite added_access = make_inventory_lds_site("ds_load_b32", 24);
   added_access.container = revision.functions().back().id;
   revision.add_access_site(std::move(added_access));
   EXPECT_TRUE(revision.view().sync().empty());
   SynchronizationInventoryBuildView revised = revision.synchronization();
   event.identity = "revision-event";
   revised.sync_events.push_back(event);
-  revised.moi_fence_candidates.push_back(fence);
-  revised.moi_fence_candidates.front().association = ConSanFenceAssociation::Qualified;
+  revised.fence_candidates.push_back(fence);
+  revised.fence_candidates.front().association = FenceAssociation::Qualified;
   revision.publish_decoded_accesses(bytes);
   revision.publish_decoded_accesses(bytes);
 
@@ -608,25 +605,25 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_EQ(unchanged.sync_events.front().identity, "original-event");
   EXPECT_EQ(unchanged.sync_sequences.size(), 1u);
   EXPECT_EQ(unchanged.barrier_lifecycle_groups.size(), 1u);
-  EXPECT_FALSE(unchanged.moi_fence_candidates.front().eligible());
+  EXPECT_FALSE(unchanged.fence_candidates.front().eligible());
 
   const ProgramInventory revised_inventory = revision.view();
   EXPECT_EQ(revised_inventory.kernels().front().name, "revision");
   ASSERT_EQ(revised_inventory.functions().size(), 1u);
   ASSERT_EQ(revised_inventory.access_sites().size(), 2u);
   for (size_t index = 0; index < revised_inventory.program_sites().size(); ++index) {
-    const ConSanProgramSite &site = revised_inventory.program_sites()[index];
-    EXPECT_EQ(site.id, ConSanProgramSiteId{static_cast<uint32_t>(index)});
+    const ProgramSite &site = revised_inventory.program_sites()[index];
+    EXPECT_EQ(site.id, ProgramSiteId{static_cast<uint32_t>(index)});
     EXPECT_EQ(revised_inventory.program_site(site.id), &site);
   }
   EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[0].container)->kind,
-            ConSanProgramContainerKind::Kernel);
+            ProgramContainerKind::Kernel);
   EXPECT_EQ(revised_inventory.container(revised_inventory.access_sites()[1].container)->kind,
-            ConSanProgramContainerKind::Function);
+            ProgramContainerKind::Function);
   EXPECT_EQ(revised_inventory.sync().sync_events.front().identity, "revision-event");
   EXPECT_TRUE(revised_inventory.sync().sync_sequences.empty());
   EXPECT_TRUE(revised_inventory.sync().barrier_lifecycle_groups.empty());
-  EXPECT_TRUE(revised_inventory.sync().moi_fence_candidates.front().eligible());
+  EXPECT_TRUE(revised_inventory.sync().fence_candidates.front().eligible());
   EXPECT_TRUE(revised_inventory.program_site_ids_well_formed());
 
   ProgramInventoryBuilder stale_site_id(revised_inventory);
@@ -638,17 +635,17 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
 TEST(ConSanProgramInventory, LargeAccessBatchRetainsContiguousStableSiteHandles) {
   constexpr size_t kAccessCount = 16384;
   ProgramInventoryBuilder builder;
-  ConSanProgramSite leading_semantic;
+  ProgramSite leading_semantic;
   leading_semantic.physical_id.original_text_offset = 8;
   leading_semantic.decoded_site().text_offset = 8;
   leading_semantic.decoded_site().size = 4;
   leading_semantic.decoded_site().mnemonic = "s_barrier";
-  ConSanBarrierSite barrier;
-  static_cast<ConSanDecodedSite &>(barrier) = leading_semantic.decoded_site();
+  BarrierSite barrier;
+  static_cast<DecodedSite &>(barrier) = leading_semantic.decoded_site();
   leading_semantic.payload = std::move(barrier);
   builder.add_semantic_site(std::move(leading_semantic));
 
-  ConSanProgramSiteArena batch;
+  ProgramSiteArena batch;
   for (size_t index = 0; index < kAccessCount; ++index)
     batch.add_access(make_inventory_lds_site("ds_load_b32", 16 + index * 8));
   builder.add_sites(std::move(batch));
@@ -657,8 +654,8 @@ TEST(ConSanProgramInventory, LargeAccessBatchRetainsContiguousStableSiteHandles)
   ASSERT_EQ(inventory.access_sites().size(), kAccessCount);
   ASSERT_EQ(inventory.program_sites().size(), kAccessCount + 1);
   for (size_t index = 0; index < inventory.program_sites().size(); ++index) {
-    const ConSanProgramSite &site = inventory.program_sites()[index];
-    EXPECT_EQ(site.id, ConSanProgramSiteId{static_cast<uint32_t>(index)});
+    const ProgramSite &site = inventory.program_sites()[index];
+    EXPECT_EQ(site.id, ProgramSiteId{static_cast<uint32_t>(index)});
     EXPECT_EQ(inventory.program_site(site.id), &site);
   }
   EXPECT_EQ(inventory.program_sites().back().mnemonic_view(), "s_barrier");
@@ -675,43 +672,43 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_dry_run = true;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(patch_succeeded(result));
   ASSERT_FALSE(result.program_inventory.sync().sync_events.empty());
-  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
+  for (const SyncEvent &event : result.program_inventory.sync().sync_events) {
     EXPECT_TRUE(event.semantic_id.valid());
     EXPECT_TRUE(event.source_site.valid());
-    EXPECT_EQ(event.semantic_id.domain, ConSanSemanticSiteDomain::SynchronizationEvent);
+    EXPECT_EQ(event.semantic_id.domain, SemanticSiteDomain::SynchronizationEvent);
     EXPECT_EQ(event.semantic_id.physical.code_object, result.program_inventory.code_object_id());
     EXPECT_EQ(event.semantic_id.physical.original_text_offset, event.text_offset());
-    const ConSanProgramSite *source = result.program_inventory.program_site(event.source_site);
+    const ProgramSite *source = result.program_inventory.program_site(event.source_site);
     ASSERT_NE(source, nullptr);
     EXPECT_EQ(source->id, event.source_site);
     EXPECT_EQ(source->text_offset(), event.text_offset());
-    EXPECT_NE(source->get_if<ConSanBarrierSite>(), nullptr);
+    EXPECT_NE(source->get_if<BarrierSite>(), nullptr);
   }
-  EXPECT_EQ(result.program_inventory.program_site(ConSanProgramSiteId{}), nullptr);
-  EXPECT_EQ(result.program_inventory.program_site(ConSanProgramSiteId{
+  EXPECT_EQ(result.program_inventory.program_site(ProgramSiteId{}), nullptr);
+  EXPECT_EQ(result.program_inventory.program_site(ProgramSiteId{
                 static_cast<uint32_t>(result.program_inventory.program_sites().size())}),
             nullptr);
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    for (const ConSanSyncEventId member : sequence.member_event_ids) {
-      const ConSanSyncEvent *event = result.program_inventory.sync().find_event(member);
+  for (const SyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
+    for (const SyncEventId member : sequence.member_event_ids) {
+      const SyncEvent *event = result.program_inventory.sync().find_event(member);
       ASSERT_NE(event, nullptr);
       EXPECT_EQ(result.program_inventory.sync().find_event(member), event);
     }
   }
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   const auto lifecycle_groups = result.program_inventory.sync().barrier_lifecycle_groups;
-  const ConSanBarrierLifecycleGroup &group = lifecycle_groups.front();
+  const BarrierLifecycleGroup &group = lifecycle_groups.front();
   EXPECT_TRUE(group.admissible());
   EXPECT_EQ(group.member_event_ids.size(), 5u);
   EXPECT_TRUE(std::ranges::all_of(group.member_event_ids,
-                                  [](ConSanSyncEventId member_id) { return member_id.valid(); }));
+                                  [](SyncEventId member_id) { return member_id.valid(); }));
 }
 
 TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
@@ -722,48 +719,47 @@ TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
       0xd8000000u, 0x00001210u, // ds_add_u32 v0, v18, no return
       0xbfb00000u,              // s_endpgm
   };
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::SuperCollider;
+  Options options;
+  options.mode = Mode::SuperCollider;
   options.fault_dry_run = true;
-  const ConSanTransformArtifacts result =
+  const TransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words, "ordered_lds_graph_scope"), options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                 result.program_inventory.kernels().front())
+  ASSERT_EQ(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                           result.program_inventory.kernels().front())
                 .size(),
             1u);
-  EXPECT_FALSE(test_decoded_sites<ConSanAtomicSite>(result.program_inventory,
-                                                    result.program_inventory.kernels().front())
+  EXPECT_FALSE(test_decoded_sites<AtomicSite>(result.program_inventory,
+                                              result.program_inventory.kernels().front())
                    .front()
                    .scope);
 
   const SynchronizationInventoryView graph = result.program_inventory.sync();
-  const auto event =
-      std::ranges::find(graph.sync_events, ConSanSyncKind::Atomic, &ConSanSyncEvent::kind);
+  const auto event = std::ranges::find(graph.sync_events, SyncKind::Atomic, &SyncEvent::kind);
   ASSERT_NE(event, graph.sync_events.end());
   ASSERT_TRUE(event->scope);
-  EXPECT_EQ(*event->scope, ConSanMemoryScope::Workgroup);
-  const ConSanSyncSequence *sequence = graph.find_unique_sequence_containing(event->semantic_id);
+  EXPECT_EQ(*event->scope, MemoryScope::Workgroup);
+  const SyncSequence *sequence = graph.find_unique_sequence_containing(event->semantic_id);
   ASSERT_NE(sequence, nullptr);
   ASSERT_TRUE(sequence->scope);
-  EXPECT_EQ(*sequence->scope, ConSanMemoryScope::Workgroup);
+  EXPECT_EQ(*sequence->scope, MemoryScope::Workgroup);
 }
 
 TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutPolicy) {
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
-  ConSanProgramContainer kernel = make_inventory_kernel();
-  ConSanProgramSite byte_site = make_inventory_lds_site("ds_store_b8", 16, 0, 8);
+  ProgramContainer kernel = make_inventory_kernel();
+  ProgramSite byte_site = make_inventory_lds_site("ds_store_b8", 16, 0, 8);
   byte_site.operands.destination_vgpr = 2;
   byte_site.operands.destination_accvgpr = 4;
   byte_site.operands.second_data_vgpr = 8;
   stage_inventory_access(builder, kernel, byte_site);
   stage_inventory_access(builder, kernel, make_inventory_lds_site("ds_store_b16", 24, 0, 16));
-  ConSanProgramSite direct_to_lds = make_inventory_lds_site("global_load_lds_b32", 32, 0, 32);
-  direct_to_lds.origin = ConSanAccessOrigin::DirectToLds;
+  ProgramSite direct_to_lds = make_inventory_lds_site("global_load_lds_b32", 32, 0, 32);
+  direct_to_lds.origin = AccessOrigin::DirectToLds;
   direct_to_lds.operands.address_vgpr.reset();
   stage_inventory_access(builder, kernel, std::move(direct_to_lds));
   builder.add_kernel(std::move(kernel));
@@ -774,15 +770,15 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   const ProgramInventory inventory = builder.view();
   const auto sites = inventory.access_sites();
   ASSERT_EQ(sites.size(), 3u);
-  const ConSanProgramSite &byte = sites[0];
-  EXPECT_EQ(byte.origin, ConSanAccessOrigin::NativeLds);
-  EXPECT_EQ(byte.address_space, ConSanAccessAddressSpace::Group);
-  EXPECT_EQ(byte.provenance, ConSanAccessProvenance::NativeLdsOpcode);
-  EXPECT_EQ(byte.confidence, ConSanSemanticConfidence::Exact);
+  const ProgramSite &byte = sites[0];
+  EXPECT_EQ(byte.origin, AccessOrigin::NativeLds);
+  EXPECT_EQ(byte.address_space, AccessAddressSpace::Group);
+  EXPECT_EQ(byte.provenance, AccessProvenance::NativeLdsOpcode);
+  EXPECT_EQ(byte.confidence, SemanticConfidence::Exact);
   EXPECT_TRUE(byte.lowering.replay_guest_access.available());
-  const ConSanProgramContainer *byte_container = inventory.container(byte.container);
+  const ProgramContainer *byte_container = inventory.container(byte.container);
   ASSERT_NE(byte_container, nullptr);
-  EXPECT_EQ(byte_container->kind, ConSanProgramContainerKind::Kernel);
+  EXPECT_EQ(byte_container->kind, ProgramContainerKind::Kernel);
   EXPECT_EQ(byte_container->descriptor_file_offset, 512u);
   EXPECT_EQ(byte_container->text_file_offset, 1024u);
   EXPECT_TRUE(byte_container->code_size_inferred_from_zero);
@@ -797,13 +793,13 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.ranges[0].byte_width, 1u);
   EXPECT_EQ(byte.ranges[0].static_byte_offset, 0);
   EXPECT_EQ(byte.ranges[0].id.physical, byte.physical_id);
-  EXPECT_EQ(byte.ranges[0].id.domain, ConSanSemanticSiteDomain::Access);
+  EXPECT_EQ(byte.ranges[0].id.domain, SemanticSiteDomain::Access);
   EXPECT_EQ(byte.ranges[0].id.range_ordinal, 0u);
   EXPECT_TRUE(byte.complete());
 
   ASSERT_EQ(sites[1].ranges.size(), 1u);
   EXPECT_EQ(sites[1].ranges[0].byte_width, 2u);
-  EXPECT_EQ(sites[2].origin, ConSanAccessOrigin::DirectToLds);
+  EXPECT_EQ(sites[2].origin, AccessOrigin::DirectToLds);
   EXPECT_FALSE(sites[2].operands.address_vgpr);
   ASSERT_EQ(sites[2].ranges.size(), 1u);
   EXPECT_EQ(sites[2].ranges[0].static_byte_offset, 0);
@@ -813,14 +809,14 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
 TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses) {
   const std::array<uint8_t, 128> bytes = {};
   ProgramInventoryBuilder builder(bytes);
-  ConSanProgramContainer owner = make_inventory_kernel("owner");
+  ProgramContainer owner = make_inventory_kernel("owner");
   owner.descriptor_file_offset = 512;
   builder.add_kernel(std::move(owner));
-  ConSanProgramContainer overlapping = make_inventory_kernel("overlapping");
+  ProgramContainer overlapping = make_inventory_kernel("overlapping");
   overlapping.descriptor_file_offset = 768;
   stage_inventory_access(builder, overlapping, make_inventory_lds_site("ds_store_b32", 80));
   stage_inventory_access(builder, overlapping,
-                         make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
+                         make_inventory_flat_site(FlatAddressSpaceHint::Group, 88));
   stage_inventory_access(builder, overlapping, make_inventory_lds_site("ds_store_b32", 120));
   builder.add_kernel(std::move(overlapping));
   builder.publish_decoded_accesses(bytes);
@@ -828,8 +824,8 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
   const std::array decoded_accesses = {
       make_inventory_lds_site("ds_store_b32", 80),
       make_inventory_lds_site("ds_store_b32", 96),
-      make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88),
-      make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 104),
+      make_inventory_flat_site(FlatAddressSpaceHint::Group, 88),
+      make_inventory_flat_site(FlatAddressSpaceHint::Group, 104),
   };
   builder.reattribute_access_range(80, 32, builder.kernels().front(), decoded_accesses, bytes);
 
@@ -841,7 +837,7 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
       return candidate.physical_id.original_text_offset;
     });
     ASSERT_NE(access, accesses.end());
-    const ConSanProgramContainer *container = inventory.container(access->container);
+    const ProgramContainer *container = inventory.container(access->container);
     ASSERT_NE(container, nullptr);
     EXPECT_EQ(container->name, "owner");
     EXPECT_EQ(container->descriptor_file_offset, 512u);
@@ -850,7 +846,7 @@ TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses)
     return candidate.physical_id.original_text_offset;
   });
   ASSERT_NE(outside, accesses.end());
-  const ConSanProgramContainer *outside_container = inventory.container(outside->container);
+  const ProgramContainer *outside_container = inventory.container(outside->container);
   ASSERT_NE(outside_container, nullptr);
   EXPECT_EQ(outside_container->name, "overlapping");
   EXPECT_EQ(outside_container->descriptor_file_offset, 768u);
@@ -860,51 +856,51 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
   ProgramInventoryBuilder builder;
   builder.add_kernel(make_inventory_kernel("owner"));
   builder.add_kernel(make_inventory_kernel("overlapping"));
-  const ConSanProgramContainerId overlapping = builder.kernels()[1].id;
+  const ProgramContainerId overlapping = builder.kernels()[1].id;
 
-  ConSanOrdinaryMemorySite ordinary;
+  OrdinaryMemorySite ordinary;
   ordinary.text_offset = 80;
   ordinary.file_offset = 0x450;
   ordinary.size = 8;
   ordinary.mnemonic = "flat_load_dword";
   for (unsigned alias = 0; alias < 2; ++alias) {
-    ConSanProgramSite access = make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 80);
+    ProgramSite access = make_inventory_flat_site(FlatAddressSpaceHint::Group, 80);
     access.container = overlapping;
     access.payload = ordinary;
     builder.add_access_site(std::move(access));
   }
-  ConSanProgramSite outside = make_inventory_lds_site("ds_store_b32", 120);
+  ProgramSite outside = make_inventory_lds_site("ds_store_b32", 120);
   outside.container = overlapping;
-  ConSanBarrierSite outside_barrier;
+  BarrierSite outside_barrier;
   outside_barrier.text_offset = 120;
   outside_barrier.size = 4;
   outside_barrier.mnemonic = "s_barrier";
   outside.payload = std::move(outside_barrier);
   builder.add_access_site(std::move(outside));
-  builder.add_semantic_site(make_consan_program_site(overlapping, ordinary));
-  ConSanFenceSite fence;
+  builder.add_semantic_site(make_program_site(overlapping, ordinary));
+  FenceSite fence;
   fence.text_offset = 88;
   fence.size = 4;
   fence.mnemonic = "buffer_wbinvl1";
-  builder.add_semantic_site(make_consan_program_site(overlapping, std::move(fence)));
+  builder.add_semantic_site(make_program_site(overlapping, std::move(fence)));
 
   builder.reattribute_semantic_range(80, 32, builder.kernels().front());
 
   const ProgramInventory inventory = builder.view();
   ASSERT_EQ(inventory.access_sites().size(), 3u);
   ASSERT_EQ(inventory.program_sites().size(), 4u);
-  EXPECT_NE(inventory.access_sites()[0].get_if<ConSanOrdinaryMemorySite>(), nullptr);
-  EXPECT_TRUE(std::holds_alternative<ConSanAccessSite>(inventory.access_sites()[1].payload));
+  EXPECT_NE(inventory.access_sites()[0].get_if<OrdinaryMemorySite>(), nullptr);
+  EXPECT_TRUE(std::holds_alternative<AccessSite>(inventory.access_sites()[1].payload));
   EXPECT_EQ(inventory.access_sites()[1].text_offset(), 80u);
   EXPECT_EQ(inventory.access_sites()[1].decoded_file_offset(), 0x450u);
   EXPECT_EQ(inventory.access_sites()[1].size(), 8u);
   EXPECT_EQ(inventory.access_sites()[1].mnemonic_view(), "flat_load_dword");
-  EXPECT_NE(inventory.access_sites()[2].get_if<ConSanBarrierSite>(), nullptr);
+  EXPECT_NE(inventory.access_sites()[2].get_if<BarrierSite>(), nullptr);
   EXPECT_EQ(inventory.container(inventory.access_sites()[2].container)->name, "overlapping");
-  EXPECT_NE(inventory.program_sites().back().get_if<ConSanFenceSite>(), nullptr);
+  EXPECT_NE(inventory.program_sites().back().get_if<FenceSite>(), nullptr);
   EXPECT_EQ(inventory.container(inventory.program_sites().back().container)->name, "owner");
   EXPECT_TRUE(std::ranges::all_of(inventory.program_sites().first(2), [&](const auto &site) {
-    const ConSanProgramContainer *container = inventory.container(site.container);
+    const ProgramContainer *container = inventory.container(site.container);
     return container != nullptr && container->name == "owner";
   }));
 }
@@ -912,28 +908,28 @@ TEST(ConSanProgramInventory, SemanticRangeDeduplicationPreservesEveryAccessRecor
 TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreferNormalizedAtomicFacet) {
   const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
   for (const auto [kind, decoded_atomic_offset, expected] : {
-           std::tuple{ConSanLdsAccessKind::Atomic, std::optional<int32_t>{0x56},
+           std::tuple{LdsAccessKind::Atomic, std::optional<int32_t>{0x56},
                       std::optional<int64_t>{0x56}},
-           std::tuple{ConSanLdsAccessKind::Read, std::optional<int32_t>{},
+           std::tuple{LdsAccessKind::Read, std::optional<int32_t>{},
                       std::optional<int64_t>{0x1234}},
-           std::tuple{ConSanLdsAccessKind::Write, std::optional<int32_t>{},
+           std::tuple{LdsAccessKind::Write, std::optional<int32_t>{},
                       std::optional<int64_t>{0x1234}},
        }) {
     ProgramInventoryBuilder builder(bytes);
     builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942);
-    ConSanProgramContainer kernel = make_inventory_kernel();
-    ConSanProgramSite site = make_inventory_lds_site("ds_single", 16, 0, 32);
+    ProgramContainer kernel = make_inventory_kernel();
+    ProgramSite site = make_inventory_lds_site("ds_single", 16, 0, 32);
     site.kind = kind;
     stage_inventory_access(builder, kernel, std::move(site));
-    if (kind == ConSanLdsAccessKind::Atomic) {
-      ConSanAtomicSite atomic;
+    if (kind == LdsAccessKind::Atomic) {
+      AtomicSite atomic;
       atomic.text_offset = 16;
       atomic.file_offset = 0;
       atomic.size = 8;
       atomic.mnemonic = "ds_single";
       atomic.raw_ioffset = decoded_atomic_offset;
       builder.add_semantic_site(
-          make_consan_program_site(builder.access_sites().back().container, std::move(atomic)));
+          make_program_site(builder.access_sites().back().container, std::move(atomic)));
     }
     builder.add_kernel(std::move(kernel));
     builder.publish_decoded_accesses(bytes);
@@ -953,9 +949,9 @@ TEST(ConSanProgramInventory, AccessOnlyNativeAtomicOffsetsUseTheTargetEncodingFa
        }) {
     ProgramInventoryBuilder builder(bytes);
     builder.set_code_object_facts(true, 0, arch, target);
-    ConSanProgramContainer kernel = make_inventory_kernel();
-    ConSanProgramSite site = make_inventory_lds_site("ds_access_only_atomic", 16, 0, 32);
-    site.kind = ConSanLdsAccessKind::Atomic;
+    ProgramContainer kernel = make_inventory_kernel();
+    ProgramSite site = make_inventory_lds_site("ds_access_only_atomic", 16, 0, 32);
+    site.kind = LdsAccessKind::Atomic;
     stage_inventory_access(builder, kernel, std::move(site));
     builder.add_kernel(std::move(kernel));
     builder.publish_decoded_accesses(bytes);
@@ -968,8 +964,8 @@ TEST(ConSanProgramInventory, UnreadableSingleRangeNativeOffsetRemainsAnExplicitM
   const std::array<uint8_t, 3> truncated_bytes = {0x34, 0x12, 0};
   ProgramInventoryBuilder builder(truncated_bytes);
   builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
-  ConSanProgramContainer kernel = make_inventory_kernel();
-  ConSanProgramSite site = make_inventory_lds_site("ds_truncated", 16, 0, 32);
+  ProgramContainer kernel = make_inventory_kernel();
+  ProgramSite site = make_inventory_lds_site("ds_truncated", 16, 0, 32);
   stage_inventory_access(builder, kernel, std::move(site));
   builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses(truncated_bytes);
@@ -1007,7 +1003,7 @@ TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrd
     SCOPED_TRACE(test.mnemonic);
     const std::array<uint8_t, 8> bytes = {3, 5, 0, 0, 0, 0, 0, 0};
     ProgramInventoryBuilder builder(bytes);
-    ConSanProgramContainer kernel = make_inventory_kernel();
+    ProgramContainer kernel = make_inventory_kernel();
     stage_inventory_access(
         builder, kernel,
         make_inventory_lds_site(std::string(test.mnemonic), 40, 0, 2 * test.width_bits));
@@ -1015,7 +1011,7 @@ TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrd
     builder.publish_decoded_accesses(bytes);
 
     const auto access_sites = builder.view().access_sites();
-    const ConSanProgramSite &site = access_sites.front();
+    const ProgramSite &site = access_sites.front();
     ASSERT_EQ(site.ranges.size(), 2u);
     EXPECT_EQ(site.ranges[0].static_byte_offset, 3 * test.scale);
     EXPECT_EQ(site.ranges[1].static_byte_offset, 5 * test.scale);
@@ -1034,28 +1030,28 @@ TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrd
 TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfidence) {
   /// Expected target-neutral semantic facts for one legacy FLAT hint.
   struct Case {
-    ConSanFlatAddressSpaceHint hint;
-    ConSanAccessAddressSpace address_space;
-    ConSanAccessProvenance provenance;
-    ConSanSemanticConfidence confidence;
+    FlatAddressSpaceHint hint;
+    AccessAddressSpace address_space;
+    AccessProvenance provenance;
+    SemanticConfidence confidence;
   };
   constexpr std::array<Case, 6> cases = {
-      Case{ConSanFlatAddressSpaceHint::Group, ConSanAccessAddressSpace::Group,
-           ConSanAccessProvenance::EncodedFlatSegment, ConSanSemanticConfidence::Exact},
-      Case{ConSanFlatAddressSpaceHint::Private, ConSanAccessAddressSpace::NonGroup,
-           ConSanAccessProvenance::EncodedFlatSegment, ConSanSemanticConfidence::Exact},
-      Case{ConSanFlatAddressSpaceHint::Global, ConSanAccessAddressSpace::NonGroup,
-           ConSanAccessProvenance::EncodedFlatSegment, ConSanSemanticConfidence::Exact},
-      Case{ConSanFlatAddressSpaceHint::MaybeGroup, ConSanAccessAddressSpace::Group,
-           ConSanAccessProvenance::PropagatedFlatPointer, ConSanSemanticConfidence::Conservative},
-      Case{ConSanFlatAddressSpaceHint::MaybePrivate, ConSanAccessAddressSpace::NonGroup,
-           ConSanAccessProvenance::PropagatedFlatPointer, ConSanSemanticConfidence::Conservative},
-      Case{ConSanFlatAddressSpaceHint::Unknown, ConSanAccessAddressSpace::Unresolved,
-           ConSanAccessProvenance::UnresolvedFlatPointer, ConSanSemanticConfidence::Ambiguous},
+      Case{FlatAddressSpaceHint::Group, AccessAddressSpace::Group,
+           AccessProvenance::EncodedFlatSegment, SemanticConfidence::Exact},
+      Case{FlatAddressSpaceHint::Private, AccessAddressSpace::NonGroup,
+           AccessProvenance::EncodedFlatSegment, SemanticConfidence::Exact},
+      Case{FlatAddressSpaceHint::Global, AccessAddressSpace::NonGroup,
+           AccessProvenance::EncodedFlatSegment, SemanticConfidence::Exact},
+      Case{FlatAddressSpaceHint::MaybeGroup, AccessAddressSpace::Group,
+           AccessProvenance::PropagatedFlatPointer, SemanticConfidence::Conservative},
+      Case{FlatAddressSpaceHint::MaybePrivate, AccessAddressSpace::NonGroup,
+           AccessProvenance::PropagatedFlatPointer, SemanticConfidence::Conservative},
+      Case{FlatAddressSpaceHint::Unknown, AccessAddressSpace::Unresolved,
+           AccessProvenance::UnresolvedFlatPointer, SemanticConfidence::Ambiguous},
   };
 
   ProgramInventoryBuilder builder;
-  ConSanProgramContainer kernel = make_inventory_kernel();
+  ProgramContainer kernel = make_inventory_kernel();
   for (size_t index = 0; index < cases.size(); ++index)
     stage_inventory_access(builder, kernel,
                            make_inventory_flat_site(cases[index].hint, 64 + index * 8));
@@ -1076,7 +1072,7 @@ TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfid
   ASSERT_EQ(sites.size(), cases.size());
   for (size_t index = 0; index < cases.size(); ++index) {
     SCOPED_TRACE(index);
-    EXPECT_EQ(sites[index].origin, ConSanAccessOrigin::Flat);
+    EXPECT_EQ(sites[index].origin, AccessOrigin::Flat);
     EXPECT_EQ(sites[index].flat_address_space_hint, cases[index].hint);
     EXPECT_EQ(sites[index].address_space, cases[index].address_space);
     EXPECT_EQ(sites[index].provenance, cases[index].provenance);
@@ -1099,21 +1095,21 @@ TEST(ConSanProgramInventory, FlatHintsBecomeTypedAddressSpaceProvenanceAndConfid
 
 TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFailure) {
   ProgramInventoryBuilder builder;
-  ConSanProgramContainer kernel = make_inventory_kernel();
+  ProgramContainer kernel = make_inventory_kernel();
 
-  ConSanProgramSite malformed;
-  malformed.origin = ConSanAccessOrigin::NativeLds;
-  malformed.kind = ConSanLdsAccessKind::Other;
+  ProgramSite malformed;
+  malformed.origin = AccessOrigin::NativeLds;
+  malformed.kind = LdsAccessKind::Other;
   malformed.physical_id.original_text_offset = 8;
   malformed.decoded_site().text_offset = 8;
   malformed.decoded_site().mnemonic = "ds_other";
   stage_inventory_access(builder, kernel, malformed);
 
-  ConSanProgramSite missing_address = make_inventory_lds_site("ds_store_b32", 16);
+  ProgramSite missing_address = make_inventory_lds_site("ds_store_b32", 16);
   missing_address.operands.address_vgpr.reset();
   stage_inventory_access(builder, kernel, missing_address);
 
-  ConSanProgramSite unavailable_range = make_inventory_lds_site("ds_store_2addr_b32", 24, 128, 64);
+  ProgramSite unavailable_range = make_inventory_lds_site("ds_store_2addr_b32", 24, 128, 64);
   stage_inventory_access(builder, kernel, unavailable_range);
   builder.add_kernel(std::move(kernel));
   builder.publish_decoded_accesses({});
@@ -1121,20 +1117,17 @@ TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFa
   const ProgramInventory inventory = builder.view();
   const auto sites = inventory.access_sites();
   ASSERT_EQ(sites.size(), 3u);
-  EXPECT_EQ(exclusion_reasons(sites[0]),
-            (std::vector<ConSanInventoryExclusionReason>{
-                ConSanInventoryExclusionReason::NonAccessInstruction,
-                ConSanInventoryExclusionReason::InvalidInstructionSize,
-                ConSanInventoryExclusionReason::InvalidAccessWidth,
-                ConSanInventoryExclusionReason::MissingAddressOperand}));
+  EXPECT_EQ(exclusion_reasons(sites[0]), (std::vector<InventoryExclusionReason>{
+                                             InventoryExclusionReason::NonAccessInstruction,
+                                             InventoryExclusionReason::InvalidInstructionSize,
+                                             InventoryExclusionReason::InvalidAccessWidth,
+                                             InventoryExclusionReason::MissingAddressOperand}));
   EXPECT_FALSE(sites[0].complete());
-  EXPECT_EQ(exclusion_reasons(sites[1]),
-            (std::vector<ConSanInventoryExclusionReason>{
-                ConSanInventoryExclusionReason::MissingAddressOperand}));
+  EXPECT_EQ(exclusion_reasons(sites[1]), (std::vector<InventoryExclusionReason>{
+                                             InventoryExclusionReason::MissingAddressOperand}));
   EXPECT_FALSE(sites[1].complete());
-  EXPECT_EQ(exclusion_reasons(sites[2]),
-            (std::vector<ConSanInventoryExclusionReason>{
-                ConSanInventoryExclusionReason::RangeEncodingUnavailable}));
+  EXPECT_EQ(exclusion_reasons(sites[2]), (std::vector<InventoryExclusionReason>{
+                                             InventoryExclusionReason::RangeEncodingUnavailable}));
   EXPECT_TRUE(sites[2].ranges.empty());
   EXPECT_FALSE(sites[2].complete());
 }
@@ -1142,14 +1135,14 @@ TEST(ConSanProgramInventory, TypedExclusionsDescribeEveryInventoryConstructionFa
 TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAttribution) {
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);
-  ConSanProgramContainer kernel = make_inventory_kernel("kernel_alias");
+  ProgramContainer kernel = make_inventory_kernel("kernel_alias");
   stage_inventory_access(builder, kernel, make_inventory_lds_site("ds_store_b32", 80));
   builder.add_kernel(std::move(kernel));
-  ConSanProgramContainer function{ConSanProgramContainerKind::Function};
+  ProgramContainer function{ProgramContainerKind::Function};
   function.name = "function_alias";
   function.entry_text_offset = 72;
   builder.add_function(std::move(function));
-  ConSanProgramSite function_access = make_inventory_lds_site("ds_store_b32", 80);
+  ProgramSite function_access = make_inventory_lds_site("ds_store_b32", 80);
   function_access.container = builder.functions().back().id;
   builder.add_access_site(std::move(function_access));
   builder.publish_decoded_accesses(bytes);
@@ -1162,22 +1155,21 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   ASSERT_EQ(sites[1].ranges.size(), 1u);
   EXPECT_EQ(sites[0].ranges[0].id, sites[1].ranges[0].id);
   EXPECT_NE(sites[0].container, sites[1].container);
-  EXPECT_EQ(inventory.container(sites[0].container)->kind, ConSanProgramContainerKind::Kernel);
-  EXPECT_EQ(inventory.container(sites[1].container)->kind, ConSanProgramContainerKind::Function);
+  EXPECT_EQ(inventory.container(sites[0].container)->kind, ProgramContainerKind::Kernel);
+  EXPECT_EQ(inventory.container(sites[1].container)->kind, ProgramContainerKind::Function);
 }
 
 TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormalizedAccesses) {
   std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   mutate_first_kernel_descriptor(
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 1234u; });
-  ConSanOptions options;
-  options.flavor = ConSanFlavor::Moi;
-  options.moi_engine = ConSanMoiEngine::RecordReplay;
+  Options options;
+  options.mode = Mode::Default;
   options.fault_dry_run = true;
-  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+  const TransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
+  ASSERT_TRUE(patch_succeeded(result));
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_code_object_id(bytes));
   EXPECT_EQ(result.program_inventory.code_object_id().byte_size, bytes.size());
   EXPECT_EQ(result.program_inventory.arch(), result.program_inventory.arch());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
@@ -1189,7 +1181,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
   EXPECT_TRUE(result.program_inventory.functions().empty());
   EXPECT_EQ(result.program_inventory.kernels().front().declared_group_segment_bytes, 1234u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  for (const ConSanProgramSite &site : result.program_inventory.access_sites()) {
+  for (const ProgramSite &site : result.program_inventory.access_sites()) {
     EXPECT_TRUE(site.complete());
     EXPECT_EQ(site.physical_id.code_object, result.program_inventory.code_object_id());
     EXPECT_EQ(result.program_inventory.container(site.container),
@@ -1197,7 +1189,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
     EXPECT_NE(site.decoded_file_offset(), 0u);
     EXPECT_NE(site.size(), 0u);
     EXPECT_NE(site.decoded_width_bits, 0u);
-    EXPECT_NE(site.kind, ConSanLdsAccessKind::Other);
+    EXPECT_NE(site.kind, LdsAccessKind::Other);
     EXPECT_FALSE(site.mnemonic_view().empty());
     EXPECT_TRUE(site.operands.address_vgpr);
     ASSERT_EQ(site.execution_owners.size(), 1u);
@@ -1206,4 +1198,4 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
 }
 
 } // namespace
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

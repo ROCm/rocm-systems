@@ -275,10 +275,10 @@ identity, raw output, coverage, report completeness, and health results
 together under the artifact root. Do not merge exploratory and accepted roots
 or reuse a root after its stable contract changes.
 
-The hardware-entry MOI path uses a 64-bit fingerprint of queue pointer and
+The hardware-entry ConSan path uses a 64-bit fingerprint of queue pointer and
 absolute queue-local dispatch ID. It distinguishes the tested simultaneous
 queues and ring-slot reuse but is not an injective encoding of the full pair:
-collisions and queue-address reuse remain possible. Sampled also has a weaker
+collisions and queue-address reuse remain possible. ConSan also has a weaker
 literal fallback under scalar pressure. Qualification must report which
 representation was used; runtime trust cannot upgrade either representation
 into exact global launch identity.

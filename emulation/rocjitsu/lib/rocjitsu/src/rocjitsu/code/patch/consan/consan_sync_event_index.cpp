@@ -3,16 +3,16 @@
 
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
-                                const ConSanSyncSequence &sequence) {
+                                const SyncSequence &sequence) {
   uint64_t prior_end = sequence.begin_text_offset;
-  const ConSanProgramContainer *sequence_container = inventory.container(sequence);
+  const ProgramContainer *sequence_container = inventory.container(sequence);
   if (sequence_container == nullptr)
     return false;
-  for (const ConSanSyncEventId member : sequence.member_event_ids) {
-    const ConSanSyncEvent *event = inventory.find_event(member);
-    const ConSanProgramSite *source = event == nullptr ? nullptr : inventory.source(*event);
+  for (const SyncEventId member : sequence.member_event_ids) {
+    const SyncEvent *event = inventory.find_event(member);
+    const ProgramSite *source = event == nullptr ? nullptr : inventory.source(*event);
     if (event == nullptr || source == nullptr || source->container != sequence_container->id ||
         event->text_offset() < prior_end || event->text_offset() < sequence.begin_text_offset ||
         event->text_offset() + source->size() > sequence.end_text_offset) {
@@ -23,16 +23,15 @@ bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
   return !sequence.member_event_ids.empty();
 }
 
-std::vector<ConSanSyncSequenceMembership>
-build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences,
-                                     size_t event_count) {
-  std::vector<ConSanSyncSequenceMembership> result(event_count);
+std::vector<SyncSequenceMembership>
+build_sync_sequence_membership_index(std::span<const SyncSequence> sequences, size_t event_count) {
+  std::vector<SyncSequenceMembership> result(event_count);
   for (size_t sequence_ordinal = 0; sequence_ordinal < sequences.size(); ++sequence_ordinal) {
-    const ConSanSyncSequence &sequence = sequences[sequence_ordinal];
-    for (const ConSanSyncEventId member : sequence.member_event_ids) {
+    const SyncSequence &sequence = sequences[sequence_ordinal];
+    for (const SyncEventId member : sequence.member_event_ids) {
       if (!member.valid() || member.ordinal >= result.size())
         continue;
-      ConSanSyncSequenceMembership &entry = result[member.ordinal];
+      SyncSequenceMembership &entry = result[member.ordinal];
       if (!entry.sequence.valid() && !entry.ambiguous)
         entry.sequence = {static_cast<uint32_t>(sequence_ordinal)};
       else {
@@ -44,4 +43,4 @@ build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequenc
   return result;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

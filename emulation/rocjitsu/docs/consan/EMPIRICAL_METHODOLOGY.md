@@ -124,7 +124,7 @@ deterministic claim requires every final trial to diagnose the fault.
 
 Report oracle manifestation separately from ConSan detection. Also record
 contained failures, timeouts, post-trial device health, clean-run unexpected
-diagnostics, and Sampled runtime stride and offset. A reached but
+diagnostics, and ConSan runtime stride and offset. A reached but
 schedule-masked fault remains an explicit qualified miss.
 
 ## Implementation-complexity protocol
@@ -132,7 +132,7 @@ schedule-masked fault remains an explicit qualified miss.
 Source-line counts are an inventory, not a synthetic quality score. For each
 mode, record:
 
-- engine-dedicated and shared production/test surfaces;
+- mode-dedicated and shared production/test surfaces;
 - analysis, target-specific emission, relocation, register, spill, and
   descriptor paths;
 - persistent and per-dispatch ABI state plus memory bounds;

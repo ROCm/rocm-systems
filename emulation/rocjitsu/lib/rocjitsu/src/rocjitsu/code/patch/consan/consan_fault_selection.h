@@ -14,12 +14,12 @@
 #include <string>
 #include <string_view>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Immutable selection facts shared by mutation planning and proof
 /// rederivation. This deliberately excludes mutation kind, payload, lowering
 /// options, and diagnostic state.
-struct ConSanFaultSelection {
+struct FaultSelection {
   std::string_view primary_site_identity;
   std::string_view primary_sequence_identity;
   std::string_view companion_site_identity;
@@ -34,36 +34,35 @@ struct ConSanFaultSelection {
 /// derived from it. It must not inspect mutation state, resource planning,
 /// emitted patches, diagnostics, or any other transformation-transaction
 /// field.
-struct ConSanFaultSelectionView {
+struct FaultSelectionView {
   const ProgramInventory &program_inventory;
-  std::span<const ConSanFaultSite> fault_sites;
+  std::span<const FaultSite> fault_sites;
 
-  [[nodiscard]] const ConSanProgramSite *source(const ConSanFaultSite &site) const {
+  [[nodiscard]] const ProgramSite *source(const FaultSite &site) const {
     return program_inventory.program_site(site);
   }
-  [[nodiscard]] std::span<const ConSanExecutionOwner>
-  execution_owners(const ConSanFaultSite &site) const {
-    const ConSanProgramSite *program_site = source(site);
+  [[nodiscard]] std::span<const ExecutionOwner> execution_owners(const FaultSite &site) const {
+    const ProgramSite *program_site = source(site);
     return program_site == nullptr
-               ? std::span<const ConSanExecutionOwner>{}
-               : std::span<const ConSanExecutionOwner>(program_site->execution_owners);
+               ? std::span<const ExecutionOwner>{}
+               : std::span<const ExecutionOwner>(program_site->execution_owners);
   }
 };
 
 /// Fully rederived ordinary-acquire mutation target. Every pointer refers into
 /// the immutable inventory supplied to the selector.
 struct OrdinaryAcquireMutationTarget {
-  const ConSanFaultSite *site = nullptr;
-  const ConSanSyncEvent *load = nullptr;
-  const ConSanSyncEvent *cache = nullptr;
-  const ConSanSyncSequence *sequence = nullptr;
+  const FaultSite *site = nullptr;
+  const SyncEvent *load = nullptr;
+  const SyncEvent *cache = nullptr;
+  const SyncSequence *sequence = nullptr;
 };
 
 /// A complete exact two-member logical barrier and its two physical sites.
 struct ExactBarrierDropPair {
-  const ConSanSyncSequence *sequence = nullptr;
-  const ConSanFaultSite *primary = nullptr;
-  const ConSanFaultSite *companion = nullptr;
+  const SyncSequence *sequence = nullptr;
+  const FaultSite *primary = nullptr;
+  const FaultSite *companion = nullptr;
 };
 
 /// Two ordered, disjoint exact barriers selected as one logical mutation.
@@ -113,34 +112,32 @@ struct ExactBarrierDropGroupResolution {
 
 /// Decide whether a cross-block destination carries the exact structured-CFG
 /// proof and explicit request opt-in required by barrier-move mutation.
-[[nodiscard]] bool
-consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
-                                             const MutationRequest &mutation);
+[[nodiscard]] bool fault_admits_cross_block_barrier_move(const BarrierMoveDestination &destination,
+                                                         const MutationRequest &mutation);
 
-[[nodiscard]] const ConSanFaultSite *
-find_fault_site_by_identity(const ConSanFaultSelectionView &inventory, std::string_view identity,
-                            ConSanFaultSiteKind kind);
+[[nodiscard]] const FaultSite *find_fault_site_by_identity(const FaultSelectionView &inventory,
+                                                           std::string_view identity,
+                                                           FaultSiteKind kind);
 
-[[nodiscard]] bool
-consan_execution_owners_include_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                                 const ConSanFaultSelectionView &inventory,
-                                                 std::string_view kernel_name_filter);
+[[nodiscard]] bool execution_owners_include_requested_kernel(std::span<const ExecutionOwner> owners,
+                                                             const FaultSelectionView &inventory,
+                                                             std::string_view kernel_name_filter);
 
-[[nodiscard]] const ConSanFaultSite *
-select_fault_site_for_plan(const ConSanFaultSelectionView &inventory,
-                           const ConSanFaultSelection &selection, ConSanFaultSiteKind kind);
+[[nodiscard]] const FaultSite *select_fault_site_for_plan(const FaultSelectionView &inventory,
+                                                          const FaultSelection &selection,
+                                                          FaultSiteKind kind);
 
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
-select_ordinary_acquire_mutation_target(const ConSanFaultSelectionView &inventory,
-                                        const ConSanFaultSelection &selection);
+select_ordinary_acquire_mutation_target(const FaultSelectionView &inventory,
+                                        const FaultSelection &selection);
 
 [[nodiscard]] ExactBarrierDropPairResolution
-resolve_exact_barrier_drop_pair(const ConSanFaultSelectionView &inventory,
-                                const ConSanFaultSelection &selection);
+resolve_exact_barrier_drop_pair(const FaultSelectionView &inventory,
+                                const FaultSelection &selection);
 
 [[nodiscard]] ExactBarrierDropGroupResolution
-resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
-                                 const ConSanFaultSelection &selection);
+resolve_exact_barrier_drop_group(const FaultSelectionView &inventory,
+                                 const FaultSelection &selection);
 
 [[nodiscard]] std::string_view
 exact_barrier_drop_pair_issue_message(ExactBarrierDropPairIssue issue);
@@ -151,4 +148,4 @@ exact_barrier_drop_pair_issue_message(ExactBarrierDropPairIssue issue);
 
 [[nodiscard]] std::string exact_barrier_drop_group_identity(const ExactBarrierDropGroup &group);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

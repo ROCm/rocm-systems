@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 class ActiveDescriptorResolver {
@@ -21,14 +21,14 @@ public:
   ActiveDescriptorResolver(const ProgramInventory &inventory,
                            const AmdGpuCodeObject &active_code_object) {
     original_kernels_.reserve(inventory.kernels().size());
-    for (const ConSanProgramContainer &kernel : inventory.kernels())
+    for (const ProgramContainer &kernel : inventory.kernels())
       original_kernels_.emplace(kernel.descriptor_file_offset, &kernel);
     active_kernels_.reserve(active_code_object.kernels().size());
     for (const AmdGpuKernelInfo &kernel : active_code_object.kernels())
       active_kernels_.emplace(kernel.name, &kernel);
   }
 
-  [[nodiscard]] std::pair<const ConSanProgramContainer *, const AmdGpuKernelInfo *>
+  [[nodiscard]] std::pair<const ProgramContainer *, const AmdGpuKernelInfo *>
   resolve(uint64_t original_descriptor_offset) const {
     const auto original = original_kernels_.find(original_descriptor_offset);
     if (original == original_kernels_.end())
@@ -38,7 +38,7 @@ public:
   }
 
 private:
-  std::unordered_map<uint64_t, const ConSanProgramContainer *> original_kernels_;
+  std::unordered_map<uint64_t, const ProgramContainer *> original_kernels_;
   std::unordered_map<std::string_view, const AmdGpuKernelInfo *> active_kernels_;
 };
 
@@ -46,7 +46,7 @@ template <typename CurrentImage, typename CommitDescriptor>
 [[nodiscard]] bool apply_descriptor_mutations(
     CurrentImage current_image, CommitDescriptor commit_descriptor,
     const ProgramInventory &inventory, const AmdGpuCodeObject &active_code_object,
-    const ConSanDescriptorMutationBatch &batch, const ConSanDescriptorMutationPolicy &policy,
+    const DescriptorMutationBatch &batch, const DescriptorMutationPolicy &policy,
     rj_code_arch_t arch, std::string_view subject, std::vector<std::string> &errors) {
   std::unordered_set<uint64_t> owners;
   owners.reserve(batch.vgprs.size() + batch.sgprs.size() + batch.private_segment_bytes.size() +
@@ -123,13 +123,13 @@ template <typename CurrentImage, typename CommitDescriptor>
 
 } // namespace
 
-bool apply_consan_descriptor_mutations_to_patcher(CodeObjectPatcher &patcher,
-                                                  const ProgramInventory &inventory,
-                                                  const AmdGpuCodeObject &active_code_object,
-                                                  const ConSanDescriptorMutationBatch &batch,
-                                                  const ConSanDescriptorMutationPolicy &policy,
-                                                  rj_code_arch_t arch, std::string_view subject,
-                                                  std::vector<std::string> &errors) {
+bool apply_descriptor_mutations_to_patcher(CodeObjectPatcher &patcher,
+                                           const ProgramInventory &inventory,
+                                           const AmdGpuCodeObject &active_code_object,
+                                           const DescriptorMutationBatch &batch,
+                                           const DescriptorMutationPolicy &policy,
+                                           rj_code_arch_t arch, std::string_view subject,
+                                           std::vector<std::string> &errors) {
   return apply_descriptor_mutations([&]() { return patcher.image_bytes(); },
                                     [&](uint64_t offset, const auto &descriptor) {
                                       return patcher.patch_kernel_descriptor(offset, descriptor);
@@ -138,12 +138,12 @@ bool apply_consan_descriptor_mutations_to_patcher(CodeObjectPatcher &patcher,
                                     errors);
 }
 
-bool apply_consan_descriptor_mutations_to_bytes(std::span<uint8_t> image,
-                                                const ProgramInventory &inventory,
-                                                const ConSanDescriptorMutationBatch &batch,
-                                                const ConSanDescriptorMutationPolicy &policy,
-                                                rj_code_arch_t arch, std::string_view subject,
-                                                std::vector<std::string> &errors) {
+bool apply_descriptor_mutations_to_bytes(std::span<uint8_t> image,
+                                         const ProgramInventory &inventory,
+                                         const DescriptorMutationBatch &batch,
+                                         const DescriptorMutationPolicy &policy,
+                                         rj_code_arch_t arch, std::string_view subject,
+                                         std::vector<std::string> &errors) {
   const AmdGpuCodeObject active_code_object(image.data(), image.size());
   if (!active_code_object.is_valid()) {
     errors.emplace_back(std::string(subject) + " cannot parse the active descriptor image");
@@ -157,4 +157,4 @@ bool apply_consan_descriptor_mutations_to_bytes(std::span<uint8_t> image,
                                     errors);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

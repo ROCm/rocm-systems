@@ -1,16 +1,15 @@
-#include "rocjitsu/code/patch/consan/consan_moi_report_buffer_layout.h"
+#include "rocjitsu/code/patch/consan/consan_mode.h"
+#include "rocjitsu/code/patch/consan/consan_report_buffer_layout.h"
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Default maximum additional ELF storage one ConSan transformation may
 /// materialize, including alignment padding. Dense production code objects can
-/// require one out-of-line body per admitted access. Qualified generated
-/// operator libraries require up to about 874 MiB for complete Inline Shadow
-/// coverage, so retain a bounded 896 MiB default while leaving process-wide
-/// ceilings independent.
-inline constexpr uint64_t kConSanDefaultMaxPatchedImageGrowthBytes = uint64_t{896} * 1024 * 1024;
+/// require one out-of-line body per admitted access. The per-object growth
+/// bound is independent of process-wide memory ceilings.
+inline constexpr uint64_t kDefaultMaxPatchedImageGrowthBytes = uint64_t{896} * 1024 * 1024;
 
-enum class ConSanPatchedImageGrowthLimitKind : uint8_t {
+enum class PatchedImageGrowthLimitKind : uint8_t {
   AbsoluteBytes,
   InputPercent,
 };
@@ -22,25 +21,24 @@ enum class ConSanPatchedImageGrowthLimitKind : uint8_t {
 /// rather than an intermediate image produced by an earlier ConSan stage. It is
 /// an alternative to the absolute form rather than a second silently combined
 /// cap.
-struct ConSanPatchedImageGrowthLimit {
-  ConSanPatchedImageGrowthLimitKind kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes;
-  uint64_t absolute_bytes = kConSanDefaultMaxPatchedImageGrowthBytes;
+struct PatchedImageGrowthLimit {
+  PatchedImageGrowthLimitKind kind = PatchedImageGrowthLimitKind::AbsoluteBytes;
+  uint64_t absolute_bytes = kDefaultMaxPatchedImageGrowthBytes;
   uint32_t input_percent = 0;
 
-  auto operator<=>(const ConSanPatchedImageGrowthLimit &) const = default;
+  auto operator<=>(const PatchedImageGrowthLimit &) const = default;
 };
 
 /// Resolve a configured policy without overflowing size_t. An invalid enum
 /// value is rejected instead of silently selecting a fallback.
 [[nodiscard]] inline constexpr std::optional<size_t>
-consan_patched_image_growth_limit_bytes(const ConSanPatchedImageGrowthLimit &policy,
-                                        size_t input_image_bytes) {
+patched_image_growth_limit_bytes(const PatchedImageGrowthLimit &policy, size_t input_image_bytes) {
   static_assert(sizeof(size_t) >= sizeof(uint64_t),
                 "ConSan patched-image accounting requires a 64-bit size_t");
   switch (policy.kind) {
-  case ConSanPatchedImageGrowthLimitKind::AbsoluteBytes:
+  case PatchedImageGrowthLimitKind::AbsoluteBytes:
     return static_cast<size_t>(policy.absolute_bytes);
-  case ConSanPatchedImageGrowthLimitKind::InputPercent: {
+  case PatchedImageGrowthLimitKind::InputPercent: {
     const size_t whole = input_image_bytes / 100u;
     const size_t remainder = input_image_bytes % 100u;
     if (whole != 0u && policy.input_percent > std::numeric_limits<size_t>::max() / whole) {
@@ -57,7 +55,7 @@ consan_patched_image_growth_limit_bytes(const ConSanPatchedImageGrowthLimit &pol
   return std::nullopt;
 }
 
-struct ConSanPatchedImageGrowthBudget {
+struct PatchedImageGrowthBudget {
   size_t total_limit_bytes = 0;
   size_t existing_growth_bytes = 0;
   size_t remaining_growth_bytes = 0;
@@ -67,15 +65,15 @@ struct ConSanPatchedImageGrowthBudget {
 /// Resolve the remaining budget for a transformation stage against the
 /// original code-object image. This prevents successive stages from each
 /// receiving a fresh full allowance.
-[[nodiscard]] inline std::optional<ConSanPatchedImageGrowthBudget>
-consan_patched_image_growth_budget(const ConSanPatchedImageGrowthLimit &policy,
-                                   size_t input_image_bytes, size_t current_image_bytes) {
-  const auto total_limit = consan_patched_image_growth_limit_bytes(policy, input_image_bytes);
+[[nodiscard]] inline std::optional<PatchedImageGrowthBudget>
+patched_image_growth_budget(const PatchedImageGrowthLimit &policy, size_t input_image_bytes,
+                            size_t current_image_bytes) {
+  const auto total_limit = patched_image_growth_limit_bytes(policy, input_image_bytes);
   if (!total_limit)
     return std::nullopt;
   const size_t existing_growth =
       current_image_bytes > input_image_bytes ? current_image_bytes - input_image_bytes : 0u;
-  return ConSanPatchedImageGrowthBudget{
+  return PatchedImageGrowthBudget{
       .total_limit_bytes = *total_limit,
       .existing_growth_bytes = existing_growth,
       .remaining_growth_bytes =
@@ -84,26 +82,20 @@ consan_patched_image_growth_budget(const ConSanPatchedImageGrowthLimit &policy,
   };
 }
 
-enum class ConSanFlavor : uint8_t {
-  None,
-  SuperCollider,
-  Moi,
-};
-
-enum class ConSanDelayMode : uint8_t {
+enum class SuperColliderDelayMode : uint8_t {
   Nop,
   Sleep,
   SleepVar,
 };
 
-enum class ConSanBarrierMoveDirection : uint8_t {
+enum class BarrierMoveDirection : uint8_t {
   LegacyMarker,
   Earlier,
   Later,
 };
 
 /// CFG/convergence proof attached to a cross-block whole-barrier move.
-enum class ConSanBarrierMoveCfgContract : uint8_t {
+enum class BarrierMoveCfgContract : uint8_t {
   SameBlock,
   /// Both successors of an acyclic conditional guard reach the reconverged
   /// source exactly once; moving the pair into the guard remains completing.
@@ -113,13 +105,13 @@ enum class ConSanBarrierMoveCfgContract : uint8_t {
   DestructiveStructuredExecDiamond,
 };
 
-enum class ConSanPerturbationKind : uint8_t {
+enum class SuperColliderPerturbationKind : uint8_t {
   None,
   Barrier,
   Atomic,
 };
 
-enum class ConSanPerturbationEdge : uint8_t {
+enum class SuperColliderPerturbationEdge : uint8_t {
   Release,
   Acquire,
 };
@@ -127,13 +119,13 @@ enum class ConSanPerturbationEdge : uint8_t {
 /// Which cache boundary an atomic weaken-order fault removes. `Any` preserves
 /// the historical first-qualified-boundary behavior; explicit edges are used
 /// by fence-pair qualification and fail closed when that edge is absent.
-enum class ConSanAtomicOrderEdge : uint8_t {
+enum class AtomicOrderEdge : uint8_t {
   Any,
   Release,
   Acquire,
 };
 
-enum class ConSanMoiOwnerSource : uint8_t {
+enum class OwnerSource : uint8_t {
   Automatic,
   WorkitemId,
   HwId,
@@ -141,12 +133,12 @@ enum class ConSanMoiOwnerSource : uint8_t {
 
 /// Controls whether flat/VFLAT sites whose group provenance is heuristic are
 /// eligible for instrumentation.
-enum class ConSanFlatProvenanceMode : uint8_t {
+enum class FlatProvenanceMode : uint8_t {
   Likely,
   Strict,
 };
 
-enum class ConSanRegisterAllocationSource : uint8_t {
+enum class RegisterAllocationSource : uint8_t {
   Unsupported,
   Explicit,
   LivenessDead,
@@ -154,7 +146,7 @@ enum class ConSanRegisterAllocationSource : uint8_t {
   SpillRequired,
 };
 
-enum class ConSanRegisterPlanReason : uint8_t {
+enum class RegisterPlanReason : uint8_t {
   None,
   InvalidRequest,
   ExplicitMisaligned,
@@ -172,13 +164,13 @@ enum class ConSanRegisterPlanReason : uint8_t {
 /// Internal ownership retained while composing instrumentation over a staged
 /// fault trampoline in a local or appended cave outside its source kernel's
 /// FUNC symbol.
-struct ConSanPreappliedCodeRange {
+struct PreappliedCodeRange {
   uint64_t text_offset = 0;
   uint32_t size = 0;
   std::string kernel_name;
   std::optional<uint64_t> continuation_text_offset;
 
-  bool operator==(const ConSanPreappliedCodeRange &) const = default;
+  bool operator==(const PreappliedCodeRange &) const = default;
 };
 
 /// Bytes unavailable to the current placement pass. Mutation composition uses
@@ -186,11 +178,11 @@ struct ConSanPreappliedCodeRange {
 /// also reserve an anchor for a deferred patch in the same transaction.
 /// Placement must never consume these ranges as newly available padding or a
 /// cave.
-struct ConSanPreappliedReservedRange {
+struct PreappliedReservedRange {
   uint64_t text_offset = 0;
   uint32_t size = 0;
 
-  bool operator==(const ConSanPreappliedReservedRange &) const = default;
+  bool operator==(const PreappliedReservedRange &) const = default;
 };
 
 /// Geometry already committed by an earlier stage of one composed transform.
@@ -200,30 +192,29 @@ struct ConSanPreappliedReservedRange {
 /// would otherwise mistake for padding or a code cave. This value carries the
 /// ownership and reservation facts into construction of the mutated image's
 /// immutable `ProgramInventory`. It contains no sanitizer request, register
-/// choice, or engine working state.
-struct ConSanPreappliedMutationLayout {
+/// choice, or mode working state.
+struct PreappliedMutationLayout {
   /// Executable ranges introduced by the earlier mutation, paired with the
   /// dispatchable owner and continuation needed to recover their CFG scope.
-  std::vector<ConSanPreappliedCodeRange> code_ranges;
+  std::vector<PreappliedCodeRange> code_ranges;
   /// Original anchors and generated ranges that later placement passes must
   /// treat as occupied even when their bytes resemble reusable padding.
-  std::vector<ConSanPreappliedReservedRange> reserved_ranges;
+  std::vector<PreappliedReservedRange> reserved_ranges;
 
-  bool operator==(const ConSanPreappliedMutationLayout &) const = default;
+  bool operator==(const PreappliedMutationLayout &) const = default;
 };
 
 /// Optional exact x/y/z and cluster workgroup identity in one storage domain.
 ///
-/// Record/Replay and Sampled always consume x/y/z as one identity. Keeping the
+/// ConSan consumes x/y/z as one identity. Keeping the
 /// optionality around the tuple, rather than around each coordinate, prevents
 /// placement, ABI telemetry, and private-state planning from publishing a
 /// partial identity. The optional cluster coordinate refines that complete
 /// identity only on targets that expose cluster-local workgroup state.
-template <typename T> class ConSanMoiPersistentWorkgroupTuple {
+template <typename T> class PersistentWorkgroupTuple {
 public:
-  ConSanMoiPersistentWorkgroupTuple() = default;
-  ConSanMoiPersistentWorkgroupTuple(T x, T y, T z,
-                                    std::optional<T> cluster_workgroup_id = std::nullopt)
+  PersistentWorkgroupTuple() = default;
+  PersistentWorkgroupTuple(T x, T y, T z, std::optional<T> cluster_workgroup_id = std::nullopt)
       : coordinates_{{x, y, z}}, cluster_workgroup_id_(cluster_workgroup_id) {}
 
   [[nodiscard]] bool empty() const { return !coordinates_; }
@@ -247,38 +238,36 @@ public:
     cluster_workgroup_id_.reset();
   }
 
-  auto operator<=>(const ConSanMoiPersistentWorkgroupTuple &) const = default;
+  auto operator<=>(const PersistentWorkgroupTuple &) const = default;
 
 private:
   std::optional<std::array<T, 3>> coordinates_;
   std::optional<T> cluster_workgroup_id_;
 };
 
-/// Exact persistent workgroup tuple shared by Record/Replay and Sampled.
-/// Both modes publish full coordinates, unlike Inline Shadow's packed key.
-using ConSanMoiPersistentWorkgroupRegisters = ConSanMoiPersistentWorkgroupTuple<uint16_t>;
+/// Exact persistent workgroup tuple published with ConSan evidence.
+using PersistentWorkgroupRegisters = PersistentWorkgroupTuple<uint16_t>;
 
 /// Per-workitem private offsets holding that exact workgroup tuple when no
 /// lifetime-safe persistent register window exists.
-using ConSanMoiPersistentWorkgroupPrivateOffsets = ConSanMoiPersistentWorkgroupTuple<uint32_t>;
+using PersistentWorkgroupPrivateOffsets = PersistentWorkgroupTuple<uint32_t>;
 
 /// Register pair carrying one owner identity and its synchronization epoch.
 /// Scalar and vector persistent representations use the same semantic pair;
 /// their containing allocation determines the register file and lifetime.
-struct ConSanMoiOwnerEpochRegisters {
+struct OwnerEpochRegisters {
   uint16_t owner = 0;
   uint16_t epoch = 0;
 
-  auto operator<=>(const ConSanMoiOwnerEpochRegisters &) const = default;
+  auto operator<=>(const OwnerEpochRegisters &) const = default;
 };
 
 /// Optional accepted owner/epoch register state. The pair can be absent but
 /// cannot be represented or mutated one register at a time.
-class ConSanMoiOwnerEpochRegisterState {
+class OwnerEpochRegisterState {
 public:
-  ConSanMoiOwnerEpochRegisterState() = default;
-  ConSanMoiOwnerEpochRegisterState(ConSanMoiOwnerEpochRegisters registers)
-      : registers_(registers) {}
+  OwnerEpochRegisterState() = default;
+  OwnerEpochRegisterState(OwnerEpochRegisters registers) : registers_(registers) {}
 
   [[nodiscard]] std::optional<uint16_t> owner() const {
     return registers_ ? std::optional{registers_->owner} : std::nullopt;
@@ -288,34 +277,34 @@ public:
   }
   [[nodiscard]] bool complete() const { return registers_.has_value(); }
   [[nodiscard]] explicit operator bool() const { return complete(); }
-  [[nodiscard]] const ConSanMoiOwnerEpochRegisters *operator->() const { return &*registers_; }
+  [[nodiscard]] const OwnerEpochRegisters *operator->() const { return &*registers_; }
   void set_owner_epoch(uint16_t owner, uint16_t epoch) {
-    registers_ = ConSanMoiOwnerEpochRegisters{owner, epoch};
+    registers_ = OwnerEpochRegisters{owner, epoch};
   }
   void reset_owner_epoch() { registers_.reset(); }
 
-  auto operator<=>(const ConSanMoiOwnerEpochRegisterState &) const = default;
+  auto operator<=>(const OwnerEpochRegisterState &) const = default;
 
 private:
-  std::optional<ConSanMoiOwnerEpochRegisters> registers_;
+  std::optional<OwnerEpochRegisters> registers_;
 };
 
 /// Effective per-site vector sources. Unlike accepted persistent allocation,
 /// materialization may provide only one half when the other value is derived
 /// directly at the probe.
-struct ConSanMoiOwnerEpochVgprSources {
+struct OwnerEpochVgprSources {
   std::optional<uint16_t> owner;
   std::optional<uint16_t> epoch;
 
-  bool operator==(const ConSanMoiOwnerEpochVgprSources &) const = default;
+  bool operator==(const OwnerEpochVgprSources &) const = default;
 };
 
-[[nodiscard]] inline ConSanMoiOwnerEpochVgprSources
-moi_owner_epoch_vgpr_sources(const ConSanMoiOwnerEpochRegisterState &state) {
+[[nodiscard]] inline OwnerEpochVgprSources
+owner_epoch_vgpr_sources(const OwnerEpochRegisterState &state) {
   return {state.owner(), state.epoch()};
 }
 
-/// Exact ordinary-SGPR ABI that retains MOI state across arbitrary guest
+/// Exact ordinary-SGPR ABI that retains ConSan state across arbitrary guest
 /// instructions.
 ///
 /// Register placement builds this tuple as one indivisible lowering choice.
@@ -323,80 +312,69 @@ moi_owner_epoch_vgpr_sources(const ConSanMoiOwnerEpochRegisterState &state) {
 /// kernel consumes that choice. Emitted prologue metadata records the same
 /// value so the final mechanism remains self-describing after mutable lowering
 /// state is gone; it is not an independently reconstructed representation.
-class ConSanMoiPersistentSgprState : public ConSanMoiOwnerEpochRegisterState {
+class PersistentSgprState : public OwnerEpochRegisterState {
 public:
-  /// Compact workgroup identity used by InlineShadow when that engine does
-  /// not require the exact coordinate tuple.
-  std::optional<uint16_t> workgroup_key;
   /// Exact x/y/z and optional CDNA5 cluster coordinates retained by
-  /// Record/Replay and Sampled instrumentation.
-  ConSanMoiPersistentWorkgroupRegisters exact_workgroup;
+  /// ConSan instrumentation.
+  PersistentWorkgroupRegisters exact_workgroup;
 
   template <typename Visitor> void for_each_range(Visitor &&visit) const {
     visit(owner(), 1u);
     visit(epoch(), 1u);
-    visit(workgroup_key, 1u);
     for (std::optional<uint16_t> reg : exact_workgroup.values())
       visit(reg, 1u);
   }
 
-  auto operator<=>(const ConSanMoiPersistentSgprState &) const = default;
+  auto operator<=>(const PersistentSgprState &) const = default;
 };
 
 /// Persistent vector state selected for one connected set of owning kernels.
 /// A shared helper connects all of its owners because its instruction stream
 /// must use one tuple, while unrelated kernels may use different safe tails.
-struct ConSanMoiPersistentVgprAssignment {
+struct PersistentVgprAssignment {
   uint64_t descriptor_file_offset = 0;
-  ConSanMoiOwnerEpochRegisters owner_epoch_vgprs;
-  std::optional<uint16_t> workgroup_key_vgpr;
-  ConSanMoiPersistentWorkgroupRegisters exact_workgroup_vgprs;
+  OwnerEpochRegisters owner_epoch_vgprs;
+  PersistentWorkgroupRegisters exact_workgroup_vgprs;
   /// Entry-captured hardware dispatch identity. The pair is used when no
   /// lifetime-safe persistent SGPR pair exists for an automatic banked report.
-  std::optional<uint16_t> dispatch_id_vgpr;
 
-  auto operator<=>(const ConSanMoiPersistentVgprAssignment &) const = default;
+  auto operator<=>(const PersistentVgprAssignment &) const = default;
 };
 
-/// Entry-local vector temporaries for a kernel whose persistent Inline state
-/// is scalar. They are proven dead before the displaced first instruction and
-/// never cross guest code.
-struct ConSanMoiPrologueScratchVgprAssignment {
+/// Entry-local vector temporaries for a kernel with persistent scalar state. They are proven dead
+/// before the displaced first instruction and never cross guest code.
+struct PrologueScratchVgprAssignment {
   uint64_t descriptor_file_offset = 0;
   uint16_t scratch_vgpr = 0;
 
-  auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
+  auto operator<=>(const PrologueScratchVgprAssignment &) const = default;
 };
 
 /// Scalar temporaries needed while a spill-backed probe establishes its
 /// private frame and reloads owner-local state.
-struct ConSanMoiScalarSpillSetup {
-  ConSanMoiScalarSpillTemporaries temporaries;
-  std::optional<uint16_t> visible_evidence_sgpr = std::nullopt;
+struct ScalarSpillSetup {
+  ScalarSpillTemporaries temporaries;
 
-  template <typename Visitor>
-  void for_each_sgpr_range(bool include_visible, Visitor &&visit) const {
+  template <typename Visitor> void for_each_sgpr_range(Visitor &&visit) const {
     visit(temporaries.frame_base_sgpr, 2u);
     visit(temporaries.scc_save_sgpr, 1u);
-    if (include_visible && visible_evidence_sgpr)
-      visit(*visible_evidence_sgpr, 1u);
   }
 
-  auto operator<=>(const ConSanMoiScalarSpillSetup &) const = default;
+  auto operator<=>(const ScalarSpillSetup &) const = default;
 };
 
-/// Inline spill state reached through branch-only relays. A dynamic-stack
+/// Scalar spill state reached through branch-only relays. A dynamic-stack
 /// bootstrap may additionally borrow one live ordinary pair, but that pair
 /// cannot exist independently of the branch-only preservation strategy.
-struct ConSanMoiBranchOnlyScalarSpill {
+struct BranchOnlyScalarSpill {
   std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
 
-  auto operator<=>(const ConSanMoiBranchOnlyScalarSpill &) const = default;
+  auto operator<=>(const BranchOnlyScalarSpill &) const = default;
 };
 
 /// One optional SGPR allocation together with the authority that selected it.
 /// Provenance cannot remain set after the register is cleared.
-class ConSanMoiSgprAllocation {
+class SgprAllocation {
 public:
   [[nodiscard]] std::optional<uint16_t> base() const { return base_; }
   [[nodiscard]] bool automatic() const { return base_ && automatic_; }
@@ -407,71 +385,34 @@ public:
   }
   void reset() { set(std::nullopt); }
 
-  auto operator<=>(const ConSanMoiSgprAllocation &) const = default;
+  auto operator<=>(const SgprAllocation &) const = default;
 
 private:
   std::optional<uint16_t> base_;
   bool automatic_ = false;
 };
 
-/// Persistent hardware dispatch identity selected for an MOI operating point.
-///
-/// The scalar and vector register forms are alternatives. Scalar provenance is
-/// part of the selected alternative, so an automatic-placement marker cannot
-/// drift away from the pair that it describes. A private-entry fallback is an
-/// independent component policy: it may coexist with an object-wide scalar
-/// pair when only some owner components cannot retain that pair.
-class ConSanMoiDispatchIdentityAllocation {
-public:
-  [[nodiscard]] std::optional<uint16_t> sgpr() const { return sgpr_.base(); }
-  [[nodiscard]] std::optional<uint16_t> vgpr() const { return vgpr_; }
-  [[nodiscard]] bool automatic_sgpr() const { return sgpr_.automatic(); }
-  [[nodiscard]] bool private_fallback() const { return private_fallback_; }
-
-  void set_sgpr(std::optional<uint16_t> base, bool automatic = false) {
-    sgpr_.set(base, automatic);
-    if (base)
-      vgpr_.reset();
-  }
-  void set_vgpr(std::optional<uint16_t> base) {
-    vgpr_ = base;
-    if (base)
-      sgpr_.reset();
-  }
-  void reset_sgpr() { sgpr_.reset(); }
-  void reset_vgpr() { vgpr_.reset(); }
-  void set_private_fallback(bool enabled) { private_fallback_ = enabled; }
-
-  auto operator<=>(const ConSanMoiDispatchIdentityAllocation &) const = default;
-
-private:
-  ConSanMoiSgprAllocation sgpr_;
-  std::optional<uint16_t> vgpr_;
-  bool private_fallback_ = false;
-};
-
 /// Probe-local scalar state selected for one connected set of owning kernels.
 /// A shared helper connects its callers because its single instruction stream
 /// cannot use a different transient window for each caller.
-struct ConSanMoiTransientSgprAssignment {
+struct TransientSgprAssignment {
   uint64_t descriptor_file_offset = 0;
   uint16_t exec_save_sgpr = 0;
-  /// Probe-local normalized resident-wave identity. Automatic Inline
-  /// assignments keep this in the final slot of their saved scalar window.
+  /// Probe-local normalized resident-wave identity.
   std::optional<uint16_t> owner_sgpr;
   /// A code-object-wide dispatch pair can be unavailable to an otherwise
   /// patchable full-pressure owner. Such an owner keeps its instrumentation
   /// and records zero generation rather than clobbering guest scalar state.
   std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
-  std::optional<ConSanMoiScalarSpillSetup> scalar_spill_setup;
+  std::optional<ScalarSpillSetup> scalar_spill_setup;
   /// The complete scalar window is preserved in private memory and control
   /// reaches the appended body through branch-only relays. This avoids any
   /// scalar value that would otherwise have to remain live from the guest
   /// anchor through probe setup.
-  std::optional<ConSanMoiBranchOnlyScalarSpill> branch_only_spill;
+  std::optional<BranchOnlyScalarSpill> branch_only_spill;
 
-  auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
+  auto operator<=>(const TransientSgprAssignment &) const = default;
 };
 
 /// Evidence retained when SuperCollider observes a mismatched replay.
@@ -482,29 +423,20 @@ struct ConSanMoiTransientSgprAssignment {
 /// lowering. Keeping this choice in the semantic request prevents a
 /// hook-local presentation option from silently changing the pipeline's
 /// evidence and resource contracts.
-enum class ConSanSuperColliderEvidenceMode : uint8_t {
+enum class SuperColliderEvidenceMode : uint8_t {
   TrapOnly,
   StickyMarker,
   Count,
 };
 
-/// Stable cross-runtime policy selected by one MOI mode registration.
-/// Configuration and lowering consume this product without reconstructing an
-/// engine matrix; mechanics that depend on object facts remain mode callbacks.
-struct ConSanMoiModePolicy {
-  uint64_t auto_report_buffer_ceiling_bytes = 0;
-  uint32_t default_runtime_sample_stride = 1;
-  bool initialize_owner_epoch_by_default = false;
-  bool owner_source_applies_without_initialization = false;
-};
-
-[[nodiscard]] ConSanMoiModePolicy consan_moi_mode_policy(ConSanMoiEngine engine);
+/// Default workgroup and cell sampling stride for the runtime ConSan profile.
+inline constexpr uint32_t kDefaultRuntimeSampleStride = 256u;
 
 /// A deterministic residue selector over a power-of-two stride.
-struct ConSanSampleSelector {
+struct SampleSelector {
   uint32_t stride = 1;
   uint32_t offset = 0;
-  friend bool operator==(const ConSanSampleSelector &, const ConSanSampleSelector &) = default;
+  friend bool operator==(const SampleSelector &, const SampleSelector &) = default;
 };
 
 /// User-visible sanitizer choices that determine which semantic observations
@@ -513,81 +445,75 @@ struct ConSanSampleSelector {
 /// This value is mutable only while a configuration source constructs it and
 /// is thereafter passed by const reference. It deliberately contains no
 /// selected registers, patch geometry, device addresses, mutation controls, or
-/// test-only switches. `flavor == std::nullopt` is the single construction-time
+/// test-only switches. `mode == std::nullopt` is the single construction-time
 /// sentinel; validation rejects it before the request reaches the transformer.
-struct ConSanRequest {
+struct Request {
   /// Selected sanitizer family. The parser resolves load-only activation to
   /// the supported default before validating the request.
-  std::optional<ConSanFlavor> flavor;
-  /// MOI implementation selected when `flavor` is `ConSanFlavor::Moi`.
-  ConSanMoiEngine moi_engine = ConSanMoiEngine::Sampled;
-  /// Source of the logical owner identity recorded by MOI probes.
-  ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
+  std::optional<Mode> mode;
+  /// Source of the logical owner identity recorded by ConSan probes.
+  OwnerSource owner_source = OwnerSource::Automatic;
   /// Admission policy for FLAT sites whose group provenance is heuristic.
-  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
+  FlatProvenanceMode flat_provenance_mode = FlatProvenanceMode::Likely;
 
   /// SuperCollider observes native LDS sites when this domain is enabled.
   bool probe_lds_check_trap = false;
   /// SuperCollider observes group-FLAT sites when this domain is enabled.
   bool probe_flat_check_trap = false;
-  /// Capture persistent owner/epoch state at kernel entry for MOI engines that
+  /// Capture persistent owner/epoch state at kernel entry for ConSan engines that
   /// require it.
-  bool moi_init_owner_epoch = false;
-  /// Include supported barrier semantics in the MOI observation request.
-  bool moi_track_barriers = false;
-  /// Include supported atomic and fence semantics in the MOI observation
+  bool init_owner_epoch = false;
+  /// Include supported barrier semantics in the ConSan observation request.
+  bool track_barriers = false;
+  /// Include supported atomic and fence semantics in the ConSan observation
   /// request.
-  bool moi_track_atomics = false;
-  /// Request Record/Replay's dynamic access-record representation.
-  bool moi_dynamic_access_records = false;
-  /// Request Sampled's immediate in-kernel conflict check in addition to its
+  bool track_atomics = false;
+  /// Request ConSan's immediate in-kernel conflict check in addition to its
   /// retained evidence.
-  bool moi_sampled_check = false;
+  bool device_conflict_check = false;
 
-  /// Static site selection stride used by the Sampled engine.
-  uint32_t moi_sample_stride = 1;
-  /// Selected residue in the static Sampled site stride.
-  uint32_t moi_sample_offset = 0;
-  /// Power-of-two dynamic selector stride used by Record/Replay and Sampled.
-  uint32_t moi_runtime_sample_stride = 1;
+  /// Static site selection stride used by the ConSan mode.
+  uint32_t sample_stride = 1;
+  /// Selected residue in the static ConSan site stride.
+  uint32_t sample_offset = 0;
+  /// Power-of-two dynamic selector stride used by ConSan.
+  uint32_t runtime_sample_stride = 1;
   /// Selected residue in the dynamic runtime stride.
-  uint32_t moi_runtime_sample_offset = 0;
-  /// Sampled LDS-cell selector. When absent, use the legacy runtime selector
+  uint32_t runtime_sample_offset = 0;
+  /// ConSan LDS-cell selector. When absent, use the legacy runtime selector
   /// for both workgroups and cells. Synchronization uses only the workgroup
   /// selector, irrespective of which cells are retained.
-  std::optional<ConSanSampleSelector> moi_sampled_cell_selection;
-  /// Requested maximum banks per logical Sampled range: 0 (auto), 1, 2, 4, 8.
+  std::optional<SampleSelector> cell_selection;
+  /// Requested maximum banks per logical ConSan range: 0 (auto) or a power of two up to 1024.
   /// The report ceiling can reduce the achieved count.
-  uint32_t moi_sampled_banks = 0;
+  uint32_t watchpoint_banks = 0;
 
-  [[nodiscard]] constexpr ConSanSampleSelector sampled_cell_selection() const {
-    return moi_sampled_cell_selection.value_or(
-        ConSanSampleSelector{moi_runtime_sample_stride, moi_runtime_sample_offset});
+  [[nodiscard]] constexpr SampleSelector cell_selector() const {
+    return cell_selection.value_or(SampleSelector{runtime_sample_stride, runtime_sample_offset});
   }
 
   /// SuperCollider delay implementation used between the original and repeat
   /// observation.
-  ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
-  /// Immediate delay amount interpreted by `delay_mode`.
-  uint32_t delay_nops = 0;
+  SuperColliderDelayMode supercollider_delay_mode = SuperColliderDelayMode::Nop;
+  /// Immediate delay amount interpreted by `supercollider_delay_mode`.
+  uint32_t supercollider_delay_nops = 0;
   /// Scalar source used only by the variable-delay form.
-  uint16_t delay_var_ssrc = 106;
+  uint16_t supercollider_delay_var_ssrc = 106;
   /// Sticky value written when SuperCollider observes instability.
-  uint32_t report_marker = 1;
+  uint32_t supercollider_report_marker = 1;
   /// Mismatch evidence protocol selected for SuperCollider instrumentation.
-  ConSanSuperColliderEvidenceMode supercollider_evidence_mode =
-      ConSanSuperColliderEvidenceMode::StickyMarker;
+  SuperColliderEvidenceMode supercollider_evidence_mode = SuperColliderEvidenceMode::StickyMarker;
 
-  /// Maximum automatic MOI evidence allocation requested for one code object.
+  /// Maximum automatic ConSan evidence allocation requested for one code object.
   /// Zero disables automatic allocation without supplying an address.
-  uint64_t moi_auto_report_buffer_size = 0;
+  uint64_t auto_report_buffer_size = 0;
 
   /// Production exact-name allowlist. Kernel-local sites are selected by exact
   /// entry name; a shared physical site is selected only when every known
   /// execution owner is present, so an unselected entry is never modified.
   std::vector<std::string> kernel_name_allowlist;
 
-  bool operator==(const ConSanRequest &) const = default;
+  bool operator==(const Request &) const = default;
 };
 
 /// Focused-test, diagnostic, and early-development controls that are outside
@@ -595,16 +521,14 @@ struct ConSanRequest {
 ///
 /// Keeping this type separate makes a call site visibly opt into diagnostic
 /// probes, forced allocation paths, or explicit registers. None of these
-/// fields may influence the meaning of a normal `ConSanRequest`.
-struct ConSanDebugOverrides {
+/// fields may influence the meaning of a normal `Request`.
+struct DebugOverrides {
   /// Turn a statically unique unmatched barrier wait into a fail-fast probe.
   bool abort_unmatched_barrier_wait = false;
   /// Force the legacy VGPR spill path even when a cheaper plan exists.
   bool test_force_vgpr_spill = false;
   /// Force private epoch state even when persistent VGPR state is available.
   bool test_force_private_epoch = false;
-  /// Seed an odd Inline exact-shadow publication for a teardown fixture.
-  bool test_seed_inline_exact_odd = false;
   /// Restrict candidate discovery to matching kernel names in focused tests.
   std::string test_kernel_name_filter;
 
@@ -613,30 +537,28 @@ struct ConSanDebugOverrides {
   /// Caller-requested even SGPR pair used to preserve EXEC. This is an input
   /// constraint, not the allocator's eventual selection: an empty value asks
   /// placement to choose a suitable pair automatically.
-  std::optional<uint16_t> requested_moi_exec_save_sgpr;
+  std::optional<uint16_t> requested_exec_save_sgpr;
   /// Caller-requested scalar owner register. This optional override is copied
   /// into a fresh lowering attempt and never mutated as placement explores
   /// automatic alternatives.
-  std::optional<uint16_t> requested_moi_owner_sgpr;
+  std::optional<uint16_t> requested_owner_sgpr;
   /// Caller-requested vector owner register. An empty value leaves the
   /// persistent owner representation and register choice to placement.
-  std::optional<uint16_t> requested_moi_owner_vgpr;
+  std::optional<uint16_t> requested_owner_vgpr;
   /// Caller-requested vector epoch register. An empty value permits placement
   /// to select either a register or another supported epoch representation.
-  std::optional<uint16_t> requested_moi_epoch_vgpr;
+  std::optional<uint16_t> requested_epoch_vgpr;
 
-  /// Runtime assertion requiring at least one visible MOI record.
-  bool moi_require_records = false;
+  /// Runtime assertion requiring at least one visible ConSan record.
+  bool require_records = false;
   /// Runtime assertion requiring at least one emitted diagnostic.
-  bool moi_require_diagnostics = false;
+  bool require_diagnostics = false;
   /// Runtime assertion forbidding emitted diagnostics.
-  bool moi_forbid_diagnostics = false;
-  /// Runtime assertion requiring a Record/Replay conflict.
-  bool moi_require_replay_conflict = false;
+  bool forbid_diagnostics = false;
   /// Runtime assertion forbidding bounded-evidence overflow.
-  bool moi_forbid_overflow = false;
+  bool forbid_overflow = false;
 
-  bool operator==(const ConSanDebugOverrides &) const = default;
+  bool operator==(const DebugOverrides &) const = default;
 };
 
 /// Explicit request to corrupt or perturb a program for validation.
@@ -655,7 +577,7 @@ struct MutationRequest {
   bool fault_mutate_barrier_participants = false;
   bool fault_atomic_wrong_address = false;
   bool fault_atomic_weaken_order = false;
-  ConSanAtomicOrderEdge fault_atomic_order_edge = ConSanAtomicOrderEdge::Any;
+  AtomicOrderEdge fault_atomic_order_edge = AtomicOrderEdge::Any;
   bool fault_atomic_weaken_scope = false;
   bool fault_lds_wrong_address = false;
   bool fault_ordinary_wrong_address = false;
@@ -682,16 +604,15 @@ struct MutationRequest {
   std::optional<int32_t> fault_barrier_target_id;
   std::optional<uint32_t> fault_barrier_target_participant_count;
   std::optional<uint64_t> fault_barrier_target_participant_mask;
-  ConSanBarrierMoveDirection fault_barrier_move_direction =
-      ConSanBarrierMoveDirection::LegacyMarker;
+  BarrierMoveDirection fault_barrier_move_direction = BarrierMoveDirection::LegacyMarker;
 
-  ConSanPerturbationKind sc_perturb_kind = ConSanPerturbationKind::None;
-  ConSanPerturbationEdge sc_perturb_edge = ConSanPerturbationEdge::Release;
-  std::string sc_perturb_identity;
-  uint32_t sc_perturb_index = 0;
-  uint32_t sc_perturb_max = 1;
-  uint32_t sc_perturb_sleep = 1;
-  uint32_t sc_perturb_required_count = 0;
+  SuperColliderPerturbationKind supercollider_perturb_kind = SuperColliderPerturbationKind::None;
+  SuperColliderPerturbationEdge supercollider_perturb_edge = SuperColliderPerturbationEdge::Release;
+  std::string supercollider_perturb_identity;
+  uint32_t supercollider_perturb_index = 0;
+  uint32_t supercollider_perturb_max = 1;
+  uint32_t supercollider_perturb_sleep = 1;
+  uint32_t supercollider_perturb_required_count = 0;
 
   /// Return whether a fault transform (as opposed to timing perturbation) was
   /// requested.
@@ -715,7 +636,8 @@ struct MutationRequest {
   /// Return whether either a fault transform or SuperCollider perturbation was
   /// requested.
   [[nodiscard]] bool has_mutation() const {
-    return has_fault_mutation() || sc_perturb_kind != ConSanPerturbationKind::None;
+    return has_fault_mutation() ||
+           supercollider_perturb_kind != SuperColliderPerturbationKind::None;
   }
 
   bool operator==(const MutationRequest &) const = default;
@@ -724,11 +646,11 @@ struct MutationRequest {
 /// Provenance of the runtime facts supplied to one ConSan transformation.
 ///
 /// This identifies the query mechanism, not the GPU architecture and not the
-/// sanitizer engine. Keeping provenance explicit lets fixtures supply
+/// sanitizer mode. Keeping provenance explicit lets fixtures supply
 /// simulator facts without pretending that they came from HSA, while the
 /// construction-time `Unknown` state prevents an unqueried default object from
 /// being mistaken for a backend that lacks every optional facility.
-enum class ConSanRuntimeBackend : uint8_t {
+enum class RuntimeBackend : uint8_t {
   /// No backend has supplied facts yet; validated production inputs reject
   /// this construction-time sentinel.
   Unknown,
@@ -748,7 +670,7 @@ enum class ConSanRuntimeBackend : uint8_t {
 /// facility. Consumers state their requirements explicitly and reject missing
 /// properties before allocating or lowering code that depends on them.
 struct RuntimeCapabilities {
-  ConSanRuntimeBackend backend = ConSanRuntimeBackend::Unknown;
+  RuntimeBackend backend = RuntimeBackend::Unknown;
   /// A global allocation can be made visible to both host and selected agent.
   bool host_device_visible_memory = false;
   /// Host observations are coherent with committed device publications.
@@ -774,7 +696,7 @@ struct RuntimeCapabilities {
 /// retired; it does not transfer ownership to the transformer. `Unbound` is a
 /// construction-time state in which all addresses must be absent. Every other
 /// value states the narrowest runtime identity that keeps the binding valid.
-enum class ConSanRuntimeResourceScope : uint8_t {
+enum class RuntimeResourceScope : uint8_t {
   /// The resource has not been bound; addresses must be absent.
   Unbound,
   /// The resource belongs to one code-object reader load.
@@ -790,23 +712,21 @@ enum class ConSanRuntimeResourceScope : uint8_t {
 
 /// Every valid resource-scope value, including the explicitly unbound state
 /// but excluding the one-past-the-end iteration bound.
-inline constexpr auto kConSanRuntimeResourceScopes = [] {
-  using E = ConSanRuntimeResourceScope;
-  return make_consan_enum_vocabulary(
-      "invalid-runtime-resource-scope", consan_enum(E::Unbound, "unbound"),
-      consan_enum(E::CodeObject, "code-object"), consan_enum(E::Executable, "executable"),
-      consan_enum(E::Dispatch, "dispatch"));
+inline constexpr auto kRuntimeResourceScopes = [] {
+  using E = RuntimeResourceScope;
+  return make_enum_vocabulary("invalid-runtime-resource-scope", enum_entry(E::Unbound, "unbound"),
+                              enum_entry(E::CodeObject, "code-object"),
+                              enum_entry(E::Executable, "executable"),
+                              enum_entry(E::Dispatch, "dispatch"));
 }();
 
 /// Return the stable diagnostic spelling of a runtime-resource lifetime.
 /// Invalid values never acquire a plausible lifetime name.
-[[nodiscard]] constexpr std::string_view
-consan_runtime_resource_scope_name(ConSanRuntimeResourceScope scope) {
-  return kConSanRuntimeResourceScopes.name(scope);
+[[nodiscard]] constexpr std::string_view runtime_resource_scope_name(RuntimeResourceScope scope) {
+  return kRuntimeResourceScopes.name(scope);
 }
 
-static_assert(kConSanRuntimeResourceScopes.size() ==
-              static_cast<size_t>(ConSanRuntimeResourceScope::Count));
+static_assert(kRuntimeResourceScopes.size() == static_cast<size_t>(RuntimeResourceScope::Count));
 
 /// Concrete runtime allocations and identities bound after address-free
 /// planning.
@@ -817,16 +737,16 @@ static_assert(kConSanRuntimeResourceScopes.size() ==
 /// override. Lifetime ownership remains with the runtime coordinator; this
 /// projection carries only the identity needed by legacy lowering.
 struct BoundRuntimeResources {
-  ConSanRuntimeResourceScope scope = ConSanRuntimeResourceScope::Unbound;
+  RuntimeResourceScope scope = RuntimeResourceScope::Unbound;
+  std::optional<uint64_t> supercollider_report_buffer_address;
   std::optional<uint64_t> report_buffer_address;
-  std::optional<uint64_t> moi_report_buffer_address;
-  uint64_t moi_report_buffer_size = 0;
-  std::optional<ConSanMoiReportBufferLayout> moi_report_layout;
-  uint64_t moi_report_generation = 0;
-  uint64_t moi_report_dispatch_id = 0;
+  uint64_t report_buffer_size = 0;
+  std::optional<ReportBufferLayout> report_layout;
+  uint64_t report_generation = 0;
+  uint64_t report_dispatch_id = 0;
 
   [[nodiscard]] bool bound() const {
-    return report_buffer_address.has_value() || moi_report_buffer_address.has_value();
+    return supercollider_report_buffer_address.has_value() || report_buffer_address.has_value();
   }
 
   bool operator==(const BoundRuntimeResources &) const = default;
@@ -840,7 +760,7 @@ struct BoundRuntimeResources {
 /// patch bytes are outputs and therefore cannot appear here.
 struct TransformPolicy {
   /// Total growth permitted relative to the pristine input image.
-  ConSanPatchedImageGrowthLimit patched_image_growth_limit;
+  PatchedImageGrowthLimit patched_image_growth_limit;
   /// Maximum number of admitted legacy patches when an expert cap is active.
   uint32_t max_patches = 1;
   /// False means the legacy patch count is an implementation-sized all-sites
@@ -859,53 +779,51 @@ struct TransformPolicy {
 /// The inherited request, debug-override, mutation, runtime-fact, binding, and
 /// transform-policy subobjects are the sole representations of input state.
 /// Placement and emission must not add selected registers, storage, routes, or
-/// retry markers to this value; both an in-progress MOI attempt and an accepted
-/// result represent those decisions with `ConSanMoiOperatingPoint`.
-struct ConSanOptions : ConSanRequest,
-                       ConSanDebugOverrides,
-                       MutationRequest,
-                       RuntimeCapabilities,
-                       BoundRuntimeResources,
-                       TransformPolicy {
+/// retry markers to this value; both an in-progress ConSan attempt and an accepted
+/// result represent those decisions with `OperatingPoint`.
+struct Options : Request,
+                 DebugOverrides,
+                 MutationRequest,
+                 RuntimeCapabilities,
+                 BoundRuntimeResources,
+                 TransformPolicy {
   /// Default construction is retained for focused mechanism tests. Production
   /// orchestration uses the typed constructor below.
-  ConSanOptions() { flavor = ConSanFlavor::None; }
+  Options() { mode = Mode::None; }
 
   /// Construct one immutable input aggregate from the complete production
   /// contracts. The six base subobjects preserve those inputs verbatim.
-  ConSanOptions(const ConSanRequest &request, const TransformPolicy &transform_policy,
-                const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources)
-      : ConSanRequest(request), ConSanDebugOverrides(debug), MutationRequest(mutation),
+  Options(const Request &request, const TransformPolicy &transform_policy,
+          const DebugOverrides &debug, const MutationRequest &mutation,
+          const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources)
+      : Request(request), DebugOverrides(debug), MutationRequest(mutation),
         RuntimeCapabilities(capabilities), BoundRuntimeResources(resources),
         TransformPolicy(transform_policy) {}
 };
 
-[[nodiscard]] inline std::string_view consan_normalize_kernel_name(std::string_view name) {
+[[nodiscard]] inline std::string_view normalize_kernel_name(std::string_view name) {
   if (name.ends_with(".kd"))
     name.remove_suffix(3);
   return name;
 }
 
-[[nodiscard]] inline bool consan_kernel_name_matches(std::string_view left,
-                                                     std::string_view right) {
+[[nodiscard]] inline bool kernel_name_matches(std::string_view left, std::string_view right) {
   return kernel_symbol_names_match(left, right);
 }
 
-[[nodiscard]] inline bool consan_container_selected(const ConSanRequest &request,
-                                                    const ConSanDebugOverrides &debug,
-                                                    std::string_view container_name) {
+[[nodiscard]] inline bool container_selected(const Request &request, const DebugOverrides &debug,
+                                             std::string_view container_name) {
   if (!debug.test_kernel_name_filter.empty() &&
       container_name.find(debug.test_kernel_name_filter) == std::string_view::npos)
     return false;
   if (request.kernel_name_allowlist.empty())
     return true;
   return std::ranges::any_of(request.kernel_name_allowlist, [&](std::string_view allowed) {
-    return consan_kernel_name_matches(allowed, container_name);
+    return kernel_name_matches(allowed, container_name);
   });
 }
 
-/// Authoritative resource and persistent-state selection for one MOI attempt.
+/// Authoritative resource and persistent-state selection for one ConSan attempt.
 ///
 /// None of this value is caller configuration. Placement refines a complete
 /// attempt while searching; retry checkpoints and the accepted transform copy
@@ -914,121 +832,110 @@ struct ConSanOptions : ConSanRequest,
 /// independently assembled subsets of the accepted allocation. Site-local
 /// lowering may copy the operating point and bind one owner assignment without
 /// changing the accepted code-object-wide value.
-enum class ConSanMoiScalarSpillLayout : uint8_t {
+enum class ScalarSpillLayout : uint8_t {
   None,
-  Inline,
   Compact,
 };
 
-struct ConSanMoiOperatingPoint {
+struct OperatingPoint {
   /// Placement's effective owner/epoch-prologue decision. Initial point
   /// construction resolves the caller request into this value once; mode
   /// planning and placement may subsequently refine it without requiring
   /// downstream components to consult a parallel configuration authority.
-  bool moi_initialize_owner_epoch = false;
+  bool initialize_owner_epoch = false;
   /// First SGPR in the code-object-wide EXEC/VCC/SCC save window accepted by
   /// placement. This is seeded from the corresponding caller override when
   /// present, but thereafter records the selected lowering state rather than
   /// caller input. Independent owner components may replace it with an entry
-  /// in `ConSanMoiOperatingPoint::owner_transient_sgprs`.
-  std::optional<uint16_t> moi_exec_save_sgpr;
+  /// in `OperatingPoint::owner_transient_sgprs`.
+  std::optional<uint16_t> exec_save_sgpr;
   /// Code-object-wide scalar owner register accepted by placement. It carries
   /// the probe-local normalized resident-wave identity when the selected
-  /// engine represents that identity in transient scalar state.
-  ConSanMoiSgprAllocation moi_owner_sgpr;
+  /// mode represents that identity in transient scalar state.
+  SgprAllocation owner_sgpr;
   /// Code-object-wide persistent per-lane owner/epoch pair accepted by
   /// placement. Some operating points instead use per-owner assignments,
   /// scalar state, or private state, in which case this value is empty.
-  ConSanMoiOwnerEpochRegisterState moi_owner_epoch_vgprs;
+  OwnerEpochRegisterState owner_epoch_vgprs;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
-  bool automatic_moi_persistent_vgprs = false;
-  /// Internal marker set when inline shadow derives owner at each probe and
+  bool automatic_persistent_vgprs = false;
+  /// Internal marker set when ConSan derives owner at each probe and
   /// keeps epoch in per-lane private memory.
-  bool automatic_moi_private_epoch = false;
+  bool automatic_private_epoch = false;
   /// Internal CDNA5 fallback: one high code-object-wide EXEC-save window is
   /// retained, while resource planning excludes only owner groups whose guest
   /// scalar allocation reaches that window.
-  bool automatic_moi_partial_exec_save_sgprs = false;
+  bool automatic_partial_exec_save_sgprs = false;
   /// Spill-backed scalar layout selected after no complete liveness-dead
-  /// transient window exists. Inline and compact Record/Replay-style layouts
-  /// have different ABI fields and are mutually exclusive.
-  ConSanMoiScalarSpillLayout automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
+  /// transient window exists.
+  ScalarSpillLayout automatic_scalar_spill_layout = ScalarSpillLayout::None;
   /// Internal proof marker set only when the automatic EXEC-save window lies
   /// above every guest-referenced SGPR and can retain cross-site wave state.
-  bool moi_exec_save_sgprs_persistent = false;
+  bool exec_save_sgprs_persistent = false;
   /// Internal marker set when a probe needs the base scalar save slot for a
   /// site-local dynamic-stack spill frame.
-  bool moi_dynamic_stack_spill = false;
-  /// Explicit scalar setup state selected when a spill-backed transient window
-  /// cannot use the mode's fixed register layout. Inline, Record/Replay, and
-  /// Sampled share the frame pair and SCC-save temporary; Inline's optional
-  /// visible-evidence temporary remains a facet of that exact allocation.
-  std::optional<ConSanMoiScalarSpillSetup> moi_scalar_spill_setup;
-  /// Inline component whose saved scalar window is reached through branch-only
+  bool dynamic_stack_spill = false;
+  /// Scalar setup state used when a spill-backed transient window cannot use
+  /// the fixed register layout: frame pointer pair and SCC-save temporary.
+  std::optional<ScalarSpillSetup> scalar_spill_setup;
+  /// Component whose saved scalar window is reached through branch-only
   /// relays instead of live-through SGPR state, including its optional
   /// dynamic-stack bootstrap pair.
-  std::optional<ConSanMoiBranchOnlyScalarSpill> moi_branch_only_spill;
-  ConSanMoiDispatchIdentityAllocation moi_dispatch_identity;
-  /// Uniform persistent scalar state selected when an MOI owner cannot retain
+  std::optional<BranchOnlyScalarSpill> branch_only_spill;
+  SgprAllocation dispatch_sgpr;
+  /// Uniform persistent scalar state selected when an ConSan owner cannot retain
   /// the equivalent values in ordinary VGPRs. The owner is captured from the
   /// entry workitem ID; epoch, compact workgroup key, and exact workgroup
   /// coordinates are uniform for every lane. Keeping the complete ABI in one
   /// value prevents planning, emission, and prologue telemetry from assembling
   /// different partial tuples.
-  ConSanMoiPersistentSgprState moi_persistent_sgprs;
-  ConSanMoiPersistentWorkgroupRegisters moi_exact_workgroup_vgprs;
-  /// Persistent packed workgroup identity used only by Inline Shadow. Launch
-  /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
-  /// not stable after arbitrary guest code.
-  std::optional<uint16_t> moi_workgroup_key_vgpr;
+  PersistentSgprState persistent_sgprs;
+  PersistentWorkgroupRegisters exact_workgroup_vgprs;
 
   /// Per-owner persistent vector tuples selected when one code-object-wide
   /// tuple cannot satisfy every owner's ordinary-VGPR boundary.
-  std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
+  std::vector<PersistentVgprAssignment> owner_persistent_vgprs;
   /// Per-owner-component transient scalar overrides selected by placement.
-  std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
+  std::vector<TransientSgprAssignment> owner_transient_sgprs;
 
-  [[nodiscard]] bool has_moi_scalar_spill() const {
-    return automatic_moi_scalar_spill_layout != ConSanMoiScalarSpillLayout::None;
+  [[nodiscard]] bool has_scalar_spill() const {
+    return automatic_scalar_spill_layout != ScalarSpillLayout::None;
   }
-  [[nodiscard]] bool has_inline_moi_scalar_spill() const {
-    return automatic_moi_scalar_spill_layout == ConSanMoiScalarSpillLayout::Inline;
+
+  [[nodiscard]] bool has_compact_scalar_spill() const {
+    return automatic_scalar_spill_layout == ScalarSpillLayout::Compact;
   }
-  [[nodiscard]] bool has_compact_moi_scalar_spill() const {
-    return automatic_moi_scalar_spill_layout == ConSanMoiScalarSpillLayout::Compact;
+  void set_owner_epoch_vgprs(uint16_t owner, uint16_t epoch) {
+    owner_epoch_vgprs.set_owner_epoch(owner, epoch);
   }
-  void set_moi_owner_epoch_vgprs(uint16_t owner, uint16_t epoch) {
-    moi_owner_epoch_vgprs.set_owner_epoch(owner, epoch);
-  }
-  void reset_moi_owner_epoch_vgprs() { moi_owner_epoch_vgprs.reset_owner_epoch(); }
+  void reset_owner_epoch_vgprs() { owner_epoch_vgprs.reset_owner_epoch(); }
 
   /// Visit every fixed-width auxiliary scalar reservation represented by this
   /// operating point. EXEC, owner, dispatch, and persistent state have
   /// separate lifetime rules and are intentionally not part of this view.
   template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
-    if (moi_scalar_spill_setup)
-      moi_scalar_spill_setup->for_each_sgpr_range(true, visit);
-    visit(moi_branch_only_spill ? moi_branch_only_spill->dynamic_stack_borrowed_sgpr : std::nullopt,
-          2u);
+    if (scalar_spill_setup)
+      scalar_spill_setup->for_each_sgpr_range(visit);
+    visit(branch_only_spill ? branch_only_spill->dynamic_stack_borrowed_sgpr : std::nullopt, 2u);
   }
 
-  bool operator==(const ConSanMoiOperatingPoint &) const = default;
+  bool operator==(const OperatingPoint &) const = default;
 };
+
+static_assert(sizeof(OperatingPoint) <= 128);
 
 /// Construct the initial unresolved point from explicit caller overrides.
 /// Placement owns every subsequent mutation; keeping this conversion narrow
 /// prevents immutable request state and solver output from becoming one
 /// inherited attempt bus.
-[[nodiscard]] inline ConSanMoiOperatingPoint
-initial_consan_moi_operating_point(const ConSanRequest &request,
-                                   const ConSanDebugOverrides &debug) {
-  ConSanMoiOperatingPoint point;
-  point.moi_initialize_owner_epoch = request.moi_init_owner_epoch;
-  point.moi_exec_save_sgpr = debug.requested_moi_exec_save_sgpr;
-  point.moi_owner_sgpr.set(debug.requested_moi_owner_sgpr);
-  if (debug.requested_moi_owner_vgpr && debug.requested_moi_epoch_vgpr) {
-    point.set_moi_owner_epoch_vgprs(*debug.requested_moi_owner_vgpr,
-                                    *debug.requested_moi_epoch_vgpr);
+[[nodiscard]] inline OperatingPoint initial_operating_point(const Request &request,
+                                                            const DebugOverrides &debug) {
+  OperatingPoint point;
+  point.initialize_owner_epoch = request.init_owner_epoch;
+  point.exec_save_sgpr = debug.requested_exec_save_sgpr;
+  point.owner_sgpr.set(debug.requested_owner_sgpr);
+  if (debug.requested_owner_vgpr && debug.requested_epoch_vgpr) {
+    point.set_owner_epoch_vgprs(*debug.requested_owner_vgpr, *debug.requested_epoch_vgpr);
   }
   return point;
 }
@@ -1036,18 +943,18 @@ initial_consan_moi_operating_point(const ConSanRequest &request,
 /// Process-local exact-one budget for repeated dynamic loads of one stable
 /// fault-site identity. The caller serializes observe() with code-object load
 /// selection. Occurrences are one-based and overflow is permanently fatal.
-struct ConSanFaultLoadSelection {
+struct FaultLoadSelection {
   uint64_t occurrence = 0;
   bool selected = false;
   bool overflow = false;
 };
 
-class ConSanFaultLoadSelector {
+class FaultLoadSelector {
 public:
-  explicit ConSanFaultLoadSelector(uint64_t requested_occurrence = 0)
+  explicit FaultLoadSelector(uint64_t requested_occurrence = 0)
       : requested_occurrence_(requested_occurrence) {}
 
-  [[nodiscard]] ConSanFaultLoadSelection observe() {
+  [[nodiscard]] FaultLoadSelection observe() {
     if (observed_ == std::numeric_limits<uint64_t>::max()) {
       overflow_ = true;
       return {observed_, false, true};

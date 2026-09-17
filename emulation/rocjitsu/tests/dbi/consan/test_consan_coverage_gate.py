@@ -35,7 +35,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
             "target_capability_unavailable",
             "range_encoding_unavailable",
             "tracking_disabled",
-            "engine_mutation_only",
+            "mode_mutation_only",
             "invalid_barrier_encoding",
             "ambiguous_sequence_membership",
             "missing_completing_event",
@@ -117,8 +117,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
 
     def test_accepts_supercollider_aggregate_without_site_rows(self) -> None:
         aggregate = coverage(
-            flavor="supercollider",
-            engine="supercollider",
+            mode="supercollider",
             access_discovered="2",
             access_supported="2",
             access_selected="2",
@@ -143,12 +142,11 @@ class ConSanCoverageGateTest(unittest.TestCase):
             )
         )
         self.assertTrue(decision.accepted, decision.reasons)
-        self.assertEqual(decision.evidence.coverage[0].flavor, "supercollider")
+        self.assertEqual(decision.evidence.coverage[0].mode, "supercollider")
 
     def test_accepts_consistent_site_rows_attached_to_supercollider(self) -> None:
         aggregate = coverage(
-            flavor="supercollider",
-            engine="supercollider",
+            mode="supercollider",
             access_discovered="1",
             access_supported="1",
             access_selected="1",
@@ -184,8 +182,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
 
     def test_rejects_inconsistent_site_rows_attached_to_supercollider(self) -> None:
         aggregate = coverage(
-            flavor="supercollider",
-            engine="supercollider",
+            mode="supercollider",
             access_discovered="2",
             access_supported="2",
             access_selected="2",
@@ -581,7 +578,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(CoverageParseError):
                 parse_coverage_evidence(text)
 
-    def test_accepts_compact_moi_log_without_verbose_site_inventory(self) -> None:
+    def test_accepts_compact_log_without_verbose_site_inventory(self) -> None:
         evidence = parse_coverage_evidence(
             log(coverage(), verdict(), synthesize_sites=False)
         )
@@ -590,8 +587,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
 
     def test_allows_reused_reader_only_for_aggregate_supercollider_records(self) -> None:
         updates = {
-            "flavor": "supercollider",
-            "engine": "supercollider",
+            "mode": "supercollider",
             "analysis_complete": "false",
             "access_supported": "24",
             "access_patched": "24",
@@ -621,7 +617,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
         ))
         self.assertEqual(len(evidence.coverage), 2)
 
-    def test_moi_reused_reader_is_disambiguated_by_load_occurrence(self) -> None:
+    def test_reused_reader_is_disambiguated_by_load_occurrence(self) -> None:
         first = coverage(reader=7, load="41")
         second = coverage(reader=7, load="42")
         evidence = parse_coverage_evidence(log(
@@ -636,7 +632,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
         )
         self.assertEqual({site.load for site in evidence.sites}, {41, 42})
 
-    def test_moi_rejects_duplicate_load_occurrence_even_when_reader_is_reused(self) -> None:
+    def test_rejects_duplicate_load_occurrence_even_when_reader_is_reused(self) -> None:
         with self.assertRaisesRegex(CoverageParseError, "duplicate coverage load identities"):
             parse_coverage_evidence(log(
                 coverage(reader=7, load="41"),

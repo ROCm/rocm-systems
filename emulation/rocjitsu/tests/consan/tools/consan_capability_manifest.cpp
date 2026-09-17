@@ -7,26 +7,23 @@
 #include <iostream>
 #include <string>
 
+namespace rocjitsu::consan {
 namespace {
 
-using namespace rocjitsu;
-
-std::string render_domain(rj_code_target_id_t target, ConSanCapabilityEngine engine,
-                          ConSanCapabilityDomain domain) {
+std::string render_domain(rj_code_target_id_t target, Mode mode, CapabilityDomain domain) {
   std::string rendered;
-  for (ConSanCapabilityForm form : kConSanCapabilityForms) {
-    if (consan_capability_domain(form) != domain)
+  for (CapabilityForm form : kCapabilityForms) {
+    if (capability_domain(form) != domain)
       continue;
-    const ConSanCapabilityDisposition disposition =
-        consan_capability_disposition(target, engine, form);
-    if (disposition == ConSanCapabilityDisposition::NotApplicable)
+    const CapabilityDisposition disposition = capability_disposition(target, mode, form);
+    if (disposition == CapabilityDisposition::NotApplicable)
       continue;
     if (!rendered.empty())
       rendered += "<br>";
-    rendered += consan_capability_form_name(form);
-    if (disposition != ConSanCapabilityDisposition::Supported) {
+    rendered += capability_form_name(form);
+    if (disposition != CapabilityDisposition::Supported) {
       rendered += " (";
-      rendered += consan_capability_disposition_name(disposition);
+      rendered += capability_disposition_name(disposition);
       rendered += ')';
     }
   }
@@ -35,18 +32,22 @@ std::string render_domain(rj_code_target_id_t target, ConSanCapabilityEngine eng
 
 } // namespace
 
-int main() {
+int render_manifest() {
   std::cout << "<!-- BEGIN GENERATED CONSAN CAPABILITY CONTRACT -->\n"
-               "| Target | Engine | Access | Barrier | Atomic | Fence |\n"
+               "| Target | Mode | Access | Barrier | Atomic | Fence |\n"
                "| --- | --- | --- | --- | --- | --- |\n";
-  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
-    for (ConSanCapabilityEngine engine : kConSanCapabilityEngines) {
-      std::cout << "| `" << rj_code_target_name(target.target) << "` | "
-                << consan_capability_engine_name(engine);
-      for (ConSanCapabilityDomain domain : kConSanCapabilityDomains)
-        std::cout << " | " << render_domain(target.target, engine, domain);
+  for (const TargetProfile &target : kTargetProfiles) {
+    for (Mode mode : kEnabledModes) {
+      std::cout << "| `" << rj_code_target_name(target.target) << "` | " << mode_label(mode);
+      for (CapabilityDomain domain : kCapabilityDomains)
+        std::cout << " | " << render_domain(target.target, mode, domain);
       std::cout << " |\n";
     }
   }
   std::cout << "<!-- END GENERATED CONSAN CAPABILITY CONTRACT -->\n";
+  return 0;
 }
+
+} // namespace rocjitsu::consan
+
+int main() { return rocjitsu::consan::render_manifest(); }

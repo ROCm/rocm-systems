@@ -6,11 +6,12 @@ from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 
-import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
+import consan_cdna_hip_registry as cdna_hip_registry
 
 
 class ValidationError(RuntimeError):
     """The requested validation contract cannot be satisfied."""
+
 
 SCHEMA_VERSION = 2
 EMPIRICAL_CAMPAIGN_SCHEMA_VERSION = 3
@@ -69,7 +70,7 @@ SOFTWARE_MODEL_ENVIRONMENT = {
 SETTING_CATEGORIES = {
     "runtime-plumbing": "Locates the target or instrumentation runtime.",
     "instrumentation-selection": (
-        "Selects a ConSan flavor or engine, or overrides an event-family default."
+        "Selects a ConSan mode or overrides an event-family default."
     ),
     "acceptance-assertion": "Makes missing or unexpected evidence fail validation.",
     "workload-tuning": "Changes a workload-specific instrumentation operating point.",
@@ -82,26 +83,22 @@ ORDINARY_FORBIDDEN_ENVIRONMENT = (
     "RJ_CONSAN_TEST_KERNEL_FILTER",
     "RJ_CONSAN_TMP_VGPR",
     "RJ_CONSAN_SCRATCH_VGPR",
-    "RJ_CONSAN_MOI_OWNER_VGPR",
-    "RJ_CONSAN_MOI_EPOCH_VGPR",
-    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR",
+    "RJ_CONSAN_OWNER_VGPR",
+    "RJ_CONSAN_EPOCH_VGPR",
+    "RJ_CONSAN_EXEC_SAVE_SGPR",
     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL",
 )
 
 ORDINARY_MOI_RUNTIME_DEFAULTS = {
-    "RJ_CONSAN_MOI_TRACK_BARRIERS": "1",
-    "RJ_CONSAN_MOI_TRACK_ATOMICS": "1",
+    "RJ_CONSAN_TRACK_BARRIERS": "1",
+    "RJ_CONSAN_TRACK_ATOMICS": "1",
 }
 
 SAMPLED_STANDARD_RUNTIME_DEFAULTS = {
-    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "256",
-    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0",
+    "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE": "256",
+    "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET": "0",
 }
 
-RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS = {
-    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE": "65536",
-    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET": "0",
-}
 
 FAULT_FAMILY_ENVIRONMENTS = {
     "barrier-drop": {
@@ -157,8 +154,7 @@ def _fault_family_environment(target: str, family: str) -> dict[str, str]:
 @dataclass(frozen=True)
 class Profile:
     id: str
-    flavor: str
-    engine: str
+    mode: str
     environment: dict[str, str]
 
 
@@ -181,15 +177,12 @@ class Workload:
     command_arguments: tuple[str, ...] = ()
     command_environment: tuple[tuple[str, str], ...] = ()
     targets: tuple[str, ...] | None = None
-    moi_record_evidence_expected: bool = True
-    record_replay_runtime_sample_stride: int | None = None
+    record_evidence_expected: bool = True
     sharktank_skip_warmup: bool = False
     run_timeout_seconds: int = TIMEOUT_SECONDS
     tensile_inner_timeout_seconds: int | None = None
     tensile_expected_numeric_rows: int | None = None
-    tensile_exact_problem_size_shards: tuple[
-        tuple[tuple[int, ...], ...], ...
-    ] = ()
+    tensile_exact_problem_size_shards: tuple[tuple[tuple[int, ...], ...], ...] = ()
     tensile_expected_source_exact_problem_size_blocks: tuple[
         tuple[tuple[int, ...], ...], ...
     ] = ()
@@ -213,57 +206,25 @@ class Workload:
 PROFILES = {
     "supercollider": Profile(
         id="supercollider",
-        flavor="supercollider",
-        engine="supercollider",
+        mode="supercollider",
         environment={
             "RJ_CONSAN_MODE": "supercollider",
             "RJ_CONSAN_POLICY": "strict",
         },
     ),
-    "record-replay": Profile(
-        id="record-replay",
-        flavor="moi",
-        engine="record_replay",
+    "default": Profile(
+        id="default",
+        mode="default",
         environment={
-            "RJ_CONSAN_MODE": "record-replay",
+            "RJ_CONSAN_MODE": "default",
             "RJ_CONSAN_POLICY": "strict",
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "1",
-        },
-    ),
-    "sampled": Profile(
-        id="sampled",
-        flavor="moi",
-        engine="sampled",
-        environment={
-            "RJ_CONSAN_MODE": "sampled",
-            "RJ_CONSAN_POLICY": "strict",
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "1",
-            "RJ_CONSAN_MOI_REQUIRE_RECORDS": "0",
-        },
-    ),
-    "inline-shadow": Profile(
-        id="inline-shadow",
-        flavor="moi",
-        engine="inline_shadow",
-        environment={
-            "RJ_CONSAN_MODE": "inline-shadow",
-            "RJ_CONSAN_POLICY": "strict",
-            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS": "1",
+            "RJ_CONSAN_FORBID_DIAGNOSTICS": "1",
+            "RJ_CONSAN_REQUIRE_RECORDS": "0",
         },
     ),
 }
 
 PROFILE_IDS = tuple(PROFILES)
-# Mirrors ConSanMoiDiagnosticKind in consan_moi_core_types.h.inc. Unknown
-# numeric values remain fail-closed so a device-side enum addition cannot be
-# silently accepted by an older validation harness.
-MOI_DIAGNOSTIC_KINDS = {
-    1: "access-conflict",
-    2: "metadata-full",
-    3: "barrier-divergence",
-}
-# Mirrors ConSanMoiShadowAccessKind::Write in consan_moi_abi.h.
-MOI_SHADOW_ACCESS_WRITE = 2
 WORKLOADS = (
     Workload(
         id="tensile-sk-mxf8gemm-explicit",
@@ -444,9 +405,6 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("lds-wrong-address",),
         targets=("gfx950",),
-        # Current Tensile v5 plus the physical Inline Shadow execution takes
-        # about 58 seconds end to end, just beyond the legacy 55-second
-        # generation-and-execution envelope.
         run_timeout_seconds=120,
         tensile_inner_timeout_seconds=110,
         tensile_expected_numeric_rows=1,
@@ -604,7 +562,6 @@ WORKLOADS = (
             "--validate",
         ),
         targets=("gfx950",),
-        record_replay_runtime_sample_stride=4,
         run_timeout_seconds=120,
     ),
     Workload(
@@ -636,7 +593,6 @@ WORKLOADS = (
             "--validate",
         ),
         targets=("gfx950",),
-        record_replay_runtime_sample_stride=32,
         run_timeout_seconds=120,
     ),
     Workload(
@@ -855,7 +811,7 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
         targets=("gfx950", "gfx1250", "gfx1201"),
-        moi_record_evidence_expected=False,
+        record_evidence_expected=False,
     ),
     Workload(
         id="pytorch-torch-histc",
@@ -1307,12 +1263,9 @@ def _validate_tensile_sharding(workload: Workload) -> None:
         )
     fault_shard_index = workload.tensile_fault_shard_index
     if fault_shard_index is not None and (
-        type(fault_shard_index) is not int
-        or not 0 <= fault_shard_index < len(shards)
+        type(fault_shard_index) is not int or not 0 <= fault_shard_index < len(shards)
     ):
-        raise RuntimeError(
-            f"{workload.id} Tensile fault shard index is out of range"
-        )
+        raise RuntimeError(f"{workload.id} Tensile fault shard index is out of range")
     sizes = []
     for shard in shards:
         if not shard:
@@ -1335,8 +1288,7 @@ def _validate_tensile_sharding(workload: Workload) -> None:
                 )
             for size in block:
                 if not size or any(
-                    type(dimension) is not int or dimension <= 0
-                    for dimension in size
+                    type(dimension) is not int or dimension <= 0 for dimension in size
                 ):
                     raise RuntimeError(
                         f"{workload.id} has a malformed expected source Exact problem size"
@@ -1362,9 +1314,7 @@ def _validate_workload_manifest() -> None:
             or name in HSA_TOOL_ENVIRONMENT
             for name, value in workload.command_environment
         ):
-            raise RuntimeError(
-                f"{workload.id} has an invalid command environment"
-            )
+            raise RuntimeError(f"{workload.id} has an invalid command environment")
         if any(not argument for argument in workload.command_arguments):
             raise RuntimeError(f"{workload.id} has an empty command argument")
         if workload.kind != "native-executable" and (
@@ -1375,8 +1325,7 @@ def _validate_workload_manifest() -> None:
                 f"kind {workload.kind}"
             )
         if workload.tensile_expected_client_passes is not None and (
-            workload.kind != "tensile"
-            or workload.tensile_expected_client_passes <= 0
+            workload.kind != "tensile" or workload.tensile_expected_client_passes <= 0
         ):
             raise RuntimeError(
                 f"{workload.id} has an invalid expected Tensile client count"
@@ -1416,6 +1365,8 @@ def _validate_workload_manifest() -> None:
             raise RuntimeError(
                 f"{workload.id} must declare the shared Stream-K fault families"
             )
+
+
 _validate_workload_manifest()
 
 
@@ -1482,7 +1433,7 @@ def _cdna_gtest_target(
     matrix_suite_family: str,
     matrix_run_timeout_seconds: int | None = None,
 ) -> _NativeGtestTarget:
-    target = cdna_hip_moi_registry.TARGETS[target_id]
+    target = cdna_hip_registry.TARGETS[target_id]
     return _NativeGtestTarget(
         id=target_id,
         build_dir=target.build_dir_name,
@@ -1516,9 +1467,6 @@ NATIVE_GTEST_TARGETS = {
         "gfx950",
         suite_family="Cdna4",
         matrix_suite_family="Cdna4Mfma",
-        # Complete Record/Replay coverage scans a large fixed report reservoir
-        # after the compact workload finishes. On the physical target that
-        # analysis takes about 160 seconds, despite subsecond device execution.
         matrix_run_timeout_seconds=300,
     ),
     "gfx1250": _NativeGtestTarget(
@@ -1531,13 +1479,7 @@ NATIVE_GTEST_TARGETS = {
         matrix_operation="Wmma",
         d128_block_oracle="SampledFastContextMatchesHostReference",
         d128_block_fault_uses_oracle=True,
-        # Current Record/Replay retains thousands of dynamic identity records
-        # across both exact host-reference cases. The native gfx1250 simulator
-        # completes that stronger contract in roughly 102 seconds.
         d128_block_run_timeout_seconds=150,
-        # The pressure suite exercises all four host-reference cases in one
-        # process. Inline Shadow currently needs roughly 200 seconds under the
-        # native simulator, so retain a 1.5x target-specific margin.
         d128_pressure_run_timeout_seconds=300,
     ),
 }
@@ -1549,7 +1491,7 @@ def _native_gtest_path(
     executable: str,
 ) -> str:
     if target.id in NATIVE_CDNA_TARGETS:
-        return str(cdna_hip_moi_registry.relative_executable_path(target.id, suite_id))
+        return str(cdna_hip_registry.relative_executable_path(target.id, suite_id))
     return str(Path(target.build_dir) / "tests" / executable)
 
 
@@ -1609,10 +1551,6 @@ def _jakub_override(target: _NativeGtestTarget) -> dict[str, object]:
             f"{oracle_prefix}/DoubleBufferedProd16x8"
         ),
         "fault_filter": f"{oracle_prefix}/ProducerSkewProd16x8",
-        # Current full-coverage Record/Replay runs the ordinary exact oracles
-        # in roughly 37 seconds, while the intentionally skewed fault oracle
-        # completes in about 62 seconds under emulation. Keep a bounded margin
-        # without rejecting the expanded 70-access inventory as a timeout.
         "run_timeout_seconds": 90,
     }
 
@@ -1732,7 +1670,7 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
 
 TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
     "gfx1201": {
-        # All four exact torch.mode profiles complete on the physical RDNA4
+        # The exact torch.mode workload completes on the physical RDNA4
         # target, but owner-local planning of its 50-MiB multi-kernel code
         # object takes 24--40 seconds. Keep a bounded 120-second process
         # envelope instead of misclassifying ordinary patching as a timeout.
@@ -1741,10 +1679,6 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         },
     },
     "gfx950": {
-        # Physical Record/Replay of the complete 151,936-logit oracle takes
-        # roughly 99 seconds. Keep the same explicit 900-second envelope used
-        # for the slower gfx950 emulator diagnostic, so the canonical command
-        # reaches a verdict on native hardware without an ad hoc CLI override.
         "qwen-prefill": {
             "run_timeout_seconds": 900,
         },
@@ -1754,47 +1688,30 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # strict replay analysis scans the target's conservative 2M-slot table;
         # retain a bounded margin for that host-side validation step.
         "tp1-prefill": {
-            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
         },
         "tp1-decode-combined": {
-            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
         },
-        # Complete SuperCollider coverage of all three TP2 oracles takes
-        # roughly 253 seconds through RocJitsu. The former generic 30-second
-        # bound expired during normal execution before the workload or hook
-        # could publish a verdict. Instrumented modes retain large report
-        # buffers across the three model lifecycles, so give each unchanged
-        # exact oracle an independent bounded process, as on gfx1250. The
-        # measured-only Inline Shadow prefill takes roughly 1,091 seconds in
-        # emulation, so retain a bounded 1,800-second margin for that row. The
-        # independently resolved decode and combined rows retain their current
-        # bounds until their own measurements establish otherwise.
         "tp2-family": {
             "sharktank_mode": "prefill",
-            "record_replay_runtime_sample_stride": 256,
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 1800,
         },
         "tp2-decode": {
-            "record_replay_runtime_sample_stride": 1,
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 600,
         },
         "tp2-combined": {
-            "record_replay_runtime_sample_stride": 256,
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 600,
         },
         "clip-bf16": {
-            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 300,
         },
         # The four Jakub oracle dispatches also miss the denser 256 cadence,
         # so this bounded row selects every workgroup deterministically.
         "jakub-attention": {
-            "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
         # The physical gfx950 histogram is one two-workgroup dispatch. Its
@@ -1804,25 +1721,11 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # dispatch for validation and retain enough time for replay's
         # conservative fixed-capacity report scan.
         "pytorch-torch-histc": {
-            "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
-        # The segmented sort is likewise a compact four-row dispatch. Its
-        # current token misses the production stride entirely even though all
-        # 56,884 accesses and 6,032 barriers are instrumented. Select each
-        # workgroup for validation. With all-supported Inline Shadow placement,
-        # the clean process completes in about 198 seconds through gfx950
-        # emulation, so a 300-second target envelope bounds every profile
-        # without weakening the production Record/Replay cadence.
         "pytorch-torch-sort": {
-            "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
-        # Inline Shadow completes the exact segmented-mode oracle in roughly
-        # 43 seconds through gfx950 emulation. The shared 30-second bound is
-        # appropriate for native execution but expires during ordinary
-        # emulator work, so retain the same bounded margin as the neighboring
-        # segmented-sort row.
         "pytorch-torch-mode": {
             "run_timeout_seconds": 120,
         },
@@ -1832,36 +1735,14 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # transform terminates without dynamic evidence.  Select the complete
         # bounded row deterministically for validation; this is the same
         # stride-one operating point used by its reviewed E2E qualification.
-        "hip-matmul-m128-n128-k128": {
-            "record_replay_runtime_sample_stride": 1,
-        },
-        # The exact norm/softmax device interval completes in about 27.5
-        # seconds, while the same official PyTorch wheel spends about 4.7
-        # seconds in fixed process startup and teardown even without ConSan.
-        # Give this physical validation row a bounded whole-process margin;
-        # this does not change the production Record/Replay cadence.
         "pytorch-norm-softmax": {
             "run_timeout_seconds": 60,
         },
         # Each compact HipKittens validation dispatch misses the production
         # stride. Select every workgroup for this bounded validation row; the
         # source workloads and their exact numerical oracles are unchanged.
-        "hipkittens-bf16fp32-16x32": {
-            "record_replay_runtime_sample_stride": 1,
-        },
-        "hipkittens-fp8fp32-4wave": {
-            "record_replay_runtime_sample_stride": 1,
-        },
-        "hipkittens-mxfp8-4wave": {
-            "record_replay_runtime_sample_stride": 1,
-        },
     },
     "gfx1250": {
-        # Complete Record/Replay instrumentation of the two exact MXF8
-        # Stream-K problems exceeds the generic 55-second Tensile subprocess
-        # budget while still making forward progress. A 300-second trial
-        # completed the first exact oracle and entered the second. Keep the
-        # unchanged serialized pair under an explicit bounded margin.
         "tensile-sk-mxf8gemm-explicit": {
             "tensile_inner_timeout_seconds": 900,
             "run_timeout_seconds": 960,
@@ -1871,7 +1752,7 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "run_timeout_seconds": 960,
         },
         # The unchanged full 151,936-logit Qwen baseline takes about 65
-        # seconds through RocJitsu. Complete Sampled instrumentation has been
+        # seconds through RocJitsu. Complete ConSan instrumentation has been
         # observed to finish in about 129 seconds but can exceed 180 seconds
         # under emulator load, so retain a bounded twofold-variance margin in
         # the executable manifest instead of requiring an ad hoc CLI override.
@@ -1881,71 +1762,31 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # The target-specific naive HipKittens runner launches one complete
         # exact-validation workgroup. Select it deterministically instead of
         # relying on its dispatch token to hit the production replay stride.
-        "hipkittens-bf16fp32-cdna5-naive": {
-            "record_replay_runtime_sample_stride": 1,
-        },
-        # The strict Inline Shadow row completes in roughly 31 seconds after
-        # transformation under RocJitsu. Keep a bounded twofold margin without
-        # weakening the ordinary physical-target timeout.  This compact
-        # emulated schedule needs a denser Record/Replay cadence than the
-        # production operating point to produce validation evidence.
         "tp1-prefill": {
-            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 60,
         },
-        # Decode and combined each retain an exact measured oracle. Their
-        # instrumented warmups merely repeat the same complete execution and
-        # make the two-mode process exceed its bound under Record/Replay.
-        # Measured-only production-cadence runs complete in about 149 and 131
-        # seconds respectively, so preserve both modes with a bounded margin.
         "tp1-decode-combined": {
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 360,
         },
-        # Running all three TP2 modes in one instrumented process retains two
-        # 252-MB rank report buffers across independent model lifecycles and
-        # exceeds the emulator bound. Keep the reviewed family fault on
-        # prefill, while the adjacent target-only rows retain decode and
-        # combined as separate exact, fully covered processes. Once the
-        # Record/Replay workgroup predicate is cached correctly, this compact
-        # 64-packet prefill schedule selects no workgroup at the production
-        # stride. The established bounded-validation cadence produces exact
-        # evidence without changing the model, oracle, or static denominator.
         "tp2-family": {
             "sharktank_mode": "prefill",
-            "record_replay_runtime_sample_stride": 256,
             "run_timeout_seconds": 180,
         },
         "tp2-decode": {
-            # Decode dispatches only one workgroup per kernel. Sparse
-            # workgroup cadences can miss every instrumented site, while two
-            # dense invocations exceed the emulator bound. Keep the exact
-            # timed oracle and omit only the redundant untimed warmup. A
-            # complete dense Record/Replay run takes roughly 344 seconds on
-            # the current host, so retain a 600-second bound for ordinary host
-            # and contention variance.
-            "record_replay_runtime_sample_stride": 1,
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 600,
         },
         "tp2-combined": {
-            "record_replay_runtime_sample_stride": 256,
             # Preserve the exact measured two-rank oracle without repeating
             # it as an instrumented warmup. The measured-only row completes
             # in about 210 seconds on the current host.
             "sharktank_skip_warmup": True,
             "run_timeout_seconds": 360,
         },
-        # Complete Inline Shadow instrumentation of the unchanged segmented
-        # sort oracle takes about 214 seconds through RocJITsu. Preserve the
-        # full exact workload under a target-specific bound with enough room
-        # for ordinary host-load variance.
         "pytorch-torch-sort": {
             "run_timeout_seconds": 360,
         },
-        # Record/Replay of the cross-target LDS-qualifying softmax shape takes
-        # roughly 32 seconds in gfx1250 emulation. Retain a bounded whole-row
-        # margin rather than relying on the generic 30-second default.
         "pytorch-norm-softmax": {
             "run_timeout_seconds": 60,
         },
@@ -2085,7 +1926,7 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         # coverage gate, and teardown verdict so a compiler/DBT failure in one
         # slice cannot be obscured by a partial monolithic transcript. The
         # 512-square slice needs roughly 30 seconds per generated solution in
-        # Sampled emulation, so retain a bounded five-minute inner allowance.
+        # ConSan emulation, so retain a bounded five-minute inner allowance.
         "tensile-sk-mxf8f4gemm-tdm": {
             "tensile_inner_timeout_seconds": 300,
             "run_timeout_seconds": 360,
@@ -2098,12 +1939,6 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "tensile_shard_parallelism": 3,
             "tensile_fault_shard_index": 0,
         },
-        # Preserve all six exact problems and all 16 generated solutions per
-        # problem, but give each exact size an independent numeric oracle,
-        # teardown verdict, and coverage gate. Four RocJITsu-backed shards fit
-        # the executable manifest's concurrency contract and keep the complete
-        # 96-row Record/Replay corpus bounded without accepting a partial
-        # monolithic timeout transcript.
         "tensile-sk-mxf4gemm-tdm": {
             "tensile_inner_timeout_seconds": 1200,
             "run_timeout_seconds": 1260,
@@ -2122,12 +1957,6 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             # The clean and overhead phases still qualify every shard.
             "tensile_fault_shard_index": 0,
         },
-        # The eight sparse benchmark blocks repeat the same three Exact
-        # problem sizes. Give each size an independent all-block numeric
-        # oracle and run the three complete size slices concurrently. This
-        # retains every generated client and solution while replacing the
-        # roughly 20-minute serial Record/Replay traversal with a bounded
-        # maximum-shard latency. Fault qualification uses the smallest slice.
         "tensile-spmm-f8-ml": {
             "tensile_inner_timeout_seconds": 900,
             "run_timeout_seconds": 960,

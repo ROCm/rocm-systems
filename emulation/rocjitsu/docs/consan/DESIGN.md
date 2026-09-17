@@ -8,9 +8,19 @@ loaded executable. It never translates between GPU architectures.
 
 This document describes the code as it exists now. It is an ownership map and
 an invariant reference, not a development history. User controls are in
-[USAGE.md](USAGE.md), mode tradeoffs are in [FLAVORS.md](FLAVORS.md), the
+[USAGE.md](USAGE.md), mode tradeoffs are in [MODES.md](MODES.md), the
 supported semantic forms are in [CAPABILITIES.md](CAPABILITIES.md), and
 register/private-memory mechanics are expanded in [SPILLING.md](SPILLING.md).
+
+## C++ namespaces
+
+Core ConSan types and functions live in `rocjitsu::consan`. Runtime hooks live
+in `rocjitsu::consan::hook`, so they can refer directly to enclosing core names.
+Implementation helpers use nested `detail` namespaces. Within these namespaces,
+identifiers omit redundant ConSan prefixes; SuperCollider-specific identifiers
+retain their SuperCollider qualifier. Callers outside these namespaces qualify
+references explicitly, without `using namespace` directives. Unqualified C++
+type names in this document refer to `rocjitsu::consan` unless otherwise stated.
 
 ## Scope and guarantees
 
@@ -77,8 +87,8 @@ ConSan then continues so a suspect kernel can still be instrumented.
 The automatic-report path is two-phase. The library first publishes an
 address-free, mode-specific evidence requirement. The HSA adapter allocates
 that exact layout, producing `BoundRuntimeResources`, then returns the opaque
-`ConSanDeferredBinding` to the library. Only the library chooses whether resume
-relowers from the input or retries retained MOI inventory. A caller cannot
+`DeferredBinding` to the library. Only the library chooses whether resume
+relowers from the input or retries retained ConSan inventory. A caller cannot
 substitute a different inventory, request, or input between phases.
 
 ## Component direction and authority
@@ -115,9 +125,9 @@ semantic success from byte vectors or patch names.
 ConSan uses distinct identities because one instruction may have several
 semantic roles:
 
-- `ConSanCodeObjectId` identifies the exact pristine image;
-- `ConSanProgramContainerId` names a kernel or executable container;
-- `ConSanProgramSiteId` names the authoritative decoded physical record;
+- `CodeObjectId` identifies the exact pristine image;
+- `ProgramContainerId` names a kernel or executable container;
+- `ProgramSiteId` names the authoritative decoded physical record;
 - `PhysicalSiteId` is its stable pristine instruction location; and
 - `SemanticSiteId` names one access range or synchronization facet.
 
@@ -138,31 +148,31 @@ handles into the inventory rather than copying partial site schemas.
 
 Analysis is target-aware but mode-neutral. Target providers decode exact ISA
 forms into normalized access, barrier, atomic, fence, ownership, and resource
-facts. Analysis does not decide that Sampled wants an access or that Inline
-Shadow can afford a probe.
+facts. Analysis does not decide whether ConSan or SuperCollider should instrument
+an access, or whether a probe can afford its registers.
 
 ## Semantic policy, intents, and coverage
 
-Policy converts inventory into a `ConSanObservationPlan` through three domain
+Policy converts inventory into a `ObservationPlan` through three domain
 functions:
 
-- `plan_consan_access_observation` decides LDS/group-FLAT applicability;
-- `plan_consan_barrier_observation` qualifies synchronization sequences; and
-- `plan_consan_atomic_fence_observation` qualifies atomic/fence associations.
+- `plan_access_observation` decides LDS/group-FLAT applicability;
+- `plan_barrier_observation` qualifies synchronization sequences; and
+- `plan_atomic_fence_observation` qualifies atomic/fence associations.
 
 Each semantic site receives one stable decision: `NotApplicable`,
 `Unsupported`, or `Admitted`. Decisions carry typed reasons and public
 capability dispositions. Unsupported is not silently converted into
 not-applicable, and lowering cannot revise policy to make coverage complete.
 
-Admitted decisions point forward to `ConSanProbeIntent` values. An intent says
+Admitted decisions point forward to `ProbeIntent` values. An intent says
 what must be observed, at which pristine instruction, before or after the guest
 operation, under which active-lane mask, and with which dynamic-result or
 atomic-address requirement. It can coalesce multiple semantic ranges or events
 at one insertion point. It contains no registers, report address, native words,
 branch route, or patch kind.
 
-The `ConSanCoverageLedger` owns the observation plan and the final lowering
+The `CoverageLedger` owns the observation plan and the final lowering
 outcome of every admitted intent: `Instrumented`, `ResourceRejected`, or
 `PlacementRejected`. It also owns the forward runtime mapping from original
 intent/site identity to validated emitted locations and report slots. Runtime
@@ -182,17 +192,17 @@ race.
 
 ## Target boundary
 
-`ConSanTargetProfile` is the one exact-target row for immutable target-wide
+`TargetProfile` is the one exact-target row for immutable target-wide
 facts: architecture, accumulator and scalar placement, dispatch/workgroup
 identity, direct-call and cache-refresh forms, transport and translation,
-native LDS dialect, workgroup-shadow clear, resident-wave identity, atomic
+native LDS dialect, resident-wave identity, atomic
 address support, and normalized memory operations.
 
 Profiles contain no mode choice, per-kernel allocation, report address, or
 mutable lowering result. Exact-target providers own target-specific decoding,
 validation, fault mutation, LDS operations, SuperCollider mechanics, and
 special state such as CDNA5 selectable VGPR banks. Mode emitters consume a
-normalized `ConSanTargetProfile` and common architecture-aware instruction
+normalized `TargetProfile` and common architecture-aware instruction
 builders; they may account for a target capability but do not select behavior
 by concrete product ID.
 
@@ -210,7 +220,7 @@ The boundary follows two rules:
 1. A mode consumes normalized target facts and common native builders and
    never switches on a concrete target ID.
 2. A target provider supplies architecture mechanics and never consumes
-   `ConSanOptions`, selects a mode, or defines report policy.
+   `Options`, selects a mode, or defines report policy.
 
 Adding a target means adding an exact profile and missing target-operation
 providers, registering them with target dispatch, extending the generated
@@ -225,52 +235,23 @@ without forcing other architectures to imitate it.
 
 ## Mode boundary
 
-The physical mode directories are:
+Default detection and shared infrastructure live in `code/patch/consan/`.
+The `supercollider/` subdirectory contains SuperCollider's exclusive lowering.
+The default detector collects access, owner, epoch, and synchronization
+information for bounded causal evidence and host conflict analysis.
+SuperCollider perturbs accesses and checks value stability.
 
-```text
-modes/
-  supercollider/
-  record_replay/
-  sampled/
-  inline_shadow/
-```
+The pipeline calls planning and lowering directly. Semantic admission remains
+in the access, barrier, and atomic/fence policy functions and precedes resource
+decisions. Resource planning, register allocation, report planning, and probe
+lowering have separate modules named for those responsibilities.
 
-SuperCollider is a separate flavor. The other three share Memory-Ordering
-Instrumentation (MOI): normalized access/owner/epoch/synchronization semantics,
-common resource and placement mechanics, and a common report pipeline.
+The hook owns evidence decoding, conflict analysis, and rendering in
+`hooks/consan/`. Snapshot and trust code manage report lifetime and evidence
+integrity separately from conflict analysis. SuperCollider uses its own
+mismatch marker rather than a causal-evidence report.
 
-Each MOI mode registers one `MoiModeOperations` value. It owns object planning
-and patch application; access, barrier, and atomic scratch demand; persistent
-state and transient scalar ABI; spill and dynamic-stack policy; dispatch
-identity and fallback; evidence planning; automatic report ceiling and runtime
-sampling default; report layout; and report-inventory reconstruction.
-
-Mode-specific planning and emission live in the mode directory. Cross-mode
-semantic admission remains centralized in the common access, barrier, and
-atomic/fence policy functions when it compares how the closed engine set
-treats the same normalized inventory. Mechanisms shared by two or three modes
-also stay common when they operate on normalized plans. Mode locality must not
-duplicate a dispatcher, placement planner, spill transaction, or publication
-protocol.
-
-Registry and orchestration selection points, plus common ABI, report-layout,
-and report-contract headers, deliberately aggregate the closed set of
-mode-specific variants so the pipeline and runtime can carry a mode-neutral
-sum type. Those are explicit facades, not shared implementations. Outside
-these aggregation surfaces, mode-specific planning, semantic projection, and
-native emission are physically owned by the corresponding mode directory.
-
-The hook mirrors this split. Record/Replay, Sampled, and Inline Shadow own
-their decoder, analyzer, and renderer under `hooks/consan/modes/<mode>`.
-Snapshot, trust, pipeline, and presentation vocabulary remain common.
-
-Adding an MOI mode means defining semantic policy and evidence ABI,
-registering one `MoiModeOperations` row, providing mode-local report
-decode/analyze/render operations, and extending conformance tests. It must not
-require edits to concrete target providers. A hypothetical-mode test exercises
-that property.
-
-## The four execution models
+## Execution models
 
 ### SuperCollider
 
@@ -283,27 +264,9 @@ observation does not identify a racing peer; a legal interleaving can change a
 value, and same-value races can be invisible. Barrier/atomic perturbation may
 compose for validation but does not change those semantics.
 
-### MOI Record/Replay
+### ConSan
 
-Record/Replay publishes bounded access and synchronization records on the GPU.
-The host reconstructs owner/epoch/order relationships and evaluates conflicts
-with the mode-owned shadow model. Its event history makes it the most
-inspectable engine.
-
-The ordinary report is not exhaustive. It uses a validated 64-bit launch
-fingerprint plus exact three-dimensional workgroup, wave-owner, and static-site
-identity, with explicit saturation when bounded hash probing cannot retain a
-new identity. On targets whose AMDHSA dispatch ID is queue-local, the launch
-fingerprint includes both the queue pointer and absolute queue-local dispatch
-ID. That compact fingerprint is not an injective encoding of the full pair;
-its collision and queue-address-lifetime limits are documented in
-[VALIDATION.md](validation/VALIDATION.md).
-Optional dynamic access append is also finite. Complete static instrumentation
-does not imply that every dynamic event survived.
-
-### MOI Sampled
-
-Sampled retains causal windows rather than a general event history. Selected
+ConSan retains causal windows rather than a general event history. Selected
 access instances publish immutable watchpoint banks; qualified barrier and
 atomic metadata shares their causal identity. The host distinguishes
 conflicts, statistical misses, saturation, and true evidence loss.
@@ -321,42 +284,29 @@ Sampling reduces dynamic evidence work; it does not reduce analysis, patching,
 or report planning in proportion to stride, and no proportional-overhead
 guarantee is made.
 
-Sampled owns a literal dispatch-identity fallback for scalar-pressure operating
+ConSan owns a literal dispatch-identity fallback for scalar-pressure operating
 points. That fallback is intentionally weaker than the hardware launch
 fingerprint and cannot establish exact separation across concurrent launches;
 common placement and runtime trust preserve rather than conceal that mode
 choice.
 
-### MOI Inline Shadow
-
-Inline Shadow keeps a versioned exact shadow for admitted four-byte LDS cells
-and evaluates supported-form conflicts on the GPU. Barriers advance device
-epoch state. Qualified releases/acquires use bounded address-scoped ordering
-state. The GPU emits first-N attributed diagnostics; the host collects rather
-than reconstructs the principal decision.
-
-“Exact” describes the admitted cell and ordering model, not unbounded ISA
-coverage. Diagnostics and ordering tables are bounded, and unsupported forms
-remain explicit gaps.
-
 ## Evidence planning and runtime binding
 
-Semantic planning produces one `ConSanEvidenceRequirements` variant:
-SuperCollider marker, Record/Replay report, Sampled report, or Inline Shadow
-report. Requirements are address-free and include exact capacity, regions,
+Semantic planning produces one `EvidenceRequirements` variant:
+SuperCollider marker or ConSan report. Requirements are address-free and include exact capacity, regions,
 alignment, initialization, and runtime capabilities. Overflow and ceiling
 checks precede allocation.
 
-For automatic evidence, `prepare_consan_automatic_transform` returns either a
-complete `TransformResult` or `ConSanDeferredBinding`. The hook allocates the
+For automatic evidence, `prepare_automatic_transform` returns either a
+complete `TransformResult` or `DeferredBinding`. The hook allocates the
 requested bytes under mode and process ceilings, initializes them, and calls
-`resume_consan_automatic_transform`. Allocation failure goes through
-`cancel_consan_automatic_transform`; it never silently shrinks the layout.
+`resume_automatic_transform`. Allocation failure goes through
+`cancel_automatic_transform`; it never silently shrinks the layout.
 
 Caller-owned buffers use the same binding validation. Report addresses are
 absent from inventory and policy and appear only at runtime binding.
 
-Each successful replacement publishes `ConSanDispatchRequirements` by kernel
+Each successful replacement publishes `DispatchRequirements` by kernel
 name: absolute private and group minima, a dynamic private-frame addend, and
 whether an instrumented probe can execute through that kernel. The hook binds
 names to loaded symbols. Before AQL dispatch it combines descriptor minima
@@ -387,7 +337,7 @@ bytes change, and shared helpers grow every execution owner consistently. Text
 and descriptors commit to a private image; the pristine input remains intact.
 
 Fault injection and SuperCollider perturbation are validation-only and enter
-through `transform_consan_with_mutation`, not ordinary `transform_consan`. A
+through `transform_with_mutation`, not ordinary `transform`. A
 live fault is selected against pristine inventory, applied and independently
 validated, then the mutated image is reinventoried and instrumented. Provenance
 and descriptor identities translate across revisions. If the composition
@@ -454,12 +404,11 @@ synchronization cannot be observed safely. A separate begin/end window API
 lets a harness select semantic operations under the manual policy without
 embedding iteration knowledge in the hook.
 
-The checkpoint boundary is shared by all MOI engines because work separated by
-a device-wide synchronization cannot race across that boundary. Its reset is
-mode-complete: Record/Replay tables, Sampled windows and publication state, and
-Inline Shadow ownership and ordering state all begin a fresh epoch while the
-allocation identity and embedded generation stay stable. SuperCollider is not
-an MOI engine; its lifetime-sticky mismatch marker is deliberately not reset.
+Work separated by a device-wide synchronization cannot race across the
+checkpoint boundary. Reset clears ConSan windows and publication/ordering
+state for the next epoch while keeping allocation identity and embedded
+generation stable. SuperCollider's lifetime-sticky mismatch marker is not
+reset by ConSan checkpoints.
 
 Coarse-grained report memory is copied through the appropriate snapshot path.
 A decoder can recover records while also observing overflow, changed
@@ -480,13 +429,13 @@ process teardown handles remaining quiescent reports.
 | Inventory and identities | `code/patch/consan/consan_program_inventory.h.inc`, `consan_site_identity.h.inc`, `consan_program_analysis.cpp` |
 | Semantic policy and coverage | `code/patch/consan/consan_*_policy.cpp`, `consan_observation_plan.h.inc` |
 | Target profiles/providers | `code/patch/consan/targets/` |
-| MOI registry/common lowering | `consan_moi_mode_planning.*`, `consan_moi_pipeline.cpp`, `consan_moi_shared_lowering.cpp` |
-| Mode-local transforms | `code/patch/consan/modes/<mode>/` |
-| Resources and placement | `consan_resource.*`, `consan_moi_probe_planning.cpp`, `consan_moi_placement.cpp`, `consan_placement.cpp` |
+| ConSan planning/common lowering | `consan_lowering_plan.h`, `consan_resource_planning.cpp`, `consan_shared_lowering.cpp` |
+| Mode-local transforms | `code/patch/consan/consan_probe_lowering.cpp`, `code/patch/consan/supercollider/` |
+| Resources and placement | `consan_resource.*`, `consan_probe_planning.cpp`, `consan_register_allocation.cpp`, `consan_placement.cpp` |
 | Descriptor/text transaction | `consan_descriptor_growth.cpp`, `consan_text_relocation.cpp` |
 | Final validation | `consan_final_validation.cpp`, `consan_validation_inventory.cpp`, `targets/consan_validation_*` |
 | HSA integration | `hooks/consan/rj_hsa_dbi_hooks.cpp`, `rj_hsa_dbi_hook_config.cpp` |
-| Runtime reports | `hooks/consan/rj_hsa_dbi_moi_report_*`, `hooks/consan/modes/<mode>/` |
+| Runtime reports | `hooks/consan/rj_hsa_dbi_report_*`, `rj_hsa_dbi_evidence_decoder.*`, `rj_hsa_dbi_conflict_*` |
 
 The compiled component, physical mode/target locality, typed inputs, and
 behavioral tests—not file size or an `.inc` suffix—define authority.

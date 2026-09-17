@@ -8,15 +8,15 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 
-namespace rocjitsu::consan_fault_target_detail {
+namespace rocjitsu::consan::fault_target_detail {
 
-ConSanAtomicFaultEncoding classify_cdna3_cdna4_atomic_fault_encoding(std::string_view mnemonic,
-                                                                     uint32_t size) {
+AtomicFaultEncoding classify_cdna3_cdna4_atomic_fault_encoding(std::string_view mnemonic,
+                                                               uint32_t size) {
   if ((mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst)) ||
       (mnemonic.starts_with("global_atomic") && size == sizeof(cdna4::FlatGlblMachineInst))) {
-    return ConSanAtomicFaultEncoding::CdnaFlat;
+    return AtomicFaultEncoding::CdnaFlat;
   }
-  return ConSanAtomicFaultEncoding::Unsupported;
+  return AtomicFaultEncoding::Unsupported;
 }
 
-} // namespace rocjitsu::consan_fault_target_detail
+} // namespace rocjitsu::consan::fault_target_detail

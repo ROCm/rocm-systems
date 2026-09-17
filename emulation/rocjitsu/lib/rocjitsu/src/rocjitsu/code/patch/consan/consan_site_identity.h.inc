@@ -11,7 +11,7 @@
 /// than silently treating two different inputs as one program. This is a
 /// content identity only: it deliberately contains no HSA reader, executable,
 /// load, or dispatch handle and therefore says nothing about runtime lifetime.
-struct ConSanCodeObjectId {
+struct CodeObjectId {
   /// Stable diagnostic fingerprint retained for compatibility with existing
   /// report and validation formats.
   std::string fingerprint;
@@ -26,13 +26,13 @@ struct ConSanCodeObjectId {
   /// have a valid content identity even though it is not a valid code object.
   [[nodiscard]] bool valid() const { return !fingerprint.empty(); }
 
-  bool operator==(const ConSanCodeObjectId &) const = default;
+  bool operator==(const CodeObjectId &) const = default;
 };
 
 /// Build the content identity used by `ProgramInventory` and stable site IDs.
 /// The function is deterministic across hosts and retains the pre-production
 /// `fnv1a64:<hex>` diagnostic representation.
-[[nodiscard]] inline ConSanCodeObjectId make_consan_code_object_id(std::span<const uint8_t> bytes) {
+[[nodiscard]] inline CodeObjectId make_code_object_id(std::span<const uint8_t> bytes) {
   const auto fnv1a = [](auto begin, auto end, uint64_t seed) {
     uint64_t hash = seed;
     for (auto cursor = begin; cursor != end; ++cursor) {
@@ -67,7 +67,7 @@ struct ConSanCodeObjectId {
 /// at most one physical insertion point for them.
 struct PhysicalSiteId {
   /// Content identity of the pristine image containing the instruction.
-  ConSanCodeObjectId code_object;
+  CodeObjectId code_object;
   /// Instruction offset in the original executable text address space.
   uint64_t original_text_offset = 0;
 
@@ -83,13 +83,13 @@ struct PhysicalSiteId {
 /// by inventory copies and mutable revisions. Keeping this handle distinct
 /// from a text offset prevents later phases from reconstructing source-site
 /// identity from container names and locations.
-struct ConSanProgramSiteId {
+struct ProgramSiteId {
   static constexpr uint32_t kInvalidOrdinal = ~uint32_t{0};
   uint32_t ordinal = kInvalidOrdinal;
 
   [[nodiscard]] bool valid() const { return ordinal != kInvalidOrdinal; }
 
-  bool operator==(const ConSanProgramSiteId &) const = default;
+  bool operator==(const ProgramSiteId &) const = default;
 };
 
 /// Semantic domain that gives meaning to the member ordinals in a
@@ -98,8 +98,8 @@ struct ConSanProgramSiteId {
 /// The domain prevents an access range and a synchronization event at the same
 /// instruction from colliding merely because both use member zero. New domains
 /// belong here only when they describe an original-program fact; lowerer patch
-/// kinds and engine-specific plan entries are not semantic site domains.
-enum class ConSanSemanticSiteDomain : uint8_t {
+/// kinds and mode-specific plan entries are not semantic site domains.
+enum class SemanticSiteDomain : uint8_t {
   /// A logical byte range read, written, or atomically accessed by an
   /// instruction.
   Access,
@@ -122,7 +122,7 @@ struct SemanticSiteId {
   /// Physical instruction that contributes this semantic fact.
   PhysicalSiteId physical;
   /// Vocabulary in which the member and range ordinals are interpreted.
-  ConSanSemanticSiteDomain domain = ConSanSemanticSiteDomain::Count;
+  SemanticSiteDomain domain = SemanticSiteDomain::Count;
   /// Stable logical-member ordinal within the selected domain.
   uint32_t member_ordinal = 0;
   /// Stable range/member sub-ordinal within the logical member.
@@ -130,13 +130,13 @@ struct SemanticSiteId {
 
   /// Return whether both the physical identity and semantic domain are valid.
   [[nodiscard]] bool valid() const {
-    return physical.valid() && domain != ConSanSemanticSiteDomain::Count;
+    return physical.valid() && domain != SemanticSiteDomain::Count;
   }
 
   /// Reinterpret the same physical fact in another semantic vocabulary.
   /// Synchronization events and their sequence edges deliberately share
   /// physical identity while remaining unequal typed graph nodes.
-  [[nodiscard]] SemanticSiteId in_domain(ConSanSemanticSiteDomain selected_domain) const {
+  [[nodiscard]] SemanticSiteId in_domain(SemanticSiteDomain selected_domain) const {
     SemanticSiteId result = *this;
     result.domain = selected_domain;
     return result;

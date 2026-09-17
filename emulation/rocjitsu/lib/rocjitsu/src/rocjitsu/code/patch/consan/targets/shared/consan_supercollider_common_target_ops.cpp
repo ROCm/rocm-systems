@@ -6,12 +6,12 @@
 
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
-namespace rocjitsu::consan_sc_target_detail {
+namespace rocjitsu::consan::supercollider_target_detail {
 
-std::optional<uint32_t> build_rdna3_rdna4_cdna5_ds_load_word0(const ConSanAccessLoweringForm &form,
+std::optional<uint32_t> build_rdna3_rdna4_cdna5_ds_load_word0(const AccessLoweringForm &form,
                                                               uint32_t original_word0) {
   uint32_t base = 0;
-  if (form.kind == ConSanAccessLoweringFormKind::NativeTwoRange) {
+  if (form.kind == AccessLoweringFormKind::NativeTwoRange) {
     switch (original_word0 & 0xFFFF0000u) {
     case 0xD8380000u:
       base = 0xD8DC0000u;
@@ -62,4 +62,4 @@ retarget_cdna3_cdna4_rdna3_flat_load_vdst(std::array<uint32_t, 3> words, uint16_
   return words;
 }
 
-} // namespace rocjitsu::consan_sc_target_detail
+} // namespace rocjitsu::consan::supercollider_target_detail

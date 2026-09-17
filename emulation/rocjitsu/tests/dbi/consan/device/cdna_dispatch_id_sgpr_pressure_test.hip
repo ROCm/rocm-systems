@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Compiler-generated regression for #11019. A wide scalar clobber raises the
-/// gfx950 descriptor to 106 SGPRs without leaving a persistent dispatch-ID
-/// pair. Record/Replay must compose its private dispatch capture with whatever
-/// owner/epoch/workgroup representation persistent placement selects.
+/// A wide scalar clobber raises the gfx950 descriptor to 106 SGPRs without
+/// leaving a persistent dispatch-ID pair. ConSan must use its literal identity
+/// fallback while preserving owner/epoch/workgroup state and guest values.
 
 #include "consan_device_test_support.h"
 
@@ -26,25 +25,22 @@ struct DeviceState {
 #endif
 
 // Preserve every portable ordinary SGPR across one LDS access. Together with
-// forced VGPR spilling this selects private dispatch identity plus an
-// entry-scalar preservation window, the minimal combination that exposed the
-// queue-preload ABI regression in the tree-atomic-or E2E kernel.
-#define RJ_CONSAN_PRIVATE_ENTRY_SCALAR_USES                                                      \
-  ".irp r,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,"         \
-  "29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,"         \
-  "57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,"         \
-  "85,86,87,88,89\n\t"                                                                         \
-  "s_mov_b32 s\\r, s\\r\n\t"                                                                    \
+// forced VGPR spilling this exercises entry-scalar preservation under pressure.
+#define RJ_CONSAN_PRIVATE_ENTRY_SCALAR_USES                                                        \
+  ".irp r,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,"           \
+  "29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,"           \
+  "57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,"           \
+  "85,86,87,88,89\n\t"                                                                             \
+  "s_mov_b32 s\\r, s\\r\n\t"                                                                       \
   ".endr\n\t"
 
-#define RJ_CONSAN_PRIVATE_ENTRY_SCALAR_CLOBBERS                                                  \
-  "s16", "s17", "s18", "s19", "s20", "s21", "s22", "s23", "s24", "s25", "s26", "s27",  \
-      "s28", "s29", "s30", "s31", "s36", "s37", "s38", "s39", "s40", "s41", "s42",       \
-      "s43", "s44", "s45", "s46", "s47", "s48", "s49", "s50", "s51", "s52", "s53",       \
-      "s54", "s55", "s56", "s57", "s58", "s59", "s60", "s61", "s62", "s63", "s64",       \
-      "s65", "s66", "s67", "s68", "s69", "s70", "s71", "s72", "s73", "s74", "s75",       \
-      "s76", "s77", "s78", "s79", "s80", "s81", "s82", "s83", "s84", "s85", "s86",       \
-      "s87", "s88", "s89"
+#define RJ_CONSAN_PRIVATE_ENTRY_SCALAR_CLOBBERS                                                    \
+  "s16", "s17", "s18", "s19", "s20", "s21", "s22", "s23", "s24", "s25", "s26", "s27", "s28",       \
+      "s29", "s30", "s31", "s36", "s37", "s38", "s39", "s40", "s41", "s42", "s43", "s44", "s45",   \
+      "s46", "s47", "s48", "s49", "s50", "s51", "s52", "s53", "s54", "s55", "s56", "s57", "s58",   \
+      "s59", "s60", "s61", "s62", "s63", "s64", "s65", "s66", "s67", "s68", "s69", "s70", "s71",   \
+      "s72", "s73", "s74", "s75", "s76", "s77", "s78", "s79", "s80", "s81", "s82", "s83", "s84",   \
+      "s85", "s86", "s87", "s88", "s89"
 
 __global__
 __launch_bounds__(kMaxThreadCount) void dispatch_id_sgpr_pressure_for_consan(DeviceState *state) {
@@ -61,6 +57,8 @@ __launch_bounds__(kMaxThreadCount) void dispatch_id_sgpr_pressure_for_consan(Dev
   // Match the downstream reproducer. These declarations make the compiler
   // account for s16:s99 while leaving the registers dead at later sites; the
   // point is persistent dispatch identity, not site-local scalar liveness.
+  // Reserve 24 VGPRs for the persistent state and an even-aligned barrier
+  // scratch window. Forced spilling cannot grow the descriptor allocation.
   asm volatile("" ::
                    : "s16", "s17", "s18", "s19", "s20", "s21", "s22", "s23", "s24", "s25", "s26",
                      "s27", "s28", "s29", "s30", "s31", "s32", "s33", "s34", "s35", "s36", "s37",
@@ -69,7 +67,7 @@ __launch_bounds__(kMaxThreadCount) void dispatch_id_sgpr_pressure_for_consan(Dev
                      "s60", "s61", "s62", "s63", "s64", "s65", "s66", "s67", "s68", "s69", "s70",
                      "s71", "s72", "s73", "s74", "s75", "s76", "s77", "s78", "s79", "s80", "s81",
                      "s82", "s83", "s84", "s85", "s86", "s87", "s88", "s89", "s90", "s91", "s92",
-                     "s93", "s94", "s95", "s96", "s97", "s98", "s99");
+                     "s93", "s94", "s95", "s96", "s97", "s98", "s99", "v23");
 
   float value = 0.0f;
   if (wave == 1u)
@@ -82,18 +80,17 @@ __launch_bounds__(kMaxThreadCount) void dispatch_id_sgpr_pressure_for_consan(Dev
     state->output[lane] = value + tile[(lane + 2u) % warpSize];
 }
 
-__global__ __launch_bounds__(kMaxThreadCount) void
-private_entry_abi_spill_for_consan(DeviceState *state) {
+__global__
+__launch_bounds__(kMaxThreadCount) void private_entry_abi_spill_for_consan(DeviceState *state) {
   __shared__ volatile uint32_t tile[kMaxThreadCount];
   const uint32_t tid = threadIdx.x;
-  const uint32_t address =
-      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&tile[tid]) & 0xffffu);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&tile[tid]) & 0xffffu);
   const uint32_t expected = 0xea950000u | tid;
   uint32_t observed = 0u;
   asm volatile(RJ_CONSAN_PRIVATE_ENTRY_WAIT RJ_CONSAN_PRIVATE_ENTRY_SCALAR_USES
-                   "ds_write_b32 %1, %2\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
-                   "ds_read_b32 %0, %1\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
-                   RJ_CONSAN_PRIVATE_ENTRY_WAIT RJ_CONSAN_PRIVATE_ENTRY_SCALAR_USES
+               "ds_write_b32 %1, %2\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE
+               "ds_read_b32 %0, %1\n\t" RJ_CONSAN_DEVICE_LARGE_CAVE RJ_CONSAN_PRIVATE_ENTRY_WAIT
+                   RJ_CONSAN_PRIVATE_ENTRY_SCALAR_USES
                : "=v"(observed)
                : "v"(address), "v"(expected)
                : RJ_CONSAN_PRIVATE_ENTRY_SCALAR_CLOBBERS, "memory");

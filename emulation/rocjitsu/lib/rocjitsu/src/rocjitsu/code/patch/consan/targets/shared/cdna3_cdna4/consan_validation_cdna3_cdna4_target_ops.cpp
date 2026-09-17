@@ -13,13 +13,13 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
-namespace rocjitsu::consan_validation_target_detail {
+namespace rocjitsu::consan::validation_target_detail {
 
 namespace kd = rocr::llvm::amdhsa;
 
-ConSanDescriptorResourceDeltaValidation
-validate_cdna3_cdna4_descriptor_resource_delta(const ConSanTargetProfile &target,
-                                               const ConSanDescriptorResourceDeltaInput &input) {
+DescriptorResourceDeltaValidation
+validate_cdna3_cdna4_descriptor_resource_delta(const TargetProfile &target,
+                                               const DescriptorResourceDeltaInput &input) {
   const uint32_t original_encoded_accum_offset =
       AMDHSA_BITS_GET(input.original_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
   const uint32_t replacement_encoded_accum_offset =
@@ -54,4 +54,4 @@ validate_cdna3_cdna4_descriptor_resource_delta(const ConSanTargetProfile &target
   return {.valid = valid, .normalized_rsrc3 = normalized_rsrc3};
 }
 
-} // namespace rocjitsu::consan_validation_target_detail
+} // namespace rocjitsu::consan::validation_target_detail

@@ -11,9 +11,11 @@
 #include <span>
 
 namespace rocjitsu {
-
 class Decoder;
 class Instruction;
+} // namespace rocjitsu
+
+namespace rocjitsu::consan {
 
 // Target encoding sentinels used while normalizing FLAT/VGLOBAL operands.
 inline constexpr uint32_t kCdnaGlobalNoSaddrEncoding = 0x7fu;
@@ -32,15 +34,15 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
 
 [[nodiscard]] bool is_barrier_instruction(const Instruction &instruction);
 
-[[nodiscard]] ConSanBarrierSite::Scope barrier_scope_for_id(int32_t barrier_id);
+[[nodiscard]] BarrierSite::Scope barrier_scope_for_id(int32_t barrier_id);
 
 void decode_barrier_operand(const Instruction &instruction,
-                            std::span<const uint8_t> instruction_bytes, ConSanBarrierSite &site);
+                            std::span<const uint8_t> instruction_bytes, BarrierSite &site);
 
 [[nodiscard]] bool is_s_clause(const Instruction &instruction);
 
 [[nodiscard]] uint32_t s_clause_following_instruction_count(const Instruction &instruction);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan
 
 #endif // ROCJITSU_CODE_PATCH_CONSAN_INSTRUCTION_SEMANTICS_H

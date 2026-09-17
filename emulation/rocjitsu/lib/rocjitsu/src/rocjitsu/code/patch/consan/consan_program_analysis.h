@@ -14,18 +14,20 @@
 #include <vector>
 
 namespace rocjitsu {
-
 class AmdGpuCodeObject;
 class Decoder;
+} // namespace rocjitsu
+
+namespace rocjitsu::consan {
 
 /// Complete forward product of code-object and synchronization analysis.
 /// Lowering transaction state, observation policy, resources, patches,
 /// replacement bytes, and mutation outcomes are deliberately absent.
-struct ConSanProgramAnalysisResult {
+struct ProgramAnalysisResult {
   ProgramInventory program_inventory;
-  std::vector<ConSanFaultSite> fault_sites;
-  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
-  ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
+  std::vector<FaultSite> fault_sites;
+  std::vector<BarrierMoveDestination> barrier_move_destinations;
+  TransformOutcome outcome = TransformOutcome::Unchanged;
   std::vector<std::string> warnings;
   std::vector<std::string> errors;
 };
@@ -39,13 +41,12 @@ struct ConSanProgramAnalysisResult {
 /// or perturbation selection, observation planning, resource solving, and
 /// mutation. `result` receives the published analysis product; `perturbation`
 /// receives only analysis candidates used by the subsequent planner.
-[[nodiscard]] bool analyze_consan_program_inventory(std::span<const uint8_t> code_object_bytes,
-                                                    const ConSanRequest &request,
-                                                    const ConSanDebugOverrides &debug,
-                                                    const MutationRequest &mutation,
-                                                    std::unique_ptr<AmdGpuCodeObject> &code_object,
-                                                    ProgramInventoryBuilder &inventory_builder,
-                                                    ConSanPerturbationPlanningState &perturbation,
-                                                    ConSanProgramAnalysisResult &result);
+[[nodiscard]] bool
+analyze_program_inventory(std::span<const uint8_t> code_object_bytes, const Request &request,
+                          const DebugOverrides &debug, const MutationRequest &mutation,
+                          std::unique_ptr<AmdGpuCodeObject> &code_object,
+                          ProgramInventoryBuilder &inventory_builder,
+                          SuperColliderPerturbationPlanningState &supercollider_perturbation,
+                          ProgramAnalysisResult &result);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

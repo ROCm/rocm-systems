@@ -31,7 +31,7 @@ import sys
 import threading
 import time
 
-import consan_cdna_hip_moi_registry as cdna_hip_moi_registry
+import consan_cdna_hip_registry as cdna_hip_registry
 from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
 from consan_tensile_support import (
     TensileValidationPaths,
@@ -53,8 +53,6 @@ from consan_validation_catalog import (
     HSA_TOOL_ENVIRONMENT,
     LLAMA_BUILD_DIR_ENV,
     LLVM_READELF_ENV,
-    MOI_DIAGNOSTIC_KINDS,
-    MOI_SHADOW_ACCESS_WRITE,
     NATIVE_GTEST_TARGETS,
     NATIVE_GTEST_WORKLOAD_IDS,
     NATIVE_GTEST_WORKLOAD_OVERRIDES,
@@ -71,7 +69,6 @@ from consan_validation_catalog import (
     QWEN_COMPILE_OPTIONS,
     QWEN_OVERHEAD_REPETITIONS,
     RDNA4_MATMUL_DIR_ENV,
-    RECORD_REPLAY_STANDARD_RUNTIME_DEFAULTS,
     SAMPLED_STANDARD_RUNTIME_DEFAULTS,
     SCHEMA_VERSION,
     SETTING_CATEGORIES,
@@ -174,49 +171,27 @@ from consan_validation_commands import (
     _write_provenance,
 )
 from consan_validation_diagnostics import (
-    DIAGNOSTIC_OUTPUT_PARSERS,
-    DiagnosticPolicy,
-    DiagnosticRecord,
-    DiagnosticSourceSummary,
-    ParsedDiagnosticOutput,
-    ReplayIdentity,
     _amdgpu_kernel_metadata,
     _benchmark_median,
     _benchmark_samples,
     _boolean,
-    _bool_label,
-    _code_object_fingerprint,
     _coverage_summary,
     _DiagnosticFieldsError,
-    _diagnostic_output_summary,
-    _diagnostic_record_result,
-    _diagnostic_source_result,
     _discard_first_sample_per_process,
     _empirical_structural_metrics,
     _empirical_structural_totals,
-    _evaluate_diagnostic_output,
     _gtest_device_measurement,
     _gtest_median,
     _gtest_test_count,
     _gtest_timing_samples,
-    _identity_label,
-    _instruction_label,
     _json_measurements,
     _json_medians,
     _json_timing_samples,
-    _lds_range,
     _llvm_readelf,
     _log_fields,
     _nonnegative_float,
     _parse_amdgpu_kernel_metadata,
     _parse_log_fields,
-    _parse_record_replay_diagnostic_output,
-    _ReplayDiagnosticRecord,
-    _replay_diagnostic_record,
-    _replay_identity,
-    _ReplayReport,
-    _ReplaySkipped,
-    _ReplaySummary,
     _retained_code_object_inventory,
     _retained_relative_path,
     _sharktank_medians,
@@ -284,12 +259,6 @@ from consan_validation_support import (
     git_identity,
     sha256_file,
 )
-
-
-
-
-
-
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -386,9 +355,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     prepare = subparsers.add_parser(
         "prepare", help="build a canonical external workload artifact"
     )
-    prepare.add_argument(
-        "--workload", choices=("qwen-prefill",), required=True
-    )
+    prepare.add_argument("--workload", choices=("qwen-prefill",), required=True)
 
     explain = subparsers.add_parser(
         "explain", help="expand commands, settings, and fault expectations"
@@ -599,9 +566,7 @@ def main(argv: list[str] | None = None) -> int:
                 _print_explain(result)
             return 0
         if args.command == "doctor":
-            result = _doctor(
-                workspace, target, selection.selected_ids(), args.launcher
-            )
+            result = _doctor(workspace, target, selection.selected_ids(), args.launcher)
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
             else:

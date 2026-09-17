@@ -11,7 +11,7 @@
 #include <string>
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 [[nodiscard]] std::string quoted_aliases(std::span<const std::string> names) {
@@ -25,14 +25,13 @@ namespace {
 }
 
 void render_observation_diagnostics(const ProgramInventory &inventory,
-                                    ConSanObservationProduct &product) {
-  const bool supercollider = product.plan().engine == ConSanCapabilityEngine::SuperCollider;
-  const std::string engine_name =
-      supercollider ? "SuperCollider"
-                    : std::string(consan_capability_engine_name(product.plan().engine));
+                                    ObservationProduct &product) {
+  const bool supercollider = product.plan().mode == Mode::SuperCollider;
+  const std::string mode_name =
+      supercollider ? "SuperCollider" : std::string(mode_label(product.plan().mode));
 
-  for (const ConSanSiteDecision &decision : product.plan().site_decisions) {
-    if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
+  for (const SiteDecision &decision : product.plan().site_decisions) {
+    if (decision.reason != AccessPolicyReason::ConflictingPhysicalAliases)
       continue;
     if (supercollider) {
       const auto access =
@@ -40,7 +39,7 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
             return candidate.physical_id == decision.semantic_site.physical;
           });
       const std::string_view access_kind =
-          access != inventory.access_sites().end() && access->origin == ConSanAccessOrigin::Flat
+          access != inventory.access_sites().end() && access->origin == AccessOrigin::Flat
               ? "FLAT"
               : "native-LDS";
       product.diagnostics.emplace_back(
@@ -50,18 +49,18 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
           quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
     } else {
       product.diagnostics.emplace_back(
-          "ConSan MOI physical access at original text offset " +
+          "ConSan physical access at original text offset " +
           std::to_string(decision.semantic_site.physical.original_text_offset) +
           " was decoded inconsistently through aliases '" +
           quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
     }
   }
-  for (const ConSanBarrierSiteDecision &decision : product.plan().barrier_site_decisions) {
-    if (decision.reason != ConSanBarrierPolicyReason::ConflictingPhysicalAliases)
+  for (const BarrierSiteDecision &decision : product.plan().barrier_site_decisions) {
+    if (decision.reason != BarrierPolicyReason::ConflictingPhysicalAliases)
       continue;
-    std::string message = "ConSan " + engine_name + " ";
+    std::string message = "ConSan " + mode_name + " ";
     if (!supercollider)
-      message = "ConSan MOI physical ";
+      message = "ConSan physical ";
     message += "barrier at original text offset " +
                std::to_string(decision.semantic_site.physical.original_text_offset) +
                " was decoded inconsistently through ";
@@ -72,20 +71,20 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
                                    "'";
     product.diagnostics.push_back(std::move(message));
   }
-  for (const ConSanAtomicSiteDecision &decision : product.plan().atomic_site_decisions) {
-    if (decision.reason != ConSanAtomicPolicyReason::ConflictingPhysicalAliases)
+  for (const AtomicSiteDecision &decision : product.plan().atomic_site_decisions) {
+    if (decision.reason != AtomicPolicyReason::ConflictingPhysicalAliases)
       continue;
     product.diagnostics.emplace_back(
-        "ConSan MOI physical atomic at original text offset " +
+        "ConSan physical atomic at original text offset " +
         std::to_string(decision.semantic_site.physical.original_text_offset) +
         " was decoded inconsistently through aliases '" +
         quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
   }
-  for (const ConSanFenceSiteDecision &decision : product.plan().fence_site_decisions) {
-    if (decision.reason != ConSanFencePolicyReason::ConflictingPhysicalAliases)
+  for (const FenceSiteDecision &decision : product.plan().fence_site_decisions) {
+    if (decision.reason != FencePolicyReason::ConflictingPhysicalAliases)
       continue;
     product.diagnostics.emplace_back(
-        "ConSan MOI physical fence at original text offset " +
+        "ConSan physical fence at original text offset " +
         std::to_string(decision.semantic_site.physical.original_text_offset) +
         " was decoded inconsistently through aliases '" +
         quoted_aliases(inventory.source_container_names(decision.semantic_site.physical)) + "'");
@@ -96,20 +95,18 @@ void render_observation_diagnostics(const ProgramInventory &inventory,
 ordinary_synchronization_reservations(const ProgramInventory &inventory) {
   std::vector<PhysicalSiteId> reservations;
   const SynchronizationInventoryView sync = inventory.sync();
-  for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
-    if (sequence.kind != ConSanSyncKind::OrdinaryMemory ||
-        (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
-         sequence.memory_role != ConSanSyncMemoryRole::Release) ||
-        !consan_sync_confidence_meets(sequence.confidence,
-                                      ConSanSemanticConfidence::Conservative) ||
-        !consan_sync_confidence_meets(sequence.memory_role_confidence,
-                                      ConSanSemanticConfidence::Conservative)) {
+  for (const SyncSequence &sequence : sync.sync_sequences) {
+    if (sequence.kind != SyncKind::OrdinaryMemory ||
+        (sequence.memory_role != SyncMemoryRole::Acquire &&
+         sequence.memory_role != SyncMemoryRole::Release) ||
+        !sync_confidence_meets(sequence.confidence, SemanticConfidence::Conservative) ||
+        !sync_confidence_meets(sequence.memory_role_confidence, SemanticConfidence::Conservative)) {
       continue;
     }
-    const ConSanSyncEvent *communication = nullptr;
-    for (ConSanSyncEventId identity : sequence.member_event_ids) {
-      const ConSanSyncEvent *event = sync.find_event(identity);
-      if (event == nullptr || event->kind != ConSanSyncKind::OrdinaryMemory)
+    const SyncEvent *communication = nullptr;
+    for (SyncEventId identity : sequence.member_event_ids) {
+      const SyncEvent *event = sync.find_event(identity);
+      if (event == nullptr || event->kind != SyncKind::OrdinaryMemory)
         continue;
       if (communication != nullptr) {
         communication = nullptr;
@@ -117,14 +114,14 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
       }
       communication = event;
     }
-    const ConSanProgramSite *communication_source =
+    const ProgramSite *communication_source =
         communication == nullptr ? nullptr : sync.source(*communication);
-    const ConSanProgramContainer *sequence_container = sync.container(sequence);
+    const ProgramContainer *sequence_container = sync.container(sequence);
     if (communication_source == nullptr || sequence_container == nullptr ||
         communication_source->container != sequence_container->id) {
       continue;
     }
-    for (const ConSanProgramSite &access : inventory.access_sites()) {
+    for (const ProgramSite &access : inventory.access_sites()) {
       if (access.container != communication_source->container ||
           access.physical_id.original_text_offset != communication->text_offset() ||
           std::ranges::find(reservations, access.physical_id) != reservations.end()) {
@@ -138,49 +135,48 @@ ordinary_synchronization_reservations(const ProgramInventory &inventory) {
 
 } // namespace
 
-bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
-                                          std::span<const uint64_t> owner_descriptor_file_offsets,
-                                          std::span<const std::string> source_containers,
-                                          std::span<const std::string> kernel_name_allowlist) {
+bool site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                                   std::span<const uint64_t> owner_descriptor_file_offsets,
+                                   std::span<const std::string> source_containers,
+                                   std::span<const std::string> kernel_name_allowlist) {
   if (kernel_name_allowlist.empty())
     return true;
   const auto selected_name = [&](std::string_view candidate) {
     return std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
-      return consan_kernel_name_matches(allowed, candidate);
+      return kernel_name_matches(allowed, candidate);
     });
   };
   if (!owner_descriptor_file_offsets.empty()) {
     return std::ranges::all_of(owner_descriptor_file_offsets, [&](uint64_t descriptor) {
-      const ConSanProgramContainer *kernel = inventory.find_kernel_by_descriptor(descriptor);
+      const ProgramContainer *kernel = inventory.find_kernel_by_descriptor(descriptor);
       return kernel != nullptr && selected_name(kernel->name);
     });
   }
   return !source_containers.empty() && std::ranges::all_of(source_containers, selected_name);
 }
 
-bool consan_site_matches_kernel_allowlist(const ProgramInventory &inventory,
-                                          std::span<const ConSanExecutionOwner> execution_owners,
-                                          std::span<const std::string> source_containers,
-                                          std::span<const std::string> kernel_name_allowlist) {
+bool site_matches_kernel_allowlist(const ProgramInventory &inventory,
+                                   std::span<const ExecutionOwner> execution_owners,
+                                   std::span<const std::string> source_containers,
+                                   std::span<const std::string> kernel_name_allowlist) {
   std::vector<uint64_t> descriptors;
   descriptors.reserve(execution_owners.size());
-  for (const ConSanExecutionOwner &owner : execution_owners) {
-    if (const ConSanProgramContainer *kernel = inventory.kernel(owner))
+  for (const ExecutionOwner &owner : execution_owners) {
+    if (const ProgramContainer *kernel = inventory.kernel(owner))
       descriptors.push_back(kernel->descriptor_file_offset);
   }
-  return consan_site_matches_kernel_allowlist(inventory, descriptors, source_containers,
-                                              kernel_name_allowlist);
+  return site_matches_kernel_allowlist(inventory, descriptors, source_containers,
+                                       kernel_name_allowlist);
 }
 
-ConSanObservationProduct
-assemble_consan_observation_product(const ProgramInventory &inventory,
-                                    const ConSanObservationPolicyRequest &request) {
-  ConSanObservationProduct product;
+ObservationProduct assemble_observation_product(const ProgramInventory &inventory,
+                                                const ObservationPolicyRequest &request) {
+  ObservationProduct product;
   product.atomic_fence_fragment_required = request.include_atomic_fence_policy;
-  ConSanObservationPlan plan;
+  ObservationPlan plan;
 
-  ConSanAccessPolicyResult access = plan_consan_access_observation(
-      inventory, {.engine = request.engine,
+  AccessPolicyResult access = plan_access_observation(
+      inventory, {.mode = request.mode,
                   .native_lds_enabled = request.native_lds_enabled,
                   .group_flat_enabled = request.group_flat_enabled,
                   .flat_provenance_mode = request.flat_provenance_mode,
@@ -190,41 +186,41 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
   plan = std::move(access.plan);
   product.access_errors = std::move(access.errors);
 
-  ConSanBarrierPolicyResult barrier = plan_consan_barrier_observation(
-      inventory, {.engine = request.engine,
-                  .tracking_enabled = request.barrier_tracking_enabled,
-                  .container_filter = request.container_filter,
-                  .kernel_name_allowlist = request.kernel_name_allowlist});
+  BarrierPolicyResult barrier =
+      plan_barrier_observation(inventory, {.mode = request.mode,
+                                           .tracking_enabled = request.barrier_tracking_enabled,
+                                           .container_filter = request.container_filter,
+                                           .kernel_name_allowlist = request.kernel_name_allowlist});
   product.barrier_errors = std::move(barrier.errors);
   product.barrier_fragment_appended = plan.append(barrier.plan);
 
   if (request.include_atomic_fence_policy) {
-    std::vector<ConSanDirectionalAccessAvailability> directional_access_windows;
-    const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(request.engine);
+    std::vector<DirectionalAccessAvailability> directional_access_windows;
+    const ModeProbeVocabulary *vocabulary = mode_probe_vocabulary(request.mode);
     if (vocabulary && vocabulary->ordering_requires_directional_access_window) {
-      for (const ConSanProbeIntent &intent : plan.probe_intents) {
+      for (const ProbeIntent &intent : plan.probe_intents) {
         if (intent.kind != vocabulary->access)
           continue;
-        for (const ConSanProgramSite &site : inventory.access_sites()) {
+        for (const ProgramSite &site : inventory.access_sites()) {
           if (site.physical_id != intent.physical_site)
             continue;
-          for (ConSanProgramContainerId owner : inventory.execution_owner_kernels(site)) {
+          for (ProgramContainerId owner : inventory.execution_owner_kernels(site)) {
             auto availability = std::ranges::find(directional_access_windows, owner,
-                                                  &ConSanDirectionalAccessAvailability::owner);
+                                                  &DirectionalAccessAvailability::owner);
             if (availability == directional_access_windows.end()) {
               directional_access_windows.push_back({.owner = owner});
               availability = std::prev(directional_access_windows.end());
             }
             availability->read |=
-                site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Atomic;
+                site.kind == LdsAccessKind::Read || site.kind == LdsAccessKind::Atomic;
             availability->write |=
-                site.kind == ConSanLdsAccessKind::Write || site.kind == ConSanLdsAccessKind::Atomic;
+                site.kind == LdsAccessKind::Write || site.kind == LdsAccessKind::Atomic;
           }
         }
       }
     }
-    ConSanAtomicFencePolicyResult atomic_fence = plan_consan_atomic_fence_observation(
-        inventory, {.engine = request.engine,
+    AtomicFencePolicyResult atomic_fence = plan_atomic_fence_observation(
+        inventory, {.mode = request.mode,
                     .tracking_enabled = request.atomic_fence_tracking_enabled,
                     .directional_access_windows = directional_access_windows,
                     .container_filter = request.container_filter,
@@ -240,51 +236,52 @@ assemble_consan_observation_product(const ProgramInventory &inventory,
       product.barrier_fragment_appended &&
       (!product.atomic_fence_fragment_required || product.atomic_fence_fragment_appended) &&
       plan.valid();
-  product.initial_coverage = ConSanCoverageLedger(std::move(plan));
+  product.initial_coverage = CoverageLedger(std::move(plan));
   if (!structurally_valid) {
     render_observation_diagnostics(inventory, product);
     if (product.diagnostics.empty()) {
       product.diagnostics.emplace_back(
-          request.engine == ConSanCapabilityEngine::SuperCollider
+          request.mode == Mode::SuperCollider
               ? "ConSan SuperCollider access policy produced an invalid observation plan"
-              : "ConSan MOI policy produced an invalid observation plan");
+              : "ConSan policy produced an invalid observation plan");
     }
   }
   return product;
 }
 
-ConSanObservationProduct assemble_consan_observation_product(const ProgramInventory &inventory,
-                                                             const ConSanRequest &request,
-                                                             const ConSanDebugOverrides &debug) {
-  const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
-  const std::optional<ConSanCapabilityEngine> engine =
-      consan_capability_engine(flavor, request.moi_engine);
-  if (!engine) {
-    ConSanObservationProduct product;
-    product.diagnostics.emplace_back("ConSan observation policy received an invalid engine");
+ObservationProduct assemble_observation_product(const ProgramInventory &inventory,
+                                                const Request &request,
+                                                const DebugOverrides &debug) {
+  const Mode mode = request.mode.value_or(Mode::None);
+  const std::optional<Mode> enabled_mode = consan::enabled_mode(mode);
+  if (!enabled_mode) {
+    ObservationProduct product;
+    product.diagnostics.emplace_back("ConSan observation policy received an invalid mode");
     return product;
   }
 
-  const bool moi = flavor == ConSanFlavor::Moi;
+  const bool uses_reports = mode == Mode::Default;
   const std::vector<PhysicalSiteId> synchronization_reservations =
-      moi ? ordinary_synchronization_reservations(inventory) : std::vector<PhysicalSiteId>{};
-  return assemble_consan_observation_product(
-      inventory, {
-                     .engine = *engine,
-                     .native_lds_enabled = moi || request.probe_lds_check_trap,
-                     .group_flat_enabled = moi || request.probe_flat_check_trap,
-                     .flat_provenance_mode = request.flat_provenance_mode,
-                     .barrier_tracking_enabled = moi ? request.moi_track_barriers : true,
-                     .include_atomic_fence_policy = moi,
-                     .atomic_fence_tracking_enabled = moi && request.moi_track_atomics,
-                     // SuperCollider's diagnostic selection filter must not shrink its
-                     // physical coverage denominator. MOI's candidate filter remains an
-                     // explicit diagnostic-only policy input during this migration.
-                     .container_filter =
-                         moi ? std::string_view(debug.test_kernel_name_filter) : std::string_view{},
-                     .kernel_name_allowlist = request.kernel_name_allowlist,
-                     .reserved_for_synchronization = synchronization_reservations,
-                 });
+      uses_reports ? ordinary_synchronization_reservations(inventory)
+                   : std::vector<PhysicalSiteId>{};
+  return assemble_observation_product(
+      inventory,
+      {
+          .mode = *enabled_mode,
+          .native_lds_enabled = uses_reports || request.probe_lds_check_trap,
+          .group_flat_enabled = uses_reports || request.probe_flat_check_trap,
+          .flat_provenance_mode = request.flat_provenance_mode,
+          .barrier_tracking_enabled = uses_reports ? request.track_barriers : true,
+          .include_atomic_fence_policy = uses_reports,
+          .atomic_fence_tracking_enabled = uses_reports && request.track_atomics,
+          // SuperCollider's diagnostic selection filter must not shrink its
+          // physical coverage denominator. ConSan's candidate filter remains an
+          // explicit diagnostic-only policy input during this migration.
+          .container_filter =
+              uses_reports ? std::string_view(debug.test_kernel_name_filter) : std::string_view{},
+          .kernel_name_allowlist = request.kernel_name_allowlist,
+          .reserved_for_synchronization = synchronization_reservations,
+      });
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

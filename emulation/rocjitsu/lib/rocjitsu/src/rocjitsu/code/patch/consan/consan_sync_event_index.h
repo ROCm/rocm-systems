@@ -9,17 +9,16 @@
 #include <span>
 #include <vector>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
-[[nodiscard]] std::vector<ConSanSyncSequenceMembership>
-build_sync_sequence_membership_index(std::span<const ConSanSyncSequence> sequences,
-                                     size_t event_count);
+[[nodiscard]] std::vector<SyncSequenceMembership>
+build_sync_sequence_membership_index(std::span<const SyncSequence> sequences, size_t event_count);
 
 /// Verify that every declared sequence member resolves to the same ordered,
 /// bounded event in the immutable program inventory.
 [[nodiscard]] bool sequence_has_exact_members(const SynchronizationInventoryView &inventory,
-                                              const ConSanSyncSequence &sequence);
+                                              const SyncSequence &sequence);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan
 
 #endif // ROCJITSU_CODE_PATCH_CONSAN_SYNC_EVENT_INDEX_H

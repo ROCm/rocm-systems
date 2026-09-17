@@ -15,9 +15,11 @@
 #include <vector>
 
 namespace rocjitsu {
-
 class AmdGpuCodeObject;
 class Decoder;
+} // namespace rocjitsu
+
+namespace rocjitsu::consan {
 
 /// The exact control-flow witnesses retained by a structured barrier move.
 struct StructuredExecDiamondProof {
@@ -48,4 +50,4 @@ prove_completing_structured_diamond(const std::vector<std::unique_ptr<BasicBlock
                                     uint32_t source_index, uint32_t destination_index,
                                     uint64_t barrier_begin, uint64_t destination_offset);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

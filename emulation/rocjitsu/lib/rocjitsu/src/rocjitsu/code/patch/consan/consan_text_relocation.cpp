@@ -23,16 +23,16 @@
 #include <string>
 #include <unordered_map>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 namespace {
 
-struct ConSanRelocatedText {
+struct RelocatedText {
   std::vector<uint8_t> image;
   std::vector<TranslatedTextPlacement> placements;
   std::vector<ClientTextMarkerPlacement> marker_placements;
   uint64_t text_size = 0;
-  std::optional<ConSanTextRelocationProof> relocation;
+  std::optional<TextRelocationProof> relocation;
 };
 
 enum class FragmentMarkerRole : uint64_t {
@@ -45,27 +45,27 @@ enum class FragmentMarkerRole : uint64_t {
   return (fragment_id << 2u) | static_cast<uint64_t>(role);
 }
 
-[[nodiscard]] bool fragment_applies_to_owner(const ConSanTextFragment &fragment,
+[[nodiscard]] bool fragment_applies_to_owner(const TextFragment &fragment,
                                              const ProgramInventory &inventory,
                                              uint64_t owner_source_entry) {
   if (fragment.patch.owner_descriptor_file_offsets.empty())
     return true;
-  return std::ranges::any_of(fragment.patch.owner_descriptor_file_offsets,
-                             [&](uint64_t descriptor_file_offset) {
-                               const ConSanProgramContainer *owner =
-                                   inventory.find_kernel_by_descriptor(descriptor_file_offset);
-                               return owner != nullptr && owner->has_text_range &&
-                                      owner->entry_text_offset == owner_source_entry;
-                             });
+  return std::ranges::any_of(
+      fragment.patch.owner_descriptor_file_offsets, [&](uint64_t descriptor_file_offset) {
+        const ProgramContainer *owner = inventory.find_kernel_by_descriptor(descriptor_file_offset);
+        return owner != nullptr && owner->has_text_range &&
+               owner->entry_text_offset == owner_source_entry;
+      });
 }
 
-[[nodiscard]] std::optional<InstructionRewrite> compose_consan_text_fragments(
-    std::span<const ConSanTextFragment *const> candidates, const InstructionRewriteContext &context,
-    const ProgramInventory &inventory, std::span<const uint8_t> source_text, rj_code_arch_t arch,
-    std::vector<std::string> &errors) {
-  std::vector<const ConSanTextFragment *> applicable;
-  for (const ConSanTextFragment *fragment : candidates) {
-    if (fragment != nullptr && fragment->kind != ConSanTextFragmentKind::EntryPrefix &&
+[[nodiscard]] std::optional<InstructionRewrite>
+compose_text_fragments(std::span<const TextFragment *const> candidates,
+                       const InstructionRewriteContext &context, const ProgramInventory &inventory,
+                       std::span<const uint8_t> source_text, rj_code_arch_t arch,
+                       std::vector<std::string> &errors) {
+  std::vector<const TextFragment *> applicable;
+  for (const TextFragment *fragment : candidates) {
+    if (fragment != nullptr && fragment->kind != TextFragmentKind::EntryPrefix &&
         fragment_applies_to_owner(*fragment, inventory, context.owner_entry_source_offset)) {
       applicable.push_back(fragment);
     }
@@ -77,24 +77,24 @@ enum class FragmentMarkerRole : uint64_t {
   if (source_size == 0u || source_size % sizeof(uint32_t) != 0u ||
       context.source_offset > source_text.size() ||
       source_size > source_text.size() - context.source_offset ||
-      std::ranges::any_of(applicable, [&](const ConSanTextFragment *fragment) {
+      std::ranges::any_of(applicable, [&](const TextFragment *fragment) {
         return fragment->id == 0u || fragment->patch.original_size != source_size;
       })) {
     errors.emplace_back("ConSan text fragments disagree on their bounded source span");
     return std::nullopt;
   }
 
-  const ConSanTextFragment *replacement = nullptr;
-  for (const ConSanTextFragment *fragment : applicable) {
+  const TextFragment *replacement = nullptr;
+  for (const TextFragment *fragment : applicable) {
     const bool invalid_shape =
-        (fragment->kind == ConSanTextFragmentKind::Prefix &&
+        (fragment->kind == TextFragmentKind::Prefix &&
          (!fragment->replacement_words.empty() || !fragment->after_words.empty())) ||
-        (fragment->kind == ConSanTextFragmentKind::Replacement &&
+        (fragment->kind == TextFragmentKind::Replacement &&
          (!fragment->before_words.empty() || !fragment->after_words.empty() ||
           fragment->replacement_words.empty()));
     const bool supplies_replacement =
-        fragment->kind == ConSanTextFragmentKind::Replacement ||
-        (fragment->kind == ConSanTextFragmentKind::Around && !fragment->replacement_words.empty());
+        fragment->kind == TextFragmentKind::Replacement ||
+        (fragment->kind == TextFragmentKind::Around && !fragment->replacement_words.empty());
     if (invalid_shape || (supplies_replacement && replacement != nullptr)) {
       errors.emplace_back("ConSan text fragments have an invalid composition shape");
       return std::nullopt;
@@ -105,28 +105,28 @@ enum class FragmentMarkerRole : uint64_t {
 
   InstructionRewrite rewrite;
   rewrite.source_size = source_size;
-  for (const ConSanTextFragment *fragment : applicable) {
+  for (const TextFragment *fragment : applicable) {
     rewrite.required_ordinary_sgpr_count = std::max<uint32_t>(rewrite.required_ordinary_sgpr_count,
                                                               fragment->patch.required_sgpr_count);
   }
   std::vector<uint32_t> composed;
-  const auto add_marker = [&](const ConSanTextFragment &fragment, FragmentMarkerRole role,
+  const auto add_marker = [&](const TextFragment &fragment, FragmentMarkerRole role,
                               uint64_t byte_offset) {
     rewrite.markers.push_back({.id = fragment_marker_id(fragment.id, role),
                                .byte_offset = static_cast<uint32_t>(byte_offset)});
   };
 
-  for (const ConSanTextFragment *fragment : applicable) {
-    if (fragment->kind != ConSanTextFragmentKind::Prefix)
+  for (const TextFragment *fragment : applicable) {
+    if (fragment->kind != TextFragmentKind::Prefix)
       continue;
     add_marker(*fragment, FragmentMarkerRole::Begin, composed.size() * sizeof(uint32_t));
     composed.insert(composed.end(), fragment->before_words.begin(), fragment->before_words.end());
     add_marker(*fragment, FragmentMarkerRole::End, composed.size() * sizeof(uint32_t));
   }
 
-  std::vector<const ConSanTextFragment *> around;
-  for (const ConSanTextFragment *fragment : applicable) {
-    if (fragment->kind != ConSanTextFragmentKind::Around)
+  std::vector<const TextFragment *> around;
+  for (const TextFragment *fragment : applicable) {
+    if (fragment->kind != TextFragmentKind::Around)
       continue;
     const uint64_t begin = composed.size() * sizeof(uint32_t);
     add_marker(*fragment, FragmentMarkerRole::Begin, begin);
@@ -137,9 +137,9 @@ enum class FragmentMarkerRole : uint64_t {
   const uint64_t replacement_begin = composed.size() * sizeof(uint32_t);
   uint64_t guest_offset = replacement_begin;
   if (replacement != nullptr) {
-    if (replacement->kind == ConSanTextFragmentKind::Replacement)
+    if (replacement->kind == TextFragmentKind::Replacement)
       add_marker(*replacement, FragmentMarkerRole::Begin, replacement_begin);
-    if (replacement->kind == ConSanTextFragmentKind::Replacement &&
+    if (replacement->kind == TextFragmentKind::Replacement &&
         replacement->patch.relocated_guest_instruction_offset) {
       if (*replacement->patch.relocated_guest_instruction_offset >
           replacement->replacement_words.size() * sizeof(uint32_t)) {
@@ -150,7 +150,7 @@ enum class FragmentMarkerRole : uint64_t {
     }
     composed.insert(composed.end(), replacement->replacement_words.begin(),
                     replacement->replacement_words.end());
-    if (replacement->kind == ConSanTextFragmentKind::Replacement) {
+    if (replacement->kind == TextFragmentKind::Replacement) {
       add_marker(*replacement, FragmentMarkerRole::Guest, guest_offset);
       add_marker(*replacement, FragmentMarkerRole::End, composed.size() * sizeof(uint32_t));
     }
@@ -163,15 +163,15 @@ enum class FragmentMarkerRole : uint64_t {
     rewrite.preserved_source_span_byte_offset = static_cast<uint32_t>(replacement_begin);
   }
 
-  for (const ConSanTextFragment *fragment : around)
+  for (const TextFragment *fragment : around)
     add_marker(*fragment, FragmentMarkerRole::Guest, guest_offset);
   for (auto it = around.rbegin(); it != around.rend(); ++it) {
     composed.insert(composed.end(), (*it)->after_words.begin(), (*it)->after_words.end());
     add_marker(**it, FragmentMarkerRole::End, composed.size() * sizeof(uint32_t));
   }
-  const bool needs_bypass = std::ranges::any_of(applicable, [](const ConSanTextFragment *fragment) {
+  const bool needs_bypass = std::ranges::any_of(applicable, [](const TextFragment *fragment) {
     return std::ranges::any_of(fragment->branch_fixups, [](const auto &fixup) {
-      return fixup.target == ConSanTextFragmentBranchTarget::Bypass;
+      return fixup.target == TextFragmentBranchTarget::Bypass;
     });
   });
   std::optional<uint64_t> bypass_offset;
@@ -191,19 +191,19 @@ enum class FragmentMarkerRole : uint64_t {
       std::memcpy(composed.data() + old_size, source_text.data() + begin, end - begin);
     }
   }
-  const auto relative_marker = [&](const ConSanTextFragment &fragment, FragmentMarkerRole role) {
+  const auto relative_marker = [&](const TextFragment &fragment, FragmentMarkerRole role) {
     return std::ranges::find_if(rewrite.markers, [&](const InstructionRewriteMarker &marker) {
       return marker.id == fragment_marker_id(fragment.id, role);
     });
   };
-  for (const ConSanTextFragment *fragment : applicable) {
+  for (const TextFragment *fragment : applicable) {
     const auto begin = relative_marker(*fragment, FragmentMarkerRole::Begin);
-    for (const ConSanTextFragmentBranchFixup &fixup : fragment->branch_fixups) {
-      const auto marker_target = fixup.target == ConSanTextFragmentBranchTarget::Guest
+    for (const TextFragmentBranchFixup &fixup : fragment->branch_fixups) {
+      const auto marker_target = fixup.target == TextFragmentBranchTarget::Guest
                                      ? relative_marker(*fragment, FragmentMarkerRole::Guest)
                                      : relative_marker(*fragment, FragmentMarkerRole::End);
       const std::optional<uint64_t> target_offset =
-          fixup.target == ConSanTextFragmentBranchTarget::Bypass
+          fixup.target == TextFragmentBranchTarget::Bypass
               ? bypass_offset
               : (marker_target == rewrite.markers.end()
                      ? std::nullopt
@@ -242,55 +242,51 @@ enum class FragmentMarkerRole : uint64_t {
 [[nodiscard]] bool supports_local_text_transaction(std::span<const uint8_t> image,
                                                    const AmdGpuCodeObject &source,
                                                    rj_code_arch_t arch,
-                                                   std::span<const ConSanTextFragment> fragments,
+                                                   std::span<const TextFragment> fragments,
                                                    bool allow_instrumented_replacements = false) {
   if (source.text_sections().size() != 1u)
     return false;
   const Section &text = *source.text_sections().front();
-  return !fragments.empty() &&
-         std::ranges::all_of(fragments, [&](const ConSanTextFragment &fragment) {
-           const uint64_t replacement_size = fragment.replacement_words.size() * sizeof(uint32_t);
-           const bool direct =
-               fragment.kind == ConSanTextFragmentKind::Replacement &&
-               fragment.before_words.empty() && fragment.after_words.empty() &&
-               fragment.patch.original_size != 0u &&
-               fragment.patch.original_size % sizeof(uint32_t) == 0u &&
-               replacement_size >= fragment.patch.original_size &&
-               fragment.patch.anchor_offset <= text.size() &&
-               replacement_size <= text.size() - fragment.patch.anchor_offset &&
-               count_nop_padding(
-                   image,
-                   text.sectionOffset() + fragment.patch.anchor_offset +
-                       fragment.patch.original_size,
-                   arch,
-                   static_cast<uint32_t>((replacement_size - fragment.patch.original_size) /
-                                         sizeof(uint32_t))) ==
-                   (replacement_size - fragment.patch.original_size) / sizeof(uint32_t);
-           const bool around = fragment.kind == ConSanTextFragmentKind::Around &&
-                               fragment.replacement_words.empty() &&
-                               (!fragment.before_words.empty() || !fragment.after_words.empty());
-           return fragment.branch_fixups.empty() &&
-                  ((direct && (fragment.intent_ids.empty() || allow_instrumented_replacements)) ||
-                   (around && fragment.intent_ids.empty() &&
-                    fragment.patch.owner_descriptor_file_offsets.size() <= 1u &&
-                    fragment.patch.original_size != 0u));
-         });
+  return !fragments.empty() && std::ranges::all_of(fragments, [&](const TextFragment &fragment) {
+    const uint64_t replacement_size = fragment.replacement_words.size() * sizeof(uint32_t);
+    const bool direct =
+        fragment.kind == TextFragmentKind::Replacement && fragment.before_words.empty() &&
+        fragment.after_words.empty() && fragment.patch.original_size != 0u &&
+        fragment.patch.original_size % sizeof(uint32_t) == 0u &&
+        replacement_size >= fragment.patch.original_size &&
+        fragment.patch.anchor_offset <= text.size() &&
+        replacement_size <= text.size() - fragment.patch.anchor_offset &&
+        count_nop_padding(image,
+                          text.sectionOffset() + fragment.patch.anchor_offset +
+                              fragment.patch.original_size,
+                          arch,
+                          static_cast<uint32_t>((replacement_size - fragment.patch.original_size) /
+                                                sizeof(uint32_t))) ==
+            (replacement_size - fragment.patch.original_size) / sizeof(uint32_t);
+    const bool around = fragment.kind == TextFragmentKind::Around &&
+                        fragment.replacement_words.empty() &&
+                        (!fragment.before_words.empty() || !fragment.after_words.empty());
+    return fragment.branch_fixups.empty() &&
+           ((direct && (fragment.intent_ids.empty() || allow_instrumented_replacements)) ||
+            (around && fragment.intent_ids.empty() &&
+             fragment.patch.owner_descriptor_file_offsets.size() <= 1u &&
+             fragment.patch.original_size != 0u));
+  });
 }
 
 /// Realize small validation and scheduling edits without relocating the
 /// containing functions. The fragment vocabulary and publication path remain
 /// shared with whole-text instrumentation; this backend preserves the bounded
 /// direct-branch geometry required by fault and perturbation validation.
-[[nodiscard]] std::optional<ConSanRelocatedText>
-rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
-                            ConSanPatchedImageGrowthLimit growth_limit, std::string_view operation,
-                            std::span<const ConSanTextFragment> fragments,
-                            ConSanTransformArtifacts &result) {
+[[nodiscard]] std::optional<RelocatedText>
+rewrite_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
+                     PatchedImageGrowthLimit growth_limit, std::string_view operation,
+                     std::span<const TextFragment> fragments, TransformArtifacts &result) {
   const Section &text = *source.text_sections().front();
   const std::span<const uint8_t> source_text(reinterpret_cast<const uint8_t *>(text.data()),
                                              text.size());
   DbiPatchPlacementPlanner planner(arch, text.size());
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const PatchInfo &patch : result.patches) {
     if ((patch.original_size != 0u &&
          !planner.reserve_existing_range(patch.anchor_offset, patch.original_size)) ||
         (patch.trampoline_size != 0u &&
@@ -301,14 +297,14 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
   }
 
   struct PlannedFragment {
-    const ConSanTextFragment *fragment = nullptr;
+    const TextFragment *fragment = nullptr;
     std::optional<DbiPatchPlacement> placement;
   };
   std::vector<PlannedFragment> planned;
   const std::vector<LocalNopCave> caves =
       find_uncovered_nop_caves(source, result.program_inventory, arch);
-  for (const ConSanTextFragment &fragment : fragments) {
-    if (fragment.kind == ConSanTextFragmentKind::Replacement) {
+  for (const TextFragment &fragment : fragments) {
+    if (fragment.kind == TextFragmentKind::Replacement) {
       if (!planner.reserve_existing_range(fragment.patch.anchor_offset,
                                           fragment.replacement_words.size() * sizeof(uint32_t))) {
         result.errors.emplace_back("ConSan local text replacements overlap");
@@ -348,7 +344,7 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
       std::string placement_error;
       placement = planner.plan(request, &placement_error);
       if (!placement) {
-        result.outcome = ConSanTransformOutcome::Unsupported;
+        result.outcome = TransformOutcome::Unsupported;
         result.warnings.emplace_back(
             "ConSan " + std::string(operation) +
             " has no reachable local or appended cave: " + placement_error);
@@ -359,9 +355,9 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
   }
 
   std::vector<uint8_t> new_text(source_text.begin(), source_text.end());
-  ConSanRelocatedText rewritten;
+  RelocatedText rewritten;
   for (const PlannedFragment &item : planned) {
-    const ConSanTextFragment &fragment = *item.fragment;
+    const TextFragment &fragment = *item.fragment;
     const uint64_t owner = fragment.patch.owner_descriptor_file_offsets.empty()
                                ? 0u
                                : fragment.patch.owner_descriptor_file_offsets.front();
@@ -401,7 +397,7 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
         result.errors.emplace_back("ConSan local text transaction lost its appended cursor");
         return std::nullopt;
       }
-      append_consan_patch_words(new_text, emitted->trampoline_words);
+      append_patch_words(new_text, emitted->trampoline_words);
     } else {
       std::memcpy(new_text.data() + placement.body_offset, emitted->trampoline_words.data(),
                   emitted->trampoline_words.size() * sizeof(uint32_t));
@@ -429,9 +425,9 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
          .owner_descriptor_file_offset = owner});
   }
   CodeObjectPatcher patcher(source);
-  if (!replace_consan_text(patcher, new_text, growth_limit, operation,
-                           result.program_inventory.code_object_id(), result.errors,
-                           &result.transform_failure_cause))
+  if (!replace_text(patcher, new_text, growth_limit, operation,
+                    result.program_inventory.code_object_id(), result.errors,
+                    &result.transform_failure_cause))
     return std::nullopt;
   rewritten.image = std::move(patcher).emit();
   AmdGpuCodeObject output(rewritten.image.data(), rewritten.image.size());
@@ -445,10 +441,10 @@ rewrite_consan_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
 
 } // namespace
 
-std::optional<ConSanTextFragment> make_consan_around_text_fragment(
+std::optional<TextFragment> make_around_text_fragment(
     std::vector<uint32_t> words, uint32_t guest_offset, uint32_t guest_size,
-    std::span<const ConSanProbeIntentId> intent_ids, ConSanRuntimeStaticMapping runtime_mapping,
-    ConSanPatchInfo patch, std::vector<std::string> &errors, std::string_view subject,
+    std::span<const ProbeIntentId> intent_ids, RuntimeStaticMapping runtime_mapping,
+    PatchInfo patch, std::vector<std::string> &errors, std::string_view subject,
     std::optional<uint32_t> emitted_guest_size, bool replacement_preserves_source_span) {
   const uint64_t byte_size = words.size() * sizeof(uint32_t);
   const uint32_t emitted_size = emitted_guest_size.value_or(guest_size);
@@ -463,10 +459,10 @@ std::optional<ConSanTextFragment> make_consan_around_text_fragment(
   const size_t guest_word = guest_offset / sizeof(uint32_t);
   const size_t guest_words = emitted_size / sizeof(uint32_t);
   patch.relocated_guest_instruction_offset = 0u;
-  return ConSanTextFragment{
+  return TextFragment{
       .id = 0u,
-      .kind = ConSanTextFragmentKind::Around,
-      .intent_ids = std::vector<ConSanProbeIntentId>(intent_ids.begin(), intent_ids.end()),
+      .kind = TextFragmentKind::Around,
+      .intent_ids = std::vector<ProbeIntentId>(intent_ids.begin(), intent_ids.end()),
       .runtime_mapping = std::move(runtime_mapping),
       .before_words = std::vector<uint32_t>(words.begin(), words.begin() + guest_word),
       .replacement_words = emitted_guest_size
@@ -481,37 +477,36 @@ std::optional<ConSanTextFragment> make_consan_around_text_fragment(
   };
 }
 
-bool stage_consan_text_rewrites(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                const ConSanDescriptorMutationBatch &descriptor_mutations,
-                                const ConSanDescriptorMutationPolicy &descriptor_policy,
-                                std::string_view subject, std::vector<ConSanTextFragment> fragments,
-                                ConSanTransformArtifacts &result) {
+bool stage_text_rewrites(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                         const DescriptorMutationBatch &descriptor_mutations,
+                         const DescriptorMutationPolicy &descriptor_policy,
+                         std::string_view subject, std::vector<TextFragment> fragments,
+                         TransformArtifacts &result) {
   const auto source =
       result.replacement.empty()
           ? std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                                      code_object.image_size())
           : std::span<const uint8_t>(result.replacement);
   std::vector<uint8_t> descriptor_image(source.begin(), source.end());
-  if (!apply_consan_descriptor_mutations_to_bytes(descriptor_image, result.program_inventory,
-                                                  descriptor_mutations, descriptor_policy, arch,
-                                                  subject, result.errors))
+  if (!apply_descriptor_mutations_to_bytes(descriptor_image, result.program_inventory,
+                                           descriptor_mutations, descriptor_policy, arch, subject,
+                                           result.errors))
     return false;
 
   result.replacement = std::move(descriptor_image);
-  return stage_consan_text_fragments(std::move(fragments), result);
+  return stage_text_fragments(std::move(fragments), result);
 }
 
-bool stage_consan_text_fragments(std::vector<ConSanTextFragment> fragments,
-                                 ConSanTransformArtifacts &result) {
-  append_consan_text_fragments(std::move(fragments), result.staged_text_fragments);
+bool stage_text_fragments(std::vector<TextFragment> fragments, TransformArtifacts &result) {
+  append_text_fragments(std::move(fragments), result.staged_text_fragments);
   result.mark_modified();
   return true;
 }
 
-void append_consan_text_fragments(std::vector<ConSanTextFragment> fragments,
-                                  std::vector<ConSanTextFragment> &transaction) {
+void append_text_fragments(std::vector<TextFragment> fragments,
+                           std::vector<TextFragment> &transaction) {
   uint64_t next_fragment_id = transaction.size() + 1u;
-  for (ConSanTextFragment &fragment : fragments)
+  for (TextFragment &fragment : fragments)
     fragment.id = next_fragment_id++;
   transaction.insert(transaction.end(), std::make_move_iterator(fragments.begin()),
                      std::make_move_iterator(fragments.end()));
@@ -519,12 +514,12 @@ void append_consan_text_fragments(std::vector<ConSanTextFragment> fragments,
 
 namespace {
 
-std::optional<ConSanRelocatedText>
-relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_arch_t arch,
-                     ConSanPatchedImageGrowthLimit growth_limit, std::string_view operation,
-                     ConSanTransformArtifacts &result) {
+std::optional<RelocatedText> relocate_text(std::span<const uint8_t> descriptor_patched_image,
+                                           rj_code_arch_t arch,
+                                           PatchedImageGrowthLimit growth_limit,
+                                           std::string_view operation, TransformArtifacts &result) {
   const auto &fragments = result.staged_text_fragments;
-  const ConSanCodeObjectId &input_id = result.program_inventory.code_object_id();
+  const CodeObjectId &input_id = result.program_inventory.code_object_id();
   std::vector<std::string> &errors = result.errors;
   const std::string error_prefix = "ConSan " + std::string(operation);
   AmdGpuCodeObject source(descriptor_patched_image.data(), descriptor_patched_image.size());
@@ -537,13 +532,13 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   const std::span<const uint8_t> source_text(
       reinterpret_cast<const uint8_t *>(source.text_sections().front()->data()), source_text_size);
   if (supports_local_text_transaction(descriptor_patched_image, source, arch, fragments))
-    return rewrite_consan_text_locally(source, arch, growth_limit, operation, fragments, result);
+    return rewrite_text_locally(source, arch, growth_limit, operation, fragments, result);
   const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
-  const auto budget = consan_patched_image_growth_budget(
-      growth_limit, input_image_bytes, descriptor_patched_image.size());
-  const auto limit = consan_patched_image_growth_limit_bytes(growth_limit, input_image_bytes);
+  const auto budget =
+      patched_image_growth_budget(growth_limit, input_image_bytes, descriptor_patched_image.size());
+  const auto limit = patched_image_growth_limit_bytes(growth_limit, input_image_bytes);
   const std::string policy =
-      consan_patched_image_growth_policy_description(growth_limit, input_image_bytes);
+      patched_image_growth_policy_description(growth_limit, input_image_bytes);
   if (!budget || !limit) {
     errors.emplace_back(error_prefix + " has an invalid patched-image growth policy (" + policy +
                         ")");
@@ -555,15 +550,15 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   translator_options.preserve_source_descriptor_resources = true;
   const auto &preapplied_code_ranges = result.program_inventory.preapplied_mutation().code_ranges;
   const bool every_fragment_has_owners =
-      std::ranges::all_of(fragments, [](const ConSanTextFragment &fragment) {
+      std::ranges::all_of(fragments, [](const TextFragment &fragment) {
         return !fragment.patch.owner_descriptor_file_offsets.empty();
       });
-  const bool has_undecoded_container = std::ranges::any_of(
-      result.program_inventory.containers(),
-      [](const ConSanProgramContainer &container) { return !container.decoded; });
+  const bool has_undecoded_container =
+      std::ranges::any_of(result.program_inventory.containers(),
+                          [](const ProgramContainer &container) { return !container.decoded; });
   const bool use_partial_translation = every_fragment_has_owners && has_undecoded_container;
   if (use_partial_translation) {
-    for (const ConSanTextFragment &fragment : fragments) {
+    for (const TextFragment &fragment : fragments) {
       translator_options.source_kernel_descriptor_offsets.insert(
           translator_options.source_kernel_descriptor_offsets.end(),
           fragment.patch.owner_descriptor_file_offsets.begin(),
@@ -578,7 +573,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
                                                      preapplied_code_ranges.size() +
                                                      result.patches.size());
   if (use_partial_translation) {
-    for (const ConSanProgramContainer &container : result.program_inventory.containers()) {
+    for (const ProgramContainer &container : result.program_inventory.containers()) {
       if (container.decoded && container.has_text_range && container.code_size != 0u) {
         translator_options.source_text_code_ranges.push_back(
             {.start_offset = container.entry_text_offset, .size = container.code_size});
@@ -594,21 +589,21 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
           {.start_offset = function.entry_text_offset, .size = function.code_size});
     }
   }
-  const bool has_preexisting_code =
-      !preapplied_code_ranges.empty() ||
-      std::ranges::any_of(result.patches,
-                          [](const ConSanPatchInfo &patch) { return patch.trampoline_size != 0u; });
-  for (const ConSanPreappliedCodeRange &range : preapplied_code_ranges) {
+  const bool has_preexisting_code = !preapplied_code_ranges.empty() ||
+                                    std::ranges::any_of(result.patches, [](const PatchInfo &patch) {
+                                      return patch.trampoline_size != 0u;
+                                    });
+  for (const PreappliedCodeRange &range : preapplied_code_ranges) {
     translator_options.source_text_code_ranges.push_back(
         {.start_offset = range.text_offset, .size = range.size});
   }
-  for (const ConSanPatchInfo &patch : result.patches) {
+  for (const PatchInfo &patch : result.patches) {
     if (patch.trampoline_size == 0u)
       continue;
     translator_options.source_text_code_ranges.push_back(
         {.start_offset = patch.trampoline_offset, .size = patch.trampoline_size});
   }
-  if (const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (const TargetProfile *target = target_profile(arch);
       target != nullptr &&
       target->identity_translation_revision != ProcessorRevision::Unspecified) {
     translator_options.input_revision = target->identity_translation_revision;
@@ -619,14 +614,12 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
     return std::nullopt;
   }
   const auto *header = reinterpret_cast<const Elf64_Ehdr *>(descriptor_patched_image.data());
-  std::unordered_map<uint64_t, std::vector<const ConSanTextFragment *>>
-      instruction_fragments_by_offset;
-  std::unordered_map<uint64_t, std::vector<const ConSanTextFragment *>> entry_fragments_by_offset;
+  std::unordered_map<uint64_t, std::vector<const TextFragment *>> instruction_fragments_by_offset;
+  std::unordered_map<uint64_t, std::vector<const TextFragment *>> entry_fragments_by_offset;
   instruction_fragments_by_offset.reserve(fragments.size());
-  for (const ConSanTextFragment &fragment : fragments) {
-    auto &index = fragment.kind == ConSanTextFragmentKind::EntryPrefix
-                      ? entry_fragments_by_offset
-                      : instruction_fragments_by_offset;
+  for (const TextFragment &fragment : fragments) {
+    auto &index = fragment.kind == TextFragmentKind::EntryPrefix ? entry_fragments_by_offset
+                                                                 : instruction_fragments_by_offset;
     index[fragment.patch.anchor_offset].push_back(&fragment);
   }
   BinaryTranslator translator(arch, arch, header->e_flags & EF_AMDGPU_MACH, translator_options);
@@ -636,7 +629,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
     const auto candidates = entry_fragments_by_offset.find(context.source_entry_offset);
     if (candidates == entry_fragments_by_offset.end())
       return std::nullopt;
-    for (const ConSanTextFragment *fragment : candidates->second) {
+    for (const TextFragment *fragment : candidates->second) {
       if (!fragment_applies_to_owner(*fragment, result.program_inventory,
                                      context.source_entry_offset)) {
         continue;
@@ -660,8 +653,8 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
         const auto candidates = instruction_fragments_by_offset.find(context.source_offset);
         if (candidates == instruction_fragments_by_offset.end())
           return std::nullopt;
-        return compose_consan_text_fragments(candidates->second, context, result.program_inventory,
-                                             source_text, arch, errors);
+        return compose_text_fragments(candidates->second, context, result.program_inventory,
+                                      source_text, arch, errors);
       });
   TranslatedCodeObject translated = translator.translate(source);
   if ((!translated.dispatchable() && !translated.rejected_text_file_growth) || !errors.empty()) {
@@ -681,23 +674,24 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   }
 
   const size_t required_growth = translated.rejected_text_file_growth
-      ? util::saturating_add(budget->existing_growth_bytes, *translated.rejected_text_file_growth)
-      : (translated.elf_bytes.size() > input_image_bytes
-             ? translated.elf_bytes.size() - input_image_bytes
-             : 0u);
+                                     ? util::saturating_add(budget->existing_growth_bytes,
+                                                            *translated.rejected_text_file_growth)
+                                     : (translated.elf_bytes.size() > input_image_bytes
+                                            ? translated.elf_bytes.size() - input_image_bytes
+                                            : 0u);
   if (required_growth > *limit) {
     if (!has_preexisting_code &&
         supports_local_text_transaction(descriptor_patched_image, source, arch, fragments,
                                         /*allow_instrumented_replacements=*/true)) {
       auto in_place =
-          rewrite_consan_text_locally(source, arch, growth_limit, operation, fragments, result);
+          rewrite_text_locally(source, arch, growth_limit, operation, fragments, result);
       const size_t in_place_growth = in_place && in_place->image.size() > input_image_bytes
                                          ? in_place->image.size() - input_image_bytes
                                          : 0u;
       if (in_place && in_place_growth <= *limit)
         return in_place;
     }
-    result.transform_failure_cause = ConSanTransformFailureCause::PatchedImageGrowthLimit;
+    result.transform_failure_cause = TransformFailureCause::PatchedImageGrowthLimit;
     errors.emplace_back(error_prefix + " rejected patched-image file growth: required total " +
                         std::to_string(required_growth) + " bytes, limit " +
                         std::to_string(*limit) + " bytes (policy " + policy + ")");
@@ -713,7 +707,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   // has already applied its exact ABI/resource transaction to the input
   // descriptors, so retain those bytes rather than accepting DBT's general
   // cross-target descriptor normalization as a second owner of the ABI.
-  ConSanTextRelocationProof relocation_proof{
+  TextRelocationProof relocation_proof{
       .source_text_size = source_text_size,
       .descriptor_rsrc1_deltas = {},
   };
@@ -768,7 +762,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
                                                  &AmdGpuKernelInfo::descriptor_file_offset);
     if (active_kernel == source.kernels().end())
       return active_descriptor_offset;
-    const ConSanProgramContainer *canonical =
+    const ProgramContainer *canonical =
         result.program_inventory.find_kernel_by_name(active_kernel->name);
     return canonical != nullptr ? canonical->descriptor_file_offset : active_descriptor_offset;
   };
@@ -780,7 +774,7 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
     placement.owner_descriptor_file_offset =
         canonical_descriptor_offset(placement.owner_descriptor_file_offset);
   }
-  return ConSanRelocatedText{
+  return RelocatedText{
       .image = std::move(translated.elf_bytes),
       .placements = std::move(translated.text_placements),
       .marker_placements = std::move(translated.client_marker_placements),
@@ -791,17 +785,17 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
 
 } // namespace
 
-bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj_code_arch_t arch,
-                                   ConSanPatchedImageGrowthLimit growth_limit,
-                                   std::string_view subject, ConSanTransformArtifacts &result) {
+bool finalize_text_rewrites(std::span<const uint8_t> descriptor_image, rj_code_arch_t arch,
+                            PatchedImageGrowthLimit growth_limit, std::string_view subject,
+                            TransformArtifacts &result) {
   if (result.staged_text_fragments.empty())
     return true;
 
-  auto relocated = relocate_consan_text(descriptor_image, arch, growth_limit, subject, result);
+  auto relocated = relocate_text(descriptor_image, arch, growth_limit, subject, result);
   if (!relocated)
     return false;
-  std::vector<ConSanPatchInfo> placed_patches;
-  std::vector<ConSanCommittedLowering> commits;
+  std::vector<PatchInfo> placed_patches;
+  std::vector<CommittedLowering> commits;
   commits.reserve(result.staged_text_fragments.size());
   std::unordered_map<uint64_t, std::vector<const TranslatedTextPlacement *>>
       rewritten_placements_by_source_offset;
@@ -815,8 +809,7 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
   marker_placements_by_id.reserve(relocated->marker_placements.size());
   for (const ClientTextMarkerPlacement &placement : relocated->marker_placements)
     marker_placements_by_id[placement.id].push_back(&placement);
-  const auto marker_for = [&](const ConSanTextFragment &fragment, FragmentMarkerRole role,
-                              uint64_t owner,
+  const auto marker_for = [&](const TextFragment &fragment, FragmentMarkerRole role, uint64_t owner,
                               uint64_t source_offset) -> const ClientTextMarkerPlacement * {
     const auto candidates = marker_placements_by_id.find(fragment_marker_id(fragment.id, role));
     if (candidates == marker_placements_by_id.end())
@@ -828,12 +821,11 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
         });
     return placement == candidates->second.end() ? nullptr : *placement;
   };
-  for (ConSanTextFragment &staged : result.staged_text_fragments) {
-    const bool in_place =
-        !relocated->relocation && staged.kind == ConSanTextFragmentKind::Replacement;
-    std::optional<ConSanPatchInfo> primary;
-    std::vector<ConSanPatchInfo> fragment_placements;
-    if (staged.kind == ConSanTextFragmentKind::EntryPrefix) {
+  for (TextFragment &staged : result.staged_text_fragments) {
+    const bool in_place = !relocated->relocation && staged.kind == TextFragmentKind::Replacement;
+    std::optional<PatchInfo> primary;
+    std::vector<PatchInfo> fragment_placements;
+    if (staged.kind == TextFragmentKind::EntryPrefix) {
       for (uint64_t owner : staged.patch.owner_descriptor_file_offsets) {
         const auto begin =
             marker_for(staged, FragmentMarkerRole::Begin, owner, staged.patch.anchor_offset);
@@ -842,7 +834,7 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
         if (begin == nullptr || end == nullptr || end->target_offset < begin->target_offset) {
           continue;
         }
-        ConSanPatchInfo placed = staged.patch;
+        PatchInfo placed = staged.patch;
         // Entry prefixes insert bytes before the source entry; they do not
         // consume or overwrite an original instruction range.
         placed.original_size = 0u;
@@ -890,11 +882,11 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
       }
     }
     const auto rewritten = rewritten_placements_by_source_offset.find(staged.patch.anchor_offset);
-    if (staged.kind != ConSanTextFragmentKind::EntryPrefix &&
+    if (staged.kind != TextFragmentKind::EntryPrefix &&
         rewritten != rewritten_placements_by_source_offset.end()) {
       for (const TranslatedTextPlacement *placement_ptr : rewritten->second) {
         const TranslatedTextPlacement &placement = *placement_ptr;
-        ConSanPatchInfo placed = staged.patch;
+        PatchInfo placed = staged.patch;
         if (in_place) {
           placed.trampoline_offset = placement.target_offset;
           placed.original_size =
@@ -962,7 +954,7 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
                                    " cloned one semantic synchronization relocation");
         return false;
       }
-      for (const ConSanTextFragmentSyncRelocation &semantic : staged.sync_relocations) {
+      for (const TextFragmentSyncRelocation &semantic : staged.sync_relocations) {
         if (semantic.fragment_relative_offset > primary->trampoline_size) {
           result.errors.emplace_back("ConSan " + std::string(subject) +
                                      " has an out-of-range synchronization relocation");
@@ -970,13 +962,13 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
         }
         result.synchronization_mutation.events.push_back(
             {.source_event = semantic.source_event,
-             .kind = ConSanSyncEventMutationKind::Relocated,
+             .kind = SyncEventMutationKind::Relocated,
              .relocated_text_offset =
                  primary->trampoline_offset + semantic.fragment_relative_offset});
       }
     }
     if (!staged.intent_ids.empty()) {
-      ConSanPatchInfo primary_location = *primary;
+      PatchInfo primary_location = *primary;
       // A relocated fragment replaces its source instruction; unlike the old
       // trampoline pipeline, no instrumented bytes remain at the source
       // coordinate. Keep original_size in the public patch description, but
@@ -987,16 +979,15 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
       // validated below. Shared helper fragments can produce several emitted
       // locations for one intent set, and moving here would leave later clone
       // validation without the access attribution required by that intent.
-      ConSanRuntimeStaticMapping runtime_mapping = staged.runtime_mapping;
-      if (auto *sampled = runtime_mapping.sampled()) {
-        for (ConSanSampledStaticAccessMapping &mapping : *sampled) {
+      RuntimeStaticMapping runtime_mapping = staged.runtime_mapping;
+      if (auto *accesses = runtime_mapping.accesses()) {
+        for (StaticAccessMapping &mapping : *accesses) {
           mapping.emitted_probe_text_offset = primary_location.trampoline_offset;
           mapping.relocated_guest_text_offset = primary_location.relocated_guest_instruction_offset;
         }
       }
-      auto commit =
-          make_consan_instrumented_patch_lowering(result.observation_plan(), staged.intent_ids,
-                                                  primary_location, std::move(runtime_mapping));
+      auto commit = make_instrumented_patch_lowering(result.observation_plan(), staged.intent_ids,
+                                                     primary_location, std::move(runtime_mapping));
       if (!commit) {
         result.errors.emplace_back("ConSan " + std::string(subject) +
                                    " produced an invalid intent-bound lowering");
@@ -1004,18 +995,18 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
         return false;
       }
       for (size_t index = 1u; index < fragment_placements.size(); ++index) {
-        ConSanPatchInfo clone_location = fragment_placements[index];
+        PatchInfo clone_location = fragment_placements[index];
         if (!in_place)
           clone_location.original_size = 0u;
-        auto clone = make_consan_instrumented_patch_lowering(
-            result.observation_plan(), staged.intent_ids, clone_location, staged.runtime_mapping);
+        auto clone = make_instrumented_patch_lowering(result.observation_plan(), staged.intent_ids,
+                                                      clone_location, staged.runtime_mapping);
         if (!clone) {
           result.errors.emplace_back("ConSan " + std::string(subject) +
                                      " produced invalid cloned lowering geometry");
           result.discard_candidate_modification();
           return false;
         }
-        for (ConSanCommittedLoweringLocation &location : clone->locations) {
+        for (CommittedLoweringLocation &location : clone->locations) {
           if (std::ranges::find(commit->locations, location) == commit->locations.end())
             commit->locations.push_back(std::move(location));
         }
@@ -1045,4 +1036,4 @@ bool finalize_consan_text_rewrites(std::span<const uint8_t> descriptor_image, rj
   return true;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

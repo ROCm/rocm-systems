@@ -12,7 +12,7 @@
 #include <array>
 #include <cstring>
 
-namespace rocjitsu::consan_validation_target_detail {
+namespace rocjitsu::consan::validation_target_detail {
 namespace {
 
 [[nodiscard]] bool same_size(std::span<const uint8_t> before, std::span<const uint8_t> after,
@@ -26,9 +26,8 @@ namespace {
   return result;
 }
 
-[[nodiscard]] ConSanEncodedMutationValidation mutation_validation(bool valid) {
-  return valid ? ConSanEncodedMutationValidation::Valid
-               : ConSanEncodedMutationValidation::InvalidMutation;
+[[nodiscard]] EncodedMutationValidation mutation_validation(bool valid) {
+  return valid ? EncodedMutationValidation::Valid : EncodedMutationValidation::InvalidMutation;
 }
 
 [[nodiscard]] bool valid_flat_address_mutation(const std::array<uint32_t, 3> &before,
@@ -57,40 +56,39 @@ namespace {
 
 } // namespace
 
-ConSanEncodedMutationValidation
-validate_rdna4_cdna5_encoded_mutation(ConSanEncodedMutationKind kind,
-                                      std::span<const uint8_t> before,
-                                      std::span<const uint8_t> after) {
+EncodedMutationValidation validate_rdna4_cdna5_encoded_mutation(EncodedMutationKind kind,
+                                                                std::span<const uint8_t> before,
+                                                                std::span<const uint8_t> after) {
   switch (kind) {
-  case ConSanEncodedMutationKind::OrdinaryGlobalAddress: {
+  case EncodedMutationKind::OrdinaryGlobalAddress: {
     if (!same_size(before, after, sizeof(rdna4::VglobalMachineInst)))
-      return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+      return EncodedMutationValidation::UnexpectedInstructionSize;
     return mutation_validation(valid_flat_address_mutation(words(before), words(after)));
   }
-  case ConSanEncodedMutationKind::OrdinaryGlobalScope: {
+  case EncodedMutationKind::OrdinaryGlobalScope: {
     if (!same_size(before, after, sizeof(rdna4::VglobalMachineInst)))
-      return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+      return EncodedMutationValidation::UnexpectedInstructionSize;
     const auto original = words(before);
     const uint32_t scope = (original[1] >> 18u) & 0x3u;
     return mutation_validation((scope == 2u || scope == 3u) &&
                                valid_scope_mutation(original, words(after)));
   }
-  case ConSanEncodedMutationKind::AtomicAddress: {
+  case EncodedMutationKind::AtomicAddress: {
     const bool ds = same_size(before, after, sizeof(rdna4::VdsMachineInst));
     const bool flat = same_size(before, after, sizeof(rdna4::VflatMachineInst));
     if (!ds && !flat)
-      return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+      return EncodedMutationValidation::UnexpectedInstructionSize;
     return mutation_validation(ds ? valid_ds_address_mutation(words(before), words(after))
                                   : valid_flat_address_mutation(words(before), words(after)));
   }
-  case ConSanEncodedMutationKind::AtomicScope:
+  case EncodedMutationKind::AtomicScope:
     if (same_size(before, after, sizeof(rdna4::VdsMachineInst)))
-      return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
+      return EncodedMutationValidation::UnsupportedInstructionEncoding;
     if (same_size(before, after, sizeof(rdna4::VflatMachineInst)))
       return mutation_validation(valid_scope_mutation(words(before), words(after)));
-    return ConSanEncodedMutationValidation::UnexpectedInstructionSize;
+    return EncodedMutationValidation::UnexpectedInstructionSize;
   }
-  return ConSanEncodedMutationValidation::UnsupportedInstructionEncoding;
+  return EncodedMutationValidation::UnsupportedInstructionEncoding;
 }
 
-} // namespace rocjitsu::consan_validation_target_detail
+} // namespace rocjitsu::consan::validation_target_detail

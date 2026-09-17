@@ -12,7 +12,7 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
 [[nodiscard]] bool block_reaches(const BasicBlock *begin, const BasicBlock *target,
@@ -222,4 +222,4 @@ prove_completing_structured_diamond(const std::vector<std::unique_ptr<BasicBlock
   };
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

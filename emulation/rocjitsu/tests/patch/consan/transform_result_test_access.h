@@ -8,7 +8,7 @@
 
 #include <utility>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Test-only access to static-artifact publication.
 ///
@@ -17,21 +17,20 @@ namespace rocjitsu {
 /// adapter publishes only the same shared artifact value returned by the
 /// production boundary through exact stage-record construction and validation.
 struct TransformResultTestAccess {
-  [[nodiscard]] static ConSanTransformDiagnosticReport
-  diagnostic_report(const TransformResult &result) {
-    return consan_transform_diagnostic_report(result);
+  [[nodiscard]] static TransformDiagnosticReport diagnostic_report(const TransformResult &result) {
+    return transform_diagnostic_report(result);
   }
 
   [[nodiscard]] static TransformResult
-  publish(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+  publish(std::span<const uint8_t> code_object_bytes, const Request &request,
           const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-          const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+          const DebugOverrides &debug, const MutationRequest &mutation,
           const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-          ConSanTransformArtifacts artifacts) {
+          TransformArtifacts artifacts) {
     return TransformResult::execute_test_transaction(code_object_bytes, request, transform_policy,
                                                      runtime_policy, debug, mutation, capabilities,
                                                      resources, std::move(artifacts));
   }
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

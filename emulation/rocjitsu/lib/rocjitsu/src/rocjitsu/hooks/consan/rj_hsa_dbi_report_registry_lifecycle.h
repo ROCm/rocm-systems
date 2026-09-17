@@ -15,7 +15,7 @@
 #include <cstring>
 #include <utility>
 
-namespace rocjitsu::consan_hook::detail {
+namespace rocjitsu::consan::hook::detail {
 
 struct AutoReportRegionSearch {
   CoreApiTable *core = nullptr;
@@ -165,4 +165,4 @@ void retire_auto_report_entries(std::array<Entry, Capacity> &entries, size_t &en
   }
 }
 
-} // namespace rocjitsu::consan_hook::detail
+} // namespace rocjitsu::consan::hook::detail

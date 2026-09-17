@@ -24,16 +24,8 @@
           "detector": "detected",
           "oracle": "fail"
         },
-        "record-replay": {
-          "detector": "detected",
-          "oracle": "fail"
-        },
-        "sampled": {
+        "default": {
           "detector": "not_detected",
-          "oracle": "fail"
-        },
-        "inline-shadow": {
-          "detector": "detected",
           "oracle": "fail"
         }
       }

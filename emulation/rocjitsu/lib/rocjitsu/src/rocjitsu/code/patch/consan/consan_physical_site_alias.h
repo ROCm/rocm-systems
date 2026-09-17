@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocjitsu::consan_detail {
+namespace rocjitsu::consan::detail {
 
 template <typename Candidate, typename ContainerName>
 void append_physical_site_alias_conflict(std::vector<std::string> &errors,
@@ -198,4 +198,4 @@ canonicalize_physical_site_aliases(std::vector<Candidate> &candidates,
       std::move(semantics_equal), [](Candidate &, const Candidate &) {});
 }
 
-} // namespace rocjitsu::consan_detail
+} // namespace rocjitsu::consan::detail

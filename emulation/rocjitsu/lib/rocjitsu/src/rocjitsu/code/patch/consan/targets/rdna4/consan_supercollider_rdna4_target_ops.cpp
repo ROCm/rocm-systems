@@ -11,7 +11,7 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_sc_target_detail {
+namespace rocjitsu::consan::supercollider_target_detail {
 namespace {
 
 [[nodiscard]] std::optional<uint8_t> flat_load_op_for_width(uint32_t width_bits) {
@@ -57,4 +57,4 @@ build_rdna4_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_b
   return words;
 }
 
-} // namespace rocjitsu::consan_sc_target_detail
+} // namespace rocjitsu::consan::supercollider_target_detail

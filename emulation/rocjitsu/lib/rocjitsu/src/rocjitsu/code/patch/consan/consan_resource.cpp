@@ -8,7 +8,7 @@
 #include <array>
 #include <cstdint>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 namespace {
 
@@ -30,7 +30,7 @@ namespace {
   return base <= limit && count <= static_cast<uint32_t>(limit) - base;
 }
 
-[[nodiscard]] std::optional<uint16_t> find_window(const ConSanRegisterRequest &request,
+[[nodiscard]] std::optional<uint16_t> find_window(const RegisterRequest &request,
                                                   const RegisterSet &live_before, uint16_t limit,
                                                   bool require_dead) {
   const uint32_t first = align_up(request.search_start, request.alignment);
@@ -46,20 +46,18 @@ namespace {
   return std::nullopt;
 }
 
-[[nodiscard]] uint16_t required_descriptor_count(const ConSanRegisterRequest &request,
-                                                 uint16_t base) {
+[[nodiscard]] uint16_t required_descriptor_count(const RegisterRequest &request, uint16_t base) {
   return static_cast<uint16_t>(std::max<uint32_t>(request.current_allocation_count,
                                                   static_cast<uint32_t>(base) + request.count));
 }
 
-[[nodiscard]] std::optional<ConSanRegisterPlan>
-plan_spill_window(const ConSanRegisterRequest &request, const RegisterSet &live_before,
-                  uint16_t limit) {
+[[nodiscard]] std::optional<RegisterPlan>
+plan_spill_window(const RegisterRequest &request, const RegisterSet &live_before, uint16_t limit) {
   const auto victim = find_window(request, live_before, limit, /*require_dead=*/false);
   if (!victim)
     return std::nullopt;
-  ConSanRegisterPlan plan;
-  plan.source = ConSanRegisterAllocationSource::SpillRequired;
+  RegisterPlan plan;
+  plan.source = RegisterAllocationSource::SpillRequired;
   plan.base = victim;
   plan.count = request.count;
   plan.required_descriptor_count = required_descriptor_count(request, *victim);
@@ -68,38 +66,37 @@ plan_spill_window(const ConSanRegisterRequest &request, const RegisterSet &live_
 
 } // namespace
 
-ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
-                                         const RegisterSet &live_before) {
-  ConSanRegisterPlan plan;
+RegisterPlan plan_registers(const RegisterRequest &request, const RegisterSet &live_before) {
+  RegisterPlan plan;
   plan.count = request.count;
   plan.required_descriptor_count = request.current_allocation_count;
   if (request.count == 0 || request.alignment == 0 || request.architecture_limit == 0 ||
       request.current_allocation_count > request.architecture_limit ||
       request.max_referenced_count > request.architecture_limit) {
-    plan.reason = ConSanRegisterPlanReason::InvalidRequest;
+    plan.reason = RegisterPlanReason::InvalidRequest;
     return plan;
   }
 
   if (request.explicit_base) {
     const uint16_t base = *request.explicit_base;
     if (base % request.alignment != 0) {
-      plan.reason = ConSanRegisterPlanReason::ExplicitMisaligned;
+      plan.reason = RegisterPlanReason::ExplicitMisaligned;
       return plan;
     }
     if (!range_fits(base, request.count, request.architecture_limit)) {
-      plan.reason = ConSanRegisterPlanReason::ExplicitOutOfRange;
+      plan.reason = RegisterPlanReason::ExplicitOutOfRange;
       return plan;
     }
     if (range_intersects(request.forbidden, request.reg_class, base, request.count)) {
-      plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
+      plan.reason = RegisterPlanReason::ForbiddenOverlap;
       return plan;
     }
     if (static_cast<uint32_t>(base) < request.max_referenced_count &&
         range_intersects(live_before, request.reg_class, base, request.count)) {
-      plan.reason = ConSanRegisterPlanReason::ExplicitLive;
+      plan.reason = RegisterPlanReason::ExplicitLive;
       return plan;
     }
-    plan.source = ConSanRegisterAllocationSource::Explicit;
+    plan.source = RegisterAllocationSource::Explicit;
     plan.base = base;
     plan.required_descriptor_count = required_descriptor_count(request, base);
     return plan;
@@ -113,13 +110,13 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
       if (auto spill = plan_spill_window(request, live_before, spill_limit))
         return *spill;
     }
-    plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+    plan.reason = RegisterPlanReason::NoLegalWindow;
     return plan;
   }
 
   if (auto dead = find_window(request, live_before, request.current_allocation_count,
                               /*require_dead=*/true)) {
-    plan.source = ConSanRegisterAllocationSource::LivenessDead;
+    plan.source = RegisterAllocationSource::LivenessDead;
     plan.base = dead;
     return plan;
   }
@@ -135,7 +132,7 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
                          request.count)) {
       continue;
     }
-    plan.source = ConSanRegisterAllocationSource::DescriptorGrowth;
+    plan.source = RegisterAllocationSource::DescriptorGrowth;
     plan.base = static_cast<uint16_t>(base);
     plan.required_descriptor_count = static_cast<uint16_t>(base + request.count);
     return plan;
@@ -148,7 +145,7 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
   // window below it is still valid after growing the smaller descriptors.
   if (auto dead = find_window(request, live_before, request.architecture_limit,
                               /*require_dead=*/true)) {
-    plan.source = ConSanRegisterAllocationSource::DescriptorGrowth;
+    plan.source = RegisterAllocationSource::DescriptorGrowth;
     plan.base = dead;
     plan.required_descriptor_count = required_descriptor_count(request, *dead);
     return plan;
@@ -161,32 +158,31 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
       return *spill;
   }
 
-  plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+  plan.reason = RegisterPlanReason::NoLegalWindow;
   return plan;
 }
 
-ConSanResourcePlanSummary
-summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans) {
-  ConSanResourcePlanSummary summary;
+ResourcePlanSummary summarize_resource_plans(std::span<const CandidateResourcePlan> plans) {
+  ResourcePlanSummary summary;
   const std::array alternative_counts = {
       &summary.alternative_selected,   &summary.alternative_rejected,
       &summary.alternative_superseded, &summary.alternative_contributed,
       &summary.alternative_vetoed,
   };
-  static_assert(static_cast<size_t>(ConSanResourcePlanAlternativeOutcome::Vetoed) + 1u == 5u);
+  static_assert(static_cast<size_t>(ResourcePlanAlternativeOutcome::Vetoed) + 1u == 5u);
   const std::array source_counts = {
       &summary.unsupported_plans,       &summary.explicit_plans, &summary.dead_plans,
       &summary.descriptor_growth_plans, &summary.spill_plans,
   };
-  static_assert(static_cast<size_t>(ConSanRegisterAllocationSource::SpillRequired) + 1u == 5u);
-  for (const ConSanCandidateResourcePlan &plan : plans) {
-    for (const ConSanResourcePlanAlternative &alternative : plan.alternatives) {
+  static_assert(static_cast<size_t>(RegisterAllocationSource::SpillRequired) + 1u == 5u);
+  for (const CandidateResourcePlan &plan : plans) {
+    for (const ResourcePlanAlternative &alternative : plan.alternatives) {
       ++summary.alternative_attempts;
-      const auto outcome = consan_resource_plan_alternative_outcome(plan, alternative);
+      const auto outcome = resource_plan_alternative_outcome(plan, alternative);
       ++*alternative_counts[static_cast<size_t>(outcome)];
     }
     ++*source_counts[static_cast<size_t>(plan.source)];
-    if (plan.source == ConSanRegisterAllocationSource::SpillRequired) {
+    if (plan.source == RegisterAllocationSource::SpillRequired) {
       summary.planned_spill_slot_bytes +=
           static_cast<size_t>(plan.scratch_vgpr_count) * SpillManager::kSlotBytes;
     }
@@ -194,8 +190,7 @@ summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> pla
   return summary;
 }
 
-void accumulate_consan_emitted_spill(ConSanResourcePlanSummary &summary,
-                                     const ConSanPatchAbiEffects &effects) {
+void accumulate_emitted_spill(ResourcePlanSummary &summary, const PatchAbiEffects &effects) {
   if (effects.spilled_vgpr_count == 0)
     return;
   ++summary.emitted_spill_patches;
@@ -203,4 +198,4 @@ void accumulate_consan_emitted_spill(ConSanResourcePlanSummary &summary,
       static_cast<size_t>(effects.spilled_vgpr_count) * SpillManager::kSlotBytes;
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

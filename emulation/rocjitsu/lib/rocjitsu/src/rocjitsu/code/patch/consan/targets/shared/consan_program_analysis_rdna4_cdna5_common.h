@@ -12,7 +12,7 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_program_analysis_target_detail {
+namespace rocjitsu::consan::program_analysis_target_detail {
 
 /// Map the RDNA4/CDNA5 cache-scope field into ConSan's causal vocabulary.
 ///
@@ -22,30 +22,30 @@ namespace rocjitsu::consan_program_analysis_target_detail {
 /// field remains alongside this product. A target's compiler-qualified
 /// workgroup acquire is a separate decoded fact because RDNA4 spells it with
 /// raw SE while CDNA5 spells it with raw CU.
-[[nodiscard]] inline constexpr std::optional<ConSanMemoryScope>
+[[nodiscard]] inline constexpr std::optional<MemoryScope>
 normalize_rdna4_cdna5_memory_scope(uint32_t raw_scope) {
   switch (raw_scope) {
   case 0:
-    return ConSanMemoryScope::Wavefront;
+    return MemoryScope::Wavefront;
   case 1:
-    return ConSanMemoryScope::Workgroup;
+    return MemoryScope::Workgroup;
   case 2:
-    return ConSanMemoryScope::Agent;
+    return MemoryScope::Agent;
   case 3:
-    return ConSanMemoryScope::System;
+    return MemoryScope::System;
   default:
     return std::nullopt;
   }
 }
 
-inline ConSanCacheOperationEncoding
+inline CacheOperationEncoding
 classify_rdna4_cdna5_cache_operation(std::string_view mnemonic,
                                      bool ordinary_acquire_mutation_supported) {
   if (mnemonic == "global_wb")
-    return {.operation = ConSanCacheOperation::Release};
+    return {.operation = CacheOperation::Release};
   if (mnemonic == "global_inv" || mnemonic == "s_dcache_inv") {
     return {
-        .operation = ConSanCacheOperation::Acquire,
+        .operation = CacheOperation::Acquire,
         .ordinary_acquire_mutation_supported =
             mnemonic == "global_inv" && ordinary_acquire_mutation_supported,
     };
@@ -53,9 +53,9 @@ classify_rdna4_cdna5_cache_operation(std::string_view mnemonic,
   return {};
 }
 
-inline ConSanWaitInstructionEncoding
-classify_rdna4_cdna5_wait_instruction(std::string_view mnemonic, uint32_t word,
-                                      rj_code_arch_t arch) {
+inline WaitInstructionEncoding classify_rdna4_cdna5_wait_instruction(std::string_view mnemonic,
+                                                                     uint32_t word,
+                                                                     rj_code_arch_t arch) {
   const bool bounded_release_counter_form =
       mnemonic == "s_wait_storecnt" || mnemonic == "s_wait_storecnt_dscnt" ||
       mnemonic == "s_wait_loadcnt" || mnemonic == "s_wait_loadcnt_dscnt";
@@ -64,7 +64,7 @@ classify_rdna4_cdna5_wait_instruction(std::string_view mnemonic, uint32_t word,
 }
 
 template <typename Raw>
-std::optional<ConSanScratchComponentEncoding>
+std::optional<ScratchComponentEncoding>
 decode_rdna4_cdna5_scratch_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(Raw))
     return std::nullopt;
@@ -72,7 +72,7 @@ decode_rdna4_cdna5_scratch_component(std::span<const uint8_t> instruction) {
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   if (raw.encoding != 0xedu || raw.vaddr != 0u)
     return std::nullopt;
-  return ConSanScratchComponentEncoding{
+  return ScratchComponentEncoding{
       .vector_address_vgpr = static_cast<uint16_t>(raw.vaddr),
       .load_data_vgpr = static_cast<uint16_t>(raw.vdst),
       .store_data_vgpr = static_cast<uint16_t>(raw.vsrc),
@@ -82,24 +82,24 @@ decode_rdna4_cdna5_scratch_component(std::span<const uint8_t> instruction) {
 }
 
 template <typename Raw>
-std::optional<ConSanLaneTransferEncoding>
+std::optional<LaneTransferEncoding>
 decode_rdna4_cdna5_lane_transfer(std::span<const uint8_t> instruction, int value_source_operand) {
   if (instruction.size() < sizeof(Raw))
     return std::nullopt;
   Raw raw{};
   std::memcpy(&raw, instruction.data(), sizeof(raw));
-  return ConSanLaneTransferEncoding{
+  return LaneTransferEncoding{
       .lane_selector = static_cast<uint32_t>(raw.src1),
       .value_source_operand = value_source_operand,
   };
 }
 
 template <typename Raw>
-ConSanVectorMemoryEncoding
+VectorMemoryEncoding
 make_rdna4_cdna5_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exact_size,
                                         bool ordinary_well_formed, bool ordinary_mutation_supported,
                                         uint32_t workgroup_acquire_scope) {
-  return ConSanVectorMemoryEncoding{
+  return VectorMemoryEncoding{
       .raw_op = static_cast<uint32_t>(raw.op),
       .raw_saddr = static_cast<uint32_t>(raw.saddr),
       .raw_nv = static_cast<uint32_t>(raw.nv),
@@ -118,7 +118,7 @@ make_rdna4_cdna5_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, boo
       .raw_scope = static_cast<uint32_t>(raw.scope),
       .raw_th = static_cast<uint32_t>(raw.th),
       .scope = normalize_rdna4_cdna5_memory_scope(static_cast<uint32_t>(raw.scope)),
-      .encoded_segment = ConSanEncodedFlatSegment::Unspecified,
+      .encoded_segment = EncodedFlatSegment::Unspecified,
       .scalar_provenance_sgpr = raw.saddr == null_saddr
                                     ? std::nullopt
                                     : std::optional<uint16_t>(static_cast<uint16_t>(raw.saddr)),
@@ -132,12 +132,12 @@ make_rdna4_cdna5_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, boo
 }
 
 template <typename Raw>
-ConSanVectorMemoryDecode
-decode_rdna4_cdna5_vector_memory(std::span<const uint8_t> instruction, uint32_t null_saddr,
-                                 uint32_t expected_encoding, bool mutation_supported,
-                                 uint32_t workgroup_acquire_scope) {
+VectorMemoryDecode decode_rdna4_cdna5_vector_memory(std::span<const uint8_t> instruction,
+                                                    uint32_t null_saddr, uint32_t expected_encoding,
+                                                    bool mutation_supported,
+                                                    uint32_t workgroup_acquire_scope) {
   if (instruction.size() < sizeof(Raw))
-    return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
+    return {.status = TargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   Raw raw{};
   std::memcpy(&raw, instruction.data(), sizeof(raw));
   const bool high_padding = [&] {
@@ -150,14 +150,13 @@ decode_rdna4_cdna5_vector_memory(std::span<const uint8_t> instruction, uint32_t 
   const bool well_formed = exact_size && raw.encoding == expected_encoding && raw.pad_8_13 == 0u &&
                            raw.pad_22_23 == 0u && high_padding && raw.pad_63 == 0u;
   return {
-      .status = ConSanTargetDecodeStatus::Decoded,
+      .status = TargetDecodeStatus::Decoded,
       .encoding = make_rdna4_cdna5_vector_memory_encoding(
           raw, null_saddr, exact_size, well_formed, mutation_supported, workgroup_acquire_scope),
   };
 }
 
-template <typename Raw>
-void fill_rdna4_cdna5_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw> void fill_rdna4_cdna5_flat_atomic_site(AtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   if constexpr (requires { raw.scale_offset; })
@@ -172,8 +171,7 @@ void fill_rdna4_cdna5_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-template <typename Raw>
-void fill_rdna4_cdna5_buffer_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw> void fill_rdna4_cdna5_buffer_atomic_site(AtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_vdata = static_cast<uint32_t>(raw.vdata);
   site.raw_rsrc = static_cast<uint32_t>(raw.rsrc);
@@ -186,8 +184,7 @@ void fill_rdna4_cdna5_buffer_atomic_site(ConSanAtomicSite &site, const Raw &raw)
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-template <typename Raw>
-void fill_rdna4_cdna5_ds_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw> void fill_rdna4_cdna5_ds_atomic_site(AtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_addr = static_cast<uint32_t>(raw.addr);
   site.raw_data0 = static_cast<uint32_t>(raw.data0);
@@ -198,7 +195,7 @@ void fill_rdna4_cdna5_ds_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
 
 template <typename DsRaw, typename FlatRaw, typename GlobalRaw, typename ScratchRaw,
           typename BufferRaw>
-bool decode_rdna4_cdna5_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+bool decode_rdna4_cdna5_atomic_site(AtomicSite &site, std::string_view mnemonic,
                                     std::span<const uint8_t> instruction) {
   if (mnemonic.starts_with("ds_") && instruction.size() >= sizeof(DsRaw)) {
     DsRaw raw{};
@@ -233,4 +230,4 @@ bool decode_rdna4_cdna5_atomic_site(ConSanAtomicSite &site, std::string_view mne
   return false;
 }
 
-} // namespace rocjitsu::consan_program_analysis_target_detail
+} // namespace rocjitsu::consan::program_analysis_target_detail

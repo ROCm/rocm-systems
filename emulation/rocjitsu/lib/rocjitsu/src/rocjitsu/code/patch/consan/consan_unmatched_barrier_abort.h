@@ -11,16 +11,15 @@
 #include <cstdint>
 #include <span>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 
 /// Replace selected statically unmatched barrier waits with a terminating
 /// instruction. The resulting bytes and patch proof remain part of the same
 /// lowering transaction and are independently validated before publication.
 void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanRequest &request,
-                                            const ConSanDebugOverrides &debug,
+                                            const Request &request, const DebugOverrides &debug,
                                             const MutationRequest &mutation,
                                             const TransformPolicy &transform_policy,
-                                            ConSanTransformArtifacts &result);
+                                            TransformArtifacts &result);
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan

@@ -8,61 +8,50 @@ target-specific status ledgers record workload qualification separately.
 The following compact projection is generated from the typed contract in
 `consan_capability_contract.h`. The host-side
 `ConSan.CapabilityManifestMatchesDocumentation` gate rejects drift in target,
-engine, or semantic-form availability without parsing the surrounding prose or
+mode, or semantic-form availability without parsing the surrounding prose or
 copying target-native mnemonic lists. "Associated only" means the form is not
-standalone evidence for that engine; it contributes ordering metadata only to
+standalone evidence for that mode; it contributes ordering metadata only to
 an admitted atomic sequence. Forms without a parenthesized qualifier are
-supported under the engine semantics described below. "Unsupported" records
-an engine-specific lowering gap for a form admitted by the target family.
+supported under the mode semantics described below. "Unsupported" records
+a mode-specific lowering gap for a form admitted by the target family.
 
 <!-- BEGIN GENERATED CONSAN CAPABILITY CONTRACT -->
-| Target | Engine | Access | Barrier | Atomic | Fence |
+| Target | Mode | Access | Barrier | Atomic | Fence |
 | --- | --- | --- | --- | --- | --- |
 | `gfx942` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
-| `gfx942` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
-| `gfx942` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
-| `gfx942` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx942` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 | `gfx950` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
-| `gfx950` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary |
-| `gfx950` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
-| `gfx950` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx950` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 | `gfx1100` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
-| `gfx1100` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary |
-| `gfx1100` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
-| `gfx1100` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
+| `gfx1100` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
 | `gfx1201` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only) | addressed ordinary (mutation only) |
-| `gfx1201` | Record/Replay | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary |
-| `gfx1201` | Sampled | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
-| `gfx1201` | Inline Shadow | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
+| `gfx1201` | ConSan | native LDS<br>group FLAT | workgroup | ordered FLAT<br>ordered VGLOBAL | addressed ordinary (associated only) |
 | `gfx1250` | SuperCollider | native LDS<br>group FLAT | workgroup (mutation only)<br>cluster (mutation only) | ordered FLAT (mutation only)<br>ordered VGLOBAL (mutation only)<br>ordered LDS (mutation only) | addressed ordinary (mutation only) |
-| `gfx1250` | Record/Replay | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary |
-| `gfx1250` | Sampled | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
-| `gfx1250` | Inline Shadow | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
+| `gfx1250` | ConSan | native LDS<br>group FLAT | workgroup<br>cluster | ordered FLAT<br>ordered VGLOBAL<br>ordered LDS<br>relaxed LDS RMW (access only) | addressed ordinary (associated only) |
 <!-- END GENERATED CONSAN CAPABILITY CONTRACT -->
 
 A form marked **supported** is decoded into the shared semantic inventory and
-has a lowering path for the named engine. Register pressure, report capacity,
+has a lowering path for the named mode. Register pressure, report capacity,
 placement, or bounded runtime-state exhaustion can still make a particular
 site dynamically incomplete. Those outcomes are reported explicitly; they do
 not turn an unsupported or incomplete run into a clean result.
 
-## Engine contract
+## Mode contract
 
-| Semantic form | SuperCollider | Record/Replay | Sampled | Inline Shadow |
-| --- | --- | --- | --- | --- |
-| Ordinary native LDS read/write | Redundant observation and mismatch marker | Bounded access record and host replay | Selected causal window | Exact supported-cell shadow update |
-| Proven or likely-group FLAT read/write | Same, after target-specific LDS-offset normalization | Same as native LDS | Same as native LDS | Same as native LDS |
-| Workgroup barrier | Mutation may compose with an access probe; no ordering claim | Barrier-arrival record and host epoch coalescing | Qualified barrier metadata in the selected causal bank | Execute the original barrier, then advance the device epoch |
-| Cluster barrier | Mutation only; no ordering claim | Supported on `gfx1250` | Supported on `gfx1250` | Supported on `gfx1250` |
-| Ordered atomic RMW | Mutation may compose with an access probe; no ordering claim | Addressed release/acquire record and host replay | Qualified ordering metadata in the selected causal bank | Bounded address-scoped release/acquire transaction |
-| Ordered compare-exchange | Mutation only; no ordering claim | Supported when the dynamic outcome is available | Supported when the dynamic outcome is available | Supported when the dynamic outcome is available |
-| Ordinary communication plus cache/fence sequence | Mutation only; no ordering claim | Dedicated addressed fence record and host replay | Not a standalone form; ordering must be associated with an admitted atomic sequence | Not a standalone form; ordering must be associated with an admitted atomic sequence |
-| Relaxed LDS RMW used as an LDS access | Redundant observation is not claimed for atomics | Access evidence where the target decoder exposes an admitted LDS RMW | Access evidence where admitted | Exact access evidence where admitted |
+| Semantic form | SuperCollider | ConSan |
+| --- | --- | --- |
+| Ordinary native LDS read/write | Redundant observation and mismatch marker | Selected causal window |
+| Proven or likely-group FLAT read/write | Same, after target-specific LDS-offset normalization | Same as native LDS |
+| Workgroup barrier | Mutation may compose with an access probe; no ordering claim | Qualified barrier metadata in the selected causal bank |
+| Cluster barrier | Mutation only; no ordering claim | Supported on `gfx1250` |
+| Ordered atomic RMW | Mutation may compose with an access probe; no ordering claim | Qualified ordering metadata in the selected causal bank |
+| Ordered compare-exchange | Mutation only; no ordering claim | Supported when the dynamic outcome is available |
+| Ordinary communication plus cache/fence sequence | Mutation only; no ordering claim | Qualified addressed communication sequence associated with a selected access window |
+| Relaxed LDS RMW used as an LDS access | Redundant observation is not claimed for atomics | Access evidence where admitted |
 
 SuperCollider deliberately does not implement a happens-before model.
-Record/Replay, Sampled, and Inline Shadow share the semantic inventory but have
-different bounded evidence models. Engine differences in this table are
-therefore intentional and are not target-parity gaps.
+ConSan analyzes bounded causal evidence. Both modes share the semantic
+inventory, but their detection guarantees differ; this is not a target-parity gap.
 
 ## Cross-target equivalent forms
 
@@ -84,6 +73,20 @@ spelling in an ISA manual. For example, CDNA `ds_read_*`/`ds_write_*`, RDNA
 `ds_load_*`/`ds_store_*`, and gfx1250 VDS spellings enter the same native-LDS
 range model.
 
+## ConSan owner and lane coverage
+
+The default owner is derived from entry `workitem_id_x`; it does not distinguish
+waves separated only in a workgroup's y/z dimensions. Access-only checks can use
+`RJ_CONSAN_OWNER_SOURCE=hw_id`. Sparse resident-wave IDs may require more
+retention banks; the multidimensional device checks explicitly request 1,024.
+Hardware-ID owners do not support ConSan's barrier/atomic ordering path.
+
+Uniform-address instructions can retain exact lane masks on supported targets.
+This is not a general per-lane trace: the CDNA second-address-group payload can
+miss a same-instruction collision when the representative address is elsewhere.
+The second-address-group diagnostic test is qualified on gfx1201; its success
+must not be interpreted as a cross-target guarantee.
+
 ## Typed exclusions
 
 These exclusions are part of the contract:
@@ -103,7 +106,8 @@ These exclusions are part of the contract:
   not-applicable;
 - atomics with missing scope/order/address metadata, unsupported width, or an
   unavailable compare-exchange outcome are typed unsupported;
-- standalone ordinary-memory fence replay is Record/Replay-only;
+- ordinary-memory fences contribute associated ordering metadata, not a
+  standalone event trace;
 - SuperCollider atomics and barriers are fault-injection composition points,
   not causal race evidence; and
 - async copies are outside the current access contract.
@@ -115,60 +119,25 @@ independent lowering outcome.
 
 ## Evidence map
 
-The host tests exercise the same production inventory and lowerers used by the
+Host tests exercise the production inventory, policy, and lowerers used by the
 HSA hook:
 
-- access decoding and normalization:
-  `analysis_test.cpp`, `moi_record_replay_test.cpp`, and
-  `supercollider_test.cpp`, including CDNA subword/transpose/dual-range,
-  every claimed gfx1100 native-LDS width, gfx1100 group-FLAT subword forms,
-  gfx1250 subword/transpose/96-bit, and group-FLAT D16 cases;
-- target-native injected instruction encodings and operand limits:
-  `rdna3_instrumentation_builder_test.cpp`, independently of architecture
-  dispatch tests;
-- all-engine access placement:
-  `moi_engine_conformance_test.cpp`, `moi_sampled_test.cpp`, and
-  `moi_inline_shadow_test.cpp`;
-- barrier semantics:
-  `moi_record_replay_test.cpp`, `moi_sampled_test.cpp`, and
-  `moi_inline_shadow_test.cpp`, including CDNA and gfx1100 singleton, gfx1100
-  dense Record/Replay routing, RDNA4 split, and gfx1250 cluster cases;
-- register preservation and private frames:
-  `spill_manager_test.cpp` and `moi_record_replay_test.cpp`, including gfx1100
-  fixed and runtime-selected dynamic frames, scalar composition, and
-  full-pressure Record/Replay placement;
-- atomic and fence semantics:
-  `moi_record_replay_model_test.cpp`, `moi_record_replay_test.cpp`,
-  `moi_sampled_test.cpp`, and `moi_inline_atomic_test.cpp`; and
-- the CDNA3/CDNA4/RDNA4/gfx1250 Inline release transaction:
-  `ConSanMoi.SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor`; and
-- the complete gfx1100 compiler acquire sequence:
-  `ConSanMoi.Gfx1100InlineAtomicAcquireUsesCompleteRdna3CacheSequence`, with
-  missing, reversed, and intervened cache-operation rejection coverage; and
-- gfx1100 vector-only and scalar-base VGLOBAL address forms plus invalid-scalar
-  rejection:
-  `ConSanMoi.Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms` and
-  `ConSanMoi.Gfx1100VglobalAtomicRejectsInvalidScalarBase`; and
-- CDNA3/CDNA4 Inline VGLOBAL release, acquire, returning compare-exchange,
-  no-return fail-closed behavior, and native address lowering:
-  `ConSanMoi.CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering`.
+- access decoding and normalization: `access_classifier_test.cpp`,
+  `analysis_test.cpp`, `probe_lowering_test.cpp`, and `supercollider_test.cpp`;
+- target contracts and disposition tables: `capability_contract_test.cpp`;
+- barrier sequencing and completion: `barrier_policy_test.cpp` and
+  `probe_lowering_test.cpp`;
+- atomic and addressed communication policy: `atomic_classifier_test.cpp`,
+  `atomic_fence_policy_test.cpp`, and `probe_lowering_test.cpp`;
+- register preservation and private frames: `spill_manager_test.cpp`,
+  `common_test.cpp`, and `lowering_plan_test.cpp`;
+- evidence sizing, lifecycle, and analysis: `evidence_requirements_test.cpp`,
+  `consan_report_plan_test.cpp`, and `hsa_hooks_unit_test.cpp`.
 
-The registered execution gates use native code objects for each target:
-
-- physical `gfx1100`: `ConSanGfx1100Physical.*`, covering clean execution in
-  all three MOI detection engines, a no-filter all-supported-site
-  SuperCollider pass, a required same-site two-wave race diagnostic,
-  sequential consistency, and ordered post-instrumentation health;
-- simulated `gfx1100`: `ConSanGfx1100Sim.*`, using the target-native W7900
-  JSON to cover the no-filter SuperCollider path, all three MOI engines, clean
-  ordered communication, and required Inline Shadow conflict attribution;
-- physical `gfx1201`: `ConSanMoiHipTest.*` and `ConSanInlineShadowTest.*`;
-- simulated `gfx1250`: `ConSanGfx1250Sim.*`;
-- simulated `gfx950`: `ConSanGfx950Sim.*` and the opted-in
-  `ConSanGfx950HipMoiSim.*` corpus; and
-- simulated `gfx942`: `ConSanGfx942Sim.*` and the opted-in
-  `ConSanGfx942HipMoiSim.*` corpus.
+[VALIDATION.md](validation/VALIDATION.md) describes the native and simulator
+execution procedures. The target-specific validation ledgers record which
+workloads have actually been qualified; a host test does not establish physical
+GPU execution coverage.
 
 Simulator and offline LDS capacity comes from the selected RocJITsu JSON.
-Runtime instrumentation always uses the LDS capacity supplied by the active
-runtime agent.
+Runtime instrumentation uses the capacity supplied by the active runtime agent.

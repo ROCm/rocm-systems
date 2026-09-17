@@ -241,13 +241,9 @@ def _inventory(args: argparse.Namespace) -> int:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     root = args.artifact_root.resolve() / workload.id / "inventory"
     root.mkdir(parents=True, exist_ok=False)
-    provenance = _write_provenance(
-        workspace, target, workload, root, args.launcher
-    )
+    provenance = _write_provenance(workspace, target, workload, root, args.launcher)
     hook = _hook_path(workspace)
-    command = _fault_workload_command(
-        workspace, target, workload, root / "unused.json"
-    )
+    command = _fault_workload_command(workspace, target, workload, root / "unused.json")
     command = _with_launcher(args.launcher, command)
     family_runs = []
     aggregate_records = {"sites": set(), "sequences": set(), "destinations": set()}
@@ -508,7 +504,7 @@ def _fault_trial_environment(
     environment["CTEST_PARALLEL_LEVEL"] = "1"
     environment.update(fault["environment"])
     if policy.get("detector") in {"detected", "statistical"}:
-        environment.pop("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", None)
+        environment.pop("RJ_CONSAN_FORBID_DIAGNOSTICS", None)
     environment.update(policy.get("environment", {}))
     for name in policy.get("unset", []):
         environment.pop(name, None)
@@ -540,9 +536,7 @@ def _faults_from_spec(
     for fault in faults:
         if not isinstance(fault, dict) or not isinstance(fault.get("id"), str):
             raise ValidationError("every fault in the spec must have a string id")
-        loaded.append(
-            _load_fault(path, target, workload, fault["id"])
-        )
+        loaded.append(_load_fault(path, target, workload, fault["id"]))
     return loaded
 
 
@@ -674,8 +668,7 @@ def _explain_contract(
         commands = {}
         for phase in ("clean", "overhead"):
             profile_artifact_roots = {
-                profile: output_root / phase / profile
-                for profile in profiles
+                profile: output_root / phase / profile for profile in profiles
             }
             commands[phase] = {
                 "payload_argv": _workload_command(
@@ -742,8 +735,7 @@ def _explain_contract(
             profile_audits.append(
                 {
                     "id": profile,
-                    "flavor": PROFILES[profile].flavor,
-                    "engine": PROFILES[profile].engine,
+                    "mode": PROFILES[profile].mode,
                     "clean_result_phase": "clean",
                     "clean_artifact_root": str(output_root / "clean" / profile),
                     "settings": settings,
@@ -855,12 +847,12 @@ def _explain_contract(
                         "profiles": [
                             profile
                             for profile in profiles
-                            if PROFILES[profile].flavor == "moi"
+                            if PROFILES[profile].mode == "default"
                         ],
                         "settings": sorted(ORDINARY_MOI_RUNTIME_DEFAULTS),
                     }
                 ]
-                if any(PROFILES[profile].flavor == "moi" for profile in profiles)
+                if any(PROFILES[profile].mode == "default" for profile in profiles)
                 else []
             ),
             "automatic_profile_defaults": [
@@ -872,7 +864,7 @@ def _explain_contract(
                     },
                 }
                 for profile in profiles
-                if PROFILES[profile].flavor == "moi"
+                if PROFILES[profile].mode == "default"
             ],
             "explicit_event_family_overrides": explicit_event_family_overrides,
             "fault_policy_exceptions": fault_policy_exceptions,
@@ -1039,10 +1031,8 @@ def _fault_admission_and_reach(
     runtime_diagnostic_count = sum(
         int(sanitizer.get(name, 0))
         for name in (
-            "inline_diagnostics",
-            "replay_diagnostics",
-            "sampled_conflicts",
-            "sampled_immediate_conflicts",
+            "conflicts",
+            "immediate_conflicts",
             "supercollider_diagnostics",
         )
         if isinstance(sanitizer.get(name, 0), int)
@@ -1105,8 +1095,7 @@ def _load_resumable_fault_result(
     expected_spec = {
         "corpus": workload.corpus,
         "workload": workload.id,
-        "flavor": PROFILES[profile].flavor,
-        "engine": PROFILES[profile].engine,
+        "mode": PROFILES[profile].mode,
         "fault_family": fault["family"],
         "row_role": "fault",
     }
@@ -1154,9 +1143,7 @@ def _fault(args: argparse.Namespace) -> int:
     hook = _hook_path(workspace)
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
     fault_root.mkdir(parents=True, exist_ok=args.resume)
-    provenance = _write_provenance(
-        workspace, target, workload, fault_root, launcher
-    )
+    provenance = _write_provenance(workspace, target, workload, fault_root, launcher)
     root = fault_root / "rows"
     root.mkdir(exist_ok=args.resume)
     smoke = _health_smoke_command(
@@ -1242,10 +1229,8 @@ def _fault(args: argparse.Namespace) -> int:
                 workload.corpus,
                 "--workload",
                 workload.id,
-                "--flavor",
-                PROFILES[profile].flavor,
-                "--engine",
-                PROFILES[profile].engine,
+                "--mode",
+                PROFILES[profile].mode,
                 "--fault-family",
                 fault["family"],
                 "--timeout",

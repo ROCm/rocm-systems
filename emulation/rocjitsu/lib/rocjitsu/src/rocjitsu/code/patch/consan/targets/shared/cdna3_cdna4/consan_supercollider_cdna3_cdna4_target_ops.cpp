@@ -14,12 +14,12 @@
 
 #include <cstring>
 
-namespace rocjitsu::consan_sc_target_detail {
+namespace rocjitsu::consan::supercollider_target_detail {
 
-std::optional<uint32_t> build_cdna3_cdna4_ds_load_word0(const ConSanAccessLoweringForm &form,
+std::optional<uint32_t> build_cdna3_cdna4_ds_load_word0(const AccessLoweringForm &form,
                                                         uint32_t original_word0) {
   uint32_t base = 0;
-  if (form.kind == ConSanAccessLoweringFormKind::NativeTwoRange) {
+  if (form.kind == AccessLoweringFormKind::NativeTwoRange) {
     switch (original_word0 & 0xFFFF0000u) {
     case 0xD81C0000u:
       base = 0xD86E0000u;
@@ -64,7 +64,7 @@ std::optional<uint32_t> build_cdna3_cdna4_ds_load_word0(const ConSanAccessLoweri
   return base | (original_word0 & kDsOffsetMask);
 }
 
-std::optional<ConSanScDirectToLdsTransfer> build_cdna3_cdna4_direct_to_lds_transfer(
+std::optional<SuperColliderDirectToLdsTransfer> build_cdna3_cdna4_direct_to_lds_transfer(
     std::array<uint32_t, 2> original_words, uint32_t width_bits, uint16_t address_vgpr,
     uint16_t payload_vgpr, uint16_t readback_vgpr, rj_code_arch_t arch) {
   const uint16_t dwords = static_cast<uint16_t>(width_bits / 32u);
@@ -105,7 +105,7 @@ std::optional<ConSanScDirectToLdsTransfer> build_cdna3_cdna4_direct_to_lds_trans
     const uint16_t read_op = width_bits == 32u   ? cdna3::kDsReadB32Ds
                              : width_bits == 96u ? cdna3::kDsReadB96Ds
                                                  : cdna3::kDsReadB128Ds;
-    return ConSanScDirectToLdsTransfer{
+    return SuperColliderDirectToLdsTransfer{
         .global_load = global_load,
         .lds_write = cdna3::build_ds(write_op, {.addr = static_cast<uint8_t>(address_vgpr),
                                                 .data0 = static_cast<uint8_t>(payload_vgpr)}),
@@ -121,7 +121,7 @@ std::optional<ConSanScDirectToLdsTransfer> build_cdna3_cdna4_direct_to_lds_trans
   const uint16_t read_op = width_bits == 32u   ? cdna4::kDsReadB32Ds
                            : width_bits == 96u ? cdna4::kDsReadB96Ds
                                                : cdna4::kDsReadB128Ds;
-  return ConSanScDirectToLdsTransfer{
+  return SuperColliderDirectToLdsTransfer{
       .global_load = global_load,
       .lds_write = cdna4::build_ds(write_op, {.addr = static_cast<uint8_t>(address_vgpr),
                                               .data0 = static_cast<uint8_t>(payload_vgpr)}),
@@ -181,4 +181,4 @@ build_cdna3_cdna4_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t w
   return words;
 }
 
-} // namespace rocjitsu::consan_sc_target_detail
+} // namespace rocjitsu::consan::supercollider_target_detail

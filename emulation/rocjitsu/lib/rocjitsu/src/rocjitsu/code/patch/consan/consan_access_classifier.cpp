@@ -8,13 +8,13 @@
 #include <array>
 #include <ranges>
 
-namespace rocjitsu {
+namespace rocjitsu::consan {
 namespace {
 
-using Reason = ConSanAccessClassifierReason;
-using TwoRangeShape = consan_detail::DecodedNativeLdsTwoRangeShape;
+using Reason = AccessClassifierReason;
+using TwoRangeShape = detail::DecodedNativeLdsTwoRangeShape;
 
-[[nodiscard]] ConSanAccessLoweringClassification reject(Reason reason) {
+[[nodiscard]] AccessLoweringClassification reject(Reason reason) {
   return {
       .form = std::nullopt,
       .normalization_reason = reason,
@@ -23,23 +23,23 @@ using TwoRangeShape = consan_detail::DecodedNativeLdsTwoRangeShape;
   };
 }
 
-[[nodiscard]] Reason inventory_reason(const ConSanProgramSite &access) {
+[[nodiscard]] Reason inventory_reason(const ProgramSite &access) {
   if (access.exclusions.empty() && !access.ranges.empty())
     return Reason::None;
   if (access.exclusions.empty())
     return Reason::RangeEncodingUnavailable;
   switch (access.exclusions.front().reason) {
-  case ConSanInventoryExclusionReason::NonAccessInstruction:
+  case InventoryExclusionReason::NonAccessInstruction:
     return Reason::NonAccessInstruction;
-  case ConSanInventoryExclusionReason::InvalidInstructionSize:
+  case InventoryExclusionReason::InvalidInstructionSize:
     return Reason::InvalidInstructionSize;
-  case ConSanInventoryExclusionReason::InvalidAccessWidth:
+  case InventoryExclusionReason::InvalidAccessWidth:
     return Reason::InvalidAccessWidth;
-  case ConSanInventoryExclusionReason::MissingAddressOperand:
+  case InventoryExclusionReason::MissingAddressOperand:
     return Reason::MissingAddressOperand;
-  case ConSanInventoryExclusionReason::RangeEncodingUnavailable:
+  case InventoryExclusionReason::RangeEncodingUnavailable:
     return Reason::RangeEncodingUnavailable;
-  case ConSanInventoryExclusionReason::Count:
+  case InventoryExclusionReason::Count:
     break;
   }
   return Reason::RangeEncodingUnavailable;
@@ -58,9 +58,9 @@ template <typename Range>
 }
 
 [[nodiscard]] bool is_replayable_single_range_native_lds(std::string_view mnemonic,
-                                                         const ConSanTargetProfile &target) {
+                                                         const TargetProfile &target) {
   const bool read_write_dialect =
-      target.native_lds.mnemonic_dialect == ConSanNativeLdsMnemonicDialect::ReadWrite;
+      target.native_lds.mnemonic_dialect == NativeLdsMnemonicDialect::ReadWrite;
   if (!read_write_dialect && (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
     return true;
   }
@@ -90,7 +90,7 @@ template <typename Range>
 }
 
 [[nodiscard]] bool is_replayable_flat_access(std::string_view mnemonic) {
-  if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
+  if (flat_load_subword_semantics(mnemonic) || flat_store_subword_semantics(mnemonic))
     return true;
   constexpr std::array forms = {
       "flat_load_b32",     "flat_load_b64",    "flat_load_b128",     "flat_store_b32",
@@ -118,10 +118,10 @@ template <typename Range>
   };
   if (named(mnemonic, native_forms))
     return true;
-  if (const auto load = consan_flat_load_subword_semantics(mnemonic))
-    return load->placement == ConSanFlatSubwordPlacement::High16;
-  if (const auto store = consan_flat_store_subword_semantics(mnemonic))
-    return store->placement == ConSanFlatSubwordPlacement::High16;
+  if (const auto load = flat_load_subword_semantics(mnemonic))
+    return load->placement == FlatSubwordPlacement::High16;
+  if (const auto store = flat_store_subword_semantics(mnemonic))
+    return store->placement == FlatSubwordPlacement::High16;
   return false;
 }
 
@@ -132,10 +132,10 @@ template <typename Range>
   };
   if (named(mnemonic, native_forms))
     return true;
-  if (const auto load = consan_flat_load_subword_semantics(mnemonic))
-    return load->placement == ConSanFlatSubwordPlacement::Low16;
-  if (const auto store = consan_flat_store_subword_semantics(mnemonic))
-    return store->placement == ConSanFlatSubwordPlacement::Low16;
+  if (const auto load = flat_load_subword_semantics(mnemonic))
+    return load->placement == FlatSubwordPlacement::Low16;
+  if (const auto store = flat_store_subword_semantics(mnemonic))
+    return store->placement == FlatSubwordPlacement::Low16;
   return false;
 }
 
@@ -146,7 +146,7 @@ template <typename Range>
 }
 
 [[nodiscard]] std::optional<uint16_t>
-native_data_register_count(const ConSanProgramSite &access,
+native_data_register_count(const ProgramSite &access,
                            const std::optional<TwoRangeShape> &two_address) {
   if (access.decoded_width_bits == 8u || access.decoded_width_bits == 16u)
     return 1u;
@@ -158,8 +158,7 @@ native_data_register_count(const ConSanProgramSite &access,
   return std::nullopt;
 }
 
-[[nodiscard]] Reason native_compare_support(const ConSanProgramSite &access,
-                                            const ConSanTargetProfile &target,
+[[nodiscard]] Reason native_compare_support(const ProgramSite &access, const TargetProfile &target,
                                             const std::optional<TwoRangeShape> &two_address,
                                             uint16_t data_register_count) {
   if (access.size() != 2u * sizeof(uint32_t))
@@ -235,11 +234,11 @@ native_data_register_count(const ConSanProgramSite &access,
       "ds_write2st64_b64",
   };
 
-  if (access.kind == ConSanLdsAccessKind::Read) {
+  if (access.kind == LdsAccessKind::Read) {
     if (!named(access.mnemonic_view(), reads))
       return Reason::UnsupportedMnemonic;
     if (access.operands.destination_accvgpr) {
-      return target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
+      return target.accumulator_model == AccumulatorModel::DescriptorPartitioned &&
                      static_cast<uint32_t>(*access.operands.destination_accvgpr) +
                              data_register_count <=
                          256u
@@ -254,7 +253,7 @@ native_data_register_count(const ConSanProgramSite &access,
                : Reason::OperandRegisterRange;
   }
 
-  if (access.kind != ConSanLdsAccessKind::Write || !named(access.mnemonic_view(), writes))
+  if (access.kind != LdsAccessKind::Write || !named(access.mnemonic_view(), writes))
     return Reason::UnsupportedMnemonic;
   if (two_address) {
     const uint32_t per_range = two_address->element_width_bits / 32u;
@@ -274,10 +273,9 @@ native_data_register_count(const ConSanProgramSite &access,
              : Reason::OperandRegisterRange;
 }
 
-[[nodiscard]] std::optional<uint16_t> flat_data_register_count(const ConSanProgramSite &access) {
-  if (consan_flat_load_subword_semantics(access.mnemonic_view()) ||
-      consan_flat_store_subword_semantics(access.mnemonic_view()) ||
-      access.decoded_width_bits == 16u)
+[[nodiscard]] std::optional<uint16_t> flat_data_register_count(const ProgramSite &access) {
+  if (flat_load_subword_semantics(access.mnemonic_view()) ||
+      flat_store_subword_semantics(access.mnemonic_view()) || access.decoded_width_bits == 16u)
     return 1u;
   if (access.decoded_width_bits == 32u || access.decoded_width_bits == 64u ||
       access.decoded_width_bits == 128u)
@@ -285,16 +283,15 @@ native_data_register_count(const ConSanProgramSite &access,
   return std::nullopt;
 }
 
-[[nodiscard]] Reason flat_compare_support(const ConSanProgramSite &access,
-                                          uint16_t data_register_count) {
+[[nodiscard]] Reason flat_compare_support(const ProgramSite &access, uint16_t data_register_count) {
   constexpr std::array reads = {"flat_load_b32",    "flat_load_b64",     "flat_load_b128",
                                 "flat_load_dword",  "flat_load_dwordx2", "flat_load_dwordx4",
                                 "flat_load_ushort", "flat_load_u16"};
   constexpr std::array writes = {"flat_store_b32",   "flat_store_b64",     "flat_store_b128",
                                  "flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx4",
                                  "flat_store_short", "flat_store_b16"};
-  if (access.kind == ConSanLdsAccessKind::Read) {
-    if (!consan_flat_load_subword_semantics(access.mnemonic_view()) &&
+  if (access.kind == LdsAccessKind::Read) {
+    if (!flat_load_subword_semantics(access.mnemonic_view()) &&
         !named(access.mnemonic_view(), reads))
       return Reason::UnsupportedMnemonic;
     if (!access.operands.destination_vgpr)
@@ -303,8 +300,8 @@ native_data_register_count(const ConSanProgramSite &access,
                ? Reason::None
                : Reason::OperandRegisterRange;
   }
-  if (access.kind != ConSanLdsAccessKind::Write ||
-      (!consan_flat_store_subword_semantics(access.mnemonic_view()) &&
+  if (access.kind != LdsAccessKind::Write ||
+      (!flat_store_subword_semantics(access.mnemonic_view()) &&
        !named(access.mnemonic_view(), writes)))
     return Reason::UnsupportedMnemonic;
   if (!access.operands.data_vgpr)
@@ -316,18 +313,18 @@ native_data_register_count(const ConSanProgramSite &access,
 
 } // namespace
 
-ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanProgramSite &access,
-                                                                   rj_code_arch_t arch) {
+AccessLoweringClassification classify_access_lowering(const ProgramSite &access,
+                                                      rj_code_arch_t arch) {
   if (const Reason reason = inventory_reason(access); reason != Reason::None)
     return reject(reason);
   if (access.decoded_file_offset() > access.physical_id.code_object.byte_size ||
       access.size() > access.physical_id.code_object.byte_size - access.decoded_file_offset())
     return reject(Reason::InstructionOutOfBounds);
-  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const TargetProfile *target = target_profile(arch);
   if (target == nullptr)
     return reject(Reason::TargetUnavailable);
 
-  ConSanAccessLoweringForm form{
+  AccessLoweringForm form{
       .access_kind = access.kind,
       .instruction_size = access.size(),
       .element_width_bits = access.decoded_width_bits,
@@ -347,10 +344,9 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
   Reason replay = Reason::UnsupportedMnemonic;
   Reason compare = Reason::UnsupportedMnemonic;
 
-  if (access.origin == ConSanAccessOrigin::DirectToLds) {
-    form.kind = access.operands.address_vgpr
-                    ? ConSanAccessLoweringFormKind::DirectToLdsExplicitAddress
-                    : ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  if (access.origin == AccessOrigin::DirectToLds) {
+    form.kind = access.operands.address_vgpr ? AccessLoweringFormKind::DirectToLdsExplicitAddress
+                                             : AccessLoweringFormKind::DirectToLdsLaneAddressed;
     form.address_vgpr_count = access.operands.address_vgpr ? 1u : 0u;
     form.data_register_count = static_cast<uint16_t>((access.decoded_width_bits + 31u) / 32u);
     replay = Reason::None;
@@ -359,17 +355,16 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
     // load plus explicit DS write, retaining the fetched payload for exact
     // post-delay comparison. Explicit-address CDNA5 async transfers have a
     // different VGLOBAL contract and remain independently unsupported here.
-    if (access.kind == ConSanLdsAccessKind::Write &&
-        form.kind == ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed &&
+    if (access.kind == LdsAccessKind::Write &&
+        form.kind == AccessLoweringFormKind::DirectToLdsLaneAddressed &&
         form.direct_memory_address_vgpr &&
         (form.element_width_bits == 32u || form.element_width_bits == 96u ||
          form.element_width_bits == 128u))
       compare = Reason::None;
-  } else if (access.origin == ConSanAccessOrigin::NativeLds) {
-    const auto two_address =
-        consan_detail::decode_native_lds_two_range_shape(access.mnemonic_view());
-    form.kind = two_address ? ConSanAccessLoweringFormKind::NativeTwoRange
-                            : ConSanAccessLoweringFormKind::NativeSingleRange;
+  } else if (access.origin == AccessOrigin::NativeLds) {
+    const auto two_address = detail::decode_native_lds_two_range_shape(access.mnemonic_view());
+    form.kind = two_address ? AccessLoweringFormKind::NativeTwoRange
+                            : AccessLoweringFormKind::NativeSingleRange;
     form.element_width_bits =
         two_address ? two_address->element_width_bits : access.decoded_width_bits;
     form.encoded_offset_scale_bytes = two_address ? two_address->offset_scale_bytes : 1u;
@@ -383,8 +378,8 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
                  ? Reason::None
                  : Reason::UnsupportedMnemonic;
     compare = native_compare_support(access, *target, two_address, *register_count);
-  } else if (access.origin == ConSanAccessOrigin::Flat) {
-    const ConSanVectorMemoryCapability &memory = target->vector_memory;
+  } else if (access.origin == AccessOrigin::Flat) {
+    const VectorMemoryCapability &memory = target->vector_memory;
     const uint32_t instruction_size = memory.instruction_word_count * sizeof(uint32_t);
     if (access.size() != instruction_size || !access.operands.address_vgpr)
       return reject(access.operands.address_vgpr ? Reason::UnsupportedEncoding
@@ -395,8 +390,8 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
     form.data_register_count = *register_count;
     const bool scalar_vector_address =
         memory.supports_flat_scalar_base && access.operands.scalar_address_sgpr;
-    form.kind = scalar_vector_address ? ConSanAccessLoweringFormKind::FlatScalarVectorAddress
-                                      : ConSanAccessLoweringFormKind::FlatVectorAddress;
+    form.kind = scalar_vector_address ? AccessLoweringFormKind::FlatScalarVectorAddress
+                                      : AccessLoweringFormKind::FlatVectorAddress;
     form.address_vgpr_count = scalar_vector_address ? 1u : 2u;
     if (scalar_vector_address)
       form.scalar_address_sgpr = *access.operands.scalar_address_sgpr;
@@ -431,12 +426,12 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
   form.destination_allocation_headroom =
       needs_destination_allocation_headroom(access.mnemonic_view());
   if (uses_high_register_subword(access.mnemonic_view())) {
-    form.register_value_placement = ConSanAccessRegisterValuePlacement::High16;
+    form.register_value_placement = AccessRegisterValuePlacement::High16;
   } else if (uses_low_register_subword(access.mnemonic_view())) {
-    form.register_value_placement = ConSanAccessRegisterValuePlacement::Low16;
+    form.register_value_placement = AccessRegisterValuePlacement::Low16;
   }
   form.destination_preserves_unwritten_bits =
-      access.kind == ConSanLdsAccessKind::Read &&
+      access.kind == LdsAccessKind::Read &&
       is_partial_destination_native_load(access.mnemonic_view());
 
   return {
@@ -447,4 +442,4 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
   };
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::consan
