@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -59,6 +60,18 @@ constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
 
 bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
 
+std::string_view instruction_execution_error_name(InstructionExecutionError error) {
+  switch (error) {
+  case InstructionExecutionError::None:
+    return "none";
+  case InstructionExecutionError::UnsupportedOperandValue:
+    return "unsupported operand value";
+  case InstructionExecutionError::UnimplementedInstruction:
+    return "unimplemented instruction";
+  }
+  return "unknown instruction execution error";
+}
+
 uint32_t pack_barrier_state(uint32_t member_count, uint32_t signal_count,
                             uint32_t allocation_blocks = 0) {
   return 1u | ((member_count & 0x7fu) << 4) | ((signal_count & 0x7fu) << 16) |
@@ -91,9 +104,13 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size), decoder_(Decoder::create(config.arch)), l2_(l2), l1_scalar_(l2),
-      l1_vector_(l2), lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
-      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
+      wf_size_(wf_size),
+      decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
+                   ? Decoder::create(config.arch)
+                   : Decoder::create(default_isa_target_registry(), config.target)),
+      l2_(l2), l1_scalar_(l2), l1_vector_(l2), lds_(config.lds_size_kb),
+      scalar_mem_pipeline_(&l1_scalar_), global_mem_pipeline_(&l1_vector_, l2),
+      local_mem_pipeline_() {
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
@@ -121,6 +138,19 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
                                                          simdojo::ExecMode exec_mode) {
+  if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetRegistry &registry = default_isa_target_registry();
+    const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
+    const IsaGpuTargetDescription *target_binding = registry.find_gpu_target(config.target);
+    if (target_descriptor == nullptr || target_binding == nullptr)
+      throw util::ConfigError("unsupported concrete GPU target");
+    if (target_descriptor->architecture_id != config.arch)
+      throw util::ConfigError("concrete GPU target does not belong to the configured architecture");
+    if (!target_descriptor->supports_execution ||
+        !target_binding->capabilities.execution_implemented)
+      throw util::ConfigError("execution is not implemented for the concrete GPU target");
+  }
+
   // Helper: instantiate the ISA-specific CU for the given execution mode.
 #define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
   case ARCH_ENUM:                                                                                  \
@@ -517,7 +547,6 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
 
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
-    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     barrier_wgs_.erase(key);
     // Queued rather than sent: notify_wg_complete() takes the CP's
@@ -594,6 +623,7 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+  std::unique_ptr<Instruction> owned_inst(inst);
   plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
@@ -614,7 +644,7 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
-      local_mem_pipeline_.issue(inst, wf);
+      local_mem_pipeline_.issue(owned_inst.release(), wf);
       return;
     }
   }
@@ -622,13 +652,13 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   const uint8_t route_tag = inst->data()->tag();
   switch (route_tag) {
   case SCALAR_MEM:
-    scalar_mem_pipeline_.issue(inst, wf);
+    scalar_mem_pipeline_.issue(owned_inst.release(), wf);
     break;
   case LOCAL_MEM:
-    local_mem_pipeline_.issue(inst, wf);
+    local_mem_pipeline_.issue(owned_inst.release(), wf);
     break;
   case GLOBAL_MEM:
-    global_mem_pipeline_.issue(inst, wf);
+    global_mem_pipeline_.issue(owned_inst.release(), wf);
     break;
   default:
     break;
@@ -682,9 +712,12 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // Deliberately not gated on debug_active_, unlike the data-side probe below.
   // An unfetchable PC reads back as zeros, and zeros decode to a valid
   // instruction, so an undebugged wave that branches into unmapped memory would
-  // otherwise execute zeros forever. Stopping it matters more than the one
-  // extra page-table lookup, which is a fraction of the per-issue decode cost.
-  if (vmid != 0 && !memory_->is_fetchable(active->pc, vmid)) {
+  // otherwise execute zeros forever. Positive registered mappings are cached
+  // with mutation/VMID epoch validation; debugger and fallback probes stay fresh.
+  const bool fetchable =
+      vmid == 0 || (debug_active() ? memory_->is_fetchable(active->pc, vmid)
+                                   : memory_->is_fetchable(active->pc, vmid, fetchability_cache_));
+  if (!fetchable) {
     if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
       return;
     // Wavefront::halt() is silent, so say why this wave stopped. Without this
@@ -727,7 +760,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     active->halt();
     return;
   }
-  Instruction *inst = decoded.value().release();
+  Instruction *inst = decoded.value().get();
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
@@ -833,7 +866,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         if (uses_split_wave_state)
           active->set_status_raw(saved_status | kPrivilegedStatusBit);
         active->pc = config->tba;
-        delete inst;
         return;
       }
     }
@@ -841,7 +873,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     // With no configured TBA, or for a parked s_trap executed by TBA code,
     // retire the instruction without inventing a host-side trap handler.
     active->pc += inst_size;
-    delete inst;
     return;
   }
 
@@ -854,7 +885,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
       uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
-        delete inst;
         return;
       }
     }
@@ -864,7 +894,19 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
-  execute_instruction(inst, *active);
+  const util::Result execution_result = execute_instruction(inst, *active);
+
+  if (execution_result.failed()) [[unlikely]] {
+    const InstructionExecutionError error = active->instruction_execution_error();
+    const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
+                                            this->name(), active->wf_id(), inst->mnemonic(),
+                                            active->pc, instruction_execution_error_name(error));
+    util::Logger::warn(failure);
+    if (auto *sim_engine = this->engine())
+      sim_engine->request_exit(failure, /*code=*/1);
+    active->halt();
+    return;
+  }
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,
@@ -879,7 +921,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // authoritative terminal hook and fires in both cases — consumers should observe
   // termination there, not via the after-execute hook.
   if (active->is_halted()) {
-    delete inst;
     return;
   }
 
@@ -996,25 +1037,20 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   if (fault_claimed) {
-    delete inst;
     return;
   }
-  if (inst->is_memory_op()) {
-    if (!inst->data()) {
-      // A memory execute path can intentionally reject an invalid complete
-      // register operand before constructing pipeline state. Treat that as a
-      // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted.
-      delete inst;
-    } else {
-      if (inst->data()->tag() == GLOBAL_MEM) {
-        auto *d = inst->data_as<VectorMemState>();
-        d->issue_pc = active->pc;
-      }
-      route_memory_inst(inst, *active);
+  // A memory execute path can reject an invalid complete register operand
+  // before constructing pipeline state. Suppress routing and memory effects
+  // for such instructions.
+  if (inst->is_memory_op() && inst->data()) {
+    if (inst->data()->tag() == GLOBAL_MEM) {
+      auto *d = inst->data_as<VectorMemState>();
+      d->issue_pc = active->pc;
     }
-  } else
-    delete inst;
+    route_memory_inst(decoded.value().release(), *active);
+  } else {
+    decoded.value().reset();
+  }
 
   active->pc += inst_size;
 

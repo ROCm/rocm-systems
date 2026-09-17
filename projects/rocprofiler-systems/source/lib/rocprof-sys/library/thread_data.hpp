@@ -14,7 +14,6 @@
 #include "library/thread_data_growth.hpp"
 #include "library/thread_deleter.hpp"
 
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <array>

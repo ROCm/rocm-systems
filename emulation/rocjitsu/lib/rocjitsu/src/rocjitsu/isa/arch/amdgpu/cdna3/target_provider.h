@@ -12,7 +12,7 @@ namespace rocjitsu::cdna3 {
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder();
 
 inline constexpr IsaTargetDescriptor kTargetDescriptor =
-    make_target_descriptor(true, &create_target_decoder);
+    make_target_descriptor(kExecutionGpuTargets, true, &create_target_decoder);
 
 } // namespace rocjitsu::cdna3
 

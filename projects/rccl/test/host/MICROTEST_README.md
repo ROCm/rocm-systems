@@ -44,10 +44,33 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
-- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
+  - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
+    `RasClientMicrotest.*`. With
+    `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
+    unit's whole dependency surface is libc, not HIP/nccl; it seams that
+    surface through `fakes/libc_fakes.{h,cc}` plus the `fakes/libc_seam.h` /
+    `fakes/libc_seam_undef.h` positional rename pair (guard-less by design, so
+    every header declaring a renamed name must precede it and the undef half
+    must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
+    of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+- **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
+  `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
+  test; several fixtures are reused by later groups, so the order within the file
+  matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
+  which cannot compile host-only; the TU pre-sets that header's include guard and
+  supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
+  addresses are stored in a table, never launched). Two shared `nccl_stubs.cc`
+  entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
+  because `enqueue.cc` defines them itself. See
+  `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
+  `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
-  arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
+  arm; the `-faultinj` variant adds `ENABLE_FAULT_INJECTION` to cover the fault-mask
+  arm of `commAlloc`/`devCommSetup` (the arm that ships, since `FAULT_INJECTION`
+  defaults ON). The two macro pairs are lexically disjoint in `init.cc`, so three
+  binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
 
@@ -121,8 +144,8 @@ test:
    `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
    target's `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
-   unit's reset entry point (e.g. `ResetP2pFakes()`) so hooks do not leak
-   between tests. Install per-test behaviour by overwriting a
+   unit's reset entry point (`ResetP2pFakes()`, `ResetEnqueueFakes()`, ...) so
+   hooks do not leak between tests. Install per-test behaviour by overwriting a
    `std::function` hook rather than editing a fake's default. Prefer the
    `ScopedHook` helper in `ScopedHook.h` (see
    [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
@@ -148,6 +171,94 @@ test:
 > `rccl-HostUnitTests`, is likewise hermetic and does not provide `hip::host`
 > either — "host-only" means *where code runs*; the microtest additionally means
 > *no HIP-runtime linkage*.)
+
+## Where a fake belongs
+
+**A fakes file is named after the production TU that DEFINES the symbol, never
+after the test target that first needed it.** A fake can only ever replace an
+*external*, so "the unit under test owns it" is never the reason a symbol is in
+a file — if it were owned by the UUT there would be nothing to fake. Filing by
+target instead produces the same symbol faked three times in three files, each
+slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
+had become before this map existed.
+
+| Production TU | Fakes file |
+|---|---|
+| `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
+| `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
+| `src/collectives.cc` | `fakes/collectives_fakes.cc` |
+| `src/dev_runtime.cc` | `fakes/dev_runtime_fakes.cc` |
+| `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
+| `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
+| `src/group.cc` | `fakes/group_fakes.cc` |
+| `src/init.cc` comm lifecycle | `fakes/comm_fakes.cc` |
+| `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
+| `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
+| `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
+| `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
+| `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
+| `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
+| `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
+| `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
+| `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
+| `src/os/linux.cc` | `fakes/os_fakes.cc` |
+| `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
+| `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
+| `src/proxy.cc` | `fakes/proxy_fakes.cc` |
+| `src/rccl_wrap.cc` | `fakes/rccl_wrap_fakes.cc` |
+| `src/recorder.cc` | `fakes/recorder_fakes.cc` |
+| `src/register/*.cc` | `fakes/register_stubs.cc` |
+| `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
+| libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
+| `src/ras/client.cc`'s libc surface (sockets/stdio/exit; see `fakes/libc_seam.h`) | `fakes/libc_fakes.cc` |
+| core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
+| reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
+| HIP runtime | `fakes/hip_fakes.cc` |
+
+**`_fakes.cc` versus `_stubs.cc`.** The suffix records what the file mostly *is*, not a rule the
+build enforces: `_fakes` for a file whose point is controllable seams, `_stubs` for one whose point
+is a fail-loud floor. Several files are honestly both — `transport_stubs.cc` is a floor that also
+owns one driven seam, and `os_fakes.cc` holds working implementations with no seam at all. Do not
+read the suffix as a guarantee; read the file's header comment, which states what it owns. If you
+add a file, pick the suffix matching its majority content and say so at the top.
+
+**`// UNDRIVEN`.** A seam carrying this marker is declared so the binary links and so an accidental
+call is visible, NOT because its path is covered. It is a link-floor entry with a chosen default,
+and that default silently selects which production arm runs. Driving a seam means deleting its
+marker. The marker travels with the declaration rather than a block comment so it cannot drift from
+what it describes. Call *counters* do not take the marker unless the counter itself is unread.
+
+Four things do NOT follow the TU-per-file rule, deliberately:
+
+- `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
+  pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
+  It therefore cannot link into the enqueue target and stays target-shaped.
+- `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
+  `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
+  assertions and moving those is a larger change.
+- `fakes/collective_stubs.cc` still carries fail-loud `ncclOsCpuCount` and
+  `ncclOsSetAffinity` entries. It cannot link `os_fakes.cc` alongside them, so
+  the `rccl-UnitTestsMicro` target keeps that pair target-shaped; every other
+  target gets them from `os_fakes.cc`.
+- Two `NCCL_PARAM` bodies stay in `fakes/init_fakes.cc` rather than their owner's
+  fakes file. `ncclParamLaunchOrderImplicit` cannot move because that file links
+  into a target whose unit under test defines the same symbol
+  (`enqueue.cc:1985`); splitting it would be a duplicate definition, not a
+  cleanup. `rcclParamIntraGraphGen` stays because its owner
+  (`graph/rccl_graph_gen.cc:34`) has no fakes file at all.
+
+`<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
+the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
+that chains their per-TU resets. It defines no seams itself.
+
+**`RCCL_STUBS_OMIT_<symbol>` is only for a symbol the unit under test defines**,
+where the omission exists purely to avoid a duplicate at link time. If a target
+instead needs a real *value* where the shared floor aborts, that symbol wants a
+seam in its owning TU's fakes file, which serves every target at once. Reaching
+for an omit macro plus a private replacement file is how `rcclUseAinic` ended up
+faked in two places.
 
 ## Adding more controllable seams
 
@@ -417,9 +528,24 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
-can be configured **directly** to build the host binaries — `rccl-HostUnitTests`
-and `rccl-UnitTestsMicro` — **without configuring/building all of librccl**. It
-compiles just the tests + fakes + the hipified unit-under-test sources.
+can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
+`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
+librccl**. It compiles just the tests + fakes + the hipified unit-under-test
+sources.
+
+Three of those names are preprocessor variants, not duplicates. `init.cc` gates
+part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
+on `ENABLE_FAULT_INJECTION`, and `enqueue.cc` gates `rcclShmemDynamicSize` on
+`RCCL_DEVICE_LINKER`, all at the **preprocessor**, so one compile can only ever
+reach one arm. The in-RCCL-build path inherits `RCCL_DEVICE_LINKER` from the
+`rccl` target's compile definitions (`ENABLE_DEVICE_LINKER` defaults ON, so the
+device-linker arm is the one that ships); this standalone project has no `rccl`
+target to inherit from, which is why it builds the `-devlinker` variant
+explicitly. `ENABLE_FAULT_INJECTION` was the same inheritance in reverse -
+defined in-tree, absent standalone, so the two paths tested different code - and
+is now stripped from the inherited list and set per variant in both paths, so the
+`-faultinj` binary is the only one that has it either way.
 
 **ROCm is a prerequisite.** Per epic AICOMRCCL-1661 ("ROCm toolchain is
 available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
@@ -436,8 +562,11 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
+./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
+./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
+./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-HostUnitTests
 ```
 
-Disable coverage instrumentation for the standalone micro-test with
-`-DMICRO_COVERAGE=OFF`.
+Disable coverage instrumentation for the standalone host-only test binaries
+with `-DHOST_TEST_COVERAGE=OFF`.

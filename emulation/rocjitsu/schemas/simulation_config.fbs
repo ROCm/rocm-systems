@@ -12,7 +12,8 @@ table ComputeUnitConfig {
   sgprs_per_wf: uint32;   // Scalar GPRs per wavefront.
   vgprs_per_wf: uint32;   // Vector GPRs per wavefront.
   lds_size_kb: uint32;    // Local Data Share size in kilobytes.
-  functional_quantum: uint32;  // Max instructions per advance() in FUNCTIONAL mode (0 = unbounded).
+  // Maximum CU step() iterations per functional dispatch quantum (0 = unbounded).
+  functional_quantum: uint32;
 }
 
 /// Configuration for a command processor.
@@ -209,6 +210,7 @@ table VirtualMachineConfig {
   arch: string;                // ISA architecture identifier (e.g., "cdna3", "rv64i").
   gpu: AmdgpuConfig;           // AMDGPU hardware configuration.
   programs: [ProgramConfig];   // Programs to load and dispatch.
+  target: string;              // Concrete GPU target (e.g., "gfx1250"); defaults by arch.
 }
 
 // ---------------------------------------------------------------------------
@@ -265,14 +267,34 @@ table TopologyDef {
 // Top-level simulation configuration.
 // ---------------------------------------------------------------------------
 
+/// Preferred host execution allocation. D includes the submitting caller;
+/// cost across G GPUs is E + G * (D - 1).
+table ExecutionThreadChoice {
+  num_threads: uint32 = 1;
+  cpu_dispatch_threads: uint32 = 1;
+}
+
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
+  num_threads: uint32;           // Engine partitions. 0/omitted selects the execution-budget policy.
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
   dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
+  // Functional CU-dispatch width, including the calling command-processor thread.
+  // 0 or omission in JSON selects the execution-budget policy; a nonzero value
+  // applies per SoC. Each effective SoC width is capped at its largest per-CP CU
+  // count. This is host acceleration,
+  // not a modeled GPU resource: changing the width must preserve the observable
+  // result of race-free workloads.
+  cpu_dispatch_threads: uint32 = 1;
+  // Total engine + retained dispatch-worker budget.
+  // 0/omitted uses min(process CPU affinity, 32). Nonzero overrides that default.
+  cpu_thread_budget: uint32;
+  // Ordered preferred allocations. Select the largest fitting effective cost.
+  // Omission falls back to serial execution; explicit knobs still apply.
+  thread_allocations: [ExecutionThreadChoice];
 }
 
 root_type SimulationConfig;

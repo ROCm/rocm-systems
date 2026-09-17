@@ -156,7 +156,7 @@ __global__ void kernelPutSdmaPath(TemplateHarness* h, uint64_t* dirtyOut) {
       reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 256, sig, ncclGinSignalInc, 0, false, 0,
       false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
   if (h->ctx.sdmaDirty) {
-    dirtyOut[0] = __hip_atomic_load(h->ctx.sdmaDirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    dirtyOut[0] = __scoped_atomic_load_n(h->ctx.sdmaDirty, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 }
 
