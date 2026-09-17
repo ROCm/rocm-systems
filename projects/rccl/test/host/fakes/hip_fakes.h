@@ -31,13 +31,6 @@
 extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
                                 hipDeviceptr_t /*dptr*/)>
     g_hipMemGetAddressRange;
-
-// hipIpcCloseMemHandle: the legacy-IPC teardown path of p2pSendFree /
-// p2pRecvFree closes each retained peer handle through this call. Default
-// returns hipErrorInvalidValue so an unexpected close surfaces as a
-// CUDACHECK failure; free-path tests install a hook that records the call
-// and returns hipSuccess.
-extern std::function<hipError_t(void* /*devPtr*/)> g_hipIpcCloseMemHandle;
 extern std::function<hipError_t(hipIpcMemHandle_t* /*handle*/, void* /*devPtr*/)>
     g_hipIpcGetMemHandle;
 
@@ -58,37 +51,6 @@ extern std::function<hipError_t(void* /*shareableHandle*/,
     g_hipMemExportToShareableHandle;
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t /*handle*/)>
     g_hipMemRelease;
-
-// cuMem*-import + legacy-IPC-import primitives the shareable-buffer import
-// path (ncclP2pImportShareableBuffer) and, on the alloc side, the cuMem
-// granularity query drive. Defaults return hipErrorInvalidValue so any
-// unexercised call surfaces via CUCHECK; import tests install a happy-path
-// hook. hipMemGetAllocationGranularity's default hands back a non-zero
-// granularity so the ALIGN_SIZE division does not divide by zero.
-extern std::function<hipError_t(std::size_t* /*granularity*/,
-                                const hipMemAllocationProp* /*prop*/,
-                                hipMemAllocationGranularity_flags /*option*/)>
-    g_hipMemGetAllocationGranularity;
-extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/,
-                                void* /*osHandle*/,
-                                hipMemAllocationHandleType /*shHandleType*/)>
-    g_hipMemImportFromShareableHandle;
-extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
-                                std::size_t /*alignment*/, void* /*addr*/,
-                                unsigned long long /*flags*/)>
-    g_hipMemAddressReserve;
-extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/,
-                                std::size_t /*offset*/,
-                                hipMemGenericAllocationHandle_t /*handle*/,
-                                unsigned long long /*flags*/)>
-    g_hipMemMap;
-extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/,
-                                const hipMemAccessDesc* /*desc*/,
-                                std::size_t /*count*/)>
-    g_hipMemSetAccess;
-extern std::function<hipError_t(void** /*devPtr*/, hipIpcMemHandle_t /*handle*/,
-                                unsigned int /*flags*/)>
-    g_hipIpcOpenMemHandle;
 
 // hipPointerGetAttribute: on HIP_VERSION >= 71260540 the fresh-registration
 // arm of ipcRegisterBuffer queries legacy-IPC capability

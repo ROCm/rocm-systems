@@ -22,7 +22,7 @@
 #include "ScopedHook.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/hip_fakes.h"
-#include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
+#include "../common/ProcessIsolatedTestRunner.hpp"
 
 // Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
 // to be #undef'd. p2p.cc's transitive includes would otherwise be the first
@@ -4469,6 +4469,12 @@ TEST_F(P2pShareableBufferMicrotest,
     void* const kReserved = reinterpret_cast<void*>(0xC0000);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity,
+        [](std::size_t* g, const hipMemAllocationProp*,
+           hipMemAllocationGranularity_flags) -> hipError_t {
+            if (g) *g = 4096;
+            return hipSuccess;
+        });
     int importCalls = 0, mapCalls = 0, accessCalls = 0, trackCalls = 0;
     ScopedHook import(g_hipMemImportFromShareableHandle,
         [&](hipMemGenericAllocationHandle_t* h, void*,
@@ -4528,8 +4534,14 @@ TEST_F(P2pShareableBufferMicrotest,
     void* const kReserved = reinterpret_cast<void*>(0xD0000);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity,
+        [](std::size_t* g, const hipMemAllocationProp*,
+           hipMemAllocationGranularity_flags) -> hipError_t {
+            if (g) *g = 4096;
+            return hipSuccess;
+        });
     int getFdCalls = 0;
-    ScopedHook getFd(g_proxyClientGetFdBlocking,
+    ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [&](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
             ++getFdCalls;
             // Hand back a real, closable fd so the SYSCHECK(close(fd)) succeeds.
@@ -4654,7 +4666,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-    ScopedHook getFd(g_proxyClientGetFdBlocking,
+    ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int*) -> ncclResult_t {
             return ncclSystemError;
         });
@@ -4687,7 +4699,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-    ScopedHook getFd(g_proxyClientGetFdBlocking,
+    ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
             if (fd) *fd = dup(STDERR_FILENO);   // a real, closable fd
             return ncclSuccess;
@@ -4720,7 +4732,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-    ScopedHook getFd(g_proxyClientGetFdBlocking,
+    ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
             // Hand back a definitely-invalid fd so close() fails with EBADF.
             if (fd) *fd = 1 << 30;
@@ -4828,6 +4840,12 @@ TEST_F(P2pShareableBufferMicrotest,
     ncclCuMemHandleType = hipMemHandleTypeFabric;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity,
+        [](std::size_t* g, const hipMemAllocationProp*,
+           hipMemAllocationGranularity_flags) -> hipError_t {
+            if (g) *g = 4096;
+            return hipSuccess;
+        });
     ScopedHook import(g_hipMemImportFromShareableHandle,
         [](hipMemGenericAllocationHandle_t* h, void*,
            hipMemAllocationHandleType) -> hipError_t {
