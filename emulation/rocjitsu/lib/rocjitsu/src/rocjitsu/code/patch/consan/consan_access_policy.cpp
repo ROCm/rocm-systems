@@ -367,7 +367,7 @@ std::optional<CommittedLowering>
 make_committed_lowering(const ObservationPlan &plan, std::span<const ProbeIntentId> intent_ids,
                         std::span<const CommittedLoweringLocation> locations,
                         LoweringOutcomeKind outcome, std::string detail,
-                        RuntimeStaticMapping runtime_mapping,
+                        StaticAccessMappings runtime_mapping,
                         std::optional<RegisterPlanReason> resource_rejection_reason) {
   CommittedLowering commit{
       .intent_ids = {},
@@ -440,14 +440,13 @@ bool runtime_static_mapping_matches_commit(const CommittedLowering &commit,
     });
   };
 
-  if (const auto *mappings = commit.runtime_mapping.accesses()) {
-    for (const StaticAccessMapping &mapping : *mappings) {
-      if (!valid_attribution(mapping.access, ProbeIntentKind::Access) ||
-          mapping.range_count == 0u || mapping.bank_count == 0u) {
-        return false;
-      }
+  for (const StaticAccessMapping &mapping : commit.runtime_mapping) {
+    if (!valid_attribution(mapping.access, ProbeIntentKind::Access) || mapping.range_count == 0u ||
+        mapping.bank_count == 0u) {
+      return false;
     }
   }
+
   for (ProbeIntentId id : commit.intent_ids) {
     const ProbeIntent *intent = resolve_intent(id);
     if (intent == nullptr)
@@ -522,7 +521,7 @@ bool CoverageLedger::publish_lowering_rejection(
     std::optional<RegisterPlanReason> resource_rejection_reason) {
   auto commit = make_committed_lowering(
       observation_plan_, intent_ids, std::span<const CommittedLoweringLocation>{}, outcome,
-      std::move(detail), RuntimeStaticMapping{}, resource_rejection_reason);
+      std::move(detail), StaticAccessMappings{}, resource_rejection_reason);
   return commit && publish_lowering_commit(std::move(*commit));
 }
 
@@ -564,8 +563,9 @@ bool CoverageLedger::publish_coalescing_instrumented_commits(
         return false;
       append_unique(incoming.intent_ids, accepted.intent_ids);
       append_unique(incoming.locations, accepted.locations);
-      if (!incoming.runtime_mapping.append(std::move(accepted.runtime_mapping)))
-        return false;
+      incoming.runtime_mapping.insert(incoming.runtime_mapping.end(),
+                                      std::make_move_iterator(accepted.runtime_mapping.begin()),
+                                      std::make_move_iterator(accepted.runtime_mapping.end()));
       if (incoming.detail.empty())
         incoming.detail = std::move(accepted.detail);
       for (ProbeIntentId id : accepted.intent_ids) {
@@ -625,11 +625,10 @@ bool CoverageLedger::publish_replacing_instrumented_commits(
   return true;
 }
 
-RuntimeStaticMapping CoverageLedger::runtime_static_mapping() const {
-  RuntimeStaticMapping mapping;
+StaticAccessMappings CoverageLedger::runtime_static_mapping() const {
+  StaticAccessMappings mapping;
   for (const CommittedLowering &commit : lowering_commits_) {
-    if (!mapping.append(commit.runtime_mapping))
-      return {};
+    mapping.insert(mapping.end(), commit.runtime_mapping.begin(), commit.runtime_mapping.end());
   }
   return mapping;
 }

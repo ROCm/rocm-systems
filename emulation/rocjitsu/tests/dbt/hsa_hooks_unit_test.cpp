@@ -5595,8 +5595,8 @@ auto_report_transform_result(bool malformed_mapping = false,
       owners.push_back(
           {index == 1u && owner_scope == ReportOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u});
     }
-    rocjitsu::consan::RuntimeStaticMapping runtime_mapping =
-        rocjitsu::consan::RuntimeStaticMapping::from_access({
+    rocjitsu::consan::StaticAccessMappings runtime_mapping =
+        rocjitsu::consan::StaticAccessMappings{{
             .access = auto_report_static_access_attribution(result, index, std::move(owners),
                                                             owner_provenance_complete),
             .first_slot = malformed_mapping && index == 0u ? std::numeric_limits<uint32_t>::max()
@@ -5606,7 +5606,7 @@ auto_report_transform_result(bool malformed_mapping = false,
             .emitted_probe_text_offset = 0x440u + index * 0x20u,
             .relocated_guest_text_offset = 0x448u + index * 0x20u,
             .scratch_vgpr = 12u,
-        });
+        }};
     const rocjitsu::consan::ProbeIntent &intent = result.observation_plan().probe_intents[index];
     const std::array intent_ids = {intent.id};
     const std::array locations = {rocjitsu::consan::CommittedLoweringLocation{

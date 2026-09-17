@@ -225,7 +225,7 @@ public:
   using Summary = ReportSummary;
 
   void register_metadata(uint64_t reader, uint64_t generation, std::string_view input_fingerprint,
-                         const RuntimeStaticMapping &static_mapping) {
+                         const StaticAccessMappings &static_mapping) {
     std::lock_guard lock(mutex_);
     auto entry = std::find_if(entries_.begin(), entries_.begin() + entry_count_,
                               [reader, generation](const Entry &item) {
@@ -236,52 +236,51 @@ public:
 
     entry->input_fingerprint = input_fingerprint;
     entry->static_metadata.reset();
-    if (const auto *static_accesses = static_mapping.accesses()) {
-      AccessStaticMetadata metadata;
-      uint32_t minimum_banks = std::numeric_limits<uint32_t>::max();
-      uint32_t maximum_banks = 0;
-      for (const StaticAccessMapping &static_access : *static_accesses) {
-        if (static_access.access.owner_provenance_complete &&
-            static_access.access.execution_owner_kernel_ids.empty()) {
-          metadata.malformed = true;
-        }
-        const uint64_t slot_count =
-            static_cast<uint64_t>(static_access.range_count) * static_access.bank_count;
-        if (static_access.range_count != 0u && static_access.bank_count != 0u &&
-            static_access.first_slot <= entry->layout.watchpoint_capacity &&
-            slot_count <= entry->layout.watchpoint_capacity - static_access.first_slot) {
-          minimum_banks = std::min(minimum_banks, static_access.bank_count);
-          maximum_banks = std::max(maximum_banks, static_access.bank_count);
-          metadata.mappings.push_back({
-              .first_slot = static_access.first_slot,
-              .range_count = static_access.range_count,
-              .bank_count = static_access.bank_count,
-              .instruction_offset = static_access.access.original_site.original_text_offset,
-              .emitted_probe_offset = static_access.emitted_probe_text_offset,
-              .relocated_guest_offset = static_access.relocated_guest_text_offset.value_or(0u),
-              .scratch_vgpr = static_access.scratch_vgpr,
-              .owner_kernel_ids = {},
-              .owner_provenance_complete = static_access.access.owner_provenance_complete &&
-                                           !static_access.access.execution_owner_kernel_ids.empty(),
-              .uniform_lds_store = static_access.access.uniform_lds_store,
-          });
-          for (ProgramContainerId owner : static_access.access.execution_owner_kernel_ids)
-            metadata.mappings.back().owner_kernel_ids.push_back(owner.ordinal);
-        } else {
-          metadata.malformed = true;
-        }
+
+    AccessStaticMetadata metadata;
+    uint32_t minimum_banks = std::numeric_limits<uint32_t>::max();
+    uint32_t maximum_banks = 0;
+    for (const StaticAccessMapping &static_access : static_mapping) {
+      if (static_access.access.owner_provenance_complete &&
+          static_access.access.execution_owner_kernel_ids.empty()) {
+        metadata.malformed = true;
       }
-      if (!static_accesses->empty()) {
-        log_message(kLogInfo,
-                    "ConSan diagnostic map reader=%llu entries=%zu mappings=%zu "
-                    "capacity=%u malformed=%s effective_banks_min=%u effective_banks_max=%u",
-                    static_cast<unsigned long long>(reader), static_accesses->size(),
-                    metadata.mappings.size(), entry->layout.watchpoint_capacity,
-                    metadata.malformed ? "true" : "false",
-                    metadata.mappings.empty() ? 0u : minimum_banks, maximum_banks);
+      const uint64_t slot_count =
+          static_cast<uint64_t>(static_access.range_count) * static_access.bank_count;
+      if (static_access.range_count != 0u && static_access.bank_count != 0u &&
+          static_access.first_slot <= entry->layout.watchpoint_capacity &&
+          slot_count <= entry->layout.watchpoint_capacity - static_access.first_slot) {
+        minimum_banks = std::min(minimum_banks, static_access.bank_count);
+        maximum_banks = std::max(maximum_banks, static_access.bank_count);
+        metadata.mappings.push_back({
+            .first_slot = static_access.first_slot,
+            .range_count = static_access.range_count,
+            .bank_count = static_access.bank_count,
+            .instruction_offset = static_access.access.original_site.original_text_offset,
+            .emitted_probe_offset = static_access.emitted_probe_text_offset,
+            .relocated_guest_offset = static_access.relocated_guest_text_offset.value_or(0u),
+            .scratch_vgpr = static_access.scratch_vgpr,
+            .owner_kernel_ids = {},
+            .owner_provenance_complete = static_access.access.owner_provenance_complete &&
+                                         !static_access.access.execution_owner_kernel_ids.empty(),
+            .uniform_lds_store = static_access.access.uniform_lds_store,
+        });
+        for (ProgramContainerId owner : static_access.access.execution_owner_kernel_ids)
+          metadata.mappings.back().owner_kernel_ids.push_back(owner.ordinal);
+      } else {
+        metadata.malformed = true;
       }
-      entry->static_metadata = std::move(metadata);
     }
+    if (!static_mapping.empty()) {
+      log_message(kLogInfo,
+                  "ConSan diagnostic map reader=%llu entries=%zu mappings=%zu "
+                  "capacity=%u malformed=%s effective_banks_min=%u effective_banks_max=%u",
+                  static_cast<unsigned long long>(reader), static_mapping.size(),
+                  metadata.mappings.size(), entry->layout.watchpoint_capacity,
+                  metadata.malformed ? "true" : "false",
+                  metadata.mappings.empty() ? 0u : minimum_banks, maximum_banks);
+    }
+    entry->static_metadata = std::move(metadata);
   }
 
   void bind_to_executable(uint64_t reader, uint64_t generation, hsa_executable_t executable) {
@@ -684,7 +683,7 @@ bool allocate_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t read
 
 void register_report_metadata(uint64_t reader, uint64_t generation,
                               std::string_view input_fingerprint,
-                              const RuntimeStaticMapping &static_mapping) {
+                              const StaticAccessMappings &static_mapping) {
   AutoReportBufferRegistry::instance().register_metadata(reader, generation, input_fingerprint,
                                                          static_mapping);
 }

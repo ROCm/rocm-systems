@@ -151,7 +151,7 @@ public:
   }
 
   /// Derive the runtime-facing projection from authoritative lowering commits.
-  [[nodiscard]] RuntimeStaticMapping runtime_static_mapping() const {
+  [[nodiscard]] StaticAccessMappings runtime_static_mapping() const {
     return coverage_ledger.runtime_static_mapping();
   }
 

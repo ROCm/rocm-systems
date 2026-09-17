@@ -443,7 +443,7 @@ rewrite_text_locally(const AmdGpuCodeObject &source, rj_code_arch_t arch,
 
 std::optional<TextFragment> make_around_text_fragment(
     std::vector<uint32_t> words, uint32_t guest_offset, uint32_t guest_size,
-    std::span<const ProbeIntentId> intent_ids, RuntimeStaticMapping runtime_mapping,
+    std::span<const ProbeIntentId> intent_ids, StaticAccessMappings runtime_mapping,
     PatchInfo patch, std::vector<std::string> &errors, std::string_view subject,
     std::optional<uint32_t> emitted_guest_size, bool replacement_preserves_source_span) {
   const uint64_t byte_size = words.size() * sizeof(uint32_t);
@@ -979,13 +979,13 @@ bool finalize_text_rewrites(std::span<const uint8_t> descriptor_image, rj_code_a
       // validated below. Shared helper fragments can produce several emitted
       // locations for one intent set, and moving here would leave later clone
       // validation without the access attribution required by that intent.
-      RuntimeStaticMapping runtime_mapping = staged.runtime_mapping;
-      if (auto *accesses = runtime_mapping.accesses()) {
-        for (StaticAccessMapping &mapping : *accesses) {
-          mapping.emitted_probe_text_offset = primary_location.trampoline_offset;
-          mapping.relocated_guest_text_offset = primary_location.relocated_guest_instruction_offset;
-        }
+      StaticAccessMappings runtime_mapping = staged.runtime_mapping;
+
+      for (StaticAccessMapping &mapping : runtime_mapping) {
+        mapping.emitted_probe_text_offset = primary_location.trampoline_offset;
+        mapping.relocated_guest_text_offset = primary_location.relocated_guest_instruction_offset;
       }
+
       auto commit = make_instrumented_patch_lowering(result.observation_plan(), staged.intent_ids,
                                                      primary_location, std::move(runtime_mapping));
       if (!commit) {

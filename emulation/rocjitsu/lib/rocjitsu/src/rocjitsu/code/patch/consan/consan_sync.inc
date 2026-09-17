@@ -457,10 +457,9 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
     return;
   }
   const ReportBufferLayout &layout = mode_semantics.report_layout;
-  const RuntimeStaticMapping runtime_mapping = runtime_mapping_including_staged(result);
-  const RuntimeStaticMapping::AccessMappings *accesses = runtime_mapping.accesses();
+  const StaticAccessMappings runtime_mapping = runtime_mapping_including_staged(result);
   std::vector<const StaticAccessMapping *> selected_windows;
-  selected_windows.reserve(accesses == nullptr ? 0u : accesses->size());
+  selected_windows.reserve(runtime_mapping.size());
   std::unordered_set<uint64_t> admitted_offsets;
   admitted_offsets.reserve(admitted.size());
   for (const Candidate &candidate : admitted) {
@@ -469,15 +468,15 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
       admitted_offsets.insert(candidate.anchor());
   }
   bool has_multi_range_window = false;
-  if (accesses != nullptr) {
-    for (const StaticAccessMapping &mapping : *accesses) {
-      if (!admitted_offsets.contains(mapping.access.original_site.original_text_offset) ||
-          mapping.range_count == 0u || mapping.bank_count == 0u)
-        continue;
-      selected_windows.push_back(&mapping);
-      has_multi_range_window |= mapping.range_count > 1u;
-    }
+
+  for (const StaticAccessMapping &mapping : runtime_mapping) {
+    if (!admitted_offsets.contains(mapping.access.original_site.original_text_offset) ||
+        mapping.range_count == 0u || mapping.bank_count == 0u)
+      continue;
+    selected_windows.push_back(&mapping);
+    has_multi_range_window |= mapping.range_count > 1u;
   }
+
   if (!selected_windows.empty() && layout.sync_metadata_capacity == 0) {
     result.warnings.emplace_back(
         "ConSan barrier sync found no selected Ready causal-window capacity");
@@ -853,10 +852,8 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     return;
   }
   const ReportBufferLayout &layout = mode_semantics.report_layout;
-  RuntimeStaticMapping runtime_mapping = runtime_mapping_including_staged(result);
-  RuntimeStaticMapping::AccessMappings *accesses = runtime_mapping.accesses();
-  const uint32_t selected_window_count =
-      accesses == nullptr ? 0u : static_cast<uint32_t>(accesses->size());
+  StaticAccessMappings runtime_mapping = runtime_mapping_including_staged(result);
+  const uint32_t selected_window_count = static_cast<uint32_t>(runtime_mapping.size());
   if (selected_window_count == 0 || options.max_patches == 0 ||
       layout.sync_metadata_capacity == 0) {
     result.warnings.emplace_back(
@@ -992,36 +989,34 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
   std::vector<Window> windows;
   windows.reserve(selected_window_count);
   bool has_multi_range_window = false;
-  if (accesses != nullptr) {
-    for (const StaticAccessMapping &mapping : *accesses) {
-      if (mapping.access_kind != LdsAccessKind::Read &&
-          mapping.access_kind != LdsAccessKind::Write &&
-          mapping.access_kind != LdsAccessKind::Atomic)
+
+  for (const StaticAccessMapping &mapping : runtime_mapping) {
+    if (mapping.access_kind != LdsAccessKind::Read && mapping.access_kind != LdsAccessKind::Write &&
+        mapping.access_kind != LdsAccessKind::Atomic)
+      continue;
+    has_multi_range_window |= mapping.range_count > 1u;
+    for (const ProgramContainer &kernel : result.program_inventory.kernels()) {
+      if (!resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
         continue;
-      has_multi_range_window |= mapping.range_count > 1u;
-      for (const ProgramContainer &kernel : result.program_inventory.kernels()) {
-        if (!resource_has_owner_context(resource_state, kernel.descriptor_file_offset))
-          continue;
-        const auto &owners = mapping.access.execution_owner_kernel_ids;
-        const bool owns_mapping =
-            owners.empty()
-                ? kernel.has_text_range &&
-                      mapping.access.original_site.original_text_offset >=
-                          kernel.entry_text_offset &&
-                      mapping.access.original_site.original_text_offset - kernel.entry_text_offset <
-                          kernel.code_size
-                : std::ranges::find(owners, kernel.id) != owners.end();
-        if (!owns_mapping)
-          continue;
-        // One physical access in a shared helper is one sampled slot, but it has
-        // an independent causal view in every kernel that can execute it. Those
-        // owners are mutually exclusive dispatches, so each may safely attach
-        // one synchronization edge to the same metadata slot.
-        windows.push_back({mapping.first_slot, mapping.bank_count, &mapping, mapping.access_kind,
-                           kernel.descriptor_file_offset});
-      }
+      const auto &owners = mapping.access.execution_owner_kernel_ids;
+      const bool owns_mapping =
+          owners.empty()
+              ? kernel.has_text_range &&
+                    mapping.access.original_site.original_text_offset >= kernel.entry_text_offset &&
+                    mapping.access.original_site.original_text_offset - kernel.entry_text_offset <
+                        kernel.code_size
+              : std::ranges::find(owners, kernel.id) != owners.end();
+      if (!owns_mapping)
+        continue;
+      // One physical access in a shared helper is one sampled slot, but it has
+      // an independent causal view in every kernel that can execute it. Those
+      // owners are mutually exclusive dispatches, so each may safely attach
+      // one synchronization edge to the same metadata slot.
+      windows.push_back({mapping.first_slot, mapping.bank_count, &mapping, mapping.access_kind,
+                         kernel.descriptor_file_offset});
     }
   }
+
   if (has_multi_range_window) {
     result.warnings.emplace_back(
         "ConSan atomic sync currently attaches only the first logical range of a "

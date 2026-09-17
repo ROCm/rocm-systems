@@ -573,11 +573,8 @@ committed_semantic_sites(const TransformArtifacts &result, const CommittedLoweri
   return commit == commits.end() ? 0u : committed_semantic_sites(result, *commit).size();
 }
 
-[[nodiscard]] RuntimeStaticMapping::AccessMappings
-static_access_mappings(const TransformArtifacts &result) {
-  RuntimeStaticMapping mapping = result.coverage_ledger.runtime_static_mapping();
-  RuntimeStaticMapping::AccessMappings *accesses = mapping.accesses();
-  return accesses == nullptr ? RuntimeStaticMapping::AccessMappings{} : std::move(*accesses);
+[[nodiscard]] StaticAccessMappings static_access_mappings(const TransformArtifacts &result) {
+  return result.coverage_ledger.runtime_static_mapping();
 }
 
 [[nodiscard]] const BarrierSiteDecision *barrier_decision_at(const TransformArtifacts &result,

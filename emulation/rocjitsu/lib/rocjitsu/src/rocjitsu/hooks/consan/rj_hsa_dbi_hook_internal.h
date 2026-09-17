@@ -356,7 +356,7 @@ void reject_report_plan(uint64_t reader, uint64_t required_size, uint64_t config
                                           uint64_t *registered_generation);
 void register_report_metadata(uint64_t reader, uint64_t generation,
                               std::string_view input_fingerprint,
-                              const RuntimeStaticMapping &static_mapping);
+                              const StaticAccessMappings &static_mapping);
 void bind_report_buffer_to_executable(uint64_t reader, uint64_t generation,
                                       hsa_executable_t executable);
 void discard_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);

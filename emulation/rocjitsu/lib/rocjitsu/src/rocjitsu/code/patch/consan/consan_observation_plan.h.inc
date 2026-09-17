@@ -750,28 +750,7 @@ struct StaticAccessMapping {
 };
 
 /// Static ConSan access mappings produced by intent-bound lowering.
-struct RuntimeStaticMapping {
-  using AccessMappings = std::vector<StaticAccessMapping>;
-
-  RuntimeStaticMapping() = default;
-  static RuntimeStaticMapping from_access(StaticAccessMapping mapping) {
-    RuntimeStaticMapping result;
-    result.mappings_.push_back(std::move(mapping));
-    return result;
-  }
-  [[nodiscard]] AccessMappings *accesses() { return &mappings_; }
-  [[nodiscard]] const AccessMappings *accesses() const { return &mappings_; }
-  [[nodiscard]] bool empty() const { return mappings_.empty(); }
-  [[nodiscard]] bool append(RuntimeStaticMapping mapping) {
-    mappings_.insert(mappings_.end(), std::make_move_iterator(mapping.mappings_.begin()),
-                     std::make_move_iterator(mapping.mappings_.end()));
-    return true;
-  }
-  bool operator==(const RuntimeStaticMapping &) const = default;
-
-private:
-  AccessMappings mappings_;
-};
+using StaticAccessMappings = std::vector<StaticAccessMapping>;
 
 /// One machine-code location emitted as part of an intent-bound lowering.
 ///
@@ -805,7 +784,7 @@ struct CommittedLowering {
   /// One or more committed locations, empty for a rejected transaction.
   std::vector<CommittedLoweringLocation> locations;
   /// Runtime-facing semantic/static mapping created by this same transaction.
-  RuntimeStaticMapping runtime_mapping;
+  StaticAccessMappings runtime_mapping;
   /// Explicit final mechanism outcome shared by every bound intent.
   LoweringOutcomeKind outcome = LoweringOutcomeKind::Pending;
   /// Typed resource-planner rejection, when that component rejected the
@@ -824,7 +803,7 @@ struct CommittedLowering {
 make_committed_lowering(const ObservationPlan &plan, std::span<const ProbeIntentId> intent_ids,
                         std::span<const CommittedLoweringLocation> locations,
                         LoweringOutcomeKind outcome, std::string detail = {},
-                        RuntimeStaticMapping runtime_mapping = {},
+                        StaticAccessMappings runtime_mapping = {},
                         std::optional<RegisterPlanReason> resource_rejection_reason = std::nullopt);
 
 /// Lowering state for one plan-owned admitted intent.
@@ -970,7 +949,7 @@ public:
   }
 
   /// Project runtime attribution from the authoritative lowering transactions.
-  [[nodiscard]] RuntimeStaticMapping runtime_static_mapping() const;
+  [[nodiscard]] StaticAccessMappings runtime_static_mapping() const;
 
   /// Forget emitted transactions while retaining explicit rejections. This is
   /// the one rollback operation used when candidate bytes are discarded.

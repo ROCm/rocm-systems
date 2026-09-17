@@ -93,6 +93,6 @@ void append_patch_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> w
 /// physical site covered by the intent set; no patch kind is interpreted.
 [[nodiscard]] std::optional<CommittedLowering> make_instrumented_patch_lowering(
     const ObservationPlan &plan, std::span<const ProbeIntentId> intent_ids,
-    const CommittedPatchGeometry &patch, RuntimeStaticMapping runtime_mapping = {});
+    const CommittedPatchGeometry &patch, StaticAccessMappings runtime_mapping = {});
 
 } // namespace rocjitsu::consan

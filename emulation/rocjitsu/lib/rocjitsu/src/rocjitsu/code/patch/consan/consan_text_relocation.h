@@ -20,7 +20,7 @@ namespace rocjitsu::consan {
 [[nodiscard]] std::optional<TextFragment>
 make_around_text_fragment(std::vector<uint32_t> words, uint32_t guest_offset, uint32_t guest_size,
                           std::span<const ProbeIntentId> intent_ids,
-                          RuntimeStaticMapping runtime_mapping, PatchInfo patch,
+                          StaticAccessMappings runtime_mapping, PatchInfo patch,
                           std::vector<std::string> &errors, std::string_view subject,
                           std::optional<uint32_t> emitted_guest_size = std::nullopt,
                           bool replacement_preserves_source_span = false);

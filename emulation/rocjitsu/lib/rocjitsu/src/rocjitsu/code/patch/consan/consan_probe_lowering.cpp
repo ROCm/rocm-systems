@@ -128,13 +128,13 @@ bool append_private_owner_epoch_load(std::vector<uint32_t> &words, std::span<con
   return true;
 }
 
-static std::optional<RuntimeStaticMapping>
+static std::optional<StaticAccessMappings>
 make_access_runtime_mapping(StaticAccessAttribution access, LdsAccessKind access_kind,
                             uint32_t first_slot, uint32_t range_count, uint32_t bank_count,
                             const PatchLoweringProduct &patch) {
   if (range_count == 0u || bank_count == 0u)
     return std::nullopt;
-  return RuntimeStaticMapping::from_access({
+  return StaticAccessMappings{{
       .access = std::move(access),
       .access_kind = access_kind,
       .first_slot = first_slot,
@@ -143,15 +143,14 @@ make_access_runtime_mapping(StaticAccessAttribution access, LdsAccessKind access
       .emitted_probe_text_offset = patch.trampoline_offset,
       .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
       .scratch_vgpr = patch.scratch_vgpr,
-  });
+  }};
 }
 
-[[nodiscard]] RuntimeStaticMapping
+[[nodiscard]] StaticAccessMappings
 runtime_mapping_including_staged(const TransformArtifacts &result) {
-  RuntimeStaticMapping mapping = result.coverage_ledger.runtime_static_mapping();
+  StaticAccessMappings mapping = result.coverage_ledger.runtime_static_mapping();
   for (const TextFragment &fragment : result.staged_text_fragments) {
-    if (!mapping.append(fragment.runtime_mapping))
-      return {};
+    mapping.insert(mapping.end(), fragment.runtime_mapping.begin(), fragment.runtime_mapping.end());
   }
   return mapping;
 }

@@ -40,7 +40,7 @@ namespace rocjitsu::consan {
       },
   };
   const bool instrumented = outcome == LoweringOutcomeKind::Instrumented;
-  RuntimeStaticMapping runtime_mapping;
+  StaticAccessMappings runtime_mapping;
   if (instrumented) {
     StaticAccessAttribution attribution{
         .intent_ids = {id},
@@ -51,7 +51,7 @@ namespace rocjitsu::consan {
     };
     switch (intent->kind) {
     case ProbeIntentKind::Access:
-      runtime_mapping = RuntimeStaticMapping::from_access({
+      runtime_mapping = StaticAccessMappings{{
           .access = std::move(attribution),
           .first_slot = 0u,
           .range_count = 1u,
@@ -59,7 +59,7 @@ namespace rocjitsu::consan {
           .emitted_probe_text_offset = locations.front().emitted_text_offset,
           .relocated_guest_text_offset = std::nullopt,
           .scratch_vgpr = std::nullopt,
-      });
+      }};
       break;
     default:
       break;

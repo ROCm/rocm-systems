@@ -412,11 +412,11 @@ TEST(ConSan, DirectProbeWritesPackedWatchpointEntry) {
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().outcome,
             LoweringOutcomeKind::Instrumented);
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().locations.size(), 1u);
-  const RuntimeStaticMapping runtime_static_mapping =
+  const StaticAccessMappings runtime_static_mapping =
       result.coverage_ledger.runtime_static_mapping();
-  ASSERT_NE(runtime_static_mapping.accesses(), nullptr);
-  ASSERT_EQ(runtime_static_mapping.accesses()->size(), 1u);
-  const StaticAccessMapping &runtime_mapping = runtime_static_mapping.accesses()->front();
+
+  ASSERT_EQ(runtime_static_mapping.size(), 1u);
+  const StaticAccessMapping &runtime_mapping = runtime_static_mapping.front();
   EXPECT_EQ(runtime_mapping.access.intent_ids,
             result.coverage_ledger.lowering_commits().front().intent_ids);
   EXPECT_EQ(runtime_mapping.access.original_site.original_text_offset, access_patch->anchor_offset);

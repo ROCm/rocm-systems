@@ -339,7 +339,7 @@ TEST(ObservationPlan, CoverageLedgerSolelyOwnsPlanAndJoinedLoweringState) {
   EXPECT_EQ(copied.intent_entry({0})->lowering, LoweringOutcomeKind::ResourceRejected);
 }
 
-RuntimeStaticMapping runtime_mapping_for(const ObservationPlan &plan,
+StaticAccessMappings runtime_mapping_for(const ObservationPlan &plan,
                                          std::span<const ProbeIntentId> intent_ids) {
   assert(!intent_ids.empty());
   const ProbeIntent *first = plan.intent(intent_ids.front());
@@ -364,30 +364,11 @@ RuntimeStaticMapping runtime_mapping_for(const ObservationPlan &plan,
     }
   }
   const auto range_count = static_cast<uint32_t>(access.original_semantic_sites.size());
-  return RuntimeStaticMapping::from_access({.access = std::move(access),
-                                            .range_count = range_count,
-                                            .bank_count = 1u,
-                                            .relocated_guest_text_offset = std::nullopt,
-                                            .scratch_vgpr = std::nullopt});
-}
-
-TEST(ObservationPlan, RuntimeStaticMappingAppendsAccesses) {
-  RuntimeStaticMapping mapping;
-  EXPECT_TRUE(mapping.empty());
-  StaticAccessMapping first;
-  first.range_count = 1u;
-  first.bank_count = 2u;
-  auto expected_first = first;
-  EXPECT_TRUE(mapping.append(RuntimeStaticMapping::from_access(std::move(first))));
-  StaticAccessMapping second;
-  second.first_slot = 2u;
-  second.range_count = 2u;
-  second.bank_count = 1u;
-  auto expected_second = second;
-  EXPECT_TRUE(mapping.append(RuntimeStaticMapping::from_access(std::move(second))));
-  ASSERT_EQ(mapping.accesses()->size(), 2u);
-  EXPECT_EQ(mapping.accesses()->front(), expected_first);
-  EXPECT_EQ(mapping.accesses()->back(), expected_second);
+  return StaticAccessMappings{{.access = std::move(access),
+                               .range_count = range_count,
+                               .bank_count = 1u,
+                               .relocated_guest_text_offset = std::nullopt,
+                               .scratch_vgpr = std::nullopt}};
 }
 
 TEST(ObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {
@@ -504,7 +485,7 @@ TEST(ObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransactional
       .emitted_size = 16,
       .relocated_guest_text_offset = 0x208,
   }};
-  RuntimeStaticMapping mapping = RuntimeStaticMapping::from_access({
+  StaticAccessMappings mapping = StaticAccessMappings{{
       .access =
           {
               .intent_ids = {intent.id},
@@ -517,8 +498,8 @@ TEST(ObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransactional
       .bank_count = 1u,
       .relocated_guest_text_offset = std::nullopt,
       .scratch_vgpr = std::nullopt,
-  });
-  const RuntimeStaticMapping expected_mapping = mapping;
+  }};
+  const StaticAccessMappings expected_mapping = mapping;
   EXPECT_FALSE(make_committed_lowering(policy.plan, intent_ids, locations,
                                        LoweringOutcomeKind::Instrumented));
   auto commit =
@@ -529,9 +510,8 @@ TEST(ObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransactional
   TransformArtifacts result;
   result.coverage_ledger = CoverageLedger(policy.plan);
   CommittedLowering malformed_commit = *commit;
-  ASSERT_NE(malformed_commit.runtime_mapping.accesses(), nullptr);
-  malformed_commit.runtime_mapping.accesses()->front().access.original_site.original_text_offset +=
-      4u;
+
+  malformed_commit.runtime_mapping.front().access.original_site.original_text_offset += 4u;
   CoverageLedger malformed_ledger(policy.plan);
   EXPECT_FALSE(malformed_ledger.publish_lowering_commit(std::move(malformed_commit)))
       << "the ledger must reject a runtime projection outside its bound intents";
@@ -542,19 +522,19 @@ TEST(ObservationPlan, CommittedLoweringPublishesTypedRuntimeMappingTransactional
   EXPECT_EQ(result.coverage_ledger.lowering_commits().front().runtime_mapping, expected_mapping);
   EXPECT_EQ(result.coverage_ledger.observation_plan(), policy.plan);
 
-  RuntimeStaticMapping malformed = expected_mapping;
-  ASSERT_NE(malformed.accesses(), nullptr);
-  malformed.accesses()->front().access.original_site.original_text_offset += 4u;
+  StaticAccessMappings malformed = expected_mapping;
+
+  malformed.front().access.original_site.original_text_offset += 4u;
   EXPECT_FALSE(make_committed_lowering(policy.plan, intent_ids, locations,
                                        LoweringOutcomeKind::Instrumented, {},
                                        std::move(malformed)));
   malformed = expected_mapping;
-  malformed.accesses()->front().access.execution_owner_kernel_ids.push_back({0u});
+  malformed.front().access.execution_owner_kernel_ids.push_back({0u});
   EXPECT_FALSE(make_committed_lowering(policy.plan, intent_ids, locations,
                                        LoweringOutcomeKind::Instrumented, {}, std::move(malformed)))
       << "runtime attribution must reject duplicate semantic owner handles";
   malformed = expected_mapping;
-  malformed.accesses()->front().access.execution_owner_kernel_ids.front() = {};
+  malformed.front().access.execution_owner_kernel_ids.front() = {};
   EXPECT_FALSE(make_committed_lowering(policy.plan, intent_ids, locations,
                                        LoweringOutcomeKind::Instrumented, {}, std::move(malformed)))
       << "runtime attribution must reject invalid semantic owner handles";
