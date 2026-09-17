@@ -18,8 +18,9 @@ npm run build -- --mode fixtures
 npm run preview -- --mode fixtures
 ```
 
-Open http://localhost:4173 to visualize the website with dummy benchmark data.
-Press **Ctrl+C** to stop the preview. The fixture build uses `.test-dist/`.
+Open http://localhost:4174 to visualize the website with dummy benchmark data.
+Press **Ctrl+C** to stop the preview. The fixture build uses `.test-dist/` and the
+fixture preview always uses port 4174; the production preview uses port 4173.
 
 For deployment, `npm run build` produces application files in `dist/` without dummy
 data. The browser loads real benchmark JSON from the deployed site's `data/` directory.
@@ -35,7 +36,8 @@ and fails closed instead of displaying partial history when invalid data bypasse
 publication gate.
 
 See the [build and test guide](docs/build-and-test.md) for local development with
-dummy data, browser setup, verification commands, and the deployment branch handoff.
+dummy data or a local data directory (`npm run dev:data -- <data-directory>`),
+browser setup, verification commands, and the deployment branch handoff.
 
 ## Source layout
 

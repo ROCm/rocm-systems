@@ -43,7 +43,7 @@ const NOISE_TOLERANCE = 3;
 function SummaryStat({ label, value }) {
   return (
     <Box sx={{ p: 1.35, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>{label}</Typography>
       <Typography sx={{ fontSize: 20, fontWeight: 770, lineHeight: 1.2, mt: 0.3 }}>{value}</Typography>
     </Box>
   );
@@ -55,7 +55,7 @@ function AggregateChange({ value, candidate, baseline }) {
   const color = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
   return (
     <Box sx={{ p: 1.35, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
-      <Typography variant="caption" color="text.secondary">Aggregate change</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>Aggregate change</Typography>
       <Stack direction="row" sx={{ alignItems: 'center', color, mt: 0.3 }}>
         {state === 'faster' && <ArrowDownwardRoundedIcon sx={{ fontSize: 22 }} />}
         {state === 'slower' && <ArrowUpwardRoundedIcon sx={{ fontSize: 22 }} />}
@@ -115,12 +115,12 @@ function RunInformation({ label, run, otherRun, filters, accentColor }) {
     >
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1.5 }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="overline" color="text.secondary">{label} run</Typography>
+          <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label} run</Typography>
           <Typography component="div" sx={{ fontFamily: 'monospace', fontWeight: 780 }}>
             {shortSha(run)}
           </Typography>
           {run.provenance?.commitMessage && (
-            <Typography variant="caption" color="text.secondary" noWrap title={run.provenance.commitMessage}>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }} noWrap title={run.provenance.commitMessage}>
               {run.provenance.commitMessage}
             </Typography>
           )}
@@ -158,7 +158,7 @@ function RunInformation({ label, run, otherRun, filters, accentColor }) {
           ))}
         </DetailGrid>
       ) : (
-        <Typography variant="body2" color="text.secondary">No environment details provided.</Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>No environment details provided.</Typography>
       )}
     </Box>
   );
@@ -173,7 +173,7 @@ function TestAvailability({ test }) {
 function ExcludedTestsTable({ comparisons }) {
   if (comparisons.length === 0) {
     return (
-      <Typography color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
+      <Typography sx={{ color: 'text.secondary', py: 3, textAlign: 'center' }}>
         Every selected benchmark has completed data in both runs.
       </Typography>
     );
@@ -399,7 +399,7 @@ export default function CompareRunsView({
           <Chip size="small" variant="outlined" label={`${hasRuns ? viewModel.counts.neutral : '—'} within ±${NOISE_TOLERANCE}%`} />
           <Chip size="small" color="error" variant="outlined" label={`${hasRuns ? viewModel.counts.slower : '—'} slower`} />
         </Stack>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
           Only benchmarks with valid completed durations in both runs are compared.
         </Typography>
         {viewModel.comparable.length > 0 ? (
@@ -407,7 +407,7 @@ export default function CompareRunsView({
             <Chart option={option} height={chartHeight} ariaLabel="Performance change by benchmark comparison chart" />
           </Box>
         ) : (
-          <Typography color="text.secondary" sx={{ py: 8, textAlign: 'center' }}>No completed benchmark results are comparable between these runs.</Typography>
+          <Typography sx={{ color: 'text.secondary', py: 8, textAlign: 'center' }}>No completed benchmark results are comparable between these runs.</Typography>
         )}
       </SectionCard>
 

@@ -15,7 +15,7 @@ function EmptyFailureCases() {
         <ErrorOutlineRoundedIcon color="error" />
         <Box>
           <Typography variant="h2">Failed and Timed-Out Cases</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>Newest first · Current filters</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.35 }}>Newest first · Current filters</Typography>
         </Box>
         <Chip data-testid="failure-total" label="—" color="error" size="small" sx={{ ml: 'auto' }} />
       </Stack>
@@ -47,7 +47,7 @@ export default function FailuresView({ data, filters }) {
             <ErrorOutlineRoundedIcon color="error" />
             <Box>
               <Typography variant="h2">Failed and Timed-Out Cases</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>Newest first · Current filters</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.35 }}>Newest first · Current filters</Typography>
             </Box>
             <Chip data-testid="failure-total" label={failures.length} color="error" size="small" sx={{ ml: 'auto' }} />
           </Stack>
@@ -60,11 +60,11 @@ export default function FailuresView({ data, filters }) {
                       <Typography variant="body2" fontWeight={700}>{test.name}</Typography>
                       <StatusChip status={test.status} />
                     </Stack>
-                    <Typography variant="caption" color="text.secondary">{test.target} · {test.suite} · {test.error}</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>{test.target} · {test.suite} · {test.error}</Typography>
                   </Box>
                   <Box data-failure-time={run.timestamp} sx={{ textAlign: { sm: 'right' }, flexShrink: 0 }}>
                     <Typography variant="caption" sx={{ display: 'block' }}>{formatFullDate(run.timestamp)}</Typography>
-                    <Typography variant="caption" color="primary.main" component="code">{shortSha(run)}</Typography>
+                    <Typography variant="caption" sx={{ color: 'primary.main' }} component="code">{shortSha(run)}</Typography>
                   </Box>
                 </Stack>
               </Paper>
@@ -74,7 +74,7 @@ export default function FailuresView({ data, filters }) {
             direction={{ xs: 'column', sm: 'row' }}
             sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', gap: 1, mt: 1.75 }}
           >
-            <Typography data-testid="failure-range" variant="caption" color="text.secondary">
+            <Typography data-testid="failure-range" variant="caption" sx={{ color: 'text.secondary' }}>
               {start + 1}–{start + visible.length} of {failures.length} cases
             </Typography>
             {pageCount > 1 && (

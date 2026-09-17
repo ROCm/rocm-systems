@@ -38,7 +38,7 @@ function BenchmarkPickerPaper({
           onMouseDown={(event) => event.preventDefault()}
           sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, px: 1.5, py: 1, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }}
         >
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             {showingAll
               ? `Showing all ${totalCount} benchmarks`
               : `${hiddenCount} benchmark${hiddenCount === 1 ? '' : 's'} hidden by global Suite filters`}

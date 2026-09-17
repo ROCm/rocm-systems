@@ -90,6 +90,43 @@ test('1D baseline uses the previous commit day and falls back to its first point
   expect(isolatedHistory.series[0].baseline).toBe(isolatedFirstValue);
 });
 
+test('1D drops the baseline when the only commit shown is the candidate', () => {
+  const { anchorDay } = selectOverview(benchmarkData, gfx1250Filters, '1D').history;
+  const previousDay = new Date(`${anchorDay}T12:00:00Z`);
+  previousDay.setUTCDate(previousDay.getUTCDate() - 1);
+  const previousDayKey = previousDay.toISOString().slice(0, 10);
+  const latestSha = commitShaFor(benchmarkData.latestCommitRun);
+
+  const rawData = cloneBenchmarkData();
+  rawData.runs = rawData.runs.filter((run) => {
+    const dayKey = periodKey(commitTimestampFor(run), 'daily');
+    if (dayKey === previousDayKey) return false;
+    if (dayKey === anchorDay) return commitShaFor(run) === latestSha;
+    return true;
+  });
+  const { history, baseline } = selectOverview(loadDashboardData(rawData), gfx1250Filters, '1D');
+
+  expect(history.summary).toBe('1 commit shown');
+  expect(history.series[0].baseline).toBeNull();
+  expect(history.durationDelta).toBeNull();
+  expect(baseline).toBeNull();
+});
+
+test('Latest Commit Results baseline follows the Performance Trend range', () => {
+  const allRange = selectOverview(benchmarkData, gfx1250Filters, 'ALL');
+  const oneDayRange = selectOverview(benchmarkData, gfx1250Filters, '1D');
+
+  expect(allRange.baseline.runId).toBe(allRange.history.firstRun.runId);
+  expect(oneDayRange.baseline.runId).toBe(oneDayRange.history.firstRun.runId);
+  expect(allRange.baseline.runId).not.toBe(oneDayRange.baseline.runId);
+  expect(allRange.results.find((result) => result.logicalTestId === 'triton-gemm-f16-1024')
+    .baselineTest.durationSeconds).toBe(
+    allRange.baseline.tests.find((test) => (
+      test.target === 'gfx1250' && test.logicalTestId === 'triton-gemm-f16-1024'
+    )).durationSeconds,
+  );
+});
+
 test('Overview uses the newest attempt of the newest commit even when it is incomplete', () => {
   const rawData = cloneBenchmarkData();
   const source = rawData.runs.find((run) => run.provenance.rocjitsuCommitSha.startsWith('31369c4d'));
@@ -112,33 +149,6 @@ test('Overview uses the newest attempt of the newest commit even when it is inco
   expect(commitShaFor(data.latestCommitRun)).toMatch(/^31369c4d/);
   expect(overview.metrics).toMatchObject({ completed: 6, total: 7, durationDelta: null });
   expect(overview.results.some((result) => result.status === 'failed')).toBe(true);
-});
-
-test('a newer rerun of the nearest earlier commit updates the Overview baseline', () => {
-  const rawData = cloneBenchmarkData();
-  const source = rawData.runs.find((run) => run.provenance.rocjitsuCommitSha.startsWith('9f774d29'));
-  rawData.runs.push({
-    ...source,
-    runId: 'newer-9f774d29-rerun',
-    timestamp: '2026-09-01T04:30:00.000Z',
-    trigger: 'manual',
-    tests: source.tests.map((result) => ({
-      ...result,
-      durationSeconds: Number.isFinite(result.durationSeconds)
-        ? Number((result.durationSeconds * 2).toFixed(3))
-        : result.durationSeconds,
-    })),
-  });
-  const data = loadDashboardData(rawData);
-  const overview = selectOverview(data, { targets: ['gfx1250'], suites: data.suites });
-  const fp16Result = overview.results.find((result) => result.logicalTestId === 'triton-gemm-f16-1024');
-
-  expect(commitShaFor(overview.candidate)).toMatch(/^31369c4d/);
-  expect(overview.baseline.runId).toBe('newer-9f774d29-rerun');
-  expect(fp16Result.baselineTest.durationSeconds).toBeCloseTo(
-    source.tests.find((test) => test.logicalTestId === 'triton-gemm-f16-1024').durationSeconds * 2,
-    2,
-  );
 });
 
 test('a late old-commit run remains visible in Overview and Aggregate Explorer data', () => {
@@ -199,19 +209,55 @@ test('catalog changes break Aggregate and normalize Overview history to the late
   );
 });
 
-test('weekly history keeps multiple commits per day and labels each day once', () => {
-  const overview = selectOverview(benchmarkData, gfx1250Filters, '1W');
+test('weekly history keeps multiple commits per day inside one band per calendar day', () => {
+  const { history } = selectOverview(benchmarkData, gfx1250Filters, '1W');
   const slotsByDay = new Map();
-  overview.history.slots.forEach((slot) => {
+  history.slots.forEach((slot) => {
     const slots = slotsByDay.get(slot.dayKey) ?? [];
     slots.push(slot);
     slotsByDay.set(slot.dayKey, slots);
   });
 
-  expect(overview.history.slots).toHaveLength(56);
-  expect(slotsByDay.get('2026-08-26').filter((slot) => slot.run)).toHaveLength(3);
-  expect(slotsByDay.get('2026-08-30').filter((slot) => slot.run)).toHaveLength(2);
-  expect(overview.history.slots.filter((slot) => slot.label).length).toBe(slotsByDay.size);
+  expect(history.dayKeys).toHaveLength(7);
+  expect(new Set(history.dayKeys).size).toBe(7);
+  expect(history.dayKeys.at(-1)).toBe(history.anchorDay);
+  expect(history.axisMax).toBe(history.dayKeys.length);
+  expect(history.slots.every((slot) => slot.run)).toBe(true);
+  expect(slotsByDay.get('2026-08-26')).toHaveLength(3);
+  expect(slotsByDay.get('2026-08-30')).toHaveLength(2);
+  history.slots.forEach((slot) => {
+    const dayIndex = history.dayKeys.indexOf(slot.dayKey);
+    expect(slot.x).toBeGreaterThanOrEqual(dayIndex);
+    expect(slot.x).toBeLessThan(dayIndex + 1);
+  });
+  expect(history.slots.map((slot) => slot.x))
+    .toEqual(history.slots.map((slot) => slot.x).sort((left, right) => left - right));
+});
+
+test('1D history follows the latest commit date rather than the latest execution day', () => {
+  const rawData = cloneBenchmarkData();
+  const source = rawData.runs.find((run) => commitShaFor(run).startsWith('31369c4d'));
+  rawData.runs.push({
+    ...source,
+    runId: 'late-execution-for-2026-08-31-commit',
+    timestamp: '2026-09-01T02:00:00.000Z',
+    commitTimestamp: '2026-08-31T21:00:00.000Z',
+    trigger: 'manual',
+    provenance: {
+      ...source.provenance,
+      rocjitsuCommitSha: 'c0ffee2600000000000000000000000000000000',
+      commitMessage: 'Commit on the anchor day that finished the next morning',
+    },
+  });
+  const data = loadDashboardData(rawData);
+  const { history } = selectOverview(data, gfx1250Filters, '1D');
+
+  expect(history.anchorDay).toBe('2026-08-31');
+  expect(history.slots.map((slot) => commitShaFor(slot.run).slice(0, 8)))
+    .toEqual(['255eabe3', '9f774d29', '31369c4d', 'c0ffee26']);
+  expect(history.slots.every((slot) => (
+    periodKey(commitTimestampFor(slot.run), 'daily') === history.anchorDay
+  ))).toBe(true);
 });
 
 test('history sufficiency follows represented calendar days', () => {
@@ -236,6 +282,46 @@ test('overview metric cards compare the latest commit with the oldest recorded c
   expect(overview.metrics.durationDelta).toBeTypeOf('number');
   expect(commitShaFor(weekOverview.metricsBaseline)).toMatch(/^86b362ea/);
   expect(weekOverview.metrics.durationDelta).toBe(overview.metrics.durationDelta);
+});
+
+test('largest changes ranks by absolute percent delta and keeps six rows', () => {
+  const data = loadDashboardData(cloneBenchmarkData());
+  const preview = selectOverview(data, gfx1250Filters, 'ALL');
+  const baseline = preview.history.firstRun;
+  const candidate = preview.history.latestRun;
+  const zeroComparableGfx1250 = (run) => {
+    run.tests.forEach((test) => {
+      if (test.target !== 'gfx1250' || !gfx1250Filters.suites.includes(test.suite)) return;
+      test.status = 'completed';
+      test.durationSeconds = 100;
+      test.error = null;
+    });
+  };
+  zeroComparableGfx1250(baseline);
+  zeroComparableGfx1250(candidate);
+
+  // |6| and |-5| both beat 3, and 1 is the seventh-smallest so it is dropped.
+  const percents = [6, -5, 3, 10, -8, 1, 4];
+  percents.forEach((percent, index) => {
+    const logicalTestId = `largest-change-${index}`;
+    const row = {
+      testId: `gfx1250:${logicalTestId}`,
+      logicalTestId,
+      target: 'gfx1250',
+      suite: 'Triton',
+      name: `Largest change ${index}`,
+      problem: { operation: 'GEMM' },
+      status: 'completed',
+      error: null,
+    };
+    baseline.tests.push({ ...row, durationSeconds: 100 });
+    candidate.tests.push({ ...row, durationSeconds: 100 + percent });
+  });
+
+  const { changes } = selectOverview(data, gfx1250Filters, 'ALL');
+  expect(changes).toHaveLength(6);
+  expect(changes.map((item) => item.delta)).toEqual([10, -8, 6, -5, 4, 3]);
+  expect(changes.some((item) => item.delta === 1)).toBe(false);
 });
 
 test('benchmark history keeps same-day commits as separate ordered points', () => {

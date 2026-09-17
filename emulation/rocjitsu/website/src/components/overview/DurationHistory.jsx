@@ -63,7 +63,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
   const rangeTone = changeTone(rangeState);
   const rangeColor = rangeTone === 'neutral' ? 'text.secondary' : `${rangeTone}.main`;
   const useContinuousDateAxis = true;
-  const labelCount = Math.min(7, Math.max(history.slots.length - 1, 1));
+  const labelCount = Math.min(7, Math.max(history.axisMax, 1));
   const maximumDuration = Math.max(...history.series.flatMap((series) => (
     series.data.filter(Number.isFinite)
   )), 0);
@@ -78,7 +78,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
   const scaledDataValues = finiteDataValues.map((value) => value * durationScale);
   const scaledBaselineValues = finiteBaselineValues.map((value) => value * durationScale);
   const yAxisMinValue = Math.min(...scaledDataValues, ...scaledBaselineValues);
-  const yAxisMaxValue = Math.max(...scaledDataValues);
+  const yAxisMaxValue = Math.max(...scaledDataValues, ...scaledBaselineValues);
   const yAxisDecimalPlaces = axisDecimalPlaces(yAxisMaxValue - yAxisMinValue);
   const yAxisPrecision = 10 ** yAxisDecimalPlaces;
   const yAxisMin = Number.isFinite(yAxisMinValue)
@@ -117,6 +117,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
               : null;
             return `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatCompactDuration(duration)}</strong>`
               + `${Number.isFinite(perfChange) ? ` · Time change ${formatPercent(perfChange)}` : ''}`
+              + `${Number.isFinite(series?.baseline) ? ` · Base time ${formatCompactDuration(series.baseline)}` : ''}`
               + `${estimated ? ' · Estimated normalized workload' : ''}`;
           }),
         ].join('<br/>');
@@ -131,8 +132,10 @@ export default function DurationHistory({ history, range, onRangeChange }) {
       boundaryGap: false,
       ...(useContinuousDateAxis ? {
         min: 0,
-        max: Math.max(history.slots.length - 1, 0),
-        interval: history.slots.length > 1 ? (history.slots.length - 1) / labelCount : undefined,
+        max: history.axisMax,
+        // A zero-width axis holds a single slot, and without an explicit interval
+        // ECharts spreads its default tick count over it and repeats that slot's label.
+        interval: history.axisMax > 0 ? history.axisMax / labelCount : 1,
       } : {
         data: history.slots.map((slot) => slot.label),
       }),
@@ -145,17 +148,17 @@ export default function DurationHistory({ history, range, onRangeChange }) {
         hideOverlap: true,
         ...(useContinuousDateAxis ? {
           formatter: (value) => {
-            const slot = history.slots[Math.round(value)];
-            if (!slot) return '';
-            if (history.mode === 'intraday' && slot.run?.timestamp) {
-              return new Date(slot.run.timestamp).toLocaleTimeString(undefined, {
+            if (history.mode === 'intraday') {
+              const run = history.slots[Math.round(value)]?.run;
+              return run ? new Date(commitTimestampFor(run)).toLocaleTimeString(undefined, {
                 hour: '2-digit',
                 minute: '2-digit',
                 hour12: false,
                 timeZone: 'UTC',
-              });
+              }) : '';
             }
-            return formatShortDate(`${slot.dayKey}T12:00:00Z`);
+            const dayKey = history.dayKeys[Math.round(value)];
+            return dayKey ? formatShortDate(`${dayKey}T12:00:00Z`) : '';
           },
         } : {}),
       },
@@ -187,7 +190,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
         ...(useContinuousDateAxis ? { encode: { x: 0, y: 1 } } : {}),
         data: useContinuousDateAxis
           ? series.data.map((value, index) => [
-            index,
+            history.slots[index].x,
             Number.isFinite(value) ? value * durationScale : null,
           ])
           : series.data.map((value) => (
@@ -222,7 +225,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           symbolSize: 12,
           label: { show: false },
           itemStyle: { ...chartPointStyle(series.color, theme.palette.background.paper), borderWidth: 3 },
-          data: [{ coord: [latestIndex, latestValue * durationScale] }],
+          data: [{ coord: [history.slots[latestIndex].x, latestValue * durationScale] }],
         } : undefined,
       };
     }),
@@ -270,7 +273,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 1.5, mb: 0.75 }}>
         <Stack direction="row" sx={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: { xs: 2, sm: 2.5 } }}>
           <Box>
-            <Typography variant="overline" color="text.secondary">
+            <Typography variant="overline" sx={{ color: 'text.secondary' }}>
               {history.normalized ? 'Normalized range change' : 'Range change'}
             </Typography>
             <Stack
@@ -285,7 +288,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
               <Typography sx={{ fontSize: 25, lineHeight: 1, fontWeight: 820, letterSpacing: '-.035em' }}>
                 {hasDelta ? formatPercent(Math.abs(history.durationDelta), false) : '—'}
               </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ ml: 0.35, mb: 0.1, lineHeight: 1 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', ml: 0.35, mb: 0.1, lineHeight: 1 }}>
                 {rangePeriodLabel(range)}
               </Typography>
             </Stack>
@@ -294,7 +297,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
             )}
           </Box>
           <Box sx={{ borderLeft: 1, borderColor: 'divider', pl: 2 }}>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {history.normalized ? 'Latest measured selected total' : 'Latest selected total'}
             </Typography>
             <Typography sx={{ fontSize: 20, lineHeight: 1.15, fontWeight: 750, letterSpacing: '-.025em', mt: 0.35 }}>
@@ -313,7 +316,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
               />
             ))}
           </Stack>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             {history.summary}
           </Typography>
         </Box>

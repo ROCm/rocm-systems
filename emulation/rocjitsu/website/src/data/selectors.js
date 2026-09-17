@@ -111,6 +111,12 @@ function calendarDayKeys(startKey, endKey) {
   return days;
 }
 
+function dayFraction(timestamp) {
+  const date = new Date(timestamp);
+  const seconds = date.getUTCHours() * 3600 + date.getUTCMinutes() * 60 + date.getUTCSeconds();
+  return Number.isFinite(seconds) ? seconds / 86_400 : 0;
+}
+
 function historyStartKey(runs, anchorKey, range, timestampForRun) {
   if (range === 'ALL') return periodKey(timestampForRun(runs[0]) ?? `${anchorKey}T00:00:00Z`, 'daily');
   if (range === 'YTD') return `${anchorKey.slice(0, 4)}-01-01`;
@@ -222,10 +228,11 @@ function dailyHistorySlots(runs, anchorDay, range) {
     const key = periodKey(commitTimestampFor(run), 'daily');
     if (key >= startKey && key <= anchorDay) latestRunByDay.set(key, run);
   });
-  return calendarDayKeys(startKey, anchorDay).map((dayKey) => {
+  return calendarDayKeys(startKey, anchorDay).map((dayKey, index) => {
     const run = latestRunByDay.get(dayKey) ?? null;
     return {
       dayKey,
+      x: index,
       run,
       label: run ? `${shortDayLabel(dayKey)}\n${shortRunSha(run)}` : shortDayLabel(dayKey),
     };
@@ -235,35 +242,38 @@ function dailyHistorySlots(runs, anchorDay, range) {
 function intradayHistorySlots(runs, anchorDay) {
   const runsByCommit = new Map();
   runs
-    .filter((run) => periodKey(run.timestamp, 'daily') === anchorDay)
+    .filter((run) => periodKey(commitTimestampFor(run), 'daily') === anchorDay)
     .sort(compareRunsByCommit)
     .forEach((run) => runsByCommit.set(commitShaFor(run), run));
   return [...runsByCommit.values()]
     .sort(compareRunsByCommit)
     .slice(-MAX_INTRADAY_COMMITS)
-    .map((run) => ({
+    .map((run, index) => ({
       dayKey: anchorDay,
+      x: index,
       run,
       label: benchmarkRunLabel(run),
     }));
 }
 
-function weeklyHistorySlots(runs, anchorDay) {
-  const startKey = shiftUtcDay(anchorDay, -(HISTORY_RANGE_DAYS['1W'] - 1));
-  return calendarDayKeys(startKey, anchorDay).flatMap((dayKey) => {
+// Weekly commits are placed at their commit time inside the day band that starts at the day's
+// index, so every calendar day keeps the same width no matter how many commits it holds.
+function weeklyHistorySlots(runs, dayKeys) {
+  return dayKeys.flatMap((dayKey, dayIndex) => {
     const runsByCommit = new Map();
     runs
       .filter((run) => periodKey(commitTimestampFor(run), 'daily') === dayKey)
       .sort(compareRunsByCommit)
       .forEach((run) => runsByCommit.set(commitShaFor(run), run));
-    const dailyRuns = [...runsByCommit.values()]
+    return [...runsByCommit.values()]
       .sort(compareRunsByCommit)
       .slice(-MAX_COMMITS_PER_DAY)
-    return Array.from({ length: MAX_COMMITS_PER_DAY }, (_, index) => ({
-      dayKey,
-      run: dailyRuns[index] ?? null,
-      label: index === 0 ? shortDayLabel(dayKey) : '',
-    }));
+      .map((run) => ({
+        dayKey,
+        x: dayIndex + dayFraction(commitTimestampFor(run)),
+        run,
+        label: benchmarkRunLabel(run),
+      }));
   });
 }
 
@@ -271,8 +281,6 @@ export function selectOverview(data, filters, range = 'ALL') {
   const completedRuns = data.runs.filter((run) => isRunCompletedForFilters(run, filters));
   const candidate = data.latestCommitRun ?? sortRunsByCommit(data.runs).at(-1) ?? data.latestRun;
   const trendRuns = completedRuns;
-  const baseline = previousCompletedRunForFilters(data.runs, candidate, filters);
-  const comparisons = compareRuns(candidate, baseline, filters);
   const latestTests = (candidate?.tests ?? []).filter((test) => testMatches(test, filters));
   const completedTests = latestTests.filter((test) => test.status === 'completed');
   const totalTestCount = latestTests.length;
@@ -283,12 +291,14 @@ export function selectOverview(data, filters, range = 'ALL') {
 
   const isIntraday = range === '1D';
   const isWeekly = range === '1W';
-  const anchorDay = periodKey(isIntraday ? candidate.timestamp : commitTimestampFor(candidate), 'daily');
-  const intradayRuns = completedRuns;
+  const anchorDay = periodKey(commitTimestampFor(candidate), 'daily');
+  const weekDayKeys = isWeekly
+    ? calendarDayKeys(shiftUtcDay(anchorDay, -(HISTORY_RANGE_DAYS['1W'] - 1)), anchorDay)
+    : null;
   const slots = isIntraday
-    ? intradayHistorySlots(intradayRuns, anchorDay)
+    ? intradayHistorySlots(completedRuns, anchorDay)
     : isWeekly
-      ? weeklyHistorySlots(completedRuns, anchorDay)
+      ? weeklyHistorySlots(completedRuns, weekDayKeys)
       : dailyHistorySlots(trendRuns, anchorDay, range);
   const representedRuns = slots.filter((slot) => slot.run).length;
   const representedDays = new Set(slots.filter((slot) => slot.run).map((slot) => slot.dayKey)).size;
@@ -313,8 +323,9 @@ export function selectOverview(data, filters, range = 'ALL') {
   const candidateHistoryBaseline = isIntraday
     ? previousIntradayRun ?? firstHistoryRun
     : firstHistoryRun;
-  const historyBaseline = !insufficientData
-    && candidateHistoryBaseline?.runId !== historyCandidate?.runId
+  // The only run in range is the candidate itself, so there is nothing to measure against.
+  const baselineIsCandidate = candidateHistoryBaseline?.runId === historyCandidate?.runId;
+  const historyBaseline = !insufficientData && !baselineIsCandidate
     ? candidateHistoryBaseline
     : null;
   const displayedDuration = sumDurations(historyCandidate.tests.filter((test) => testMatches(test, filters)));
@@ -344,7 +355,9 @@ export function selectOverview(data, filters, range = 'ALL') {
       target,
       color: targetColor(target, index),
       data: projected.map(({ value }) => value),
-      baseline: isIntraday && Number.isFinite(previousValue) ? previousValue : firstValue,
+      baseline: isIntraday && Number.isFinite(previousValue)
+        ? previousValue
+        : baselineIsCandidate ? null : firstValue,
       estimated: projected.map(({ estimatedTests }) => estimatedTests.length > 0),
     };
   });
@@ -361,7 +374,7 @@ export function selectOverview(data, filters, range = 'ALL') {
     ? normalizedSeries.every((series) => Number.isFinite(series.baseline))
       ? normalizedSeries.reduce((total, series) => total + series.baseline, 0)
       : null
-    : normalizedDurationAt(firstHistoryIndex);
+    : baselineIsCandidate ? null : normalizedDurationAt(firstHistoryIndex);
   const oldestCompletedRun = sortRunsByCommit(completedRuns)[0] ?? null;
   const metricsBaseline = latestCompletedRunForCommit(completedRuns, oldestCompletedRun);
   const metricsBaselineDuration = metricsBaseline
@@ -388,11 +401,15 @@ export function selectOverview(data, filters, range = 'ALL') {
   const historyComparisons = historyBaseline
     ? compareRuns(historyCandidate, historyBaseline, filters).filter((item) => item.comparable)
     : [];
+  const resultComparisons = compareRuns(candidate, historyBaseline, filters);
   const history = {
     range,
     mode: isIntraday ? 'intraday' : isWeekly ? 'weekly-by-commit' : 'daily-by-commit',
     anchorDay,
     slots,
+    dayKeys: isIntraday ? null : weekDayKeys ?? slots.map((slot) => slot.dayKey),
+    // Weekly slots sit inside their day band, so the axis runs one unit past the last day.
+    axisMax: isWeekly ? weekDayKeys.length : Math.max(slots.length - 1, 0),
     currentDuration: displayedDuration,
     firstRun: historyBaseline ?? firstHistoryRun,
     latestRun: historyCandidate,
@@ -413,10 +430,10 @@ export function selectOverview(data, filters, range = 'ALL') {
 
   return {
     candidate,
-    baseline,
+    baseline: historyBaseline,
     changes,
     history,
-    results: comparisons.map((item) => ({
+    results: resultComparisons.map((item) => ({
       ...item.candidateTest,
       baselineTest: item.baselineTest,
       comparable: item.comparable,

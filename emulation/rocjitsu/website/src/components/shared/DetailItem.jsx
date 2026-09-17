@@ -6,8 +6,7 @@ export default function DetailItem({ label, children }) {
       <Typography
         component="div"
         variant="overline"
-        color="text.secondary"
-        sx={{ fontSize: '11px', lineHeight: '20px' }}
+        sx={{ color: 'text.secondary', fontSize: '11px', lineHeight: '20px' }}
       >
         {label}
       </Typography>

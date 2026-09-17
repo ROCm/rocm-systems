@@ -59,11 +59,11 @@ function LoadingDataState({ progress }) {
           />
           <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
             <Typography fontWeight={700}>Loading benchmark run data…</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4 }}>
               The dashboard shell is ready while run files are fetched and validated.
             </Typography>
             {determinate && (
-              <Typography data-testid="dashboard-load-progress" variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+              <Typography data-testid="dashboard-load-progress" variant="body2" sx={{ color: 'text.secondary', mt: 0.4 }}>
                 {progress.loaded} of {progress.total} run files loaded
               </Typography>
             )}
@@ -118,6 +118,8 @@ function emptyOverview(range) {
       mode: 'daily-by-commit',
       anchorDay: null,
       slots: [],
+      dayKeys: [],
+      axisMax: 0,
       currentDuration: null,
       firstRun: null,
       latestRun: null,
@@ -137,7 +139,7 @@ function DashboardHero({ data = null }) {
     <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'flex-end' }, gap: 2, mb: 2.5 }}>
       <Box>
         <Typography component="h1" variant="h1">Rocjitsu Performance Health</Typography>
-        <Typography color="text.secondary" sx={{ mt: 0.7, maxWidth: 760 }}>
+        <Typography sx={{ color: 'text.secondary', mt: 0.7, maxWidth: 760 }}>
           Track benchmark performance, regressions, and run coverage across selected GFX targets.
         </Typography>
       </Box>
@@ -145,7 +147,7 @@ function DashboardHero({ data = null }) {
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
           <AccessTimeRoundedIcon color="primary" sx={{ fontSize: 18 }} />
           <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Latest commit run</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>Latest commit run</Typography>
             {data?.latestCommitRun ? (
               <Stack direction="row" sx={{ gap: 0.8, alignItems: 'center' }}>
                 <Typography variant="caption" fontWeight={700}>{formatFullDate(data.latestCommitRun.timestamp)}</Typography>
@@ -153,7 +155,7 @@ function DashboardHero({ data = null }) {
               </Stack>
             ) : data ? (
               <Stack direction="row" sx={{ gap: 0.8, alignItems: 'center' }}>
-                <Typography variant="caption" color="text.secondary" fontWeight={700}>—</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }} fontWeight={700}>—</Typography>
                 <Chip label="—" size="small" disabled sx={{ height: 20, fontFamily: 'monospace', fontSize: 10 }} />
               </Stack>
             ) : (
@@ -284,7 +286,7 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
       <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, py: 2.25 }}>
           <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-            <Typography variant="caption" color="text.secondary">Data schema v{data.schemaVersion ?? '—'}</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Data schema v{data.schemaVersion ?? '—'}</Typography>
           </Stack>
         </Container>
       </Box>

@@ -240,7 +240,7 @@ export default function BenchmarksView({
         {mode === 'aggregate' ? (
           <>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: { xs: 'flex-start', md: 'flex-end' }, gap: 0.75, mb: 1.5 }}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 {data.runs.length} official attempts · Selected runs remain visible while zooming · {scrollZoomEnabled
                   ? 'Scroll, pinch, or use the slider to change the visible range'
                   : 'Use the slider to change the visible range'}
@@ -274,7 +274,7 @@ export default function BenchmarksView({
               {interactionControls}
             </Box>
             <FilterOverrideAlert benchmarks={outsideSingleFilter} available={catalog.available} onReturn={returnSingleToFilters} />
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.75 }}>
               {showDetailsOnClick
                 ? 'Dotted segments bridge unavailable measurements. Click any result marker to select its run and open pass/failure details.'
                 : 'Dotted segments bridge unavailable measurements. Click any result marker to select or clear its run.'}
@@ -350,7 +350,7 @@ export default function BenchmarksView({
             ) : (
               <Paper variant="outlined" sx={{ p: 5, borderStyle: 'dashed', textAlign: 'center' }}>
                 <Typography fontWeight={700}>No benchmark graphs selected</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Use the checkbox list above to display up to eight graphs.</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>Use the checkbox list above to display up to eight graphs.</Typography>
               </Paper>
             )}
           </>

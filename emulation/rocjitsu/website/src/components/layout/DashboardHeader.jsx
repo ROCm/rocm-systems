@@ -89,8 +89,7 @@ export default function DashboardHeader({ data, downloadData, loading = false, m
                     target="_blank"
                     rel="noreferrer"
                     variant="caption"
-                    color="primary.main"
-                    sx={{ textDecoration: 'none', display: { xs: 'none', sm: 'inline-flex' }, alignItems: 'center', gap: 0.4 }}
+                    sx={{ color: 'primary.main', textDecoration: 'none', display: { xs: 'none', sm: 'inline-flex' }, alignItems: 'center', gap: 0.4 }}
                   >
                     ROCm/rocm-systems <OpenInNewRoundedIcon sx={{ fontSize: 11 }} />
                   </Typography>

@@ -20,6 +20,7 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import BenchmarkResultDialog from '../benchmarks/BenchmarkResultDialog';
 import StatusChip from '../shared/StatusChip';
 import { formatDuration, formatPercent } from '../../utils/formatters';
+import { changeTone, classifyDurationChange } from '../../utils/performance';
 import { detailActionStyles } from '../../theme/styles';
 import CommitComparison from '../shared/CommitComparison';
 
@@ -32,15 +33,45 @@ const resultColumns = [
   { key: 'benchmark', label: 'Benchmark' },
   { key: 'duration', label: 'Duration', align: 'right', sx: rightAlignedColumn },
   { key: 'baseline', label: 'Baseline', align: 'right', sx: { ...hiddenBelowTablet, ...rightAlignedColumn } },
-  { key: 'change', label: 'Change', align: 'right', sx: rightAlignedColumn },
+  { key: 'deltaAbs', label: 'Delta abs', align: 'right', sx: { ...hiddenBelowTablet, ...rightAlignedColumn } },
+  { key: 'change', label: 'Delta %', align: 'right', sx: rightAlignedColumn },
   { key: 'status', label: 'Status' },
 ];
 const resultCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function absoluteDelta(row) {
+  const baselineDuration = row.baselineTest?.durationSeconds;
+  if (!row.comparable
+    || !Number.isFinite(row.durationSeconds)
+    || !Number.isFinite(baselineDuration)) {
+    return null;
+  }
+  return row.durationSeconds - baselineDuration;
+}
+
+function formatSignedDuration(value) {
+  if (!Number.isFinite(value)) return '—';
+  if (value === 0) return formatDuration(0);
+  const sign = value > 0 ? '+' : '-';
+  return `${sign}${formatDuration(Math.abs(value))}`;
+}
+
+function PerfDelta({ value, format }) {
+  const state = classifyDurationChange(value);
+  const tone = changeTone(state);
+  const color = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
+  return (
+    <Typography variant="body2" fontWeight={720} sx={{ color }} data-change-state={state}>
+      {format(value)}
+    </Typography>
+  );
+}
 
 function resultSortValue(row, key) {
   if (key === 'benchmark') return row.name;
   if (key === 'duration') return row.durationSeconds;
   if (key === 'baseline') return row.baselineTest?.durationSeconds;
+  if (key === 'deltaAbs') return absoluteDelta(row);
   if (key === 'change') return row.delta;
   return row[key];
 }
@@ -135,7 +166,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 1.5, p: { xs: 2, sm: 2.5 } }}>
         <Box>
           <Typography variant="h2">Latest Commit Results</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4 }}>
             Test results for the latest commit date · Select a benchmark name for details
           </Typography>
         </Box>
@@ -156,7 +187,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
         />
       </Stack>
       <TableContainer sx={{ maxHeight: 510, borderTop: 1, borderColor: 'divider' }}>
-        <Table stickyHeader size="small" sx={{ minWidth: 720 }}>
+        <Table stickyHeader size="small" sx={{ minWidth: 820 }}>
           <TableHead>
             <TableRow>
               {resultColumns.map((column) => (
@@ -173,7 +204,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.testId} sx={{ '&:last-child td': { borderBottom: 0 } }}>
-                <TableCell><Typography variant="body2" fontWeight={700} color="primary.main">{row.target}</Typography></TableCell>
+                <TableCell><Typography variant="body2" fontWeight={700} sx={{ color: 'primary.main' }}>{row.target}</Typography></TableCell>
                 <TableCell>{row.suite}</TableCell>
                 <TableCell>
                   <ButtonBase
@@ -186,10 +217,11 @@ export default function ResultsTable({ results, run, baseline, repository, searc
                 </TableCell>
                 <TableCell align="right" sx={{ ...rightAlignedColumn, fontVariantNumeric: 'tabular-nums', fontWeight: 650 }}>{formatDuration(row.durationSeconds)}</TableCell>
                 <TableCell align="right" sx={{ ...hiddenBelowTablet, ...rightAlignedColumn, fontVariantNumeric: 'tabular-nums', color: 'text.secondary' }}>{formatDuration(row.baselineTest?.durationSeconds)}</TableCell>
+                <TableCell align="right" sx={{ ...hiddenBelowTablet, ...rightAlignedColumn, fontVariantNumeric: 'tabular-nums' }}>
+                  <PerfDelta value={absoluteDelta(row)} format={formatSignedDuration} />
+                </TableCell>
                 <TableCell align="right" sx={rightAlignedColumn}>
-                  <Typography variant="body2" fontWeight={720} color={!row.comparable ? 'text.secondary' : row.delta > 0 ? 'error.main' : 'success.main'}>
-                    {formatPercent(row.delta)}
-                  </Typography>
+                  <PerfDelta value={row.comparable ? row.delta : null} format={formatPercent} />
                   {row.comparable && <CommitComparison candidate={run} baseline={baseline} align="right" sx={{ mt: 0.15, fontSize: 10 }} />}
                 </TableCell>
                 <TableCell><StatusChip status={row.status} /></TableCell>
@@ -197,7 +229,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
             ))}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={8} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   {run ? 'No benchmarks match this search.' : '—'}
                 </TableCell>
               </TableRow>

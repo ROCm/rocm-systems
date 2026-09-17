@@ -46,7 +46,7 @@ export default function RunDetailsDialog({ run, filters, repository, onClose }) 
         <>
           <DialogTitle component="div" sx={{ pr: 7 }}>
             <Typography variant="h2" sx={{ lineHeight: '24px' }}>Run Details</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4, lineHeight: '21px' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>
               Commit {shortSha(run)} · {run.trigger === 'manual' ? 'Manual' : 'Auto'}
             </Typography>
             <IconButton onClick={onClose} aria-label="Close Run Details" sx={{ position: 'absolute', top: 11, right: 11 }}>
@@ -81,12 +81,12 @@ export default function RunDetailsDialog({ run, filters, repository, onClose }) 
                       <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <Box sx={{ minWidth: 0 }}>
                           <Typography variant="body2" sx={{ fontWeight: 700 }}>{test.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">{test.target} · {test.suite}</Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>{test.target} · {test.suite}</Typography>
                         </Box>
                         <StatusChip status={test.status} />
                       </Stack>
                       {hasDisplayValue(test.error) && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{test.error}</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>{test.error}</Typography>
                       )}
                     </Box>
                   ))}
@@ -103,7 +103,7 @@ export default function RunDetailsDialog({ run, filters, repository, onClose }) 
                 ))}
               </DetailGrid>
             ) : (
-              <Typography variant="body2" color="text.secondary">No environment details were provided for this run.</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>No environment details were provided for this run.</Typography>
             )}
 
             <Divider sx={{ my: 2.5 }} />

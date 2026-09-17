@@ -172,7 +172,7 @@ export default function FiltersBar({ data, state, disabled = false }) {
     <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 3, boxShadow: 1 }}>
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 1.5 }}>
         <TuneRoundedIcon color="primary" sx={{ fontSize: 18 }} />
-        <Typography variant="overline" color="text.secondary">Global filters</Typography>
+        <Typography variant="overline" sx={{ color: 'text.secondary' }}>Global filters</Typography>
       </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
         <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />

@@ -188,12 +188,24 @@ test('latest results can be sorted by every column', async ({ page }) => {
   await page.goto('/');
 
   const results = page.getByTestId('latest-results');
-  const labels = ['Target', 'Suite', 'Benchmark', 'Duration', 'Baseline', 'Change', 'Status'];
+  const labels = ['Target', 'Suite', 'Benchmark', 'Duration', 'Baseline', 'Delta abs', 'Delta %', 'Status'];
   for (const label of labels) {
     const header = results.getByRole('columnheader', { name: label, exact: true });
     await header.getByRole('button', { name: label, exact: true }).click();
     await expect(header).toHaveAttribute('aria-sort', 'ascending');
   }
+
+  const deltaPercent = results.locator('tbody tr td:nth-child(7) [data-change-state]').first();
+  await expect(deltaPercent).toBeVisible();
+  await expect(results.locator('[data-change-state="slower"]')).toHaveCount(0);
+  const fasterColor = await results.locator('[data-change-state="faster"]').first().evaluate((el) => (
+    getComputedStyle(el).color
+  ));
+  const unavailableColor = await results.locator('[data-change-state="unavailable"]').first().evaluate((el) => (
+    getComputedStyle(el).color
+  ));
+  expect(fasterColor).toBe('rgb(22, 138, 91)');
+  expect(unavailableColor).toBe('rgb(100, 112, 135)');
 
   const durationHeader = results.getByRole('columnheader', { name: 'Duration', exact: true });
   await expect(durationHeader.getByRole('button', { name: 'Duration', exact: true })).toHaveCSS('flex-direction', 'row');
@@ -300,8 +312,10 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'faster');
   await expect(page.getByText(/Latest vs first shown/)).toHaveCount(0);
   const largestChangesPair = page.getByTestId('largest-changes').getByTestId('compared-commits').first();
+  const latestResultsPair = page.getByTestId('latest-results').getByTestId('compared-commits').first();
   const allRangePair = await largestChangesPair.getAttribute('aria-label');
   expect(allRangePair).toBe('Candidate commit 31369c4d versus baseline commit 86b362ea');
+  expect(await latestResultsPair.getAttribute('aria-label')).toBe(allRangePair);
 
   await page.getByRole('button', { name: 'Trailing 7 days' }).click();
   await expect(page.getByText(/\d+ commits? shown/)).toBeVisible();
@@ -309,6 +323,20 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'faster');
   const weekRangePair = await largestChangesPair.getAttribute('aria-label');
   expect(weekRangePair).not.toBe(allRangePair);
+  expect(await latestResultsPair.getAttribute('aria-label')).toBe(weekRangePair);
+  const weekAxis = await readChart(
+    page.getByRole('img', { name: 'Performance trend for 1W' }),
+    (instance) => ({
+      name: instance.getOption().xAxis[0].name,
+      labels: instance.getModel().getComponent('xAxis').axis
+        .getViewLabels()
+        .map((label) => label.formattedLabel)
+        .filter(Boolean),
+    }),
+  );
+  expect(weekAxis.name).toBe('Date (UTC)');
+  expect(weekAxis.labels).toHaveLength(7);
+  expect(new Set(weekAxis.labels).size).toBe(7);
 
   await page.getByRole('button', { name: 'Trailing 24 hours' }).click();
   await expect(page.getByText('3 commits shown')).toBeVisible();
@@ -316,6 +344,7 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'slower');
   const dayRangePair = await largestChangesPair.getAttribute('aria-label');
   expect(dayRangePair).not.toBe(weekRangePair);
+  expect(await latestResultsPair.getAttribute('aria-label')).toBe(dayRangePair);
   const intradayTooltip = await readChart(
     page.getByRole('img', { name: 'Performance trend for 1D' }),
     (instance) => {
@@ -339,6 +368,8 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   expect(intradayTooltip).not.toContain('Commit time ·');
   expect(intradayTooltip).toMatch(/\d+m\d+s/);
   expect(intradayTooltip).toMatch(/Time change [+-]?\d+\.\d+%/);
+  expect(intradayTooltip).toMatch(/Time change [+-]?\d+\.\d+% · Base time \d+m\d+s/);
+  expect(intradayTooltip).not.toMatch(/<strong>Base time/);
   expect(intradayTooltip).not.toMatch(/\d+m \d+/);
   const durationUnit = await readChart(
     page.getByRole('img', { name: 'Performance trend for 1D' }),
@@ -347,15 +378,83 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   expect(durationUnit).toBe('Minutes');
   const intradayAxis = await readChart(
     page.getByRole('img', { name: 'Performance trend for 1D' }),
-    (instance) => ({
-      name: instance.getOption().xAxis[0].name,
-      type: instance.getOption().xAxis[0].type,
-      points: instance.getOption().series[0].data.length,
-    }),
+    (instance) => {
+      const option = instance.getOption();
+      const baseline = option.series[0].markLine.data[0].yAxis;
+      return {
+        name: option.xAxis[0].name,
+        type: option.xAxis[0].type,
+        points: option.series[0].data.length,
+        baseline,
+        yAxisMin: option.yAxis[0].min,
+        yAxisMax: option.yAxis[0].max,
+      };
+    },
   );
   expect(intradayAxis.name).toBe('Commit time (UTC)');
   expect(intradayAxis.type).toBe('value');
   expect(intradayAxis.points).toBe(3);
+  expect(intradayAxis.yAxisMin).toBeLessThanOrEqual(intradayAxis.baseline);
+  expect(intradayAxis.yAxisMax).toBeGreaterThanOrEqual(intradayAxis.baseline);
+});
+
+test('keeps a dashed baseline above the measured range inside the y-axis', async ({ page }) => {
+  await page.route('**/data/runs/generated-commit-20260830T153000000Z.json', async (route) => {
+    const response = await route.fetch();
+    const run = await response.json();
+    run.targets.forEach((target) => target.results.forEach((result) => {
+      if (Number.isFinite(result.durationSeconds)) result.durationSeconds *= 10;
+    }));
+    await route.fulfill({ response, json: run });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Trailing 24 hours' }).click();
+
+  const bounds = await readChart(
+    page.getByRole('img', { name: 'Performance trend for 1D' }),
+    (instance) => {
+      const option = instance.getOption();
+      const baselines = option.series.map((series) => series.markLine.data[0].yAxis);
+      const measuredValues = option.series.flatMap((series) => (
+        series.data.map((point) => point[1]).filter(Number.isFinite)
+      ));
+      return {
+        highestBaseline: Math.max(...baselines),
+        highestMeasuredValue: Math.max(...measuredValues),
+        yAxisMax: option.yAxis[0].max,
+      };
+    },
+  );
+
+  expect(bounds.highestBaseline).toBeGreaterThan(bounds.highestMeasuredValue);
+  expect(bounds.yAxisMax).toBeGreaterThanOrEqual(bounds.highestBaseline);
+});
+
+test('labels the 1D axis once per commit shown', async ({ page }) => {
+  for (const file of ['benchmark-202608310530-255eabe3', 'benchmark-202608311310-9f774d29']) {
+    await page.route(`**/data/runs/${file}.json`, async (route) => {
+      const response = await route.fetch();
+      const run = await response.json();
+      run.targets.forEach((target) => target.results.forEach((result) => {
+        result.durationSeconds = null;
+        result.status = 'failed';
+        result.error = 'Simulation exited before producing a valid timing result';
+      }));
+      await route.fulfill({ response, json: run });
+    });
+  }
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Trailing 24 hours' }).click();
+  await expect(page.getByText('1 commit shown')).toBeVisible();
+
+  const intradayLabels = await readChart(
+    page.getByRole('img', { name: 'Performance trend for 1D' }),
+    (instance) => instance.getModel().getComponent('xAxis').axis
+      .getViewLabels()
+      .map((label) => label.formattedLabel)
+      .filter(Boolean),
+  );
+  expect(intradayLabels).toEqual(['19:45']);
 });
 
 test('uses a continuous value x-axis for every rendered trend range', async ({ page }) => {

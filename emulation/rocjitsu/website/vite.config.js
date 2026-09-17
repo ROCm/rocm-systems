@@ -1,14 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
+import {
+  resolveDashboardDataDirectory,
+  serveDashboardData,
+} from './scripts/dashboard-data-dir.mjs';
 
 const fixtureDirectory = fileURLToPath(new URL('./tests/fixtures/', import.meta.url));
+const localDataDirectory = process.env.DASHBOARD_DATA_DIR
+  ? resolveDashboardDataDirectory(process.env.DASHBOARD_DATA_DIR)
+  : null;
 
 export default defineConfig(({ mode }) => ({
   base: './',
   // Dummy benchmark history is available only for explicit fixture builds/dev servers.
-  publicDir: mode === 'fixtures' ? fixtureDirectory : false,
-  plugins: [react()],
+  // A local data directory is mounted at /data/ instead of copying into publicDir.
+  publicDir: mode === 'fixtures' && !localDataDirectory ? fixtureDirectory : false,
+  plugins: [
+    react(),
+    localDataDirectory ? serveDashboardData(localDataDirectory) : null,
+  ].filter(Boolean),
   preview: {
     port: mode === 'fixtures' ? 4174 : 4173,
     strictPort: true,

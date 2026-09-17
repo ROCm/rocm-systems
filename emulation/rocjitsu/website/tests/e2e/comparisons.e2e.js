@@ -143,7 +143,7 @@ test('comparison surfaces identify both compared commits', async ({ page }) => {
   const historyPair = 'Candidate commit 31369c4d versus baseline commit 86b362ea';
   await expect(page.getByTestId('performance-trend').getByLabel(historyPair)).toBeVisible();
   await expect(page.getByTestId('largest-changes').getByLabel(historyPair)).toHaveCount(5);
-  await expect(page.getByTestId('latest-results').getByLabel(latestPair)).toHaveCount(7);
+  await expect(page.getByTestId('latest-results').getByLabel(historyPair)).toHaveCount(5);
 
   const recentRuns = page.getByTestId('recent-runs-table');
   await expect(recentRuns.locator('tbody tr').first().getByLabel('Candidate commit 8418072e versus baseline commit f25f5a48')).toBeVisible();

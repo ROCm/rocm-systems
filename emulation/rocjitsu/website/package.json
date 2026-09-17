@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "vite",
     "dev:fixtures": "vite --mode fixtures",
+    "dev:data": "node scripts/dev-with-data.mjs",
+    "preview:data": "node scripts/dev-with-data.mjs --preview",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",

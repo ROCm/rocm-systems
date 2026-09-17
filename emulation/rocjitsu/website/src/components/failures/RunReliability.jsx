@@ -15,7 +15,7 @@ import { chartAreaGradient, chartLineStyle, chartPointStyle } from '../../utils/
 function SummaryStat({ label, value }) {
   return (
     <Box sx={{ p: 1.25, border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'action.hover' }}>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>{label}</Typography>
       <Typography sx={{ fontSize: 20, fontWeight: 760, lineHeight: 1.2, mt: 0.25 }}>{value}</Typography>
     </Box>
   );
@@ -95,11 +95,11 @@ export default function RunReliability({ reliability }) {
         <Chart option={option} height={230} ariaLabel="Run reliability coverage trend" />
       </Box>
       <Divider sx={{ my: 1.5 }} />
-      <Typography variant="overline" color="text.secondary">Runs below 100%</Typography>
+      <Typography variant="overline" sx={{ color: 'text.secondary' }}>Runs below 100%</Typography>
       {!hasRuns ? (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>—</Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>—</Typography>
       ) : reliability.issueRuns.length === 0 ? (
-        <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>All official runs in this window reached complete coverage.</Typography>
+        <Typography variant="body2" sx={{ color: 'success.main', mt: 1 }}>All official runs in this window reached complete coverage.</Typography>
       ) : (
         <Stack sx={{ mt: 0.75, gap: 1 }}>
           {reliability.issueRuns.map((row) => (
@@ -119,11 +119,11 @@ export default function RunReliability({ reliability }) {
             >
               <Box>
                 <Typography variant="body2" fontWeight={700}>{formatFullDate(row.run.timestamp)}</Typography>
-                <Typography variant="caption" color="primary.main" component="code">{shortSha(row.run)}</Typography>
+                <Typography variant="caption" sx={{ color: 'primary.main' }} component="code">{shortSha(row.run)}</Typography>
               </Box>
               <Box>
                 <Stack direction="row" sx={{ justifyContent: 'space-between', gap: 1, mb: 0.45 }}>
-                  <Typography variant="caption" color="text.secondary">Coverage</Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Coverage</Typography>
                   <Typography variant="caption" fontWeight={700}>{row.completed}/{row.total} · {row.completionPercent.toFixed(1)}%</Typography>
                 </Stack>
                 <LinearProgress

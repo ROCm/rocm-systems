@@ -65,7 +65,7 @@ Catalogs, targets, plugins, and run filenames do not belong in metadata.
 
 The index contains no catalog, target, plugin, or benchmark data.
 
-An invalid, missing, or unreadable run is skipped and reported in the dashboard warning. A missing or invalid catalog invalidates each run that references it. Invalid dataset metadata or index structure remains fatal, as does a dataset with no usable completed Vanilla runs.
+Validation fails closed. An invalid, missing, or unreadable run listed in the index rejects the whole dataset instead of being skipped; a missing or invalid catalog rejects every run that references it, and therefore the dataset. Invalid dataset metadata or index structure is equally fatal, as is a dataset containing no valid Vanilla run. That last check requires a Vanilla run to exist, not to have completed every result: a valid Vanilla run whose results are failed or timed out still satisfies it.
 
 ## Test catalog
 
@@ -197,6 +197,12 @@ A run represents one Rocjitsu plugin execution on one source revision and machin
 
 Do not give plugin executions the same `id`. For different plugins to share a `comparisonId`, they must have identical catalog, source, trigger, machine, environment, and target sets. Their completion times and result values may differ.
 
+Validation enforces three rules per `comparisonId`, and a violation of any of them rejects the whole dataset:
+
+- Every run sharing the ID must carry the same catalog path, branch, commit SHA, commit timestamp, commit message, trigger, machine, normalized environment, and target set.
+- A plugin ID may appear at most once. Publish a rerun under a new `comparisonId` rather than repeating a plugin inside an existing comparison.
+- A comparison containing any non-Vanilla plugin must also contain its `vanilla` run. Publish the instrumented runs together with their baseline, never on their own.
+
 Normal performance history, Overview, Run Comparison, Benchmarks, and Failures use only the `vanilla` plugin. The Plugin Comparison list includes only compatible controlled comparisons containing Vanilla and at least one non-Vanilla plugin, and renders each target selected in the global filter without adding a second target picker.
 
 ### `plugin`
@@ -272,8 +278,9 @@ Plugin comparison always occurs within one `comparisonId` and one target. Vanill
 
 ```text
 duration change (%) = (plugin duration - baseline duration) / baseline duration × 100
-speedup             = baseline duration / plugin duration
 ```
+
+Per-test changes within ±3% are presented as measurement noise rather than overhead.
 
 The overall runtime overhead is the geometric mean of per-test duration ratios. When every selected test is comparable, the value is exact. When only some tests pass for both the plugin and baseline, the dashboard measures the geometric-mean overhead from those passed pairs and assumes the same overhead for the entire selected test set. This whole-set estimate is marked with `*` and reports how many passed pairs contributed. Failed, timed-out, missing, and baseline-incomplete results contribute no measured ratio; they receive the passed-pair overhead assumption. No estimate is shown when no passed pair exists.
 
@@ -292,6 +299,56 @@ Validation is mandatory before publication. The browser runs the same validation
 fails closed with no benchmark data if invalid files bypass the publishing gate; it
 does not skip invalid runs or construct partial history.
 
+`validate:data` covers only what the index can reach. It starts at `metadata.json` and
+`index.json` in the given directory, then reads the runs listed in `runFiles` and the
+catalogs those runs reference. A file that exists on disk but is unreachable from the
+index is never read: an orphan run file, a catalog no run references, or a run left out
+of `runFiles` is neither validated nor reported. Stage the directory exactly as it will
+be published, with the updated index in place, so that validation covers everything the
+browser will load.
+
 ## Values derived by the dashboard
 
-Do not publish aggregate duration, runtime overhead, speedup, baselines, deltas, coverage percentages, reliability percentages, comparison counts, chart labels, colors, or layout. The browser derives them from catalogs and run results.
+Do not publish aggregate duration, runtime overhead, baselines, deltas, coverage percentages, reliability percentages, comparison counts, chart labels, colors, or layout. The browser derives them from catalogs and run results.
+
+### Baseline selection
+
+There is no single published baseline. Each surface answers a different question and
+chooses its own, so the same run can show different changes in different places. Every
+choice below respects the active target and suite filters, and *complete* means that
+every selected test in that run completed with a finite duration.
+
+| Surface | Candidate | Baseline |
+| --- | --- | --- |
+| Overview metric cards | Latest commit run | Latest complete run of the oldest commit that has one |
+| Duration history and Largest Changes | Latest run shown in the selected timeframe | First run shown in that timeframe; the `1D` range instead uses the previous commit day's latest run |
+| Latest Commit Results | Latest commit run | The same timeframe baseline the duration history uses, so the Overview range selector also changes this table |
+| Recent Runs | Each listed run | Nearest earlier complete commit run, evaluated per row |
+| Run Comparison | Selected run, defaulting to the latest execution | Nearest earlier complete commit run for a selected candidate; with no selection, the previous execution in publication order |
+| Plugin Comparison | Each plugin run in the comparison | The `vanilla` run of the same `comparisonId` and target |
+
+Baselines are ordered by commit, not by publication time, so a historical rerun
+published today does not become the baseline for older commits. Largest Changes and
+Run Comparison treat changes within ±3% as measurement noise.
+
+### Workload normalization
+
+Comparing a summed duration across catalog versions would otherwise compare different
+test sets, so history is normalized to one workload before any total is computed:
+
+- The canonical workload is the set of tests the latest commit run covers for each
+  selected target and suite.
+- A run published under a different catalog ID that lacks a canonical test contributes
+  that test's most recent completed duration from history. Such a point is marked as
+  estimated in its tooltip, and the range change is then labelled as normalized.
+- If a canonical test is present but not completed, or is missing with no earlier
+  completed duration to draw on, the run contributes no value and the chart shows a gap
+  instead of a smaller total.
+- Daily ranges plot the latest complete run for each UTC commit date; the `1D` range
+  plots the individual commits of a single UTC date.
+- A fixed-length range representing fewer than 75% of its calendar days is reported as
+  insufficient data, and its range-level change is withheld rather than estimated.
+
+Normalization only fills tests absent from an older catalog. It never substitutes a
+value for a test that ran and failed, so failures always reduce coverage rather than
+silently inheriting an earlier duration.

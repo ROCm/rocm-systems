@@ -129,7 +129,7 @@ function CommitFlags({ row }) {
 function RunTypeValue({ run }) {
   const type = triggerType(run.trigger);
   return (
-    <Typography variant="body2" fontWeight={700} color={type === 'Manual' ? 'primary.main' : 'secondary.main'}>
+    <Typography variant="body2" fontWeight={700} sx={{ color: type === 'Manual' ? 'primary.main' : 'secondary.main' }}>
       {type}
     </Typography>
   );
@@ -239,7 +239,7 @@ function MobileRun({ row, selected, onSelectRun, onExploreRun }) {
             </Typography>
             {row.latest && <MostRecentMarker />}
           </Stack>
-          <Typography variant="caption" color="text.secondary" component="div">
+          <Typography variant="caption" sx={{ color: 'text.secondary' }} component="div">
             <Box component="span" sx={{ color: 'primary.main', fontFamily: 'monospace' }}>{shortSha(row.run)}</Box>
             {hasDisplayValue(row.run.provenance?.commitMessage) && ` · ${row.run.provenance.commitMessage}`}
           </Typography>
@@ -252,14 +252,14 @@ function MobileRun({ row, selected, onSelectRun, onExploreRun }) {
       </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1.25, mt: 1.25 }}>
         <Box>
-          <Typography variant="caption" color="text.secondary">Commit time</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>Commit time</Typography>
           <Typography component="time" dateTime={commitTimestampFor(row.run)} title={formatFullDate(commitTimestampFor(row.run))} variant="body2">
             {compactRunTime(commitTimestampFor(row.run), true)}
           </Typography>
         </Box>
-        <Box><Typography variant="caption" color="text.secondary">Run type</Typography><RunTypeValue run={row.run} /></Box>
-        <Box><Typography variant="caption" color="text.secondary">Coverage</Typography><Coverage row={row} /></Box>
-        <Box sx={{ textAlign: 'right' }} title={baselineDescription(row)}><Typography variant="caption" color="text.secondary">Perf change</Typography><Typography variant="body2" fontWeight={700}>{formatDuration(row.duration)}</Typography><ChangeValue value={row.durationDelta} candidate={row.run} baseline={row.baseline} /></Box>
+        <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Run type</Typography><RunTypeValue run={row.run} /></Box>
+        <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Coverage</Typography><Coverage row={row} /></Box>
+        <Box sx={{ textAlign: 'right' }} title={baselineDescription(row)}><Typography variant="caption" sx={{ color: 'text.secondary' }}>Perf change</Typography><Typography variant="body2" fontWeight={700}>{formatDuration(row.duration)}</Typography><ChangeValue value={row.durationDelta} candidate={row.run} baseline={row.baseline} /></Box>
       </Box>
     </Box>
   );
@@ -312,7 +312,7 @@ export default function RecentRuns({ data, filters, onCompareRun, onExploreRun }
         <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1.5, mb: 1.25, p: 1.15, borderRadius: 2, bgcolor: 'action.hover', border: 1, borderColor: 'primary.main' }}>
           <Box>
             <Typography variant="body2" fontWeight={720}>Candidate selected</Typography>
-            <Typography variant="caption" color="text.secondary">Select another run as the baseline to open Run Comparison.</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Select another run as the baseline to open Run Comparison.</Typography>
           </Box>
           <Button size="small" color="inherit" onClick={() => setSelectedRunId(null)}>Clear</Button>
         </Stack>
@@ -349,8 +349,8 @@ export default function RecentRuns({ data, filters, onCompareRun, onExploreRun }
                   <TableCell sx={{ minWidth: 0, verticalAlign: 'middle' }}>
                     <TableCellContent expanded={expanded} footer={row.latestCommit || row.olderCommit ? <CommitFlags row={row} /> : null}>
                       <Stack direction="row" sx={{ minWidth: 0, alignItems: 'baseline', gap: 1 }}>
-                        <Typography component="code" variant="body2" color="primary.main" fontWeight={760} sx={{ flexShrink: 0 }}>{shortSha(row.run)}</Typography>
-                        {hasDisplayValue(row.run.provenance?.commitMessage) && <Typography variant="body2" color="text.secondary" noWrap sx={{ minWidth: 0 }}>{row.run.provenance.commitMessage}</Typography>}
+                        <Typography component="code" variant="body2" fontWeight={760} sx={{ color: 'primary.main', flexShrink: 0 }}>{shortSha(row.run)}</Typography>
+                        {hasDisplayValue(row.run.provenance?.commitMessage) && <Typography variant="body2" noWrap sx={{ color: 'text.secondary', minWidth: 0 }}>{row.run.provenance.commitMessage}</Typography>}
                       </Stack>
                     </TableCellContent>
                   </TableCell>

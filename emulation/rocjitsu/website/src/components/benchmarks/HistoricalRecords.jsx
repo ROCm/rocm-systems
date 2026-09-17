@@ -29,7 +29,7 @@ function ChangeValue({ value, candidate, baseline }) {
   const color = Number.isFinite(value) && tone !== 'neutral' ? `${tone}.main` : 'text.secondary';
   return (
     <Box>
-      <Typography variant="body2" color={color} fontWeight={720}>{formatPercent(value)}</Typography>
+      <Typography variant="body2" fontWeight={720} sx={{ color }}>{formatPercent(value)}</Typography>
       {Number.isFinite(value) && <CommitComparison candidate={candidate} baseline={baseline} align="right" sx={{ mt: 0.1, fontSize: 10 }} />}
     </Box>
   );
@@ -51,7 +51,7 @@ export default function HistoricalRecords({ data, filters, benchmark, onSelectRe
     <Paper data-testid="historical-records" variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
       <Box sx={{ p: 2.5 }}>
         <Typography variant="h2">Benchmark Run History</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4 }}>
           Each change compares with the latest completed result for the same benchmark and target from the nearest earlier commit. Select a run time for details.
         </Typography>
       </Box>
@@ -82,20 +82,19 @@ export default function HistoricalRecords({ data, filters, benchmark, onSelectRe
                 </TableCell>
                 <TableCell>
                   <Stack direction="row" sx={{ minWidth: 0, alignItems: 'baseline', gap: 0.75 }}>
-                    <Typography component="code" variant="caption" color="primary.main" sx={{ flexShrink: 0 }}>{shortSha(record.run)}</Typography>
+                    <Typography component="code" variant="caption" sx={{ color: 'primary.main', flexShrink: 0 }}>{shortSha(record.run)}</Typography>
                     {hasDisplayValue(record.run.provenance?.commitMessage) && (
                       <Typography
                         variant="caption"
-                        color="text.secondary"
                         noWrap
                         title={record.run.provenance.commitMessage}
-                        sx={{ minWidth: 0 }}
+                        sx={{ color: 'text.secondary', minWidth: 0 }}
                       >
                         {record.run.provenance.commitMessage}
                       </Typography>
                     )}
                   </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{formatShortDate(commitTimestampFor(record.run))}</Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>{formatShortDate(commitTimestampFor(record.run))}</Typography>
                 </TableCell>
                 <TableCell>{record.test.target}</TableCell>
                 <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 650 }}>{formatDuration(record.test.durationSeconds)}</TableCell>

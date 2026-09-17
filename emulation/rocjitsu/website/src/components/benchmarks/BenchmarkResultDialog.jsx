@@ -35,7 +35,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
         <>
           <DialogTitle component="div" sx={{ pr: 7 }}>
             <Typography variant="h2" sx={{ lineHeight: '24px' }}>{test.name}</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.suite}</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.suite}</Typography>
             <IconButton onClick={onClose} aria-label="Close details" sx={{ position: 'absolute', top: 11, right: 11 }}><CloseRoundedIcon /></IconButton>
           </DialogTitle>
           <DialogContent dividers>
@@ -55,7 +55,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
                 ))}
               </DetailGrid>
             ) : (
-              <Typography variant="body2" color="text.secondary">No problem details were provided for this result.</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>No problem details were provided for this result.</Typography>
             )}
 
             <Divider sx={{ my: 2.5 }} />
@@ -67,7 +67,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
                 ))}
               </DetailGrid>
             ) : (
-              <Typography variant="body2" color="text.secondary">No environment details were provided for this run.</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>No environment details were provided for this run.</Typography>
             )}
 
             <Divider sx={{ my: 2.5 }} />

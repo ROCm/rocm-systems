@@ -42,12 +42,21 @@ Individual commands, all run from `website/`:
 | Command | Purpose |
 | --- | --- |
 | `npm run build` | Build the static site into `dist/` |
+| `npm run dev:fixtures` | Serve the app with dummy fixture JSON at `/data/` |
+| `npm run dev:data -- <data-directory>` | Serve the app with a local data directory at `/data/` |
+| `npm run preview:data -- <data-directory>` | Preview `dist/` with a local data directory at `/data/` |
 | `npm run lint` | Check JavaScript and React source with ESLint |
 | `npm run test:unit` | Run data loader, selector, and utility tests without a browser |
 | `npm run test:e2e` | Run Chromium desktop behavior and mobile layout tests |
 | `npm run test:e2e:chart-race` | Run the chart interaction race test ten times sequentially |
-| `npm test` | Run both unit and browser tests |
-| `npm run verify` | Run lint, build, and both test suites |
+| `npm test` | Run the unit tests, the browser suites, and the ten-repeat chart race test |
+| `npm run verify` | Run lint, build, and everything in `npm test` |
+
+Run the two browser commands one at a time. Both rebuild the shared `.test-dist/`
+fixture output before starting their server, so a concurrent run deletes files the other
+one is still copying and fails the build with `ENOENT`. Assigning a different
+`PLAYWRIGHT_PORT` avoids the port conflict but not this one, because the build directory
+is shared regardless of port.
 
 If Chromium's system libraries are already installed, `npx playwright install chromium`
 installs just the browser without changing OS packages. Rerun browser installation
@@ -58,14 +67,18 @@ after updating Playwright if its required browser version changes.
 ```bash
 # From emulation/rocjitsu/website:
 npm run dev:fixtures -- --host 127.0.0.1
+npm run dev:data -- /absolute/path/to/staged/data --host 127.0.0.1
 ```
 
 Use the URL printed by Vite. Fixture mode serves the static JSON in
 `tests/fixtures/data/` through the same application loader used by the normal
-dashboard. Unit tests validate the same fixture data in memory. Plain `npm run dev`
-serves only the application. Restart the fixture development server after editing
-fixture JSON. For a fixture preview, rebuild first.
-To inspect the production build:
+dashboard. `dev:data` mounts any local data directory at `/data/`, the same URL
+the production site uses for `dist/data/`. The argument may be the data directory
+itself or a parent that contains `data/`. Unit tests validate the same fixture
+data in memory. Restart the development server after editing JSON. For a
+production-build preview of local data, run `npm run build` and then
+`npm run preview:data -- /absolute/path/to/staged/data --host 127.0.0.1`.
+To inspect the production build without data:
 
 ```bash
 npm run build
@@ -95,6 +108,9 @@ The intended release flow is:
 
 Do not deploy if validation fails. The browser uses the same validator and fails
 closed if invalid data bypasses this gate; it does not display a partial run history.
+Validation follows `index.json`, so it only checks the runs listed there and the
+catalogs those runs reference. Stage the directory with its updated index before
+validating; see [the data contract](website-data-contract.md) for what stays unchecked.
 
 For example, from `emulation/rocjitsu/website`, after checking out the deployment
 branch in a separate directory, set the destination to that checkout's site root:

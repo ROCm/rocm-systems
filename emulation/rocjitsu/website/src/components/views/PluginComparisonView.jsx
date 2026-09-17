@@ -93,7 +93,7 @@ function SummaryCard({ summary, baseline, target }) {
       <Stack direction="row" sx={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography fontWeight={780} color={color} noWrap>{run.plugin.name}</Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             {run.plugin.version ?? run.plugin.id}
           </Typography>
         </Box>
@@ -104,7 +104,7 @@ function SummaryCard({ summary, baseline, target }) {
       >
         {baseline ? 'Baseline' : Number.isFinite(summary.overhead) ? `${formatPercent(summary.overhead)}${summary.estimated ? '*' : ''}` : '—'}
       </Typography>
-      <Typography variant="caption" color="text.secondary">
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
         {baseline
           ? 'Uninstrumented reference'
           : summary.estimated
@@ -115,16 +115,16 @@ function SummaryCard({ summary, baseline, target }) {
       </Typography>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mt: 1.3 }}>
         <Box>
-          <Typography variant="caption" color="text.secondary">Coverage</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>Coverage</Typography>
           <Typography variant="body2" fontWeight={720}>{summary.completed}/{summary.total}</Typography>
         </Box>
         <Box>
-          <Typography variant="caption" color="text.secondary">Total duration</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>Total duration</Typography>
           <Typography variant="body2" fontWeight={720}>{formatDuration(summary.duration)}</Typography>
         </Box>
       </Box>
       {!baseline && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
           {summary.counts.faster} lower · {summary.counts.neutral} within ±{PLUGIN_NOISE_TOLERANCE}% · {summary.counts.slower} overhead
         </Typography>
       )}
@@ -167,7 +167,7 @@ function SummaryCard({ summary, baseline, target }) {
 }
 
 function ResultCell({ value, baseline, onOpen }) {
-  if (!value?.result) return <Typography color="text.secondary">Missing</Typography>;
+  if (!value?.result) return <Typography sx={{ color: 'text.secondary' }}>Missing</Typography>;
   return (
     <ButtonBase
       onClick={() => onOpen({ run: value.run, test: value.result })}
@@ -182,8 +182,11 @@ function ResultCell({ value, baseline, onOpen }) {
         )}
         <Typography
           variant="caption"
-          color={baseline || !Number.isFinite(value.delta) ? 'text.secondary' : value.delta > 0 ? 'warning.main' : 'success.main'}
-          sx={{ display: 'block', mt: 0.15 }}
+          sx={{
+            color: baseline || !Number.isFinite(value.delta) ? 'text.secondary' : value.delta > 0 ? 'warning.main' : 'success.main',
+            display: 'block',
+            mt: 0.15,
+          }}
         >
           {baseline ? 'Baseline' : Number.isFinite(value.delta) ? `${formatPercent(value.delta)} overhead` : 'Not comparable'}
         </Typography>
@@ -371,8 +374,8 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
                 <Typography fontWeight={780}>Comparison plugin</Typography>
                 <Typography sx={{ mt: 1.2, fontSize: 24, lineHeight: 1.1, fontWeight: 820 }}>—</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mt: 1.3 }}>
-                  <Box><Typography variant="caption" color="text.secondary">Coverage</Typography><Typography variant="body2" fontWeight={720}>—</Typography></Box>
-                  <Box><Typography variant="caption" color="text.secondary">Total duration</Typography><Typography variant="body2" fontWeight={720}>—</Typography></Box>
+                  <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Coverage</Typography><Typography variant="body2" fontWeight={720}>—</Typography></Box>
+                  <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Total duration</Typography><Typography variant="body2" fontWeight={720}>—</Typography></Box>
                 </Box>
               </Paper>
             )}
@@ -389,7 +392,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
               ariaDescribedBy={`plugin-chart-help-${target}`}
               onEvents={{ click: ({ data: point }) => point?.result && onOpen({ run: point.run, test: point.result }) }}
             />
-            <Typography id={`plugin-chart-help-${target}`} variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            <Typography id={`plugin-chart-help-${target}`} variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
               Every point in this chart is also available as a keyboard-operable button in the Test-by-Plugin Results table below.
             </Typography>
             {viewModel.summaries.some((summary) => summary.estimated) && (
@@ -416,7 +419,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
                     <TableRow key={row.test.logicalTestId} hover>
                       <TableCell sx={{ minWidth: 220 }}>
                         <Typography variant="body2" fontWeight={720}>{row.test.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">{row.test.suite}</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>{row.test.suite}</Typography>
                       </TableCell>
                       {row.values.map((value) => (
                         <TableCell key={value.run.runId} sx={{ minWidth: 145 }}>
@@ -470,7 +473,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
                               bgcolor: alpha(pluginColor(run.plugin.id), 0.06),
                             }}
                           />
-                          <Typography variant="caption" color="text.secondary">{test.name}</Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>{test.name}</Typography>
                         </Stack>
                       </Box>
                       <StatusChip status={test.status} />
@@ -499,7 +502,7 @@ function PluginComparisonNotice() {
         </Box>
         <Box>
           <Typography variant="h3">No sanitizer comparison runs available</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             No vanilla baseline or sanitizer comparison runs are available. To enable comparison, publish a vanilla run and at least one sanitizer run for the same commit.
           </Typography>
         </Box>
@@ -537,7 +540,7 @@ function EmptyPluginComparison() {
             ['Tests', '—'],
           ].map(([label, value]) => (
             <Box key={label}>
-              <Typography variant="overline" color="text.secondary">{label}</Typography>
+              <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
               <Typography variant="body2" fontWeight={800}>{value}</Typography>
             </Box>
           ))}
@@ -550,8 +553,8 @@ function EmptyPluginComparison() {
             <Typography fontWeight={780}>{label}</Typography>
             <Typography sx={{ mt: 1.2, fontSize: 24, fontWeight: 820 }}>—</Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mt: 1.3 }}>
-              <Box><Typography variant="caption" color="text.secondary">Coverage</Typography><Typography>—</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">Total duration</Typography><Typography>—</Typography></Box>
+              <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Coverage</Typography><Typography>—</Typography></Box>
+              <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Total duration</Typography><Typography>—</Typography></Box>
             </Box>
           </Paper>
         ))}
@@ -575,7 +578,7 @@ function EmptyPluginComparison() {
         subtitle="Failure and timeout diagnostics for this target"
         action={<Chip size="small" icon={<BugReportRoundedIcon />} label="—" />}
       >
-        <Typography color="text.secondary">—</Typography>
+        <Typography sx={{ color: 'text.secondary' }}>—</Typography>
       </SectionCard>
     </Box>
   );
@@ -642,8 +645,8 @@ export default function PluginComparisonView({ data, filters }) {
             ))}
           </TextField>
         </Box>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.2 }}>
-          Same commit, catalog, and test definitions. Branch, machine, and environment may differ.
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.2 }}>
+          Same source commit, catalog, trigger, machine, environment, and target set.
         </Typography>
       </SectionCard>
 

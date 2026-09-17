@@ -34,12 +34,12 @@ export default function LargestChanges({ changes, candidate, baseline }) {
         {legendItems.map((item) => (
           <Stack key={item.state} direction="row" data-legend-state={item.state} sx={{ alignItems: 'center', gap: 0.65 }}>
             <Box aria-hidden="true" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: item.color, flexShrink: 0 }} />
-            <Typography variant="caption" color="text.secondary" fontWeight={650}>{item.label}</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }} fontWeight={650}>{item.label}</Typography>
           </Stack>
         ))}
       </Stack>
       {changes.length === 0 ? (
-        <Typography color="text.secondary" sx={{ py: 8, textAlign: 'center' }}>
+        <Typography sx={{ color: 'text.secondary', py: 8, textAlign: 'center' }}>
           {candidate ? 'No comparable results in this selection.' : '—'}
         </Typography>
       ) : changes.map((item, index) => {
@@ -53,7 +53,7 @@ export default function LargestChanges({ changes, candidate, baseline }) {
               <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="body2" fontWeight={680} noWrap>{item.candidateTest.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                     {item.candidateTest.target} · {item.candidateTest.suite}
                   </Typography>
                 </Box>

@@ -7,8 +7,7 @@ export default function CommitComparison({ candidate, baseline, align = 'left', 
       <Typography
         component="span"
         variant="caption"
-        color="text.disabled"
-        sx={{ display: 'block', textAlign: align, lineHeight: 1.35, ...sx }}
+        sx={{ color: 'text.disabled', display: 'block', textAlign: align, lineHeight: 1.35, ...sx }}
       >
         No comparison commits
       </Typography>
@@ -21,11 +20,10 @@ export default function CommitComparison({ candidate, baseline, align = 'left', 
     <Typography
       component="span"
       variant="caption"
-      color="text.secondary"
       data-testid="compared-commits"
       aria-label={`Candidate commit ${candidateSha} versus baseline commit ${baselineSha}`}
       title={`Candidate commit ${candidateSha} vs baseline commit ${baselineSha}`}
-      sx={{ display: 'block', textAlign: align, lineHeight: 1.35, whiteSpace: 'nowrap', ...sx }}
+      sx={{ color: 'text.secondary', display: 'block', textAlign: align, lineHeight: 1.35, whiteSpace: 'nowrap', ...sx }}
     >
       <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 'inherit', fontWeight: 700 }}>{candidateSha}</Box>
       <Box component="span" sx={{ mx: 0.45, color: 'text.disabled' }}>{' vs '}</Box>

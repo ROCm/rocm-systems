@@ -3,7 +3,17 @@ import { loadDashboardData } from '../../src/data/dashboardData.js';
 import { provenanceDetails } from '../../src/data/provenance.js';
 import { chartGapPresentation } from '../../src/utils/chartGaps.js';
 import { escapeHtml } from '../../src/utils/formatters.js';
+import { changeTone, classifyDurationChange } from '../../src/utils/performance.js';
 import { cloneBenchmarkData } from '../fixtures/publishedData.js';
+
+test('duration change color is gray at zero and signed otherwise', () => {
+  expect(classifyDurationChange(0)).toBe('neutral');
+  expect(changeTone(classifyDurationChange(0))).toBe('neutral');
+  expect(classifyDurationChange(0.1)).toBe('slower');
+  expect(changeTone(classifyDurationChange(0.1))).toBe('error');
+  expect(classifyDurationChange(-0.1)).toBe('faster');
+  expect(changeTone(classifyDurationChange(-0.1))).toBe('success');
+});
 
 test('escapes every HTML-significant character in published text', () => {
   expect(escapeHtml('<img src=x onerror="alert(\'1\')"> & more')).toBe(
