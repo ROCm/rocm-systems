@@ -223,12 +223,12 @@ class TestHipFileTelemetry(RocprofsysTest):
         self.assert_perfetto(
             result,
             counter_names=[
-                "GPU [0] Storage Read Bytes (S)",
-                "GPU [0] Storage Write Bytes (S)",
-                "GPU [0] Storage Read Ops (S)",
-                "GPU [0] Storage Write Ops (S)",
-                "GPU [0] Storage Read Bandwidth (S)",
-                "GPU [0] Storage Write Bandwidth (S)",
+                "Storage Read Bytes (S)",
+                "Storage Write Bytes (S)",
+                "Storage Read Ops (S)",
+                "Storage Write Ops (S)",
+                "Storage Read Bandwidth (S)",
+                "Storage Write Bandwidth (S)",
             ],
             subtest_name="Perfetto hipFile counter validation",
         )
@@ -261,18 +261,18 @@ class TestHipFileTelemetry(RocprofsysTest):
         self.assert_perfetto(
             result,
             counter_names=[
-                "GPU [0] Storage Read Bytes (S)",
-                "GPU [0] Storage Write Bytes (S)",
-                "GPU [0] Storage Read Bandwidth (S)",
-                "GPU [0] Storage Write Bandwidth (S)",
+                "Storage Read Bytes (S)",
+                "Storage Write Bytes (S)",
+                "Storage Read Bandwidth (S)",
+                "Storage Write Bandwidth (S)",
             ],
             counter_names_present=[
-                "GPU [0] Storage Fastpath Reads (S)",
-                "GPU [0] Storage Fastpath Writes (S)",
-                "GPU [0] Storage Fallback Reads (S)",
-                "GPU [0] Storage Fallback Writes (S)",
-                "GPU [0] Storage Read Errors (S)",
-                "GPU [0] Storage Write Errors (S)",
+                "Storage Fastpath Reads (S)",
+                "Storage Fastpath Writes (S)",
+                "Storage Fallback Reads (S)",
+                "Storage Fallback Writes (S)",
+                "Storage Read Errors (S)",
+                "Storage Write Errors (S)",
             ],
             subtest_name="Perfetto hipFile default metric selection",
         )
@@ -311,12 +311,12 @@ class TestHipFileTelemetry(RocprofsysTest):
         self.assert_perfetto(
             result,
             counter_names=[
-                "GPU [0] Storage Fallback Reads (S)",
-                "GPU [0] Storage Fallback Writes (S)",
+                "Storage Fallback Reads (S)",
+                "Storage Fallback Writes (S)",
             ],
             counter_names_zero=[
-                "GPU [0] Storage Fastpath Reads (S)",
-                "GPU [0] Storage Fastpath Writes (S)",
+                "Storage Fastpath Reads (S)",
+                "Storage Fastpath Writes (S)",
             ],
             subtest_name="Perfetto hipFile fallback counter validation",
         )
