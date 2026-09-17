@@ -77,6 +77,7 @@ struct TensorDmaDescriptor {
   uint32_t count = 0;
   uint64_t global_base = 0;
   uint32_t lds_base = 0;
+  uint32_t data_size = 0;
   uint32_t elem_size = 0;
   std::array<uint32_t, 5> tensor_dims{};
   std::array<uint32_t, 5> tile_dims{};
@@ -119,7 +120,8 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
   desc.global_base =
       static_cast<uint64_t>(d0[2]) | (static_cast<uint64_t>(d0[3] & kGlobalHighBitsMask) << 32);
 
-  desc.elem_size = 1u << static_cast<uint32_t>(read_bits(d1, 16, 2));
+  desc.data_size = static_cast<uint32_t>(read_bits(d1, 16, 2));
+  desc.elem_size = 1u << desc.data_size;
   desc.atomic_barrier = read_bits(d1, 18, 1) != 0;
   desc.iterate = !desc.gather && read_bits(d1, 19, 1) != 0;
   desc.pad = read_bits(d1, 20, 1) != 0;
@@ -542,6 +544,13 @@ util::Result execute_tensor_dma(const Inst &inst, Wavefront &wf, bool store_from
         .wavefront_id = wf.wf_id(),
         .process_id = wf.process_id(),
         .element_size_bytes = desc.value().elem_size,
+        .tile_dim0 = desc.value().tile_dims[0],
+        .tile_dim1 = desc.value().gather ? desc.value().valid_indices : desc.value().tile_dims[1],
+        .data_size = desc.value().data_size,
+        .tensor_dim0_stride =
+            static_cast<int64_t>(desc.value().global_strides[0] * desc.value().elem_size),
+        .tensor_dim1_stride =
+            static_cast<int64_t>(desc.value().global_strides[1] * desc.value().elem_size),
         .is_load = !store_from_lds,
         .addresses = TensorDmaAddressView::deferred(observed_address_count, &desc.value(),
                                                     &materialize_observed_addresses),
