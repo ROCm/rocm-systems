@@ -1686,7 +1686,18 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     *out_handle = static_cast<uint32_t>(handle.handle);
-    if (out_dev_addr != nullptr) *out_dev_addr = handle.dev_addr;
+    if (out_dev_addr != nullptr) {
+      // handle.dev_addr is the device address of the allocation's base, not of va: they agree
+      // today only because place_blob always allocates and places a whole BO (SegmentAddress with
+      // a zero offset), so va == base. Add the offset explicitly, as XdnaDriver::ResolveDeviceBuffer
+      // does, so this stays correct if SegmentAlloc ever sub-allocates for this region -- getting
+      // it wrong here is a hang at dispatch time, not a load-time error.
+      const auto offset = static_cast<uint8_t*>(va) - static_cast<uint8_t*>(base);
+      if (offset < 0) {
+        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+      }
+      *out_dev_addr = (handle.dev_addr != 0) ? handle.dev_addr + static_cast<uint64_t>(offset) : 0;
+    }
     return HSA_STATUS_SUCCESS;
   };
 
@@ -1776,8 +1787,12 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       // The ELF is authoritative on the kernarg layout. A hsaco carrying a nonzero size that
       // disagrees with the ELF is a converter bug the loader can't reconcile; a zero size just
       // means the converter left it for the loader to fill in.
+      //
+      // The kernarg buffer holds 2 * num_args uint64_t entries -- addresses, then sizes -- per
+      // hsa_amd_aie_kernel_dispatch_packet_t::kernarg_address's documented layout in
+      // hsa_ext_amd_aie.h. Don't drop the 2x factor back to just the addresses.
       const uint32_t elf_kernarg_size =
-          static_cast<uint32_t>(kernel.num_args() * sizeof(uint64_t));
+          static_cast<uint32_t>(kernel.num_args() * 2 * sizeof(uint64_t));
       if (ki->kernarg_size != 0 && ki->kernarg_size != elf_kernarg_size) {
         log_warning_n(10,
                       "AIE: kernarg size mismatch for '%s': hsaco says %u bytes, the ELF wants "

@@ -1871,6 +1871,16 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
     log_warning_n(10, "AIE: the kernel's argument patch table is inconsistent.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
+  // Size and endpoint alone don't rule out a non-monotonic table (e.g. {0, 100, 3} with
+  // num_args=2, arg_sites.size()=3): the loader always builds this monotonically, but the
+  // descriptor arrives through an application-supplied handle, and the patch loop below indexes
+  // arg_sites[arg_site_offset[arg] .. arg_site_offset[arg+1]) without further checks.
+  for (size_t i = 1; i < desc->arg_site_offset.size(); ++i) {
+    if (desc->arg_site_offset[i] < desc->arg_site_offset[i - 1]) {
+      log_warning_n(10, "AIE: the kernel's argument patch table is not monotonic.\n");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+  }
   for (const aie_elf::PatchSite& site : desc->arg_sites) {
     if ((site.offset % sizeof(uint32_t)) != 0 ||
         site.offset + 3 * sizeof(uint32_t) > desc->ctrl_code_size) {
@@ -2185,6 +2195,14 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     // before it: their control-code buffers are the runtime's own and are freed on the way out,
     // and nothing the build wrote is visible to the caller.
     if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+    // reserved4/5/6 are documented "must be 0" in hsa_ext_amd_aie.h. They used to be insts_size,
+    // pdi_addr and pdi_patch_offset (the old PDI-patch flow); an application still assigning them
+    // dispatches correctly today, but would silently divert onto a stale code path the day these
+    // words are reclaimed. Reject that now rather than let it surface later.
+    if (pkt->reserved4 != 0 || pkt->reserved5 != nullptr || pkt->reserved6 != 0) {
+      log_warning_n(10, "AIE: packet reserved fields must be zero.\n");
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
     if (PacketMode(pkt) != mode) {

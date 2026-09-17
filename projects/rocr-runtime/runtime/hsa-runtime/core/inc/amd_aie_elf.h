@@ -7,13 +7,13 @@
 // Reader for the full-ELF kernel binaries aiecc emits (`aiecc --get-full-elf`).
 //
 // A full ELF carries the PDI and the control code in one file, along with the relocations that
-// say where addresses have to be written into the control code. The runtime deliberately knows
-// nothing about any of that: an application (or, for the unified hsaco flow, the runtime itself)
-// extracts the pieces, allocates them from the agent's device memory pool, patches its own
-// argument addresses in, and names the buffers in an ordinary dispatch packet. The one address
-// it cannot know is the PDI's device address, so it passes the offset of that patch site in
-// hsa_amd_aie_kernel_dispatch_packet_t::pdi_patch_offset and the runtime fills it in; that
-// non-zero offset is also what selects the full-ELF dispatch shape.
+// say where addresses have to be written into the control code. This reader is used at load time,
+// nested inside a unified hsaco's AIE section: the loader parses it, keeps the control code
+// pristine in host memory, places the PDI in the agent's device memory, and patches the PDI's
+// device address into the pristine copy right away (that address is not known until placement).
+// Application argument addresses are not patched here -- at dispatch time, the driver copies the
+// pristine control code into a per-dispatch device buffer and patches the argument addresses into
+// that copy, so concurrent dispatches of the same kernel never share a patch site.
 //
 // Only what the vector_scalar_add design needs is supported: one PDI, one control-code section
 // per kernel, and buffer arguments. Control packets, preemption save/restore sections and
@@ -50,8 +50,8 @@ struct Kernel {
   std::vector<uint8_t> pdi;
   /// @brief Control-code bytes.
   std::vector<uint8_t> ctrl_code;
-  /// @brief Where the PDI's device address goes in the control code. Passed to the runtime as
-  /// hsa_amd_aie_kernel_dispatch_packet_t::pdi_patch_offset.
+  /// @brief Byte offset in @ref ctrl_code where the PDI's device address is patched in at load
+  /// time, once the PDI has been placed in device memory.
   uint64_t pdi_patch_offset = 0;
   /// @brief Whether @ref pdi_patch_offset is valid.
   bool has_pdi_patch = false;

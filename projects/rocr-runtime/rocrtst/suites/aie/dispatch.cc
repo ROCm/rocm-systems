@@ -1971,8 +1971,7 @@ TEST_F(FullElfDispatchTest, HsacoFullElfLoads) {
                 symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
                 &kernarg_segment_size),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(kernarg_segment_size,
-            aie_full_elf_kernel::num_kernargs * sizeof(std::uint64_t));
+  EXPECT_EQ(kernarg_segment_size, aie_full_elf_kernel::kernarg_bytes);
 
   EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
@@ -2305,6 +2304,12 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
       {"too many kernargs",
        [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs + 1; }},
       {"unrecognised opcode", [](packet_t& p) { p.opcode = 0xFF; }},
+      // reserved4/5/6 are documented "must be 0"; the driver rejects a nonzero value rather than
+      // silently accept it and risk diverting onto a stale code path if these words are ever
+      // reclaimed (they used to be insts_size/pdi_addr/pdi_patch_offset).
+      {"nonzero reserved4", [](packet_t& p) { p.reserved4 = 1; }},
+      {"nonzero reserved5", [](packet_t& p) { p.reserved5 = reinterpret_cast<void*>(1); }},
+      {"nonzero reserved6", [](packet_t& p) { p.reserved6 = 1; }},
   };
 
   for (const auto& c : cases) {

@@ -324,10 +324,10 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::stri
           k.pdi_patch_offset % sizeof(uint32_t) != 0) {
         return fail("PDI patch site does not fit the control code");
       }
-      // Offset 0 is how hsa_amd_aie_kernel_dispatch_packet_t::pdi_patch_offset spells "PDI plus
-      // instruction sequence", so a kernel reporting it would build a packet that silently takes
-      // the other dispatch shape. A real full-ELF control code opens with a transaction header and
-      // never puts the patch site there, so this rejects a malformed ELF rather than a legal one.
+      // A real full-ELF control code opens with a 16-byte transaction header, so a legitimate PDI
+      // patch site is never at offset 0. This check no longer disambiguates a packet field (there
+      // is none left to disambiguate) -- it is retained purely as a well-formedness check on the
+      // ELF itself, catching a relocation the parser mis-attributed rather than a legal kernel.
       if (k.pdi_patch_offset == 0) {
         return fail("PDI patch site at offset 0 is indistinguishable from no patch");
       }
