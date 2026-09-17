@@ -101,7 +101,7 @@ public:
           continue;
         if (!kernel_name_allowlist.empty() &&
             !std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
-              return kernel_name_matches(allowed, kernel.name);
+              return kernel_symbol_names_match(allowed, kernel.name);
             }))
           continue;
         cfg.leaders.push_back(kernel.entry_text_offset);

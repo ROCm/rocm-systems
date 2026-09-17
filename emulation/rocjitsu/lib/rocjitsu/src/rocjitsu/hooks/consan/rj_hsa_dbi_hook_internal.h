@@ -73,10 +73,10 @@ constexpr uint32_t kDefaultFaultReservationTimeoutMs = 30000;
 
 /// Fully parsed hook configuration.
 ///
-/// The six public base subobjects are the Slice-2 contracts constructed by the
+/// The six public base subobjects are the input contracts constructed by the
 /// environment parser. The remaining members are hook-local presentation,
 /// allocation-mode, and parsing-provenance state; they are deliberately not
-/// forwarded to legacy lowering. Inheritance preserves the existing parser's
+/// forwarded to lowering. Inheritance preserves the parser's
 /// concise field spelling while allowing production callers to pass each
 /// immutable contract independently.
 struct HookConfig : Request,

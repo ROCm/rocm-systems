@@ -734,7 +734,7 @@ static_assert(kRuntimeResourceScopes.size() == static_cast<size_t>(RuntimeResour
 /// allocation, but each individual value is immutable once handed to the
 /// transformer. It contains no sanitizer policy, mutation request, or test
 /// override. Lifetime ownership remains with the runtime coordinator; this
-/// projection carries only the identity needed by legacy lowering.
+/// value supplies the allocation geometry and identities needed by lowering.
 struct BoundRuntimeResources {
   RuntimeResourceScope scope = RuntimeResourceScope::Unbound;
   std::optional<uint64_t> supercollider_report_buffer_address;
@@ -800,10 +800,6 @@ struct Options : Request,
         TransformPolicy(transform_policy) {}
 };
 
-[[nodiscard]] inline bool kernel_name_matches(std::string_view left, std::string_view right) {
-  return kernel_symbol_names_match(left, right);
-}
-
 [[nodiscard]] inline bool container_selected(const Request &request, const DebugOverrides &debug,
                                              std::string_view container_name) {
   if (!debug.test_kernel_name_filter.empty() &&
@@ -812,7 +808,7 @@ struct Options : Request,
   if (request.kernel_name_allowlist.empty())
     return true;
   return std::ranges::any_of(request.kernel_name_allowlist, [&](std::string_view allowed) {
-    return kernel_name_matches(allowed, container_name);
+    return kernel_symbol_names_match(allowed, container_name);
   });
 }
 

@@ -84,7 +84,7 @@ struct RuntimeCapabilityRequirements {
   bool operator==(const RuntimeCapabilityRequirements &) const = default;
 };
 
-/// Typed reason that one immutable Slice-2 contract is invalid or cannot
+/// Typed reason that one immutable input contract is invalid or cannot
 /// satisfy a consumer. The enum is intentionally shared by the pure validation
 /// functions so parsers and runtime adapters can use one machine-readable
 /// vocabulary while rendering their own contextual messages.

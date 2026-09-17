@@ -143,7 +143,7 @@ bool site_matches_kernel_allowlist(const ProgramInventory &inventory,
     return true;
   const auto selected_name = [&](std::string_view candidate) {
     return std::ranges::any_of(kernel_name_allowlist, [&](std::string_view allowed) {
-      return kernel_name_matches(allowed, candidate);
+      return kernel_symbol_names_match(allowed, candidate);
     });
   };
   if (!owner_descriptor_file_offsets.empty()) {
