@@ -7,6 +7,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -124,6 +125,18 @@ struct AieKernelDescriptor {
   void* ctrl_code;
   /// @brief Size of @ref ctrl_code in bytes; 0 for PdiInsts.
   uint64_t ctrl_code_size;
+  /// @brief Byte offset in the control code taking the PDI's device address. FullElf only.
+  ///
+  /// The loader leaves the site holding whatever the ELF shipped: only the driver can turn a BO
+  /// handle into the address the NPU fetches from, so the driver writes it into each dispatch's
+  /// copy. Validated by the ELF parser as non-zero, 4-byte aligned and within the control code.
+  uint64_t pdi_patch_offset;
+  /// @brief The PDI's device address, resolved on first dispatch and cached. FullElf only.
+  ///
+  /// A BO's device address is fixed for its lifetime, so this is resolved once rather than per
+  /// dispatch. Mutable and atomic because the descriptor is shared across queues and reached
+  /// through a const pointer; concurrent resolvers race only to store the same value.
+  mutable std::atomic<uint64_t> pdi_dev_addr{0};
   /// @brief Patch sites per argument the control code references; FullElf only, empty otherwise.
   ///
   /// Nested rather than flattened with a separate index: this is built once at load and read once

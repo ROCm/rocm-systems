@@ -82,11 +82,6 @@ struct DriverMemoryHandle {
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
   size_t size{0};
-  /// @brief Device (NPU) address of this allocation, or 0 if it has none. Only meaningful for
-  /// @ref XdnaDriver; a host-shared BO has no device address, since the NPU walks the same page
-  /// tables the host does and vaddr is already what the hardware uses. See
-  /// XdnaDriver::AllocateMemory's use of amdxdna_drm_get_bo_info::xdna_addr.
-  uint64_t dev_addr{0};
   hsa_fabric_handle_t fabric_handle{};
   /// @brief Driver that created this handle.
   ///

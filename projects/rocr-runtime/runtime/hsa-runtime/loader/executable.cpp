@@ -1679,10 +1679,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // The insts/PDI blobs are immutable after load, so their XDNA BO handles are
   // stable for the object's lifetime. Resolve once here instead of on every
   // dispatch. Kernarg BOs are per-dispatch and still resolve at submit.
-  // out_dev_addr is only needed for FullElf's PDI (patched into the control code below); the
-  // PdiInsts callers pass nullptr and get just the BO handle, as before.
-  auto resolve_handle = [&](void* va, uint32_t* out_handle,
-                            uint64_t* out_dev_addr = nullptr) -> hsa_status_t {
+  auto resolve_handle = [&](void* va, uint32_t* out_handle) -> hsa_status_t {
     void* base = nullptr;
     core::DriverMemoryHandle handle{};
     if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(va, core_agent, &base,
@@ -1690,18 +1687,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     *out_handle = static_cast<uint32_t>(handle.handle);
-    if (out_dev_addr != nullptr) {
-      // handle.dev_addr is the device address of the allocation's base, not of va: they agree
-      // today only because place_blob always allocates and places a whole BO (SegmentAddress with
-      // a zero offset), so va == base. Add the offset explicitly, as XdnaDriver::ResolveDeviceBuffer
-      // does, so this stays correct if SegmentAlloc ever sub-allocates for this region -- getting
-      // it wrong here is a hang at dispatch time, not a load-time error.
-      const auto offset = static_cast<uint8_t*>(va) - static_cast<uint8_t*>(base);
-      if (offset < 0) {
-        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-      }
-      *out_dev_addr = (handle.dev_addr != 0) ? handle.dev_addr + static_cast<uint64_t>(offset) : 0;
-    }
     return HSA_STATUS_SUCCESS;
   };
 
@@ -1726,6 +1711,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     desc->num_cols = ki->num_cols;
     desc->ctrl_code = nullptr;
     desc->ctrl_code_size = 0;
+    desc->pdi_patch_offset = 0;
 
     if (ki->kind == AMD::AieKernelKind::PdiInsts) {
       void* insts_dev = nullptr;
@@ -1817,31 +1803,17 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         delete[] ctrl_code_host;
         return s;
       }
-      // The PDI's *device* address is what the NPU needs, not its CPU-visible VA (pdi_dev):
-      // those differ, and a host-shared BO has no device address at all. This mirrors the
-      // per-dispatch resolve in BuildFullElfCommand (amd_xdna_driver.cpp), which this load-time
-      // patch replaces.
-      uint64_t pdi_dev_addr = 0;
-      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle, &pdi_dev_addr);
-          s != HSA_STATUS_SUCCESS) {
+      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
         delete[] ctrl_code_host;
         return s;
       }
-      if (pdi_dev_addr == 0) {
-        log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
-        delete[] ctrl_code_host;
-        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-      }
       desc->pdi_size = kernel.pdi.size();
 
-      // Patch the PDI's device address into the pristine host copy, once, at load -- this is
-      // what deletes the equivalent per-dispatch patch from the driver's submit path. Parse()
-      // already validated that pdi_patch_offset is non-zero, 4-byte aligned, and fits.
-      const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFFu);
-      const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_dev_addr >> 32);
-      std::memcpy(ctrl_code_host + kernel.pdi_patch_offset, &pdi_addr_lo, sizeof(pdi_addr_lo));
-      std::memcpy(ctrl_code_host + kernel.pdi_patch_offset + sizeof(pdi_addr_lo), &pdi_addr_hi,
-                  sizeof(pdi_addr_hi));
+      // The control code's PDI site keeps whatever the ELF shipped. Turning a BO handle into the
+      // address the NPU fetches from is the driver's to do, so it patches each dispatch's copy --
+      // that keeps device addresses out of the loader and out of core's memory handles entirely.
+      // Parse() already validated the offset is non-zero, 4-byte aligned and within range.
+      desc->pdi_patch_offset = kernel.pdi_patch_offset;
 
       desc->ctrl_code = ctrl_code_host;
       desc->ctrl_code_size = kernel.ctrl_code.size();

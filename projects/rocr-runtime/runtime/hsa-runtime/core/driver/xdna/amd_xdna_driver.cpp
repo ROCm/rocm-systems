@@ -362,13 +362,11 @@ static hsa_status_t GetBOInfo(int fd, uint32_t bo_handle, amdxdna_drm_get_bo_inf
 /// @param[out] bo_handle pointer to store the BO handle associated with the allocation
 /// @param[out] base pointer to store the base address of the allocation (optional)
 /// @param[out] size pointer to store the size of the allocation (optional)
-/// @param[out] dev_addr pointer to store the allocation's cached device address (optional). Zero
-/// when the allocating driver did not record one; the caller must then query the kernel.
 ///
 /// @return @c HSA_STATUS_SUCCESS on success, or an error status if the address does not belong to
 /// an allocation accessible to the agent
 static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_t* bo_handle,
-                                    void** base, size_t* size, uint64_t* dev_addr = nullptr) {
+                                    void** base, size_t* size) {
   void* local_base = nullptr;
   core::DriverMemoryHandle handle{};
   if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(mem, &agent, &local_base,
@@ -377,7 +375,6 @@ static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_
   }
   if (base != nullptr) *base = local_base;
   if (size != nullptr) *size = handle.size;
-  if (dev_addr != nullptr) *dev_addr = handle.dev_addr;
   *bo_handle = static_cast<uint32_t>(handle.handle);
   return HSA_STATUS_SUCCESS;
 }
@@ -415,20 +412,14 @@ static hsa_status_t ResolveDeviceBuffer(int fd, void* ptr, const core::Agent& ag
                                         size_t* bytes_from_ptr) {
   void* base = nullptr;
   size_t alloc_size = 0;
-  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size, dev_addr);
+  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
 
-  // AllocateMemory already paid for a GET_BO_INFO ioctl and recorded the device address, so the
-  // cached value stands in for one here -- this runs per dispatch, on the path whose whole case is
-  // dispatch latency. Zero means no driver recorded one (a foreign or host-shared allocation), so
-  // fall back to asking the kernel rather than reporting "no device address" on its behalf.
-  if (*dev_addr == 0) {
-    err = GetBODevAddr(fd, *bo_handle, dev_addr);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
+  err = GetBODevAddr(fd, *bo_handle, dev_addr);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // ResolveBOHandle reports the allocation; the packet may point part-way into it.
@@ -1386,9 +1377,6 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   handle->size = size;
   handle->owner = this;
   handle->owns_allocation = true;
-  // Matches GetBODevAddr's contract: 0 means the BO has no device address (host-shared).
-  handle->dev_addr =
-      (get_bo_info_args.xdna_addr == AMDXDNA_INVALID_ADDR) ? 0 : get_bo_info_args.xdna_addr;
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1888,6 +1876,16 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // The loader bounds every patch site against the control code it parsed, but the descriptor
   // arrives through a handle the application supplies, so the write below is bounded here too
   // rather than on the loader's word. PatchShimDma48 touches three dwords from the site.
+  // The PDI address is a 64-bit store, so its site has to lie wholly inside the control code.
+  // Checked the same way and for the same reason as the argument sites below: the loader bounded
+  // it against the ELF it parsed, but the descriptor arrives through an application-supplied
+  // handle. Subtract rather than add so an out-of-range offset cannot wrap past the bound.
+  if ((desc->pdi_patch_offset % sizeof(uint32_t)) != 0 ||
+      desc->ctrl_code_size < sizeof(uint64_t) ||
+      desc->pdi_patch_offset > desc->ctrl_code_size - sizeof(uint64_t)) {
+    log_warning_n(10, "AIE: the PDI patch site does not fit the kernel's control code.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
   for (const auto& sites : desc->arg_sites) {
     for (const aie_elf::PatchSite& site : sites) {
       if ((site.offset % sizeof(uint32_t)) != 0 ||
@@ -1931,9 +1929,31 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   }
 
   // Always from pristine: PatchShimDma48 adds to what is already there, so patching over a
-  // previous result would accumulate. The copy also brings the PDI's device address, which was
-  // written into the pristine copy at load.
+  // previous result would accumulate.
   std::memcpy(ctrl.ptr, desc->ctrl_code, desc->ctrl_code_size);
+
+  // The PDI's device address. A BO's device address is fixed for its lifetime, so resolve it on
+  // the first dispatch and cache it on the descriptor rather than paying an ioctl per dispatch.
+  // Two threads can race here and both store the same value, which is harmless.
+  uint64_t pdi_dev_addr = desc->pdi_dev_addr.load(std::memory_order_relaxed);
+  if (pdi_dev_addr == 0) {
+    err = GetBODevAddr(fd, desc->pdi_bo_handle, &pdi_dev_addr);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
+    if (pdi_dev_addr == 0) {
+      log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+    desc->pdi_dev_addr.store(pdi_dev_addr, std::memory_order_relaxed);
+  }
+  // Write it where the ELF asked. Unlike the argument sites this is a plain store, not an additive
+  // fold, but it still goes into the fresh copy rather than the pristine one.
+  const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFFu);
+  const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_dev_addr >> 32);
+  auto* pdi_site = static_cast<uint8_t*>(ctrl.ptr) + desc->pdi_patch_offset;
+  std::memcpy(pdi_site, &pdi_addr_lo, sizeof(pdi_addr_lo));
+  std::memcpy(pdi_site + sizeof(pdi_addr_lo), &pdi_addr_hi, sizeof(pdi_addr_hi));
 
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
   for (size_t arg = 0; arg < desc->arg_sites.size(); ++arg) {
@@ -1946,7 +1966,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   FlushCpuCache(ctrl.ptr, 0, desc->ctrl_code_size);
 
   bo_handles->push_back(ctrl.handle);
-  // The PDI is reached only through the address the loader wrote into the control code, so the
+  // The PDI is reached only through the address written into the control code above, so the
   // command still has to list it for the driver to keep it resident.
   if (desc->pdi_size != 0) {
     bo_handles->push_back(desc->pdi_bo_handle);
