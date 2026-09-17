@@ -1947,7 +1947,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) 
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 2);
-  EXPECT_EQ(dereg.calls, 1);  // exactly the one that succeeded
+  EXPECT_EQ(dereg.calls, 2);  // first segment plus the part-way failing one
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 }
 
