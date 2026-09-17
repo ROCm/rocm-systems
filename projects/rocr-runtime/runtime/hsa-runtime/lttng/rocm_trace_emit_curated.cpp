@@ -27,7 +27,7 @@
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
 #include <atomic>
-#include "rocm_hsa_curated_tp.h"
+#include "rocm_hsa_tp.h"
 
 extern std::atomic<bool> rocm_hsa_trace_g_disabled;
 #ifndef ROCM_TRACE_DISABLED_DEFINED

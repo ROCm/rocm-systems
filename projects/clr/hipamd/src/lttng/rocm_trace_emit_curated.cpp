@@ -34,7 +34,7 @@
 #if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
 
 #include <atomic>
-#include "rocm_hip_curated_tp.h"
+#include "rocm_hip_tp.h"
 
 extern std::atomic<bool> rocm_hip_trace_g_disabled;
 #ifndef ROCM_TRACE_DISABLED_DEFINED

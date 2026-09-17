@@ -735,7 +735,7 @@ def emit_emit_cpp(cfg, apis, banner, return_kinds, emit_header_basename,
     out.append(f'#include "{emit_header_basename}"\n')
 
     out.append(f"\n#if defined({enable_macro}) && {enable_macro}\n\n"
-               f"#include <atomic>\n#include \"{cfg.tp_provider}_curated_tp.h\"\n")
+               f"#include <atomic>\n#include \"{cfg.tp_provider}_tp.h\"\n")
 
     out.append(f"""
 extern std::atomic<bool> {cfg.tp_provider}_trace_g_disabled;

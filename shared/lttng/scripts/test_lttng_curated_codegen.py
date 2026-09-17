@@ -411,6 +411,29 @@ def test_curated_minimal_fixture_generates():
     assert 'void rocm_trace_emit_hipMalloc_exit(void**, hipError_t) {}' in cpp_text
 
 
+def test_emit_cpp_includes_provider_wrapper_not_bare_schema_header():
+    """ON-mode regression guard (rocm-sr0): the non-inline emit .cpp must
+    include the provider WRAPPER header ("<provider>_tp.h") inside its
+    enable-macro branch, NOT the bare schema header
+    ("<provider>_curated_tp.h"). Only the wrapper sets
+    LTTNG_UST_TRACEPOINT_PROVIDER/INCLUDE and pulls in <lttng/tracepoint.h>,
+    which declare lttng_ust_do_tracepoint / lttng_ust_tracepoint_enabled.
+    Including the bare schema header directly (as the buggy generator did)
+    leaves those undeclared and fails to compile ~1300 times per provider
+    in ON-mode, while OFF-mode (the #else no-op branch, which includes
+    neither) still builds clean — so this is the cheapest check that would
+    have caught the bug the OFF-mode syntax check could not. Mirrors the
+    precedent already in rocm_trace_emit.h."""
+    yaml_path = os.path.join(HERE, 'testdata', 'curated_minimal.yaml')
+    sigs_path = os.path.join(HERE, 'testdata', 'curated_minimal_sigs.json')
+    with tempfile.TemporaryDirectory() as d:
+        _, _, cpp_text = _generate(
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
+    assert '#include "rocm_hip_tp.h"' in cpp_text
+    assert '#include "rocm_hip_curated_tp.h"' not in cpp_text
+
+
 def test_high_arity_api_generates_ordered_event_chunks():
     """Preserve every representable arg while keeping each UST event at ten fields."""
     args = '\n'.join(
