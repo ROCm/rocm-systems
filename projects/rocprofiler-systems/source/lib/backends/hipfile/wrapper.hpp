@@ -187,7 +187,7 @@ static_assert(wrapper::k_max_gpu_slots == k_max_gpus,
 /// @brief Contract for a per-GPU counter: convertible to std::uint64_t without losing
 /// value.
 template <typename T>
-inline constexpr bool is_counter_type =
+inline constexpr bool k_is_counter_type =
     std::is_integral_v<T> && std::is_unsigned_v<T> && sizeof(T) <= sizeof(std::uint64_t);
 
 // backend::query() copies these counters into stats_snapshot's std::uint64_t fields. A
@@ -197,18 +197,18 @@ inline constexpr bool is_counter_type =
 // absurd bandwidth reading. Locked here because this is the only file that sees the real
 // struct.
 static_assert(
-    is_counter_type<decltype(hipFilePerGpuStats_t::read_bytes)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::write_bytes)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_total_reads)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_total_writes)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_nvfs_reads)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_nvfs_writes)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_posix_reads)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_posix_writes)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_unaligned_reads)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_unaligned_writes)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_reads_err)> &&
-        is_counter_type<decltype(hipFilePerGpuStats_t::n_writes_err)>,
+    k_is_counter_type<decltype(hipFilePerGpuStats_t::read_bytes)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::write_bytes)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_total_reads)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_total_writes)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_nvfs_reads)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_nvfs_writes)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_posix_reads)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_posix_writes)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_unaligned_reads)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_unaligned_writes)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_reads_err)> &&
+        k_is_counter_type<decltype(hipFilePerGpuStats_t::n_writes_err)>,
     "a hipFilePerGpuStats_t counter is no longer an unsigned integer that fits in "
     "std::uint64_t; backends::hipfile::backend::query() would convert it silently");
 
