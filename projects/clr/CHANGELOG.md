@@ -8,6 +8,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP APIs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
+      * `hipLibraryGetModule` returns the module handle backing a library, so a `hipLibrary_t` can be used with the module-based entry points such as `hipModuleGetFunction`, `hipModuleGetGlobal`, and `hipModuleGetTexRef`. Mirrors `cuLibraryGetModule`.
 * Disable HRR capture feature
 
 ### Resolved issues
