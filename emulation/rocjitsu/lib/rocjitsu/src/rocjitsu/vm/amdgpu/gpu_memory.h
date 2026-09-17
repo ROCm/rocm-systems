@@ -900,6 +900,11 @@ public:
       return CopyOutcome::Faulted;
     }
     std::array<uint8_t, PAGE_SIZE> buffer{};
+    // In daemon mode an unmapped userspace-looking address belongs to the
+    // registered client, not to the daemon. Probing it through identity
+    // translation first can fault a perfectly valid client buffer before the
+    // process_vm fallback gets a chance to copy it.
+    const bool client_backed = vmid != 0 && has_client_backing(vmid);
     size_t offset = 0;
     while (offset < len) {
       const uint64_t src_ea = src_addr + offset;
@@ -912,8 +917,8 @@ public:
       // client owns and the kernel refused is not: it will not become readable
       // later, and retrying it re-runs the same packet on every doorbell while
       // the queue never drains. That is a fault.
-      if (!copy_from_mapped(src_ea, buffer.data(), chunk, vmid)) {
-        if (vmid == 0 || !has_client_backing(vmid))
+      if (!copy_from_mapped(src_ea, buffer.data(), chunk, vmid, !client_backed)) {
+        if (!client_backed)
           return faults.observed() ? CopyOutcome::Faulted : CopyOutcome::Unavailable;
         if (!read_client_memory(src_ea, buffer.data(), chunk, vmid)) {
           note_rejected_identity_access(src_ea, vmid);
@@ -921,8 +926,8 @@ public:
         }
       }
 
-      if (!copy_to_mapped(dst_ea, buffer.data(), chunk, vmid)) {
-        if (vmid == 0 || !has_client_backing(vmid))
+      if (!copy_to_mapped(dst_ea, buffer.data(), chunk, vmid, !client_backed)) {
+        if (!client_backed)
           return faults.observed() ? CopyOutcome::Faulted : CopyOutcome::Unavailable;
         if (!write_client_memory(dst_ea, buffer.data(), chunk, vmid)) {
           // Indeterminate, as in write_block(): process_vm_writev reports the
@@ -2358,8 +2363,8 @@ private:
   /// @details A page-table span is memcpy'd from its extent. An identity span is
   /// moved by the kernel, so the check and the copy are the same operation and
   /// no unmap can slip between them.
-  bool copy_mapped_span(uint64_t addr, void *bytes, size_t size, uint32_t vmid,
-                        bool into_memory) const {
+  bool copy_mapped_span(uint64_t addr, void *bytes, size_t size, uint32_t vmid, bool into_memory,
+                        bool allow_identity) const {
     const FaultDispatch fault_dispatch(*this);
     if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
       return false;
@@ -2391,6 +2396,8 @@ private:
             }
             return true;
           }
+          if (!allow_identity)
+            return false;
           if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
             return false;
           const bool moved = into_memory ? page.write(page_offset, bytes, size)
@@ -2404,13 +2411,16 @@ private:
   }
 
   /// @brief Read a mapped span into @p dst without ever exposing a bare pointer.
-  bool copy_from_mapped(uint64_t addr, void *dst, size_t size, uint32_t vmid) const {
-    return copy_mapped_span(addr, dst, size, vmid, /*into_memory=*/false);
+  bool copy_from_mapped(uint64_t addr, void *dst, size_t size, uint32_t vmid,
+                        bool allow_identity = true) const {
+    return copy_mapped_span(addr, dst, size, vmid, /*into_memory=*/false, allow_identity);
   }
 
   /// @brief Write @p src into a mapped span without ever exposing a bare pointer.
-  bool copy_to_mapped(uint64_t addr, const void *src, size_t size, uint32_t vmid) const {
-    return copy_mapped_span(addr, const_cast<void *>(src), size, vmid, /*into_memory=*/true);
+  bool copy_to_mapped(uint64_t addr, const void *src, size_t size, uint32_t vmid,
+                      bool allow_identity = true) const {
+    return copy_mapped_span(addr, const_cast<void *>(src), size, vmid, /*into_memory=*/true,
+                            allow_identity);
   }
 
   uint8_t *translate(uint64_t addr, uint32_t vmid, size_t size) const {
