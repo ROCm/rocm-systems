@@ -8,7 +8,6 @@ import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
 import { formatDuration, formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
-import CommitComparison from '../shared/CommitComparison';
 
 function MetricCard({ label, value, caption, icon, tone = 'primary', badge }) {
   const toneColor = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
@@ -34,7 +33,7 @@ function MetricCard({ label, value, caption, icon, tone = 'primary', badge }) {
   );
 }
 
-export default function MetricsGrid({ metrics, candidate, baseline }) {
+export default function MetricsGrid({ metrics }) {
   const hasResults = metrics.total > 0;
   const baselineState = classifyDurationChange(metrics.durationDelta);
   const baselineTone = changeTone(baselineState);
@@ -44,7 +43,7 @@ export default function MetricsGrid({ metrics, candidate, baseline }) {
       <MetricCard
         label="Total duration"
         value={formatDuration(metrics.duration)}
-        caption="Selected tests in the overview run"
+        caption="Selected-test duration from the latest commit's newest attempt"
         icon={<TimerRoundedIcon />}
         tone={hasResults ? 'primary' : 'neutral'}
       />
@@ -53,8 +52,7 @@ export default function MetricsGrid({ metrics, candidate, baseline }) {
         value={formatPercent(metrics.durationDelta)}
         caption={(
           <>
-            <Box component="span" sx={{ display: 'block' }}>Selected-test aggregate vs baseline</Box>
-            <CommitComparison candidate={candidate} baseline={baseline} sx={{ mt: 0.3 }} />
+            <Box component="span" sx={{ display: 'block' }}>Selected-test duration change: latest vs oldest commit</Box>
           </>
         )}
         icon={<SpeedRoundedIcon />}
@@ -68,9 +66,9 @@ export default function MetricsGrid({ metrics, candidate, baseline }) {
         )}
       />
       <MetricCard
-        label="Overview run coverage"
+        label="Run coverage"
         value={hasResults ? `${metrics.completed} / ${metrics.total}` : '—'}
-        caption="Selected tests completed in the overview run"
+        caption="Completed selected tests in the latest run"
         icon={<FactCheckRoundedIcon />}
         tone={!hasResults ? 'neutral' : metrics.completeness === 100 ? 'success' : 'warning'}
       />
@@ -78,10 +76,10 @@ export default function MetricsGrid({ metrics, candidate, baseline }) {
         label="Run health"
         value={!hasResults ? '—' : healthy ? 'Healthy' : `${metrics.failed} issue${metrics.failed === 1 ? '' : 's'}`}
         caption={!hasResults
-          ? 'No run health data is available'
+          ? 'No latest-run health data available'
           : healthy
-            ? 'No failures or timeouts in selected tests'
-            : 'Review incomplete cases in selected tests'}
+            ? 'All selected tests completed without failures'
+            : 'Review failed or incomplete selected tests'}
         icon={<HealthAndSafetyRoundedIcon />}
         tone={!hasResults ? 'neutral' : healthy ? 'success' : 'error'}
       />

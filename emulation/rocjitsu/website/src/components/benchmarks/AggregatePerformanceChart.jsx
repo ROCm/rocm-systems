@@ -7,6 +7,7 @@ import { commitTimestampFor } from '../../data/runOrdering';
 import { escapeHtml, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { chartAreaGradient, chartLineStyle, chartPointStyle } from '../../utils/chartStyles';
 import { chartGapPresentation } from '../../utils/chartGaps';
+import { durationAxisBounds } from '../../utils/durationAxis';
 import {
   initialZoomWindow,
   zoomFromEvent,
@@ -52,9 +53,10 @@ export default function AggregatePerformanceChart({
   ));
   const seriesPresentations = viewModel.series.map((series) => ({
     ...series,
-    ...chartGapPresentation(series.data),
+    ...chartGapPresentation(series.data, series.catalogBreaks),
   }));
   const minimumValue = visibleChartValues.length ? Math.min(...visibleChartValues) : 0;
+  const durationAxis = durationAxisBounds(visibleChartValues);
   const incompleteMarkerData = seriesPresentations.flatMap((series) => (
     series.data.flatMap((record, index) => {
       if (Number.isFinite(record.value) || record.total === 0) return [];
@@ -142,10 +144,6 @@ export default function AggregatePerformanceChart({
         const usable = allPoints.filter((parameter) => (
           parameter.seriesType === 'line' && Number.isFinite(parameter.data?.value)
         ));
-        const selectedTests = (run.tests ?? []).filter((test) => (
-          filters.targets.includes(test.target) && filters.suites.includes(test.suite)
-        ));
-        const totalTestCount = selectedTests.length;
         const unavailable = allPoints.find((parameter) => (
           parameter.seriesName === 'Selected run' && parameter.data?.unavailableTargets
         ))?.data.unavailableTargets;
@@ -154,9 +152,11 @@ export default function AggregatePerformanceChart({
         ));
         return [
           `<strong>Commit ${escapeHtml(shortSha(run))}</strong>`,
+          `Commit name · ${escapeHtml(run.provenance?.commitMessage ?? 'unknown')}`,
+          `Catalog · ${escapeHtml(run.catalogId ?? 'unknown')}`,
           `Commit time · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}`,
           `Execution time · ${escapeHtml(formatFullDate(run.timestamp))}`,
-          `Run type · ${run.trigger === 'manual' ? 'Manual' : 'Auto'}`,
+          `Branch · ${escapeHtml(run.branch ?? 'unknown')}`,
           ...usable.map((targetPoint) => (
             `${targetPoint.marker}${escapeHtml(targetPoint.seriesName)}&nbsp;&nbsp;<strong>${formatDuration(targetPoint.data.value)}</strong>`
           )),
@@ -164,7 +164,6 @@ export default function AggregatePerformanceChart({
             ? `${incomplete.marker}${escapeHtml(incomplete.data.target)}&nbsp;&nbsp;<strong>${incomplete.data.completed}/${incomplete.data.total} completed</strong>`
             : null,
           unavailable?.length ? `Unavailable targets · ${escapeHtml(unavailable.join(', '))}` : null,
-          `Selected results · ${selectedTests.filter((test) => test.status === 'completed').length}/${totalTestCount} completed`,
         ].filter(Boolean).join('<br/>');
       },
     },
@@ -190,6 +189,7 @@ export default function AggregatePerformanceChart({
     yAxis: {
       type: 'value',
       name: 'Seconds',
+      ...durationAxis,
       scale: true,
       nameTextStyle: { color: theme.palette.text.secondary, align: 'right' },
       axisLabel: { color: theme.palette.text.secondary },
@@ -221,7 +221,9 @@ export default function AggregatePerformanceChart({
       ...seriesPresentations.map((series) => ({
         name: series.target,
         type: 'line',
-        data: series.data,
+        data: series.data.map((point, index) => (
+          series.catalogBreaks.includes(index) ? null : point
+        )),
         showSymbol: false,
         symbol: 'circle',
         symbolSize: 7,
@@ -255,9 +257,11 @@ export default function AggregatePerformanceChart({
       ...seriesPresentations.map((series) => ({
         name: `${series.target} point selection`,
         type: 'scatter',
-        data: series.data,
+        data: series.data.map((record, index) => (
+          record ? { ...record, value: [index, record.value] } : null
+        )),
         symbolSize: 18,
-        itemStyle: { color: 'rgba(0, 0, 0, 0.001)' },
+        itemStyle: { color: 'rgba(0, 0, 0, 0.01)' },
         emphasis: { scale: false },
         tooltip: { show: showDetailsOnClick },
         z: 10,
@@ -292,13 +296,15 @@ export default function AggregatePerformanceChart({
   })), [viewModel.runs]);
   const chartEvents = useMemo(() => ({
     click: (parameters) => {
-      if (parameters.componentType === 'series' && parameters.data?.run) {
+      const run = parameters.data?.run
+        ?? (Number.isInteger(parameters.dataIndex) ? viewModel.runs[parameters.dataIndex] : null);
+      if (run) {
         setZoom((current) => zoomIncludingIndexes(
           current,
           viewModel.runs.length,
           selectedIndexes,
         ));
-        onSelectRun(parameters.data.run);
+        onSelectRun(run);
       }
     },
     datazoom: (parameters) => {
@@ -308,7 +314,7 @@ export default function AggregatePerformanceChart({
         selectedIndexes,
       ));
     },
-  }), [onSelectRun, selectedIndexes, viewModel.runs.length]);
+  }), [onSelectRun, selectedIndexes, viewModel.runs]);
 
   return (
     <Box data-testid="aggregate-performance-chart">

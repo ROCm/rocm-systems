@@ -203,7 +203,11 @@ test('latest results can be sorted by every column', async ({ page }) => {
   ]);
   expect(rightPadding[0]).toBe(rightPadding[1]);
   await durationHeader.getByRole('button', { name: 'Duration', exact: true }).click();
-  const durations = (await results.locator('tbody tr td:nth-child(6)').allTextContents()).map((value) => Number.parseFloat(value));
+  const durations = (await results.locator('tbody tr td:nth-child(6)').allTextContents()).map((value) => {
+    const minutes = Number(value.match(/(\d+)m/)?.[1] ?? 0);
+    const seconds = Number(value.match(/([\d.]+)s/)?.[1] ?? 0);
+    return minutes * 60 + seconds;
+  });
   expect(durations).toEqual([...durations].sort((left, right) => left - right));
   await durationHeader.getByRole('button', { name: 'Duration', exact: true }).click();
   await expect(durationHeader).toHaveAttribute('aria-sort', 'descending');
@@ -272,28 +276,37 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   await expect(page.getByLabel('Comparison period')).toHaveCount(0);
   await expect(page.getByLabel('History range')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'All available history' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText(/\d+ UTC commit dates? shown/)).toBeVisible();
+  await expect(page.getByText(/\d+ commits? shown/)).toBeVisible();
   await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'faster');
-  await expect(page.getByTestId('performance-range-change')).toContainText('6.9%');
-  await expect(page.getByText('Latest vs first shown in ALL')).toBeVisible();
+  await expect(page.getByTestId('performance-range-change')).toContainText('21.4%');
+  await expect(page.getByText(/Latest vs first shown/)).toHaveCount(0);
+  const largestChangesPair = page.getByTestId('largest-changes').getByTestId('compared-commits').first();
+  const allRangePair = await largestChangesPair.getAttribute('aria-label');
+  expect(allRangePair).toBe('Candidate commit 31369c4d versus baseline commit 86b362ea');
 
   await page.getByRole('button', { name: 'Trailing 7 days' }).click();
-  await expect(page.getByText(/\d+ UTC commit dates? shown/)).toBeVisible();
-  await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'slower');
-  await expect(page.getByTestId('performance-range-change')).toContainText('0.5%');
-  await expect(page.getByText('Latest vs first shown in 1W')).toBeVisible();
+  await expect(page.getByText(/\d+ commits? shown/)).toBeVisible();
+  await expect(page.getByText('past week', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'faster');
+  await expect(page.getByTestId('performance-range-change')).toContainText('0.7%');
+  const weekRangePair = await largestChangesPair.getAttribute('aria-label');
+  expect(weekRangePair).not.toBe(allRangePair);
 
   await page.getByRole('button', { name: 'Trailing 24 hours' }).click();
-  await expect(page.getByText('3 completed runs shown')).toBeVisible();
+  await expect(page.getByText('3 commits shown')).toBeVisible();
+  await expect(page.getByText('past day', { exact: true })).toBeVisible();
   await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'faster');
-  await expect(page.getByTestId('performance-range-change')).toContainText('1.2%');
-  await expect(page.getByText('Latest vs first shown in 1D')).toBeVisible();
+  await expect(page.getByTestId('performance-range-change')).toContainText('10.1%');
+  const dayRangePair = await largestChangesPair.getAttribute('aria-label');
+  expect(dayRangePair).not.toBe(weekRangePair);
   const intradayTooltip = await readChart(
     page.getByRole('img', { name: 'Performance trend for 1D' }),
     (instance) => {
       const option = instance.getOption();
       const series = option.series.find((candidate) => candidate.type === 'line');
-      const dataIndex = series.data.findIndex((value) => Number.isFinite(value));
+      const dataIndex = series.data.findIndex((value) => (
+        Array.isArray(value) && Number.isFinite(value[1])
+      ));
       return option.tooltip[0].formatter([{
         dataIndex,
         value: series.data[dataIndex],
@@ -302,8 +315,93 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
       }]);
     },
   );
-  expect(intradayTooltip).toContain('Run time ·');
-  expect(intradayTooltip).toContain('Commit time ·');
+  expect(intradayTooltip).toContain('Commit date ·');
+  expect(intradayTooltip).toMatch(/Commit SHA · [a-f0-9]{8}/);
+  expect(intradayTooltip).toContain('Test catalog ·');
+  expect(intradayTooltip).not.toContain('Run time ·');
+  expect(intradayTooltip).not.toContain('Commit time ·');
+  expect(intradayTooltip).toMatch(/\d+m\d+s/);
+  expect(intradayTooltip).toMatch(/Time change [+-]?\d+\.\d+%/);
+  expect(intradayTooltip).not.toMatch(/\d+m \d+/);
+  const durationUnit = await readChart(
+    page.getByRole('img', { name: 'Performance trend for 1D' }),
+    (instance) => instance.getOption().yAxis[0].name,
+  );
+  expect(durationUnit).toBe('Minutes');
+  const intradayAxis = await readChart(
+    page.getByRole('img', { name: 'Performance trend for 1D' }),
+    (instance) => ({
+      name: instance.getOption().xAxis[0].name,
+      type: instance.getOption().xAxis[0].type,
+      points: instance.getOption().series[0].data.length,
+    }),
+  );
+  expect(intradayAxis.name).toBe('Commit time (UTC)');
+  expect(intradayAxis.type).toBe('value');
+  expect(intradayAxis.points).toBe(3);
+});
+
+test('uses a continuous value x-axis for every rendered trend range', async ({ page }) => {
+  await page.goto('/');
+
+  for (const rangeButton of ['All available history', 'Trailing 30 days', 'Trailing 7 days', 'Trailing 24 hours']) {
+    await page.getByRole('button', { name: rangeButton }).click();
+    const axisType = await readChart(
+      page.getByRole('img', { name: /Performance trend for/ }),
+      (instance) => instance.getOption().xAxis[0].type,
+    );
+    expect(axisType, rangeButton).toBe('value');
+    const baselineValues = await readChart(
+      page.getByRole('img', { name: /Performance trend for/ }),
+      (instance) => instance.getOption().series
+        .map((series) => series.markLine?.data?.[0]?.yAxis)
+        .filter((value) => Number.isFinite(value)),
+    );
+    expect(baselineValues.length, rangeButton).toBeGreaterThan(0);
+    const axisBounds = await readChart(
+      page.getByRole('img', { name: /Performance trend for/ }),
+      (instance) => {
+        const option = instance.getOption();
+        const values = option.series.flatMap((series) => (
+          series.data
+            .filter((value) => Array.isArray(value) && Number.isFinite(value[1]))
+            .map((value) => value[1])
+        ));
+        return {
+          min: option.yAxis[0].min,
+          max: option.yAxis[0].max,
+          lowest: Math.min(...values, ...baselineValues),
+          highest: Math.max(...values),
+        };
+      },
+    );
+    const decimalPlaces = Math.max(
+      0,
+      Math.ceil(-Math.log10((axisBounds.highest - axisBounds.lowest) / 5)),
+    );
+    const precision = 10 ** decimalPlaces;
+    expect(axisBounds.min, rangeButton).toBeCloseTo(
+      Math.floor(axisBounds.lowest * precision) / precision,
+      5,
+    );
+    expect(axisBounds.max, rangeButton).toBeCloseTo(
+      Math.ceil(axisBounds.highest * precision) / precision,
+      5,
+    );
+  }
+});
+
+test('shows the minimum 3M coverage and insufficient-data messaging for sparser ranges', async ({ page }) => {
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Trailing 90 days' }).click();
+  await expect(page.getByTestId('performance-trend-chart')).toBeVisible();
+  await expect(page.getByTestId('performance-trend-insufficient')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Trailing 180 days' }).click();
+  await expect(page.getByTestId('performance-trend-insufficient')).toHaveText(
+    "There isn't enough data for the selected time range",
+  );
 });
 
 test('largest changes uses a fixed three-percent noise tolerance', async ({ page }) => {
@@ -311,12 +409,12 @@ test('largest changes uses a fixed three-percent noise tolerance', async ({ page
 
   const largestChanges = page.getByTestId('largest-changes');
   await expect(page.getByLabel('Noise tolerance')).toHaveCount(0);
-  await expect(page.getByText('Largest benchmark changes in the Overview comparison', { exact: true })).toBeVisible();
+  await expect(page.getByText('Largest benchmark changes across the selected history range', { exact: true })).toBeVisible();
   await expect(largestChanges.locator('[data-legend-state="slower"]')).toHaveText('Slower');
   await expect(largestChanges.locator('[data-legend-state="neutral"]')).toHaveText('Within ±3%');
   await expect(largestChanges.locator('[data-legend-state="faster"]')).toHaveText('Faster');
   await expect(largestChanges.getByText(/Slower >|Faster </)).toHaveCount(0);
-  await expect(largestChanges.locator('[data-change-state="neutral"]')).toHaveCount(3);
+  await expect(largestChanges.locator('[data-change-state="neutral"]')).toHaveCount(0);
 });
 
 test('recent runs contains horizontal scrolling on compact laptops', async ({ page }) => {

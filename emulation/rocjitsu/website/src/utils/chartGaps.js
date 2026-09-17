@@ -3,7 +3,7 @@ function numericPointValue(point) {
   return Number.isFinite(value) ? value : null;
 }
 
-export function chartGapPresentation(points = []) {
+function chartGapPresentationForRange(points) {
   const observedValues = points.map(numericPointValue);
   const previousIndexes = [];
   const nextIndexes = [];
@@ -51,6 +51,32 @@ export function chartGapPresentation(points = []) {
       data[pointIndex] = estimatedValues[pointIndex];
     }
     if (data.filter(Number.isFinite).length >= 2) segments.push(data);
+  }
+
+  return { estimatedValues, segments };
+}
+
+export function chartGapPresentation(points = [], hardBreaks = []) {
+  const boundaries = [0, ...hardBreaks
+    .filter((index) => Number.isInteger(index) && index > 0 && index < points.length), points.length]
+    .sort((left, right) => left - right);
+  const estimatedValues = Array(points.length).fill(null);
+  const segments = [];
+
+  for (let boundaryIndex = 1; boundaryIndex < boundaries.length; boundaryIndex += 1) {
+    const start = boundaries[boundaryIndex - 1];
+    const end = boundaries[boundaryIndex];
+    const presentation = chartGapPresentationForRange(points.slice(start, end));
+    presentation.estimatedValues.forEach((value, index) => {
+      estimatedValues[start + index] = value;
+    });
+    presentation.segments.forEach((segment) => {
+      const paddedSegment = Array(points.length).fill(null);
+      segment.forEach((value, index) => {
+        paddedSegment[start + index] = value;
+      });
+      segments.push(paddedSegment);
+    });
   }
 
   return { estimatedValues, segments };

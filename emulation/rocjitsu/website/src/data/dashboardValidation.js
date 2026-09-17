@@ -1,4 +1,4 @@
-import { backfillRunIds, compareRunExecution, isRunCompleted, sortRunsByCommit } from './runOrdering.js';
+import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
 const CURRENT_SCHEMA_VERSION = 1;
 export const RUN_FILE_PATTERN = /^runs\/[A-Za-z0-9._-]+\.json$/;
@@ -304,7 +304,6 @@ function buildDashboardData(raw) {
   const pluginRuns = [...allRuns].sort(compareRunExecution);
   const runs = pluginRuns.filter((run) => run.plugin.id === 'vanilla');
   const latestCommitRun = sortRunsByCommit(runs).at(-1) ?? null;
-  const latestCompletedRun = sortRunsByCommit(runs.filter(isRunCompleted)).at(-1) ?? null;
   const targets = [...new Set(runs.flatMap((run) => run.targets))];
   const plugins = [...new Map(pluginRuns.map((run) => [run.plugin.id, run.plugin])).values()];
 
@@ -314,7 +313,6 @@ function buildDashboardData(raw) {
     runs,
     latestRun: runs.at(-1) ?? null,
     latestCommitRun,
-    latestCompletedRun,
     backfillRunIds: backfillRunIds(runs),
     targets,
     plugins,
@@ -496,7 +494,6 @@ export function validatePublishedDashboardData({
   });
 
   if (!data.latestRun) throw new Error('The data files do not contain any Vanilla benchmark runs');
-  if (!data.latestCompletedRun) throw new Error('The data files do not contain a completed Vanilla benchmark run');
 
   const publicationIssues = validatePublicationPolicy(acceptedSourceRuns);
   return { data, sourceData, warnings, publicationIssues };

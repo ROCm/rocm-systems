@@ -139,9 +139,9 @@ export default function ResultsTable({ results, run, baseline, repository, searc
     <Paper data-testid="latest-results" variant="outlined" sx={{ overflow: 'hidden', boxShadow: 1 }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 1.5, p: { xs: 2, sm: 2.5 } }}>
         <Box>
-          <Typography variant="h2">Latest Results</Typography>
+          <Typography variant="h2">Latest Commit Results</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
-            Results from the Overview run · Select a benchmark name for details
+            Test results for the latest commit date · Select a benchmark name for details
           </Typography>
         </Box>
         <TextField

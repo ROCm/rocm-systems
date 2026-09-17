@@ -51,19 +51,19 @@
       "results": [
         {
           "testId": "triton-gemm-f16-1024",
-          "durationSeconds": 3.733,
+          "durationSeconds": 63.461,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
-          "durationSeconds": 22.531,
+          "durationSeconds": 383.027,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
-          "durationSeconds": 5.775,
+          "durationSeconds": 98.175,
           "status": "completed",
           "error": null
         },
@@ -75,19 +75,19 @@
         },
         {
           "testId": "tensile-gemm-f16-8192",
-          "durationSeconds": 23.854,
+          "durationSeconds": 405.518,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-fp8-4096",
-          "durationSeconds": 14.544,
+          "durationSeconds": 247.248,
           "status": "completed",
           "error": null
         },
         {
           "testId": "deepseek-v3-decode-fp8",
-          "durationSeconds": 51.7,
+          "durationSeconds": 878.9,
           "status": "completed",
           "error": null
         }
@@ -98,37 +98,37 @@
       "results": [
         {
           "testId": "triton-gemm-f16-1024",
-          "durationSeconds": 3.234,
+          "durationSeconds": 54.978,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
-          "durationSeconds": 19.766,
+          "durationSeconds": 336.022,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
-          "durationSeconds": 5.097,
+          "durationSeconds": 86.649,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
-          "durationSeconds": 6.323,
+          "durationSeconds": 107.491,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
-          "durationSeconds": 21.202,
+          "durationSeconds": 360.434,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-fp8-4096",
-          "durationSeconds": 12.793,
+          "durationSeconds": 217.481,
           "status": "completed",
           "error": null
         },

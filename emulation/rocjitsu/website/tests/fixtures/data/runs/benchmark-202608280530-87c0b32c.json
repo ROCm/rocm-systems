@@ -50,13 +50,13 @@
       "results": [
         {
           "testId": "triton-gemm-f16-1024",
-          "durationSeconds": 2.104,
+          "durationSeconds": 35.768,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
-          "durationSeconds": 11.129,
+          "durationSeconds": 189.193,
           "status": "completed",
           "error": null
         },
@@ -68,25 +68,25 @@
         },
         {
           "testId": "triton-layernorm-bf16-8192",
-          "durationSeconds": 3.936,
+          "durationSeconds": 66.912,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
-          "durationSeconds": 14.808,
+          "durationSeconds": 251.736,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-fp8-4096",
-          "durationSeconds": 7.926,
+          "durationSeconds": 134.742,
           "status": "completed",
           "error": null
         },
         {
           "testId": "deepseek-v3-decode-fp8",
-          "durationSeconds": 25.468,
+          "durationSeconds": 432.956,
           "status": "completed",
           "error": null
         }
@@ -97,43 +97,43 @@
       "results": [
         {
           "testId": "triton-gemm-f16-1024",
-          "durationSeconds": 1.812,
+          "durationSeconds": 30.804,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
-          "durationSeconds": 9.716,
+          "durationSeconds": 165.172,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
-          "durationSeconds": 2.828,
+          "durationSeconds": 48.076,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
-          "durationSeconds": 3.477,
+          "durationSeconds": 59.109,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
-          "durationSeconds": 12.936,
+          "durationSeconds": 219.912,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-fp8-4096",
-          "durationSeconds": 6.839,
+          "durationSeconds": 116.263,
           "status": "completed",
           "error": null
         },
         {
           "testId": "deepseek-v3-decode-fp8",
-          "durationSeconds": 22.155,
+          "durationSeconds": 376.635,
           "status": "completed",
           "error": null
         }

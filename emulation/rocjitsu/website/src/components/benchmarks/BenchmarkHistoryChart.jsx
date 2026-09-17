@@ -115,6 +115,7 @@ export default function BenchmarkHistoryChart({
     tooltip: {
       trigger: 'axis',
       triggerOn: showDetailsOnClick ? 'mousemove|click' : 'mousemove',
+      axisPointer: { type: 'line', lineStyle: { color: theme.palette.text.disabled, type: 'dashed' } },
       backgroundColor: theme.palette.background.paper,
       borderColor: theme.palette.divider,
       textStyle: { color: theme.palette.text.primary },
@@ -125,8 +126,12 @@ export default function BenchmarkHistoryChart({
         if (points.length === 0) return 'No result for this benchmark';
         const run = points[0].data.record.run;
         return [
-          `<strong>Run time · ${escapeHtml(formatFullDate(run.timestamp))}</strong>`,
-          `Commit ${escapeHtml(shortSha(run))} · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}`,
+          `<strong>Commit ${escapeHtml(shortSha(run))}</strong>`,
+          `Commit name · ${escapeHtml(run.provenance?.commitMessage ?? 'unknown')}`,
+          `Catalog · ${escapeHtml(run.catalogId ?? 'unknown')}`,
+          `Commit time · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}`,
+          `Execution time · ${escapeHtml(formatFullDate(run.timestamp))}`,
+          `Branch · ${escapeHtml(run.branch ?? 'unknown')}`,
           ...points.map((point) => {
             const { test } = point.data.record;
             const target = escapeHtml(point.data.target ?? point.seriesName);

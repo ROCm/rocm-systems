@@ -98,7 +98,6 @@ const emptyDashboardData = {
   plugins: [],
   latestRun: null,
   latestCommitRun: null,
-  latestCompletedRun: null,
   backfillRunIds: new Set(),
 };
 

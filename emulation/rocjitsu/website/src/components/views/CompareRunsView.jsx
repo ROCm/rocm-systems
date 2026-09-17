@@ -15,7 +15,7 @@ import SwapVertRoundedIcon from '@mui/icons-material/SwapVertRounded';
 import RunSelector from '../compare/RunSelector';
 import Chart from '../shared/Chart';
 import SectionCard from '../shared/SectionCard';
-import { previousCompletedRun, selectRunComparison } from '../../data/selectors';
+import { previousCompletedRunForFilters, selectRunComparison } from '../../data/selectors';
 import { escapeHtml, formatDuration, formatPercent, shortSha } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
@@ -64,7 +64,7 @@ export default function CompareRunsView({
   const selectedCandidate = data.runs.find((run) => run.runId === selectedCandidateId);
   const candidate = selectedCandidate ?? data.latestRun;
   const defaultBaseline = selectedCandidate
-    ? previousCompletedRun(data.runs, candidate)
+    ? previousCompletedRunForFilters(data.runs, candidate, filters)
     : data.runs.at(-2) ?? null;
   const baseline = data.runs.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
   const viewModel = selectRunComparison(candidate, baseline, filters, NOISE_TOLERANCE);

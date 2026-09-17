@@ -129,9 +129,12 @@ export default function BenchmarksView({
 }) {
   const catalog = useMemo(() => selectBenchmarkCatalog(data, filters), [data, filters]);
   const initialId = catalog.available[0]?.id ?? catalog.all[0]?.id ?? '';
+  const defaultGridIds = (catalog.available.length > 0 ? catalog.available : catalog.all)
+    .slice(0, 2)
+    .map((test) => test.id);
   const [mode, setMode] = useState(selectedRunIds.length > 0 ? 'aggregate' : 'single');
   const [selectedId, setSelectedId] = useState(initialId);
-  const [gridIds, setGridIds] = useState(initialId ? [initialId] : []);
+  const [gridIds, setGridIds] = useState(defaultGridIds);
   const [showAll, setShowAll] = useState(false);
   const [showDetailsOnClick, setShowDetailsOnClick] = useState(true);
   const [scrollZoomEnabled, setScrollZoomEnabled] = useState(true);
@@ -202,7 +205,7 @@ export default function BenchmarksView({
           ? 'One benchmark across all official attempts, including reruns'
           : mode === 'grid'
             ? `Up to ${MAX_GRID_BENCHMARKS} benchmark histories across all official attempts`
-            : 'Selected-suite duration by target across all official attempts, including reruns'}
+              : 'Selected-suite duration by target across all official attempts, including reruns; catalog changes are shown as breaks'}
         action={(
           <Stack sx={{ alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 0.75 }}>
             <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 0.75 }}>
@@ -221,7 +224,7 @@ export default function BenchmarksView({
                 value={mode}
                 onChange={(_, nextMode) => {
                   if (!nextMode) return;
-                  if (nextMode === 'grid' && gridIds.length === 0) setGridIds([selectedTest.id]);
+                  if (nextMode === 'grid' && gridIds.length === 0) setGridIds(defaultGridIds);
                   setMode(nextMode);
                 }}
                 aria-label="Benchmark display mode"

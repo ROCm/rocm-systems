@@ -3,12 +3,6 @@ function parsedTime(value) {
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
 }
 
-export function isRunCompleted(run) {
-  return Array.isArray(run?.tests)
-    && run.tests.length > 0
-    && run.tests.every((test) => test.status === 'completed');
-}
-
 export function commitShaFor(run) {
   return run?.provenance?.rocjitsuCommitSha ?? '';
 }

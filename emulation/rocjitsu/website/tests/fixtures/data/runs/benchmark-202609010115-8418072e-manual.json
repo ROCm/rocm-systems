@@ -1,7 +1,7 @@
 {
   "id": "benchmark-202609010115-8418072e-manual",
   "comparisonId": "benchmark-202609010115-8418072e-manual",
-  "testCatalog": "test-catalogs/rocjitsu-core-v2.json",
+  "testCatalog": "test-catalogs/rocjitsu-core-v1.json",
   "plugin": {
     "id": "vanilla",
     "name": "Vanilla"
@@ -50,43 +50,31 @@
       "results": [
         {
           "testId": "triton-gemm-f16-1024",
-          "durationSeconds": 2.131,
+          "durationSeconds": 40.489,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
-          "durationSeconds": 11.18,
+          "durationSeconds": 212.42,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
-          "durationSeconds": 3.228,
+          "durationSeconds": 61.332,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
-          "durationSeconds": 3.939,
+          "durationSeconds": 74.841,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
-          "durationSeconds": 14.918,
-          "status": "completed",
-          "error": null
-        },
-        {
-          "testId": "tensile-gemm-fp8-4096",
-          "durationSeconds": 8.063,
-          "status": "completed",
-          "error": null
-        },
-        {
-          "testId": "deepseek-v3-decode-fp8",
-          "durationSeconds": 26.141,
+          "durationSeconds": 283.442,
           "status": "completed",
           "error": null
         }
@@ -97,43 +85,31 @@
       "results": [
         {
           "testId": "triton-gemm-f16-1024",
-          "durationSeconds": 1.814,
+          "durationSeconds": 34.466,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
-          "durationSeconds": 9.715,
+          "durationSeconds": 184.585,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
-          "durationSeconds": 2.84,
+          "durationSeconds": 53.96,
           "status": "completed",
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
-          "durationSeconds": 3.521,
+          "durationSeconds": 66.899,
           "status": "completed",
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
-          "durationSeconds": 13.22,
-          "status": "completed",
-          "error": null
-        },
-        {
-          "testId": "tensile-gemm-fp8-4096",
-          "durationSeconds": 7.032,
-          "status": "completed",
-          "error": null
-        },
-        {
-          "testId": "deepseek-v3-decode-fp8",
-          "durationSeconds": 22.795,
+          "durationSeconds": 251.18,
           "status": "completed",
           "error": null
         }

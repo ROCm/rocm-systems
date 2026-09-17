@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { writeDashboardFixtureSite } from './tests/fixtures/dashboardFixture.js';
+import { fileURLToPath } from 'node:url';
+
+const fixtureDirectory = fileURLToPath(new URL('./tests/fixtures/', import.meta.url));
 
 export default defineConfig(({ mode }) => ({
   base: './',
   // Dummy benchmark history is available only for explicit fixture builds/dev servers.
-  publicDir: mode === 'fixtures' ? writeDashboardFixtureSite() : false,
+  publicDir: mode === 'fixtures' ? fixtureDirectory : false,
   plugins: [react()],
   preview: {
     port: mode === 'fixtures' ? 4174 : 4173,

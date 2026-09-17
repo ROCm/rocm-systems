@@ -58,12 +58,11 @@ after updating Playwright if its required browser version changes.
 npm run dev:fixtures -- --host 127.0.0.1
 ```
 
-Use the URL printed by Vite. Fixture mode combines the explicit cases in
-`tests/fixtures/data/` with deterministic generated history and writes the result
-to the ignored `.test-data/data/` directory. Unit tests use the same factory in
-memory. Plain `npm run dev` serves only the application.
-Restart the fixture development server after editing fixture JSON. For a fixture
-preview, rebuild first; fixture generation happens when Vite loads its configuration.
+Use the URL printed by Vite. Fixture mode serves the static JSON in
+`tests/fixtures/data/` through the same application loader used by the normal
+dashboard. Unit tests validate the same fixture data in memory. Plain `npm run dev`
+serves only the application. Restart the fixture development server after editing
+fixture JSON. For a fixture preview, rebuild first.
 To inspect the production build:
 
 ```bash

@@ -26,7 +26,7 @@ export default function LargestChanges({ changes, candidate, baseline }) {
   return (
     <SectionCard
       title="Largest Changes"
-      subtitle="Largest benchmark changes in the Overview comparison"
+      subtitle="Largest benchmark changes across the selected history range"
       sx={{ height: '100%' }}
       data-testid="largest-changes"
     >

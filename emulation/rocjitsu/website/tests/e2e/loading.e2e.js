@@ -13,7 +13,7 @@ test('loads the data-driven overview without browser errors', async ({ page }) =
   await expect(page.getByText('Demo', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
   await expect(page.getByText('Performance Trend')).toBeVisible();
-  await expect(page.getByText('Overview run coverage', { exact: false })).toBeVisible();
+  await expect(page.getByText('Run coverage', { exact: false })).toBeVisible();
   await expect(page.getByText('Recent Runs')).toBeVisible();
   await expect(page.getByText('RocJitsu Commit Activity')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(1);
@@ -102,7 +102,7 @@ test('offers a working Retry after a fatal data failure', async ({ page }) => {
   await expect(page.getByText('Run health', { exact: true })).toBeVisible();
   await expect(page.getByText('Performance Trend')).toBeVisible();
   await expect(page.getByText('Largest Changes')).toBeVisible();
-  await expect(page.getByText('Latest Results')).toBeVisible();
+  await expect(page.getByText('Latest Commit Results')).toBeVisible();
   await expect(page.getByText('Recent Runs')).toBeVisible();
   await expect(page.getByTestId('latest-commit-run').getByText('—', { exact: true })).toHaveCount(2);
 

@@ -55,21 +55,38 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
     (benchmarkInputBox.y + benchmarkInputBox.height / 2)
     - (detailsButtonBox.y + detailsButtonBox.height / 2),
   )).toBeLessThanOrEqual(1);
-  await expect(page.getByRole('img', { name: /duration history/ })).toHaveCount(1);
+  const initialSingleChart = page.getByRole('img', { name: /duration history/ });
+  await expect(initialSingleChart).toHaveCount(1);
+  const singleTooltip = await readChart(initialSingleChart, (instance) => {
+    const option = instance.getOption();
+    const series = option.series.find((candidate) => candidate.type === 'line');
+    const dataIndex = series.data.findIndex(Boolean);
+    return option.tooltip[0].formatter([{
+      data: series.data[dataIndex],
+      dataIndex,
+      marker: '',
+      seriesName: series.name,
+      seriesType: 'line',
+    }]);
+  });
+  expect(singleTooltip).toContain('Commit name ·');
+  expect(singleTooltip).toContain('Catalog ·');
+  expect(singleTooltip).toContain('Branch · develop');
 
   await page.getByRole('button', { name: 'Grid' }).click();
-  await expect(page.getByText('1 of 8 benchmarks selected', { exact: false })).toBeVisible();
+  await expect(page.getByText('2 of 8 benchmarks selected', { exact: false })).toBeVisible();
   await page.getByRole('combobox', { name: 'Benchmarks to graph' }).click();
-  const option = page.getByRole('option', { name: /GEMM BF16 4096/ });
+  const option = page.getByRole('option', { name: /Softmax FP32 4096/ });
   await expect(option.getByRole('checkbox')).not.toBeChecked();
   await option.click();
   await expect(option.getByRole('checkbox')).toBeChecked();
   await page.keyboard.press('Escape');
 
+  await expect(page.getByText('3 of 8 benchmarks selected', { exact: false })).toBeVisible();
+  await expect(page.getByTestId('benchmark-grid').getByRole('img', { name: /duration history/ })).toHaveCount(3);
+  await page.getByRole('button', { name: 'Hide Softmax FP32 4096×4096 graph' }).click();
   await expect(page.getByText('2 of 8 benchmarks selected', { exact: false })).toBeVisible();
   await expect(page.getByTestId('benchmark-grid').getByRole('img', { name: /duration history/ })).toHaveCount(2);
-  await page.getByRole('button', { name: 'Hide GEMM BF16 4096³ graph' }).click();
-  await expect(page.getByTestId('benchmark-grid').getByRole('img', { name: /duration history/ })).toHaveCount(1);
 
   await page.getByRole('button', { name: 'Aggregate' }).click();
   await expect(page.getByRole('button', { name: 'Aggregate' })).toHaveAttribute('aria-pressed', 'true');
@@ -103,7 +120,8 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
       initialEnd: option.dataZoom[0].endValue,
     };
   });
-  expect(aggregateOption.lineSeries.map((series) => series.name)).toEqual(['gfx1250']);
+  expect(aggregateOption.lineSeries).toHaveLength(1);
+  expect(aggregateOption.lineSeries.every((series) => series.name === 'gfx1250')).toBe(true);
   expect(aggregateOption.lineSeries.every((series) => series.showSymbol === false)).toBe(true);
   expect(aggregateOption.lineSeries.every((series) => series.hasLatestMarker === false)).toBe(true);
   expect(aggregateOption.gapBridgeTypes.length).toBeGreaterThan(0);

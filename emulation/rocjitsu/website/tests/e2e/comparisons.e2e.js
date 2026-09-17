@@ -136,14 +136,13 @@ test('escapes injected catalog text instead of executing it in a chart tooltip',
   expect(await page.evaluate(() => window.__tooltipInjection)).toBeUndefined();
 });
 
-test('every performance-change surface identifies both compared commits', async ({ page }) => {
+test('comparison surfaces identify both compared commits', async ({ page }) => {
   await page.goto('/');
 
   const latestPair = 'Candidate commit 31369c4d versus baseline commit 9f774d29';
-  const metric = page.getByText('Perf change', { exact: true }).first().locator('..');
-  await expect(metric.getByLabel(latestPair)).toBeVisible();
-  await expect(page.getByTestId('performance-trend').getByLabel('Candidate commit 255eabe3 versus baseline commit 86b362ea')).toBeVisible();
-  await expect(page.getByTestId('largest-changes').getByLabel(latestPair)).toHaveCount(6);
+  const historyPair = 'Candidate commit 31369c4d versus baseline commit 86b362ea';
+  await expect(page.getByTestId('performance-trend').getByLabel(historyPair)).toBeVisible();
+  await expect(page.getByTestId('largest-changes').getByLabel(historyPair)).toHaveCount(5);
   await expect(page.getByTestId('latest-results').getByLabel(latestPair)).toHaveCount(7);
 
   const recentRuns = page.getByTestId('recent-runs-table');

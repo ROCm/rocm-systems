@@ -12,7 +12,7 @@ import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
 import Chart from '../shared/Chart';
 import SectionCard from '../shared/SectionCard';
-import { escapeHtml, formatDuration, formatFullDate, formatPercent } from '../../utils/formatters';
+import { escapeHtml, formatDuration, formatPercent, formatShortDate, shortSha } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 import { chartAreaGradient, chartLineStyle, chartPointStyle } from '../../utils/chartStyles';
 import CommitComparison from '../shared/CommitComparison';
@@ -28,11 +28,30 @@ const ranges = [
   { value: 'ALL', label: 'ALL', ariaLabel: 'All available history' },
 ];
 
-function visibleLabelIndexes(count, maximum = 8) {
-  if (count <= maximum) return new Set(Array.from({ length: count }, (_, index) => index));
-  return new Set(Array.from({ length: maximum }, (_, index) => (
-    Math.round(index * (count - 1) / (maximum - 1))
-  )));
+const MINUTES_THRESHOLD_SECONDS = 60;
+
+function axisDecimalPlaces(range) {
+  if (!(range > 0)) return 0;
+  return Math.max(0, Math.ceil(-Math.log10(range / 5)));
+}
+
+function formatCompactDuration(seconds) {
+  if (!Number.isFinite(seconds)) return '—';
+  if (seconds < MINUTES_THRESHOLD_SECONDS) return formatDuration(seconds);
+  const roundedSeconds = Math.round(seconds);
+  return `${Math.floor(roundedSeconds / 60)}m${roundedSeconds % 60}s`;
+}
+
+function rangePeriodLabel(range) {
+  return {
+    '1D': 'past day',
+    '1W': 'past week',
+    '1M': 'past month',
+    '3M': 'past 3 months',
+    '6M': 'past 6 months',
+    YTD: 'this year',
+    ALL: 'all available history',
+  }[range] ?? 'Selected period';
 }
 
 export default function DurationHistory({ history, range, onRangeChange }) {
@@ -43,7 +62,31 @@ export default function DurationHistory({ history, range, onRangeChange }) {
   const rangeState = classifyDurationChange(history.durationDelta);
   const rangeTone = changeTone(rangeState);
   const rangeColor = rangeTone === 'neutral' ? 'text.secondary' : `${rangeTone}.main`;
-  const labelIndexes = visibleLabelIndexes(history.slots.length);
+  const useContinuousDateAxis = true;
+  const labelCount = Math.min(7, Math.max(history.slots.length - 1, 1));
+  const maximumDuration = Math.max(...history.series.flatMap((series) => (
+    series.data.filter(Number.isFinite)
+  )), 0);
+  const showMinutes = maximumDuration > MINUTES_THRESHOLD_SECONDS;
+  const durationScale = showMinutes ? 1 / 60 : 1;
+  const finiteDataValues = history.series.flatMap((series) => (
+    series.data.filter(Number.isFinite)
+  ));
+  const finiteBaselineValues = history.series
+    .map((series) => series.baseline)
+    .filter(Number.isFinite);
+  const scaledDataValues = finiteDataValues.map((value) => value * durationScale);
+  const scaledBaselineValues = finiteBaselineValues.map((value) => value * durationScale);
+  const yAxisMinValue = Math.min(...scaledDataValues, ...scaledBaselineValues);
+  const yAxisMaxValue = Math.max(...scaledDataValues);
+  const yAxisDecimalPlaces = axisDecimalPlaces(yAxisMaxValue - yAxisMinValue);
+  const yAxisPrecision = 10 ** yAxisDecimalPlaces;
+  const yAxisMin = Number.isFinite(yAxisMinValue)
+    ? Math.floor(yAxisMinValue * yAxisPrecision) / yAxisPrecision
+    : undefined;
+  const yAxisMax = Number.isFinite(yAxisMaxValue)
+    ? Math.ceil(yAxisMaxValue * yAxisPrecision) / yAxisPrecision
+    : undefined;
   const option = {
     color: history.series.map((series) => series.color),
     tooltip: {
@@ -53,33 +96,46 @@ export default function DurationHistory({ history, range, onRangeChange }) {
       borderColor: theme.palette.divider,
       textStyle: { color: theme.palette.text.primary },
       formatter: (points) => {
-        const usable = points.filter((point) => Number.isFinite(point.value));
+        const usable = points
+          .map((point) => ({
+            ...point,
+            duration: Array.isArray(point.value) ? point.value[1] : point.value,
+          }))
+          .filter((point) => Number.isFinite(point.duration));
         if (!usable.length) return '';
         const run = history.slots[usable[0].dataIndex]?.run;
-        const timeDetails = history.mode === 'intraday'
-          ? [
-            `<strong>Run time · ${escapeHtml(formatFullDate(run.timestamp))}</strong>`,
-            `Commit time · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}`,
-          ]
-          : [
-            `<strong>Commit time · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}</strong>`,
-            `Run time · ${escapeHtml(formatFullDate(run.timestamp))}`,
-          ];
         return [
-          ...timeDetails,
-          `Commit ${escapeHtml(run.provenance?.rocjitsuCommitSha?.slice(0, 8) ?? 'unknown')}`,
-          ...usable.map((point) => `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatDuration(point.value)}</strong>`),
+          `<strong>Commit date · ${escapeHtml(formatShortDate(commitTimestampFor(run)))}</strong>`,
+          `Commit SHA · ${escapeHtml(shortSha(run))}`,
+          `Test catalog · ${escapeHtml(run.catalogId ?? 'unknown')}`,
+          ...usable.map((point) => {
+            const series = history.series.find((candidate) => candidate.target === point.seriesName);
+            const estimated = series?.estimated?.[point.dataIndex];
+            const duration = point.duration / durationScale;
+            const perfChange = Number.isFinite(series?.baseline) && series.baseline !== 0
+              ? ((duration - series.baseline) / series.baseline) * 100
+              : null;
+            return `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatCompactDuration(duration)}</strong>`
+              + `${Number.isFinite(perfChange) ? ` · Time change ${formatPercent(perfChange)}` : ''}`
+              + `${estimated ? ' · Estimated normalized workload' : ''}`;
+          }),
         ].join('<br/>');
       },
     },
     grid: { left: 54, right: 18, top: 18, bottom: 58 },
     xAxis: {
-      type: 'category',
-      name: history.mode === 'intraday' ? 'Execution Time (UTC)' : 'Commit Date (UTC)',
+      type: useContinuousDateAxis ? 'value' : 'category',
+      name: history.mode === 'intraday' ? 'Commit time (UTC)' : 'Date (UTC)',
       nameLocation: 'middle',
       nameGap: 43,
       boundaryGap: false,
-      data: history.slots.map((slot) => slot.label),
+      ...(useContinuousDateAxis ? {
+        min: 0,
+        max: Math.max(history.slots.length - 1, 0),
+        interval: history.slots.length > 1 ? (history.slots.length - 1) / labelCount : undefined,
+      } : {
+        data: history.slots.map((slot) => slot.label),
+      }),
       axisLine: { lineStyle: { color: gridColor } },
       axisTick: { show: false },
       axisLabel: {
@@ -87,20 +143,40 @@ export default function DurationHistory({ history, range, onRangeChange }) {
         fontSize: 10,
         lineHeight: 14,
         hideOverlap: true,
-        interval: (index) => labelIndexes.has(index),
+        ...(useContinuousDateAxis ? {
+          formatter: (value) => {
+            const slot = history.slots[Math.round(value)];
+            if (!slot) return '';
+            if (history.mode === 'intraday' && slot.run?.timestamp) {
+              return new Date(slot.run.timestamp).toLocaleTimeString(undefined, {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'UTC',
+              });
+            }
+            return formatShortDate(`${slot.dayKey}T12:00:00Z`);
+          },
+        } : {}),
       },
       nameTextStyle: { color: axisColor, fontSize: 11 },
       splitLine: { show: false },
     },
     yAxis: {
       type: 'value',
-      name: 'Seconds',
+      name: showMinutes ? 'Minutes' : 'Seconds',
       scale: true,
+      ...(Number.isFinite(yAxisMin) ? { min: yAxisMin } : {}),
+      ...(Number.isFinite(yAxisMax) ? { max: yAxisMax } : {}),
       nameTextStyle: { color: axisColor, align: 'right', padding: [0, 2, 6, 0] },
+      axisLine: { show: false },
       axisLabel: { color: axisColor, fontSize: 11 },
       splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
     },
     series: history.series.map((series) => {
+      const firstIndex = series.data.findIndex((value) => Number.isFinite(value));
+      const firstValue = firstIndex >= 0 ? series.data[firstIndex] : null;
+      const baselineValue = Number.isFinite(series.baseline) ? series.baseline : firstValue;
       const latestIndex = series.data.reduce((lastIndex, value, index) => (
         Number.isFinite(value) ? index : lastIndex
       ), -1);
@@ -108,7 +184,15 @@ export default function DurationHistory({ history, range, onRangeChange }) {
       return {
         name: series.target,
         type: 'line',
-        data: series.data,
+        ...(useContinuousDateAxis ? { encode: { x: 0, y: 1 } } : {}),
+        data: useContinuousDateAxis
+          ? series.data.map((value, index) => [
+            index,
+            Number.isFinite(value) ? value * durationScale : null,
+          ])
+          : series.data.map((value) => (
+            Number.isFinite(value) ? value * durationScale : value
+          )),
         smooth: 0.12,
         showSymbol: false,
         symbol: 'circle',
@@ -117,6 +201,17 @@ export default function DurationHistory({ history, range, onRangeChange }) {
         lineStyle: chartLineStyle(series.color, 2.8),
         itemStyle: chartPointStyle(series.color, theme.palette.background.paper),
         emphasis: { focus: 'series', scale: 1.55, lineStyle: { width: 3.4 } },
+        markLine: Number.isFinite(baselineValue) ? {
+          silent: true,
+          symbol: 'none',
+          label: {
+            show: true,
+            formatter: `— (${formatCompactDuration(baselineValue)}) —`,
+            position: 'insideEndTop',
+          },
+          lineStyle: { color: theme.palette.text.disabled, type: 'dashed', width: 1.25 },
+          data: [{ yAxis: baselineValue * durationScale }],
+        } : undefined,
         areaStyle: {
           color: chartAreaGradient(series.color, history.series.length === 1 ? 0.24 : 0.11),
           opacity: 1,
@@ -127,7 +222,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           symbolSize: 12,
           label: { show: false },
           itemStyle: { ...chartPointStyle(series.color, theme.palette.background.paper), borderWidth: 3 },
-          data: [{ coord: [latestIndex, latestValue] }],
+          data: [{ coord: [latestIndex, latestValue * durationScale] }],
         } : undefined,
       };
     }),
@@ -139,8 +234,12 @@ export default function DurationHistory({ history, range, onRangeChange }) {
       title="Performance Trend"
       subtitle={(
         <>
-          <Box component="span" sx={{ display: 'block' }}>Selected-suite duration by target. Historical reruns are excluded.</Box>
-          <Box component="span" sx={{ display: 'block' }}>{history.description}.</Box>
+          <Box component="span" sx={{ display: 'block' }}>
+            This graph samples data from:
+          </Box>
+          <Box component="span" sx={{ display: 'block' }}>
+            commits from the <u>default branch</u> where <u>all tests passed</u>.
+          </Box>
         </>
       )}
       sx={{ height: '100%' }}
@@ -171,12 +270,14 @@ export default function DurationHistory({ history, range, onRangeChange }) {
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-end' }, gap: 1.5, mb: 0.75 }}>
         <Stack direction="row" sx={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: { xs: 2, sm: 2.5 } }}>
           <Box>
-            <Typography variant="overline" color="text.secondary">Range change</Typography>
+            <Typography variant="overline" color="text.secondary">
+              {history.normalized ? 'Normalized range change' : 'Range change'}
+            </Typography>
             <Stack
               data-testid="performance-range-change"
               data-change-state={rangeState}
               direction="row"
-              sx={{ alignItems: 'center', color: rangeColor, gap: 0.35, mt: 0.2 }}
+              sx={{ alignItems: 'flex-end', color: rangeColor, gap: 0.35, mt: 0.2 }}
             >
               {rangeState === 'faster' && <ArrowDownwardRoundedIcon sx={{ fontSize: 24 }} />}
               {rangeState === 'slower' && <ArrowUpwardRoundedIcon sx={{ fontSize: 24 }} />}
@@ -184,16 +285,18 @@ export default function DurationHistory({ history, range, onRangeChange }) {
               <Typography sx={{ fontSize: 25, lineHeight: 1, fontWeight: 820, letterSpacing: '-.035em' }}>
                 {hasDelta ? formatPercent(Math.abs(history.durationDelta), false) : '—'}
               </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 0.35, mb: 0.1, lineHeight: 1 }}>
+                {rangePeriodLabel(range)}
+              </Typography>
             </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.55 }}>
-              {history.comparisonLabel}
-            </Typography>
             {hasDelta && (
               <CommitComparison candidate={history.latestRun} baseline={history.firstRun} sx={{ mt: 0.25 }} />
             )}
           </Box>
           <Box sx={{ borderLeft: 1, borderColor: 'divider', pl: 2 }}>
-            <Typography variant="caption" color="text.secondary">Latest selected total</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {history.normalized ? 'Latest measured selected total' : 'Latest selected total'}
+            </Typography>
             <Typography sx={{ fontSize: 20, lineHeight: 1.15, fontWeight: 750, letterSpacing: '-.025em', mt: 0.35 }}>
               {formatDuration(history.currentDuration)}
             </Typography>
@@ -215,9 +318,18 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           </Typography>
         </Box>
       </Stack>
-      <Box data-testid="performance-trend-chart" sx={{ mx: -0.75, flex: 1, minHeight: 278 }}>
-        <Chart option={option} height="100%" ariaLabel={`Performance trend for ${range}`} />
-      </Box>
+      {history.insufficientData ? (
+        <Box
+          data-testid="performance-trend-insufficient"
+          sx={{ flex: 1, minHeight: 278, display: 'grid', placeItems: 'center', color: 'text.secondary', textAlign: 'center' }}
+        >
+          There isn't enough data for the selected time range
+        </Box>
+      ) : (
+        <Box data-testid="performance-trend-chart" sx={{ mx: -0.75, flex: 1, minHeight: 278 }}>
+          <Chart option={option} height="100%" ariaLabel={`Performance trend for ${range}`} />
+        </Box>
+      )}
     </SectionCard>
   );
 }

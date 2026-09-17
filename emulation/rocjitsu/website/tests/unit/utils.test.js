@@ -17,6 +17,12 @@ test('interpolates only the dotted bridge across unavailable chart values', () =
   expect(presentation.segments).toEqual([[10, 12, 14, 16]]);
 });
 
+test('does not interpolate dotted bridges across hard chart breaks', () => {
+  const presentation = chartGapPresentation([{ value: 10 }, null, { value: 30 }], [1]);
+  expect(presentation.estimatedValues).toEqual([10, 30, 30]);
+  expect(presentation.segments).toEqual([[null, 30, 30]]);
+});
+
 test('omits optional provenance fields that a run does not publish', () => {
   const rawData = cloneBenchmarkData();
   rawData.runs.forEach((run) => {

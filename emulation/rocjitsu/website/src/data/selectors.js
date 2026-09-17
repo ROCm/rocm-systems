@@ -4,7 +4,6 @@ import {
   commitTimestampFor,
   compareCommitPosition,
   compareRunsByCommit,
-  isRunCompleted,
   sortRunsByCommit,
 } from './runOrdering';
 
@@ -14,6 +13,9 @@ const HISTORY_RANGE_DAYS = {
   '3M': 90,
   '6M': 180,
 };
+const MAX_COMMITS_PER_DAY = 8;
+const MAX_INTRADAY_COMMITS = 56;
+const MIN_HISTORY_COVERAGE = 0.75;
 
 export function periodKey(timestamp, period = 'weekly') {
   const date = new Date(timestamp);
@@ -28,16 +30,16 @@ export function testMatches(test, filters) {
   return filters.targets.includes(test.target) && filters.suites.includes(test.suite);
 }
 
-export function resultMap(run) {
-  return new Map((run?.tests ?? []).map((test) => [test.testId, test]));
+export function isRunCompletedForFilters(run, filters) {
+  const selectedTests = (run?.tests ?? []).filter((test) => testMatches(test, filters));
+  return selectedTests.length > 0
+    && selectedTests.every((test) => (
+      test.status === 'completed' && Number.isFinite(test.durationSeconds)
+    ));
 }
 
-export function previousCompletedRun(runs, candidate) {
-  if (!candidate) return null;
-  return runs.filter((run) => (
-    isRunCompleted(run)
-    && compareCommitPosition(run, candidate) < 0
-  )).sort(compareRunsByCommit).at(-1) ?? null;
+export function resultMap(run) {
+  return new Map((run?.tests ?? []).map((test) => [test.testId, test]));
 }
 
 export function previousCompletedRunForFilters(runs, candidate, filters) {
@@ -49,10 +51,11 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
 
   return runs.filter((run) => {
     if (compareCommitPosition(run, candidate) >= 0) return false;
+    if (!isRunCompletedForFilters(run, filters)) return false;
     const tests = resultMap(run);
     return selectedTestIds.every((testId) => {
       const test = tests.get(testId);
-      return test?.status === 'completed' && Number.isFinite(test.durationSeconds);
+      return test != null;
     });
   }).sort(compareRunsByCommit).at(-1) ?? null;
 }
@@ -130,15 +133,6 @@ function shortDayLabel(dayKey) {
   });
 }
 
-function runTimeLabel(timestamp) {
-  return new Date(timestamp).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-  });
-}
-
 function benchmarkRunLabel(run, attemptLabel = '') {
   const dayKey = periodKey(commitTimestampFor(run), 'daily');
   return `${shortDayLabel(dayKey)}\n${shortRunSha(run)}${attemptLabel ? ` · ${attemptLabel}` : ''}`;
@@ -154,16 +148,85 @@ function durationForRun(run, target, suites) {
   return Number(sumDurations(selectedTests).toFixed(3));
 }
 
+function selectedTestsForTarget(run, target, suites) {
+  return (run?.tests ?? []).filter((test) => (
+    test.target === target && suites.includes(test.suite)
+  ));
+}
+
+function historyWorkload(run, target, suites) {
+  return new Set(selectedTestsForTarget(run, target, suites).map((test) => test.logicalTestId));
+}
+
+function latestCompletedResultAnchors(runs, target, suites, logicalTestIds) {
+  const anchors = new Map();
+  for (const run of sortRunsByCommit(runs).reverse()) {
+    for (const test of selectedTestsForTarget(run, target, suites)) {
+      if (
+        logicalTestIds.has(test.logicalTestId)
+        && test.status === 'completed'
+        && Number.isFinite(test.durationSeconds)
+        && !anchors.has(test.logicalTestId)
+      ) {
+        anchors.set(test.logicalTestId, test.durationSeconds);
+      }
+    }
+  }
+  return anchors;
+}
+
+function normalizedDurationForRun(
+  run,
+  target,
+  suites,
+  canonicalTestIds,
+  canonicalCatalogId,
+  anchors,
+) {
+  if (!run || canonicalTestIds.size === 0) return { value: null, estimatedTests: [] };
+  const tests = new Map(selectedTestsForTarget(run, target, suites)
+    .map((test) => [test.logicalTestId, test]));
+  const estimatedTests = [];
+  let total = 0;
+
+  for (const logicalTestId of canonicalTestIds) {
+    const test = tests.get(logicalTestId);
+    if (test) {
+      if (test.status !== 'completed' || !Number.isFinite(test.durationSeconds)) {
+        return { value: null, estimatedTests: [] };
+      }
+      total += test.durationSeconds;
+      continue;
+    }
+
+    const anchor = run.catalogId !== canonicalCatalogId ? anchors.get(logicalTestId) : null;
+    if (!Number.isFinite(anchor)) return { value: null, estimatedTests: [] };
+    total += anchor;
+    estimatedTests.push(logicalTestId);
+  }
+
+  return {
+    value: Number(total.toFixed(3)),
+    estimatedTests,
+  };
+}
+
+function latestCompletedRunForCommit(runs, referenceRun) {
+  if (!referenceRun) return null;
+  const commit = commitShaFor(referenceRun);
+  return sortRunsByCommit(runs.filter((run) => commitShaFor(run) === commit)).at(-1) ?? null;
+}
+
 function dailyHistorySlots(runs, anchorDay, range) {
   const commitOrderedRuns = sortRunsByCommit(runs);
   const startKey = historyStartKey(commitOrderedRuns, anchorDay, range, commitTimestampFor);
-  const firstRunByDay = new Map();
+  const latestRunByDay = new Map();
   commitOrderedRuns.forEach((run) => {
     const key = periodKey(commitTimestampFor(run), 'daily');
-    if (key >= startKey && key <= anchorDay && !firstRunByDay.has(key)) firstRunByDay.set(key, run);
+    if (key >= startKey && key <= anchorDay) latestRunByDay.set(key, run);
   });
   return calendarDayKeys(startKey, anchorDay).map((dayKey) => {
-    const run = firstRunByDay.get(dayKey) ?? null;
+    const run = latestRunByDay.get(dayKey) ?? null;
     return {
       dayKey,
       run,
@@ -173,85 +236,196 @@ function dailyHistorySlots(runs, anchorDay, range) {
 }
 
 function intradayHistorySlots(runs, anchorDay) {
-  const dayRuns = runs.filter((run) => periodKey(run.timestamp, 'daily') === anchorDay);
-  const slotCount = Math.max(8, dayRuns.length);
-  return Array.from({ length: slotCount }, (_, index) => {
-    const run = dayRuns[index] ?? null;
-    return {
+  const runsByCommit = new Map();
+  runs
+    .filter((run) => periodKey(run.timestamp, 'daily') === anchorDay)
+    .sort(compareRunsByCommit)
+    .forEach((run) => runsByCommit.set(commitShaFor(run), run));
+  return [...runsByCommit.values()]
+    .sort(compareRunsByCommit)
+    .slice(-MAX_INTRADAY_COMMITS)
+    .map((run) => ({
       dayKey: anchorDay,
       run,
-      label: run ? `${runTimeLabel(run.timestamp)}\n${shortRunSha(run)}` : '—',
-    };
+      label: benchmarkRunLabel(run),
+    }));
+}
+
+function weeklyHistorySlots(runs, anchorDay) {
+  const startKey = shiftUtcDay(anchorDay, -(HISTORY_RANGE_DAYS['1W'] - 1));
+  return calendarDayKeys(startKey, anchorDay).flatMap((dayKey) => {
+    const runsByCommit = new Map();
+    runs
+      .filter((run) => periodKey(commitTimestampFor(run), 'daily') === dayKey)
+      .sort(compareRunsByCommit)
+      .forEach((run) => runsByCommit.set(commitShaFor(run), run));
+    const dailyRuns = [...runsByCommit.values()]
+      .sort(compareRunsByCommit)
+      .slice(-MAX_COMMITS_PER_DAY)
+    return Array.from({ length: MAX_COMMITS_PER_DAY }, (_, index) => ({
+      dayKey,
+      run: dailyRuns[index] ?? null,
+      label: index === 0 ? shortDayLabel(dayKey) : '',
+    }));
   });
 }
 
 export function selectOverview(data, filters, range = 'ALL') {
-  const completedRuns = data.runs.filter(isRunCompleted);
+  const completedRuns = data.runs.filter((run) => isRunCompletedForFilters(run, filters));
   const candidate = data.latestCommitRun ?? sortRunsByCommit(data.runs).at(-1) ?? data.latestRun;
-  const officialRuns = completedRuns;
-  const trendRuns = officialRuns.filter((run) => !data.backfillRunIds.has(run.runId));
-  const baseline = previousCompletedRun(data.runs, candidate);
+  const trendRuns = completedRuns;
+  const baseline = previousCompletedRunForFilters(data.runs, candidate, filters);
   const comparisons = compareRuns(candidate, baseline, filters);
   const latestTests = (candidate?.tests ?? []).filter((test) => testMatches(test, filters));
   const completedTests = latestTests.filter((test) => test.status === 'completed');
   const totalTestCount = latestTests.length;
-  const comparable = comparisons.filter((item) => item.comparable);
   const candidateComplete = totalTestCount > 0
     && completedTests.length === totalTestCount
     && completedTests.every((test) => Number.isFinite(test.durationSeconds));
-  const fullyComparable = candidateComplete
-    && comparisons.length === latestTests.length
-    && comparable.length === latestTests.length;
-  const candidateDuration = comparable.reduce((total, item) => total + item.test.durationSeconds, 0);
-  const baselineDuration = comparable.reduce((total, item) => total + item.previous.durationSeconds, 0);
-  const durationDelta = fullyComparable && baselineDuration
-    ? ((candidateDuration - baselineDuration) / baselineDuration) * 100
-    : null;
   const failed = latestTests.filter((test) => test.status !== 'completed').length;
 
   const isIntraday = range === '1D';
+  const isWeekly = range === '1W';
   const anchorDay = periodKey(isIntraday ? candidate.timestamp : commitTimestampFor(candidate), 'daily');
-  const intradayRuns = trendRuns.filter((run) => periodKey(run.timestamp, 'daily') === anchorDay);
+  const intradayRuns = completedRuns;
   const slots = isIntraday
     ? intradayHistorySlots(intradayRuns, anchorDay)
-    : dailyHistorySlots(trendRuns, anchorDay, range);
+    : isWeekly
+      ? weeklyHistorySlots(completedRuns, anchorDay)
+      : dailyHistorySlots(trendRuns, anchorDay, range);
   const representedRuns = slots.filter((slot) => slot.run).length;
+  const representedDays = new Set(slots.filter((slot) => slot.run).map((slot) => slot.dayKey)).size;
+  const requestedDays = range === 'YTD'
+    ? Math.floor((
+      Date.parse(`${anchorDay}T00:00:00Z`)
+      - Date.parse(`${anchorDay.slice(0, 4)}-01-01T00:00:00Z`)
+    ) / 86_400_000) + 1
+    : HISTORY_RANGE_DAYS[range];
+  const insufficientData = !isIntraday
+    && !isWeekly
+    && range !== 'ALL'
+    && requestedDays
+    && representedDays / requestedDays < MIN_HISTORY_COVERAGE;
   const historyCandidate = [...slots].reverse().find((slot) => slot.run)?.run ?? candidate;
   const firstHistoryRun = slots.find((slot) => slot.run)?.run ?? null;
-  const historyBaseline = firstHistoryRun?.runId !== historyCandidate?.runId ? firstHistoryRun : null;
-  const historyComparisons = compareRuns(historyCandidate, historyBaseline, filters).filter((item) => item.comparable);
+  const previousIntradayRun = isIntraday && firstHistoryRun
+    ? sortRunsByCommit(completedRuns.filter((run) => (
+      periodKey(commitTimestampFor(run), 'daily') === shiftUtcDay(anchorDay, -1)
+    ))).at(-1) ?? null
+    : null;
+  const candidateHistoryBaseline = isIntraday
+    ? previousIntradayRun ?? firstHistoryRun
+    : firstHistoryRun;
+  const historyBaseline = !insufficientData
+    && candidateHistoryBaseline?.runId !== historyCandidate?.runId
+    ? candidateHistoryBaseline
+    : null;
   const displayedDuration = sumDurations(historyCandidate.tests.filter((test) => testMatches(test, filters)));
-  const comparableCandidateDuration = historyComparisons.reduce((total, item) => total + item.test.durationSeconds, 0);
-  const comparableBaselineDuration = historyComparisons.reduce((total, item) => total + item.previous.durationSeconds, 0);
+  const normalizedSeries = filters.targets.map((target, index) => {
+    const canonicalTestIds = historyWorkload(candidate, target, filters.suites);
+    const anchors = latestCompletedResultAnchors(data.runs, target, filters.suites, canonicalTestIds);
+    const projected = slots.map((slot) => normalizedDurationForRun(
+      slot.run,
+      target,
+      filters.suites,
+      canonicalTestIds,
+      candidate?.catalogId,
+      anchors,
+    ));
+    const firstValue = projected.find(({ value }) => Number.isFinite(value))?.value ?? null;
+    const previousValue = previousIntradayRun
+      ? normalizedDurationForRun(
+        previousIntradayRun,
+        target,
+        filters.suites,
+        canonicalTestIds,
+        candidate?.catalogId,
+        anchors,
+      ).value
+      : null;
+    return {
+      target,
+      color: targetColor(target, index),
+      data: projected.map(({ value }) => value),
+      baseline: isIntraday && Number.isFinite(previousValue) ? previousValue : firstValue,
+      estimated: projected.map(({ estimatedTests }) => estimatedTests.length > 0),
+      estimatedTests: projected.map(({ estimatedTests }) => estimatedTests),
+    };
+  });
+  const normalizedDurationAt = (index) => {
+    const values = normalizedSeries.map((series) => series.data[index]);
+    return values.every(Number.isFinite)
+      ? values.reduce((total, value) => total + value, 0)
+      : null;
+  };
+  const historyCandidateIndex = slots.findLastIndex((slot) => slot.run?.runId === historyCandidate?.runId);
+  const firstHistoryIndex = slots.findIndex((slot) => slot.run?.runId === firstHistoryRun?.runId);
+  const normalizedCandidateDuration = normalizedDurationAt(historyCandidateIndex);
+  const normalizedBaselineDuration = isIntraday
+    ? normalizedSeries.every((series) => Number.isFinite(series.baseline))
+      ? normalizedSeries.reduce((total, series) => total + series.baseline, 0)
+      : null
+    : normalizedDurationAt(firstHistoryIndex);
+  const oldestCompletedRun = sortRunsByCommit(completedRuns)[0] ?? null;
+  const metricsBaseline = latestCompletedRunForCommit(completedRuns, oldestCompletedRun);
+  const metricsBaselineDuration = metricsBaseline
+    ? filters.targets.reduce((total, target) => {
+      if (total == null) return null;
+      const canonicalTestIds = historyWorkload(candidate, target, filters.suites);
+      const anchors = latestCompletedResultAnchors(data.runs, target, filters.suites, canonicalTestIds);
+      const normalized = normalizedDurationForRun(
+        metricsBaseline,
+        target,
+        filters.suites,
+        canonicalTestIds,
+        candidate?.catalogId,
+        anchors,
+      );
+      return normalized.value == null ? null : total + normalized.value;
+    }, 0)
+    : null;
+  const metricsDurationDelta = candidateComplete
+    && Number.isFinite(metricsBaselineDuration)
+    && metricsBaselineDuration > 0
+    ? ((sumDurations(completedTests) - metricsBaselineDuration) / metricsBaselineDuration) * 100
+    : null;
+  const historyComparisons = historyBaseline
+    ? compareRuns(historyCandidate, historyBaseline, filters).filter((item) => item.comparable)
+    : [];
   const history = {
     range,
-    mode: isIntraday ? 'intraday' : 'daily-by-commit',
+    mode: isIntraday ? 'intraday' : isWeekly ? 'weekly-by-commit' : 'daily-by-commit',
     anchorDay,
     slots,
     runCount: representedRuns,
     currentDuration: displayedDuration,
-    firstRun: firstHistoryRun,
+    firstRun: historyBaseline ?? firstHistoryRun,
     latestRun: historyCandidate,
-    durationDelta: comparableBaselineDuration
-      ? ((comparableCandidateDuration - comparableBaselineDuration) / comparableBaselineDuration) * 100
+    durationDelta: !insufficientData
+      && normalizedCandidateDuration != null
+      && normalizedBaselineDuration
+      ? ((normalizedCandidateDuration - normalizedBaselineDuration) / normalizedBaselineDuration) * 100
       : null,
     comparisonLabel: historyBaseline
-      ? `Latest vs first shown in ${range}`
+      ? `Latest vs first shown in ${range}${normalizedSeries.some((series) => series.estimated.some(Boolean)) ? ' · normalized workload' : ''}`
       : 'At least two completed runs are needed',
-    summary: isIntraday
-      ? `${representedRuns} completed run${representedRuns === 1 ? '' : 's'} shown`
-      : `${representedRuns} UTC commit date${representedRuns === 1 ? '' : 's'} shown`,
-    description: isIntraday
-      ? `All completed official runs executed on ${shortDayLabel(anchorDay)} (UTC)`
-      : 'The first completed official run for each UTC commit date is shown',
-    series: filters.targets.map((target, index) => ({
-      target,
-      color: targetColor(target, index),
-      data: slots.map((slot) => durationForRun(slot.run, target, filters.suites)),
-    })),
+    summary: `${representedRuns} commit${representedRuns === 1 ? '' : 's'} shown`,
+    description: [
+      isIntraday
+        ? `All official commits from ${shortDayLabel(anchorDay)} (UTC) are shown`
+        : isWeekly
+          ? `All official commits are shown, up to ${MAX_COMMITS_PER_DAY} per UTC date`
+          : 'The latest completed official run for each UTC commit date is shown',
+      normalizedSeries.some((series) => series.estimated.some(Boolean))
+        ? 'Historical values are normalized to the latest selected workload'
+        : null,
+    ].filter(Boolean).join('. '),
+    normalized: normalizedSeries.some((series) => series.estimated.some(Boolean)),
+    insufficientData,
+    series: normalizedSeries,
   };
 
-  const changes = comparable
+  const changes = historyComparisons
     .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta))
     .slice(0, 6);
 
@@ -265,12 +439,13 @@ export function selectOverview(data, filters, range = 'ALL') {
     results: comparisons.map((item) => ({ ...item, ...item.test })),
     metrics: {
       duration: candidateComplete ? sumDurations(completedTests) : null,
-      durationDelta,
+      durationDelta: metricsDurationDelta,
       completed: completedTests.length,
       total: totalTestCount,
       failed,
       completeness: totalTestCount ? (completedTests.length / totalTestCount) * 100 : 0,
     },
+    metricsBaseline,
   };
 }
 
@@ -289,9 +464,7 @@ export function selectAggregateRunSeries(data, filters) {
       target,
       color: targetColor(target, index),
       data: runs.map((run) => {
-        const selectedTests = (run.tests ?? []).filter((test) => (
-          test.target === target && filters.suites.includes(test.suite)
-        ));
+        const selectedTests = selectedTestsForTarget(run, target, filters.suites);
         return {
           value: durationForRun(run, target, filters.suites),
           run,
@@ -300,6 +473,10 @@ export function selectAggregateRunSeries(data, filters) {
           total: selectedTests.length,
         };
       }),
+      catalogBreaks: runs.reduce((breaks, run, index) => {
+        if (index > 0 && run.catalogId !== runs[index - 1].catalogId) breaks.push(index);
+        return breaks;
+      }, []),
     })),
     labels: runs.map((run) => {
       const sha = commitShaFor(run);

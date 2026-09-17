@@ -5,8 +5,7 @@ import {
   validatePublishedResult,
 } from '../../src/data/dashboardValidation.js';
 import { selectPluginComparisonGroups } from '../../src/data/pluginComparison.js';
-import { isRunCompleted } from '../../src/data/runOrdering.js';
-import { createDashboardFixture } from '../fixtures/dashboardFixture.js';
+import { isRunCompletedForFilters } from '../../src/data/selectors.js';
 import {
   benchmarkData,
   cloneBenchmarkData,
@@ -31,14 +30,14 @@ test('loads merged target runs from immutable test catalogs', () => {
     },
   ]);
   expect(dataMetadata.schemaVersion).toBe(1);
-  expect(dataIndex.runFiles).toHaveLength(55);
+  expect(dataIndex.runFiles).toHaveLength(83);
   expect(dataIndex.runFiles.every((runFile) => /^runs\/[^/]+\.json$/.test(runFile))).toBe(true);
   expect(Object.keys(publishedCatalogs).sort()).toEqual([
     'test-catalogs/rocjitsu-core-v1.json',
     'test-catalogs/rocjitsu-core-v2.json',
   ]);
-  expect(benchmarkData.runs).toHaveLength(51);
-  expect(benchmarkData.pluginRuns).toHaveLength(55);
+  expect(benchmarkData.runs).toHaveLength(79);
+  expect(benchmarkData.pluginRuns).toHaveLength(83);
   expect(benchmarkData.runs.every((run) => run.plugin.id === 'vanilla')).toBe(true);
   expect(benchmarkData.runs.every((run) => (
     run.targets.includes('gfx1250') && run.targets.includes('gfx950')
@@ -58,20 +57,6 @@ test('loads merged target runs from immutable test catalogs', () => {
   expect(pluginGroups[1].runs.map((run) => run.plugin.id)).toEqual(['vanilla', 'asan', 'tsan', 'ubsan']);
 });
 
-test('fixture generation is deterministic and isolates mutations between callers', () => {
-  const first = createDashboardFixture();
-  const second = createDashboardFixture();
-  expect(second).toEqual(first);
-  const generated = first.runs.filter((run) => run.id.startsWith('generated-history-'));
-  expect(generated).toHaveLength(35);
-  expect(new Set(first.runs.map((run) => run.id)).size).toBe(first.runs.length);
-  expect(new Set(generated.map((run) => run.source.commit)).size).toBe(35);
-
-  generated[0].targets[0].results[0].durationSeconds = -1;
-  first.catalogs['test-catalogs/rocjitsu-core-v2.json'].tests[0].name = 'Mutated';
-  expect(createDashboardFixture()).toEqual(second);
-});
-
 test('separates run completion time from tested commit time', () => {
   const run = benchmarkData.runs.find((candidate) => candidate.timestamp === '2026-08-31T13:10:00.000Z');
   expect({ runTime: run.timestamp, commitTime: run.commitTimestamp }).toEqual({
@@ -83,11 +68,40 @@ test('separates run completion time from tested commit time', () => {
 test('keeps an older smaller test set complete after the catalog grows', () => {
   const historicalRun = benchmarkData.runs.find((run) => run.runId === 'benchmark-202606010530-86b362ea');
   const historicalTargetTests = historicalRun.tests.filter((test) => test.target === 'gfx1250');
-  const currentTargetTests = benchmarkData.latestCompletedRun.tests.filter((test) => test.target === 'gfx1250');
+  const currentTargetTests = benchmarkData.latestCommitRun.tests.filter((test) => test.target === 'gfx1250');
   expect(historicalTargetTests).toHaveLength(5);
   expect(currentTargetTests).toHaveLength(7);
   expect(benchmarkData.testCatalog).toHaveLength(7);
-  expect(isRunCompleted(historicalRun)).toBe(true);
+  expect(isRunCompletedForFilters(historicalRun, {
+    targets: ['gfx1250'],
+    suites: benchmarkData.suites,
+  })).toBe(true);
+});
+
+test('keeps v1 smaller and faster than the v2 workload', () => {
+  const workloadByCatalog = new Map();
+  for (const run of benchmarkData.runs) {
+    const workload = workloadByCatalog.get(run.catalogId) ?? {
+      testIds: new Set(),
+      totals: [],
+    };
+    run.tests.forEach((test) => workload.testIds.add(test.logicalTestId));
+    for (const target of new Set(run.tests.map((test) => test.target))) {
+      workload.totals.push(run.tests
+        .filter((test) => test.target === target)
+        .reduce((total, test) => total + (test.durationSeconds ?? 0), 0));
+    }
+    workloadByCatalog.set(run.catalogId, workload);
+  }
+
+  const v1 = workloadByCatalog.get('rocjitsu-core-v1');
+  const v2 = workloadByCatalog.get('rocjitsu-core-v2');
+  expect(v1.testIds.size).toBeLessThan(v2.testIds.size);
+  expect(Math.max(...v1.totals)).toBeLessThan(Math.min(...v2.totals));
+  expect(Math.max(...v1.totals)).toBeGreaterThan(850);
+  expect(Math.max(...v1.totals)).toBeLessThan(950);
+  expect(Math.max(...v2.totals)).toBeGreaterThan(1_100);
+  expect(Math.max(...v2.totals)).toBeLessThan(1_300);
 });
 
 describe('dataset-level validation', () => {
