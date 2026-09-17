@@ -468,7 +468,7 @@ private:
     ReportBufferLayout layout;
     bool fine_grained = false;
     std::string input_fingerprint;
-    RuntimeStaticMetadata static_metadata;
+    std::optional<AccessStaticMetadata> static_metadata;
     bool static_metadata_counted = false;
     uint64_t executable = 0;
     bool executable_bound = false;
@@ -600,17 +600,17 @@ private:
   ReportPipelineResult process_report(const Entry &entry, const ReportSnapshot &snapshot,
                                       Summary summary = {}) {
     const auto limit = std::min(conflict_limit_, conflict_examples_remaining_);
-    const auto result =
-        hook::process_report({.reader = entry.reader,
-                              .source_address = reinterpret_cast<uint64_t>(entry.ptr),
-                              .size = entry.size,
-                              .layout = entry.layout,
-                              .fine_grained = entry.fine_grained,
-                              .input_fingerprint = entry.input_fingerprint,
-                              .static_metadata = &entry.static_metadata,
-                              .conflict_example_limit = limit,
-                              .allow_uniform_lds_stores = allow_uniform_lds_stores_},
-                             snapshot, summary);
+    const auto result = hook::process_report(
+        {.reader = entry.reader,
+         .source_address = reinterpret_cast<uint64_t>(entry.ptr),
+         .size = entry.size,
+         .layout = entry.layout,
+         .fine_grained = entry.fine_grained,
+         .input_fingerprint = entry.input_fingerprint,
+         .static_metadata = entry.static_metadata ? &*entry.static_metadata : nullptr,
+         .conflict_example_limit = limit,
+         .allow_uniform_lds_stores = allow_uniform_lds_stores_},
+        snapshot, summary);
     conflict_examples_remaining_ -=
         std::min(conflict_examples_remaining_, result.conflict_example_count);
     return result;

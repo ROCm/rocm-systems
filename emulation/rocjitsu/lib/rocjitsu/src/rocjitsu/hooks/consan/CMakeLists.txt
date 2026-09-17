@@ -44,7 +44,6 @@ target_link_libraries(rocjitsu_consan_report_decoder PRIVATE util)
 add_library(
     rocjitsu_consan_report_analyzer
     STATIC
-        rj_hsa_dbi_report_analyzer.cpp
         rj_hsa_dbi_conflict_analysis.cpp
 )
 set_target_properties(

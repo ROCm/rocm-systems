@@ -140,9 +140,7 @@ ConflictRendering render_conflicts(const ReportPipelineInput &input, const Repor
     };
 
     const auto instruction = [&](const Evidence &entry) {
-      const auto *metadata = input.static_metadata
-                                 ? (*input.static_metadata ? &**input.static_metadata : nullptr)
-                                 : nullptr;
+      const auto *metadata = input.static_metadata;
       std::optional<uint64_t> offset;
       if (metadata) {
         // Check only retained diagnostics. The decoder's first matching

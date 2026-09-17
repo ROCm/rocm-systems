@@ -33,8 +33,6 @@ struct AccessStaticMetadata {
   bool malformed = false;
 };
 
-using RuntimeStaticMetadata = std::optional<AccessStaticMetadata>;
-
 /// Immutable runtime/static context paired with one captured report. It owns
 /// no HSA handles and borrows only registry metadata for the duration of the
 /// synchronous report pipeline.
@@ -45,7 +43,7 @@ struct ReportPipelineInput {
   ReportBufferLayout layout;
   bool fine_grained = false;
   std::string_view input_fingerprint;
-  const RuntimeStaticMetadata *static_metadata = nullptr;
+  const AccessStaticMetadata *static_metadata = nullptr;
   uint32_t conflict_example_limit = 8;
   /// Opt-in suppression of statically proven same-instruction uniform LDS writes.
   bool allow_uniform_lds_stores = false;

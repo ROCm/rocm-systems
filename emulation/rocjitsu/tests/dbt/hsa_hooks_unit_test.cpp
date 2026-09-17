@@ -3491,16 +3491,6 @@ TEST(HsaHooksUnitTest, ConSanAnalyzerOwnsConflicts) {
   sampled[0].static_mapping = &mappings[0];
   sampled[1].static_mapping = &mappings[1];
   EXPECT_EQ(rocjitsu::consan::hook::analyze_conflicts(sampled, false).conflict_count, 0u);
-
-  // Report-level analysis consumes the same typed ConSan evidence.
-  sampled[0].static_mapping = nullptr;
-  sampled[1].static_mapping = nullptr;
-  rocjitsu::consan::hook::ReportPipelineInput pipeline_input;
-  rocjitsu::consan::hook::DecodedReport report;
-  report.records.evidence.assign(sampled.begin(), sampled.end());
-  const auto analysis = rocjitsu::consan::hook::analyze_report(pipeline_input, report);
-  EXPECT_EQ(analysis.summary.conflict_count, 1u);
-  EXPECT_EQ(analysis.conflicts.conflict_count, 1u);
 }
 
 TEST(HsaHooksUnitTest, AutoReportSnapshotOwnsVisibilityAndCopyFailures) {
@@ -3598,13 +3588,12 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
 TEST(HsaHooksUnitTest, AutoReportPipelineCarriesOptionalMetadata) {
   rocjitsu::consan::hook::ReportPipelineInput input;
   EXPECT_EQ(input.static_metadata, nullptr);
-  rocjitsu::consan::hook::RuntimeStaticMetadata metadata =
+  rocjitsu::consan::hook::AccessStaticMetadata metadata =
       rocjitsu::consan::hook::AccessStaticMetadata{.mappings = {}, .malformed = true};
   input.static_metadata = &metadata;
-  ASSERT_TRUE(input.static_metadata->has_value());
-  EXPECT_TRUE(input.static_metadata->value().malformed);
-  metadata.reset();
-  EXPECT_FALSE(input.static_metadata->has_value());
+  EXPECT_TRUE(input.static_metadata->malformed);
+  input.static_metadata = nullptr;
+  EXPECT_EQ(input.static_metadata, nullptr);
 }
 
 TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDiagnostics) {

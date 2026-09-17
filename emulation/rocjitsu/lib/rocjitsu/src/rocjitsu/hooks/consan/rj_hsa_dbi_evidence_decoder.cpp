@@ -52,9 +52,7 @@ DecodedEvidence decode_evidence(const ReportPipelineInput &input, const ReportHe
     view.version_after = pending.version;
     return view;
   };
-  const auto *metadata = input.static_metadata
-                             ? (*input.static_metadata ? &**input.static_metadata : nullptr)
-                             : nullptr;
+  const auto *metadata = input.static_metadata;
   const std::span<const AccessStaticMapping> static_mappings =
       metadata ? metadata->mappings : std::span<const AccessStaticMapping>{};
   std::vector<Evidence> visible;

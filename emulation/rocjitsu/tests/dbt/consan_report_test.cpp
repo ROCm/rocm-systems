@@ -94,16 +94,16 @@ TEST(ConSanReportTest, MaskIsAcceptedOnlyWithItsCommittedCurrentWindow) {
   AccessStaticMapping mapping;
   mapping.range_count = mapping.bank_count = 1;
   mapping.uniform_lds_store = true;
-  RuntimeStaticMetadata metadata = AccessStaticMetadata{{mapping}, false};
+  AccessStaticMetadata metadata{{mapping}, false};
   input.static_metadata = &metadata;
   for (bool malformed : {false, true}) {
-    auto &details = *metadata;
+    auto &details = metadata;
     details.malformed = malformed;
     summary = {};
     auto proof = decode_evidence(input, header, bytes, summary);
     EXPECT_EQ(analyze_conflicts(proof.evidence, true, 8, true).conflict_count, malformed ? 1u : 0u);
   }
-  auto &details = *metadata;
+  auto &details = metadata;
   details.malformed = false;
   details.mappings.push_back(mapping); // Even agreeing overlapping maps are ambiguous.
   summary = {};
@@ -255,19 +255,19 @@ TEST(ConSanReportTest, OverlappingMappingsDoNotInventUniqueInstructionAttributio
     entry.static_mapping = &metadata.mappings.front();
   const auto analysis = analyze_conflicts(mode.evidence, false);
   ASSERT_EQ(analysis.conflict_count, 1u);
-  RuntimeStaticMetadata runtime_metadata = metadata;
+  AccessStaticMetadata runtime_metadata = metadata;
   ReportPipelineInput input;
   input.static_metadata = &runtime_metadata;
   const auto line = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
   EXPECT_NE(line.find("first_instruction=ambiguous second_instruction=ambiguous"),
             std::string::npos);
   // Multiple aliases of the same original instruction still give a unique PC.
-  runtime_metadata->mappings[1].instruction_offset = 0x120;
+  runtime_metadata.mappings[1].instruction_offset = 0x120;
   const auto aliases = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
   EXPECT_NE(aliases.find("first_instruction=0x120 second_instruction=0x120"), std::string::npos);
   // A supplied mapping table is authoritative even if an entry still has an
   // older mapping pointer. Do not invent attribution for a slot it omits.
-  runtime_metadata->mappings.clear();
+  runtime_metadata.mappings.clear();
   const auto missing = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
   EXPECT_NE(missing.find("first_instruction=unavailable second_instruction=unavailable"),
             std::string::npos);

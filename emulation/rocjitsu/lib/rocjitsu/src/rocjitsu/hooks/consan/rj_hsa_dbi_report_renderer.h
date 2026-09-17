@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_analyzer.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_conflict_analysis.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_decoder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_rendering.h"
 
 #include <vector>

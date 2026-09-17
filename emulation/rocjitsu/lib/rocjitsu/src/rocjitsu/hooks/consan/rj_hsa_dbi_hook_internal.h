@@ -7,7 +7,8 @@
 
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_analyzer.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_conflict_analysis.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_decoder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_snapshot.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_trust.h"
 

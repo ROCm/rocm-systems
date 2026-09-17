@@ -3,8 +3,8 @@
 
 #include "rj_hsa_dbi_report_pipeline.h"
 
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_conflict_analysis.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_analyzer.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_decoder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_report_renderer.h"
 
@@ -12,26 +12,25 @@ namespace rocjitsu::consan::hook {
 
 ReportPipelineResult process_report(const ReportPipelineInput &input,
                                     const ReportSnapshot &snapshot, ReportSummary summary) {
-  if (const auto *metadata = input.static_metadata
-                                 ? (*input.static_metadata ? &**input.static_metadata : nullptr)
-                                 : nullptr;
-      metadata && metadata->malformed) {
+  if (const auto *metadata = input.static_metadata; metadata && metadata->malformed) {
     ++summary.static_mapping_malformed_count;
   }
   const DecodedReport decoded = decode_report(input, snapshot, summary);
   summary = decoded.summary;
 
-  std::optional<ReportAnalysis> analysis;
+  std::optional<ConflictAnalysis> analysis;
   if (decoded.complete()) {
-    analysis = analyze_report(input, decoded);
-    summary = analysis->summary;
+    analysis = analyze_conflicts(decoded.records.evidence,
+                                 decoded.records.synchronization_evidence_complete,
+                                 input.conflict_example_limit, input.allow_uniform_lds_stores);
+    accumulate_analysis(summary, *analysis);
   }
 
   const std::vector<ReportDiagnostic> diagnostics =
-      render_report({input, decoded, summary, analysis ? &analysis->conflicts : nullptr});
+      render_report({input, decoded, summary, analysis ? &*analysis : nullptr});
   for (const ReportDiagnostic &diagnostic : diagnostics)
     log_message(kLogInfo, "%s", diagnostic.text.c_str());
-  const auto *conflicts = analysis ? &analysis->conflicts : nullptr;
+  const auto *conflicts = analysis ? &*analysis : nullptr;
   return {.summary = summary,
           .complete = decoded.complete(),
           .conflict_example_count =
