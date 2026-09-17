@@ -62,45 +62,16 @@ template <class S> class note_section_accessor_template {
 
     const char* data = note_section->get_data();
     const Elf_Xword data_size = note_section->get_size();
-    const Elf_Xword position = note_start_positions[index];
-    const Elf_Xword align = sizeof(Elf_Word);
-    const Elf_Xword header_size = 3 * align;
-    if (data == nullptr || position > data_size || header_size > data_size - position) {
+    note_record record;
+    // The section may have changed since its note offsets were collected.
+    if (!read_note(data, data_size, note_start_positions[index], record)) {
       return false;
     }
 
-    const endianess_convertor& convertor = elf_file.get_convertor();
-    const char* pData = data + position;
-    Elf_Word raw_namesz;
-    Elf_Word raw_descsz;
-    Elf_Word raw_type;
-    std::memcpy(&raw_namesz, pData, sizeof(raw_namesz));
-    std::memcpy(&raw_descsz, pData + align, sizeof(raw_descsz));
-    std::memcpy(&raw_type, pData + 2 * align, sizeof(raw_type));
-    const Elf_Word namesz = convertor(raw_namesz);
-    const Elf_Word parsed_descsz = convertor(raw_descsz);
-    const Elf_Word parsed_type = convertor(raw_type);
-    const Elf_Xword padded_name = (static_cast<Elf_Xword>(namesz) + align - 1) / align * align;
-    const Elf_Xword padded_desc =
-        (static_cast<Elf_Xword>(parsed_descsz) + align - 1) / align * align;
-    const Elf_Xword remaining = data_size - position - header_size;
-    if (padded_name > remaining || padded_desc > remaining - padded_name) {
-      return false;
-    }
-
-    type = parsed_type;
-    descSize = parsed_descsz;
-    if (namesz == 0) {
-      name.clear();
-    } else {
-      name.assign(pData + header_size, namesz - 1);
-    }
-    if (0 == parsed_descsz) {
-      desc = 0;
-    } else {
-      desc = const_cast<char*>(pData + header_size + padded_name);
-    }
-
+    name.assign(record.name, record.name_size);
+    type = record.type;
+    descSize = record.descriptor_size;
+    desc = const_cast<char*>(record.descriptor);
     return true;
   }
 
@@ -134,38 +105,66 @@ template <class S> class note_section_accessor_template {
   }
 
  private:
-  //------------------------------------------------------------------------------
-  void process_section() {
-    const endianess_convertor& convertor = elf_file.get_convertor();
-    const char* data = note_section->get_data();
-    Elf_Xword size = note_section->get_size();
-    Elf_Xword current = 0;
+  struct note_record {
+    Elf_Word type;
+    const char* name;
+    Elf_Word name_size;
+    const char* descriptor;
+    Elf_Word descriptor_size;
+    Elf_Xword total_size;
+  };
 
-    note_start_positions.clear();
+  static Elf_Xword padded_size(Elf_Word size) {
+    constexpr Elf_Xword alignment = sizeof(Elf_Word);
+    return (static_cast<Elf_Xword>(size) + alignment - 1) / alignment * alignment;
+  }
 
-    // Is it empty?
-    if (0 == data || 0 == size) {
-      return;
+  // Decode one complete record. Scanning and lookup share these checks.
+  bool read_note(const char* data, Elf_Xword data_size, Elf_Xword position,
+                 note_record& record) const {
+    constexpr Elf_Xword header_size = 3 * sizeof(Elf_Word);
+    if (data == nullptr || position > data_size || header_size > data_size - position) {
+      return false;
     }
 
-    const Elf_Xword align = sizeof(Elf_Word);
-    const Elf_Xword header_size = 3 * align;
-    while (current <= size && header_size <= size - current) {
-      Elf_Word raw_namesz;
-      Elf_Word raw_descsz;
-      std::memcpy(&raw_namesz, data + current, sizeof(raw_namesz));
-      std::memcpy(&raw_descsz, data + current + sizeof(raw_namesz), sizeof(raw_descsz));
-      const Elf_Word namesz = convertor(raw_namesz);
-      const Elf_Word descsz = convertor(raw_descsz);
-      const Elf_Xword padded_name = (static_cast<Elf_Xword>(namesz) + align - 1) / align * align;
-      const Elf_Xword padded_desc = (static_cast<Elf_Xword>(descsz) + align - 1) / align * align;
-      const Elf_Xword remaining = size - current - header_size;
-      if (padded_name > remaining || padded_desc > remaining - padded_name) {
-        break;
-      }
+    Elf_Word header[3];
+    std::memcpy(header, data + position, sizeof(header));
+    const endianess_convertor& convertor = elf_file.get_convertor();
+    const Elf_Word namesz = convertor(header[0]);
+    const Elf_Word descsz = convertor(header[1]);
+    const Elf_Xword padded_name = padded_size(namesz);
+    const Elf_Xword padded_desc = padded_size(descsz);
+    const Elf_Xword remaining = data_size - position - header_size;
+    if (padded_name > remaining || padded_desc > remaining - padded_name) {
+      return false;
+    }
 
+    const char* name = data + position + header_size;
+    if (namesz != 0 && name[namesz - 1] != '\0') {
+      return false;
+    }
+    record.type = convertor(header[2]);
+    record.name = name;
+    record.name_size = namesz == 0 ? 0 : namesz - 1;
+    record.descriptor = descsz == 0 ? nullptr : name + padded_name;
+    record.descriptor_size = descsz;
+    record.total_size = header_size + padded_name + padded_desc;
+    return true;
+  }
+
+  //------------------------------------------------------------------------------
+  void process_section() {
+    note_start_positions.clear();
+    if (note_section == nullptr) {
+      return;
+    }
+    const char* data = note_section->get_data();
+    const Elf_Xword data_size = note_section->get_size();
+    Elf_Xword current = 0;
+    note_record record;
+    while (read_note(data, data_size, current, record)) {
       note_start_positions.push_back(current);
-      current += header_size + padded_name + padded_desc;
+      current += record.total_size;
     }
   }
 
