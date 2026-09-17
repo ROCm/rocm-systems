@@ -695,6 +695,10 @@ namespace code {
         mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX1150;
       else if (is_finalizer && old_name == "AMD:AMDGPU:11:5:1")
         mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX1151;
+      else if (is_finalizer && old_name == "AMD:AMDGPU:11:7:0")
+        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX1170;
+      else if (is_finalizer && old_name == "AMD:AMDGPU:11:7:1")
+        mach = ELF::EF_AMDGPU_MACH_AMDGCN_GFX1171;
 #endif // GFX11_BUILD
 #if defined(GFX12_BUILD)
       else if (is_finalizer && old_name == "AMD:AMDGPU:12:0:0")
