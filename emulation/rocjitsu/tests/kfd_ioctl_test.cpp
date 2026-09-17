@@ -123,6 +123,25 @@ int run_isolated_test_probe(std::string_view name, std::string_view gtest_name,
   return wait_for_child_with_timeout(child, timeout);
 }
 
+TEST(CommandProcessorTest, QueueExceptionWithoutMemoryFailsWithoutInterrupt) {
+  rocjitsu::amdgpu::CommandProcessor cp("cp");
+  rocjitsu::amdgpu::HwQueue queue{};
+  queue.queue_id = 1;
+  queue.process_id = 2;
+  queue.exception_status_va = 0x1000;
+  queue.exception_event_id = 3;
+  cp.register_queue(queue);
+
+  uint32_t interrupts = 0;
+  cp.set_interrupt_callback([&](uint32_t, uint32_t) { ++interrupts; });
+  const uint64_t status = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_TRUE(cp.signal_queue_exception(queue.queue_id, queue.process_id, status, false));
+  EXPECT_FALSE(cp.publish_queue_exception(queue.queue_id, queue.process_id, status));
+  EXPECT_FALSE(cp.signal_queue_exception(queue.queue_id, queue.process_id, status));
+  EXPECT_EQ(interrupts, 0u);
+  EXPECT_TRUE(cp.queue_exception_suspended_for_test(queue.queue_id, queue.process_id));
+}
+
 TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   constexpr std::string_view kProbe = "interrupt-callback-removal";
   if (!is_isolated_probe(kProbe)) {
