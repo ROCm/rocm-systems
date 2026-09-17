@@ -56,6 +56,14 @@ inline constexpr std::string_view GLYPH_BOX_TOP_LEFT      = "╭─ ";
 inline constexpr std::string_view GLYPH_BOX_BOTTOM_LEFT   = "╰";
 inline constexpr std::string_view GLYPH_BOX_LINE          = "─";
 inline constexpr std::string_view GLYPH_BOX_LEFT_RAIL     = "│ ";
+
+inline constexpr unsigned char ESCAPE_BYTE          = 0x1B;
+inline constexpr unsigned char CSI_FINAL_BYTE_MIN   = 0x40;
+inline constexpr unsigned char CSI_FINAL_BYTE_MAX   = 0x7E;
+inline constexpr unsigned char C0_CONTROL_MAX       = 0x20;
+inline constexpr unsigned char TAB_BYTE             = 0x09;
+inline constexpr unsigned char LINE_FEED_BYTE       = 0x0A;
+inline constexpr unsigned char DEL_BYTE             = 0x7F;
 }  // namespace
 
 run_metadata
@@ -112,14 +120,14 @@ strip_terminal_control_chars(std::string_view s)
     for(std::size_t i = 0; i < s.size();)
     {
         const auto byte = static_cast<unsigned char>(s[i]);
-        // CSI sequence: ESC [ ... <final byte in 0x40..0x7E>
-        if(byte == 0x1B && i + 1 < s.size() && s[i + 1] == '[')
+        // CSI sequence: ESC [ ... <final byte in CSI_FINAL_BYTE_MIN..CSI_FINAL_BYTE_MAX>
+        if(byte == ESCAPE_BYTE && i + 1 < s.size() && s[i + 1] == '[')
         {
             std::size_t j = i + 2;
             while(j < s.size())
             {
                 const auto fb = static_cast<unsigned char>(s[j]);
-                if(fb >= 0x40 && fb <= 0x7E)
+                if(fb >= CSI_FINAL_BYTE_MIN && fb <= CSI_FINAL_BYTE_MAX)
                 {
                     ++j;
                     break;
@@ -129,9 +137,10 @@ strip_terminal_control_chars(std::string_view s)
             i = j;
             continue;
         }
-        // Drop other C0 controls + DEL; keep tab (0x09) and newline (0x0A)
-        // so downstream layout still sees structure.
-        if((byte < 0x20 && byte != 0x09 && byte != 0x0A) || byte == 0x7F)
+        // Drop other C0 controls + DEL; keep tab and newline so downstream
+        // layout still sees structure.
+        if((byte < C0_CONTROL_MAX && byte != TAB_BYTE && byte != LINE_FEED_BYTE) ||
+           byte == DEL_BYTE)
         {
             ++i;
             continue;
