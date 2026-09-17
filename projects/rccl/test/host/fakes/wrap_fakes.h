@@ -57,6 +57,10 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, siz
     g_isSymmetricKernelRequested;
 extern std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath;
 
+// RCCL_DDA_NRANKS_RELAX as seen by rcclSelectAllGather / rcclSelectReduceScatter.
+// False (the default) is the stock 8-rank DDA floor.
+extern bool g_ddaNranksRelaxEnabled;
+
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>
     g_getAlgoInfo;
 extern std::function<int(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int)> g_kernelPackedChannels;
