@@ -77,7 +77,7 @@ THE SOFTWARE.
         static LARGE_INTEGER _freq_ = {}; \
         if (_freq_.QuadPart == 0) QueryPerformanceFrequency(&_freq_); \
         LARGE_INTEGER _cnt_; QueryPerformanceCounter(&_cnt_); \
-        uint64_t _us_ = static_cast<uint64_t>(_cnt_.QuadPart * 1000000ULL / _freq_.QuadPart); \
+        uint64_t _us_ = static_cast<uint64_t>((_cnt_.QuadPart / _freq_.QuadPart) * 1000000ULL + (_cnt_.QuadPart % _freq_.QuadPart) * 1000000ULL / _freq_.QuadPart);
         const char *_f_ = strrchr(__FILE__, '\\'); \
         if (!_f_) _f_ = strrchr(__FILE__, '/'); \
         uint32_t _tid_ = GetCurrentThreadId(); \
