@@ -247,7 +247,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
 
     cbdata_t cb_dt{};
 
-    cb_dt.agent = agent_id;
+    cb_dt.agent  = agent_id;
     cb_dt.handle = handle;
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.

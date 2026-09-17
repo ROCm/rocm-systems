@@ -210,12 +210,12 @@ producer_loop(
                                 rocprofiler_thread_trace_timestamp_t end_ts      = {}) {
         auto t0 = std::chrono::system_clock::now();
 
-        auto& buffer       = buffers[slot_idx];
-        buffer.flags       = flags;
-        buffer.size        = size;
-        buffer.se_id       = buffer_packet.shader_engine_id;
-        buffer.chunk_index = next_chunk_index++;
-        buffer.read_offset = read_offset;
+        auto& buffer           = buffers[slot_idx];
+        buffer.flags           = flags;
+        buffer.size            = size;
+        buffer.se_id           = buffer_packet.shader_engine_id;
+        buffer.chunk_index     = next_chunk_index++;
+        buffer.read_offset     = read_offset;
         buffer.start_timestamp = start_ts;
         buffer.end_timestamp   = end_ts;
 
@@ -251,8 +251,8 @@ producer_loop(
 
     // Drain remaining ATT data after a stop; waits for a free slot to land it in.
     auto iterate_trace = [&]() {
-        size_t idx  = wait_for_free_slot();
-        auto   wptr = iterate_data(buffer_packet);
+        size_t idx   = wait_for_free_slot();
+        auto   wptr  = iterate_data(buffer_packet);
         auto   clock = buffer_packet.get_gpu_clock();
         if(current_ts.gpu_clock == 0) current_ts = convert_timestamp(queue.agent_id, clock.start);
         auto end_ts = convert_timestamp(queue.agent_id, clock.latest);
