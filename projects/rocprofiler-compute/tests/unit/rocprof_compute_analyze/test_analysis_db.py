@@ -21,6 +21,8 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
+from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
+from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     db_analysis,
@@ -1300,12 +1302,14 @@ def make_pc_sampling_tool_data():
                 "code_object_id": 5,
                 "kernel_name": "_Z7vecCopyv.kd",
                 "formatted_kernel_name": "vecCopy",
+                "truncated_kernel_name": "vecCopy",
             },
             {
                 "kernel_id": 101,
                 "code_object_id": 5,
                 "kernel_name": "vecAdd.kd",
                 "formatted_kernel_name": "vecAdd",
+                "truncated_kernel_name": "vecAdd",
             },
         ],
         "code_objects": [{"code_object_id": 5, "load_base": 0x1000}],
@@ -2554,6 +2558,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2668,6 +2673,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2743,6 +2749,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2835,6 +2842,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2938,6 +2946,7 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
             code_object_stores,
             {},
             make_source_frame_collector(workload),
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -3038,14 +3047,17 @@ def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
     return analyzer, result_path
 
 
-def read_per_kernel_isa_file(result_path, kernel_uuid, code_object_id=5, pid=42):
-    """Return one exported ISA file as its header and its rows."""
+def read_per_kernel_isa_file(result_path, kernel_row, code_object_id=5, pid=42):
+    """Return one exported ISA file as its header and its rows.
+
+    The folder is named after the kernel's row in kernel.csv.
+    """
     export_path = (
         result_path
         / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
         / ISA_WORKLOAD_NAME
         / ISA_WORKLOAD_SUB_NAME
-        / f"kernel_{kernel_uuid}"
+        / f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
     with export_path.open(newline="", encoding="utf-8") as export_file:
@@ -3099,13 +3111,10 @@ def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
     run_source_export_analysis(analyzer)
 
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    kernel_uuids = dict(
-        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
-    )
     assert per_kernel_isa_paths(result_path) == sorted(
-        f"vector_copy/run/kernel_{kernel_uuid}"
+        f"vector_copy/run/{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
         f"/isa_code_object_id_{code_object_id}_pid_{pid}.csv"
-        for kernel_uuid in kernel_uuids.values()
+        for kernel_row in kernel_frame.itertuples()
         for code_object_id, pid in ((5, 42), (5, 43), (6, 44))
     )
 
@@ -3126,16 +3135,14 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
     )
     run_source_export_analysis(analyzer)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    kernel_uuids = dict(
-        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
-    )
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuids["vecCopy"])
+    kernel_frame = pd.read_csv(result_path / "kernel.csv").set_index("kernel_name")
+    header, rows = read_per_kernel_isa_file(result_path, kernel_frame.loc["vecCopy"])
 
     assert header == [
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
         "Total count",
         "Active count",
         "Stall count",
@@ -3151,6 +3158,7 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
             "1",
             str(0x10),
             "v_mov",
+            "",
             "1",
             "0",
             "1",
@@ -3162,6 +3170,33 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
             "42",
         ]
     ]
+
+
+def test_run_analysis_isa_file_carries_the_static_instruction_type(tmp_path):
+    """Real mnemonics get a pipeline; an unclassified one leaves the cell empty."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["strings"]["pc_sample_instructions"] = [
+        "v_mov_b32_e32 v1, 0",
+        "not_an_instruction",
+    ]
+    # Both offsets belong to one kernel, so one file holds both rows.
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [tool_data]},
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
+
+    type_column = header.index("Instruction type")
+    assert [row[type_column] for row in rows] == ["VALU", ""]
 
 
 def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
@@ -3188,8 +3223,8 @@ def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == ["Stall SLEEP_WAIT", "Stall WAITCNT"]
     sleep_index, waitcnt_index = (
@@ -3223,12 +3258,12 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == []
     # host_trap knows the sample landed, but not whether the wave issued.
-    assert rows[0][3:6] == ["1", "", ""]
+    assert rows[0][4:7] == ["1", "", ""]
 
 
 def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
@@ -3266,7 +3301,8 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     # The second code object held only the kernel the filter dropped.
     assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
+        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
@@ -3288,7 +3324,8 @@ def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
     assert list(kernel_frame["kernel_name"]) == ["vecAdd"]
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
+        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
@@ -3361,3 +3398,84 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
+
+
+# =============================================================================
+# Static instruction type tests
+# =============================================================================
+
+
+def test_both_instruction_line_paths_share_one_instruction_type(db_session):
+    """The sampling and disassembly paths classify lines the same way, and a
+    pipeline seen twice is stored once."""
+    workload = orm.Workload(name="w", sub_name="s")
+    kernel = orm.Kernel(kernel_name="vecCopy", workload=workload)
+    code_object_store = orm.CodeObjectStore(
+        workload=workload, pid=42, code_object_id=5, load_base=0x1000
+    )
+    db_session.add_all([workload, kernel, code_object_store])
+    source_frames = make_source_frame_collector(workload)
+    kernel_symbols = {}
+
+    db_analysis._add_instruction_line(
+        InstructionLineRecord(
+            code_object_offset=0x10,
+            kernel_name="vecCopy",
+            instruction="v_mov_b32_e32 v1, 0",
+            source=SOURCE_LINE_MISSING,
+            total_count=1,
+            issue_count=1,
+            stall_count=0,
+            stall_reasons={},
+            inst_types={},
+            active_thread_percent=None,
+            wave_occupancy_percent=None,
+        ),
+        code_object_store,
+        kernel,
+        kernel_symbols,
+        source_frames,
+    )
+    db_analysis._add_symbol_isa(
+        kernel_symbols[(42, 5, "vecCopy")],
+        CodeObjectSymbol(
+            name="vecCopy",
+            virtual_address=0x1020,
+            instructions=[
+                CodeObjectInstruction(
+                    virtual_address=0x1020,
+                    instruction="v_add_f32_e32 v0, v1, v2",
+                    source=None,
+                ),
+                CodeObjectInstruction(
+                    virtual_address=0x1028,
+                    instruction="s_waitcnt lgkmcnt(0)",
+                    source=None,
+                ),
+                CodeObjectInstruction(
+                    virtual_address=0x1030,
+                    instruction="not_an_instruction v0",
+                    source=None,
+                ),
+            ],
+        ),
+        source_frames,
+    )
+    db_session.commit()
+
+    pipeline_by_offset = {
+        line.code_object_offset: (
+            line.instruction_type_lookup.text
+            if line.instruction_type_lookup is not None
+            else None
+        )
+        for line in db_session.query(orm.InstructionLine).all()
+    }
+    assert pipeline_by_offset == {
+        0x10: "VALU",
+        0x20: "VALU",
+        0x28: "INTERNAL",
+        0x30: None,
+    }
+    # The two VALU lines share one lookup row.
+    assert db_session.query(orm.InstructionTypeLookup).count() == 2
