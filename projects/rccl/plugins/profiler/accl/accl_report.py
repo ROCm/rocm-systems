@@ -53,6 +53,7 @@ class Record:
 
 def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
     records = []
+    samples_seen = defaultdict(int)
     with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -67,17 +68,28 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
             if not cp or not hdr:
                 continue
 
+            coll = cp.get('coll', '')
             sn = cp.get('coll_sn', 0)
+            msg_size = cp.get('coll_msg_size_bytes', 0)
+            rank = hdr.get('rank', 0)
             n_ranks = hdr.get('n_ranks', 1)
-            if sn < warmup:
+            # rccl-tests performs its requested warmups at every message size,
+            # while coll_sn increases for the lifetime of the communicator.
+            # Drop the first N observations independently for every rank,
+            # collective, and size instead of treating coll_sn as a global
+            # warmup counter.
+            sample_key = (rank, coll, msg_size)
+            sample_index = samples_seen[sample_key]
+            samples_seen[sample_key] += 1
+            if sample_index < warmup:
                 continue
 
             decomp = cp.get('decomposition', {})
             records.append(Record(
-                coll=cp.get('coll', ''),
+                coll=coll,
                 sn=sn,
-                msg_size=cp.get('coll_msg_size_bytes', 0),
-                rank=hdr.get('rank', 0),
+                msg_size=msg_size,
+                rank=rank,
                 n_ranks=n_ranks,
                 algo=cp.get('coll_algo', ''),
                 proto=cp.get('coll_proto', ''),
