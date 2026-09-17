@@ -310,12 +310,7 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
     if (size >= GPU_HUGE_PAGE_SIZE)
         align = GPU_HUGE_PAGE_SIZE;
 
-    // kUserMemory is a GPU mapping of existing host pages. Book GPU VA from the
-    // RAM-sized system heap so userptr does not compete with VRAM-sized local
-    // heap. Do not Commit/DecommitSystemHeapSpace: those syscalls act on the
-    // SVM overlay at gpu_addr, not the app's user_ptr, and the CPU pages
-    // already exist.
-    if (domain == Wkmi::kSystem || domain == Wkmi::kUserMemory) {
+    if (domain == Wkmi::kSystem) {
         if (!system_heap_mgr_) {
             *out_gpu_virt_addr = 0;
             return ErrorCode::OutOfMemory;
@@ -323,14 +318,25 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain
 
         gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
         if (gpu_addr == 0) {
-            log_va_exhaustion(domain == Wkmi::kUserMemory ? "userptr" : "system",
-                              system_heap_mgr_.get(), system_heap_space_size_, size, align,
-                              hit_base_addr);
+            log_va_exhaustion("system", system_heap_mgr_.get(), system_heap_space_size_, size,
+                              align, hit_base_addr);
             code = ErrorCode::OutOfMemory;
-        } else if (domain == Wkmi::kSystem &&
-                   !CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
+        } else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
             system_heap_mgr_->Free(gpu_addr);
             code = ErrorCode::SyscallFail;
+        }
+    } else if (domain == Wkmi::kUserMemory) {
+        // Userptr: system-heap GPU VA only. Do not Commit; pages are at user_ptr.
+        if (!system_heap_mgr_) {
+            *out_gpu_virt_addr = 0;
+            return ErrorCode::OutOfMemory;
+        }
+
+        gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
+        if (gpu_addr == 0) {
+            log_va_exhaustion("userptr", system_heap_mgr_.get(), system_heap_space_size_, size,
+                              align, hit_base_addr);
+            code = ErrorCode::OutOfMemory;
         }
     } else {
         if (!local_heap_mgr_) {
