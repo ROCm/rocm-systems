@@ -126,6 +126,13 @@ int run_isolated_test_probe(std::string_view name, std::string_view gtest_name,
   return wait_for_child_with_timeout(child, timeout);
 }
 
+TEST(CommandProcessorTest, QueueExceptionWithoutVmFails) {
+  rocjitsu::amdgpu::CommandProcessor cp("cp");
+  const uint64_t status = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  EXPECT_FALSE(cp.publish_queue_exception(1, 2, status));
+  EXPECT_FALSE(cp.signal_queue_exception(1, 2, status));
+}
+
 TEST(InterruptSinkTest, RoutesAndRevokesFrontendsIndependently) {
   std::vector<std::pair<uint32_t, uint32_t>> first_calls;
   std::vector<std::pair<uint32_t, uint32_t>> second_calls;

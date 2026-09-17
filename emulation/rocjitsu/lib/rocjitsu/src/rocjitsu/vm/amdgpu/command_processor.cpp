@@ -1269,6 +1269,9 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 
 bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t process_id,
                                                uint64_t status) {
+  if (!gpu_vm_)
+    return false;
+
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   AddressSpaceHandle address_space;
