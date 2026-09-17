@@ -48,6 +48,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - `--replay-mode application` is the existing behavior and remains the default.
     - Requires `--pmc` (or `pmc_groups` from an input file) and the `--kernel-replay-beta-enabled` acknowledgement flag. It cannot be combined with other tracing services, which would report each kernel once per pass.
     - Documented in `how-to/using-kernel-replay-rocprofv3.rst`.
+    - Anytime initialization support.
+    - Tools can call `rocprofiler_force_configure` after one or more other tools have configured ROCprofiler-SDK.
+    - NOTE: during the initialization of another tool, there is a small window where previously existing tools don't receive records generated from the application's background threads.
 
 **rocprof-trace-decoder:**
 
