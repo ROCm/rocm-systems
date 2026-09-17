@@ -20,6 +20,21 @@ test('counts failed tests in the run denominator', () => {
   expect(isRunCompletedForFilters(summary.run, gfx1250Filters)).toBe(false);
 });
 
+test('recent-run baselines follow the selected test scope', () => {
+  const rowsFor = (filters) => selectRecentRuns(
+    benchmarkData,
+    filters,
+    benchmarkData.runs.length,
+  );
+  const august30Row = (filters) => rowsFor(filters)
+    .find(({ run }) => commitShaFor(run).startsWith('9398bd3f'));
+
+  expect(commitShaFor(august30Row(gfx1250Filters).baseline)).toMatch(/^390ca630/);
+
+  const tritonOnlyFilters = { ...gfx1250Filters, suites: ['Triton'] };
+  expect(commitShaFor(august30Row(tritonOnlyFilters).baseline)).toMatch(/^0db03af1/);
+});
+
 test('history completion follows the selected target', () => {
   const mixedRun = benchmarkData.runs.find((run) => run.runId === 'benchmark-202608140530-f25f5a48');
   const gfx950Filters = { targets: ['gfx950'], suites: benchmarkData.suites };
