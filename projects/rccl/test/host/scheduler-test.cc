@@ -12,6 +12,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -2799,5 +2800,27 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ContinuingTask_OverflowsShared
   auto* works = argsBuf->getWorks(2);
   EXPECT_EQ(works[1].sChannelId, 1u);  // not channel 0 (task1's channel), but the new channel task2 lands on
   EXPECT_EQ(works[1].nChannels, 1u);
+}
+
+// Tail past the packing loop (symmetric_sched.cc:449,455): the last two previously-unasserted straight-line writes.
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufKcomm_CopiedFromCommSymkState) {
+  SymmetricTaskScheduler_Scene scene;
+  memset(&scene.comm->symkState.kcomm, 0xAB, sizeof(scene.comm->symkState.kcomm));
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(memcmp(&argsBuf->kcomm, &scene.comm->symkState.kcomm, sizeof(argsBuf->kcomm)), 0);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkStorageType_SetToArgs) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.plan->workStorageType = ncclDevWorkStorageTypeFifo;  // sentinel: Args==0 is also the zero-init default
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->workStorageType, ncclDevWorkStorageTypeArgs);
 }
 
