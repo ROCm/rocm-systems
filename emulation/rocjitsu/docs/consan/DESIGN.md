@@ -7,8 +7,9 @@ complete replacement independently, and binds its runtime evidence to the
 loaded executable. It never translates between GPU architectures.
 
 This document describes the code as it exists now. It is an ownership map and
-an invariant reference, not a development history. User controls are in
-[USAGE.md](USAGE.md), mode tradeoffs are in [MODES.md](MODES.md), the
+an invariant reference, not a development history. Everyday commands are in
+[USAGE.md](USAGE.md), detailed controls are in [EXPERT_CONTROLS.md](EXPERT_CONTROLS.md),
+mode tradeoffs are in [MODES.md](MODES.md), the
 supported semantic forms are in [CAPABILITIES.md](CAPABILITIES.md), and
 register/private-memory mechanics are expanded in [SPILLING.md](SPILLING.md).
 
@@ -472,3 +473,76 @@ behavioral tests—not file size or an `.inc` suffix—define authority.
 These invariants are more stable than any encoding or placement strategy. They
 decide whether target support, a new mode, or shared optimization belongs at
 the intended layer.
+
+## Transform memory accounting
+
+The [process memory controls](EXPERT_CONTROLS.md#shared-controls) bound
+concurrent transformation storage, retained replacement-image bytes, and
+retained replacement-image growth independently. The concurrent-transform control is
+acquired before semantic inventory. It is a conservative admission unit for
+major ELF and parser storage, not a strict RSS limit: allocator bookkeeping,
+other non-image analysis state, and unrelated process memory are outside the
+model.
+
+Let `I` be the original input size and `M` be `I` plus the configured per-object
+maximum growth. The modeled phases are `I + 12*M` for an ordinary incremental
+patch, `I + 13*M` while independently validated composite mutation storage
+remains live, and `9*I + 10*M` during final validation.
+
+Each parser has eight major-image units: its image, up to two units for section
+objects and their vector slots, bounded payload, bounded section names, and up
+to three units for compact section classification plus symbol- and
+kernel-metadata-derived state.
+
+That final budget charges each newly retained role for its copied name plus
+conservative aggregate kernel/function record and container state; roles sharing
+one logical symbol name share overlapping transient-state charges. It also
+charges retained kernel metadata map entries before insertion and vector
+capacity beyond the requested entry count. Section classification is one bit per
+section and keeps symbol lookup linear in the ELF section and symbol counts.
+Classification, symbol, and metadata state share that three-unit budget rather
+than receiving separate allowances, so metadata can reject an object already at
+the symbol boundary. This tightens parser admission without changing the
+eight-unit parser coefficient or the `12*M`, `13*M`, and `9*I + 10*M` phase
+coefficients.
+
+Section headers, transient symbol-name characters, and metadata names are views
+into the image rather than duplicate owning collections. Repeated kernel names
+within one AMDGPU metadata note retain the final record, while an earlier note
+keeps precedence over later notes, matching the parser's existing merge rules.
+Metadata note walking separately charges both planned payload passes against
+four image-sized units of work, so overlapping or repeated program-header
+references cannot multiply parser time without limit. Reserved-range ELF symbol
+section indices do not resolve against oversized directly encoded section
+tables.
+
+Admission uses the largest phase value and reports the governing phase and
+coefficients. The parser rejects aggregate copied section payload or
+section-name bytes larger than its backing image, and conservatively charged
+symbol- and metadata-derived state larger than its three-unit budget.
+
+Deployments with a tuned concurrent-transform ceiling should derive it from the
+reported phase and current coefficients. The patcher preallocates every file
+insertion, commits same-size rewrites directly, moves every emitted image, and
+avoids a separate padding buffer so vector growth cannot add an unmodelled
+geometric full-image allocation.
+
+The two retained-image controls are charged together after transformation, when
+the exact replacement size is known: one counts the full image and the other
+counts only its growth delta. Admission and ownership are one transaction, so
+failure of either retained budget commits neither charge. Failed
+replacement-reader creation or loading releases every local storage owner before
+refunding the retained charge or invoking a fallback loader.
+
+Unload starts a new peak-reporting interval without releasing live transform
+charges or retained replacement ownership; the latter remains until an
+executable destruction observed while the hook is active, or process exit. New
+HSA API calls made after the tool's `OnUnload` callback and before a synthetic
+reinstall are outside the hook lifetime and cannot be reconciled on reload.
+Teardown reports the live and peak values for all three controls, including
+baseline runs where the ceilings are unlimited.
+
+The absolute and percentage growth variables are mutually exclusive. A
+growth-policy rejection reports the exact alignment-inclusive bytes required,
+the effective total limit, and the selected policy. Successive ConSan stages
+share that one original-image budget rather than receiving independent limits.

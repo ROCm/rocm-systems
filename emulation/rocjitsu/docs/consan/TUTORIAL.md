@@ -64,7 +64,7 @@ This default is called **ConSan**. It instruments admitted memory and
 synchronization sites, retains bounded causal windows selected at runtime, and
 checks their ordering on the host. Its standard runtime sampling stride is 256
 with offset zero; the workgroup and LDS-cell selectors can also be configured
-independently (see [USAGE.md](USAGE.md#consan-event-and-sampling-controls)).
+independently (see [expert controls](EXPERT_CONTROLS.md#consan-event-and-sampling-controls)).
 
 A nonzero `conflicts` count with an attributed diagnostic is positive
 ConSan evidence. Zero means only that the retained samples exposed no conflict;
@@ -199,8 +199,8 @@ before and after each experiment, and avoid unrelated concurrent GPU work. Give
 the application an appropriate external timeout so a deliberately broken
 synchronization operation cannot hang indefinitely.
 
-See the fault-injection controls in [USAGE.md](USAGE.md) for other mutation
-families and their additional selectors.
+See [fault-injection controls](EXPERT_CONTROLS.md#fault-injection) for other
+mutation families and their additional selectors.
 
 ## Troubleshooting
 
@@ -235,7 +235,8 @@ The GPU becomes unhealthy:
 
 ## Next documents
 
-- [USAGE.md](USAGE.md): complete public controls and result interpretation.
+- [USAGE.md](USAGE.md): everyday commands and result interpretation.
+- [EXPERT_CONTROLS.md](EXPERT_CONTROLS.md): detailed public controls and validation interfaces.
 - [MODES.md](MODES.md): detailed comparison of the available analyses.
 - [MALFORMED_INPUT.md](MALFORMED_INPUT.md): the optional malformed-barrier
   guard and its safety boundary.
