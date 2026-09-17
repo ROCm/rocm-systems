@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
 //
@@ -30,6 +31,8 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
+#include "core/output/artifact.hpp"
+#include "core/output/process_metadata.hpp"
 #include "core/output/process_tree.hpp"
 #include "core/output/registry.hpp"
 #include "core/output/summary_writer.hpp"

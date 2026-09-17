@@ -3,14 +3,21 @@
 
 #include "core/output/registry.hpp"
 
+#include "core/output/artifact.hpp"
+#include "core/output/process_metadata.hpp"
 #include "logger/debug.hpp"
 
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::output
 {
@@ -48,22 +55,22 @@ registry::register_file(std::string path, output_format format, std::optional<pi
     entry.path       = std::move(path);
     entry.format     = format;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.push_back({ .session_id = m_session_id, .value = std::move(entry) });
 }
 
 void
 registry::record_process(process_metadata meta)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto                        found = m_processes.find(meta.pid);
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    const auto                        found = m_processes.find(meta.pid);
     if(found == m_processes.end() || found->second.session_id != m_session_id)
     {
         // Capture the key before moving from meta: relying on the RHS of
         // `operator[]=` being sequenced before the LHS (so meta.pid would
         // still read correctly after the move) is a fragile guarantee that
         // only holds because pid_t is trivially copyable.
-        const pid_t pid = meta.pid;
+        const pid_t pid  = meta.pid;
         m_processes[pid] = session_entry<process_metadata>{ .session_id = m_session_id,
                                                             .value = std::move(meta) };
         return;
@@ -82,8 +89,8 @@ registry::record_process(process_metadata meta)
 std::vector<artifact>
 registry::rows() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    std::vector<artifact>       result;
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<artifact>             result;
     result.reserve(m_files.size());
     for(const auto& entry : m_files)
     {
@@ -98,8 +105,8 @@ registry::rows() const
 std::vector<process_metadata>
 registry::processes() const
 {
-    std::lock_guard<std::mutex>   lock(m_mutex);
-    std::vector<process_metadata> result;
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<process_metadata>     result;
     result.reserve(m_processes.size());
     for(const auto& [pid, entry] : m_processes)
     {
@@ -114,8 +121,8 @@ registry::processes() const
 std::uint64_t
 registry::start_new_session()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    const auto                  ended_session = m_session_id;
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    const auto                        ended_session = m_session_id;
     ++m_session_id;
 
     std::erase_if(m_files, [ended_session](const auto& entry) {

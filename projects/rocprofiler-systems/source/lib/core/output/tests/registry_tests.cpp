@@ -7,19 +7,27 @@
 #include "core/output/process_metadata.hpp"
 #include "core/output/registry.hpp"
 
+// Directly provides pid_t used below; clang-tidy's Include Cleaner flags this
+// header as both redundant and required (a known false-positive with glibc's
+// sys/types.h).
+// NOLINTNEXTLINE(misc-include-cleaner)
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace
 {
-// NOLINTNEXTLINE(readability-identifier-naming) - GTest fixture convention is
-// PascalCase; the AbstractClassCase "_interface" naming rule doesn't apply here.
+// GTest fixture convention is PascalCase; the AbstractClassCase "_interface"
+// naming rule doesn't apply here.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class RegistryTest : public ::testing::Test
 {
 protected:
@@ -45,6 +53,7 @@ TEST_F(RegistryTest, default_pid_resolves_to_getpid)
 
 TEST_F(RegistryTest, explicit_pid_is_preserved)
 {
+    // NOLINTNEXTLINE(misc-include-cleaner)
     constexpr pid_t k_child_pid = 4242;
     registry::instance().register_file("/tmp/rocprofsys-test/perfetto-trace.proto",
                                        output_format::perfetto, k_child_pid);
@@ -172,10 +181,10 @@ TEST_F(RegistryTest, concurrent_register_is_thread_safe)
         threads.emplace_back([thread_index]() {
             for(int i = 0; i < k_per_thread; ++i)
             {
-                registry::instance().register_file(
-                    "/tmp/rocprofsys-test/concurrent-" + std::to_string(thread_index) +
-                        "-" + std::to_string(i) + ".proto",
-                    output_format::perfetto);
+                registry::instance().register_file("/tmp/rocprofsys-test/concurrent-" +
+                                                       std::to_string(thread_index) +
+                                                       "-" + std::to_string(i) + ".proto",
+                                                   output_format::perfetto);
             }
         });
     }
@@ -211,7 +220,7 @@ TEST_F(RegistryTest, record_process_sparse_upsert_preserves_ppid)
 
 TEST_F(RegistryTest, record_process_non_empty_fields_win_on_upsert)
 {
-    constexpr pid_t k_main_pid     = 1001;
+    constexpr pid_t k_main_pid      = 1001;
     constexpr pid_t k_resolved_ppid = 7;
 
     process_metadata sparse;

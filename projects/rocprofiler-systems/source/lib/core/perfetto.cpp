@@ -6,6 +6,7 @@
 #include "common/path.hpp"
 #include "common/units/data_size.hpp"
 #include "config.hpp"
+#include "core/output/artifact.hpp"
 #include "core/output/registry.hpp"
 #include "core/perfetto/log_filter.hpp"
 #include "library/runtime.hpp"

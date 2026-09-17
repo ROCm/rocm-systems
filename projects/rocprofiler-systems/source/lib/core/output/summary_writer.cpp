@@ -3,16 +3,20 @@
 
 #include "core/output/summary_writer.hpp"
 
+#include "core/output/artifact.hpp"
+#include "core/output/process_tree.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/base.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -21,7 +25,11 @@
 #include <numeric>
 #include <ostream>
 #include <set>
+#include <span>
+#include <string_view>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace rocprofsys::output
 {
@@ -57,13 +65,13 @@ inline constexpr std::string_view k_glyph_box_bottom_left   = "╰";
 inline constexpr std::string_view k_glyph_box_line          = "─";
 inline constexpr std::string_view k_glyph_box_left_rail     = "│ ";
 
-inline constexpr unsigned char k_escape_byte          = 0x1B;
-inline constexpr unsigned char k_csi_final_byte_min   = 0x40;
-inline constexpr unsigned char k_csi_final_byte_max   = 0x7E;
-inline constexpr unsigned char k_c0_control_max       = 0x20;
-inline constexpr unsigned char k_tab_byte             = 0x09;
-inline constexpr unsigned char k_line_feed_byte       = 0x0A;
-inline constexpr unsigned char k_del_byte             = 0x7F;
+inline constexpr unsigned char k_escape_byte        = 0x1B;
+inline constexpr unsigned char k_csi_final_byte_min = 0x40;
+inline constexpr unsigned char k_csi_final_byte_max = 0x7E;
+inline constexpr unsigned char k_c0_control_max     = 0x20;
+inline constexpr unsigned char k_tab_byte           = 0x09;
+inline constexpr unsigned char k_line_feed_byte     = 0x0A;
+inline constexpr unsigned char k_del_byte           = 0x7F;
 }  // namespace
 
 run_metadata
@@ -71,8 +79,8 @@ run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
 {
     run_metadata meta{};
 
-    const auto now           = std::chrono::system_clock::now();
-    const auto time_t_value  = std::chrono::system_clock::to_time_t(now);
+    const auto now          = std::chrono::system_clock::now();
+    const auto time_t_value = std::chrono::system_clock::to_time_t(now);
     std::tm    utc{};
     if(::gmtime_r(&time_t_value, &utc) != nullptr)
     {
@@ -120,14 +128,16 @@ strip_terminal_control_chars(std::string_view text)
     for(std::size_t i = 0; i < text.size();)
     {
         const auto byte = static_cast<unsigned char>(text[i]);
-        // CSI sequence: ESC [ ... <final byte in k_csi_final_byte_min..k_csi_final_byte_max>
+        // CSI sequence: ESC [ ... <final byte in
+        // k_csi_final_byte_min..k_csi_final_byte_max>
         if(byte == k_escape_byte && i + 1 < text.size() && text[i + 1] == '[')
         {
             std::size_t scan_index = i + 2;
             while(scan_index < text.size())
             {
                 const auto final_byte = static_cast<unsigned char>(text[scan_index]);
-                if(final_byte >= k_csi_final_byte_min && final_byte <= k_csi_final_byte_max)
+                if(final_byte >= k_csi_final_byte_min &&
+                   final_byte <= k_csi_final_byte_max)
                 {
                     ++scan_index;
                     break;
@@ -203,7 +213,8 @@ datasize_to_string(std::uint64_t size_bytes)
         return fmt::format("{:.2f} MB",
                            static_cast<double>(size_bytes) / k_bytes_per_megabyte);
     }
-    return fmt::format("{:.2f} GB", static_cast<double>(size_bytes) / k_bytes_per_gigabyte);
+    return fmt::format("{:.2f} GB",
+                       static_cast<double>(size_bytes) / k_bytes_per_gigabyte);
 }
 
 struct format_badge
@@ -327,7 +338,7 @@ derive_output_dir(const run_metadata& meta, std::span<const artifact> rows)
     {
         return std::string{ k_unknown_value_placeholder };
     }
-    auto parent = std::filesystem::path{ rows.front().path }.parent_path().string();
+    const auto parent = std::filesystem::path{ rows.front().path }.parent_path().string();
     return parent.empty() ? std::string{ k_unknown_value_placeholder } : parent;
 }
 
@@ -337,8 +348,8 @@ push_root_tasks(std::vector<render_task>& stack, const process_tree& tree)
     for(auto root_it = tree.roots().rbegin(); root_it != tree.roots().rend(); ++root_it)
     {
         stack.push_back({ .node         = &*root_it,
-                         .connector    = std::string{},
-                         .child_prefix = std::string{ k_glyph_root_indent } });
+                          .connector    = std::string{},
+                          .child_prefix = std::string{ k_glyph_root_indent } });
     }
 }
 
@@ -352,8 +363,8 @@ emit_file_rows(std::vector<std::string>& lines, const render_task& task,
     {
         const bool last_entry = (index + 1 == file_count) && child_count == 0;
         const auto branch =
-            task.child_prefix +
-            std::string{ last_entry ? k_glyph_file_branch_last : k_glyph_file_branch_mid };
+            task.child_prefix + std::string{ last_entry ? k_glyph_file_branch_last
+                                                        : k_glyph_file_branch_mid };
         lines.push_back(file_row_line(branch, node.rows[index], cwd));
     }
     if(file_count > 0 && child_count > 0)
@@ -377,11 +388,11 @@ push_child_tasks(std::vector<render_task>& stack, const render_task& task,
             task.child_prefix +
             std::string{ last_child ? k_glyph_child_conn_last : k_glyph_child_conn_mid };
         std::string next_prefix =
-            task.child_prefix +
-            std::string{ last_child ? k_glyph_child_indent_last : k_glyph_child_indent_mid };
+            task.child_prefix + std::string{ last_child ? k_glyph_child_indent_last
+                                                        : k_glyph_child_indent_mid };
         stack.push_back({ .node         = &node.children[reverse_index],
-                         .connector    = std::move(child_conn),
-                         .child_prefix = std::move(next_prefix) });
+                          .connector    = std::move(child_conn),
+                          .child_prefix = std::move(next_prefix) });
         if(reverse_index > 0)
         {
             stack.push_back(
@@ -414,12 +425,12 @@ render_tree(const process_tree& tree, pid_t main_pid)
     push_root_tasks(stack, tree);
 
     // Resolved once for the whole render
-    std::error_code       cwd_error;
-    std::filesystem::path cwd = std::filesystem::current_path(cwd_error);
+    std::error_code             cwd_error;
+    const std::filesystem::path cwd = std::filesystem::current_path(cwd_error);
 
     while(!stack.empty())
     {
-        render_task task = std::move(stack.back());
+        const render_task task = std::move(stack.back());
         stack.pop_back();
 
         if(task.node == nullptr)
@@ -496,7 +507,7 @@ build_legend(std::span<const artifact> rows)
     }
 
     std::string legend;
-    for(output_format format : formats)
+    for(const output_format format : formats)
     {
         const auto badge = badge_for(format);
         if(badge.viewer_hint.empty())
