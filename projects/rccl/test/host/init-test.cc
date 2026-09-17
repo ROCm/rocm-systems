@@ -21,6 +21,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <sys/resource.h>
 #include <utility>
 #include <vector>
 
@@ -180,6 +181,18 @@ class DeleteWatch {
 #else
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
 #endif
+
+// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
+// shuffled death test can inherit a large address space from an earlier test. Dumping that address
+// space turns a millisecond assertion into a multi-second test. Apply the limit inside the death
+// statement so only gtest's child is affected and unexpected parent-process crashes remain dumpable.
+static void DisableCoreDumpsForExpectedCrash() {
+  const struct rlimit noCore = {0, 0};
+  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
+    std::perror("setrlimit(RLIMIT_CORE) failed");
+    _exit(1);
+  }
+}
 
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -819,7 +832,12 @@ TEST_F(InitMicrotest, P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero) {
   P2pScheduleComm c(/*nNodes=*/2, /*node=*/0, /*localRank=*/0, /*nRanks=*/8,
                     /*maxLocalRanks=*/4, {4, 4});
   // Pin the signal: EXPECT_DEATH("") would also accept ::abort(), _exit(1) or a null deref at the same spot.
-  EXPECT_EXIT(ncclP2pSchedule(c.get()), ::testing::KilledBySignal(SIGFPE), "");
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        (void)ncclP2pSchedule(c.get());
+      },
+      ::testing::KilledBySignal(SIGFPE), "");
 }
 
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_BuildsFullSchedule) {
@@ -1226,9 +1244,13 @@ TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
   ReadyComm rc;
   int exclude[1] = {0};
   // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
-  EXPECT_EXIT(ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                  /*config=*/nullptr, /*shrinkFlags=*/0),
-              DEATH_BY_SEGV, "newcomm argument is NULL");
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+                                  /*config=*/nullptr, /*shrinkFlags=*/0);
+      },
+      DEATH_BY_SEGV, "newcomm argument is NULL");
 }
 
 // Full strings, not substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped "(run with)" hint.
@@ -3687,6 +3709,7 @@ TEST_F(InitMicrotest, SetCommAbortFlags_LargePositiveValue_StoredVerbatim) {
 TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDevUnderNonNullChildFlag_DiesOnNullDeref) {
   EXPECT_EXIT(
       {
+        DisableCoreDumpsForExpectedCrash();
         AbortFlagsComm c;
         c.get()->childAbortFlagDev = nullptr;
         fprintf(stderr, "setCommAbortFlags-reached-with-null-childAbortFlagDev\n");
