@@ -44,6 +44,23 @@ A process only accepts an attachment if ``rocprofiler-register`` loaded the atta
 
   Because this behavior is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for the change to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
 
+Attachment capability and startup profiling can coexist. Enabling attachment
+initializes the attachment listener even when the process exposes
+``rocprofiler_configure`` or already has an active startup or anytime client.
+On the first attachment, the requested tool is registered as an additional
+client using anytime initialization. Detach and reattach affect only that
+attachment client.
+
+``ROCPROFILER_REGISTER_FORCE_LOAD`` continues to control startup SDK loading;
+it does not enable or disable the attachment listener. Reattachment reuses the
+tool configured by the first attachment. Attaching a different tool, or
+attaching a tool DSO that is already active as a non-attachment client, is not
+currently supported.
+
+Use ``rocprofiler-register``, ``rocprofiler-sdk``, and
+``rocprofiler-sdk-attach`` packages from the same ROCm release. Attachment uses
+private cross-library entry points that are versioned together.
+
 .. _process_attachment_permissions:
 
 Obtain permission to trace the target process
