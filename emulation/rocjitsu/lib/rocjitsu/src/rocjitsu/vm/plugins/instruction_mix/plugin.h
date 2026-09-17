@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/instruction_family.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 
 #include <cstddef>
@@ -13,34 +14,25 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace rocjitsu::plugins::coverage {
+namespace rocjitsu::plugins::instruction_mix {
 
-/// Exclusive instruction families used by the coverage report. The order is
-/// part of the JSONL schema and should remain stable. It mirrors the
-/// throughput plugin's families so the two reports can be joined.
-enum class InstructionFamily : size_t {
-  Scalar,
-  Vector,
-  Matrix,
-  Lds,
-  Global,
-  Control,
-  Other,
-  Count,
-};
+/// The instruction-mix report shares its instruction families with the
+/// throughput report so the two are joinable; see
+/// plugins/instruction_family.h.
+using InstructionFamily = plugins::InstructionFamily;
 
-inline constexpr size_t kInstructionFamilyCount = static_cast<size_t>(InstructionFamily::Count);
+inline constexpr size_t kInstructionFamilyCount = plugins::kInstructionFamilyCount;
 
-/// One covered mnemonic. A mnemonic reachable through more than one encoding is
-/// still one entry, because the coverage denominators (the ISA XML and the
+/// One executed mnemonic. A mnemonic reachable through more than one encoding
+/// is still one entry, because the coverage denominators (the ISA XML and the
 /// generated sources) enumerate mnemonics rather than encodings.
 ///
 /// The encoding fields then have to pick one of those encodings, and the pick
 /// must not depend on which wavefront happened to finish first: the report is
 /// meant to be diffable between runs. `merge()` keeps the entry that is
-/// smallest by (first_dispatch_id, encoding_id, opcode), which is a total
-/// order over sightings and therefore stable.
-struct MnemonicCoverage {
+/// smallest under `sighting_precedes()`, which orders on every field the record
+/// emits and is therefore a total order over distinguishable sightings.
+struct MnemonicStats {
   uint64_t executions = 0;
   uint16_t encoding_id = 0;
   uint16_t opcode = 0;
@@ -68,33 +60,45 @@ struct MnemonicHash {
 /// generated/cdna5/vopd.cpp:261). A view stored past the instruction's lifetime
 /// therefore dangles. Copying on first sight costs one allocation per distinct
 /// mnemonic; heterogeneous lookup keeps the repeat path allocation-free.
-using CoverageMap =
-    std::unordered_map<std::string, MnemonicCoverage, MnemonicHash, std::equal_to<>>;
+using MnemonicMap = std::unordered_map<std::string, MnemonicStats, MnemonicHash, std::equal_to<>>;
 
 /// Per-wavefront accumulation. Kept wavefront-local so the hot before-execute
 /// hook touches no memory shared with another simulation partition and the
 /// plugin never needs the group's callback lock on the instruction path.
-struct CoverageWavefrontState final : WavefrontState {
-  CoverageMap counts;
+struct InstructionMixWavefrontState final : WavefrontState {
+  MnemonicMap counts;
 };
 
-/// Records which ISA mnemonics a run actually executed.
+/// Records which ISA mnemonics a run actually executed, and how often.
 ///
 /// One execution is counted each time a wavefront reaches the before-execute
 /// hook, matching the throughput plugin: counts are executed *wave*
 /// instructions, not active-lane operations. A mnemonic with a non-zero count
-/// was reached by at least one wavefront; a mnemonic absent from the report was
-/// not executed by this run at all.
+/// was reached by at least one wavefront; a mnemonic absent from a *complete*
+/// summary was not executed by this run at all (see `complete` below).
 ///
 /// The plugin deliberately reports no architecture name. It observes decoded
 /// instructions, not the target that produced them; the harness that chose the
 /// config knows the architecture and attributes the report.
-class CoveragePlugin final : public ExecutionPlugin {
+///
+/// @note Single-XCD scope. Dispatch identity in the plugin callback API is the
+///       command processor's `next_dispatch_id_`, which every XCD's CP counts
+///       independently from 1, while one plugin group is shared by the whole
+///       SoC (vm/soc.cpp SoC::set_plugin_group). On a multi-XCD config two
+///       concurrent dispatches on different XCDs can therefore share an id and
+///       have their records combined. Mnemonic *coverage* -- the union of what
+///       executed, which is what this plugin exists to answer -- survives that,
+///       because merging is associative and the summary is the union either
+///       way; the per-dispatch attribution and `dispatches` count do not.
+///       Fixing it means making dispatch identity unique SoC-wide in the
+///       callback API, which the throughput and race plugins key on too. See
+///       https://github.com/ROCm/rocm-systems/issues/11774 for the follow-up.
+class InstructionMixPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Plugin configuration object as a JSON string. May be
   ///        null, in which case the defaults apply.
-  explicit CoveragePlugin(const char *config_json = nullptr);
-  ~CoveragePlugin() override;
+  explicit InstructionMixPlugin(const char *config_json = nullptr);
+  ~InstructionMixPlugin() override;
 
   void onShutdown() override;
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -110,22 +114,27 @@ public:
 private:
   struct DispatchState {
     KernelDispatchInfo info;
-    CoverageMap counts;
+    MnemonicMap counts;
   };
 
-  static void merge(CoverageMap &destination, const CoverageMap &source);
+  static void merge(MnemonicMap &destination, const MnemonicMap &source);
   void emit_record(std::string_view record, const KernelDispatchInfo *info,
-                   const CoverageMap &counts);
+                   const MnemonicMap &counts);
 
   /// In-flight dispatches, erased as each one ends. A dispatch that never
-  /// reaches onAmdgpuDispatchExecutionEnd stays here until shutdown and is
-  /// absent from the per-dispatch records, matching the throughput plugin --
-  /// but here the retained state is a whole mnemonic map rather than a fixed
-  /// array, so a run that abandons many dispatches holds more memory.
+  /// reaches onAmdgpuDispatchExecutionEnd stays here until shutdown, which
+  /// folds whatever it collected into the summary and counts it in
+  /// `incomplete_dispatches_` -- the report's contract is that absence means
+  /// non-execution, so an abandoned dispatch's mnemonics must not vanish. It
+  /// still gets no `"record":"dispatch"` line, since its per-dispatch totals
+  /// are not final. The retained state is a whole mnemonic map rather than a
+  /// fixed array, so a run that abandons many dispatches holds more memory
+  /// than the throughput plugin would.
   std::unordered_map<uint32_t, DispatchState> dispatches_;
-  CoverageMap aggregate_;
+  MnemonicMap aggregate_;
   uint64_t completed_dispatches_ = 0;
+  uint64_t incomplete_dispatches_ = 0;
   bool summary_emitted_ = false;
 };
 
-} // namespace rocjitsu::plugins::coverage
+} // namespace rocjitsu::plugins::instruction_mix

@@ -53,8 +53,8 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "halt_snapshot_plugin.h"
-#include "rocjitsu/vm/plugins/coverage/plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/instruction_mix/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -1177,10 +1177,10 @@ TEST(ThroughputPluginTest, TimesTerminatorWithoutAfterExecuteCallback) {
   EXPECT_GT(dispatch.execution_seconds[control], 0.0);
 }
 
-class CoverageTestInstruction final : public Instruction {
+class InstructionMixTestInstruction final : public Instruction {
 public:
-  explicit CoverageTestInstruction(std::string_view mnemonic, uint64_t flags = 0,
-                                   std::unique_ptr<DynamicInstState> state = nullptr)
+  explicit InstructionMixTestInstruction(std::string_view mnemonic, uint64_t flags = 0,
+                                         std::unique_ptr<DynamicInstState> state = nullptr)
       : Instruction(mnemonic, nullptr) {
     flags_ = flags;
     set_data(std::move(state));
@@ -1189,29 +1189,34 @@ public:
 
 class EncodedTestInstruction final : public Instruction {
 public:
-  EncodedTestInstruction(std::string_view mnemonic, uint16_t encoding_id, uint16_t opcode = 0)
+  EncodedTestInstruction(std::string_view mnemonic, uint16_t encoding_id, uint16_t opcode = 0,
+                         int size = 4)
       : Instruction(mnemonic, nullptr) {
     encoding_id_ = encoding_id;
     opcode_ = opcode;
+    size_ = size;
   }
 };
 
-struct ParsedCoverageRecord {
+struct ParsedMixRecord {
   std::string record;
   uint64_t dispatch_id = 0;
   std::string kernel_name;
   uint64_t dispatches = 0;
+  uint64_t incomplete_dispatches = 0;
+  bool complete = false;
   uint64_t wave_instructions = 0;
   uint64_t unique_mnemonics = 0;
   std::map<std::string, uint64_t> mnemonic_executions;
   std::map<std::string, std::string> mnemonic_family;
   std::map<std::string, uint64_t> mnemonic_encoding;
+  std::map<std::string, uint64_t> mnemonic_encoding_bytes;
   std::map<std::string, uint64_t> family_mnemonics;
   std::map<std::string, uint64_t> family_executions;
 };
 
-std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
-  std::vector<ParsedCoverageRecord> records;
+std::vector<ParsedMixRecord> parse_instruction_mix_jsonl(std::string_view jsonl) {
+  std::vector<ParsedMixRecord> records;
   std::istringstream lines{std::string(jsonl)};
   std::string line;
   while (std::getline(lines, line)) {
@@ -1225,7 +1230,7 @@ std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
     }
     auto root = flexbuffers::GetRoot(builder.GetBuffer());
     if (!root.IsMap()) {
-      ADD_FAILURE() << "coverage record is not a JSON object";
+      ADD_FAILURE() << "instruction-mix record is not a JSON object";
       continue;
     }
     auto object = root.AsMap();
@@ -1235,9 +1240,9 @@ std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
     EXPECT_TRUE(record_type.IsString()) << "record must be a string";
     if (!schema.IsString() || !record_type.IsString())
       continue;
-    EXPECT_EQ(schema.AsString().str(), "rocjitsu.coverage.v1");
+    EXPECT_EQ(schema.AsString().str(), "rocjitsu.instruction_mix.v1");
 
-    ParsedCoverageRecord record;
+    ParsedMixRecord record;
     record.record = record_type.AsString().str();
     record.wave_instructions = object["wave_instructions"].AsUInt64();
     record.unique_mnemonics = object["unique_mnemonics"].AsUInt64();
@@ -1246,8 +1251,10 @@ std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
       record.kernel_name = object["kernel_name"].AsString().str();
     } else if (record.record == "summary") {
       record.dispatches = object["dispatches"].AsUInt64();
+      record.incomplete_dispatches = object["incomplete_dispatches"].AsUInt64();
+      record.complete = object["complete"].AsBool();
     } else {
-      ADD_FAILURE() << "unknown coverage record type: " << record.record;
+      ADD_FAILURE() << "unknown instruction-mix record type: " << record.record;
       continue;
     }
 
@@ -1275,6 +1282,7 @@ std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
         record.mnemonic_executions[name] = entry["executions"].AsUInt64();
         record.mnemonic_family[name] = entry["family"].AsString().str();
         record.mnemonic_encoding[name] = entry["encoding_id"].AsUInt64();
+        record.mnemonic_encoding_bytes[name] = entry["encoding_bytes"].AsUInt64();
       }
     }
     records.push_back(std::move(record));
@@ -1282,35 +1290,42 @@ std::vector<ParsedCoverageRecord> parse_coverage_jsonl(std::string_view jsonl) {
   return records;
 }
 
-TEST(CoveragePluginTest, ClassifiesExclusiveInstructionFamilies) {
-  using plugins::coverage::CoveragePlugin;
-  using plugins::coverage::InstructionFamily;
+TEST(InstructionMixPluginTest, ClassifiesExclusiveInstructionFamilies) {
+  using plugins::instruction_mix::InstructionFamily;
+  using plugins::instruction_mix::InstructionMixPlugin;
 
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("s_add_u32")),
+  EXPECT_EQ(InstructionMixPlugin::classify(InstructionMixTestInstruction("s_add_u32")),
             InstructionFamily::Scalar);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("v_add_f32")),
+  EXPECT_EQ(InstructionMixPlugin::classify(InstructionMixTestInstruction("v_add_f32")),
             InstructionFamily::Vector);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("v_mfma_f32_16x16x16_f16", MFMA)),
+  EXPECT_EQ(InstructionMixPlugin::classify(
+                InstructionMixTestInstruction("v_mfma_f32_16x16x16_f16", MFMA)),
             InstructionFamily::Matrix);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("v_wmma_f32_16x16x16_f16")),
-            InstructionFamily::Matrix);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("ds_read_b32", MEMORY_OP)),
+  EXPECT_EQ(
+      InstructionMixPlugin::classify(InstructionMixTestInstruction("v_wmma_f32_16x16x16_f16")),
+      InstructionFamily::Matrix);
+  EXPECT_EQ(InstructionMixPlugin::classify(InstructionMixTestInstruction("ds_read_b32", MEMORY_OP)),
             InstructionFamily::Lds);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("global_load_b32", MEMORY_OP)),
-            InstructionFamily::Global);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("s_branch", BRANCH | IGNORES_EXEC)),
+  EXPECT_EQ(
+      InstructionMixPlugin::classify(InstructionMixTestInstruction("global_load_b32", MEMORY_OP)),
+      InstructionFamily::Global);
+  EXPECT_EQ(InstructionMixPlugin::classify(
+                InstructionMixTestInstruction("s_branch", BRANCH | IGNORES_EXEC)),
             InstructionFamily::Control);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("s_endpgm", PROGRAM_TERMINATOR)),
-            InstructionFamily::Control);
-  EXPECT_EQ(CoveragePlugin::classify(CoverageTestInstruction("exp")), InstructionFamily::Other);
+  EXPECT_EQ(
+      InstructionMixPlugin::classify(InstructionMixTestInstruction("s_endpgm", PROGRAM_TERMINATOR)),
+      InstructionFamily::Control);
+  EXPECT_EQ(InstructionMixPlugin::classify(InstructionMixTestInstruction("exp")),
+            InstructionFamily::Other);
 }
 
-TEST(CoveragePluginTest, ReportsExecutedMnemonicsAsJsonl) {
+TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
   PluginFixture f(/*num_wf_slots=*/1);
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::coverage::CoveragePlugin>()));
+  ASSERT_TRUE(
+      f.plugin_group_->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
 
@@ -1319,7 +1334,7 @@ TEST(CoveragePluginTest, ReportsExecutedMnemonicsAsJsonl) {
   f.run_kernel(code, 4);
   f.shutdown();
 
-  const auto records = parse_coverage_jsonl(sink.str());
+  const auto records = parse_instruction_mix_jsonl(sink.str());
   ASSERT_EQ(records.size(), 2u);
 
   const auto &dispatch = records[0];
@@ -1352,15 +1367,22 @@ TEST(CoveragePluginTest, ReportsExecutedMnemonicsAsJsonl) {
   const auto &summary = records[1];
   EXPECT_EQ(summary.record, "summary");
   EXPECT_EQ(summary.dispatches, 1u);
+  // The run drained, so nothing was folded in unfinished and absence from this
+  // summary really does mean the mnemonic never executed.
+  EXPECT_EQ(summary.incomplete_dispatches, 0u);
+  EXPECT_TRUE(summary.complete);
   EXPECT_EQ(summary.wave_instructions, dispatch.wave_instructions);
   EXPECT_EQ(summary.unique_mnemonics, dispatch.unique_mnemonics);
   EXPECT_EQ(summary.mnemonic_executions, dispatch.mnemonic_executions);
 }
 
-// The coverage report is only joinable with the throughput report if the two
-// plugins agree on what family an instruction is in, and they carry separate
-// copies of that classifier. Nothing else makes them agree, so this does.
-TEST(CoveragePluginTest, AgreesWithThroughputOnInstructionFamilies) {
+// The instruction-mix report is only joinable with the throughput report if
+// the two plugins agree on what family an instruction is in. They now classify
+// through one shared header (plugins/instruction_family.h) rather than through
+// per-plugin copies, and this pins the agreement so a future divergence -- a
+// plugin growing its own override, or the family list being reordered on one
+// side -- fails here instead of silently desynchronising the two schemas.
+TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
   struct Case {
     const char *mnemonic;
     uint64_t flags;
@@ -1391,22 +1413,22 @@ TEST(CoveragePluginTest, AgreesWithThroughputOnInstructionFamilies) {
   };
 
   for (const auto &c : kCases) {
-    const auto coverage_family =
-        plugins::coverage::CoveragePlugin::classify(CoverageTestInstruction(c.mnemonic, c.flags));
+    const auto mix_family = plugins::instruction_mix::InstructionMixPlugin::classify(
+        InstructionMixTestInstruction(c.mnemonic, c.flags));
     const auto throughput_family = plugins::throughput::ThroughputPlugin::classify(
         ThroughputTestInstruction(c.mnemonic, c.flags));
-    EXPECT_EQ(plugins::coverage::CoveragePlugin::family_name(coverage_family),
+    EXPECT_EQ(plugins::instruction_mix::InstructionMixPlugin::family_name(mix_family),
               plugins::throughput::ThroughputPlugin::family_name(throughput_family))
-        << "coverage and throughput disagree on " << c.mnemonic;
+        << "instruction-mix and throughput disagree on " << c.mnemonic;
   }
 
   // The family name lists must also line up index for index, since the JSONL
   // schemas present them in enum order.
-  ASSERT_EQ(plugins::coverage::kInstructionFamilyCount,
+  ASSERT_EQ(plugins::instruction_mix::kInstructionFamilyCount,
             plugins::throughput::kInstructionFamilyCount);
-  for (size_t i = 0; i < plugins::coverage::kInstructionFamilyCount; ++i) {
-    EXPECT_EQ(plugins::coverage::CoveragePlugin::family_name(
-                  static_cast<plugins::coverage::InstructionFamily>(i)),
+  for (size_t i = 0; i < plugins::instruction_mix::kInstructionFamilyCount; ++i) {
+    EXPECT_EQ(plugins::instruction_mix::InstructionMixPlugin::family_name(
+                  static_cast<plugins::instruction_mix::InstructionFamily>(i)),
               plugins::throughput::ThroughputPlugin::family_name(
                   static_cast<plugins::throughput::InstructionFamily>(i)))
         << "family order differs at index " << i;
@@ -1416,14 +1438,14 @@ TEST(CoveragePluginTest, AgreesWithThroughputOnInstructionFamilies) {
 // Merging walks unordered maps, so a mnemonic seen through two encodings must
 // not have its reported encoding decided by hash order -- the whole point of
 // the report is that two runs of the same workload diff cleanly.
-TEST(CoveragePluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
+TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
   PluginFixture f(/*num_wf_slots=*/1);
 
   auto run = [&f](bool reversed) {
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     ExecutionPluginGroup group(std::move(sink_config));
-    EXPECT_TRUE(group.add(std::make_unique<plugins::coverage::CoveragePlugin>()));
+    EXPECT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
 
     // Two waves in the same dispatch reach the same mnemonic through different
     // encodings. Feeding them in either order must produce one answer.
@@ -1442,8 +1464,8 @@ TEST(CoveragePluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
     return sink.str();
   };
 
-  const auto forward = parse_coverage_jsonl(run(false));
-  const auto backward = parse_coverage_jsonl(run(true));
+  const auto forward = parse_instruction_mix_jsonl(run(false));
+  const auto backward = parse_instruction_mix_jsonl(run(true));
   ASSERT_FALSE(forward.empty());
   ASSERT_FALSE(backward.empty());
   EXPECT_EQ(forward.front().mnemonic_encoding, backward.front().mnemonic_encoding);
@@ -1452,25 +1474,119 @@ TEST(CoveragePluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
   EXPECT_EQ(backward.front().mnemonic_executions.at("v_lshlrev_b64"), 2u);
 }
 
+// A mnemonic can be sighted through encodings that tie on every other ordered
+// field and still print a different size: the generated VOP1 constructors set
+// encoding_id_ and opcode_ before widening size_ for the DPP, SDWA and literal
+// forms, so v_mov_b32_e32 is reachable at both four and eight bytes with the
+// same encoding id and opcode. If the tie-break does not look at the size, the
+// reported encoding_bytes is decided by whichever wave merged first and the
+// report stops being diffable.
+TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
+  PluginFixture f(/*num_wf_slots=*/1);
+
+  auto run = [&f](bool reversed) {
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    ExecutionPluginGroup group(std::move(sink_config));
+    EXPECT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+
+    // Same mnemonic, same encoding id, same opcode, same dispatch: the size is
+    // the only field that separates the two sightings.
+    const int first = reversed ? 8 : 4;
+    const int second = reversed ? 4 : 8;
+    for (const int size : {first, second}) {
+      amdgpu::Wavefront &wf = *f.cu()->wf(0);
+      wf.set_dispatch_id(1);
+      group.onAmdgpuWavefrontDispatched(wf);
+      EncodedTestInstruction inst("v_mov_b32_e32", /*encoding_id=*/63, /*opcode=*/1, size);
+      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+      group.onAmdgpuWavefrontHalted(wf);
+    }
+    group.onAmdgpuDispatchExecutionEnd(1);
+    group.onShutdown();
+    return sink.str();
+  };
+
+  const auto forward = parse_instruction_mix_jsonl(run(false));
+  const auto backward = parse_instruction_mix_jsonl(run(true));
+  ASSERT_FALSE(forward.empty());
+  ASSERT_FALSE(backward.empty());
+  EXPECT_EQ(forward.front().mnemonic_encoding_bytes, backward.front().mnemonic_encoding_bytes);
+  // The smaller sighting is the one the total order keeps.
+  EXPECT_EQ(forward.front().mnemonic_encoding_bytes.at("v_mov_b32_e32"), 4u);
+  EXPECT_EQ(forward.front().mnemonic_executions.at("v_mov_b32_e32"), 2u);
+  EXPECT_EQ(backward.front().mnemonic_executions.at("v_mov_b32_e32"), 2u);
+}
+
+// A bounded run (rj_vm_request_exit) stops with work in flight: workers are
+// joined and plugin shutdown follows immediately, so a dispatch can have halted
+// waves but never reach execution-end. Those instructions were still executed,
+// and the report's contract is that absence means non-execution -- so the
+// summary has to carry them, and has to say that it is a partial view.
+TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+
+  // Dispatch 1 completes; dispatch 2 halts its wave but never ends.
+  for (const uint32_t dispatch_id : {1u, 2u}) {
+    amdgpu::Wavefront &wf = *f.cu()->wf(0);
+    wf.set_dispatch_id(dispatch_id);
+    group.onAmdgpuWavefrontDispatched(wf);
+    InstructionMixTestInstruction inst(dispatch_id == 1 ? "s_nop" : "v_add_f32");
+    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+    group.onAmdgpuWavefrontHalted(wf);
+  }
+  group.onAmdgpuDispatchExecutionEnd(1);
+  group.onShutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+
+  // Only the finished dispatch gets a per-dispatch record: dispatch 2's totals
+  // are not final, so reporting them as a dispatch line would be a lie.
+  const auto &dispatch = records[0];
+  EXPECT_EQ(dispatch.record, "dispatch");
+  EXPECT_EQ(dispatch.dispatch_id, 1u);
+  EXPECT_EQ(dispatch.mnemonic_executions.size(), 1u);
+  EXPECT_EQ(dispatch.mnemonic_executions.count("v_add_f32"), 0u);
+
+  const auto &summary = records[1];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 1u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  // The abandoned dispatch's mnemonic is in the union, so a reader cannot take
+  // its absence for non-execution.
+  EXPECT_EQ(summary.wave_instructions, 2u);
+  EXPECT_EQ(summary.unique_mnemonics, 2u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("v_add_f32"), 1u);
+  EXPECT_EQ(summary.family_executions.at("vector"), 1u);
+  EXPECT_EQ(summary.family_executions.at("control"), 1u);
+}
+
 // The mnemonic a plugin observes does not always point to static storage:
 // the generated FLAT encoding on every architecture and VOPD on gfx11/gfx12
 // and CDNA5 synthesise it into a per-instruction std::string member
 // (generated/cdna4/encodings.cpp Flat::Flat, generated/cdna5/vopd.cpp), so a
 // stored std::string_view outlives its characters. The plugin must copy on
 // first sight; this test fails with a view-keyed map.
-TEST(CoveragePluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
+TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
   PluginFixture f(/*num_wf_slots=*/1);
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   ExecutionPluginGroup group(std::move(sink_config));
-  ASSERT_TRUE(group.add(std::make_unique<plugins::coverage::CoveragePlugin>()));
+  ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
 
   amdgpu::Wavefront &wf = *f.cu()->wf(0);
   wf.set_dispatch_id(1);
   group.onAmdgpuWavefrontDispatched(wf);
   {
     std::string transient_mnemonic = "global_load_dwordx4_transient_storage";
-    CoverageTestInstruction inst(transient_mnemonic, MEMORY_OP);
+    InstructionMixTestInstruction inst(transient_mnemonic, MEMORY_OP);
     group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
     // Scribble over the characters the view pointed at, then release them.
     transient_mnemonic.assign(transient_mnemonic.size(), 'X');
@@ -1480,7 +1596,7 @@ TEST(CoveragePluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
   group.onAmdgpuDispatchExecutionEnd(1);
   group.onShutdown();
 
-  const auto records = parse_coverage_jsonl(sink.str());
+  const auto records = parse_instruction_mix_jsonl(sink.str());
   ASSERT_FALSE(records.empty());
   const auto &dispatch = records.front();
   ASSERT_EQ(dispatch.mnemonic_executions.size(), 1u);

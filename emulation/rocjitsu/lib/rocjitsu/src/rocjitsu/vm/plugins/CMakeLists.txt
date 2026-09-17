@@ -23,8 +23,8 @@ rj_add_object_library(
 )
 
 rj_add_object_library(
-    rocjitsu_plugin_coverage
-    coverage/plugin.cpp
+    rocjitsu_plugin_instruction_mix
+    instruction_mix/plugin.cpp
 )
 
 # Host-side loader: discovers and dlopen()s plugin shared objects named in the
@@ -119,7 +119,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_so(throughput rocjitsu_plugin_throughput
         ${CMAKE_CURRENT_SOURCE_DIR}/throughput/plugin_export.cpp
     )
-    rj_add_plugin_so(coverage rocjitsu_plugin_coverage
-        ${CMAKE_CURRENT_SOURCE_DIR}/coverage/plugin_export.cpp
+    # The registered plugin name is `instruction-mix`, and the loader derives
+    # the soname from that name, so the output name must carry the hyphen too.
+    rj_add_plugin_so(instruction-mix rocjitsu_plugin_instruction_mix
+        ${CMAKE_CURRENT_SOURCE_DIR}/instruction_mix/plugin_export.cpp
     )
 endif()

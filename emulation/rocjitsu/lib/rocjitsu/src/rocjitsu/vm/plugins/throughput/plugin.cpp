@@ -3,8 +3,6 @@
 
 #include "rocjitsu/vm/plugins/throughput/plugin.h"
 
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-
 #include <algorithm>
 #include <format>
 #include <memory>
@@ -14,10 +12,6 @@ namespace rocjitsu::plugins::throughput {
 namespace {
 
 constexpr size_t family_index(InstructionFamily family) { return static_cast<size_t>(family); }
-
-bool has_prefix(std::string_view mnemonic, std::string_view prefix) {
-  return mnemonic.starts_with(prefix);
-}
 
 std::string json_escape(std::string_view value) {
   std::string escaped;
@@ -79,44 +73,11 @@ ThroughputPlugin::ThroughputPlugin(const char * /*config_json*/) : ExecutionPlug
 ThroughputPlugin::~ThroughputPlugin() { onShutdown(); }
 
 InstructionFamily ThroughputPlugin::classify(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-
-  if (inst.is_mfma() || has_prefix(mnemonic, "v_mfma_") || has_prefix(mnemonic, "v_smfmac_") ||
-      has_prefix(mnemonic, "v_wmma_") || has_prefix(mnemonic, "v_swmmac_"))
-    return InstructionFamily::Matrix;
-
-  if (inst.is_memory_op()) {
-    if (const auto *state = inst.data()) {
-      if (state->tag() == amdgpu::LOCAL_MEM)
-        return InstructionFamily::Lds;
-      if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::SCALAR_MEM)
-        return InstructionFamily::Global;
-    }
-
-    // These fallbacks keep synthetic/model-only instructions useful even when
-    // they do not carry execution-pipeline state.
-    if (has_prefix(mnemonic, "ds_"))
-      return InstructionFamily::Lds;
-    return InstructionFamily::Global;
-  }
-
-  constexpr uint64_t control_flags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
-                                     PROGRAM_TERMINATOR | WAITCNT | BARRIER;
-  if ((inst.flags() & control_flags) != 0 || has_prefix(mnemonic, "s_nop") ||
-      has_prefix(mnemonic, "s_sleep") || has_prefix(mnemonic, "s_delay"))
-    return InstructionFamily::Control;
-  if (has_prefix(mnemonic, "s_"))
-    return InstructionFamily::Scalar;
-  if (has_prefix(mnemonic, "v_"))
-    return InstructionFamily::Vector;
-  return InstructionFamily::Other;
+  return classify_instruction(inst);
 }
 
 std::string_view ThroughputPlugin::family_name(InstructionFamily family) {
-  constexpr std::array<std::string_view, kInstructionFamilyCount> names = {
-      "scalar", "vector", "matrix", "lds", "global", "control", "other"};
-  const size_t index = family_index(family);
-  return index < names.size() ? names[index] : "other";
+  return instruction_family_name(family);
 }
 
 uint64_t ThroughputPlugin::total(const InstructionCounts &counts) {

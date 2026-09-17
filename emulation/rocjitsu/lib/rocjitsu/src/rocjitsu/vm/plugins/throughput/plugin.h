@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/instruction_family.h"
 
 #include <array>
 #include <chrono>
@@ -14,20 +15,12 @@
 
 namespace rocjitsu::plugins::throughput {
 
-/// Exclusive instruction families used by the throughput report. The order is
-/// part of the JSONL schema and should remain stable.
-enum class InstructionFamily : size_t {
-  Scalar,
-  Vector,
-  Matrix,
-  Lds,
-  Global,
-  Control,
-  Other,
-  Count,
-};
+/// The throughput report shares its instruction families with the
+/// instruction-mix report so the two are joinable; see
+/// plugins/instruction_family.h.
+using InstructionFamily = plugins::InstructionFamily;
 
-inline constexpr size_t kInstructionFamilyCount = static_cast<size_t>(InstructionFamily::Count);
+inline constexpr size_t kInstructionFamilyCount = plugins::kInstructionFamilyCount;
 using InstructionCounts = std::array<uint64_t, kInstructionFamilyCount>;
 using InstructionNanoseconds = std::array<uint64_t, kInstructionFamilyCount>;
 

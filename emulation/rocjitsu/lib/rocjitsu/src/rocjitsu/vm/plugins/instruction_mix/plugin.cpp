@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/plugins/coverage/plugin.h"
+#include "rocjitsu/vm/plugins/instruction_mix/plugin.h"
 
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <algorithm>
@@ -16,12 +15,8 @@
 #include <tuple>
 #include <vector>
 
-namespace rocjitsu::plugins::coverage {
+namespace rocjitsu::plugins::instruction_mix {
 namespace {
-
-bool has_prefix(std::string_view mnemonic, std::string_view prefix) {
-  return mnemonic.starts_with(prefix);
-}
 
 std::string json_escape(std::string_view value) {
   std::string escaped;
@@ -63,52 +58,6 @@ std::string json_escape(std::string_view value) {
   return escaped;
 }
 
-} // namespace
-
-CoveragePlugin::CoveragePlugin(const char * /*config_json*/) : ExecutionPlugin("coverage") {}
-
-CoveragePlugin::~CoveragePlugin() { onShutdown(); }
-
-InstructionFamily CoveragePlugin::classify(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-
-  if (inst.is_mfma() || has_prefix(mnemonic, "v_mfma_") || has_prefix(mnemonic, "v_smfmac_") ||
-      has_prefix(mnemonic, "v_wmma_") || has_prefix(mnemonic, "v_swmmac_"))
-    return InstructionFamily::Matrix;
-
-  if (inst.is_memory_op()) {
-    if (const auto *state = inst.data()) {
-      if (state->tag() == amdgpu::LOCAL_MEM)
-        return InstructionFamily::Lds;
-      if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::SCALAR_MEM)
-        return InstructionFamily::Global;
-    }
-    if (has_prefix(mnemonic, "ds_"))
-      return InstructionFamily::Lds;
-    return InstructionFamily::Global;
-  }
-
-  constexpr uint64_t control_flags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
-                                     PROGRAM_TERMINATOR | WAITCNT | BARRIER;
-  if ((inst.flags() & control_flags) != 0 || has_prefix(mnemonic, "s_nop") ||
-      has_prefix(mnemonic, "s_sleep") || has_prefix(mnemonic, "s_delay"))
-    return InstructionFamily::Control;
-  if (has_prefix(mnemonic, "s_"))
-    return InstructionFamily::Scalar;
-  if (has_prefix(mnemonic, "v_"))
-    return InstructionFamily::Vector;
-  return InstructionFamily::Other;
-}
-
-std::string_view CoveragePlugin::family_name(InstructionFamily family) {
-  constexpr std::array<std::string_view, kInstructionFamilyCount> names = {
-      "scalar", "vector", "matrix", "lds", "global", "control", "other"};
-  const size_t index = static_cast<size_t>(family);
-  return index < names.size() ? names[index] : "other";
-}
-
-namespace {
-
 /// Ordering over sightings of the same mnemonic, used to decide which one's
 /// encoding fields the merged entry keeps.
 ///
@@ -116,19 +65,41 @@ namespace {
 /// "whichever this run's hashing happened to visit first" -- and the report
 /// exists to be diffed between runs. Ordering by a value tuple instead makes
 /// the choice independent of iteration order, and therefore reproducible.
-bool sighting_precedes(const MnemonicCoverage &lhs, const MnemonicCoverage &rhs) {
-  return std::tie(lhs.first_dispatch_id, lhs.encoding_id, lhs.opcode) <
-         std::tie(rhs.first_dispatch_id, rhs.encoding_id, rhs.opcode);
+///
+/// Every field the record emits is in the tuple. Dropping one would leave
+/// sightings that tie here but print differently, and the tie would again be
+/// broken by merge order: VOP1 is the live case, since the generated
+/// constructors set `encoding_id_` and `opcode_` before widening `size_` for
+/// the DPP, SDWA and literal forms (e.g. generated/cdna4/encodings.cpp
+/// Vop1::Vop1), so `v_mov_b32_e32` can be sighted at four and at eight bytes
+/// with everything else equal.
+bool sighting_precedes(const MnemonicStats &lhs, const MnemonicStats &rhs) {
+  return std::tie(lhs.first_dispatch_id, lhs.encoding_id, lhs.opcode, lhs.encoding_bytes,
+                  lhs.family) < std::tie(rhs.first_dispatch_id, rhs.encoding_id, rhs.opcode,
+                                         rhs.encoding_bytes, rhs.family);
 }
 
 } // namespace
 
-void CoveragePlugin::merge(CoverageMap &destination, const CoverageMap &source) {
+InstructionMixPlugin::InstructionMixPlugin(const char * /*config_json*/)
+    : ExecutionPlugin("instruction-mix") {}
+
+InstructionMixPlugin::~InstructionMixPlugin() { onShutdown(); }
+
+InstructionFamily InstructionMixPlugin::classify(const Instruction &inst) {
+  return classify_instruction(inst);
+}
+
+std::string_view InstructionMixPlugin::family_name(InstructionFamily family) {
+  return instruction_family_name(family);
+}
+
+void InstructionMixPlugin::merge(MnemonicMap &destination, const MnemonicMap &source) {
   for (const auto &[mnemonic, entry] : source) {
     auto [iter, inserted] = destination.try_emplace(mnemonic, entry);
     if (inserted)
       continue;
-    MnemonicCoverage &existing = iter->second;
+    MnemonicStats &existing = iter->second;
     const uint64_t executions = existing.executions + entry.executions;
     if (sighting_precedes(entry, existing))
       existing = entry;
@@ -136,23 +107,24 @@ void CoveragePlugin::merge(CoverageMap &destination, const CoverageMap &source) 
   }
 }
 
-void CoveragePlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
+void InstructionMixPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
   dispatches_[info.dispatch_id].info = info;
 }
 
-void CoveragePlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
+void InstructionMixPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   // Wavefront::reset() does not clear plugin state, so a recycled wave slot
   // still holds the previous wavefront's map. Replace it rather than reuse it.
-  wf.set_plugin_state(slot_index(), std::make_unique<CoverageWavefrontState>());
+  wf.set_plugin_state(slot_index(), std::make_unique<InstructionMixWavefrontState>());
 }
 
-void CoveragePlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
-                                                      amdgpu::Wavefront &wf) {
-  auto *state = static_cast<CoverageWavefrontState *>(wf.plugin_state(slot_index()));
+void InstructionMixPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/,
+                                                            const Instruction &inst,
+                                                            amdgpu::Wavefront &wf) {
+  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
   const std::string_view mnemonic = inst.mnemonic();
   auto iter = state->counts.find(mnemonic);
   if (iter == state->counts.end()) {
-    MnemonicCoverage entry;
+    MnemonicStats entry;
     entry.encoding_id = inst.encoding_id();
     entry.opcode = inst.opcode();
     entry.encoding_bytes = static_cast<uint8_t>(std::max(inst.size(), 0));
@@ -163,12 +135,12 @@ void CoveragePlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Ins
   ++iter->second.executions;
 }
 
-void CoveragePlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-  auto *state = static_cast<CoverageWavefrontState *>(wf.plugin_state(slot_index()));
+void InstructionMixPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
   merge(dispatches_[wf.dispatch_id()].counts, state->counts);
 }
 
-void CoveragePlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
+void InstructionMixPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   auto iter = dispatches_.find(dispatch_id);
   if (iter == dispatches_.end())
     return;
@@ -181,18 +153,33 @@ void CoveragePlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   dispatches_.erase(iter);
 }
 
-void CoveragePlugin::onShutdown() {
+void InstructionMixPlugin::onShutdown() {
   if (summary_emitted_)
     return;
   summary_emitted_ = true;
+
+  // Anything still in flight was executed, and the report's whole contract is
+  // that a mnemonic absent from the summary was never executed -- so fold it
+  // in rather than drop it. A bounded run (rj_vm_request_exit) stops with work
+  // in flight routinely. These dispatches get no per-dispatch record: their
+  // totals are not final, and only the union is trustworthy.
+  //
+  // Waves that never reached wavefront-halt are still missed: their counts
+  // live in wavefront-local plugin state and the plugin has no way to
+  // enumerate live wavefronts. `incomplete_dispatches` is what tells a reader
+  // the summary may be a subset; a run that ends cleanly reports zero.
+  incomplete_dispatches_ = dispatches_.size();
+  for (const auto &[dispatch_id, state] : dispatches_)
+    merge(aggregate_, state.counts);
+
   emit_record("summary", nullptr, aggregate_);
 }
 
-void CoveragePlugin::emit_record(std::string_view record, const KernelDispatchInfo *info,
-                                 const CoverageMap &counts) {
+void InstructionMixPlugin::emit_record(std::string_view record, const KernelDispatchInfo *info,
+                                       const MnemonicMap &counts) {
   // Sorted so two runs of the same workload produce byte-identical mnemonic
   // ordering and the JSONL diffs cleanly.
-  std::vector<const CoverageMap::value_type *> sorted;
+  std::vector<const MnemonicMap::value_type *> sorted;
   sorted.reserve(counts.size());
   for (const auto &item : counts)
     sorted.push_back(&item);
@@ -210,7 +197,7 @@ void CoveragePlugin::emit_record(std::string_view record, const KernelDispatchIn
   }
 
   std::string output =
-      std::format("{{\"schema\":\"rocjitsu.coverage.v1\",\"record\":\"{}\"", record);
+      std::format("{{\"schema\":\"rocjitsu.instruction_mix.v1\",\"record\":\"{}\"", record);
   if (info) {
     output += std::format(",\"dispatch_id\":{},\"kernel_name\":\"{}\",\"kernel_symbol\":\"{}\""
                           ",\"grid\":[{},{},{}],\"workgroup\":[{},{},{}],\"workgroups\":{}"
@@ -221,7 +208,9 @@ void CoveragePlugin::emit_record(std::string_view record, const KernelDispatchIn
                           info->workgroup_size_y, info->workgroup_size_z, info->workgroup_count,
                           info->wfs_per_workgroup);
   } else {
-    output += std::format(",\"dispatches\":{}", completed_dispatches_);
+    output += std::format(",\"dispatches\":{},\"incomplete_dispatches\":{},\"complete\":{}",
+                          completed_dispatches_, incomplete_dispatches_,
+                          incomplete_dispatches_ == 0 ? "true" : "false");
   }
   output += std::format(",\"wave_instructions\":{},\"unique_mnemonics\":{},\"families\":{{",
                         executions, sorted.size());
@@ -238,7 +227,7 @@ void CoveragePlugin::emit_record(std::string_view record, const KernelDispatchIn
     if (!first)
       output += ',';
     first = false;
-    const MnemonicCoverage &entry = item->second;
+    const MnemonicStats &entry = item->second;
     output +=
         std::format("\"{}\":{{\"executions\":{},\"encoding_id\":{},\"opcode\":{},"
                     "\"encoding_bytes\":{},\"family\":\"{}\",\"first_dispatch_id\":{}}}",
@@ -249,4 +238,4 @@ void CoveragePlugin::emit_record(std::string_view record, const KernelDispatchIn
   sink().write(output);
 }
 
-} // namespace rocjitsu::plugins::coverage
+} // namespace rocjitsu::plugins::instruction_mix
