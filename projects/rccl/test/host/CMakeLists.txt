@@ -52,7 +52,11 @@ set(RCCL_MICRO_TEST_SOURCES
   devcomm-test.cc
   wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
   dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
+  scheduler-test.cc                    # src/scheduler/*.cc (allgatherv + symmetric schedulers)
   fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
+  fakes/scheduler_fakes.cc             # scheduler.cc's own externals not faked elsewhere
+  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc (ncclGetSymRegType)
+  fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
@@ -157,6 +161,9 @@ if(BUILD_TESTS)
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
+    # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
+    ALLGATHERV_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/allgatherv_sched_tmp.cc"
+    SYMMETRIC_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/symmetric_sched.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -844,6 +851,8 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
   DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
+  ALLGATHERV_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
+  SYMMETRIC_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
