@@ -850,6 +850,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                                               env_has_value("RJ_CONSAN_CELL_SAMPLE_STRIDE") ||
                                               env_has_value("RJ_CONSAN_CELL_SAMPLE_OFFSET");
   config.runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE");
+  config.sampling_controls_explicit = legacy_sample_selection || explicit_independent_selection ||
+                                      env_has_value("RJ_CONSAN_SAMPLE_STRIDE") ||
+                                      env_has_value("RJ_CONSAN_SAMPLE_OFFSET");
   const uint32_t runtime_sample_stride_default =
       config.mode == Mode::Default ? workgroup_default : 1u;
   if (!parse_u32_env("RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,

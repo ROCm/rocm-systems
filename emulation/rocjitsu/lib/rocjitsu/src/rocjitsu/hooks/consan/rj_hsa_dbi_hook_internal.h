@@ -91,6 +91,7 @@ struct HookConfig : Request,
   bool auto_report_buffer_size_explicit = false;
   bool max_patches_explicit = false;
   bool runtime_sample_stride_explicit = false;
+  bool sampling_controls_explicit = false;
   const char *preset = "default";
   bool allow_uniform_lds_stores = false;
   uint32_t conflict_limit = 8;

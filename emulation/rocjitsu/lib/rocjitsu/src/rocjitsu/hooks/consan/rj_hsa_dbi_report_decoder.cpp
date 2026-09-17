@@ -15,6 +15,7 @@ DecodedReport decode_report(const ReportPipelineInput &input, const ReportSnapsh
   ReportSummary &summary = result.summary;
   if (snapshot.bytes.size() < sizeof(ReportHeader) || snapshot.bytes.size() < input.size) {
     result.failure = ReportDecodeFailure::SnapshotTooSmall;
+    ++result.summary.incomplete_snapshot_count;
     return result;
   }
   const void *report_ptr = snapshot.bytes.data();
@@ -23,17 +24,20 @@ DecodedReport decode_report(const ReportPipelineInput &input, const ReportSnapsh
   if (!report_header_is_current(*header)) {
     result.header = *header;
     result.failure = ReportDecodeFailure::InvalidHeader;
+    ++result.summary.malformed_snapshot_count;
     return result;
   }
   if (input.expected_generation && header->generation != *input.expected_generation) {
     result.header = *header;
     result.failure = ReportDecodeFailure::GenerationMismatch;
+    ++result.summary.stale_snapshot_count;
     return result;
   }
   const ReportBufferLayout &expected_layout = input.layout;
   if (!report_layout_matches_header(*header, expected_layout, input.size)) {
     result.header = *header;
     result.failure = ReportDecodeFailure::LayoutMismatch;
+    ++result.summary.malformed_snapshot_count;
     return result;
   }
   result.failure = ReportDecodeFailure::None;
