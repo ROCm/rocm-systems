@@ -4243,7 +4243,7 @@ TEST_F(P2pShareableBufferMicrotest,
        Allocate_CuMemEnabledNonPosix_ExportsHandleAndRetains)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;  // anything != POSIX_FD
+    ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
 
@@ -4464,7 +4464,7 @@ TEST_F(P2pShareableBufferMicrotest,
        Import_CuMemEnabledNonPosix_MapsAndTracksRemoteBuffer)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;  // != POSIX_FD
+    ncclCuMemHandleType = hipMemHandleTypeWin32;  // != POSIX_FD
 
     void* const kReserved = reinterpret_cast<void*>(0xC0000);
 
@@ -4596,7 +4596,7 @@ TEST_F(P2pShareableBufferMicrotest,
        Import_CuMemImportFails_Propagates)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;
+    ncclCuMemHandleType = hipMemHandleTypeWin32;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
     ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -4630,7 +4630,7 @@ TEST_F(P2pShareableBufferMicrotest,
        Import_CuMemGranularityQueryFails_Propagates)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;
+    ncclCuMemHandleType = hipMemHandleTypeWin32;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
     ScopedHook gran(g_hipMemGetAllocationGranularity,
@@ -4776,7 +4776,7 @@ class P2pImportMapStageFails
 TEST_P(P2pImportMapStageFails, CuMem_MappingStageRefuses_Propagates)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;
+    ncclCuMemHandleType = hipMemHandleTypeWin32;
     const auto stage = GetParam();
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
@@ -4837,7 +4837,7 @@ TEST_F(P2pShareableBufferMicrotest,
        Import_CuMemTrackImportFails_Propagates)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;
+    ncclCuMemHandleType = hipMemHandleTypeWin32;
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
     ScopedHook gran(g_hipMemGetAllocationGranularity,
@@ -4937,7 +4937,7 @@ TEST_F(P2pShareableBufferMicrotest,
        Allocate_CuMemExportHandleFails_Propagates)
 {
     auto saved_handle_type = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;  // non-POSIX
+    ncclCuMemHandleType = hipMemHandleTypeWin32;  // non-POSIX
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
     ScopedHook xport(g_hipMemExportToShareableHandle,
@@ -5607,7 +5607,7 @@ protected:
         // shareable-handle export and batch-fd-query sub-arms are skipped;
         // this isolates the segment-walk / grow / retain-release contract.
         saved_handle_type_ = ncclCuMemHandleType;
-        ncclCuMemHandleType = hipMemHandleTypeFabric;  // anything != POSIX_FD
+        ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
         proxyConn_.sameProcess = 1;
     }
     void TearDown() override {
@@ -6203,7 +6203,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessNonPosix_ImportsFrom
 {
     conn_.sameProcess = 0;
     auto saved = ncclCuMemHandleType;
-    ncclCuMemHandleType = hipMemHandleTypeFabric;  // anything != POSIX_FD
+    ncclCuMemHandleType = hipMemHandleTypeWin32;  // anything != POSIX_FD
 
     p2pIpcExpInfo req{};
     req.size = 0x1000;
