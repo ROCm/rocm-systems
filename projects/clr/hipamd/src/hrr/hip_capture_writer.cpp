@@ -737,15 +737,14 @@ void checkpoint() {
 void mark_incomplete(const char* reason) {
   // Record once; the loud, AMD_LOG_LEVEL-routed message is emitted by the caller
   // (e.g. serialize_kernel_launch) which has the relevant context. Here we only
-  // need the durable flag and a single breadcrumb so a bare run still surfaces
-  // it. Error level: the archive is not faithful and replay must not treat it
-  // as one. log_printf appends its own newline, so the format string omits it.
+  // need the durable flag and a single stderr breadcrumb so a bare run still
+  // surfaces it.
   if (!g_capture_incomplete.exchange(true, std::memory_order_relaxed)) {
-    LogPrintfError(
-        "[HRR capture] Archive marked INCOMPLETE: %s. The clean-shutdown "
-        "trailer will be omitted and manifest.complete=false so replay "
-        "cannot treat this capture as faithful",
-        reason ? reason : "(unspecified)");
+    fprintf(stderr,
+            "[HRR capture] Archive marked INCOMPLETE: %s. The clean-shutdown "
+            "trailer will be omitted and manifest.complete=false so replay "
+            "cannot treat this capture as faithful.\n",
+            reason ? reason : "(unspecified)");
   }
 }
 
