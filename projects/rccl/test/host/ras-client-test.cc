@@ -37,7 +37,6 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
-#include "fakes/env_fakes.h"  // src/misc/param.cc + getenv interposition
 #include "fakes/libc_fakes.h"
 
 // os.h reaches nccl.h and the HIP headers, the one chain of declarations client.cc pulls in that
@@ -122,8 +121,6 @@ void ResetRasClientGlobals() {
   // glibc treats optind == 0 (not 1) as "reinitialize everything", which is what
   // repeated getopt_long calls in one process need.
   optind = 0;
-  // Keeps NCCL_RAS_TIMEOUT_FACTOR unset regardless of the test runner's real environment.
-  SetMicroEnvAbsent("NCCL_RAS_TIMEOUT_FACTOR");
 }
 
 }  // namespace
@@ -357,7 +354,7 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWh
       {{"-t", "5x"}, 5.0},           // trailing garbage
       {{"--timeout=abc"}, 0.0},      // strtod consumed nothing
       {{"-t", "inf"}, HUGE_VAL},     // errno stays 0 and endPtr reaches the NUL; only !isfinite rejects this one
-      {{"-t", "1e-400"}, 0.0},       // underflow: glibc sets ERANGE, so errno is the only clause rejecting this
+      {{"--timeout=1e-400"}, 0.0},   // underflow: glibc sets ERANGE, so errno is the only clause rejecting this
   };
   for (const auto& c : cases) {
     ResetLibcFakes();
