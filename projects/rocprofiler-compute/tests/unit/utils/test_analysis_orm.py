@@ -42,8 +42,8 @@ PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "instruction_type",
     "source",
     "count",
-    "count_issue",
-    "count_stall",
+    "issue_count",
+    "stall_count",
     "wave_occupancy_percent",
     "active_thread_percent",
     "stall_reason",
@@ -574,8 +574,8 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
             "instruction_type": None,
             "source": "/s/a.cpp:1",
             "count": 3,
-            "count_issue": 1,
-            "count_stall": 2,
+            "issue_count": 1,
+            "stall_count": 2,
             "wave_occupancy_percent": 75.0,
             "active_thread_percent": 50.0,
             "stall_reason": {"WAITCNT": 2},
@@ -672,8 +672,8 @@ def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):
     # never summed together.
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert [row["count"] for row in rows] == [8, 9]
-    assert [row["count_issue"] for row in rows] == [2, 3]
-    assert [row["count_stall"] for row in rows] == [6, 6]
+    assert [row["issue_count"] for row in rows] == [2, 3]
+    assert [row["stall_count"] for row in rows] == [6, 6]
     assert [row["stall_reason"] for row in rows] == [
         {"MEMORY": 4, "WAITCNT": 2},
         {"BARRIER": 1, "WAITCNT": 5},
@@ -832,8 +832,8 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
 
     assert [row["code_object_id"] for row in rows] == [5, 6]
     assert [row["count"] for row in rows] == [3, 5]
-    assert all(row["count_issue"] is None for row in rows)
-    assert all(row["count_stall"] is None for row in rows)
+    assert all(row["issue_count"] is None for row in rows)
+    assert all(row["stall_count"] is None for row in rows)
     assert all(row["stall_reason"] is None for row in rows)
     # A host-trap record carries an execution mask but no wave count.
     assert all(row["active_thread_percent"] == 50.0 for row in rows)
