@@ -73,6 +73,13 @@ std::vector<ncclDevWorkBcast*> ScheduleBcastTasksToPlan_CollectWorkItems(struct 
   return items;
 }
 
+// Walks plan->bcastTaskQueue (an intrusive queue keyed on ncclTaskBcast::next) to see what the tail loop drained.
+std::vector<ncclTaskBcast*> ScheduleBcastTasksToPlan_CollectBcastTaskQueue(struct ncclKernelPlan* plan) {
+  std::vector<ncclTaskBcast*> items;
+  for (ncclTaskBcast* t = ncclIntruQueueHead(&plan->bcastTaskQueue); t != nullptr; t = t->next) items.push_back(t);
+  return items;
+}
+
 // Mirrors ncclDevFuncId's general-collective key (device.h); AllGatherV never takes the special-cased branches.
 uint64_t ScheduleBcastTasksToPlan_DevFuncKey(int proto) {
   return (uint64_t(ncclFuncAllGatherV & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
@@ -816,4 +823,54 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_PartBytes_RoundsCountUpNotDo
   // With partBytes=256 (floor, wrong): part0 bytes would be 256 and part1 256 instead.
   EXPECT_EQ(items[0]->bytes, 512u);
   EXPECT_EQ(items[1]->bytes, 1u);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_DrainsSkippedPeerAndFillsPlanQueueInOrder) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/3);
+  scene.comm->planner.nTasksBcast = 10;  // distinct from batchTasks(2), so a wrong-subtrahend mutant is observable
+
+  ncclTaskBcast task0{};
+  task0.count = 0;  // count=0 keeps this test's focus on the tail loop, not Block 5's per-channel slicing
+  ncclTaskBcast task2{};
+  task2.count = 0;
+  scene.peers[0].bcastQueue.head = &task0;
+  // scene.peers[1] left empty: exercises the t==nullptr skip-peer arm inside the tail loop's walk.
+  scene.peers[2].bcastQueue.head = &task2;
+
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+
+  const std::vector<ncclTaskBcast*> drained = ScheduleBcastTasksToPlan_CollectBcastTaskQueue(scene.plan.get());
+  ASSERT_EQ(drained.size(), 2u);
+  EXPECT_EQ(drained[0], &task0);  // order matters: peer0 walked before peer2, peer1 contributed nothing
+  EXPECT_EQ(drained[1], &task2);
+  EXPECT_EQ(scene.plan->nTasksBcast, 2);
+  EXPECT_EQ(scene.comm->planner.nTasksBcast, 8);  // 10 - batchTasks(2), not 10 - 1
+  EXPECT_EQ(scene.peers[0].bcastQueue.head, nullptr);  // fully drained, not left with a stale head
+  EXPECT_EQ(scene.peers[1].bcastQueue.head, nullptr);  // was already empty
+  EXPECT_EQ(scene.peers[2].bcastQueue.head, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_PeerWithTwoQueuedTasks_DequeuesOnlyTheHeadThisCall) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  scene.comm->planner.nTasksBcast = 5;
+
+  ncclTaskBcast task0{};
+  task0.count = 0;
+  ncclTaskBcast task1{};
+  task1.count = 0;
+  task0.next = &task1;  // 2 tasks queued on the same peer; only the head is peeked/batched this round
+  scene.peers[0].bcastQueue.head = &task0;
+
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+
+  const std::vector<ncclTaskBcast*> drained = ScheduleBcastTasksToPlan_CollectBcastTaskQueue(scene.plan.get());
+  ASSERT_EQ(drained.size(), 1u);  // TryDequeue removes one task per call, not the whole chain
+  EXPECT_EQ(drained[0], &task0);
+  EXPECT_EQ(scene.plan->nTasksBcast, 1);
+  EXPECT_EQ(scene.comm->planner.nTasksBcast, 4);
+  EXPECT_EQ(scene.peers[0].bcastQueue.head, &task1);  // task1 remains queued for a later call
 }
