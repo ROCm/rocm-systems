@@ -2871,5 +2871,220 @@ DecodeResult decodeFlatAtomicDecX2Flat(const MachineInst *opcode,
 }
 } // namespace detail
 
+GlobalLoadLdsUbyteFlat::GlobalLoadLdsUbyteFlat(const MachineInst *inst)
+    : Flat("global_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsUbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsUbyteFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_UBYTE requires its GLOBAL segment";
+  return std::make_unique<GlobalLoadLdsUbyteFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsSbyteFlat::GlobalLoadLdsSbyteFlat(const MachineInst *inst)
+    : Flat("global_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsSbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsSbyteFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SBYTE requires its GLOBAL segment";
+  return std::make_unique<GlobalLoadLdsSbyteFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsUshortFlat::GlobalLoadLdsUshortFlat(const MachineInst *inst)
+    : Flat("global_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsUshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsUshortFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_USHORT requires its GLOBAL segment";
+  return std::make_unique<GlobalLoadLdsUshortFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsSshortFlat::GlobalLoadLdsSshortFlat(const MachineInst *inst)
+    : Flat("global_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsSshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsSshortFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SSHORT requires its GLOBAL segment";
+  return std::make_unique<GlobalLoadLdsSshortFlat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsDwordFlat::GlobalLoadLdsDwordFlat(const MachineInst *inst)
+    : Flat("global_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsDwordFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORD requires its GLOBAL segment";
+  return std::make_unique<GlobalLoadLdsDwordFlat>(opcode);
+}
+} // namespace detail
+
 } // namespace cdna3
 } // namespace rocjitsu

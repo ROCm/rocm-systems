@@ -39,12 +39,11 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
-  # The kernel-count leak guards (src/device/test_generate_kernel_counts.py and
-  # src/device/symmetric/test_generate_symmetric.py) are intentionally NOT
-  # registered as ctest cases here: nothing in RCCL CI runs `ctest`, so an
-  # add_test() would never gate. They run in CI via the CPU-only host-test
-  # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
-  # folded into `run`).
+  # The kernel-count leak guards and the __hip_atomic_* poison probe
+  # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
+  # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
+  # never gate. They run in CI via the CPU-only host-test pipeline instead --
+  # see test/host/run_host_tests.sh (the `guards` phase, folded into `run`).
 
   # CPU-only net_telemetry unit test: net_telemetry.cc depends only on libc and
   # pthread, so this compiles it directly with its own harness (no GPU, no gtest,
@@ -131,8 +130,19 @@ if(BUILD_TESTS)
         message(FATAL_ERROR "Could not find MPI library (libmpi.so) in ${MPI_PATH}/lib or ${MPI_PATH}/lib64")
     endif()
 
+    # OpenMPI C++ bindings live in libmpi_cxx (Debian/Ubuntu) and are required
+    # when test code includes <mpi.h> from C++ (MPI::Comm, MPI::Op, ...).
+    find_library(MPI_CXX_BINDING_LIBRARY
+        NAMES mpi_cxx mpi++
+        PATHS ${MPI_PATH}/lib ${MPI_PATH}/lib64
+        NO_DEFAULT_PATH
+    )
+
     # Set up MPI variables
     set(MPI_CXX_LIBRARIES ${MPI_LIBRARY})
+    if(MPI_CXX_BINDING_LIBRARY)
+        list(APPEND MPI_CXX_LIBRARIES ${MPI_CXX_BINDING_LIBRARY})
+    endif()
     set(MPI_CXX_INCLUDE_DIRS ${MPI_PATH}/include)
     set(MPI_CXX_LINK_FLAGS "-L${MPI_PATH}/lib -Wl,-rpath,${MPI_PATH}/lib")
     set(MPIEXEC_EXECUTABLE ${MPI_PATH}/bin/mpirun CACHE FILEPATH "MPI executable")
@@ -157,7 +167,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h, net_ib/net_ib_flush_fault_inject.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -231,6 +241,13 @@ if(BUILD_TESTS)
   get_target_property(RCCL_INTERFACE_COMPILE_DEFINITIONS rccl INTERFACE_COMPILE_DEFINITIONS)
   if(RCCL_INTERFACE_COMPILE_DEFINITIONS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS ${RCCL_INTERFACE_COMPILE_DEFINITIONS})
+  endif()
+
+  if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+  endif()
+  if(AMDSMI_FABRIC_API)
+    list(APPEND RCCL_COMMON_COMPILE_DEFS AMDSMI_FABRIC_DIRECT)
   endif()
 
   # Collect testing framework source files
@@ -346,6 +363,8 @@ if(BUILD_TESTS)
       CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/RcclEpTests.cpp
+      device/LlFifoSysScopeTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
@@ -383,6 +402,11 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
 
+    # Unit tests pass generic hipMalloc pointers into load16global/store16global.
+    # The gfx942 b128 global-aperture builtins fault on those pointers; use the
+    # nontemporal dword-pair fallback in op128.h for this target only.
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
+
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
       ${PROJECT_BINARY_DIR}/hipify/src/include
@@ -400,6 +424,12 @@ if(BUILD_TESTS)
     if(NOT RCCL_GFX1250_TDM_HEADER)
       message(WARNING "SDK lacks hip/amd_detail/amd_gfx1250_TDM.h; tdm:: entry points will compile to no-op stubs and device/TestTdmCopy.cpp will report TDM as unsupported")
     endif()
+
+    # rccl_ep is header-only and is not hipified, so its tests include it
+    # straight from the source tree. Scope it to the one file: its device/ and
+    # include/ header names are generic enough to shadow src/ for other TUs.
+    set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
+      INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)
@@ -595,6 +625,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
+      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       ChannelDefaultsTests.cpp
@@ -633,6 +664,13 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    if(TARGET rccl-env-json)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-json)
+    endif()
+    if(TARGET rccl-env-example)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-example)
+    endif()
 
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
@@ -789,26 +827,31 @@ if(BUILD_TESTS)
     if(AMDSMI_FABRIC_API)
       target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_FABRIC_DIRECT)
     endif()
+    if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    endif()
   endif()
 
   # Build the GIN example plugin for host-API custom-plugin regression tests.
   if(ENABLE_MPI_TESTS AND ENABLE_HOST_API_TESTS)
     set(RCCL_GIN_EXAMPLE_PLUGIN_DIR "${CMAKE_BINARY_DIR}/test/unit/plugins")
-    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/libnccl-gin-example.so")
-    find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
-    add_custom_command(
-      OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
-      COMMAND ${RCCL_GIN_EXAMPLE_CC}
-              -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
-              -fPIC -shared
-              -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
-              ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
-      DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
-      COMMENT "Building libnccl-gin-example.so for Host API regression tests"
-      VERBATIM
-    )
-    add_custom_target(nccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/librccl-gin-example.so")
+    if(NOT TARGET rccl-gin-example)
+      find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
+      add_custom_command(
+        OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+        COMMAND ${RCCL_GIN_EXAMPLE_CC}
+                -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
+                -fPIC -shared
+                -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
+                ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+        DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+        COMMENT "Building librccl-gin-example.so for Host API regression tests"
+        VERBATIM
+      )
+      add_custom_target(rccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+    endif()
   endif()
 
   # Create separate MPI test binary if MPI tests are enabled
@@ -854,8 +897,27 @@ if(BUILD_TESTS)
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      DdaFabricSimpleMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
+
+    # rccl_ep has no library target by default, so the test binary compiles its
+    # C ABI directly; that also keeps the tests independent of the option.
+    if(ENABLE_RCCL_EP_TESTS)
+      list(APPEND MPI_TEST_SOURCE_FILES
+        RcclEpDispatchCombineMPITests.cpp
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+      )
+      # The project is declared project(rccl CXX) with no enable_language(HIP), so CMake
+      # silently drops a .hip source from the target unless it is marked as CXX.
+      set_source_files_properties(
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+        PROPERTIES LANGUAGE CXX)
+      set_source_files_properties(
+        RcclEpDispatchCombineMPITests.cpp
+        ../src/algorithms/rccl_ep/python/rccl_ep_capi.hip
+        PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
+    endif()
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
 
@@ -877,7 +939,7 @@ if(BUILD_TESTS)
     endif()
 
     if(ENABLE_HOST_API_TESTS)
-      add_dependencies(rccl-UnitTestsMPI nccl-gin-example)
+      add_dependencies(rccl-UnitTestsMPI rccl-gin-example)
       target_compile_definitions(rccl-UnitTestsMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
@@ -895,7 +957,7 @@ if(BUILD_TESTS)
         HostApiCustomGinPluginMPITests.cpp
       )
       list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
-      add_dependencies(rccl-HostApiCustomGinPluginMPI nccl-gin-example)
+      add_dependencies(rccl-HostApiCustomGinPluginMPI rccl-gin-example)
       target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
