@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <set>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -22,12 +23,9 @@
 #include "comm.h"
 #include "rma/rma_ce.h"
 
-// rma_ce.cc defines ncclRmaCePutLaunch / ncclRmaCeWaitLaunch, which rma-test.cc
-// needs as controllable seams in this same binary (rma.cc dispatches to them).
-// Rename the unit's own entry points so both can coexist: rma.cc keeps binding
-// to the seams in rma_fakes.cc, and the tests below call the real ones.
-// The static helpers (ncclRmaCePutLaunchPersist/NonPersist) are distinct tokens
-// and so are untouched.
+// rma_fakes.cc seams ncclRmaCePutLaunch / ncclRmaCeWaitLaunch for rma-test.cc,
+// which needs them in this same binary. Rename the unit's own entry points so
+// both can coexist; the static helpers are distinct tokens and are untouched.
 #define ncclRmaCePutLaunch ncclRmaCePutLaunchUut
 #define ncclRmaCeWaitLaunch ncclRmaCeWaitLaunchUut
 #include RMA_CE_CC_PATH
@@ -36,16 +34,9 @@
 
 namespace {
 
-// Release the windows a test left registered. ncclRmaCeFinalize deregisters a
-// window but never frees the host object, and a test whose teardown path fails
-// deliberately leaves it registered as well.
-//
-// dev-runtime-test.cc has a fuller ReclaimDevrWindows, but it is static to that
-// TU, walks devrState.winSorted (whose element type is private to
-// dev_runtime.cc) and drains memHead through the equally private
-// symMemoryDestroy. Every window here comes from the non-symmetric path, so it
-// has no backing ncclDevrMemory and memHead stays empty; the windows are
-// tracked as they are created rather than recovered from winSorted.
+// Release a window a test left registered: ncclRmaCeFinalize deregisters one
+// but never frees the host object. Non-symmetric windows only, so there is no
+// backing ncclDevrMemory to drain.
 void ReclaimWindow(ncclDevrWindow* w) {
   if (w == nullptr) return;
   free(w->ipcPeerPtrs);
@@ -101,14 +92,11 @@ TEST_F(RmaCeLaunchTest, WaitLaunch_CeNotInitialised_ReturnsInternalError) {
 // and lets everything else run for real so the layout arithmetic is the unit's.
 class RmaCeInitTest : public ::testing::Test {
 protected:
-  // dev_runtime.cc is compiled into this binary, so the CE unit's calls into it
-  // run for real. The fixture sets the terms they read rather than stubbing the
-  // functions: comm->symmetricSupport == 0 selects RCCL's non-symmetric path,
-  // a non-zero bigSize makes ncclDevrInitOnce a no-op, and lsaRankList is what
-  // ncclDevrWorldToLsaRank walks.
-  // Deliberately different: the unit indexes some things by comm->nRanks and
-  // others by devrState.lsaSize, and equal values make every confusion of the
-  // two invisible.
+  // dev_runtime.cc is compiled into this binary, so its functions run for real
+  // and the fixture sets the state they read rather than stubbing them.
+  //
+  // nRanks and lsaSize differ deliberately: equal values hide every confusion
+  // of the two.
   static constexpr int kNRanks     = 7;
   static constexpr int kLsaSize    = 5;
   static constexpr int kNumRmaSig  = 2;
@@ -150,6 +138,13 @@ protected:
   // The one window ncclRmaCeInit registered (per context), for tests that need
   // to reach into it.
   ncclDevrWindow* SignalWin(int ctx = 0) { return Ctx(ctx)->signalsWin; }
+
+  // This rank's slot inside a peer's window, at the given region offset. The
+  // write side of SignalSlot: a sender raises its own slot in the peer's copy.
+  const char* SelfSlotIn(int peerWorldRank, size_t regionOffset, int sigIdx = 0) {
+    return reinterpret_cast<const char*>(PeerWin(peerWorldRank)) + regionOffset +
+           (sigIdx * kLsaSize + kLsaSelf) * sizeof(uint64_t);
+  }
 
   // Rank r's window image inside peerWins_.
   // World rank -> LSA rank, the lookup ncclDevrWorldToLsaRank performs.
@@ -285,11 +280,9 @@ protected:
   }
 
   void TearDown() override {
-    // Balance what a test left built: Finalize releases the context array, the
-    // signal region and both device buffers each context allocated, and is a
-    // no-op success on a comm that was never initialised. Suites that drive
-    // Finalize themselves clear the flag -- re-running it after a Finalize that
-    // failed part-way would double-free what that attempt already released.
+    // Balance what a test left built; a no-op success if it built nothing.
+    // Suites that drive Finalize themselves clear the flag: re-running it after
+    // one that failed part-way double-frees what that attempt released.
     if (autoFinalize_) ncclRmaCeFinalize(comm_.get());
     for (ncclWindow_vidmem* h : shadowWins_) {
       ReclaimWindow(static_cast<ncclDevrWindow*>(h->winHost));
@@ -302,6 +295,18 @@ protected:
     ResetCeFakes();
     ResetHipFakes();
     ResetDevRuntimeMicroFakes();
+  }
+
+  // True once every configured context has finished its allocations, which is
+  // where the CE stream and event are created.
+  bool ContextsBuilt() {
+    auto& st = comm_->rmaState.rmaCeState;
+    if (st.rmaCeCtxs == nullptr || st.rmaCeCtxCount == 0) return false;
+    for (int i = 0; i < st.rmaCeCtxCount; i++) {
+      auto* c = static_cast<ncclRmaCeCtx*>(st.rmaCeCtxs[i]);
+      if (c == nullptr || c->signalOpSeqsDev == nullptr) return false;
+    }
+    return true;
   }
 
   ncclRmaCeCtx* Ctx(int i) {
@@ -369,6 +374,12 @@ TEST_F(RmaCeInitTest, Init_Succeeds_PublishesZeroThenOneAsSignalConstants) {
   ASSERT_NE(ctx->signalConstDev, nullptr);
   EXPECT_EQ(ctx->signalConstZeroDev, ctx->signalConstDev);
   EXPECT_EQ(ctx->signalConstOneDev, ctx->signalConstDev + 1);
+  // ...and by value: seeding both to the same number would keep the addresses
+  // right while every graph signal and ack wrote it.
+  EXPECT_EQ(ctx->signalConstZeroDev[0], 0u);
+  EXPECT_EQ(ctx->signalConstOneDev[0], 1u);
+  // The ack flags start raised, so a first graph put is not blocked.
+  EXPECT_EQ(ctx->graphAckDev[0], 1u);
 }
 
 // Zero configured contexts is not an error: the stream and event still come up,
@@ -435,11 +446,23 @@ TEST_F(RmaCeInitTest, Init_AckSeedFailsOnLaterContext_PropagatesAndLeavesUniniti
 // The stream and event are created after every context is built, so a failure
 // there still must not report the state as ready.
 TEST_F(RmaCeInitTest, Init_StreamCreateFails_LeavesUninitialised) {
-  // Overrides the emulator InstallHipVmmEmulator() put in place in SetUp, which
-  // succeeds unconditionally; g_hipStreamCreateResult no longer reaches here.
-  g_hipStreamCreateWithFlags = [](hipStream_t*, unsigned) { return hipErrorInvalidValue; };
+  // The allocator creates a stream of its own per buffer, so failing every call
+  // would stop at the first allocation instead of at the CE stream. Fail only
+  // once the context loop is done, which signalOpSeqsDev (its last allocation)
+  // marks.
+  auto realCreate = g_hipStreamCreateWithFlags;
+  bool failed = false;
+  ScopedHook create(g_hipStreamCreateWithFlags,
+                    [this, &failed, realCreate](hipStream_t* st, unsigned flags) {
+                      if (ContextsBuilt() && !failed) {
+                        failed = true;
+                        return hipErrorInvalidValue;
+                      }
+                      return realCreate(st, flags);
+                    });
 
   EXPECT_EQ(ncclRmaCeInit(comm_.get()), ncclUnhandledCudaError);
+  EXPECT_TRUE(failed) << "never reached the CE stream creation";
   EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
 }
 
@@ -467,9 +490,10 @@ protected:
     autoFinalize_ = false;   // every test here drives Finalize itself
     // Device buffers are released with ncclCudaFree(ptr, comm->memManager),
     // which lands on cudaFree -- not on the public ncclMemFree.
-    g_hipFree = [this](void* p) {
+    auto realFree = g_hipFree;
+    g_hipFree = [this, realFree](void* p) {
       freed_.push_back(p);
-      return hipSuccess;
+      return realFree(p);
     };
     g_devrNcclCommWindowDeregister = [this](ncclComm_t, ncclWindow_t win) {
       deregistered_.push_back(win);
@@ -484,9 +508,6 @@ protected:
     };
   }
 
-  void TearDown() override {
-    RmaCeInitTest::TearDown();
-  }
 };
 
 // The whole point: after teardown the comm reports no CE state, so a later
@@ -519,7 +540,12 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_ClearsStreamAndEvent) {
 TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindow) {
   comm_->config.numRmaCtx = 3;
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
-  std::vector<void*> signalsDev{Ctx(0)->signalsDev, Ctx(1)->signalsDev, Ctx(2)->signalsDev};
+  std::vector<void*> deviceBufs;
+  for (int i = 0; i < 3; i++) {
+    deviceBufs.push_back(Ctx(i)->signalsDev);
+    deviceBufs.push_back(Ctx(i)->signalOpSeqsDev);
+    deviceBufs.push_back(Ctx(i)->signalConstDev);
+  }
   std::vector<ncclWindow_t> expected{Ctx(0)->signalsWin->vidmem, Ctx(1)->signalsWin->vidmem,
                                      Ctx(2)->signalsWin->vidmem};
 
@@ -529,11 +555,13 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindo
   // handle deregistered is the one the window was registered under (vidmem),
   // not the host object the unit reads its fields from.
   EXPECT_EQ(deregistered_, expected);
-  // Each context's signal buffer is released. Containment rather than equality:
-  // Init allocates two further device buffers per context, which land here too.
-  for (size_t i = 0; i < signalsDev.size(); i++) {
-    EXPECT_NE(std::find(freed_.begin(), freed_.end(), signalsDev[i]), freed_.end())
-        << "context " << i << " signal buffer not freed";
+  // Distinct, so hoisting the registration out of the per-context loop fails.
+  EXPECT_EQ(std::set<ncclWindow_t>(expected.begin(), expected.end()).size(), 3u);
+  // Every device buffer each context allocated is released. Containment rather
+  // than equality: the order is production's business.
+  for (size_t i = 0; i < deviceBufs.size(); i++) {
+    EXPECT_NE(std::find(freed_.begin(), freed_.end(), deviceBufs[i]), freed_.end())
+        << "device buffer " << i << " not freed";
   }
 }
 
@@ -569,6 +597,9 @@ TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarke
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
   EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  // Not retried here, and the state is left allocated on purpose: the failed
+  // attempt already released this context's buffers before the deregister, and
+  // Finalize restarts at context 0, so a second call double-frees them.
 }
 
 // ---------------------------------------------------------------------------
@@ -579,11 +610,12 @@ TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarke
 // path then does is that helper's contract, covered separately. The two are told
 // apart by the capacity they size their batch-ops params to -- the persistent
 // path builds one op at a time, the non-persistent path one per rank.
-class RmaCePutLaunchTest : public RmaCeInitTest {
+// Everything a launch suite needs before it installs its own hooks: CE state
+// brought up, a task pool, and an empty plan.
+class RmaCeLaunchFixture : public RmaCeInitTest {
 protected:
   std::unique_ptr<ncclKernelPlan> plan_;
   ncclRmaArgs args_{};
-  std::vector<int> initCapacities_;
 
   void SetUp() override {
     RmaCeInitTest::SetUp();
@@ -594,7 +626,21 @@ protected:
 
     plan_ = std::make_unique<ncclKernelPlan>();
     plan_->rmaArgs = &args_;
-    args_.nRmaTasksCe = 0;  // no tasks: the split is the only thing under test
+    args_.nRmaTasksCe = 0;
+  }
+
+  void TearDown() override {
+    ncclMemoryStackDestruct(&comm_->memPermanent);
+    RmaCeInitTest::TearDown();
+  }
+};
+
+class RmaCePutLaunchTest : public RmaCeLaunchFixture {
+protected:
+  std::vector<int> initCapacities_;
+
+  void SetUp() override {
+    RmaCeLaunchFixture::SetUp();
 
     auto initParams = g_ceInitBatchOpsParams;
     g_ceInitBatchOpsParams = [this, initParams](ncclCeBatchOpsParams* params, int capacity) {
@@ -607,11 +653,6 @@ protected:
     g_ceLaunchBatchOps = [](ncclComm*, ncclCeBatchOpsParams*, hipStream_t, ncclCeCollArgs*) {
       return ncclSuccess;
     };
-  }
-
-  void TearDown() override {
-    ncclMemoryStackDestruct(&comm_->memPermanent);
-    RmaCeInitTest::TearDown();
   }
 };
 
@@ -644,11 +685,9 @@ TEST_F(RmaCePutLaunchTest, PutLaunch_NonPersistentPlanWithTasks_SizesBatchesPerR
   task->peer = 0;
   ncclIntruQueueEnqueue(&plan_->rmaTaskQueueCe, task);
 
-  ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr);
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
-  ASSERT_GE(initCapacities_.size(), 2u);
-  EXPECT_EQ(initCapacities_[0], kNRanks);
-  EXPECT_EQ(initCapacities_[1], kNRanks);
+  EXPECT_EQ(initCapacities_, (std::vector<int>{kNRanks, kNRanks}));
 }
 
 // A failure inside the chosen path is the dispatcher's result; it does not
@@ -676,6 +715,7 @@ struct MemOp {
   unsigned operation;
   const void* address;
   uint64_t value;
+  unsigned flags;   // the wait predicate; GEQ vs EQ is not otherwise observable
 };
 struct Submission {
   enum Kind { kMemOps, kBatch };
@@ -687,17 +727,12 @@ struct Submission {
 // Drives one non-persistent put launch and records everything it enqueued.
 // Tasks are grouped by peer and issued a round at a time, one task per peer per
 // round, so the shape of this log is the unit's contract.
-class RmaCeNonPersistTest : public RmaCeInitTest {
+class RmaCeNonPersistTest : public RmaCeLaunchFixture {
 protected:
-  std::unique_ptr<ncclKernelPlan> plan_;
-  ncclRmaArgs args_{};
   std::vector<Submission> log_;
-  // Peer addresses handed back per (win, offset) lookup, so a test can tell the
-  // data destination from the signal destination.
-  // The window tasks name for their data. Built by hand rather than registered:
-  // production takes it from the task, so nothing in this unit creates it. Same
-  // shape a registration produces -- one image per LSA rank, keyed by
-  // ipcPeerPtrs -- so the real ncclDevrGetLsaRankPtr resolves against it.
+  // The window tasks name for their data. Built by hand -- nothing in this unit
+  // creates it -- in the shape a registration produces, so the real
+  // ncclDevrGetLsaRankPtr resolves against it.
   ncclDevrWindow dataWin_{};
   std::vector<void*> dataPeerPtrs_;
   std::vector<uint64_t> peerData_;
@@ -722,15 +757,8 @@ protected:
   }
 
   void SetUp() override {
-    RmaCeInitTest::SetUp();
-    ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
-
-    ncclMemoryStackConstruct(&comm_->memPermanent);
-    ncclMemoryPoolConstruct(&comm_->memPool_ncclTaskRma);
+    RmaCeLaunchFixture::SetUp();
     srcBuf_.assign(8, 0);
-
-    plan_ = std::make_unique<ncclKernelPlan>();
-    plan_->rmaArgs = &args_;
     plan_->persistent = false;
 
     // Signal lookups resolve against the window ncclRmaCeInit registered, whose
@@ -757,30 +785,29 @@ protected:
         // The wait and write forms share a layout, so one read covers both.
         s.memOps.push_back({ops[i].writeValue.operation,
                             reinterpret_cast<const void*>(ops[i].writeValue.address),
-                            ops[i].writeValue.value64});
+                            ops[i].writeValue.value64,
+                            ops[i].writeValue.flags});
       }
       log_.push_back(std::move(s));
       return ncclSuccess;
     };
   }
 
-  void TearDown() override {
-    ncclMemoryStackDestruct(&comm_->memPermanent);
-    RmaCeInitTest::TearDown();
-  }
-
   // Queue one CE task. bytes == 0 means signal-only; signal == false means data-only.
-  void PushTask(int peer, size_t bytes, bool signal, size_t winOffset = 0, int signalIdx = 0) {
+  void PushTask(int peer, size_t bytes, bool signal, size_t winOffset = 0, int signalIdx = 0,
+                ncclDataType_t datatype = ncclUint8, int ctx = 0) {
     auto* t = ncclMemoryPoolAlloc<ncclTaskRma>(&comm_->memPool_ncclTaskRma, &comm_->memPermanent);
     pushed_.push_back(t);
     t->peer = peer;
-    t->count = bytes;
-    t->datatype = ncclUint8;  // one byte per element, so count is the byte count
+    // count is an element count; with the ncclUint8 default it is the byte count.
+    t->count = bytes / ncclTypeSize(datatype);
+    t->datatype = datatype;
     t->srcBuff = srcBuf_.data();
     t->peerWinHost = &dataWin_;
     t->peerWinOffset = winOffset;
     t->signalMode = signal ? NCCL_SIGNAL : NCCL_SIGNAL_NONE;
     t->signalIdx = signalIdx;
+    t->ctx = ctx;
     ncclIntruQueueEnqueue(&plan_->rmaTaskQueueCe, t);
     args_.nRmaTasksCe++;
   }
@@ -815,8 +842,9 @@ TEST_F(RmaCeNonPersistTest, NonPersist_OneDataTask_CopiesTaskBufferToResolvedPee
 
 // Tasks for different peers travel together: one round, one op per peer.
 TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRound) {
-  PushTask(/*peer=*/1, 32, false);
-  PushTask(/*peer=*/3, 48, false);
+  PushTask(/*peer=*/1, 32, /*signal=*/true);
+  PushTask(/*peer=*/3, 48, /*signal=*/true);
+  ncclRmaCeCtx* ceCtx = Ctx(0);
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
@@ -825,6 +853,14 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
   ASSERT_EQ(batches[0].size(), 2u);
   EXPECT_EQ(batches[0][0].dst, PeerData(1));
   EXPECT_EQ(batches[0][1].dst, PeerData(3));
+
+  // Both peers signal in the same round, so each takes its own staging slot --
+  // sharing one would make the second overwrite the first.
+  ASSERT_EQ(batches[1].size(), 2u);
+  EXPECT_EQ(batches[1][0].src, &ceCtx->signalOpSeqsDev[0]);
+  EXPECT_EQ(batches[1][1].src, &ceCtx->signalOpSeqsDev[1]);
+  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(1, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(3, ceCtx->signalOffset));
 }
 
 // Two tasks for the same peer cannot share a batch, because a batched copy does
@@ -855,7 +891,9 @@ TEST_F(RmaCeNonPersistTest, NonPersist_SignallingTask_StagesSequenceBeforeCopyin
   EXPECT_EQ(log_[1].kind, Submission::kBatch);   // data
   EXPECT_EQ(log_[2].kind, Submission::kBatch);   // signal
   ASSERT_EQ(log_[2].ops.size(), 1u);
-  EXPECT_EQ(log_[2].ops[0].dst, PeerWin(2) + kLsaSelf);
+  EXPECT_EQ(log_[2].ops[0].dst, SelfSlotIn(2, Ctx(0)->signalOffset));
+  // Copied from the slot that was just staged, not from a constant.
+  EXPECT_EQ(log_[2].ops[0].src, &Ctx(0)->signalOpSeqsDev[0]);
   EXPECT_EQ(log_[2].ops[0].size, sizeof(uint64_t));
 }
 
@@ -872,6 +910,40 @@ TEST_F(RmaCeNonPersistTest, NonPersist_RepeatedSignalsToSamePeer_AdvanceTheSeque
     for (const auto& op : s.memOps) staged.push_back(op.value);
   }
   EXPECT_EQ(staged, (std::vector<uint64_t>{1, 2}));
+}
+
+// The context a task names is the one whose signal buffer it raises. With one
+// configured context every selection collapses to context 0, so this configures
+// two and signals through the second.
+TEST_F(RmaCeNonPersistTest, NonPersist_TaskNamesSecondContext_SignalsThatContext) {
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  comm_->config.numRmaCtx = 2;
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  PushTask(/*peer=*/1, 0, /*signal=*/true, /*winOffset=*/0, /*signalIdx=*/0,
+           ncclUint8, /*ctx=*/1);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  // The staged sequence is bumped on context 1, and context 0 is untouched.
+  ASSERT_EQ(log_.size(), 3u);
+  ASSERT_EQ(log_[2].ops.size(), 1u);
+  EXPECT_EQ(log_[2].ops[0].src, &Ctx(1)->signalOpSeqsDev[0]);
+  EXPECT_EQ(Ctx(1)->signalOpSeqs[SignalSlot(0, 1)], 1u);
+  EXPECT_EQ(Ctx(0)->signalOpSeqs[SignalSlot(0, 1)], 0u);
+}
+
+// count is an element count, not a byte count: the unit multiplies by the
+// datatype's size. With the uint8 default the two coincide, so this uses floats.
+TEST_F(RmaCeNonPersistTest, NonPersist_WideDatatype_CopiesElementCountTimesElementSize) {
+  PushTask(/*peer=*/1, /*bytes=*/64, /*signal=*/false, /*winOffset=*/0, /*signalIdx=*/0,
+           ncclFloat32);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);
+  ASSERT_EQ(batches[0].size(), 1u);
+  EXPECT_EQ(batches[0][0].size, 16u * sizeof(float));   // 16 elements, not 16 bytes
 }
 
 // A task carrying no bytes is signal-only: nothing is copied for it.
@@ -901,11 +973,9 @@ TEST_F(RmaCeNonPersistTest, NonPersist_FailsMidRound_ReturnsQueuedTasksToThePool
 
   EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
 
-  // All four tasks come back, not just the two the unit had already finished
-  // with. The pool starts empty, so the free list is exactly what was returned:
-  // asserting its size as well as its contents is what makes dropping the
-  // cleanup loop visible -- the two tasks freed on the way in would otherwise
-  // leave the list non-empty and any weaker check would still pass.
+  // All four come back, not just the two the unit had already finished with.
+  // The pool starts empty, so the free list is exactly what was returned; the
+  // size check is what makes dropping the cleanup loop visible.
   auto freeList = PoolFreeList();
   ASSERT_EQ(freeList.size(), 4u);
   for (size_t i = 0; i < pushed_.size(); i++) {
@@ -938,11 +1008,9 @@ TEST_F(RmaCeNonPersistTest, NonPersist_NonZeroSignalIndex_TargetsTheIndexedSlot)
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
-  // lsaSelf is 0, so the offset into the peer's window is the signal index times
-  // one rank-stride: kSigIdx * kLsaSize slots past the peer's own base.
   ASSERT_EQ(log_.size(), 3u);
   ASSERT_EQ(log_[2].ops.size(), 1u);
-  EXPECT_EQ(log_[2].ops[0].dst, PeerWin(kPeer) + kSigIdx * kLsaSize + kLsaSelf);
+  EXPECT_EQ(log_[2].ops[0].dst, SelfSlotIn(kPeer, ceCtx->signalOffset, kSigIdx));
   // And the counter bumped is the one for (kSigIdx, peer), not the one for peer.
   EXPECT_EQ(ceCtx->signalOpSeqs[SignalSlot(kSigIdx, kPeer)], 1u);
   EXPECT_EQ(ceCtx->signalOpSeqs[LsaOf(kPeer)], 0u);   // index 0 is a different slot
@@ -1009,8 +1077,7 @@ TEST_F(RmaCePersistTest, Persist_SignallingTask_WaitsForAckAndClearsItBeforeCopy
 TEST_F(RmaCePersistTest, Persist_SignallingTask_CopiesDeviceConstantToGraphSignalSlot) {
   PushTask(/*peer=*/1, /*bytes=*/0, /*signal=*/true);
   ncclRmaCeCtx* ceCtx = Ctx(0);
-  const char* expectedDst = reinterpret_cast<char*>(PeerWin(1)) +
-                            ceCtx->graphSignalOffset + kLsaSelf * sizeof(uint64_t);
+  const char* expectedDst = SelfSlotIn(1, ceCtx->graphSignalOffset);
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
@@ -1032,10 +1099,9 @@ TEST_F(RmaCePersistTest, Persist_NonSignallingTask_SubmitsNoAckHandshake) {
 }
 
 // One batch pair per task, in queue order, with no grouping across peers. Two
-// different peers is what shows it: the non-persistent path would put both into
-// a single round's data batch (see NonPersist_TasksForDifferentPeers_...), while
-// this path issues a pair each. Same-peer input cannot tell the two apart --
-// both emit four batches.
+// different peers is what shows it: the non-persistent path batches both into
+// one round, this one issues a pair each. Same-peer input cannot tell them
+// apart -- both emit four batches.
 TEST_F(RmaCePersistTest, Persist_TasksForDifferentPeers_IssueOneBatchPairEach) {
   PushTask(/*peer=*/1, 32, false);
   PushTask(/*peer=*/3, 48, false);
@@ -1095,9 +1161,7 @@ TEST_F(RmaCePersistTest, Persist_NonZeroSignalIndex_UsesTheIndexedAckAndSignalSl
   auto batches = Batches();
   ASSERT_EQ(batches.size(), 2u);
   ASSERT_EQ(batches[1].size(), 1u);
-  const char* expected = reinterpret_cast<char*>(PeerWin(kPeer)) +
-                         ceCtx->graphSignalOffset +
-                         (kSigIdx * kLsaSize + kLsaSelf) * sizeof(uint64_t);
+  const char* expected = SelfSlotIn(kPeer, ceCtx->graphSignalOffset, kSigIdx);
   EXPECT_EQ(batches[1][0].dst, expected);
 }
 
@@ -1156,6 +1220,9 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_NonPersistent_WaitsOncePerPeerInOneBatch)
   EXPECT_EQ(log_[0].memOps[0].operation, hipStreamMemOpWaitValue64);
   EXPECT_EQ(log_[0].memOps[0].address, &ceCtx->signalsDev[SignalSlot(0, 1)]);
   EXPECT_EQ(log_[0].memOps[0].value, 2u);
+  // GEQ, not EQ: the running total can be overshot by design, and an exact
+  // match would hang.
+  EXPECT_EQ(log_[0].memOps[0].flags, unsigned(hipStreamWaitValueGte));
   EXPECT_EQ(log_[0].memOps[1].address, &ceCtx->signalsDev[SignalSlot(0, 3)]);
   EXPECT_EQ(log_[0].memOps[1].value, 5u);
 }
@@ -1206,8 +1273,7 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_Persistent_AcksSenderSlotWithDeviceConsta
   plan_->persistent = true;
   PushWaitTask({1}, {1});
   ncclRmaCeCtx* ceCtx = Ctx(0);
-  const char* expectedAck = reinterpret_cast<char*>(PeerWin(1)) +
-                            ceCtx->graphAckOffset + kLsaSelf * sizeof(uint64_t);
+  const char* expectedAck = SelfSlotIn(1, ceCtx->graphAckOffset);
 
   ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
@@ -1230,13 +1296,10 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_SignalModeNone_SubmitsNothing) {
 }
 
 // DEFECT PINNED, not endorsed: the graph arm submits each cycle's wait before
-// resolving the ack address, so a failure there returns with waits already on the
-// stream. The caller gets an error for an operation that is partly in flight,
-// which is the same hazard rma.cc hits when it skips its closing join.
-//
-// Pinned here rather than fixed: repairing the ordering in rma_ce.cc will fail
-// this test, which is the point -- it should change together with the fix. Both
-// hazards are written up on #11581; neither has a Jira ticket yet.
+// resolving the ack address, so a failure returns with waits already on the
+// stream -- the same hazard rma.cc hits when it skips its closing join.
+// Fixing the ordering will fail this test, which is the point: it changes with
+// the fix. Both are written up on #11581; neither has a Jira ticket yet.
 TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentAckResolutionFails_LeavesWaitsOnTheStream) {
   plan_->persistent = true;
   PushWaitTask({1}, {1});
@@ -1281,9 +1344,7 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentNonZeroSignalIndex_UsesTheIndex
   ASSERT_EQ(log_[0].memOps.size(), 2u);
   EXPECT_EQ(log_[0].memOps[0].address, &ceCtx->graphSignalsDev[SignalSlot(kSigIdx, kPeer)]);
 
-  const char* expectedAck = reinterpret_cast<char*>(PeerWin(kPeer)) +
-                            ceCtx->graphAckOffset +
-                            (kSigIdx * kLsaSize + kLsaSelf) * sizeof(uint64_t);
+  const char* expectedAck = SelfSlotIn(kPeer, ceCtx->graphAckOffset, kSigIdx);
   ASSERT_EQ(log_[1].ops.size(), 1u);
   EXPECT_EQ(log_[1].ops[0].dst, expectedAck);
 }

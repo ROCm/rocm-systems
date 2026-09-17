@@ -61,7 +61,6 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
   fakes/rma_fakes.cc                   # rma proxy/CE externals (circular-buf, destroy, launchers)
-  fakes/ce_fakes.cc                    # src/ce_coll.cc (batch-ops params + launch)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
   fakes/utils_fakes.cc                 # src/misc/utils.cc (targets without the real utils.cc)
@@ -69,7 +68,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
   fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-  fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
+  fakes/ce_fakes.cc                    # src/ce_coll.cc availability + batch-ops seams
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
   fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
   fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
