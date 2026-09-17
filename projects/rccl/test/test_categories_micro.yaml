@@ -14,6 +14,7 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # transport/p2p.cc
       - "P2pMicrotest.*"
       - "P2pMicrotestIsolated.*"
       - "P2pCanConnectMicrotest.*"
@@ -31,16 +32,22 @@ test_categories:
       - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      # ras/ras.cc
       - "RasMicrotest.*"
+      # ras/diagnostics_checks_common.cc
       - "RasDiagnosticsCommonMicrotest.*"
+      # ras/client.cc
       - "RasClientMicrotest.*"
+      # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
       - "RmaProxyLaunchTest.*"
       - "RmaProxyQueueTest.*"
       - "RmaProxyParamsTest.*"
       - "RmaProxyReclaimTest.*"
+      # rma/rma_proxy_progress.cc
       - "RmaProxyProgressTest.*"
+      # rma/rma_ce.cc
       - "RmaCeLaunchTest.*"
       - "RmaCeInitTest.*"
       - "RmaCeFinalizeTest.*"
@@ -48,6 +55,7 @@ test_categories:
       - "RmaCeNonPersistTest.*"
       - "RmaCePersistTest.*"
       - "RmaCeWaitLaunchTest.*"
+      # rma/rma.cc
       - "RmaWaitSignalTest.*"
       - "RmaPutTest.*"
       - "RmaLaunchTest.*"
@@ -55,11 +63,16 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # group.cc
       - "GroupEndInternalTest.*"
+      # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
+      # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
       - "Compute*"
