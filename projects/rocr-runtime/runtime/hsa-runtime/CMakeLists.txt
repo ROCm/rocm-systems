@@ -260,14 +260,35 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_locks.cpp
             libamdhsacode/amd_options.cpp
             libamdhsacode/amd_hsa_code.cpp
-            lttng/rocm_hsa_tp.cpp
-            # Out-of-line definitions for the curated emit helpers
-            # (declarations in lttng/rocm_trace_emit_curated.h). Self-guarded
-            # on HSA_ENABLE_LTTNG_UST: real tracepoint bodies when set, no-op
-            # stubs otherwise, so the unguarded call sites always link a body
-            # even in an LTTng-disabled build.
-            lttng/rocm_trace_emit_curated.cpp
-            lttng/rocm_trace_init.cpp)
+            lttng/rocm_hsa_tp.cpp)
+
+# Curated-tracepoint backend selector. Within the existing ROCR_ENABLE_LTTNG_UST
+# enable gate this chooses HOW the curated APIs emit:
+#   classic (default) - LTTNG_UST_TRACEPOINT_EVENT macros + lttng_ust_do_tracepoint,
+#                        via lttng/rocm_trace_emit_curated.{h,cpp}.
+#   tracelogging      - Microsoft TraceLogging TraceLoggingWrite() against the
+#                        rocm_hsa_tlg provider, via
+#                        tracelogging/rocm_trace_emit_curated.{h,cpp}. Links the
+#                        vendored lttngh (shared/tracelogging) and lttng-ust
+#                        directly (no dynamic-loading provider DSO).
+# This is a backend swap, not a third coexisting enable option.
+set(ROCR_LTTNG_BACKEND "classic" CACHE STRING
+    "Curated-tracepoint backend: 'classic' (LTTNG_UST macros) or 'tracelogging'")
+set_property(CACHE ROCR_LTTNG_BACKEND PROPERTY STRINGS classic tracelogging)
+if(ROCR_LTTNG_BACKEND STREQUAL "tracelogging")
+  target_sources(${CORE_RUNTIME_TARGET} PRIVATE
+      tracelogging/rocm_trace_emit_curated.cpp
+      tracelogging/rocm_trace_init.cpp)
+else()
+  # Out-of-line definitions for the curated emit helpers
+  # (declarations in lttng/rocm_trace_emit_curated.h). Self-guarded on
+  # HSA_ENABLE_LTTNG_UST: real tracepoint bodies when set, no-op stubs
+  # otherwise, so the unguarded call sites always link a body even in an
+  # LTTng-disabled build.
+  target_sources(${CORE_RUNTIME_TARGET} PRIVATE
+      lttng/rocm_trace_emit_curated.cpp
+      lttng/rocm_trace_init.cpp)
+endif()
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
@@ -483,6 +504,27 @@ or 'direct' (legacy fallback, hsa-runtime64 links liblttng-ust directly)")
           ${LTTNG_VENDORED_INCLUDE_DIR})
       set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
 
+      if(ROCR_LTTNG_BACKEND STREQUAL "tracelogging")
+        # TraceLogging backend: put tracelogging/ FIRST on the include path so
+        # the call sites (rocm_trace_emit.h -> "rocm_trace_emit_curated.h")
+        # resolve to the generated TraceLogging curated header instead of the
+        # classic one. Then build the vendored lttngh helper and link it.
+        # TraceLogging requires direct lttng-ust linkage (the provider is
+        # defined in-DSO), so force direct mode regardless of
+        # ROCR_LTTNG_UST_LINK_MODE.
+        target_include_directories(${CORE_RUNTIME_TARGET} BEFORE PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tracelogging)
+        set(TRACELOGGING_VENDORED_ROOT
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/tracelogging"
+            CACHE PATH "Path to shared vendored tracelogging tree")
+        set(TRACELOGGING_VENDORED_SRC "${TRACELOGGING_VENDORED_ROOT}/tracelogging-src")
+        set(TRACELOGGING_VENDORED_UST_INCLUDE "${LTTNG_VENDORED_INCLUDE_DIR}")
+        include(${TRACELOGGING_VENDORED_ROOT}/cmake/VendorTracelogging.cmake)
+        target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE rocm_tracelogging)
+        # lttngh calls into liblttng-ust + liblttng-ust-tracepoint at runtime.
+        set(ROCR_LTTNG_UST_LINK_MODE "direct")
+      endif()
+
       # Build the runtime only after the vendored libs exist (the .pc query
       # above happens at configure time, but the actual .so/header files are
       # only produced when the lttng_ust_vendored ExternalProject runs at
@@ -548,9 +590,15 @@ or 'direct' (legacy fallback, hsa-runtime64 links liblttng-ust directly)")
         target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LTTNG_VENDORED_LIB_DIR})
         target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
             PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
+        if(ROCR_LTTNG_BACKEND STREQUAL "tracelogging")
+          # lttngh (vendored TraceLogging helper) calls lttng_ust_tracepoint_*
+          # from liblttng-ust-tracepoint; PkgConfig::LTTNG_UST does not carry it.
+          target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
+              "-Wl,--no-as-needed" lttng-ust-tracepoint)
+        endif()
 
         # RPATH:
-        #   BUILD_RPATH   — let in-tree tests find the vendored .so files.
+        #   BUILD_RPATH — let in-tree tests find the vendored .so files.
         #   INSTALL_RPATH — at /opt/rocm/lib/libhsa-runtime64.so, the
         #                   vendored libs sit directly in /opt/rocm/lib/.
         # We append rather than overwrite because rocr-runtime sets RPATH

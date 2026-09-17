@@ -127,15 +127,29 @@ target_sources(amdhip64 PRIVATE
   hip_table_interface_c.cpp
   hip_comgr_helper.cpp
   hip_library.cpp
+  profiler/hip_clr_profiler.cpp
+  profiler/hip_clr_dispatch_wrappers.cpp)
+
+# Curated-tracepoint backend selector (see ROCR_LTTNG_BACKEND on the HSA side).
+# Within the existing HIP_ENABLE_LTTNG_UST enable gate this chooses HOW the
+# curated APIs emit: 'classic' (LTTNG_UST macros, lttng/rocm_trace_emit_curated.cpp)
+# or 'tracelogging' (TraceLoggingWrite against rocm_hip_tlg,
+# tracelogging/rocm_trace_emit_curated.cpp). Backend swap, not a third option.
+set(HIP_LTTNG_BACKEND "classic" CACHE STRING
+    "Curated-tracepoint backend: 'classic' (LTTNG_UST macros) or 'tracelogging'")
+set_property(CACHE HIP_LTTNG_BACKEND PROPERTY STRINGS classic tracelogging)
+if(HIP_LTTNG_BACKEND STREQUAL "tracelogging")
+  # Out-of-line TraceLoggingWrite emit helpers (real bodies when
+  # HIP_ENABLE_LTTNG_UST is set, no-op stubs otherwise).
+  target_sources(amdhip64 PRIVATE tracelogging/rocm_trace_emit_curated.cpp)
+else()
   # Out-of-line definitions for the curated emit helpers (declarations in
   # lttng/rocm_trace_emit_curated.h). Self-guarded on HIP_ENABLE_LTTNG_UST:
   # real tracepoint bodies when set, no-op stubs otherwise. Compiled
-  # unconditionally (unlike the LTTng-only provider TU added under
-  # if(HIP_ENABLE_LTTNG_UST) below) so the no-op stubs the unguarded call
-  # sites need are always linked in an LTTng-disabled build.
-  lttng/rocm_trace_emit_curated.cpp
-  profiler/hip_clr_profiler.cpp
-  profiler/hip_clr_dispatch_wrappers.cpp)
+  # unconditionally so the no-op stubs the unguarded call sites need are
+  # always linked in an LTTng-disabled build.
+  target_sources(amdhip64 PRIVATE lttng/rocm_trace_emit_curated.cpp)
+endif()
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
@@ -410,15 +424,34 @@ if(HIP_ENABLE_LTTNG_UST)
     # lttng/rocm_hip_tp.cpp is the definition-only TU that actually
     # generates the tracepoint provider probes (LTTNG_UST_TRACEPOINT_
     # CREATE_PROBES / _DEFINE, in direct mode) or the dynamic-linkage
-    # declaration (in dynamic mode); lttng/rocm_trace_init.cpp defines the
-    # runtime-wide kill switch (rocm_hip_trace_g_disabled) that every
-    # call site in rocm_trace_emit.h references, plus the dlmopen
-    # SEGFAULT mitigation constructor. Without both compiled into
-    # amdhip64, the library has undefined references to the tracepoint
-    # symbols and rocm_hip_trace_g_disabled at link/load time.
-    target_sources(amdhip64 PRIVATE
-        lttng/rocm_hip_tp.cpp
-        lttng/rocm_trace_init.cpp)
+    # declaration (in dynamic mode). It defines the CLASSIC rocm_hip
+    # provider (non-curated events); it is used by both backends.
+    target_sources(amdhip64 PRIVATE lttng/rocm_hip_tp.cpp)
+
+    if(HIP_LTTNG_BACKEND STREQUAL "tracelogging")
+      # TraceLogging backend: tracelogging/ FIRST on the include path so the
+      # call sites resolve the generated TraceLogging curated header; the
+      # tracelogging/rocm_trace_init.cpp owns the kill switch + register/
+      # unregister lifecycle. TraceLogging needs direct lttng-ust linkage.
+      target_include_directories(amdhip64 BEFORE PRIVATE
+          ${CMAKE_CURRENT_LIST_DIR}/tracelogging)
+      target_sources(amdhip64 PRIVATE tracelogging/rocm_trace_init.cpp)
+      set(TRACELOGGING_VENDORED_ROOT
+          "${CMAKE_CURRENT_LIST_DIR}/../../../../shared/tracelogging"
+          CACHE PATH "Path to shared vendored tracelogging tree")
+      set(TRACELOGGING_VENDORED_SRC "${TRACELOGGING_VENDORED_ROOT}/tracelogging-src")
+      set(TRACELOGGING_VENDORED_UST_INCLUDE "${LTTNG_VENDORED_INCLUDE_DIR}")
+      include(${TRACELOGGING_VENDORED_ROOT}/cmake/VendorTracelogging.cmake)
+      target_link_libraries(amdhip64 PRIVATE rocm_tracelogging
+          "-Wl,--no-as-needed" lttng-ust-tracepoint)
+      set(HIP_LTTNG_UST_LINK_MODE "direct")
+    else()
+      # classic backend: lttng/rocm_trace_init.cpp defines the runtime-wide
+      # kill switch (rocm_hip_trace_g_disabled) that every call site in
+      # rocm_trace_emit.h references, plus the dlmopen SEGFAULT mitigation
+      # constructor.
+      target_sources(amdhip64 PRIVATE lttng/rocm_trace_init.cpp)
+    endif()
 
     # Build amdhip64 only after the vendored libs exist (the .pc query
     # above happens at configure time, but the actual .so files are only

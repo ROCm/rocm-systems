@@ -3061,6 +3061,7 @@ void Runtime::InitIPCDmaBufSupport() {
 }
 
 extern "C" void __rocm_hsa_tp_init(void);
+extern "C" void __rocm_hsa_tp_fini(void);
 
 void Runtime::LoadTools() {
   typedef bool (*tool_init_t)(::HsaApiTable*, uint64_t, uint64_t, const char* const*);
@@ -3339,6 +3340,12 @@ void Runtime::UnloadTools() {
     unld = (tool_unload_t)os::GetExportAddress(tool_libs_[i - 1], "OnUnload");
     if (unld) unld();
   }
+
+  /* Unregister the tracepoint provider, symmetric with the LoadTools()
+   * registration. On the TraceLogging backend this drops the refcount and,
+   * on the last shutdown of an init/shutdown cycle, unregisters the provider.
+   * On the classic LTTng backend this is a no-op. */
+  __rocm_hsa_tp_fini();
 
   // Reset API table in case some tool doesn't cleanup properly
   hsa_api_table().Reset();

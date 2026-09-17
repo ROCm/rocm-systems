@@ -40,6 +40,13 @@ extern "C" void __rocm_hsa_tp_init(void) {
      * stable. */
 }
 
+/* Symmetric shutdown hook called from Runtime::UnloadTools(). The classic
+ * LTTNG_UST provider is unregistered automatically at DSO teardown, so this is
+ * a no-op here; it exists so the runtime's UnloadTools() call resolves in a
+ * classic-backend build (the TraceLogging backend's variant unregisters the
+ * provider). */
+extern "C" void __rocm_hsa_tp_fini(void) {}
+
 /* Library constructor — runs at dlopen time, before any user code in the
  * runtime is reached. Honors ROCM_LTTNG_UST_DISABLE (the same env var
  * recognized by the HIP provider; one switch silences both) and skips
@@ -81,5 +88,6 @@ extern "C" __attribute__((constructor(101))) void __rocm_hsa_tp_ctor(void) {
 #else
 
 extern "C" void __rocm_hsa_tp_init(void) { /* no-op when LTTng is disabled */ }
+extern "C" void __rocm_hsa_tp_fini(void) { /* no-op when LTTng is disabled */ }
 
 #endif

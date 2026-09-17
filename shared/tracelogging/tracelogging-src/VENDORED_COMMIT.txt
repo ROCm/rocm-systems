@@ -1,0 +1,18 @@
+Vendored from https://github.com/microsoft/tracelogging.git
+Upstream commit: bde9dbf4ba4ce6df90af1d6719460f67c4510ad0
+Subtree taken: LTTng/
+
+Files vendored (complete lttngh static-library file set per LTTng/src/CMakeLists.txt,
+plus the two public headers):
+  include/tracelogging/TraceLoggingProvider.h
+  include/lttngh/LttngHelpers.h
+  src/LttngHelpers.c
+  src/LttngActivityHelpers.c
+  src/LttngNetHelpers.c
+
+LICENSE: MIT (see LICENSE).
+
+Version compatibility: LttngHelpers.h keys off <lttng/ust-version.h>. For the
+project's vendored LTTng-UST 2.13.7 (LTTNG_UST_MINOR_VERSION == 13) it selects
+lttngh_UST_VER 213, its newest supported code path. Verified against the real
+header in this same commit.
