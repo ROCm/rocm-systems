@@ -38,6 +38,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -192,6 +193,7 @@ struct creation_notifier
     std::vector<creation_notifier_cb_t> precreate_callbacks  = {};
     std::vector<creation_notifier_cb_t> postcreate_callbacks = {};
     std::vector<void*>                  user_data            = {};
+    std::vector<uint32_t>               client_ids           = {};
     std::mutex                          mutex                = {};
 };
 
@@ -211,20 +213,41 @@ update_creation_notifiers(creation_notifier_cb_t pre,
                           creation_notifier_cb_t post,
                           int                    libs,
                           void*                  data,
+                          uint32_t               client_id,
                           library_sequence_t<Idx...>)
 {
-    auto update = [pre, post, libs, data](auto& notifier) {
+    auto update = [pre, post, libs, data, client_id](auto& notifier) {
         if(libs == 0 || ((libs & notifier.value) == notifier.value))
         {
-            notifier.mutex.lock();
+            auto lock = std::lock_guard<std::mutex>{notifier.mutex};
             notifier.precreate_callbacks.emplace_back(pre);
             notifier.postcreate_callbacks.emplace_back(post);
             notifier.user_data.emplace_back(data);
-            notifier.mutex.unlock();
+            notifier.client_ids.emplace_back(client_id);
         }
     };
 
     (update(get_creation_notifier<Idx>()), ...);
+}
+
+template <rocprofiler_runtime_library_t... Idx>
+void
+remove_client_creation_notifiers(uint32_t client_id, library_sequence_t<Idx...>)
+{
+    auto remove = [client_id](auto& notifier) {
+        auto lock = std::lock_guard<std::mutex>{notifier.mutex};
+        for(auto i = notifier.client_ids.size(); i > 0; --i)
+        {
+            auto idx = i - 1;
+            if(notifier.client_ids.at(idx) != client_id) continue;
+            notifier.precreate_callbacks.erase(notifier.precreate_callbacks.begin() + idx);
+            notifier.postcreate_callbacks.erase(notifier.postcreate_callbacks.begin() + idx);
+            notifier.user_data.erase(notifier.user_data.begin() + idx);
+            notifier.client_ids.erase(notifier.client_ids.begin() + idx);
+        }
+    };
+
+    (remove(get_creation_notifier<Idx>()), ...);
 }
 
 // invokes creation notifiers
@@ -328,6 +351,13 @@ finalize()
 }
 
 void
+deregister_client_callbacks(uint64_t client_id)
+{
+    remove_client_creation_notifiers(static_cast<uint32_t>(client_id),
+                                     creation_notifier_library_seq);
+}
+
+void
 notify_pre_internal_thread_create(rocprofiler_runtime_library_t libs)
 {
     execute_creation_notifiers<notifier_stage::precreation>(libs, creation_notifier_library_seq);
@@ -404,11 +434,13 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
                                       int                                      libs,
                                       void*                                    data)
 {
+    auto client_id = rocprofiler::context::get_current_client();
     rocprofiler::internal_threading::update_creation_notifiers(
         precreate,
         postcreate,
         libs,
         data,
+        client_id.value_or(std::numeric_limits<uint32_t>::max()),
         rocprofiler::internal_threading::creation_notifier_library_seq);
     return ROCPROFILER_STATUS_SUCCESS;
 }
