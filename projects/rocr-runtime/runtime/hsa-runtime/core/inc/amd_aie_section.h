@@ -8,6 +8,9 @@
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 
 #include <cstdint>
+#include <vector>
+
+#include "core/inc/amd_aie_elf.h"
 
 namespace rocr {
 namespace AMD {
@@ -114,6 +117,20 @@ struct AieKernelDescriptor {
   uint32_t kernarg_size;
   /// @brief Number of NPU columns the kernel uses.
   uint32_t num_cols;
+  /// @brief Pristine control code, in host memory. FullElf only; null for PdiInsts.
+  ///
+  /// The NPU never fetches this -- it is only ever a memcpy source for the per-dispatch
+  /// buffer the driver allocates -- so it needs neither device memory nor alignment.
+  void* ctrl_code;
+  /// @brief Size of @ref ctrl_code in bytes; 0 for PdiInsts.
+  uint64_t ctrl_code_size;
+  /// @brief Number of arguments the control code references. FullElf only.
+  uint32_t num_args;
+  /// @brief Argument patch sites, flattened; sites for argument @c i are
+  /// [arg_site_offset[i], arg_site_offset[i + 1]).
+  std::vector<aie_elf::PatchSite> arg_sites;
+  /// @brief Index into @ref arg_sites per argument; size is @ref num_args + 1.
+  std::vector<uint32_t> arg_site_offset;
 };
 
 /// @brief Current AieKernelDescriptor::version value.

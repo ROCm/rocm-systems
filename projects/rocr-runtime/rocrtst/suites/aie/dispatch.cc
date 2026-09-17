@@ -1532,8 +1532,8 @@ void DispatchMulAndVerify(hsa_queue_t* queue, const kernel_artifacts& artifacts,
 //
 // The suite's CMake packages the vsadd PDI+insts artifacts above into a single
 // AIE hsaco (kind = PdiInsts) via aie_hsaco.py, so this test can exercise
-// hsa_executable_load_agent_code_object end to end. Full-ELF hsacos (kind =
-// FullElf) are not supported by the loader yet; that lands in Task 5.
+// hsa_executable_load_agent_code_object end to end. The suite also packages the vsadd full-ELF
+// artifact into a second hsaco (kind = FullElf); see the HsacoFullElf* tests below.
 // ---------------------------------------------------------------------------
 const std::filesystem::path kHsacoPath = STRINGIFY(DEFAULT_HSACO_PATH);
 constexpr const char* kHsacoKernelName = DEFAULT_HSACO_KERNEL_NAME;
@@ -1648,10 +1648,12 @@ std::size_t FindKindFieldOffset(const std::vector<std::uint8_t>& hsaco) {
 }
 
 // Closes I-4/Concern-2: the kind-validation switch in LoadAieCodeObject (executable.cpp) is
-// otherwise unreachable in this suite, since aie_hsaco.py always packages kind=PdiInsts and
-// refuses to emit anything else. Reaching kind=FullElf (unsupported until Task 5) and an unknown
-// kind therefore requires corrupting an already-built hsaco's bytes directly; no toolchain
-// support for either value is needed to do that.
+// otherwise unreachable via this hsaco, since aie_hsaco.py packages it with kind=PdiInsts.
+// kind=FullElf is exercised for real by HsacoFullElfLoads below; here it is reached by corrupting
+// an already-built PdiInsts hsaco's bytes directly, which still must fail -- a PdiInsts kernel
+// table entry patched to claim kind=FullElf does not contain a nested ELF, so the load now fails
+// while trying to parse the (non-ELF) insts blob as one, rather than at the kind-range check
+// itself. The unknown-kind (99) half still fails at the kind-range check, unchanged.
 TEST_F(DispatchTest, AieKindIsValidated) {
   if (!hsaco_available()) {
     GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
@@ -1934,6 +1936,124 @@ class FullElfDispatchTest : public DispatchTest {
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
   }
 };
+
+// ---------------------------------------------------------------------------
+// Unified hsaco loader: FullElf
+//
+// The suite's CMake packages the vsadd full-ELF artifact into a single AIE hsaco (kind =
+// FullElf) via aie_hsaco.py's "elf:" kernel spec, so these tests can exercise
+// hsa_executable_load_agent_code_object on the FullElf path added by Task 5, mirroring the
+// PdiInsts coverage above (HsacoKernelObjectIsPublished, AieKindIsValidated).
+// ---------------------------------------------------------------------------
+const std::filesystem::path kElfHsacoPath = STRINGIFY(DEFAULT_ELF_HSACO_PATH);
+constexpr const char* kElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
+
+// The build skips packaging this hsaco when the toolchain cannot produce a full ELF; mirrors
+// hsaco_available() above.
+bool elf_hsaco_available() { return std::filesystem::exists(kElfHsacoPath); }
+
+// Reads the whole hsaco file into memory. Returns an empty vector on failure; callers are
+// expected to have already checked elf_hsaco_available().
+std::vector<std::uint8_t> elf_hsaco_bytes() {
+  std::size_t size = 0;
+  auto f = open_binary(kElfHsacoPath, &size);
+  if (!f) return {};
+  std::vector<std::uint8_t> buf(size);
+  if (!read_exact(f, buf.data(), size)) return {};
+  return buf;
+}
+
+// Loads `bytes` as a code object reader against `agent` and returns the load status without
+// asserting on it, so a caller can check a specific failure code. On success, `executable` and
+// `reader` are left open for the caller to inspect and destroy; on failure, both are already
+// destroyed.
+hsa_status_t TryLoad(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent,
+                     hsa_executable_t* executable, hsa_code_object_reader_t* reader) {
+  if (hsa_code_object_reader_create_from_memory(bytes.data(), bytes.size(), reader) !=
+      HSA_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  if (hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                executable) != HSA_STATUS_SUCCESS) {
+    hsa_code_object_reader_destroy(*reader);
+    return HSA_STATUS_ERROR;
+  }
+
+  const hsa_status_t status =
+      hsa_executable_load_agent_code_object(*executable, agent, *reader, nullptr, nullptr);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_executable_destroy(*executable);
+    hsa_code_object_reader_destroy(*reader);
+  }
+  return status;
+}
+
+// Loads `bytes` and freezes the resulting executable; asserts on every step, since the tests that
+// use this only care about what happens after a known-good load. Leaves `executable` and `reader`
+// open for the caller to inspect and destroy.
+void LoadAndFreeze(const std::vector<std::uint8_t>& bytes, hsa_agent_t agent,
+                   hsa_executable_t* executable, hsa_code_object_reader_t* reader) {
+  ASSERT_EQ(TryLoad(bytes, agent, executable, reader), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_executable_freeze(*executable, nullptr), HSA_STATUS_SUCCESS);
+}
+
+// Returns a copy of the FullElf hsaco with its (only) kernel table entry's name replaced by a
+// name the nested ELF does not contain, so the loader must fail after successfully parsing the
+// ELF rather than while locating the AIE section. The replacement is the same length as the
+// original name plus its NUL, so no other offset in the section needs to move.
+std::vector<std::uint8_t> BadNameHsaco() {
+  auto hsaco = elf_hsaco_bytes();
+  if (hsaco.empty()) return {};
+
+  const std::string original_name = kElfHsacoKernelName;
+  const std::string bad_name(original_name.size(), 'z');
+
+  const auto it = std::search(hsaco.begin(), hsaco.end(), original_name.begin(),
+                              original_name.end());
+  if (it == hsaco.end()) return {};
+  std::copy(bad_name.begin(), bad_name.end(), it);
+  return hsaco;
+}
+
+TEST_F(FullElfDispatchTest, HsacoFullElfLoads) {
+  if (!elf_hsaco_available()) {
+    GTEST_SKIP() << "elf hsaco was not built: " << kElfHsacoPath;
+  }
+
+  const auto hsaco = elf_hsaco_bytes();
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kElfHsacoPath;
+
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  ASSERT_NO_FATAL_FAILURE(LoadAndFreeze(hsaco, aie_agents.front(), &executable, &reader));
+
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(hsa_executable_get_symbol_by_name(executable, kElfHsacoKernelName, &aie_agents.front(),
+                                              &symbol),
+            HSA_STATUS_SUCCESS);
+  std::uint64_t kernel_object = 0;
+  ASSERT_EQ(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                           &kernel_object),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(kernel_object, 0u) << "kernel object must be published after freeze";
+
+  EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(FullElfDispatchTest, HsacoFullElfRejectsUnknownKernelName) {
+  if (!elf_hsaco_available()) {
+    GTEST_SKIP() << "elf hsaco was not built: " << kElfHsacoPath;
+  }
+
+  const auto bad_hsaco = BadNameHsaco();
+  ASSERT_FALSE(bad_hsaco.empty()) << "failed to build a corrupted copy of " << kElfHsacoPath;
+
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  EXPECT_EQ(TryLoad(bad_hsaco, aie_agents.front(), &executable, &reader),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+}
 
 TEST_F(FullElfDispatchTest, ElfParse) {
   // The vector-scalar-add design has one PDI and two buffer arguments.

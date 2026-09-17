@@ -314,6 +314,27 @@ add_custom_command(
 )
 add_custom_target(vsadd_hsaco_artifact DEPENDS "${vsadd_HSACO}")
 
+# Packages the vsadd full-ELF artifact into a single AIE hsaco with kind=FullElf, so the
+# loader test in dispatch.cc can exercise hsa_executable_load_agent_code_object on a
+# FullElf hsaco. The path is set unconditionally (mirroring vsadd_FULL_ELF above) so the test's
+# file-existence check has something to point at; the packaging command itself only runs when the
+# toolchain can emit full ELFs.
+set(vsadd_ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
+if(AIE_FULL_ELF_SUPPORTED)
+  add_custom_command(
+    OUTPUT "${vsadd_ELF_HSACO}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+            --hsaco "${vsadd_ELF_HSACO}"
+            --arch "${AIE_HSACO_ARCH}"
+            --kernel "elf:${vsadd_FULL_ELF}:0:1"
+    # Depend on the target, not its output files: see the vsadd_HSACO rule above for why.
+    DEPENDS vsadd_full_elf_artifacts
+    COMMENT "Packaging vsadd full-ELF artifact into a unified AIE hsaco"
+    VERBATIM
+  )
+  add_custom_target(vsadd_elf_hsaco_artifact DEPENDS "${vsadd_ELF_HSACO}")
+endif()
+
 # ---------------------------------------------------------------------------
 # dispatch test executable
 # ---------------------------------------------------------------------------
@@ -352,6 +373,10 @@ target_compile_definitions(dispatch
     MUL_SCALE=${VSMUL_SCALE}
     DEFAULT_HSACO_PATH=${vsadd_HSACO}
     DEFAULT_HSACO_KERNEL_NAME="${VSADD_HSACO_KERNEL_NAME}"
+    DEFAULT_ELF_HSACO_PATH=${vsadd_ELF_HSACO}
+    # Same "<device>:<sequence>" kernel key as DEFAULT_ELF_KERNEL_NAME above; aie_hsaco.py's elf:
+    # form derives the hsaco's kernel name from the same underlying ELF, so the two must match.
+    DEFAULT_ELF_HSACO_KERNEL_NAME="main:sequence"
 )
 target_link_libraries(dispatch
   PRIVATE
@@ -365,6 +390,9 @@ add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hs
 # function never defined.
 if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
   add_dependencies(dispatch ${vsadd_FULL_ELF_TARGET} ${vsmul_FULL_ELF_TARGET})
+endif()
+if(AIE_FULL_ELF_SUPPORTED)
+  add_dependencies(dispatch vsadd_elf_hsaco_artifact)
 endif()
 
 gtest_discover_tests(dispatch)

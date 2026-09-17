@@ -61,6 +61,7 @@
 #include "inc/amd_hsa_kernel_code.h"
 #include "core/inc/amd_aie_code.hpp"
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aie_elf.h"
 #include "core/inc/amd_aie_section.h"
 #include "core/inc/runtime.h"
 #include "core/inc/amd_elf_image.hpp"
@@ -828,6 +829,10 @@ void AieLoadedCodeObjectImpl::Destroy() {
     owner->context()->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, b.first, b.second);
   }
   device_buffers.clear();
+  // FullElf descriptors own a host allocation (ctrl_code) that SegmentFree above does not touch.
+  for (auto& d : descriptors) {
+    delete[] static_cast<uint8_t*>(d->ctrl_code);
+  }
   descriptors.clear();
 }
 
@@ -1667,6 +1672,24 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // Stage symbols locally; only publish into agent_symbols_ once every blob has
   // been placed, so a mid-loop failure leaves no dangling handles behind. Device
   // buffers already recorded on loaded_obj are freed via Destroy() on failure.
+  // The insts/PDI blobs are immutable after load, so their XDNA BO handles are
+  // stable for the object's lifetime. Resolve once here instead of on every
+  // dispatch. Kernarg BOs are per-dispatch and still resolve at submit.
+  auto resolve_handle = [&](void* va, uint32_t* out_handle) -> hsa_status_t {
+    void* base = nullptr;
+    core::DriverMemoryHandle handle{};
+    if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(va, core_agent, &base,
+                                                                  &handle) != HSA_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+    *out_handle = static_cast<uint32_t>(handle.handle);
+    return HSA_STATUS_SUCCESS;
+  };
+
+  // Nested full ELFs, parsed once per distinct blob (keyed on the blob's address in the
+  // caller's hsaco buffer) and cached across kernel-table entries that share one embedded ELF.
+  std::map<const uint8_t*, std::map<std::string, AMD::aie_elf::Kernel>> parsed_elfs;
+
   std::vector<std::shared_ptr<AieKernelSymbol>> staged_symbols;
   staged_symbols.reserve(kernel_names.size());
   for (const auto& kernel_name : kernel_names) {
@@ -1676,58 +1699,130 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       loaded_obj->Destroy();
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
-    if (ki->kind != AMD::AieKernelKind::PdiInsts) {
-      // FullElf arrives in Task 5.
-      log_warning_n(10, "AIE: full-ELF payloads are not supported by this build.\n");
-      loaded_obj->Destroy();
-      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-    }
-
-    void* insts_dev = nullptr;
-    void* pdi_dev = nullptr;
-    if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev); s != HSA_STATUS_SUCCESS) {
-      loaded_obj->Destroy();
-      return s;
-    }
-    if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS) {
-      loaded_obj->Destroy();
-      return s;
-    }
-
-    // The insts/PDI blobs are immutable after load, so their XDNA BO handles are
-    // stable for the object's lifetime. Resolve once here instead of on every
-    // dispatch. Kernarg BOs are per-dispatch and still resolve at submit.
-    auto resolve_handle = [&](void* va, uint32_t* out_handle) -> hsa_status_t {
-      void* base = nullptr;
-      core::DriverMemoryHandle handle{};
-      if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(va, core_agent, &base,
-                                                                    &handle) != HSA_STATUS_SUCCESS) {
-        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-      }
-      *out_handle = static_cast<uint32_t>(handle.handle);
-      return HSA_STATUS_SUCCESS;
-    };
 
     auto desc = std::make_unique<AMD::AieKernelDescriptor>();
     desc->version = AMD::kAieKernelDescriptorVersion;
     desc->kind = ki->kind;
     desc->reserved0 = 0;
-    desc->insts_bo_va = insts_dev;
-    desc->insts_size = ki->insts_size;
-    if (auto s = resolve_handle(insts_dev, &desc->insts_bo_handle); s != HSA_STATUS_SUCCESS) {
-      loaded_obj->Destroy();
-      return s;
-    }
-    desc->pdi_bo_handle = 0;
-    if (pdi_dev != nullptr) {
-      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+    desc->kernarg_size = ki->kernarg_size;
+    desc->num_cols = ki->num_cols;
+    desc->ctrl_code = nullptr;
+    desc->ctrl_code_size = 0;
+    desc->num_args = 0;
+
+    if (ki->kind == AMD::AieKernelKind::PdiInsts) {
+      void* insts_dev = nullptr;
+      void* pdi_dev = nullptr;
+      if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev);
+          s != HSA_STATUS_SUCCESS) {
         loaded_obj->Destroy();
         return s;
       }
+      if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS) {
+        loaded_obj->Destroy();
+        return s;
+      }
+
+      desc->insts_bo_va = insts_dev;
+      desc->insts_size = ki->insts_size;
+      if (auto s = resolve_handle(insts_dev, &desc->insts_bo_handle); s != HSA_STATUS_SUCCESS) {
+        loaded_obj->Destroy();
+        return s;
+      }
+      desc->pdi_bo_handle = 0;
+      if (pdi_dev != nullptr) {
+        if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+          loaded_obj->Destroy();
+          return s;
+        }
+      }
+      desc->pdi_size = ki->pdi_size;
+    } else {
+      // FullElf: ki->insts_data/insts_size locate the nested full ELF, not a device-ready
+      // instruction blob, so this kernel has no insts BO.
+      desc->insts_bo_va = nullptr;
+      desc->insts_size = 0;
+      desc->insts_bo_handle = 0;
+      desc->pdi_bo_handle = 0;
+      desc->pdi_size = 0;
+
+      auto it = parsed_elfs.find(ki->insts_data);
+      if (it == parsed_elfs.end()) {
+        std::map<std::string, AMD::aie_elf::Kernel> kernels;
+        std::string error;
+        const hsa_status_t err =
+            AMD::aie_elf::Parse(ki->insts_data, ki->insts_size, &kernels, &error);
+        if (err != HSA_STATUS_SUCCESS) {
+          log_warning_n(10, "AIE: cannot parse the nested full ELF: %s\n", error.c_str());
+          loaded_obj->Destroy();
+          return err;
+        }
+        it = parsed_elfs.emplace(ki->insts_data, std::move(kernels)).first;
+      }
+
+      const auto kernel_it = it->second.find(kernel_name);
+      if (kernel_it == it->second.end()) {
+        log_warning_n(10, "AIE: the nested ELF has no kernel named '%s'.\n",
+                      kernel_name.c_str());
+        loaded_obj->Destroy();
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+      const AMD::aie_elf::Kernel& kernel = kernel_it->second;
+
+      // The ELF is authoritative on the kernarg layout; a hsaco claiming a different size is a
+      // converter bug, not something the loader can reconcile.
+      if (ki->kernarg_size != 0 &&
+          ki->kernarg_size != kernel.num_args() * sizeof(uint64_t)) {
+        log_warning_n(10,
+                      "AIE: kernarg size mismatch for '%s': hsaco says %u bytes, the ELF wants "
+                      "%zu bytes.\n",
+                      kernel_name.c_str(), ki->kernarg_size,
+                      kernel.num_args() * sizeof(uint64_t));
+        loaded_obj->Destroy();
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+
+      // The control code is only ever a memcpy source for a per-dispatch buffer (Task 6), so
+      // it stays in ordinary host memory rather than a device segment.
+      auto* ctrl_code_host = new uint8_t[kernel.ctrl_code.size()];
+      std::memcpy(ctrl_code_host, kernel.ctrl_code.data(), kernel.ctrl_code.size());
+
+      // Unlike the control code, the PDI is fetched by the NPU, so it needs device memory.
+      void* pdi_dev = nullptr;
+      if (auto s = place_blob(kernel.pdi.data(), kernel.pdi.size(), &pdi_dev);
+          s != HSA_STATUS_SUCCESS) {
+        delete[] ctrl_code_host;
+        loaded_obj->Destroy();
+        return s;
+      }
+      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+        delete[] ctrl_code_host;
+        loaded_obj->Destroy();
+        return s;
+      }
+      desc->pdi_size = kernel.pdi.size();
+
+      // Patch the PDI's device address into the pristine host copy, once, at load -- this is
+      // what deletes the equivalent per-dispatch patch from the driver's submit path. Parse()
+      // already validated that pdi_patch_offset is non-zero, 4-byte aligned, and fits.
+      const uint64_t pdi_addr = reinterpret_cast<uint64_t>(pdi_dev);
+      const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_addr & 0xFFFFFFFFu);
+      const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_addr >> 32);
+      std::memcpy(ctrl_code_host + kernel.pdi_patch_offset, &pdi_addr_lo, sizeof(pdi_addr_lo));
+      std::memcpy(ctrl_code_host + kernel.pdi_patch_offset + sizeof(pdi_addr_lo), &pdi_addr_hi,
+                  sizeof(pdi_addr_hi));
+
+      desc->ctrl_code = ctrl_code_host;
+      desc->ctrl_code_size = kernel.ctrl_code.size();
+      desc->num_args = kernel.num_args();
+      desc->arg_site_offset.reserve(desc->num_args + 1);
+      desc->arg_site_offset.push_back(0);
+      for (const auto& sites : kernel.arg_sites) {
+        desc->arg_sites.insert(desc->arg_sites.end(), sites.begin(), sites.end());
+        desc->arg_site_offset.push_back(static_cast<uint32_t>(desc->arg_sites.size()));
+      }
     }
-    desc->pdi_size = ki->pdi_size;
-    desc->kernarg_size = ki->kernarg_size;
-    desc->num_cols = ki->num_cols;
+
     uint64_t desc_ptr = reinterpret_cast<uint64_t>(desc.get());
     loaded_obj->descriptors.push_back(std::move(desc));
 
