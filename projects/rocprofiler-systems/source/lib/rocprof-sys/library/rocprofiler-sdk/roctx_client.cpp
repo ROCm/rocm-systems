@@ -149,6 +149,16 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
             }
             break;
         }
+        // roctxRangePop/roctxRangeStop close an existing pushed/started range;
+        // their exit-side handlers pop the stack and write its "end" event.
+        // They must not also fall into default's write_begin, which would
+        // open a spurious, never-closed scope nested under the range being
+        // popped and corrupt every subsequent event's nesting.
+        case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop:
+        case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop:
+        {
+            break;
+        }
         default:
         {
             if(write_enabled)

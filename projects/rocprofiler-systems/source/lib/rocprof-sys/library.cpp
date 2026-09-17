@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdint>
+#include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
@@ -33,12 +34,14 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/mpip.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
@@ -55,7 +58,6 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
@@ -267,15 +269,16 @@ struct fini_bundle
     template <typename... Args>
     void start(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        ((tim::operation::start<Tp>{}(std::get<Tp>(m_data),
+                                      std::forward<Args>(_args)...)),
+         ...);
     }
 
     template <typename... Args>
     void stop(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        ((tim::operation::stop<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...)),
+         ...);
     }
 
     std::string as_string(bool _print_prefix = true) const
@@ -677,7 +680,7 @@ rocprofsys_init_tooling_hidden(void)
                 LOG_DEBUG("Pause callback...");
                 rocprofiler_sdk::pause();
                 sampling::pause();
-                component::mpi_gotcha::pause();
+                component::pause_mpip();
                 component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
                 component::vaapi_gotcha::pause();
@@ -691,7 +694,7 @@ rocprofsys_init_tooling_hidden(void)
                 LOG_DEBUG("Resume callback...");
                 rocprofiler_sdk::resume();
                 sampling::resume();
-                component::mpi_gotcha::resume();
+                component::resume_mpip();
                 component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
                 component::vaapi_gotcha::resume();
@@ -894,8 +897,10 @@ rocprofsys_reset_preload_hidden(void)
             if(itr.find("librocprof-sys") != std::string::npos) continue;
             _modified_preload += fmt::format(":{}", itr);
         }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+        if(!_modified_preload.empty() && _modified_preload.starts_with(':'))
+        {
             _modified_preload = _modified_preload.substr(1);
+        }
 
         rocprofsys::set_env("LD_PRELOAD", _modified_preload, 1);
     }
@@ -1049,6 +1054,35 @@ rocprofsys_finalize_hidden(void)
         process_sampler::shutdown();
     }
 
+    // -----------------------------------------------------------------------
+    // Causal-profiling shutdown must happen BEFORE rocprofiler_sdk::shutdown().
+    //
+    // Why: rocprofiler_sdk uses a PTL (Portable Threading Library) thread pool
+    //   whose workers call pthread_cond_wait while waiting for async work.  That
+    //   call is intercepted by blocking_gotcha, which injects causal delay credits
+    //   after every blocking operation.  When the SDK tries to drain its buffers
+    //   and join its workers, the workers are stuck inside the blocking_gotcha
+    //   wrapper; because blocking_gotcha::shutdown() has not yet been called, the
+    //   wrapper keeps accumulating and applying delays and the workers never return
+    //   — a deadlock that prevents the process from shutting down cleanly.
+    //
+    // Fix 1 – disable blocking_gotcha BEFORE the SDK shutdown so that any
+    //   future pthread_cond_wait calls (or in-flight ones completing their
+    //   postblock step) bypass the delay logic and return immediately.
+    //
+    // Fix 2 – write the causal output files BEFORE the SDK shutdown.  This
+    //   ensures output is on disk even if SDK shutdown takes longer than expected.
+    //
+    // -----------------------------------------------------------------------
+    if(get_use_causal())
+    {
+        LOG_DEBUG("Disabling causal blocking interceptors before SDK shutdown...");
+        causal::component::causal_gotcha::shutdown();
+
+        LOG_DEBUG("Writing causal output before SDK shutdown...");
+        causal::finish_experimenting();
+    }
+
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
 
@@ -1151,9 +1185,7 @@ rocprofsys_finalize_hidden(void)
 
     if(get_use_causal())
     {
-        LOG_DEBUG("Finishing the causal experiments...");
-        causal::finish_experimenting();
-
+        LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
         _output_registry.register_file(fmt::format("{}.json", _base),
                                        output_format::causal_json);

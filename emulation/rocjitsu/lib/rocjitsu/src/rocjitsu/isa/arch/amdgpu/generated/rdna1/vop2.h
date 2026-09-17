@@ -27,18 +27,6 @@ private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
-class VDot2cF32F16Vop2 : public Vop2 {
-public:
-  VDot2cF32F16Vop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand vsrc1;
-
-private:
-  void execute_modifier_impl(amdgpu::Wavefront &wf);
-};
-
 class VAddF32Vop2 : public Vop2 {
 public:
   VAddF32Vop2(const MachineInst *inst);
@@ -147,18 +135,6 @@ private:
 class VMulHiU32U24Vop2 : public Vop2 {
 public:
   VMulHiU32U24Vop2(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-  Operand vsrc1;
-
-private:
-  void execute_modifier_impl(amdgpu::Wavefront &wf);
-};
-
-class VDot4cI32I8Vop2 : public Vop2 {
-public:
-  VDot4cI32I8Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;

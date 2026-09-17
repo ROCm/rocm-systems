@@ -3,11 +3,12 @@
 
 /// @file probe_callable.h
 /// @brief Turn a resolved probe symbol into a self-contained, callable probe
-///        body: its instruction words plus a verified calling convention.
+///        body: its instruction words plus its verified ABI.
 
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
 #include <optional>
@@ -19,34 +20,125 @@ namespace rocjitsu {
 class AmdGpuCodeObject;
 struct ResolvedProbeSymbol;
 
-/// @brief The ABI a verified probe body conforms to.
+/// @brief The return-link rule a verified probe body conforms to.
 ///
-/// Only one shape is supported today: a no-argument function that returns
-/// through the s[30:31] link pair. More enums will be added as more
-/// arguments are passed
+/// @details Names only how the body returns. The registers a convention
+/// implies are reported by derive_probe_abi(), so this enum does not carry one
+/// enumerator per combination of the properties an ABI has.
 enum class ProbeCallingConvention {
-  Unknown,                      ///< Not yet verified / unrecognized.
-  AmdGpuFuncNoArgsReturnS30S31, ///< void(void), returns via s_setpc_b64 s[30:31].
+  Unknown,                ///< Not yet verified / unrecognized.
+  AmdGpuFuncReturnS30S31, ///< Returns via s_setpc_b64 s[30:31].
 };
 
-/// @brief The return-link SGPR pair base for a verified calling convention.
-[[nodiscard]] inline constexpr std::optional<uint16_t> link_pair_for(ProbeCallingConvention cc) {
-  switch (cc) {
-  case ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31:
-    return 30;
-  case ProbeCallingConvention::Unknown:
-  default:
+/// @brief A link-pair base no calling convention can select.
+///
+/// @details A 64-bit scalar operand must name an even-aligned register pair, so
+/// an odd base is invalid by construction rather than by convention. Used as
+/// ProbeAbi's default so the field reads as obviously unset to anyone inspecting
+/// one, rather than plausible. Validity does not turn on it -- that is
+/// is_valid_probe_abi()'s job.
+inline constexpr uint16_t kUnsetLinkPairBase = 1;
+
+/// @brief The most argument dwords a probe can be handed in registers.
+///
+/// @details Arguments are delivered one dword per VGPR from arg_vgpr_base. The
+/// convention fills v0 upward through v30 -- v31 is reserved for the packed
+/// workitem id -- so 31 dwords is the most that arrive in registers.
+///
+/// 16 is an arbitrary cap well inside that: the free-register search would
+/// refuse an argument block near 31 long before the convention did, and only
+/// single-dword integer arguments have been measured. Raising it toward 31
+/// needs no ABI change.
+inline constexpr uint8_t kMaxProbeArgVgprs = 16;
+
+/// @brief Where a verified convention places the values the framework, rather
+///        than the probe body, is responsible for producing.
+///
+/// @details Derived from the convention and the declared argument count by
+/// derive_probe_abi(). A POD, so a caller can still build one by hand — the
+/// fail-closed tests rely on being able to — which is why consumers ask
+/// is_valid_probe_abi() rather than trusting the fields.
+struct ProbeAbi {
+  ProbeCallingConvention cc = ProbeCallingConvention::Unknown;
+  uint16_t link_pair_base = kUnsetLinkPairBase; ///< Base of the return-link SGPR pair.
+  uint16_t arg_vgpr_base = 0;                   ///< First VGPR holding an argument dword.
+  uint8_t num_arg_vgprs = 0;                    ///< Argument dwords passed, one per VGPR.
+
+  constexpr bool operator==(const ProbeAbi &) const = default;
+};
+
+/// @brief The ABI @p cc implies when the probe is called with @p num_arg_dwords
+///        argument dwords, or std::nullopt if that pairing is not supported.
+///
+/// @details The count is an input, not a property of the convention: one
+/// convention covers probes of any supported arity.
+[[nodiscard]] inline constexpr std::optional<ProbeAbi>
+derive_probe_abi(ProbeCallingConvention cc, uint8_t num_arg_dwords = 0) {
+  if (num_arg_dwords > kMaxProbeArgVgprs)
     return std::nullopt;
+  // No default case: a convention added to the enum should fail the build here
+  // rather than silently derive to nullopt. The trailing return keeps a value
+  // cast from outside the enumerators from running off the end.
+  switch (cc) {
+  case ProbeCallingConvention::AmdGpuFuncReturnS30S31:
+    return ProbeAbi{
+        .cc = cc, .link_pair_base = 30, .arg_vgpr_base = 0, .num_arg_vgprs = num_arg_dwords};
+  case ProbeCallingConvention::Unknown:
+    break;
   }
+  return std::nullopt;
 }
+
+/// @brief Could @p abi have come out of derive_probe_abi()?
+///
+/// @details Answered by re-deriving and comparing, so the question the name asks
+/// is the question that gets tested. A weaker screen -- "recognized convention,
+/// even-aligned pair" -- would admit an ABI whose link pair or argument window
+/// its own convention never chooses, which is the shape a hand-built one takes.
+/// Re-derives from @p abi's own count: deriving from a fixed count would accept
+/// any num_arg_vgprs.
+[[nodiscard]] inline constexpr bool is_valid_probe_abi(const ProbeAbi &abi) {
+  return derive_probe_abi(abi.cc, abi.num_arg_vgprs) == abi;
+}
+
+/// @brief The return-link register pair @p abi returns through.
+///
+/// @details Meaningful only for an @p abi that passes is_valid_probe_abi(),
+/// like the field it wraps. Exists so consumers reason about "the link pair"
+/// rather than re-deriving that it is two SGPRs starting at link_pair_base.
+[[nodiscard]] inline constexpr RegisterRef probe_link_pair(const ProbeAbi &abi) {
+  return RegisterRef{RegClass::SGPR, abi.link_pair_base, 2};
+}
+
+/// @brief The VGPRs @p abi delivers argument dwords in, empty when it passes
+///        none.
+///
+/// @details Separate from supplied_registers(), which also covers the link pair.
+/// This is the set the trampoline writes at the call site, so argument
+/// materialization and its clobber accounting key on it.
+///
+/// An @p abi that fails is_valid_probe_abi() passes nothing.
+[[nodiscard]] RegisterSet arg_registers(const ProbeAbi &abi);
+
+/// @brief The registers @p abi has the framework supply to the probe body.
+///
+/// @details A body that reads one of these is not depending on state that only
+/// exists at kernel entry, so a live-in analysis subtracts this set before
+/// concluding a probe cannot be called from an arbitrary site. Collecting the
+/// per-convention register knowledge behind one query keeps that analysis from
+/// having to enumerate the conventions itself.
+///
+/// An @p abi that fails is_valid_probe_abi() supplies nothing.
+[[nodiscard]] RegisterSet supplied_registers(const ProbeAbi &abi);
 
 /// @brief A probe body extracted from a code object and verified to be safe to
 ///        relocate verbatim into the instrumented code object.
 struct ProbeCallable {
-  std::string symbol;                               ///< Resolved symbol name.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID; ///< ISA the body decodes as.
-  std::vector<uint32_t> body_words;                 ///< The body's instruction words, in order.
-  ProbeCallingConvention cc = ProbeCallingConvention::Unknown; ///< Verified ABI.
+  std::string symbol;                                        ///< Resolved symbol name.
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;          ///< ISA the body decodes as.
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete ISA target, if known.
+  std::vector<uint32_t> body_words; ///< The body's instruction words, in order.
+  ProbeAbi abi;                     ///< Verified convention and the registers it implies.
 
   /// Byte offset of the body once it has been laid out in the instrumented
   /// code object's text.
@@ -68,12 +160,20 @@ struct ProbeCallable {
 ///     addressing is not statically detectable here and is not rejected, and
 ///   - end in `s_setpc_b64 s[30:31]`.
 ///
-/// On success the returned ProbeCallable has cc ==
-/// AmdGpuFuncNoArgsReturnS30S31. Returns std::nullopt (with a reason written to
-/// @p error_out, if non-null) on any failure.
+/// On success the returned ProbeCallable carries the ABI derived from
+/// AmdGpuFuncReturnS30S31 and @p num_arg_dwords. Returns std::nullopt (with a
+/// reason written to @p error_out, if non-null) on any failure.
+///
+/// @param num_arg_dwords How many argument dwords the caller intends to pass.
+///   Declared, not inferred: nothing in a body distinguishes "reads v0 as its
+///   first argument" from "reads v0 uninitialized". A count over
+///   kMaxProbeArgVgprs is rejected. Whether the body agrees with the
+///   declaration is decided by analyze_probe_live_ins(), which subtracts what
+///   this ABI supplies.
 [[nodiscard]] std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                                 const ResolvedProbeSymbol &sym,
                                                                 rj_code_arch_t arch,
+                                                                uint8_t num_arg_dwords = 0,
                                                                 std::string *error_out = nullptr);
 
 } // namespace rocjitsu

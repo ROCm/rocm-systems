@@ -34,6 +34,41 @@ use nix::sys::signal::Signal;
 const BORROWER_WAIT: &str = "borrower(s) are still using session";
 
 #[test]
+fn version_identifies_the_source_revision() {
+    let version = Env::new().ok(&["--version"]);
+    let mut lines = version.lines();
+    assert_eq!(
+        lines.next(),
+        Some(concat!("mirage ", env!("CARGO_PKG_VERSION")))
+    );
+    let identity = lines
+        .next()
+        .expect("version output needs a RocJITsu identity");
+    if identity.starts_with("rocjitsu build identity unavailable:") {
+        assert_eq!(lines.next(), None, "unexpected output after: {version}");
+        return;
+    }
+
+    assert!(identity.starts_with("rocjitsu "), "{version}");
+    let revision = lines
+        .next()
+        .and_then(|line| line.strip_prefix("git revision: "))
+        .unwrap_or_else(|| panic!("missing revision in: {version}"));
+    assert!(
+        revision == "unknown"
+            || (revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit())),
+        "{version}"
+    );
+    assert!(
+        lines
+            .next()
+            .is_some_and(|line| line.starts_with("git commit: ")),
+        "{version}"
+    );
+    assert_eq!(lines.next(), None, "unexpected output after: {version}");
+}
+
+#[test]
 fn paths_reports_the_overridden_directories() {
     let env = Env::new();
     let out = env.ok(&["paths"]);
@@ -3119,4 +3154,56 @@ fn the_suite_can_actually_run() {
     // Guards against the e2e suite going green while every test in it skipped
     // for a missing emulator runtime. See `assert_suite_can_run`.
     harness::assert_suite_can_run();
+}
+
+#[test]
+fn thread_overrides_reach_the_generated_rocjitsu_config() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("thread-overrides");
+    let show_config = r#"cat "$(cat "$ROCJITSU_RUNTIME_DIR/config_path")""#;
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "thread-overrides",
+        "--in-process",
+        "-o",
+        "cpu_thread_budget=64",
+        "-o",
+        "num_threads=4",
+        "-o",
+        "cpu_dispatch_threads=17",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(config["cpu_thread_budget"], 64);
+    assert_eq!(config["num_threads"], 4);
+    assert_eq!(config["cpu_dispatch_threads"], 17);
+    assert!(
+        config["thread_allocations"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty())
+    );
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "thread-overrides",
+        "--in-process",
+        "--gpus-per-node",
+        "2",
+        "-o",
+        "num_threads=0",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(config["num_threads"], 1);
+    assert_eq!(config["vm"]["gpu"]["num_gpus"], 2);
 }

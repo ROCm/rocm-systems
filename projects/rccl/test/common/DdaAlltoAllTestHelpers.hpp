@@ -8,13 +8,13 @@
 
 #include <cstring>
 
-#include "algorithms/CollCommon.h"
+#include "algorithms/dda/device/CollCommon.h"
 #include "archinfo.h"
 #include "collectives.h"
 #include "comm.h"
 #include "enqueue.h"
 #include "group.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "rccl_common.h"
 
 namespace RcclUnitTesting
@@ -43,7 +43,7 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
 // The fabric path always stages via a pre-kernel memcpy.
 inline bool testAlltoAllUsesInKernelStagingCopy(size_t countPerRank, ncclDataType_t datatype) {
   const size_t bytesPerRank = countPerRank * static_cast<size_t>(ncclTypeSize(datatype));
-  return meta::comms::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
+  return dda::common::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
 }
 
 inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t typeSize) {

@@ -333,6 +333,7 @@ namespace RcclUnitTesting
     useInteractive = GetEnvVar("UT_INTERACTIVE",  0);
     timeoutUs      = GetEnvVar("UT_TIMEOUT_US" ,  5000000);
     useMultithreading = GetEnvVar("UT_MULTITHREAD", false);
+    commPool          = GetEnvVar("UT_COMM_POOL", true);
 
     // Total number of reduction ops
     int numOps = ncclNumOps;
@@ -481,6 +482,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_INTERACTIVE"      , useInteractive, "Run in interactive mode"),
         std::make_tuple("UT_TIMEOUT_US"       , timeoutUs     , "Timeout limit for collective calls in us"),
         std::make_tuple("UT_MULTITHREAD"      , useMultithreading, "Multi-thread single-process ranks"),
+        std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
         std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),
         std::make_tuple("UT_DEVICE_DATA_MIN_ELEMS", -1        , "Min elements for the device-data path (default 1Mi)"),
         std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected element (default off)"),

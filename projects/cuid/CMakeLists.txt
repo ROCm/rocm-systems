@@ -1,22 +1,5 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 #
 # Minimum version of cmake required
@@ -34,23 +17,11 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 # Read version from amd_cuid.h so there is a single source of truth
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/include/amd_cuid.h" _CUID_HEADER)
-string(
-    REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)"
-    _
-    "${_CUID_HEADER}"
-)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)" _ "${_CUID_HEADER}")
 set(VERSION_MAJOR "${CMAKE_MATCH_1}")
-string(
-    REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)"
-    _
-    "${_CUID_HEADER}"
-)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)" _ "${_CUID_HEADER}")
 set(VERSION_MINOR "${CMAKE_MATCH_1}")
-string(
-    REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)"
-    _
-    "${_CUID_HEADER}"
-)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)" _ "${_CUID_HEADER}")
 set(VERSION_PATCH "${CMAKE_MATCH_1}")
 set(VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 message("Package version: ${VERSION_STRING}")
@@ -65,19 +36,9 @@ project(${AMDCUID} VERSION "${VERSION_STRING}")
 # CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
-        set(CMAKE_INSTALL_PREFIX
-            "C:/Program Files/AMD/ROCM/AMDCUID"
-            CACHE PATH
-            "Default installation directory."
-            FORCE
-        )
+        set(CMAKE_INSTALL_PREFIX "C:/Program Files/AMD/ROCM/AMDCUID" CACHE PATH "Default installation directory." FORCE)
     else() # Linux/Unix
-        set(CMAKE_INSTALL_PREFIX
-            "${ROCM_DIR}/core"
-            CACHE PATH
-            "Default installation directory."
-            FORCE
-        )
+        set(CMAKE_INSTALL_PREFIX "${ROCM_DIR}/core" CACHE PATH "Default installation directory." FORCE)
     endif()
 endif()
 
@@ -86,7 +47,7 @@ endif()
 include(GNUInstallDirs)
 
 # C++ standard for all targets
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
@@ -121,27 +82,9 @@ if(WIN32)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib) # Import libs
 endif()
 
-# Platform-specific dependencies; use native Windows bcrypt for HMAC, and OpenSSL on Linux/Unix
-if(WIN32)
-    # Use the native Windows bcrypt library and link it directly on Windows targets.
-else()
-    # Prefer a system-installed OpenSSL; fall back to building from source via
-    # FetchContent if the dev package is not present (e.g. in bare containers).
-    find_package(OpenSSL QUIET)
-    if(NOT OPENSSL_FOUND)
-        message(
-            STATUS
-            "OpenSSL not found on system; fetching and building from source"
-        )
-        include(FetchContent)
-        FetchContent_Declare(
-            openssl-cmake
-            GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
-            GIT_TAG 1.1.1w-20231130
-        )
-        FetchContent_MakeAvailable(openssl-cmake)
-    endif()
-endif()
+# No third-party dependencies. SHA-256 and HMAC-SHA-256 are built from
+# lib/src/sha256.cc; random key material comes from the platform CSPRNG
+# (bcrypt on Windows, getrandom(2)//dev/urandom elsewhere).
 
 message("Build Configuration:")
 message("-----------ROCM_DIR : " ${ROCM_DIR})
@@ -181,9 +124,7 @@ if(UNIX AND NOT APPLE)
         @ONLY
     )
     install(
-        PROGRAMS
-            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh
-            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
+        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
         COMPONENT ${LIB_COMPONENT}
     )
@@ -202,9 +143,7 @@ if(NOT TARGET uninstall)
     )
     add_custom_target(
         uninstall
-        COMMAND
-            ${CMAKE_COMMAND} -P
-            "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
         COMMENT "Uninstalling ${AMDCUID} ..."
     )
 endif()

@@ -34,6 +34,19 @@ static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recv
   return ncclSuccess;
 }
 
+// Query whether a receiver QP is CTS-posting. Receiver QPs are dual-role: all
+// take data receives and a subset posts CTS, so ask the selector rather than
+// restate its rule. On selector failure answer false, since every QP takes
+// data, so "not CTS" is the truthful fallback and true would corrupt roles.
+static inline bool IbCastRecvCommIsCtsQp(struct ncclIbRecvComm* recvComm, int qpIndex) {
+  for (uint32_t id = 0; id < (uint32_t)recvComm->base.nqps; id++) {
+    ncclIbQp* ctsQp = NULL;
+    if (IbCastRecvCommGetQpForCts(recvComm, id, &ctsQp) != ncclSuccess) return false;
+    if (ctsQp == &recvComm->base.qps[qpIndex]) return true;
+  }
+  return false;
+}
+
 static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uint32_t reqIndex, ncclIbRequest** req) {
   if (reqIndex >= NET_IB_MAX_REQUESTS) {
     WARN("NET/IB: %s: Invalid request index %u. Not in the range [%u, %u). Cannot retrieve request.", __func__,
