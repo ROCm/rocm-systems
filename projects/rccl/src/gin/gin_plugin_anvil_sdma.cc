@@ -953,14 +953,31 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
         ctx->gpuCtxHost.fabricA2ALlEpochLen = lane.llEpochLen;
       }
     }
+    // Peer-scratch hipMalloc is rank-local. Vote it with the LL agree (same as
+    // epoch) so a failed rank never NCCLCHECKGOTOs out between the two
+    // allgathers and leave peers blocked in the LSA vote.
+    if (localEnabled) {
+      size_t regionBytes = 0;
+      if (ginFabricA2ALaneBuildPeerScratchDev(cctx->comm, &ctx->fabricA2APeerScratchDev, &regionBytes) !=
+          ncclSuccess) {
+        if (ctx->fabricA2APeerScratchDev) {
+          CUDACHECKIGNORE(hipFree(ctx->fabricA2APeerScratchDev));
+          ctx->fabricA2APeerScratchDev = nullptr;
+        }
+        if (ctx->gpuCtxHost.fabricA2ALlEpoch) {
+          CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.fabricA2ALlEpoch));
+          ctx->gpuCtxHost.fabricA2ALlEpoch = nullptr;
+          ctx->gpuCtxHost.fabricA2ALlEpochLen = 0;
+        }
+        localEnabled = 0;
+      } else {
+        ctx->gpuCtxHost.fabricA2APeerScratch = ctx->fabricA2APeerScratchDev;
+        ctx->gpuCtxHost.fabricA2AScratchBytes = regionBytes;
+      }
+    }
     int allEnabled = 0;
     NCCLCHECKGOTO(ncclGinFabricA2ALaneAgreeEnabled(cctx->comm, localEnabled, &allEnabled), ret, fail);
     if (allEnabled) {
-      size_t regionBytes = 0;
-      NCCLCHECKGOTO(ginFabricA2ALaneBuildPeerScratchDev(cctx->comm, &ctx->fabricA2APeerScratchDev, &regionBytes), ret,
-                    fail);
-      ctx->gpuCtxHost.fabricA2APeerScratch = ctx->fabricA2APeerScratchDev;
-      ctx->gpuCtxHost.fabricA2AScratchBytes = regionBytes;
       ctx->gpuCtxHost.fabricA2ALlThreshold = lane.llThreshold;
       ctx->gpuCtxHost.fabricA2AEnabled = 1;
     } else {
@@ -968,6 +985,12 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
         CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost.fabricA2ALlEpoch));
         ctx->gpuCtxHost.fabricA2ALlEpoch = nullptr;
         ctx->gpuCtxHost.fabricA2ALlEpochLen = 0;
+      }
+      if (ctx->fabricA2APeerScratchDev) {
+        CUDACHECKIGNORE(hipFree(ctx->fabricA2APeerScratchDev));
+        ctx->fabricA2APeerScratchDev = nullptr;
+        ctx->gpuCtxHost.fabricA2APeerScratch = nullptr;
+        ctx->gpuCtxHost.fabricA2AScratchBytes = 0;
       }
       if (cctx->comm->ddaFabricMemHandler == nullptr || cctx->comm->ddaPeerPtrsDev == nullptr ||
           cctx->comm->ddaLLEpochDev == nullptr || cctx->comm->ddaScratch == nullptr) {

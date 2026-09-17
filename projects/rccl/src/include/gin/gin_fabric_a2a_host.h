@@ -39,6 +39,8 @@ void ncclGinFabricA2ALaneClearAll();
 // collective, so a rank that returns early hangs the peers blocked inside it.
 ncclResult_t ncclGinFabricA2ALaneAgreeEnabled(struct ncclComm* comm, int localEnabled, int* allEnabled);
 // Build a device peer-scratch table pointing at the GIN LL carve-out in ddaScratch.
+// Rank-local and fallible: callers must vote the result into a collective agree
+// before any later allgather, not NCCLCHECKGOTO out between two agrees.
 ncclResult_t ginFabricA2ALaneBuildPeerScratchDev(struct ncclComm* comm, void*** outPeerDev, size_t* outRegionBytes);
 #endif
 
