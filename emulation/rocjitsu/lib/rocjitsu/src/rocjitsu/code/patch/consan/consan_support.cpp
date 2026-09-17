@@ -85,53 +85,6 @@ bool detail::reject_optional_scratch_range_overlap(std::optional<uint16_t> value
   return true;
 }
 
-bool detail::reject_atomic_candidate_scratch_overlap(const AtomicLoweringForm &form,
-                                                     uint16_t scratch_vgpr,
-                                                     uint16_t scratch_vgpr_count,
-                                                     std::vector<std::string> &errors) {
-  if (range_overlaps(form.address_vgpr, form.address_vgpr_count, scratch_vgpr,
-                     scratch_vgpr_count)) {
-    errors.emplace_back(
-        "ConSan atomic record patch scratch VGPRs overlap the atomic address VGPRs");
-    return true;
-  }
-  if (range_overlaps(form.data_vgpr, form.data_register_count, scratch_vgpr, scratch_vgpr_count)) {
-    errors.emplace_back("ConSan atomic record patch scratch VGPRs overlap the atomic data VGPR");
-    return true;
-  }
-  if (form.destination_vgpr && form.destination_register_count != 0u &&
-      range_overlaps(*form.destination_vgpr, form.destination_register_count, scratch_vgpr,
-                     scratch_vgpr_count)) {
-    errors.emplace_back(
-        "ConSan atomic record patch scratch VGPRs overlap the atomic destination VGPR");
-    return true;
-  }
-  return false;
-}
-
-bool detail::has_recent_saveexec(std::span<const uint8_t> bytes, const Candidate &candidate) {
-  constexpr uint32_t kSop1PrefixMask = 0xFF800000u;
-  constexpr uint32_t kSop1OpMask = 0x0000FF00u;
-  const auto is_saveexec = [&](uint32_t word) {
-    const uint32_t op = (word & kSop1OpMask) >> 8u;
-    return (word & kSop1PrefixMask) == (kSop1EncodingPrefix << 23u) && op >= 0x20u && op <= 0x33u;
-  };
-  constexpr uint64_t kLookbackDwords = 3u;
-  for (uint64_t dword = 1u; dword <= kLookbackDwords; ++dword) {
-    const uint64_t byte_distance = dword * sizeof(uint32_t);
-    if (candidate.site().decoded_file_offset() < byte_distance)
-      break;
-    const uint64_t offset = candidate.site().decoded_file_offset() - byte_distance;
-    if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
-      continue;
-    uint32_t word = 0u;
-    std::memcpy(&word, bytes.data() + offset, sizeof(word));
-    if (is_saveexec(word))
-      return true;
-  }
-  return false;
-}
-
 std::optional<uint16_t> WorkgroupSource::operand() const {
   if (!has_value() || private_offset)
     return std::nullopt;

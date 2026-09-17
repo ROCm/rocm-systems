@@ -154,44 +154,4 @@ build_runtime_workgroup_gate_prefix(const RuntimeWorkgroupGatePlan &plan,
   return result;
 }
 
-bool prepend_runtime_workgroup_gate(TextFragment &fragment, const RuntimeWorkgroupGatePlan &plan,
-                                    const WorkgroupSources &workgroup_sources, rj_code_arch_t arch,
-                                    std::vector<std::string> &errors, std::string_view patch_name) {
-  auto gate = build_runtime_workgroup_gate_prefix(plan, workgroup_sources, arch);
-  if (!gate) {
-    errors.emplace_back("ConSan " + std::string(patch_name) +
-                        " could not encode its runtime workgroup gate");
-    return false;
-  }
-  fragment.branch_fixups.push_back(
-      {.word_index = gate->bypass_branch_word, .target = TextFragmentBranchTarget::Bypass});
-  fragment.before_words.insert(fragment.before_words.begin(), gate->words.begin(),
-                               gate->words.end());
-  return true;
-}
-
-bool prepend_runtime_workgroup_gate_to_after_words(TextFragment &fragment,
-                                                   const RuntimeWorkgroupGatePlan &plan,
-                                                   const WorkgroupSources &workgroup_sources,
-                                                   rj_code_arch_t arch,
-                                                   std::vector<std::string> &errors,
-                                                   std::string_view patch_name) {
-  auto gate = build_runtime_workgroup_gate_prefix(plan, workgroup_sources, arch);
-  if (!gate) {
-    errors.emplace_back("ConSan " + std::string(patch_name) +
-                        " could not encode its post-guest runtime workgroup gate");
-    return false;
-  }
-  const size_t bypass_words =
-      gate->words.size() + fragment.after_words.size() - gate->bypass_branch_word - 1u;
-  if (bypass_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-    errors.emplace_back("ConSan " + std::string(patch_name) +
-                        " post-guest runtime workgroup gate is out of branch range");
-    return false;
-  }
-  gate->words[gate->bypass_branch_word] = build_s_branch(static_cast<int16_t>(bypass_words), arch);
-  fragment.after_words.insert(fragment.after_words.begin(), gate->words.begin(), gate->words.end());
-  return true;
-}
-
 } // namespace rocjitsu::consan::detail

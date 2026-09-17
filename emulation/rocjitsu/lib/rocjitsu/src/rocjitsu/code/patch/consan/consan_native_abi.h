@@ -22,7 +22,6 @@ namespace rocjitsu::consan::detail {
 
 inline constexpr uint16_t kScalarInlineNegativeOneOperand = 193u;
 inline constexpr uint16_t kScalarOperandTtmpBase = 108u;
-inline constexpr uint16_t kScalarOperandSharedBase = 235u;
 inline constexpr uint32_t kMaxVgprs = kOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106u;
 

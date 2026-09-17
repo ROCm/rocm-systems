@@ -84,7 +84,7 @@ enum class AutoReportPlanReason : uint8_t {
   Count,
 };
 
-/// Address-free result of laying out one legacy ConSan evidence buffer.
+/// Address-free result of laying out one ConSan evidence buffer.
 ///
 /// A complete value owns exact region capacities, offsets, and total bytes.
 /// Incomplete values retain the typed outcome and, where representable, the

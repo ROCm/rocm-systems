@@ -19,11 +19,6 @@ descriptor_mutation_policy(const RuntimeCapabilities *capabilities, rj_code_arch
 common_workitem_owner_shift(std::span<const uint8_t> image, const ResolvedScratchPlan &resources,
                             rj_code_arch_t arch, std::vector<std::string> &warnings);
 
-[[nodiscard]] std::optional<detail::WorkitemOwnerDerivationPlan>
-resolve_private_workitem_owner(std::span<const uint8_t> image, const ResolvedScratchPlan &resources,
-                               const PrivateStateLayout &layout, rj_code_arch_t arch,
-                               std::vector<std::string> &warnings);
-
 [[nodiscard]] std::optional<uint64_t>
 common_record_owner_descriptor(std::span<const uint8_t> image, const ResolvedScratchPlan &resources,
                                rj_code_arch_t arch, std::vector<std::string> &warnings);

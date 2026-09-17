@@ -24,24 +24,6 @@ enum class AtomicEventKind : uint32_t {
   AcquireRelease = 3,
 };
 
-enum class AtomicOperation : uint8_t {
-  Rmw = 1,
-  CompareExchange = 2,
-};
-
-enum class AtomicOutcome : uint16_t {
-  NotApplicable = 0,
-  Success = 1,
-  Failure = 2,
-  Unavailable = 3,
-};
-
-enum class FenceEventKind : uint8_t {
-  Release = 1,
-  Acquire = 2,
-  AcquireRelease = 3,
-};
-
 inline constexpr uint32_t kReportMagic = 0x494f4d43u; // "CMOI" little-endian.
 inline constexpr uint32_t kReportAbiVersion = 14;
 struct alignas(8) ReportHeader {

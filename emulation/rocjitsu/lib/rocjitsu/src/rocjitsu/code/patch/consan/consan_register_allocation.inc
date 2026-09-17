@@ -71,15 +71,6 @@ first_admitted_register_range(uint32_t begin, uint16_t width, uint16_t limit, ui
       (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) != 0 ? 1u : 0u));
 }
 
-[[nodiscard]] uint16_t descriptor_dispatch_id_prefix_sgpr_count(const KD &desc) {
-  const uint16_t properties = desc.kernel_code_properties;
-  return amdhsa_dispatch_id_prefix_sgpr_count(
-      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER) != 0,
-      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0,
-      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR) != 0,
-      AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0);
-}
-
 [[nodiscard]] std::optional<uint16_t> descriptor_kernarg_segment_ptr_sgpr(const KD &desc) {
   const uint16_t properties = desc.kernel_code_properties;
   if (AMDHSA_BITS_GET(properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) == 0)

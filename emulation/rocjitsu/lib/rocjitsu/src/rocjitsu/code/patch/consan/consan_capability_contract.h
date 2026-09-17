@@ -26,9 +26,7 @@ struct ProgramAnalysisTargetOperations;
 /// validation use these target-neutral names instead of importing one ISA
 /// generation's vocabulary.
 inline constexpr uint16_t kAmdGpuExecLo = 126u;
-inline constexpr uint16_t kAmdGpuExecHi = 127u;
 inline constexpr uint16_t kAmdGpuVccLo = 106u;
-inline constexpr uint16_t kAmdGpuVccHi = 107u;
 inline constexpr uint16_t kAmdGpuWorkitemIdX = 0u;
 inline constexpr uint8_t kAmdGpuScopeDevice = 2u;
 

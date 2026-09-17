@@ -800,12 +800,6 @@ struct Options : Request,
         TransformPolicy(transform_policy) {}
 };
 
-[[nodiscard]] inline std::string_view normalize_kernel_name(std::string_view name) {
-  if (name.ends_with(".kd"))
-    name.remove_suffix(3);
-  return name;
-}
-
 [[nodiscard]] inline bool kernel_name_matches(std::string_view left, std::string_view right) {
   return kernel_symbol_names_match(left, right);
 }

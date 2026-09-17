@@ -42,19 +42,6 @@ plan_runtime_workgroup_gate(const RuntimeWorkgroupGatePlan &plan,
 build_runtime_workgroup_gate_prefix(const RuntimeWorkgroupGatePlan &plan,
                                     const WorkgroupSources &workgroup_sources, rj_code_arch_t arch);
 
-[[nodiscard]] bool
-prepend_runtime_workgroup_gate(TextFragment &fragment, const RuntimeWorkgroupGatePlan &plan,
-                               const WorkgroupSources &workgroup_sources, rj_code_arch_t arch,
-                               std::vector<std::string> &errors, std::string_view patch_name);
-
-/// Insert a runtime gate immediately after a fragment's guest instruction.
-/// This preserves adjacency constraints before acquire-like guest operations
-/// while still bypassing the remaining instrumentation for unselected groups.
-[[nodiscard]] bool prepend_runtime_workgroup_gate_to_after_words(
-    TextFragment &fragment, const RuntimeWorkgroupGatePlan &plan,
-    const WorkgroupSources &workgroup_sources, rj_code_arch_t arch,
-    std::vector<std::string> &errors, std::string_view patch_name);
-
 [[nodiscard]] bool append_runtime_workgroup_residue_compare(std::vector<uint32_t> &words,
                                                             uint16_t residue_sgpr,
                                                             uint16_t temporary_sgpr,

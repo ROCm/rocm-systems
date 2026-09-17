@@ -281,16 +281,6 @@ namespace detail {
                                                          std::string_view value_name,
                                                          std::vector<std::string> &errors);
 
-[[nodiscard]] bool reject_atomic_candidate_scratch_overlap(const AtomicLoweringForm &form,
-                                                           uint16_t scratch_vgpr,
-                                                           uint16_t scratch_vgpr_count,
-                                                           std::vector<std::string> &errors);
-
-/// Return whether one of the three preceding dwords is a saveexec operation.
-/// This conservative guard prevents insertion inside compiler-produced EXEC
-/// narrowing sequences.
-[[nodiscard]] bool has_recent_saveexec(std::span<const uint8_t> bytes, const Candidate &candidate);
-
 /// Complete semantic input to one private-state entry-initialization body.
 ///
 /// Placement constructs this plan after it has resolved the private layout,

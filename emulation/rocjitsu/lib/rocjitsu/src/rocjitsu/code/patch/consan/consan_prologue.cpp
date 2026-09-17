@@ -346,28 +346,6 @@ cdna_guest_workgroup_payload_copies(const WorkgroupSources &sources, rj_code_arc
   return sequence.finish();
 }
 
-[[nodiscard]] bool append_entry_workitem_coordinate(std::vector<uint32_t> &words,
-                                                    uint16_t destination_vgpr, uint8_t dimension,
-                                                    rj_code_arch_t arch) {
-  constexpr uint32_t kPackedCoordinateMask = 0x3ffu;
-  constexpr uint16_t kPackedCoordinateBits = 10u;
-  if (dimension > 2u)
-    return false;
-
-  InstructionSequence sequence(words);
-  const auto mask = instrumentation::build_v_and_b32_literal(
-      destination_vgpr, kPackedCoordinateMask,
-      dimension == 0u ? kAmdGpuWorkitemIdX : destination_vgpr, arch);
-  if (dimension == 0u)
-    return sequence.emit(mask);
-  return sequence.emit_all(
-      instrumentation::build_v_lshrrev_b32(
-          destination_vgpr,
-          scalar_positive_inline_u32(static_cast<uint16_t>(dimension * kPackedCoordinateBits)),
-          kAmdGpuWorkitemIdX, arch),
-      mask);
-}
-
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_owner_epoch_prologue_words(const OwnerEpochPrologueEmissionPlan &plan, rj_code_arch_t arch,
                                  std::vector<std::string> &errors) {

@@ -62,8 +62,4 @@ struct ReportPipelineResult {
                                                   const ReportSnapshot &snapshot,
                                                   ReportSummary initial_summary = {});
 
-[[nodiscard]] ReportSummary summarize_report(const ReportPipelineInput &input,
-                                             const ReportSnapshot &snapshot,
-                                             ReportSummary initial_summary);
-
 } // namespace rocjitsu::consan::hook

@@ -31,7 +31,6 @@
 
 namespace rocjitsu::consan {
 
-using detail::WorkitemOwnerDerivationPlan;
 namespace detail {
 [[nodiscard]] std::optional<uint8_t> descriptor_workitem_id_dimensions(const KD &descriptor) {
   const uint32_t encoded =
@@ -61,21 +60,6 @@ common_workitem_owner_shift(std::span<const uint8_t> image, const ResolvedScratc
   if (!common_shift)
     warnings.emplace_back("ConSan private owner requires an owning kernel descriptor");
   return common_shift;
-}
-
-[[nodiscard]] std::optional<WorkitemOwnerDerivationPlan>
-resolve_private_workitem_owner(std::span<const uint8_t> image, const ResolvedScratchPlan &resources,
-                               const PrivateStateLayout &layout, rj_code_arch_t arch,
-                               std::vector<std::string> &warnings) {
-  if (!layout.owner_offset) {
-    warnings.emplace_back("ConSan private owner requires an entry-captured owner slot");
-    return std::nullopt;
-  }
-  const auto common_shift = common_workitem_owner_shift(image, resources, arch, warnings);
-  if (!common_shift)
-    return std::nullopt;
-  return WorkitemOwnerDerivationPlan{.entry_workitem_x_private_offset = *layout.owner_offset,
-                                     .wave_size_shift = *common_shift};
 }
 
 [[nodiscard]] std::optional<uint64_t>

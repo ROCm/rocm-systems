@@ -37,9 +37,4 @@ ReportPipelineResult process_report(const ReportPipelineInput &input,
               conflicts ? static_cast<uint32_t>(conflicts->examples.size()) : 0u};
 }
 
-ReportSummary summarize_report(const ReportPipelineInput &input, const ReportSnapshot &snapshot,
-                               ReportSummary summary) {
-  return process_report(input, snapshot, summary).summary;
-}
-
 } // namespace rocjitsu::consan::hook
