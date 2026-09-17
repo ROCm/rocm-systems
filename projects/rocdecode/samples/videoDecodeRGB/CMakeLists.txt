@@ -127,10 +127,10 @@ find_package(Threads QUIET)
 
 if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND AND rocprofiler-register_FOUND)))
     # HIP
-    if(WIN32)
-        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-    else()
+    if(NOT WIN32)
         set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
+    else()
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     endif()
     # FFMPEG
     include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR})
@@ -155,7 +155,11 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR}
                         videodecrgb.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
-    if(WIN32)
+    if(NOT WIN32)
+        list(APPEND SOURCES
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
+    else()
         # HIP kernel files must be compiled with hipcc on Windows (VS generator does not support HIP language)
         set(HIPCC ${ROCM_PATH}/bin/hipcc.exe)
         set(KERNEL_SOURCES
@@ -193,10 +197,6 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
             list(APPEND KERNEL_OBJS ${KOBJ})
         endforeach()
         add_custom_target(hip_kernels DEPENDS ${KERNEL_OBJS})
-    else()
-        list(APPEND SOURCES
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
     endif()
 
     add_executable(${PROJECT_NAME} ${SOURCES})

@@ -126,15 +126,15 @@ print("\nrunrocDecodeTests V"+__version__+"\n")
 scriptPath = os.path.dirname(os.path.realpath(__file__))
 if videoDecodeEXE == '':
     if sampleMode == 0:
-        if platform.system() == 'Windows':
-            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
-        else:
+        if platform.system() != 'Windows':
             rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
-    elif sampleMode == 1:
-        if platform.system() == 'Windows':
-            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/Release/videodecodeperf.exe'
         else:
+            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
+    elif sampleMode == 1:
+        if platform.system() != 'Windows':
             rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/videodecodeperf'
+        else:
+            rocDecode_exe = rocDecodeDirectory+'/samples/videoDecodePerf/build/Release/videodecodeperf.exe'
 else:
     rocDecode_exe = videoDecodeEXE
 if resultsDir == '':
@@ -275,30 +275,30 @@ elif sampleMode == 1:
 # get data
 if checkDecStatus == 0:
     platform_name = platform.platform()
-    if platform.system() == 'Windows':
-        platform_name_fq = shell('hostname')
-        platform_ip = b'N/A'
-    else:
+    if platform.system() != 'Windows':
         platform_name_fq = shell('hostname --all-fqdns')
         platform_ip = shell('hostname -I')[0:-1]  # extra trailing space
+    else:
+        platform_name_fq = shell('hostname')
+        platform_ip = b'N/A'
 
     file_dtstr = datetime.now().strftime("%Y%m%d")
     reportFilename = 'rocDecode_report_%s_%s.md' % (platform_name, file_dtstr)
     report_dtstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
-    if platform.system() == 'Windows':
-        sys_info = shell('systeminfo')
-        cpu_info = shell('wmic cpu get Name')
-        gpu_info = shell('wmic path win32_VideoController get Name')
-        memory_info = shell('wmic ComputerSystem get TotalPhysicalMemory')
-        board_info = shell('wmic baseboard get product,manufacturer')
-        lib_tree = b'N/A (use dumpbin /dependents on Windows)'
-    else:
+    if platform.system() != 'Windows':
         sys_info = shell('inxi -c0 -S')
         cpu_info = shell('inxi -c0 -C')
         gpu_info = shell('inxi -c0 -G')
         memory_info = shell('inxi -c 0 -m')
         board_info = shell('inxi -c0 -M')
         lib_tree = shell('ldd '+run_rocDecode_app)
+    else:
+        sys_info = shell('systeminfo')
+        cpu_info = shell('wmic cpu get Name')
+        gpu_info = shell('wmic path win32_VideoController get Name')
+        memory_info = shell('wmic ComputerSystem get TotalPhysicalMemory')
+        board_info = shell('wmic baseboard get product,manufacturer')
+        lib_tree = b'N/A (use dumpbin /dependents on Windows)'
     lib_tree = strip_libtree_addresses(lib_tree)
 
     # Load the data

@@ -67,10 +67,10 @@ print("\nrunrocDecodeTests V"+__version__+"\n")
 # rocDecode Application
 scriptPath = os.path.dirname(os.path.realpath(__file__))
 if videoDecodeEXE == '':
-    if platform.system() == 'Windows':
-        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
-    else:
+    if platform.system() != 'Windows':
         rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/videodecode'
+    else:
+        rocDecode_exe = rocDecodeDirectory+'/samples/videoDecode/build/Release/videodecode.exe'
 else:
     rocDecode_exe = videoDecodeEXE
 if resultsDir == '':

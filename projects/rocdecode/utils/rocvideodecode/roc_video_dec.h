@@ -39,12 +39,12 @@ THE SOFTWARE.
 #include <thread>
 #include <ctime>
 #include <time.h>
-#ifdef _WIN32
-#include <process.h>
-#include <windows.h>
-#else
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/syscall.h>
+#else
+#include <process.h>
+#include <windows.h>
 #endif
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
@@ -55,7 +55,23 @@ THE SOFTWARE.
 
 // Simple logging macros - format matches src/commons.h:
 //   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
-#ifdef _WIN32
+#ifndef _WIN32
+#define RocVideoDecCriticalLog(msg) \
+    do { \
+        struct timespec _ts_; \
+        clock_gettime(CLOCK_MONOTONIC, &_ts_); \
+        uint64_t _us_ = static_cast<uint64_t>(_ts_.tv_sec) * 1000000ULL + _ts_.tv_nsec / 1000ULL; \
+        const char *_f_ = strrchr(__FILE__, '/'); \
+        pid_t _tid_ = static_cast<pid_t>(syscall(SYS_gettid)); \
+        std::ostringstream _htid_oss_; \
+        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
+        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
+                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
+                  << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
+                  << __func__ << "(): " << (msg) << std::endl; \
+    } while (0)
+#else
 #define RocVideoDecCriticalLog(msg) \
     do { \
         static LARGE_INTEGER _freq_ = {}; \
@@ -71,22 +87,6 @@ THE SOFTWARE.
         std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
                   << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
                   << _getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
-                  << __func__ << "(): " << (msg) << std::endl; \
-    } while (0)
-#else
-#define RocVideoDecCriticalLog(msg) \
-    do { \
-        struct timespec _ts_; \
-        clock_gettime(CLOCK_MONOTONIC, &_ts_); \
-        uint64_t _us_ = static_cast<uint64_t>(_ts_.tv_sec) * 1000000ULL + _ts_.tv_nsec / 1000ULL; \
-        const char *_f_ = strrchr(__FILE__, '/'); \
-        pid_t _tid_ = static_cast<pid_t>(syscall(SYS_gettid)); \
-        std::ostringstream _htid_oss_; \
-        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
-                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
-        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
-                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
-                  << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
 #endif
