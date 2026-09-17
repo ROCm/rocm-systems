@@ -469,4 +469,12 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   }
 };
 
+// Mirrors ginAnvilGetGinProperties()'s supportsStrongSignals on the host side.
+template <>
+struct ncclGinApi_SupportsStrongSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
+  NCCL_DEVICE_INLINE static bool call(ncclGinCtx) {
+    return true;
+  }
+};
+
 #endif
