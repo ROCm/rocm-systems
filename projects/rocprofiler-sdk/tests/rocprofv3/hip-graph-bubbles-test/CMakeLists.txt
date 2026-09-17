@@ -10,11 +10,12 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# These tests currently fail only on gfx1151. Detect the system architecture and disable
-# the tests there, while leaving them enabled elsewhere.
+# Disable all variants on gfx1151 and gfx120X.
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-hip-graph-bubbles-gfx-info ECHO)
 set(HIP_GRAPH_BUBBLES_DISABLED OFF)
-if("gfx1151" IN_LIST rocprofiler-sdk-hip-graph-bubbles-gfx-info)
+if("gfx1151" IN_LIST rocprofiler-sdk-hip-graph-bubbles-gfx-info OR
+   "gfx1201" IN_LIST rocprofiler-sdk-hip-graph-bubbles-gfx-info OR
+   "gfx1200" IN_LIST rocprofiler-sdk-hip-graph-bubbles-gfx-info)
     set(HIP_GRAPH_BUBBLES_DISABLED ON)
 endif()
 
