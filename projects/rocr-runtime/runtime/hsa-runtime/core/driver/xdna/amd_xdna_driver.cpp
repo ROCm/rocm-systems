@@ -1251,6 +1251,9 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   handle->size = size;
   handle->owner = this;
   handle->owns_allocation = true;
+  // Matches GetBODevAddr's contract: 0 means the BO has no device address (host-shared).
+  handle->dev_addr =
+      (get_bo_info_args.xdna_addr == AMDXDNA_INVALID_ADDR) ? 0 : get_bo_info_args.xdna_addr;
 
   return HSA_STATUS_SUCCESS;
 }

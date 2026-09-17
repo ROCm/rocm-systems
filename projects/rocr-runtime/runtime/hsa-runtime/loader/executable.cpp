@@ -1675,7 +1675,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // The insts/PDI blobs are immutable after load, so their XDNA BO handles are
   // stable for the object's lifetime. Resolve once here instead of on every
   // dispatch. Kernarg BOs are per-dispatch and still resolve at submit.
-  auto resolve_handle = [&](void* va, uint32_t* out_handle) -> hsa_status_t {
+  // out_dev_addr is only needed for FullElf's PDI (patched into the control code below); the
+  // PdiInsts callers pass nullptr and get just the BO handle, as before.
+  auto resolve_handle = [&](void* va, uint32_t* out_handle,
+                            uint64_t* out_dev_addr = nullptr) -> hsa_status_t {
     void* base = nullptr;
     core::DriverMemoryHandle handle{};
     if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(va, core_agent, &base,
@@ -1683,6 +1686,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     *out_handle = static_cast<uint32_t>(handle.handle);
+    if (out_dev_addr != nullptr) *out_dev_addr = handle.dev_addr;
     return HSA_STATUS_SUCCESS;
   };
 
@@ -1769,15 +1773,25 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       }
       const AMD::aie_elf::Kernel& kernel = kernel_it->second;
 
-      // The ELF is authoritative on the kernarg layout; a hsaco claiming a different size is a
-      // converter bug, not something the loader can reconcile.
-      if (ki->kernarg_size != 0 &&
-          ki->kernarg_size != kernel.num_args() * sizeof(uint64_t)) {
+      // The ELF is authoritative on the kernarg layout. A hsaco carrying a nonzero size that
+      // disagrees with the ELF is a converter bug the loader can't reconcile; a zero size just
+      // means the converter left it for the loader to fill in.
+      const uint32_t elf_kernarg_size =
+          static_cast<uint32_t>(kernel.num_args() * sizeof(uint64_t));
+      if (ki->kernarg_size != 0 && ki->kernarg_size != elf_kernarg_size) {
         log_warning_n(10,
                       "AIE: kernarg size mismatch for '%s': hsaco says %u bytes, the ELF wants "
-                      "%zu bytes.\n",
-                      kernel_name.c_str(), ki->kernarg_size,
-                      kernel.num_args() * sizeof(uint64_t));
+                      "%u bytes.\n",
+                      kernel_name.c_str(), ki->kernarg_size, elf_kernarg_size);
+        loaded_obj->Destroy();
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+      desc->kernarg_size = elf_kernarg_size;
+
+      // A kernel with no PDI patch site has no PDI to patch; nothing downstream can dispatch it.
+      if (!kernel.has_pdi_patch) {
+        log_warning_n(10, "AIE: kernel '%s' has no PDI patch site in its control code.\n",
+                      kernel_name.c_str());
         loaded_obj->Destroy();
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
@@ -1795,19 +1809,30 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         loaded_obj->Destroy();
         return s;
       }
-      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+      // The PDI's *device* address is what the NPU needs, not its CPU-visible VA (pdi_dev):
+      // those differ, and a host-shared BO has no device address at all. This mirrors the
+      // per-dispatch resolve in BuildFullElfCommand (amd_xdna_driver.cpp), which this load-time
+      // patch replaces.
+      uint64_t pdi_dev_addr = 0;
+      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle, &pdi_dev_addr);
+          s != HSA_STATUS_SUCCESS) {
         delete[] ctrl_code_host;
         loaded_obj->Destroy();
         return s;
+      }
+      if (pdi_dev_addr == 0) {
+        log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
+        delete[] ctrl_code_host;
+        loaded_obj->Destroy();
+        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
       }
       desc->pdi_size = kernel.pdi.size();
 
       // Patch the PDI's device address into the pristine host copy, once, at load -- this is
       // what deletes the equivalent per-dispatch patch from the driver's submit path. Parse()
       // already validated that pdi_patch_offset is non-zero, 4-byte aligned, and fits.
-      const uint64_t pdi_addr = reinterpret_cast<uint64_t>(pdi_dev);
-      const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_addr & 0xFFFFFFFFu);
-      const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_addr >> 32);
+      const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFFu);
+      const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_dev_addr >> 32);
       std::memcpy(ctrl_code_host + kernel.pdi_patch_offset, &pdi_addr_lo, sizeof(pdi_addr_lo));
       std::memcpy(ctrl_code_host + kernel.pdi_patch_offset + sizeof(pdi_addr_lo), &pdi_addr_hi,
                   sizeof(pdi_addr_hi));
@@ -1824,10 +1849,13 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     }
 
     uint64_t desc_ptr = reinterpret_cast<uint64_t>(desc.get());
+    // desc->kernarg_size, not ki->kernarg_size: for FullElf the descriptor's value is the one
+    // possibly filled in from the ELF above when the hsaco left it at 0.
+    const uint32_t symbol_kernarg_size = desc->kernarg_size;
     loaded_obj->descriptors.push_back(std::move(desc));
 
     auto kernel_sym =
-        std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size);
+        std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, symbol_kernarg_size);
     kernel_sym->agent = agent;
     staged_symbols.push_back(std::move(kernel_sym));
   }

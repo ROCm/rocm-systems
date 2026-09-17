@@ -2037,6 +2037,17 @@ TEST_F(FullElfDispatchTest, HsacoFullElfLoads) {
             HSA_STATUS_SUCCESS);
   EXPECT_NE(kernel_object, 0u) << "kernel object must be published after freeze";
 
+  // The packaged hsaco's kernel-table entry carries kernarg_size=0 (aie_hsaco.py's "elf:" form
+  // does not know it); the loader must fill it in from the nested ELF's argument count rather
+  // than report 0.
+  std::uint32_t kernarg_segment_size = 0;
+  ASSERT_EQ(hsa_executable_symbol_get_info(
+                symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
+                &kernarg_segment_size),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(kernarg_segment_size,
+            aie_full_elf_kernel::num_kernargs * sizeof(std::uint64_t));
+
   EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
 }
