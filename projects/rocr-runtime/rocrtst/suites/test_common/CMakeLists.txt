@@ -451,6 +451,10 @@ aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
+# This pure helper suite has its own CPU-only target below. Keep it out of the
+# legacy aggregate to avoid duplicate registration and internal-header coupling.
+list(FILTER functionalSources EXCLUDE REGEX ".*/doorbell_type_test\\.cc$")
+
 # Optional: enable NUMA async copy test (memory_async_copy_numa.cc)
 # Force disabled by default to avoid building the NUMA test source.
 set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)
@@ -811,6 +815,30 @@ set_tests_properties(intercept_queue_logic_test PROPERTIES
   LABELS "quick;standard;pr;pre-commit"
   TIMEOUT 60)
 
+# Isolated CPU-only tests for pure ROCr helpers. Keep these out of the legacy
+# utility aggregate, which also initializes runtime/device-dependent fixtures.
+add_executable(rocrtst_poll_backoff_test
+  ${ROCRTST_ROOT}/common/utils_test/poll_backoff_test.cpp)
+target_include_directories(rocrtst_poll_backoff_test PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(rocrtst_poll_backoff_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME rocrtst_poll_backoff_test COMMAND rocrtst_poll_backoff_test)
+set_tests_properties(rocrtst_poll_backoff_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
+  TIMEOUT 60)
+
+add_executable(rocrtst_doorbell_type_test
+  ${ROCRTST_ROOT}/suites/functional/doorbell_type_test.cc)
+target_include_directories(rocrtst_doorbell_type_test PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(rocrtst_doorbell_type_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME rocrtst_doorbell_type_test COMMAND rocrtst_doorbell_type_test)
+set_tests_properties(rocrtst_doorbell_type_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
+  TIMEOUT 60)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -830,7 +858,8 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS intercept_queue_logic_test
+install(TARGETS intercept_queue_logic_test rocrtst_poll_backoff_test
+                rocrtst_doorbell_type_test
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -885,6 +914,10 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "\n"
         "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
         "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
+        "add_test(rocrtst_poll_backoff_test \"../rocrtst_poll_backoff_test\")\n"
+        "set_tests_properties(rocrtst_poll_backoff_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
+        "add_test(rocrtst_doorbell_type_test \"../rocrtst_doorbell_type_test\")\n"
+        "set_tests_properties(rocrtst_doorbell_type_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )
 
     install(
