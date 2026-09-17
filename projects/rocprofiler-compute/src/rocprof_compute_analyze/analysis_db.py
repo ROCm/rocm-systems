@@ -1499,7 +1499,7 @@ class db_analysis(OmniAnalyze_Base):
                         if roofline_data_expressions[metric_name]
                     },
                 }
-                for kernel_name in top_kernels[: self.get_args().max_stat_num]
+                for kernel_name in top_kernels
             ])
 
             roofline_data_per_kernel[workload_path] = roofline_df
