@@ -253,6 +253,14 @@ struct mock_sdk
     using agent_id_t                = test_support::agent_id_t;
     using timestamp_t               = std::uint64_t;
     using correlation_id_t          = test_support::correlation_id_t;
+    // Satisfies policies::domain_service::backend's requirement that
+    // iterate_callback_tracing_kind_operation_args() accept a callback of this shape;
+    // the real backend<Wrapper> forwards this type straight from rocprofiler-sdk.
+    using callback_tracing_operation_args_cb_t = int (*)(std::uint64_t, std::int32_t,
+                                                         std::uint32_t, const void* const,
+                                                         std::int32_t, const char*,
+                                                         const char*, const char*,
+                                                         std::int32_t, void*);
 
     // NOLINTBEGIN(readability-identifier-naming)
     static constexpr std::size_t      compile_time_version                    = 90909;
@@ -404,11 +412,36 @@ struct pmc_info_data_t
 // Every production on_configure() body calls exactly these members
 // unconditionally-or-conditionally; mocked so tests can verify they ran correctly
 // instead of just not crashing.
+//
+// The members below add_pmc_info are only touched by on_tracing_api_enter/exit
+// (library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp) and its
+// externals_with_tracing wrapper further down this file -- no on_configure() test
+// exercises them, so extending this struct is safe for every existing StrictMock user.
 struct gmock_externals
 {
     MOCK_METHOD(void, add_string, (std::string_view value));
     MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
     MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
+
+    MOCK_METHOD(bool, is_active, ());
+    MOCK_METHOD(bool, get_use_timemory, ());
+    MOCK_METHOD(void, tracing_push_timemory, (std::string_view name));
+    MOCK_METHOD(void, tracing_pop_timemory, (std::string_view name));
+    MOCK_METHOD(bool, check_backtrace_operations,
+                (std::uint64_t kind, std::uint32_t operation));
+    MOCK_METHOD(std::optional<int>, get_backtrace_data, (bool are_operations_available));
+    MOCK_METHOD(void, metadata_add_string, (std::string_view value));
+    MOCK_METHOD(void, metadata_add_thread_info,
+                (std::int32_t parent_process_id, std::int32_t process_id,
+                 std::uint64_t thread_id));
+    MOCK_METHOD(std::int32_t, get_pid, ());
+    MOCK_METHOD(std::int32_t, get_ppid, ());
+    // NOLINTNEXTLINE(readability-function-size)
+    MOCK_METHOD(void, region_sample_buffer_storage_store,
+                (std::uint64_t thread_id, std::string region_name,
+                 std::uint64_t correlation_id, std::uint64_t parent_stack_id,
+                 std::uint64_t begin_timestamp, std::uint64_t end_timestamp,
+                 std::string args_str, std::string category));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
@@ -644,6 +677,114 @@ struct externals
     static constexpr std::string_view k_kfd_queue_category_name = "rocm_kfd_queue";
     static constexpr std::string_view k_kfd_queue_category_description =
         "KFD Queue Events";
+};
+
+// Every SdkBackend member on_tracing_api_enter/exit
+// (library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp) touches; mocked so
+// tests can control return values and assert exactly what gets called, instead of the
+// fixed get_timestamp()==0/get_parent_stack_id()==0 behavior mock_sdk hard-codes for
+// every other callback-domain test.
+struct gmock_tracing_backend
+{
+    MOCK_METHOD(std::uint64_t, get_timestamp, ());
+    MOCK_METHOD(tracing_names_t, get_callback_tracing_names, ());
+    MOCK_METHOD(std::uint64_t, get_parent_stack_id, (const correlation_id_t&) );
+    MOCK_METHOD(void, iterate_args, (std::uint64_t kind, std::uint32_t operation));
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_tracing_backend>>
+    g_tracing_backend_mock;
+
+// SdkBackend stand-in for on_tracing_api_enter/exit tests: inherits mock_sdk's
+// boilerplate (context_id_t, kfd_*, ...) so it still satisfies
+// policies::domain_service::backend, then hides (re-declares) exactly the four
+// members those two functions touch, routing them through g_tracing_backend_mock.
+struct mock_sdk_with_tracing : mock_sdk
+{
+    static std::uint64_t get_timestamp()
+    {
+        return g_tracing_backend_mock->get_timestamp();
+    }
+
+    static tracing_names_t get_callback_tracing_names()
+    {
+        return g_tracing_backend_mock->get_callback_tracing_names();
+    }
+
+    static std::uint64_t get_parent_stack_id(const correlation_id_t& correlation_id)
+    {
+        return g_tracing_backend_mock->get_parent_stack_id(correlation_id);
+    }
+
+    template <typename ArgCallbackT>
+    static void iterate_callback_tracing_kind_operation_args(
+        const callback_tracing_record_t& record, ArgCallbackT /*callback*/,
+        std::int32_t /*max_deref*/, void* /*data*/)
+    {
+        g_tracing_backend_mock->iterate_args(record.kind, record.operation);
+    }
+};
+
+// Externals stand-in for on_tracing_api_enter/exit tests: inherits externals'
+// boilerplate (agent_manager_t, kfd_sample_t, category name constants, ...) so it
+// still satisfies policies::domain_service::externals, then hides exactly the members
+// on_tracing_api_enter/exit touch, routing them through g_externals_mock (the same
+// StrictMock<gmock_externals> instance on_configure() tests already use).
+struct externals_with_tracing : externals
+{
+    // externals also overloads buffer_storage_store() for kfd_sample_t; pull that
+    // overload back in since declaring the region_sample overload below would
+    // otherwise hide it, breaking policies::domain_service::externals for
+    // Externals::buffer_storage_store(std::move(kfd_sample_t{})).
+    using externals::buffer_storage_store;
+
+    static bool is_active() { return g_externals_mock->is_active(); }
+    static bool get_use_timemory() { return g_externals_mock->get_use_timemory(); }
+
+    template <typename CategoryT>
+    static void tracing_push_timemory(CategoryT, std::string_view name)
+    {
+        g_externals_mock->tracing_push_timemory(name);
+    }
+
+    template <typename CategoryT>
+    static void tracing_pop_timemory(CategoryT, std::string_view name)
+    {
+        g_externals_mock->tracing_pop_timemory(name);
+    }
+
+    static bool check_backtrace_operations(std::uint64_t kind, std::uint32_t operation)
+    {
+        return g_externals_mock->check_backtrace_operations(kind, operation);
+    }
+
+    static std::optional<int> get_backtrace_data(bool are_operations_available)
+    {
+        return g_externals_mock->get_backtrace_data(are_operations_available);
+    }
+
+    static void metadata_add_string(std::string_view value)
+    {
+        g_externals_mock->metadata_add_string(value);
+    }
+
+    static void metadata_add_thread_info(const thread_info_t& info)
+    {
+        g_externals_mock->metadata_add_thread_info(info.parent_process_id,
+                                                   info.process_id, info.thread_id);
+    }
+
+    static std::int32_t get_pid() { return g_externals_mock->get_pid(); }
+    static std::int32_t get_ppid() { return g_externals_mock->get_ppid(); }
+
+    static void buffer_storage_store(region_sample&& sample)
+    {
+        g_externals_mock->region_sample_buffer_storage_store(
+            sample.thread_id, sample.name != nullptr ? sample.name : "",
+            sample.correlation_id, sample.parent_stack_id, sample.start_timestamp,
+            sample.end_timestamp, sample.args_str != nullptr ? sample.args_str : "",
+            sample.category != nullptr ? sample.category : "");
+    }
 };
 
 }  // namespace rocprofsys::domains::test_support

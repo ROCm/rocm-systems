@@ -3,122 +3,21 @@
 
 #pragma once
 
+#include "library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
-#include <cstdint>
-
-#include "core/common_types.hpp"
-#include "core/demangler.hpp"
 
 namespace rocprofsys::domains::callback::hip
 {
 
-template <policies::domain_service::externals Externals>
-inline void
-on_runtime_api_configure()
-{}
-
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals>
-inline void
-on_runtime_api_enter(typename SdkBackend::callback_tracing_record_t record,
-                     typename SdkBackend::user_data_t* user_data, void* callback_data)
+template <typename Externals>
+struct runtime_api_category
 {
-    (void) callback_data;
+    using type = Externals::rocm_hip_api_category;
 
-    if(!Externals::is_active())
-    {
-        return;
-    }
-
-    typename SdkBackend::timestamp_t ts = SdkBackend::get_timestamp();
-
-    if(user_data)
-    {
-        user_data->value = ts;
-    }
-
-    auto name =
-        SdkBackend::get_callback_tracing_names().at(record.kind, record.operation);
-
-    if(Externals::get_use_timemory())
-    {
-        Externals::tracing_push_timemory(typename Externals::rocm_hip_api_category{},
-                                         name);
-    }
-}
-
-template <policies::domain_service::backend   SdkBackend,
-          policies::domain_service::externals Externals>
-inline void
-on_runtime_api_exit(typename SdkBackend::callback_tracing_record_t record,
-                    typename SdkBackend::user_data_t* user_data, void* callback_data)
-{
-    (void) callback_data;
-
-    typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp();
-
-    if(!Externals::is_active())
-    {
-        return;
-    }
-
-    auto backtrace_data = Externals::get_backtrace_data(
-        Externals::check_backtrace_operations(record.kind, record.operation));
-
-    auto name =
-        SdkBackend::get_callback_tracing_names().at(record.kind, record.operation);
-
-    const auto begin_timestamp = user_data->value;
-    const auto end_timestamp   = timestamp;
-
-    if(Externals::get_use_timemory())
-    {
-        Externals::tracing_pop_timemory(typename Externals::rocm_hip_api_category{},
-                                        name);
-    }
-
-    // Insert callback trace into database
-    auto args = function_args_t{};
-
-    auto iterate_args_callback =
-        [](auto /*kind*/, std::int32_t /*operation*/, std::uint32_t arg_number,
-           const void* const /*arg_value_addr*/, std::int32_t /*arg_indirection_count*/,
-           const char* arg_type, const char* arg_name, const char* arg_value_str,
-           std::int32_t /*arg_dereference_count*/, void* data) {
-            auto* func_args = static_cast<function_args_t*>(data);
-            if(arg_type && arg_name && arg_value_str)
-            {
-                func_args->emplace_back(
-                    argument_info{ .arg_number = arg_number,
-                                   .arg_type   = rocprofsys::utility::demangle(arg_type),
-                                   .arg_name   = arg_name,
-                                   .arg_value  = arg_value_str });
-            }
-            return 0;
-        };
-
-    SdkBackend::iterate_callback_tracing_kind_operation_args(
-        record, iterate_args_callback, 2, &args);
-
-    auto call_stack = Externals::get_backtrace_json(backtrace_data);
-
-    Externals::metadata_add_string(Externals::rocm_hip_api_category_name);
-
-    Externals::metadata_add_thread_info(
-        { Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}" });
-
-    const std::string args_str = get_args_string(args);
-
-    const std::string region_name{ name };
-
-    Externals::buffer_storage_store(typename Externals::region_sample{
-        record.thread_id, region_name.c_str(), record.correlation_id.internal,
-        SdkBackend::get_parent_stack_id(record.correlation_id), begin_timestamp,
-        end_timestamp, call_stack.dump().c_str(), args_str.c_str(),
-        Externals::rocm_hip_api_category_name.data() });
-}
+    static constexpr std::string_view k_name = Externals::rocm_hip_api_category_name;
+};
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
@@ -130,11 +29,10 @@ inline constexpr auto k_runtime_api = callback_domain_definition<SdkBackend>{
             .mode  = collection_mode::callback,
             .group = domain_group{ .name = "hip_api" },
         },
-    .on_record =
-        tracing_callback_dispatcher<SdkBackend,
-                                    on_runtime_api_enter<SdkBackend, Externals>,
-                                    on_runtime_api_exit<SdkBackend, Externals>>::callback,
-    .on_configure = on_runtime_api_configure<Externals>
+    .on_record = tracing_callback_dispatcher<
+        SdkBackend, on_tracing_api_enter<SdkBackend, Externals, runtime_api_category>,
+        on_tracing_api_exit<SdkBackend, Externals, runtime_api_category>>::callback,
+    .on_configure = on_tracing_api_configure<Externals>
 };
 
 }  // namespace rocprofsys::domains::callback::hip
