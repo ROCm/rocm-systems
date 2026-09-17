@@ -189,16 +189,16 @@ format_duration(std::chrono::nanoseconds dur)
 std::string
 datasize_to_string(std::uint64_t size_bytes)
 {
-    if(size_bytes < k_bytes_per_kilobyte)
+    if(static_cast<double>(size_bytes) < k_bytes_per_kilobyte)
     {
         return fmt::format("{} B", size_bytes);
     }
-    if(size_bytes < k_bytes_per_megabyte)
+    if(static_cast<double>(size_bytes) < k_bytes_per_megabyte)
     {
         return fmt::format("{:.2f} KB",
                            static_cast<double>(size_bytes) / k_bytes_per_kilobyte);
     }
-    if(size_bytes < k_bytes_per_gigabyte)
+    if(static_cast<double>(size_bytes) < k_bytes_per_gigabyte)
     {
         return fmt::format("{:.2f} MB",
                            static_cast<double>(size_bytes) / k_bytes_per_megabyte);
