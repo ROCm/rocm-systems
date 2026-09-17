@@ -170,7 +170,7 @@ get_stream_id(hipStream_t stream)
         [](const stream_map_t& _data,
            hipStream_t         _stream) -> std::optional<rocprofiler_stream_id_t> {
             ROCP_INFO_IF(_data.count(_stream) == 0 &&
-                         !rocprofiler::registration::supports_attachment())
+                         !rocprofiler::registration::uses_rocattach_hsa_interception())
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
@@ -182,7 +182,7 @@ get_stream_id(hipStream_t stream)
     // Stream ID already exists
     if(stream_id) return *stream_id;
 
-    ROCP_INFO_IF(!rocprofiler::registration::supports_attachment())
+    ROCP_INFO_IF(!rocprofiler::registration::uses_rocattach_hsa_interception())
         << fmt::format("Stream ID is not present in {}, registering hipStream_t ({}) lazily",
                        __FUNCTION__,
                        sdk::utility::as_hex(static_cast<void*>(stream)));
