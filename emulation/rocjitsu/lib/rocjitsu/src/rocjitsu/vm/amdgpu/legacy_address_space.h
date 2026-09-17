@@ -2560,8 +2560,8 @@ private:
   /// Addressability checks in the mapped-span helpers remain the final guard
   /// against host-allocation reuse that preserves identical PTE contents.
   template <typename F>
-  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
-                   F &&fn) const -> std::invoke_result_t<F, const LegacyPageTableEntry *> {
+  auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache, F &&fn) const
+      -> std::invoke_result_t<F, const LegacyPageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
     size_t metadata_retries = 0;
@@ -2748,6 +2748,7 @@ private:
 
   bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
     const FaultDispatch fault_dispatch(*this);
+    const bool client_backed = vmid != 0 && has_client_backing(vmid);
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
     std::memset(dst, 0, len);
@@ -2783,6 +2784,9 @@ private:
           note_clipped_mapped_access("read", addr, len, vmid);
         return true;
       }
+      // Unmapped client addresses must use process_vm, never daemon identity backing.
+      if (client_backed)
+        return false;
       if (page.read(access_begin, dst, len))
         return true;
       note_rejected_identity_access(addr, vmid);
@@ -2792,6 +2796,7 @@ private:
 
   bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
     const FaultDispatch fault_dispatch(*this);
+    const bool client_backed = vmid != 0 && has_client_backing(vmid);
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
     return with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
@@ -2823,6 +2828,9 @@ private:
           note_clipped_mapped_access("write", addr, len, vmid);
         return true;
       }
+      // Unmapped client addresses must use process_vm, never daemon identity backing.
+      if (client_backed)
+        return false;
       if (page.write(access_begin, src, len))
         return true;
       note_rejected_identity_access(addr, vmid, page.write_refusal_cause());
@@ -2838,6 +2846,7 @@ private:
   bool copy_mapped_span(uint64_t addr, void *bytes, size_t size, uint32_t vmid,
                         bool into_memory) const {
     const FaultDispatch fault_dispatch(*this);
+    const bool client_backed = vmid != 0 && has_client_backing(vmid);
     if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
       return false;
     return with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
@@ -2934,6 +2943,9 @@ private:
         }
         return true;
       }
+      // Unmapped client addresses must use process_vm, never daemon identity backing.
+      if (client_backed)
+        return false;
       if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
         return false;
       MemoryFaultCause write_cause = MemoryFaultCause::NotPresent;
