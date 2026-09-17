@@ -101,8 +101,9 @@ cargo test --test matrix_e2e -- --nocapture
 summary line (`N ran, M skipped, T total`).
 
 The `rocjitsu` rows run whenever `mirage` discovers its KMD library; see
-[`building.md`](../docs/building.md) for the discovery order (a sibling
-monorepo build, `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`).
+[`building.md`](../docs/building.md) for the discovery order (a
+`<prefix>/lib` beside the test binary, a sibling monorepo build,
+`$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib` — in that order).
 
 The containerized dimensions (`podman`, `docker`) are driven through a
 hermetic mock provider — a small shell script standing in for the

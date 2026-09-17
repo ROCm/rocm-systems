@@ -112,6 +112,9 @@ public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
   static constexpr uint32_t kNumberOfHsaEvents = 1024;   //!< Note: may change in the future to 8K, KMD should define it
   static constexpr uint32_t kAqlPayloadId = 1 << 24;
+  // DXUMD_SCHEDULERIDENTIFIER_COMPUTE0 from the KMD scheduler enum (kdx_umd.h,
+  // not on this include path). The PM4 path must run on COMPUTE0.
+  static constexpr uint32_t kSchedulerIdCompute0 = 5;
 
   WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();

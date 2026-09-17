@@ -71,17 +71,19 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 
 ### Current scope
 
-- Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body. All-or-nothing: any per-site failure fails the whole patch.
+- Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol, argument count)` reuse one copied probe body. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
 - `BeforeInst` kind only (other kinds are fatal).
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` and `force_full_exec` are still reserved milestone guardrails — non-default values are fatal until each gains a real consumer.
+- Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
+- Probe calls may pass immediate 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. The count is declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
 - Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) and any chosen scratch/special-state temps to be within the kernel's SGPR allocation (bounded by `kernel_sgpr_count`); auto-growing the SGPR count is not yet implemented (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
 ### Key design constraint
 
-The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (`max_scratch_offset_bytes` + the fail-closed `plan_*_spills` helpers, plus the single-kernel and nonzero-scratch checks), and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
+The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (`max_scratch_offset_bytes` + the fail-closed `plan_*_spills` helpers, plus the single-kernel and nonzero-scratch checks), the probe live-in gate in `resolve_points()`, and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
 
 ---
 
@@ -154,10 +156,10 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 
 | Type | Stage | Carries |
 | --- | --- | --- |
-| `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, reserved fields |
-| `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls) |
-| `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, calling convention, `body_words`, `output_text_offset` |
-| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
+| `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, `probe_args`, reserved fields |
+| `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls), `probe_args` |
+| `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, verified `ProbeAbi`, `body_words`, `output_text_offset` |
+| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
 | `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings` |
@@ -186,6 +188,10 @@ Multi-word, generation-specific encoders for the spill bracket, split out from t
 
 An unmodeled arch throws `UnimplementedInst`. The hard arch gates on spilling are these five builders, `max_scratch_offset_bytes`, and — in the orchestrator — `arch_has_accvgpr` (AccVGPR spills require an AGPR file) and `arch_has_unified_vgpr_allocation` (which selects the descriptor's ACCUM_OFFSET split used to size the AccVGPR window).
 
+### Vector Builders (`code/builders/vector_builders.h`) [DBI-only]
+
+The plain VALU ops emitted outside the spill bracket, which `instruction_builder.h` (scalar by construction) and `spill_builders.h` (scoped to the bracket) are not the home for. Today just `build_v_mov_b32_imm`, the `v_mov_b32 vN, <literal>` pair used for argument materialization: a VOP1 word whose `src0` names the literal constant, plus the literal word. Covers all ten AMDGPU targets, each through its own generation's builder and opcode table — the encodings agree at this opcode, but the generated VOP1 `op` field is 7 bits on cdna5 and rdna4 and 8 bits on the other eight generations, so a shared packer would be right only for opcodes that fit both.
+
 ### Kernel Descriptor Scan (`code/kernel_descriptor_scan.h`) [shared with DBT]
 
 Enumerates a code object's kernel descriptors and derives per-kernel allocation facts. `scan_kernel_descriptors(image, text_offset, text_size)` returns each kernel's descriptor file offset, entry, and `private_segment_fixed_size`, with overflow-safe extent checks and a descriptor-bounded-by-owning-section guard (rejects malformed ELFs). `kernel_wavefront_size` and `descriptor_vgpr_granularity_for_wavefront` decode the wave-size-dependent VGPR encoding granule (shared with DBT so the two cannot diverge); the orchestrator multiplies `(GRANULATED_WORKITEM_VGPR_COUNT + 1)` by that granule to get the kernel's VGPR count. The orchestrator currently rejects anything but a single kernel.
@@ -203,13 +209,35 @@ Ordinary SGPRs, VGPRs, and AccVGPRs via `RegisterSet`. `InstDefUse` records expl
 
 #### What it does NOT track
 
-- EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these, but they are not in the backward-liveness dataflow set (`RegisterSet` is SGPR/VGPR/AccVGPR only). See the special-state note below for how they are still preserved.
+- EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these, but they are not in the backward-liveness dataflow set (`RegisterSet` is SGPR/VGPR/AccVGPR only). See the special-state note below for how they are still preserved, and for what a probe that *reads* them gets.
 - Cross-kernel CFG. Edges that leave the kernel scope are silently dropped.
 - Memory dependencies. Liveness is purely register-based.
 
-#### Special state (EXEC / VCC / M0)
+#### Special state (EXEC / VCC / SCC / M0)
 
 EXEC, VCC, and M0 *writes* are surfaced by the decoder as special-state operands (e.g. `v_cmp` → VCC, `v_cmpx` → EXEC), so a probe's `ProbeClobberSummary.touches_{exec,vcc,m0}` are set and drive preservation. They are **not** part of the backward-liveness `RegisterSet` dataflow, so preservation is *save-when-clobbered*, not save-when-live. Because implicit-def detection is not proven comprehensive (a truly operand-less implicit def could be missed), EXEC and VCC are preserved **unconditionally** as a safety net; M0 is preserved only when a write is detected. This is why the trampoline can reserve EXEC/VCC/M0 temps even though liveness never reports them.
+
+The same `RegisterSet` limit bounds the probe live-in gate in the other direction: a probe that *reads* special state before writing it is not detected, because there are no bits to report it with. Such a probe is accepted with an empty live-in set and runs against whatever the envelope leaves in that register. This is a deliberate boundary — special state is the trampoline's to preserve, and the live-in gate covers ordinary registers only (`code/patch/probe_live_in.h`) — but it is worth knowing per register what "whatever the envelope leaves" means:
+
+- **SCC** — the probe never sees the anchor's SCC. The envelope's SCC save/restore (`s_cselect_b32` / `s_cmp_lg_u32`, see [Instrumentation Flow (probe-call)](#instrumentation-flow-probe-call)) brackets the whole sequence and so protects the **host kernel's** SCC across instrumentation; it does not deliver it to the probe. The `s_getpc_b64` + 64-bit add chain that materializes the call target runs *after* the save and writes SCC, so the probe is entered with that carry-out. A probe branching on SCC before writing it therefore branches on envelope arithmetic, deterministically wrong rather than merely stale.
+- **M0** — carries the anchor's value. On GFX9/CDNA a `ds_*` instruction implicitly reads M0, which a kernel prologue initializes, so an LDS-using probe works only while no instruction upstream of the anchor rewrote M0 (`s_movrel*`, GWS, `s_sendmsg`, a strided DS op). Nothing verifies that.
+- **EXEC / VCC** — carry the anchor's value; the envelope restores the anchor mask before the call precisely so the probe runs under it. EXEC is forced to `-1` only around the spill store/load, never across the call.
+
+Covering the read side needs a special-state analysis that does not exist; `RegisterSet` has no bits for these (`isa/register_set.h`).
+
+### Probe Live-Ins
+
+**Files:** `code/patch/probe_live_in.h`, `code/patch/probe_live_in.cpp`
+
+The complement of `probe_clobber`: what does the probe body *read* before defining it? `analyze_probe_live_ins()` builds the probe object's CFG (probe entry passed as an `extra_split_point`), forms the block scope with `reachable_kernel_blocks()`, runs `LivenessAnalysis` over it, and returns the entry block's live-in set minus `supplied_registers(abi)`. That subtraction is the `s[30:31]` return link plus the argument VGPRs the ABI's declared count covers.
+
+A non-empty result is a probe expecting state that only exists at kernel entry — `workitem_id_x` in `v31`, written by the kernel's own prologue — which a trampoline at an arbitrary anchor cannot reproduce. `Instrumentor::resolve_points()` rejects the site. This is also how a declared argument count is verified against the body the compiler actually emitted; see [Probe arguments](#probe-arguments).
+
+CFG liveness rather than a linear scan of the body words: a def under a forward branch does not reach a use after the join, so a linear walk would report a smaller footprint than the body has.
+
+The analysis sets `LivenessAnalysisOptions::exec_masked_defs_kill`, so a masked vector write counts as writing the whole register. Without it no masked def is ever a kill and every VGPR the probe reads — including ones it defines itself — is reported as an input. The probe owns its own EXEC; the option's doc states what that obliges.
+
+Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5, whose vector operands resolve only from a block where `MODE.VGPR_MSB` is known zero, which an anchor does not guarantee; relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
 
 ### SpillManager
 
@@ -308,9 +336,10 @@ The trampoline envelope wraps the relocated original:
     s_mov_b64    <exec_temp>, exec      <-- EXEC save (preserve_exec, or any spilling site)
     s_mov_b64    <vcc_temp>,  vcc       <-- VCC save  (preserve_vcc)
     s_mov_b32    <m0_temp>,   m0        <-- M0 save   (preserve_m0)
-    s_mov_b64    exec, -1               <-- widen to full mask for the stores (spilling site)
+    s_mov_b64    exec, -1               <-- widen to full mask (spilling or argument site)
     [spill prologue]                    <-- VGPR/acc direct stores; SGPR writelane + store; store wait
-    s_mov_b64    exec, <exec_temp>      <-- restore anchor mask so the probe runs masked (spilling site)
+    v_mov_b32    v[arg_base + i], <lit> <-- one per probe_args entry, in order, all lanes
+    s_mov_b64    exec, <exec_temp>      <-- restore anchor mask so the probe runs masked
     s_cselect_b32 <scc_temp>, 1, 0      <-- SCC save (preserve_scc)
     s_getpc_b64  s[target_pair]
     s_add_u32    s[target_lo], s[target_lo], (probe_target - pc)@lo
@@ -327,15 +356,37 @@ The trampoline envelope wraps the relocated original:
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
-Lines above are conditional: the EXEC/VCC/M0 saves and restores appear only when that register is preserved (EXEC also rides in whenever the site spills); the four `exec, -1` / `exec, <exec_temp>` toggles appear only on a spilling site; the `[spill prologue]` / `[spill epilogue]` are empty when `spill_set` is empty (leaving the plain SCC-bracketed call). See [TrampolineBuilder → Spill bracket](#spill-bracket) for the bracket contents. The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
+Lines above are conditional: the EXEC/VCC/M0 saves and restores appear only when that register is preserved (EXEC also rides in whenever the site spills); the four `exec, -1` / `exec, <exec_temp>` toggles appear only on a spilling site; the `v_mov_b32` block is empty when the site passes no arguments; the `[spill prologue]` / `[spill epilogue]` are empty when `spill_set` is empty (leaving the plain SCC-bracketed call). The three `exec` toggles appear whenever the site spills **or** passes arguments — an argument site with nothing to spill still opens the window, and emits the third toggle over an empty epilogue so the planner and emitter count the same three unconditionally. See [TrampolineBuilder → Spill bracket](#spill-bracket) for the bracket contents. The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
+
+### Probe arguments
+
+A point may carry `probe_args`, a list of immediate 32-bit values handed to the probe. They arrive in consecutive VGPRs from `ProbeAbi::arg_vgpr_base` (`v0` today), one dword per register, in order — the AMDGPU function calling convention's placement for explicit scalar arguments.
+
+**The count is declared, not inferred.** Nothing in a compiled body distinguishes "reads `v0` as its first argument" from "reads `v0` uninitialized", so the caller states how many dwords it is passing and `derive_probe_abi(cc, num_arg_dwords)` builds the ABI from the pair. `is_valid_probe_abi()` re-derives from an ABI's own count and compares, so a hand-built ABI whose argument window its convention would not choose is rejected.
+
+**Verification is the live-in analysis, unchanged.** `supplied_registers()` widens to cover the argument VGPRs, and the existing "residual live-in set must be empty" rule then does the work: a declared argument the body reads subtracts away; one it reads but the caller did not declare survives and fails the site by name. Acceptance is "nothing left over" rather than "reads exactly what was declared", so a probe that ignores an argument it was handed is not rejected — wasteful, not unsafe. There is no argument-specific code in the analysis.
+
+`kMaxProbeArgVgprs` is 16, an arbitrary cap. The convention fills `v0` upward through `v30` (`v31` is the packed workitem id), so 31 dwords is the most that arrive in registers; the cap sits well inside that because the free-register search would refuse an argument block near 31 long before the convention did, and only single-dword integer arguments have been measured.
+
+**Emission.** `emit_probe_call()` writes the values with `v_mov_b32 vN, <literal>` **inside the full-mask window** — after the spill prologue, immediately before the anchor-EXEC restore. Three things fix that position:
+
+- It follows the spill prologue, so an argument VGPR that was live at the anchor is already stored. The prologue ends in a store-completion wait, so the store has finished reading the register before the `v_mov` overwrites it.
+- It runs under `EXEC = -1`, so the argument is defined in *every* lane. Written under the anchor mask instead, the inactive lanes would keep whatever the guest left in that register, and a probe reading an argument through an EXEC-independent op — `v_readlane_b32` of a fixed lane, or anything it runs after widening EXEC itself — would see stale data.
+- `v_mov_b32` writes no SCC, so it cannot disturb the save/restore pair straddling it.
+
+Passing any argument therefore opens the full-mask window even on a site that spills nothing, which costs the EXEC save/restore pair and three EXEC toggles. It also makes an argument-passing plan arch-dependent: reserving the EXEC temp resolves a per-arch operand code, so unlike a bare no-argument plan it cannot be built without `plan.arch`. Each argument adds two words to `before_word_count` and the window adds five, so the existing plan/emit drift guard covers them.
+
+**The argument VGPRs are builder clobbers**, which is what routes a live one into the spill set. They are the one builder clobber not *chosen* dead — the ABI fixes them — so unlike the envelope's SGPR temps they can collide with a live value, and the site's `will_spill` decision has to account for them or a spilling site would skip the EXEC save that bracketing the stores requires.
+
+The declared count joins the probe dedup key: two sites naming one symbol with different counts were verified against different conventions and do not share a `ProbeCallable`. The values stay per-site.
 
 ### Register requirement
 
-The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFuncNoArgsReturnS30S31`): `s_swappc_b64` writes the return address there and the body's `s_setpc_b64 s[30:31]` reads it back. The planner additionally picks a dead, even-aligned **target pair** (holds the materialized address) and a dead **SCC temp** from the anchor's liveness. All of these must be *granted by the kernel's SGPR allocation*.
+The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFuncReturnS30S31`): `s_swappc_b64` writes the return address there and the body's `s_setpc_b64 s[30:31]` reads it back. It likewise fixes the **argument VGPRs** at `v0` upward. The planner additionally picks a dead, even-aligned **target pair** (holds the materialized address) and a dead **SCC temp** from the anchor's liveness. All of these must be *granted by the kernel's allocation* — the SGPRs by `.sgpr_count`, the argument VGPRs by the ordinary-VGPR bound, since an index at or past it is unallocated or aliases an AGPR.
 
 The planner also reserves, from the same dead-SGPR pool bounded by `plan.kernel_sgpr_count`, a temp per preserved special register (an even pair for EXEC/VCC, a single for M0) and — for SGPR spills — a bridge VGPR from the kernel's ordinary-VGPR range (`min(kernel_vgpr_count, accum_base)`, so it can never alias an AccVGPR). EXEC is reserved whenever the site spills, not just when the probe clobbers it, because the store/load run under a forced full mask.
 
-The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31` (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy fails closed when the link pair is live at the anchor, when no dead target pair or required temp is available within the kernel's allocation, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
+The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel must already allocate through `s31` (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (`vector_add_probe.hip`, `.sgpr_count` ≥ 32). Resource policy fails closed when the probe body reads a register its convention does not supply, when the link pair is live at the anchor, when a site passes more argument dwords than `kMaxProbeArgVgprs`, when the argument VGPRs fall outside the kernel's ordinary-VGPR bound, when a site passes arguments but no single kernel descriptor was discovered to derive that bound from, when a non-empty `probe_args` accompanies an inline-nop point, when no dead target pair or required temp is available within the kernel's allocation, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (`arch_has_accvgpr` is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (`kernel_vgpr_count − accum_base`). The spill set itself is `instrument_clobbers ∩ live_at_anchor` and is spilled, not rejected.
 
 ---
 
@@ -343,11 +394,14 @@ The instrumentor does **not yet grow the kernel's SGPR count**, so the kernel mu
 
 - **Unit (`tests/patch/instrumentor_test.cpp`):** Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for `is_relocatable_anchor`), inline-nop plan guardrail, `make_trampoline_plan`, end-to-end `patch()` on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), the spill formula, per-class spill planning (`plan_vgpr/sgpr/acc_spills` — ascending slots, class/arch/offset-cap rejections, the kernel-VGPR-count bridge bound), the drain ordering (`expect_drain_before_store` / `expect_drain_after_return`), EXEC/VCC/M0 preservation (incl. unconditional EXEC/VCC), and the fail-closed cases (FLAT_SCRATCH clobber, zero-scratch, SGPR temp past the kernel allocation).
 - **Spill sim e2e (`tests/dbi/dbi_spill_sim_test.cpp`):** Runs the full `s_swappc` envelope + spill bracket through `DbiSim` and reads back registers after execution, each with a negative control that nops the restore. Fixtures cover VGPR, SGPR (VGPR-bridged), two-SGPR, reused-spilled-bridge, AccVGPR (CDNA), combined VGPR+SGPR+ACC, EXEC preserve (wave32 partial mask), full-mask EXEC-widen spill, and probe-runs-under-anchor-mask — parameterized across **CDNA3, CDNA4, and RDNA4** (AGPR is CDNA-only).
+- **Argument sim e2e (`tests/dbi/dbi_arg_sim_test.cpp`):** Runs a probe call that passes an argument at an anchor where the argument register `v0` is *live*, so one execution covers the whole chain — argument VGPRs into `builder_clobbers`, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's `v0` survived carrying it. Negative control nops the two `v_mov_b32 v0, <literal>` words and requires the probe to read the guest's value instead. Parameterized across **CDNA3, CDNA4, and RDNA4**. Shares `test::DbiSim` (`tests/dbi/dbi_sim.h`) with the spill suite; note that harness dispatches its own descriptor with the full register file, so the register-ownership gates are exercised at patch time only.
 - **Unit (`tests/code/kernel_descriptor_scan_test.cpp`):** Single-kernel scan, and the malformed-ELF rejections (unterminated `.kd` name, section-header-table / symtab-range overflow, descriptor crossing its owning section).
 - **Unit (`tests/patch/trampoline_builder_test.cpp`):** Builder byte-layout contract, branch math, arch-honoring opcode selection, INT16 limit boundary cases.
 - **Unit (`tests/patch/instruction_builder_test.cpp`):** `compute_sopp_branch_simm16` boundary / alignment / overflow / negative-unaligned-delta.
+- **Unit (`tests/patch/vector_builder_test.cpp`):** `build_v_mov_b32_imm` encoding across all ten AMDGPU targets, non-AMDGPU rejection, and the literal `src0` code pinned against every generation's operand table.
 - **Unit (`tests/patch/probe_symbol_test.cpp`, `probe_callable_test.cpp`, `probe_clobber_test.cpp`):** Probe symbol resolution (missing / duplicate / undefined / non-executable / zero-size rejection), `ProbeCallable` construction, and the `rj_nop_probe` clobber summary (empty ordinary clobbers, no special state).
-- **Probe fixture (`tests/dbi/probe_fixture_test.cpp`, gated on `HAS_PROBE_FIXTURES`):** Resolves `rj_nop_probe` in the real amdclang++-compiled gfx90a device ELF, confirms the body returns via `s_setpc_b64 s[30:31]`, builds the callable, and checks the clobber summary. No GPU required.
+- **Unit (`tests/patch/probe_live_in_test.cpp`):** Probe input footprint — `v31` read cold is reported, the same body defining `v31` first is not, a def under a forward branch (which a linear scan would miss) is reported, scalars both ways, the link pair excluded — the declared-argument cases (the same body accepted at count 1 and rejected naming `v0` at count 0; an argument beyond the count named; a declared-but-unread argument accepted) — plus every fail-closed path: unknown convention, gfx1250, relative / GPR-indexed VGPR access, multi-`.text` probe object, symbol outside `.text`, body ahead of its section, missing decoder, undecodable `.text`, and an entry that starts no block.
+- **Probe fixture (`tests/dbi/probe_fixture_test.cpp`, gated on `HAS_PROBE_FIXTURES`):** Resolves `rj_nop_probe` in the real amdclang++-compiled gfx90a device ELF, confirms the body returns via `s_setpc_b64 s[30:31]`, builds the callable, and checks the clobber summary. Also pins the argument ABI against the compiler with `rj_arg_probe`: declared at count 1 the residual live-in set is empty, and at count 0 the same body reports `v0` — so a toolchain that placed argument 0 elsewhere would fail with the register it chose. No GPU required.
 - **Static DBI smoke (`tests/dbi/hsa_dbi_nop_asm_test.cpp`, `HsaDbiNopAsmCdna2Static`):** Loads a real compiled gfx90a `vector_add` ELF, runs `Instrumentor::patch()`, asserts the patched ELF differs from the original, decodes the anchor as `s_branch`, and confirms `.text` grew to hold the appended trampoline cave. No GPU required.
 - **Hardware DBI smoke (`HsaDbiNopAsmCdna2Hardware`, gated on `HAS_CDNA2_GPU`):** Three tests on a real gfx90a GPU — patched ELF loads + validates via HSA; dispatched kernel produces bit-identical output to the original (the inline-nop placeholder is a no-op); a *sabotage* test overwrites the trampoline's `s_nop 0` with `s_endpgm 0` and asserts the kernel actually fails, proving the GPU genuinely executes the trampoline path rather than silently bypassing the splice. `hsa_init` / `hsa_shut_down` and agent enumeration run once per suite via `SetUpTestSuite` / `TearDownTestSuite`; the agent is located by matching the target's `DbiTargetParams::isa_substring` against the HSA ISA name, so the same fixture binds to a real GPU or to whichever agent the CLI launcher supplies.
 - **Static probe-call smoke (`tests/dbi/hsa_dbi_nop_probe_test.cpp`, `HsaDbiNopProbeCdna2Static`, gated on `HAS_PROBE_FIXTURES`):** Instruments the register-padded `vector_add_probe` kernel with a probe call to `rj_nop_probe`, then asserts the patch shape — anchor decodes as `s_branch`, `.text` grew, the copied probe body matches the resolved body and ends in `s_setpc_b64`, and the trampoline contains the `s_swappc_b64` to it. No GPU required.

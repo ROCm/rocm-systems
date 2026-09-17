@@ -1503,7 +1503,7 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   std::string err;
   // s5 live: the planner must avoid it; the rest are free.
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(
-      plan, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31, make_sgpr_set({5}),
+      plan, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), make_sgpr_set({5}),
       probe_summary.ordinary_clobbers, &err));
 
   const RegisterSet clobbers =
@@ -1560,6 +1560,23 @@ TEST(InstrumentorSpill, PlanVgprSpillsRejectsNonVgpr) {
   EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
   EXPECT_TRUE(out.empty());
   EXPECT_NE(err.find("s7"), std::string::npos);
+}
+
+// A special register (EXEC/SCC/...) in the spill set is named by its
+// architectural name -- def/use surfaces special singletons, so a
+// consumer that forgets to project them out must still get a readable diagnostic.
+TEST(InstrumentorSpill, PlanVgprSpillsNamesSpecialRegisters) {
+  RegisterSet spill;
+  spill.expand(RegisterRef{RegClass::EXEC, 0, 1});
+  spill.expand(RegisterRef{RegClass::SCC, 0, 1});
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  EXPECT_FALSE(plan_vgpr_spills(spill, spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("exec"), std::string::npos) << err;
+  EXPECT_NE(err.find("scc"), std::string::npos) << err;
+  EXPECT_EQ(err.find('?'), std::string::npos) << err;
 }
 
 // An offset past the CDNA4 12-bit FLAT field fails even within the scratch limit.
@@ -1896,6 +1913,149 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
 }
 
+// Two sites naming one symbol with different counts were verified against
+// different conventions, so they must not share a ProbeCallable. Checks the
+// registry split; the values themselves are not materialized yet.
+TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    if (anchor != 0)
+      pt.probe_args = {0xAAAAAAAAu};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 2);
+}
+
+// The ABI fixes the argument VGPRs at v0 upward, so unlike the envelope's SGPR
+// temps they cannot be re-picked to fit. The default fixture allocates 8 unified
+// VGPRs with the AGPR window at v4, leaving v0..v3 ordinary, so a fifth argument
+// would name a register that aliases an AGPR.
+TEST(InstrumentorProbePatch, ArgumentsPastTheKernelVgprAllocationFailClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(5, 0u);
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v0..v4"), std::string::npos) << result.errors.front();
+  EXPECT_NE(result.errors.front().find("only 4 ordinary VGPRs"), std::string::npos)
+      << result.errors.front();
+}
+
+// Exactly filling the ordinary window is accepted: the gate is ownership, not a
+// margin.
+TEST(InstrumentorProbePatch, ArgumentsFillingTheOrdinaryVgprWindowAreAccepted) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {1u, 2u, 3u, 4u};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+}
+
+// With more than one kernel there is no single VGPR allocation to bound the
+// argument registers against, the same fail-closed shape as the SGPR bound. A
+// zero-argument call is unaffected, which the sibling multi-kernel tests cover.
+TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) {
+  auto target = make_gfx950_two_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {1u};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("bound VGPR selection"), std::string::npos)
+      << result.errors.front();
+}
+
+// An inline nop has nowhere to put arguments.
+TEST(InstrumentorProbePatch, RejectsArgumentsWithoutAProbe) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  AmdGpuCodeObject obj(target.data(), target.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_args = {1u};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("probe_args"), std::string::npos) << result.errors.front();
+}
+
+// More arguments than the ABI has registers for. Rejected before the count is
+// narrowed to uint8_t, which would wrap a large request into a small in-range
+// one.
+TEST(InstrumentorProbePatch, RejectsMoreArgumentsThanFitInRegisters) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(kMaxProbeArgVgprs + 1, 0u);
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("the limit is"), std::string::npos) << result.errors.front();
+}
+
 // Two anchors calling the SAME (probe_obj, symbol) share a single copied body:
 // the body is emitted once and both trampolines target that one copy. Locks in
 // the resolve_probe_index dedup so a regression that copies per site is caught.
@@ -2064,6 +2224,32 @@ TEST(InstrumentorProbePatch, ProbeClobberingLinkPairFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
+// A probe reading v31 without defining it wants workitem_id_x, which only the
+// kernel's own entry prologue produces. Nothing in the instrumentation path
+// supplies it, so the site is rejected rather than silently handed whatever the
+// instrumented kernel left in v31.
+TEST(InstrumentorProbePatch, ProbeWithImplicitLiveInFailsClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMovV0FromV31, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  instr.add_point(pt);
+
+  auto result = instr.patch();
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v31"), std::string::npos)
+      << "error was: " << result.errors.front();
+  EXPECT_NE(result.errors.front().find("before defining it"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 // A probe call needs the kernel's SGPR allocation to bound temp selection. On a
 // descriptorless object that bound is unknown, so the call fails closed rather than
 // fall back to the device-wide default (which could pick temps past the allocation).
@@ -2220,8 +2406,11 @@ protected:
 
   // Patch a probe that clobbers one special register on a zero-scratch kernel
   // whose anchor (v_mov v3, v2) needs no spill, isolating the save/restore.
+  // The compare's vsrc1 is v0, so the body defines v0 before reading it. A probe
+  // that read v0 cold would be rejected as having an implicit live-in, which is
+  // a different gate than the special-state preservation under test here.
   std::vector<uint32_t> patch_probe_clobbering(uint32_t probe_clobber_word) {
-    Caved c = patch_spill({kMovV3V2, endpgm()}, {probe_clobber_word, setpc()},
+    Caved c = patch_spill({kMovV3V2, endpgm()}, {kMovV0Zero, probe_clobber_word, setpc()},
                           /*private_bytes=*/0);
     EXPECT_EQ(c.scratch, 0u) << "special-state preservation needs no scratch";
     return c.cave;
@@ -2595,37 +2784,40 @@ TEST_F(Rdna4ProbeSpill, BoundaryDrainsAtNoSpillSite) { expect_boundary_drains_at
 // even for a probe whose special-state write the summary might miss. The VOPC
 // encodings are arch-specific single words, so each test passes its own.
 TEST_F(Cdna3ProbeSpill, PreservesVccFromImplicitCompare) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u);
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
 }
 
 TEST_F(Cdna3ProbeSpill, PreservesExecFromImplicitCmpx) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
 }
 
 TEST_F(Cdna4ProbeSpill, PreservesVccFromImplicitCompare) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7D940000u);
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
 }
 
 TEST_F(Cdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7DB40000u);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7DB40080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
 }
 
 TEST_F(Rdna4ProbeSpill, PreservesVccFromImplicitCompare) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmp_eq_u32=*/0x7C940000u);
+  const std::vector<uint32_t> cave =
+      patch_probe_clobbering(/*v_cmp_eq_u32 vcc, 0, v0=*/0x7C940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_vcc_lo(arch()));
 }
 
 TEST_F(Rdna4ProbeSpill, PreservesExecFromImplicitCmpx) {
-  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32=*/0x7D940000u);
+  const std::vector<uint32_t> cave = patch_probe_clobbering(/*v_cmpx_eq_u32 0, v0=*/0x7D940080u);
   ASSERT_FALSE(cave.empty());
   expect_special_preserved(cave, sop1_op_mov_b64(arch()), scalar_operand_exec_lo(arch()));
 }

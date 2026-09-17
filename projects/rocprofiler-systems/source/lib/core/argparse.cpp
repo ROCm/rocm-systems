@@ -4,11 +4,13 @@
 #include "argparse.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "config.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
 #include <cstdint>
+#include <tuple>
 
 #include <timemory/settings/types.hpp>
 
@@ -27,18 +29,8 @@ namespace
 auto
 get_clock_id_choices()
 {
-    auto clock_name = [](std::string _v) {
-        constexpr auto _clock_prefix = std::string_view{ "clock_" };
-        for(auto& itr : _v)
-            itr = tolower(itr);
-        auto _pos = _v.find(_clock_prefix);
-        if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
-        if(_v == "process_cputime_id") _v = "cputime";
-        return _v;
-    };
-
 #define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
-    std::make_tuple(clock_name(#VAL), VAL, std::string_view{ #VAL })
+    std::make_tuple(utility::string::clock_name(#VAL), VAL, std::string_view{ #VAL })
 
     auto _choices = strvec_t{};
     auto _aliases = std::map<std::string, strvec_t>{};
@@ -62,15 +54,16 @@ get_clock_id_choices()
 
 using rocprofsys::common::update_mode;
 
+// NOLINTBEGIN - ignore argument number issue
 template <typename Tp>
 void
-update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
-           update_mode _mode = update_mode::REPLACE, std::string_view _join_delim = ":")
+update_env(parser_data& data, std::string_view env_var, Tp&& env_val,
+           update_mode mode = update_mode::replace, std::string_view join_delim = ":")
 {
-    rocprofsys::common::update_env(_data.env.current, _env_var,
-                                   std::forward<Tp>(_env_val), _mode, _join_delim,
-                                   _data.env.updated, _data.env.initial);
+    rocprofsys::common::update_env(data.env.current, env_var, std::forward<Tp>(env_val),
+                                   mode, join_delim, data.env.updated, data.env.initial);
 }
+// NOLINTEND
 
 }  // namespace
 
@@ -109,10 +102,10 @@ init_parser(parser_data& _data)
         path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
     auto _libexecpath = path::realpath(path::get_internal_script_path());
-    update_env(_data, env_vars::SCRIPT_PATH, _libexecpath, update_mode::REPLACE);
+    update_env(_data, env_vars::SCRIPT_PATH, _libexecpath, update_mode::replace);
 
     auto _rootpath = path::realpath(path::get_rocprofsys_root());
-    update_env(_data, env_vars::ROOT, _rootpath, update_mode::REPLACE);
+    update_env(_data, env_vars::ROOT, _rootpath, update_mode::replace);
 
     return _data;
 }
@@ -120,7 +113,7 @@ init_parser(parser_data& _data)
 parser_data&
 add_ld_preload(parser_data& _data)
 {
-    update_env(_data, "LD_PRELOAD", _data.env.dl_libpath, update_mode::APPEND);
+    update_env(_data, "LD_PRELOAD", _data.env.dl_libpath, update_mode::append);
     return _data;
 }
 
@@ -130,7 +123,7 @@ add_ld_library_path(parser_data& _data)
     auto libdir = path::parent_path(_data.env.dl_libpath);
     if(path::is_directory(libdir))
     {
-        update_env(_data, "LD_LIBRARY_PATH", libdir, update_mode::APPEND);
+        update_env(_data, "LD_LIBRARY_PATH", libdir, update_mode::append);
     }
     return _data;
 }
@@ -380,9 +373,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_modes.empty())
                 {
                     update_env(_data, env_vars::SAMPLING_CPUTIME,
-                               _modes.count("cputime") > 0, update_mode::WEAK);
+                               _modes.contains("cputime"), update_mode::weak);
                     update_env(_data, env_vars::SAMPLING_REALTIME,
-                               _modes.count("realtime") > 0, update_mode::WEAK);
+                               _modes.contains("realtime"), update_mode::weak);
                 }
             });
 
@@ -439,11 +432,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("seconds")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_DELAY, p.get<double>("wait"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::SAMPLING_DELAY, p.get<double>("wait"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::CAUSAL_DELAY, p.get<double>("wait"),
-                           update_mode::WEAK);
+                           update_mode::weak);
             });
 
         _data.reg.processed_environs.emplace("wait");
@@ -460,11 +453,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("seconds")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_DURATION, p.get<double>("duration"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::SAMPLING_DURATION, p.get<double>("duration"),
-                           update_mode::WEAK);
+                           update_mode::weak);
                 update_env(_data, env_vars::CAUSAL_DURATION, p.get<double>("duration"),
-                           update_mode::WEAK);
+                           update_mode::weak);
             });
 
         _data.reg.processed_environs.emplace("duration");
@@ -482,7 +475,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::TRACE_PERIODS,
                            fmt::format("{}", fmt::join(p.get<strvec_t>("periods"), " ")),
-                           update_mode::WEAK);
+                           update_mode::weak);
             });
 
         _data.reg.processed_environs.emplace("periods");
@@ -593,7 +586,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
-                               update_mode::PREPEND);
+                               update_mode::prepend);
             });
 
         _data.reg.processed_environs.emplace("include");
@@ -1353,10 +1346,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
     if(_add_group)
     {
-        auto _group_label = _group_name;
-        for(auto& c : _group_label)
-            c = toupper(c);
-        _parser.start_group(_group_label);
+        _parser.start_group(utility::string::to_upper(_group_name));
     }
 
     for(const auto& itr : _settings)

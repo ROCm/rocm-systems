@@ -35,10 +35,14 @@ THE SOFTWARE.
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#if defined(ENABLE_ROCSHMEM_GIN)
+#include "algorithms/gin/gin_all_reduce.h"
+#endif
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "strongstream.h"
+#include "tuning.h"
 
 // Use this param to experiment pipelining new data types besides bfloat16
 // Make sure you generate the device code with the new data type (i.e. in generate.py)
@@ -67,11 +71,13 @@ RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", 0);
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
-RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(65536));          // 64 KiB
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
-RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
+RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(2) * 1024 * 1024); // 2 MiB
+RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024); // 4 MiB
+RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
-RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
+RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(67108864)); // 64 MiB
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
@@ -555,14 +561,29 @@ static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count
   if (devOp < 0) return false;
   if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
   if (!ncclSymkAvailable(comm, coll, devOp, dataType, (size_t)count)) return false;
-  float estTimeUs;
-  ncclSymkKernelId kernelId;
-  int nWarps;
-  bool forced = false;
-  if (ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, ncclSymSendRegRecvReg,
-                         &estTimeUs, &kernelId, maxChannels, &nWarps, &forced) != ncclSuccess)
-    return false;
+  // NCCL 2.31 replaced ncclSymkPickKernel() with the tuning cost model; restricting
+  // the tuning mask to the symmetric kernels reproduces the old query.
+  struct ncclTuningInput_t input = {};
+  input.comm = comm;
+  input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
+  input.func = coll;
+  input.redOp = op;
+  input.devRedOp = (ncclDevRedOp_t)devOp;
+  input.datatype = dataType;
+  input.nBytes = (size_t)count * ncclTypeSize(dataType);
+  input.count = (size_t)count;
+  input.countMax = (size_t)count;
+  input.nWorks = 1;
+  input.winRegType = ncclSymSendRegRecvReg;
+  input.minCTAs = comm->config.minCTAs;
+  input.maxCTAs = comm->config.maxCTAs;
+  input.CTAPolicy = comm->config.CTAPolicy;
+  input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(devOp, dataType) || coll == ncclFuncAllGather);
+  struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
+  if (ncclTuningCompute(&input, &bestTuning) != ncclSuccess) return false;
+  ncclSymkKernelId kernelId = (ncclSymkKernelId)bestTuning.symKernelId;
   if (kernelId == ncclSymkKernelId_Count) return false;
+  *maxChannels = bestTuning.maxChannels;
   *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
   *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
   return true;
@@ -626,6 +647,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
       *algoName = "DDA-IPC";
       break;
+    case rcclAddonAlgos_t::RCCL_GIN_SDMA:
+      *algoName = "GIN-SDMA";
+      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -647,7 +671,11 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
                     size_t gfx1250Default) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
+  // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
+  // is configured per communicator. Use the resolved communicator value:
+  // testing the raw sentinel as a boolean disables DDA by default, while
+  // testing only the environment would ignore an explicit config value.
+  if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || ncclGroupDepth != 0) {
     return false;
   }
   size_t threshold;
@@ -859,7 +887,7 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
 // Single source of truth for AllReduce implementation selection. See the header
 // comment on rcclSelectAllReduce(). The priority chain and every gate below are a
 // faithful consolidation of what was previously split between ncclAllReduce_impl()
-// (symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
+// (GIN-SDMA / symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
 // outcome for any given operands is identical.
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
@@ -870,6 +898,18 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->nMaxChannels = 0;
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+  // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
+  // ncclAllReduce_impl (group depth 0 + eligibility). Graph-capture-safe: init
+  // runs off a private stream in relaxed mode; kernels re-read signal baselines.
+  // Must beat CE / DDA / symmetric so rcclGetCollImplInfo names the backend that ran.
+  if (ncclGroupDepth == 0 && ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    decision->algo = RCCL_GIN_SDMA;
+    decision->nMaxChannels = kGinAllReduceLsaCtas;
+    return ncclSuccess;
+  }
+#endif
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA, exactly
   // as the pre-refactor collectives.cc path did.
@@ -912,7 +952,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
   const bool force = rcclParamForceCeAllReduce() != 0;
-  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
+  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
@@ -929,8 +969,20 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
   // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
   // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  //
+  // GIN AllReduce is selected first in this function and requires symmetric
+  // windows. By default it only claims messages >= 256 MiB, so DDA must still be
+  // allowed for smaller symmetric AllReduces (otherwise they would hit the
+  // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
+  // !symEligible gate because GIN already returned above for those sizes.
+  bool ddaSymEligible = symEligible;
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
+    ddaSymEligible = false;
+  }
+#endif
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
+  if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -940,8 +992,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         return ncclSuccess;
       }
       // Mid-size fast lane: LL128 protocol (128B lines, no GPU barrier).
-      if (rcclParamDdaLL128() && msgBytes <= (size_t)rcclParamDdaLL128Threshold() &&
-          ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         decision->nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype);
@@ -970,7 +1021,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
   // && ((CTAPolicy & ZERO) || force): ceAvailable starts from ncclCeAvailable(op) then
   // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
-  bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType);
+  bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
     ceAvailable = false;
@@ -1050,15 +1101,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // symk never reclaims it), mirroring rcclSelectAllReduce.
   if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (rcclParamDdaLL() && msgSize <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      if (ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllGatherDdaFabricLLBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (rcclParamDdaLL128() && msgSize <= (size_t)rcclParamDdaLL128Threshold() &&
-          ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      if (ncclAllGatherDdaFabricLL128Eligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
         decision->nMaxChannels = ncclAllGatherDdaFabricLL128Blocks(comm, sendcount, datatype);
@@ -1143,8 +1192,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     }
     // Branch #3: CE via registered symmetric windows.
     const bool ceAvailable =
-      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (ceAvailable && !hasSysmemSegment) {
+      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
+    if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
