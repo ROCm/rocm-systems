@@ -893,6 +893,19 @@ expect_domain_uses_category(const Domain& domain, std::string_view expected_cate
 
     g_tracing_backend_mock.reset();
     g_externals_mock.reset();
+
+    // Every domain wires tracing_callback_dispatcher with only OnEnter/OnExit (no
+    // OnNone), so CALLBACK_PHASE_NONE must reach neither SdkBackend nor Externals.
+    // StrictMock<...> with zero EXPECT_CALLs set fails the test if it does.
+    g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
+    g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
+
+    auto none_record  = mock_sdk_with_tracing::callback_tracing_record_t{};
+    none_record.phase = mock_sdk_with_tracing::CALLBACK_PHASE_NONE;
+    domain.on_record(none_record, &user_data, nullptr);
+
+    g_tracing_backend_mock.reset();
+    g_externals_mock.reset();
 }
 
 }  // namespace rocprofsys::domains::test_support

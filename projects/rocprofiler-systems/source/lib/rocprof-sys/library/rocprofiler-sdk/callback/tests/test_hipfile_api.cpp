@@ -32,24 +32,6 @@ TEST(hipfile_api_test, descriptor_reports_correct_metadata)
     EXPECT_EQ(k_domain.meta.group, std::nullopt);
 }
 
-TEST(hipfile_api_test, on_record_dispatches_by_phase_without_crashing)
-{
-    constexpr const auto& k_domain = k_hipfile_api<mock_sdk, externals>;
-    mock_sdk::user_data_t user_data{};
-
-    auto enter_record  = mock_sdk::callback_tracing_record_t{};
-    enter_record.phase = mock_sdk::CALLBACK_PHASE_ENTER;
-    k_domain.on_record(enter_record, &user_data, nullptr);
-
-    auto exit_record  = mock_sdk::callback_tracing_record_t{};
-    exit_record.phase = mock_sdk::CALLBACK_PHASE_EXIT;
-    k_domain.on_record(exit_record, &user_data, nullptr);
-
-    auto none_record  = mock_sdk::callback_tracing_record_t{};
-    none_record.phase = mock_sdk::CALLBACK_PHASE_NONE;
-    k_domain.on_record(none_record, &user_data, nullptr);
-}
-
 // Regression guard: hipfile_api must push/pop timemory and stamp buffer-storage
 // records with "rocm_hipfile_api", not any other domain's category.
 TEST(hipfile_api_test, uses_rocm_hipfile_api_category)
