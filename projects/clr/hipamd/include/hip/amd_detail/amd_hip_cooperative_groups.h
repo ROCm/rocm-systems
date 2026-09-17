@@ -1528,7 +1528,7 @@ __CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
     union {
       int i;
       T f;
-    } tmp;
+    } tmp = {};
 
     tmp.f = result;
     tmp.i = __hip_ds_bpermute(from << 2, tmp.i);
