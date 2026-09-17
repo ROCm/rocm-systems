@@ -1670,11 +1670,14 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // dispatch, not per XCD. This cannot be pinned to the XCD that read the
     // packet: when the grid is smaller than the XCD count that XCD's share may be
     // empty, so it never places anything. Let whichever XCD places the grid's
-    // first workgroup claim the report.
+    // first workgroup claim the report. The shared claim must run under the
+    // plugin-group callback lock: otherwise the winner can be descheduled after
+    // claiming while a peer publishes this dispatch's first wave callback.
     if (!entry.execution_begun) {
       entry.execution_begun = true;
-      if (!entry.grid_completion || entry.grid_completion->claim_execution_begin())
-        plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
+      plugin_group_->onAmdgpuDispatchExecutionBeginOnce(entry.dispatch_id, [&]() {
+        return !entry.grid_completion || entry.grid_completion->claim_execution_begin();
+      });
     }
     ComputeUnitCore *cu = placement.cu;
     uint32_t lds_base = placement.lds_base;
@@ -2349,12 +2352,19 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dispatch_info.entry_pc = entry_pc;
   dispatch_info.kernel_symbol = kernel_symbol;
   dispatch_info.kernel_name = kernel_name;
+  dispatch_info.lds_size_bytes = dp.group_segment_fixed_size;
+  dispatch_info.wave_size = wave_size;
+  dispatch_info.code_target =
+      cus_.empty() ? ROCJITSU_CODE_TARGET_INVALID : cus_[0]->config().target;
   dispatch_info.grid_size_x = pkt.grid_size_x;
   dispatch_info.grid_size_y = pkt.grid_size_y;
   dispatch_info.grid_size_z = pkt.grid_size_z;
   dispatch_info.workgroup_size_x = pkt.workgroup_size_x;
   dispatch_info.workgroup_size_y = pkt.workgroup_size_y;
   dispatch_info.workgroup_size_z = pkt.workgroup_size_z;
+  dispatch_info.cluster_size_x = dp.cluster_size_x;
+  dispatch_info.cluster_size_y = dp.cluster_size_y;
+  dispatch_info.cluster_size_z = dp.cluster_size_z;
   dispatch_info.workgroup_count = total_wgs;
   dispatch_info.wfs_per_workgroup = wfs_per_wg;
   dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;

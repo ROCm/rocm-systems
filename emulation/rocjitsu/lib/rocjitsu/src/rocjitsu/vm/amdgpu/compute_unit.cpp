@@ -17,18 +17,23 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/except.h"
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 
 namespace rocjitsu {
@@ -626,30 +631,64 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   std::unique_ptr<Instruction> owned_inst(inst);
   plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
-  if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
+  const uint8_t decoded_route_tag = inst->data()->tag();
+  bool normalized_to_local = false;
+  uint64_t flat_local_lane_mask = 0;
+  uint64_t flat_dds_lane_mask = 0;
+  std::array<uint64_t, 64> pre_routing_address_storage;
+  std::span<const uint64_t> pre_routing_addresses;
+  if (inst->data()->tag() == GLOBAL_MEM && inst->mnemonic().starts_with("flat_") &&
+      shared_aperture_base_ != 0) {
     auto &d = *inst->data_as<VectorMemState>();
-    uint64_t probe = 0;
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (d.lane_mask & (1ULL << lane)) {
-        probe = d.per_lane_addr[lane];
-        break;
+    // The wavefront is the authority on its own width. VectorMemState::wf_size
+    // is set by whoever built the state, and the DS paths leave it at its
+    // default until the local pipeline backfills it -- which is after this.
+    const uint32_t wf_size = wf.wf_size();
+    const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask : 0;
+    for (uint32_t lane = 0; lane < wf_size; ++lane) {
+      const uint64_t lane_bit = uint64_t{1} << lane;
+      if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
+        const uint64_t address = d.per_lane_addr[lane];
+        if (address >= shared_aperture_base_ && address <= shared_aperture_limit_) {
+          if (((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
+            flat_dds_lane_mask |= lane_bit;
+          else
+            flat_local_lane_mask |= lane_bit;
+        }
       }
     }
     // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
     // not VMCNT).  Scratch-targeting FLATs stay on the global path.
-    if (probe >= shared_aperture_base_ && probe <= shared_aperture_limit_) {
-      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+    const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
+    const uint32_t first_lane =
+        request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
+    const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
+    if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
+      if (observes_memory_routing_) {
+        std::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
+        pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
+      }
+      for (uint32_t lane = 0; lane < wf_size; ++lane) {
         if (d.lane_mask & (1ULL << lane))
           d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
-      local_mem_pipeline_.issue(owned_inst.release(), wf);
-      return;
+      normalized_to_local = true;
     }
   }
 
   const uint8_t route_tag = inst->data()->tag();
+  // After the aperture rewrite, before the pipeline takes the instruction:
+  // this is the one point at which the space, the counter, and the addresses
+  // are all the ones the memory system is about to use. Gated on a plugin that
+  // wants it rather than on any plugin at all, because building the
+  // observation is real work on the per-instruction path and most plugins have
+  // no use for it.
+  if (observes_memory_routing_)
+    report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
+                         pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
+
   switch (route_tag) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(owned_inst.release(), wf);
@@ -663,6 +702,127 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   default:
     break;
   }
+}
+
+// The observation's route is MemPipelineTag under another name; keep the two
+// numberings pinned so a new tag cannot pick up an existing route's value.
+static_assert(static_cast<uint8_t>(MemoryRoute::SCALAR) == SCALAR_MEM);
+static_assert(static_cast<uint8_t>(MemoryRoute::GLOBAL) == GLOBAL_MEM);
+static_assert(static_cast<uint8_t>(MemoryRoute::LOCAL) == LOCAL_MEM);
+
+namespace {
+
+DecodedMemorySpace decoded_memory_space(std::string_view mnemonic, uint8_t decoded_route_tag) {
+  // Canonical AMDGPU mnemonics carry the encoding family. Keep this decision
+  // separate from the route tag: FLAT and explicit SCRATCH both initially use
+  // the global pipeline, but a plugin must be able to tell them apart.
+  if (mnemonic.starts_with("flat_"))
+    return DecodedMemorySpace::FLAT;
+  if (mnemonic.starts_with("scratch_") || mnemonic.starts_with("s_scratch_"))
+    return DecodedMemorySpace::SCRATCH;
+  if (mnemonic.starts_with("ds_"))
+    return DecodedMemorySpace::LOCAL;
+  if (mnemonic.starts_with("global_") || mnemonic.starts_with("buffer_") ||
+      mnemonic.starts_with("tbuffer_") || mnemonic.starts_with("image_"))
+    return DecodedMemorySpace::GLOBAL;
+  if (mnemonic.starts_with("s_"))
+    return DecodedMemorySpace::SCALAR;
+
+  // Synthetic instructions and future families still get the least-specific
+  // fact routing already knew before it made any changes.
+  switch (decoded_route_tag) {
+  case SCALAR_MEM:
+    return DecodedMemorySpace::SCALAR;
+  case GLOBAL_MEM:
+    return DecodedMemorySpace::GLOBAL;
+  case LOCAL_MEM:
+    return DecodedMemorySpace::LOCAL;
+  default:
+    return DecodedMemorySpace::UNKNOWN;
+  }
+}
+
+} // namespace
+
+void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefront &wf,
+                                           uint8_t route_tag, uint8_t decoded_route_tag,
+                                           bool normalized_to_local,
+                                           std::span<const uint64_t> pre_routing_addresses,
+                                           uint64_t flat_local_lane_mask,
+                                           uint64_t flat_dds_lane_mask) {
+  MemoryAccessObservation access;
+  access.mnemonic = inst.mnemonic();
+  access.pc = wf.pc;
+  access.compute_unit_id = id();
+  access.dispatch_id = wf.dispatch_id();
+  access.queue_id = wf.queue_id();
+  access.workgroup_id = wf.wg_id();
+  access.wavefront_id = wf.wf_id();
+  access.process_id = wf.process_id();
+  access.decoded_space = decoded_memory_space(inst.mnemonic(), decoded_route_tag);
+  access.normalized_to_local = normalized_to_local;
+  access.pre_routing_addresses = pre_routing_addresses;
+
+  switch (route_tag) {
+  case SCALAR_MEM: {
+    const auto &state = *inst.data_as<ScalarMemState>();
+    access.route = MemoryRoute::SCALAR;
+    access.is_load = state.is_load;
+    access.mtype = state.mtype;
+    access.wait_counter = state.wait_counter_type;
+    access.element_size_bytes = state.elem_size;
+    access.elements_per_lane = state.num_dwords;
+    // A scalar access is one address, so it is a one-lane wavefront as far as
+    // the memory system is concerned. Saying so lets a consumer treat both
+    // routes with the same per-lane arithmetic.
+    access.wavefront_size = 1;
+    access.active_lane_mask = 1;
+    access.architectural_exec_lane_mask = 1;
+    access.valid_lane_mask = 1;
+    access.request_lane_mask = 1;
+    access.addresses = std::span<const uint64_t>(&state.addr, 1);
+    break;
+  }
+  case GLOBAL_MEM:
+  case LOCAL_MEM: {
+    const auto &state = *inst.data_as<VectorMemState>();
+    const uint32_t wf_size = wf.wf_size();
+    access.route = route_tag == LOCAL_MEM ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
+    access.is_load = state.is_load;
+    access.atomic_op = state.atomic_op;
+    access.mtype = state.mtype;
+    access.wait_counter = state.wait_counter_type;
+    access.wavefront_size = wf_size;
+    access.element_size_bytes = state.elem_size;
+    access.elements_per_lane = state.num_elems;
+    access.active_lane_mask = state.exec_mask;
+    access.architectural_exec_lane_mask = wf.exec() & access.wavefront_lane_mask();
+    access.valid_lane_mask = state.lane_mask;
+    access.request_lane_mask = transpose_request_lane_mask(state, wf_size);
+    access.flat_local_lane_mask = flat_local_lane_mask & access.request_lane_mask;
+    access.flat_dds_lane_mask = flat_dds_lane_mask & access.request_lane_mask;
+    // Intersected with the requesting lanes, which is how the global pipeline
+    // splits the wave: a swizzled lane that never requests costs nothing.
+    access.scratch_lane_mask =
+        state.scratch_swizzle ? state.scratch_lane_mask & access.request_lane_mask : 0;
+    access.scratch_element_stride_bytes = state.scratch_swizzle ? state.scratch_addr_stride : 0;
+    access.non_temporal = state.non_temporal;
+    access.force_l1_bypass = state.request_force_l1_bypass;
+    access.lds_destination = state.lds_dst;
+    access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    access.element_lane_masks = state.element_lane_masks.view();
+    if (state.ds2_active)
+      access.secondary_addresses =
+          std::span<const uint64_t>(state.ds2_per_lane_addr.data(), wf_size);
+    break;
+  }
+  default:
+    // Left UNKNOWN, so a consumer counting the kernel's memory traffic sees an
+    // access it cannot account for rather than never hearing about it.
+    break;
+  }
+
+  plugin_group_->onAmdgpuMemoryAccessRouted(access);
 }
 
 void ComputeUnitCore::update_wf_states() {
@@ -790,7 +950,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active,
+                                                  std::span<const uint32_t>(words, 4));
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at

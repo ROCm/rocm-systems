@@ -27,6 +27,9 @@ set(RJ_OBJECT_LIBS
     rocjitsu_dbt_config
     rocjitsu_pci
 )
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    list(APPEND RJ_OBJECT_LIBS rocjitsu_plugin_perfsim)
+endif()
 
 if(RJ_INSTALL_TESTS)
     set(RJ_INSTALL_TEST_DIR "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests")
@@ -411,6 +414,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_loader_fixture(good)
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
+
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        add_library(
+            rocjitsu_perfsim_fake_backend
+            MODULE
+            perfsim_fake_backend.cpp
+        )
+        set_target_properties(
+            rocjitsu_perfsim_fake_backend
+            PROPERTIES
+                CXX_VISIBILITY_PRESET hidden
+                C_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        rj_configure_target(rocjitsu_perfsim_fake_backend TEST)
+    endif()
 endif()
 
 add_executable(
@@ -563,6 +582,9 @@ add_executable(
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
 )
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
+endif()
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
@@ -628,6 +650,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        target_compile_definitions(
+            rocjitsu_tests
+            PRIVATE
+                PERFSIM_FAKE_BACKEND_PATH="$<TARGET_FILE:rocjitsu_perfsim_fake_backend>"
+                PERFSIM_PLUGIN_DIR="${PROJECT_BINARY_DIR}"
+        )
+        add_dependencies(
+            rocjitsu_tests
+            rocjitsu_perfsim_fake_backend
+            rocjitsu_plugin_perfsim_so
+        )
+    endif()
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via

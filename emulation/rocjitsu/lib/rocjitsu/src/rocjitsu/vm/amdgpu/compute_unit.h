@@ -384,10 +384,12 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_memory_routing_ = plugin_group_->observes_memory_routing();
   }
 
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+  const ExecutionPluginGroup &plugin_group() const { return *plugin_group_; }
 
   /// @brief Return the number of resident (not-yet-halted) wavefront slots.
   /// @details A wave frees its resources and its slot at s_endpgm, so halted
@@ -983,6 +985,21 @@ protected:
   /// @param wf The issuing wavefront.
   void route_memory_inst(Instruction *inst, Wavefront &wf);
 
+  /// @brief Tell the plugin group what the memory system is about to be asked
+  ///        for, once routing has settled.
+  /// @param inst The routed instruction.
+  /// @param wf The issuing wavefront.
+  /// @param route_tag The pipeline tag the instruction ended up with.
+  /// @param decoded_route_tag The pipeline tag before routing changed it.
+  /// @param normalized_to_local Whether a FLAT access was rewritten into LDS.
+  /// @param pre_routing_addresses Original addresses when routing rewrote them.
+  /// @param flat_local_lane_mask Requesting FLAT lanes in the LDS aperture half.
+  /// @param flat_dds_lane_mask Requesting FLAT lanes in the DDS aperture half.
+  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+                            uint8_t decoded_route_tag, bool normalized_to_local,
+                            std::span<const uint64_t> pre_routing_addresses,
+                            uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);
+
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
     if (on_idle_)
@@ -1104,6 +1121,7 @@ protected:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_sgpr_reads_ = false;
   bool pool_driven_ = false;
+  bool observes_memory_routing_ = false;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;
@@ -1168,6 +1186,13 @@ inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t m
 }
 inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
+}
+inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() const {
+  return raw_cu().plugin_group().observes_tensor_dma_memory_access();
+}
+inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
+    const TensorDmaMemoryAccessObservation &access) {
+  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access);
 }
 
 /// @brief Execution-mode-aware compute unit shell.

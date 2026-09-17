@@ -44,6 +44,29 @@ public:
   uint32_t read_count = 0;
 };
 
+class MemoryAccessRecorder final : public ExecutionPlugin {
+public:
+  MemoryAccessRecorder() : ExecutionPlugin("memory_access_recorder") {}
+
+  bool observes_memory_routing() const override { return true; }
+
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
+    mnemonic = access.mnemonic;
+    active_lane_mask = access.active_lane_mask;
+    architectural_exec_lane_mask = access.architectural_exec_lane_mask;
+    valid_lane_mask = access.valid_lane_mask;
+    request_lane_mask = access.request_lane_mask;
+    addresses.assign(access.addresses.begin(), access.addresses.end());
+  }
+
+  std::string mnemonic;
+  uint64_t active_lane_mask = 0;
+  uint64_t architectural_exec_lane_mask = 0;
+  uint64_t valid_lane_mask = 0;
+  uint64_t request_lane_mask = 0;
+  std::vector<uint64_t> addresses;
+};
+
 class Gfx1250MemoryTestCu
     : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa> {
 public:
@@ -96,6 +119,104 @@ private:
   uint64_t saved_;
 };
 #endif
+
+TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
+  amdgpu::GpuMemory memory("gfx1250_transpose_memory");
+  amdgpu::L2Cache l2("gfx1250_transpose_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 64;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_transpose_cu", config, &memory, &l2);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<MemoryAccessRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  compute_unit->set_plugin_group(plugin_group);
+
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  constexpr uint64_t kArchitecturalExec = uint64_t{1} << 5;
+  constexpr uint64_t kBaseAddress = 0x4000;
+  wave->set_exec(kArchitecturalExec);
+  write_wave_sgpr(*compute_unit, *wave, 0, static_cast<uint32_t>(kBaseAddress));
+  write_wave_sgpr(*compute_unit, *wave, 1, static_cast<uint32_t>(kBaseAddress >> 32));
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    compute_unit->write_vgpr(wave->vgpr_alloc().base, lane, lane * 16);
+
+  const auto words =
+      cdna5::build_vglobal(cdna5::kGlobalLoadTr4B64Vglobal, {.saddr = 0, .vdst = 8, .vaddr = 0});
+  auto load = decode_gfx1250(words, "global_load_tr4_b64");
+  ASSERT_NE(load, nullptr);
+  compute_unit->execute_and_route(std::move(load), *wave);
+
+  constexpr uint64_t kWave32Mask = 0xFFFF'FFFFULL;
+  EXPECT_EQ(recorder_ptr->mnemonic, "global_load_tr4_b64");
+  EXPECT_EQ(recorder_ptr->active_lane_mask, kWave32Mask);
+  EXPECT_EQ(recorder_ptr->architectural_exec_lane_mask, kArchitecturalExec);
+  EXPECT_EQ(recorder_ptr->valid_lane_mask, kWave32Mask);
+  EXPECT_EQ(recorder_ptr->request_lane_mask, kWave32Mask);
+  ASSERT_EQ(recorder_ptr->addresses.size(), wave->wf_size());
+  EXPECT_EQ(recorder_ptr->addresses.front(), kBaseAddress);
+  EXPECT_EQ(recorder_ptr->addresses.back(), kBaseAddress + 31 * 16);
+}
+
+TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
+  amdgpu::GpuMemory memory("gfx1250_zero_exec_transpose_memory");
+  amdgpu::L2Cache l2("gfx1250_zero_exec_transpose_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 64;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_zero_exec_transpose_cu", config, &memory, &l2);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<MemoryAccessRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  compute_unit->set_plugin_group(plugin_group);
+
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  constexpr uint64_t kBaseAddress = 0x4000;
+  constexpr uint32_t kDestination = 8;
+  constexpr uint32_t kSentinel = 0xA5A5'5A5Au;
+  wave->set_exec(0);
+  write_wave_sgpr(*compute_unit, *wave, 0, static_cast<uint32_t>(kBaseAddress));
+  write_wave_sgpr(*compute_unit, *wave, 1, static_cast<uint32_t>(kBaseAddress >> 32));
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+    compute_unit->write_vgpr(wave->vgpr_alloc().base, lane, lane * 16);
+    compute_unit->write_vgpr(wave->vgpr_alloc().base + kDestination, lane, kSentinel);
+    compute_unit->write_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane, kSentinel);
+  }
+
+  const auto words = cdna5::build_vglobal(cdna5::kGlobalLoadTr4B64Vglobal,
+                                          {.saddr = 0, .vdst = kDestination, .vaddr = 0});
+  auto load = decode_gfx1250(words, "global_load_tr4_b64");
+  ASSERT_NE(load, nullptr);
+  compute_unit->execute_and_route(std::move(load), *wave);
+
+  EXPECT_EQ(recorder_ptr->mnemonic, "global_load_tr4_b64");
+  EXPECT_EQ(recorder_ptr->active_lane_mask, 0u);
+  EXPECT_EQ(recorder_ptr->architectural_exec_lane_mask, 0u);
+  EXPECT_EQ(recorder_ptr->valid_lane_mask, 0u);
+  EXPECT_EQ(recorder_ptr->request_lane_mask, 0u);
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+    EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination, lane), kSentinel);
+    EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane), kSentinel);
+  }
+}
 
 TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
   using amdgpu::fp_mode::effective_f16_omod;
