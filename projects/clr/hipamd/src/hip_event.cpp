@@ -513,9 +513,10 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
     return hipSuccess;
   }
   // Case 1: Event was recorded during an active stream capture and is part of an active capture.
+  // The whole sequence is invalidated, not just the stream the query names.
   auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
   if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    s->InvalidateCapture();
     return hipErrorCapturedEvent;
   }
   // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an

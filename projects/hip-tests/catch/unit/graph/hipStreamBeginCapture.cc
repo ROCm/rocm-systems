@@ -1706,10 +1706,13 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
  * ------------------------
  *    - Test to verify that a stream whose capture has been invalidated refuses further
  *      capture work. Querying an event recorded inside a capture is illegal and invalidates
- *      the forked stream; a wait issued afterwards must report
+ *      the capture sequence it belongs to; a wait issued afterwards must report
  *      hipErrorStreamCaptureInvalidated rather than being accepted and silently ignored,
  *      which is what CUDA returns and what every operation routed through the
  *      STREAM_CAPTURE macro already did.
+ *    - The illegal query names the forked stream, so the test also covers the scope of the
+ *      invalidation: the origin is invalidated along with it and its teardown reports that
+ *      rather than unjoined work. CUDA behaves the same way.
  * Test source
  * ------------------------
  *    - catch\unit\graph\hipStreamBeginCapture.cc
@@ -1743,7 +1746,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStr
   incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
   HIP_CHECK(hipGetLastError());
 
-  // Invalidate the forked stream's capture with an illegal query on a captured event.
+  // Invalidate the capture with an illegal query on an event recorded on the forked stream.
   HIP_CHECK(hipEventRecord(selfEvent, forkedStream));
   REQUIRE(hipEventQuery(selfEvent) != hipSuccess);
   (void)hipGetLastError();
@@ -1761,11 +1764,14 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStr
   HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
-  // Tear the capture down. Invalidating a participant does not invalidate the origin, which
-  // is still active, so ending the capture reports the forked stream's work as unjoined
-  // rather than reporting the invalidation, and produces no graph.
+  // The invalidation reached the origin, even though the illegal query named the participant.
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  // Tear the capture down. The origin reports the invalidation rather than the forked
+  // stream's unjoined work, and produces no graph.
   hipGraph_t graph = nullptr;
-  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
 }
 
@@ -2001,11 +2007,11 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStrea
   HIP_CHECK_ERROR(hipStreamBeginCapture(target, hipStreamCaptureModeThreadLocal),
                   hipErrorIllegalState);
 
-  // Unwind. The origin is still capturing in the participant case, and invalidated in the
-  // other, so accept either outcome without inspecting the graph out-param.
+  // Unwind. The invalidation covers the whole sequence whichever stream the query named, so
+  // the origin's teardown reports it and yields no graph in both cases.
   hipGraph_t graph = nullptr;
-  (void)hipStreamEndCapture(captureStream, &graph);
-  (void)hipGetLastError();
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
 }
 
 /**
@@ -2221,7 +2227,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentWaitsAccumulateDepen
   // The overlap is scheduler-dependent. With 8 threads, 100 iterations aborted with vector
   // corruption in the unlocked implementation on the first run.
   constexpr int kIterations = 100;
-  constexpr size_t kExpectedDependencies = kThreads + 1;
   constexpr size_t kExpectedNodes = kThreads + 2;
   constexpr size_t kExpectedEdges = 2 * kThreads + 1;
 
@@ -2270,13 +2275,20 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentWaitsAccumulateDepen
     waitFailures += failures.load(std::memory_order_relaxed);
 
     hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+#if HT_AMD
+    constexpr size_t kExpectedDependencies = kThreads + 1;
     const hipGraphNode_t* dependencies = nullptr;
     size_t numDependencies = 0;
     HIP_CHECK(hipStreamGetCaptureInfo_v2(origin, &captureStatus, nullptr, nullptr, &dependencies,
                                          &numDependencies));
-    REQUIRE(captureStatus == hipStreamCaptureStatusActive);
     REQUIRE(dependencies != nullptr);
     REQUIRE(numDependencies == kExpectedDependencies);
+#else
+    // cuStreamGetCaptureInfo_v2 was superseded by v3 in CUDA 13, so hipStreamGetCaptureInfo_v2
+    // is not declared there. The edge count below covers the same accumulation.
+    HIP_CHECK(hipStreamGetCaptureInfo(origin, &captureStatus, nullptr));
+#endif  // HT_AMD
+    REQUIRE(captureStatus == hipStreamCaptureStatusActive);
 
     // Consume the complete dependency set so every source is joined back to the origin.
     dummyKernel<<<1, 1, 0, origin>>>();
@@ -2347,7 +2359,13 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapt
   HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
+#if HT_NVIDIA
+  // CUDA refuses the wait too, but flattens it to a generic invalid-argument error instead of
+  // naming the invalidated capture.
+  HIP_CHECK_ERROR(hipStreamWaitEvent(outsider, originEvent, 0), hipErrorInvalidValue);
+#else
   HIP_CHECK_ERROR(hipStreamWaitEvent(outsider, originEvent, 0), hipErrorStreamCaptureInvalidated);
+#endif  // HT_NVIDIA
 
   // The refusal leaves the outsider outside the capture, and does not disturb the capture.
   HIP_CHECK(hipStreamIsCapturing(outsider, &captureStatus));
