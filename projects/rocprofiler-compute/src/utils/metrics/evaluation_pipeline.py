@@ -12,6 +12,10 @@ import pandas as pd
 
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
+from utils.metrics.collectable import (
+    apply_composite_metrics,
+    cache_collectable_expressions,
+)
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -20,10 +24,6 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
-)
-from utils.metrics.weighted_avg import (
-    apply_weighted_avg_metrics,
-    cache_weighted_avg_sub_expressions,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
@@ -212,7 +212,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    cache_weighted_avg_sub_expressions(dfs, dfs_type)
+    cache_collectable_expressions(dfs, dfs_type)
     expressions = [
         expr
         for df_id in dfs
@@ -280,7 +280,7 @@ def eval_metric(
             )
         dfs[df_id].loc[row_id, col] = eval_result
 
-    apply_weighted_avg_metrics(
+    apply_composite_metrics(
         dfs,
         dfs_type,
         raw_pmc_df,

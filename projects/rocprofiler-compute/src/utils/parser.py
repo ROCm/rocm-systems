@@ -18,9 +18,18 @@ from pc_sampling.pc_sampling_analysis import (
 from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.collectable import (
+    COLLECT_SUM_SPECS_ATTR,
+    COLLECTABLE_IDS_ATTR,
+    WEIGHTED_AVG_ATTR,
+    WEIGHTED_AVG_SUBS_ATTR,
+)
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list, parse_weighted_avg_submetrics
-from utils.metrics.weighted_avg import WEIGHTED_AVG_ATTR
+from utils.metrics.expression import (
+    gen_counter_list,
+    parse_collect_sum_submetrics,
+    parse_weighted_avg_submetrics,
+)
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -225,6 +234,8 @@ def _build_metric_table_df(
     expressions: list[str] = []
     weighted_avg_specs: dict[str, dict[str, Any]] = {}
     weighted_avg_subs: dict[str, list[str]] = {}
+    collectable_ids: dict[str, str] = {}
+    collect_sum_specs: dict[str, list[str]] = {}
     metric_entries = data_config["metric"]
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
@@ -238,11 +249,18 @@ def _build_metric_table_df(
         ):
             continue
 
+        collectable_id = entries.get("_collectable_id")
+        if isinstance(collectable_id, str) and collectable_id:
+            collectable_ids[metric_idx] = collectable_id
+
         avg_entry = entries.get("avg")
         if isinstance(avg_entry, str):
             weighted_subs = parse_weighted_avg_submetrics(avg_entry)
             if weighted_subs:
                 weighted_avg_subs[metric_idx] = weighted_subs
+            sum_refs = parse_collect_sum_submetrics(avg_entry)
+            if sum_refs:
+                collect_sum_specs[metric_idx] = sum_refs
         weighted_meta = entries.get("_weighted_avg")
         if isinstance(weighted_meta, dict):
             weighted_avg_specs[metric_idx] = weighted_meta
@@ -290,7 +308,9 @@ def _build_metric_table_df(
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
     df.attrs[WEIGHTED_AVG_ATTR] = weighted_avg_specs
-    df.attrs["weighted_avg_subs"] = weighted_avg_subs
+    df.attrs[WEIGHTED_AVG_SUBS_ATTR] = weighted_avg_subs
+    df.attrs[COLLECTABLE_IDS_ATTR] = collectable_ids
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = collect_sum_specs
     return df, expressions
 
 

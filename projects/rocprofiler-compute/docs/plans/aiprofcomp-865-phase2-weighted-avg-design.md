@@ -73,11 +73,20 @@ Prefer **one** style after Xuan review; implementation agent should not ship bot
 
 | Component | Change |
 |-----------|--------|
-| `src/utils/metrics/expression.py` (or parser) | Parse `WEIGHTED_AVG(...)` and build AST node |
-| `src/utils/metrics/aggregation.py` | `to_weighted_avg(sub_results, weights)` using per-dispatch aligned series |
-| `utils_analysis.py` / metric eval | Evaluate submetrics first; pass PMC columns into weighted merge |
+| `src/utils/metrics/collectable.py` | **Collectable graph** (`MetricEvalGraph`), expr cache, `apply_composite_metrics()` |
+| `src/utils/metrics/expression.py` | Parse `WEIGHTED_AVG(...)`, `COLLECT_SUM(...)`; skip `build_eval_string` for composites |
+| `src/utils/metrics/aggregation.py` | `merge_dispatch_weighted_avg`, `merge_dispatch_collect_sum` |
+| `evaluation_pipeline.py` | `cache_collectable_expressions` → `eval_metric` → `apply_composite_metrics` |
+| `parser.py` | `_collectable_id`, `_weighted_avg`, `collect_sum_specs` attrs on metric tables |
 | `tools/counter_grouping_inspector.py` | Optional: flag parent metrics that declare `WEIGHTED_AVG` and verify each sub-id is single-bucket |
 | Autogen / unified_config | If metrics are generated, extend split script or hand-author pilot in gfx942 YAML |
+
+### 4.0 Collectables (analyze path, Layer 1.5 aligned)
+
+- **Collectable row:** metric table row referenced by a composite (`WEIGHTED_AVG` / `COLLECT_SUM`); optional stable `_collectable_id: collect.*`.
+- **Graph:** `build_metric_eval_graph()` registers collectables → composites; v1 order is collectables first, then composites.
+- **`COLLECT_SUM(h, i)`:** Xuan-style \(M = h + i\) when sub-collectables are already single-pass (per-dispatch sum, then `to_avg`).
+- **Future:** load collectables from `collectables.yaml` via `MetricLibrary`; adapter emits same graph attrs.
 
 ### 4.1 Merge semantics (normative)
 

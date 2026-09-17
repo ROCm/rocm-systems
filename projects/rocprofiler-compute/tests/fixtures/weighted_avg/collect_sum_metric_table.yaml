@@ -1,0 +1,21 @@
+# COLLECT_SUM pilot: parent = h + i (shared-denominator style sub-collectables).
+Panel Config:
+  data source:
+  - metric_table:
+      id: 1703
+      title: Pilot COLLECT_SUM
+      header:
+        metric: Metric
+        avg: Avg
+      metric:
+        hbm_read_sub:
+          avg: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
+          unit: Percent
+          _collectable_id: collect.hbm_read
+        hbm_write_sub:
+          avg: 100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
+          unit: Percent
+          _collectable_id: collect.hbm_write
+        hbm_total_traffic:
+          avg: COLLECT_SUM(hbm_read_sub, hbm_write_sub)
+          unit: Percent
