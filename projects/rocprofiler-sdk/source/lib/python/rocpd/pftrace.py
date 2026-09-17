@@ -131,7 +131,7 @@ def add_args(parser):
 
 def main(argv=None):
     import argparse
-    from .time_window import add_args as add_args_time_window
+    from . import time_window
     from .output_config import add_args as add_args_output_config
     from .output_config import add_generic_args
 
@@ -153,7 +153,7 @@ def main(argv=None):
     process_out_config_args = add_args_output_config(parser)
     process_pftrace_args = add_args(parser)
     process_generic_args = add_generic_args(parser)
-    process_time_window_args = add_args_time_window(parser)
+    process_time_window_args = time_window.add_args(parser)
 
     args = parser.parse_args(argv)
     input = RocpdImportData(
@@ -163,7 +163,7 @@ def main(argv=None):
     out_cfg_args = process_out_config_args(input, args)
     pftrace_args = process_pftrace_args(input, args)
     generic_out_cfg_args = process_generic_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {
         **pftrace_args,
