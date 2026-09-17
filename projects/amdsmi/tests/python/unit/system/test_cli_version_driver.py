@@ -89,10 +89,10 @@ def _run_version(gpu_version: bool = True, human_readable: bool = False) -> dict
 class TestVersionDriverOutput(unittest.TestCase):
     def test_json_reports_driver_fields(self) -> None:
         output = _run_version()
-        self.assertEqual(output["driver_kernel_version"], "6.19.14")
-        self.assertEqual(output["driver_version"], "31400000")
-        self.assertEqual(output["driver_build_version"], "2370381")
         self.assertEqual(output["driver_full_version"], "6.19.14.31400000-2370381")
+        self.assertNotIn("driver_kernel_version", output)
+        self.assertNotIn("driver_version", output)
+        self.assertNotIn("driver_build_version", output)
         self.assertNotIn("amdgpu_version", output)
         self.assertNotIn("amdgpu_dkms_version", output)
 
@@ -101,18 +101,17 @@ class TestVersionDriverOutput(unittest.TestCase):
             _run_version(human_readable=True)
 
         line = printed.call_args[0][0]
-        kernel_index = line.index("Kernel version: 6.19.14")
-        driver_index = line.index("Driver version: 31400000")
-        build_index = line.index("Build version: 2370381")
-        self.assertLess(kernel_index, driver_index)
-        self.assertLess(driver_index, build_index)
+        self.assertIn("AMDGPU Version: 6.19.14.31400000-2370381", line)
+        self.assertNotIn("Kernel version:", line)
+        self.assertNotIn("Driver version:", line)
+        self.assertNotIn("Build version:", line)
 
     def test_gpu_fields_are_na_when_gpu_version_is_disabled(self) -> None:
         output = _run_version(gpu_version=False)
-        self.assertEqual(output["driver_kernel_version"], "N/A")
-        self.assertEqual(output["driver_version"], "N/A")
-        self.assertEqual(output["driver_build_version"], "N/A")
         self.assertEqual(output["driver_full_version"], "N/A")
+        self.assertNotIn("driver_kernel_version", output)
+        self.assertNotIn("driver_version", output)
+        self.assertNotIn("driver_build_version", output)
 
 
 if __name__ == "__main__":

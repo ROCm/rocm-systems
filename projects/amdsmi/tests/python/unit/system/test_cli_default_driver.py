@@ -161,14 +161,14 @@ class TestDefaultDriverHeader(unittest.TestCase):
             logger.print_default_output(_banner_payload())
 
         lines = stdout.getvalue().splitlines()
-        kernel_index = next(
-            i for i, line in enumerate(lines) if line.startswith("| Kernel Version:")
+        amdgpu_index = next(
+            i for i, line in enumerate(lines) if line.startswith("| AMDGPU Version:")
         )
-        self.assertTrue(lines[kernel_index + 1].startswith("| Driver Version:"))
-        self.assertTrue(lines[kernel_index + 2].startswith("| Build Version:"))
-        self.assertIn("6.19.14", lines[kernel_index])
-        self.assertIn("31400000", lines[kernel_index + 1])
-        self.assertIn("2370381", lines[kernel_index + 2])
+        self.assertIn("6.19.14.31400000-2370381", lines[amdgpu_index])
+        self.assertTrue(lines[amdgpu_index + 1].startswith("| ROCm Version:"))
+        self.assertFalse(any(line.startswith("| Kernel Version:") for line in lines))
+        self.assertFalse(any(line.startswith("| Driver Version:") for line in lines))
+        self.assertFalse(any(line.startswith("| Build Version:") for line in lines))
 
 
 if __name__ == "__main__":

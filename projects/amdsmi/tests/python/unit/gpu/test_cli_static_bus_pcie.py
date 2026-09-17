@@ -281,7 +281,7 @@ class TestCliStaticDriverVersions(unittest.TestCase):
         }
         cls.static_module = _load_static_module()
 
-    def test_json_reports_split_driver_versions(self) -> None:
+    def test_json_reports_amdgpu_version(self) -> None:
         commands = object.__new__(self.static_module.StaticCommands)
         commands.logger = _FakeLogger("json")
         commands.helpers = _FakeHelpers()
@@ -293,7 +293,8 @@ class TestCliStaticDriverVersions(unittest.TestCase):
         commands.static_gpu(args)
 
         driver_info = commands.logger.store_gpu_json_output[-1]["driver"]
-        self.assertEqual(driver_info["kernel_version"], "6.19.14")
-        self.assertEqual(driver_info["version"], "31400000")
-        self.assertEqual(driver_info["build_version"], "2370381")
-        self.assertEqual(driver_info["full_version"], "6.19.14.31400000-2370381")
+        self.assertEqual(driver_info["amdgpu_version"], "6.19.14.31400000-2370381")
+        self.assertNotIn("kernel_version", driver_info)
+        self.assertNotIn("version", driver_info)
+        self.assertNotIn("build_version", driver_info)
+        self.assertNotIn("full_version", driver_info)
