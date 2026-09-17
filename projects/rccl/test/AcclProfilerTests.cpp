@@ -625,7 +625,8 @@ TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
 
             // channelId=4 and 5 with nChannels=2: simulates the second
             // collective in a grouped launch where the first used channels 0-3.
-            // These MUST be accepted — the guard is ACCL_MAX_CHANNELS, not nChannels.
+            // These MUST be accepted — the full uint8_t channelId range fits
+            // ACCL_MAX_CHANNELS, independent of this collective's nChannels.
             kchDescr.kernelCh.channelId = 4;
             kchDescr.kernelCh.pTimer = 1000000;
             void* kch4 = nullptr;

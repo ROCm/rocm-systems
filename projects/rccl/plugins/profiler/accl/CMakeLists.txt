@@ -14,6 +14,7 @@ endif()
 
 # RCCL source root (this file lives at plugins/profiler/accl).
 get_filename_component(RCCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+include(GNUInstallDirs)
 
 add_library(rccl-profiler-accl SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/accl_profiler.cc
@@ -45,3 +46,10 @@ if(NOT ACCL_STANDALONE)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     )
 endif()
+
+install(TARGETS rccl-profiler-accl
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/accl_report.py
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl/accl
+)
