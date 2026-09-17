@@ -76,17 +76,17 @@ Panel Config:
           avg: SUM(TX_VMW_SECTORS_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_sum / $denom)
           max: MAX(TX_VMW_SECTORS_sum / $denom)
-          unit: (Requests + $normUnit)
+          unit: (Sectors + $normUnit)
         Total Requests - Sector Reads:
           avg: SUM(TX_VMW_SECTORS_READ_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_READ_sum / $denom)
           max: MAX(TX_VMW_SECTORS_READ_sum / $denom)
-          unit: (Requests + $normUnit)
+          unit: (Sectors + $normUnit)
         Total Requests - Sector Writes:
           avg: SUM(TX_VMW_SECTORS_WRITE_sum) / SUM($denom)
           min: MIN(TX_VMW_SECTORS_WRITE_sum / $denom)
           max: MAX(TX_VMW_SECTORS_WRITE_sum / $denom)
-          unit: (Requests + $normUnit)
+          unit: (Sectors + $normUnit)
   - metric_table:
       id: 903
       title: Cache Lookup
