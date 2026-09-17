@@ -1273,6 +1273,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   uint32_t exception_event_id = 0;
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink;
+  std::chrono::milliseconds ack_timeout;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
     auto queue = std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
@@ -1282,6 +1283,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
       return false;
     exception_status_va = queue->exception_status_va;
     exception_event_id = queue->exception_event_id;
+    ack_timeout = runtime_exception_ack_timeout_;
     address_space = queue->address_space;
     interrupt_sink = queue->interrupt_sink;
   }
@@ -1294,7 +1296,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
                       sizeof(combined_status)) != VmAccessOutcome::Complete)
     return false;
   interrupt_sink.deliver(process_id, exception_event_id);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
   AtomicLoadResult exception_status = read_gpu_u64(address_space, exception_status_va);
   while (exception_status.outcome == VmAccessOutcome::Complete &&
          exception_status.value == combined_status && std::chrono::steady_clock::now() < deadline) {
