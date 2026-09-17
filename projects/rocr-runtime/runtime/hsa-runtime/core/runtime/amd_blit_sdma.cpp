@@ -1990,7 +1990,7 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
     // CAS failed -- reuse the observed value directly, skip redundant atomic Load.
     curr_index = observed;
-    _mm_pause();
+    ROCR_CPU_PAUSE();
   }
 
   return nullptr;
@@ -2065,7 +2065,7 @@ void BlitSdma<useGCR, scopeFields>::PadRingToEnd(uint64_t curr_index) {
   // Check whether the engine has finished using this region.
   if (CanWriteUpto(new_index) == false) {
     // Engine hasn't freed this region yet.  Pause briefly.
-    _mm_pause();
+    ROCR_CPU_PAUSE();
     return;
   }
 

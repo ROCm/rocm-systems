@@ -59,18 +59,70 @@
 #include <sstream>
 #include <thread>
 #include <locale>
+#include <atomic>
 
+// ROCR_HAVE_X86_INTRINSICS is set on exactly the configurations where the
+// x86 intrinsic header is included below and _mm_pause/_mm_sfence/_mm_mfence/
+// _mm_clflush are therefore available: GCC/Clang on x86, GCC on PowerPC (via
+// the NO_WARN_X86_INTRINSICS compatibility shim), and MSVC on x86. Keep the
+// two conditions in sync.
 #if defined(__GNUC__)
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#define ROCR_HAVE_X86_INTRINSICS 1
 #elif defined(__powerpc64__) || defined(__PPC64__)
 // PowerPC compatibility shim for x86 intrinsics
 #define NO_WARN_X86_INTRINSICS
 #include <x86intrin.h>
+#define ROCR_HAVE_X86_INTRINSICS 1
 #endif
 #endif
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
 #include "intrin.h"
+#define ROCR_HAVE_X86_INTRINSICS 1
+#endif
+#if !defined(ROCR_HAVE_X86_INTRINSICS)
+#define ROCR_HAVE_X86_INTRINSICS 0
+#endif
+
+// Hosts without the x86 intrinsics (e.g. riscv64) have no _mm_pause. Fall
+// back to a no-op hint; this only affects spin-wait efficiency, not
+// correctness.
+#if ROCR_HAVE_X86_INTRINSICS
+#define ROCR_CPU_PAUSE() _mm_pause()
+#else
+#define ROCR_CPU_PAUSE() do {} while (0)
+#endif
+
+// _mm_sfence/_mm_mfence (x86 store/full fences, used here for CPU-to-PCIe
+// write ordering: packet body before header, doorbell writes, etc.) are only
+// available where the x86 intrinsics are.
+//
+// On riscv64, std::atomic_thread_fence(seq_cst) is NOT an equivalent
+// substitute: the RISC-V backend lowers it to `fence rw, rw`, which only
+// orders ordinary-memory (r/w) accesses against each other. RISC-V fence
+// predecessor/successor sets are {i, o, r, w}, where `i`/`o` (device
+// input/output) is the bit that governs ordering against device-mapped
+// (e.g. PCIe BAR / doorbell) memory -- `rw` does not imply `io`. So a plain
+// seq_cst fence does not guarantee that a CPU write to normal/WC memory
+// (packet body) is ordered, as observed by the PCIe-attached GPU, before a
+// later write to device-mapped memory (header/doorbell) -- exactly the
+// guarantee _mm_sfence/_mm_mfence provide on x86. Use explicit fence forms
+// that include the o/i bits instead.
+#if ROCR_HAVE_X86_INTRINSICS
+#define ROCR_CPU_SFENCE() _mm_sfence()
+#define ROCR_CPU_MFENCE() _mm_mfence()
+#elif defined(__GNUC__) && defined(__riscv) && (__riscv_xlen == 64)
+#define ROCR_CPU_SFENCE() __asm__ __volatile__("fence ow, ow" ::: "memory")
+#define ROCR_CPU_MFENCE() __asm__ __volatile__("fence iorw, iorw" ::: "memory")
+#else
+// Other non-x86 hosts: fall back to a full std::atomic_thread_fence. This is
+// a safe (if slightly pessimistic) superset for CPU-CPU ordering, but -- as
+// explained above -- is NOT verified to provide CPU-to-device ordering; add
+// an explicit arch branch above before relying on this fallback for a new
+// target.
+#define ROCR_CPU_SFENCE() std::atomic_thread_fence(std::memory_order_seq_cst)
+#define ROCR_CPU_MFENCE() std::atomic_thread_fence(std::memory_order_seq_cst)
 #endif
 
 namespace rocr {
@@ -451,10 +503,19 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   const char* cur = (const char*)base;
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
+#if ROCR_HAVE_X86_INTRINSICS
   do {
     _mm_clflush((const void*)cur);
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
+#else
+  // No portable CPU data-cache flush instruction is available here (e.g.
+  // riscv64 lacks _mm_clflush); intentionally skip, matching this function's
+  // existing "skip flush" fallback above for platforms without cacheline
+  // size info.
+  (void)cur;
+  (void)lastline;
+#endif
 }
 
 }  // namespace rocr

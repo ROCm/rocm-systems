@@ -230,7 +230,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   assert(isa != nullptr && "ISA registry inconsistency.");
 
-  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the 
+  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the
   // strict variant by name so the reported ISA and code-object
   // selection target the A0-safe ISA. Later steppings keep the base target.
   if (properties_.Capability.ui32.ASICRevision == 0 &&
@@ -1273,7 +1273,7 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   }
 
   // For non-gang H2D/D2H copies, bypass the gang lock entirely.
-  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines 
+  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines
   // and separate blit objects, no serialization needed.
   if (gang_factor == 1) {
     const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
@@ -4619,7 +4619,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         break;
       }
 #if defined(_MSC_VER)
-      _mm_pause();
+      ROCR_CPU_PAUSE();
 #elif defined(__x86_64__) || defined(__i386__)
       __builtin_ia32_pause();
 #endif

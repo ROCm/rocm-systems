@@ -270,7 +270,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(retry_doorbell_);
       if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
-        _mm_sfence();
+        ROCR_CPU_SFENCE();
       }
       // Release-publish the header, then ring the doorbell.
       atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
@@ -314,7 +314,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       if (write_index != 0) {
         if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
-          _mm_sfence();
+          ROCR_CPU_SFENCE();
         }
         atomic::Store(&ring[write & mask].packet.header, packets[first_written_packet_index].packet.header,
                       std::memory_order_release);
@@ -415,7 +415,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 
     if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
-      _mm_sfence();
+      ROCR_CPU_SFENCE();
     }
   }
   i = next_packet_;
@@ -434,7 +434,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
-    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
     case HSA_QUEUE_INFO_USE_COUNT:
     case HSA_QUEUE_INFO_HW_ID:
     case HSA_AMD_QUEUE_INFO_ENGINE_TYPE:
