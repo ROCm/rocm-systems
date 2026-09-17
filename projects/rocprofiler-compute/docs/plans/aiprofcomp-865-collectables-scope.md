@@ -7,6 +7,7 @@
 
 **Related docs**
 
+- Stakeholder Q&A: `aiprofcomp-865-stakeholder-qa.md`
 - Phase 1 & 2 overview: `aiprofcomp-865-single-run-collection-phases.md`
 - Phase 2 mechanics: `aiprofcomp-865-phase2-weighted-avg-design.md`
 - gfx942 impact numbers: `aiprofcomp-865-gfx942-single-pass-impact-report.md`

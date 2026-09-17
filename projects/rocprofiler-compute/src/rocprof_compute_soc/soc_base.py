@@ -542,7 +542,10 @@ class OmniSoC_Base:
         return filter_blocks
 
     def _allocate_perfmon_counter_files(
-        self, counters: set[str]
+        self,
+        counters: set[str],
+        *,
+        apply_refill: bool = True,
     ) -> tuple[list[CounterFile], int, int]:
         """Bin-pack counters into perfmon buckets.
 
@@ -596,6 +599,19 @@ class OmniSoC_Base:
                 output_files.append(CounterFile(str(file_count), self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
+
+        if apply_refill:
+            from rocprof_compute_soc.counter_grouping_refill import (
+                apply_metric_coalesce_refill_pass,
+            )
+
+            output_files, file_count, _refill_stats = apply_metric_coalesce_refill_pass(
+                self,
+                output_files,
+                file_count,
+                set(counters),
+                self.__perfmon_config,
+            )
 
         return output_files, file_count, accu_file_count
 
