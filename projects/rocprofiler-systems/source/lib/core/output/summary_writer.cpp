@@ -120,6 +120,34 @@ repeat_glyph(std::string_view glyph, std::size_t count)
     return out;
 }
 
+// Returns the index just past a CSI escape sequence starting at `start`
+// (which must point at the ESC byte), or `text.size()` if it never
+// terminates with a byte in k_csi_final_byte_min..k_csi_final_byte_max.
+std::size_t
+skip_csi_sequence(std::string_view text, std::size_t start)
+{
+    std::size_t scan_index = start + 2;
+    while(scan_index < text.size())
+    {
+        const auto final_byte = static_cast<unsigned char>(text[scan_index]);
+        if(final_byte >= k_csi_final_byte_min && final_byte <= k_csi_final_byte_max)
+        {
+            return scan_index + 1;
+        }
+        ++scan_index;
+    }
+    return scan_index;
+}
+
+// Drop other C0 controls + DEL; keep tab and newline so downstream layout
+// still sees structure.
+bool
+is_droppable_control_byte(unsigned char byte)
+{
+    return (byte < k_c0_control_max && byte != k_tab_byte && byte != k_line_feed_byte) ||
+           byte == k_del_byte;
+}
+
 std::string
 strip_terminal_control_chars(std::string_view text)
 {
@@ -128,29 +156,12 @@ strip_terminal_control_chars(std::string_view text)
     for(std::size_t i = 0; i < text.size();)
     {
         const auto byte = static_cast<unsigned char>(text[i]);
-        // CSI sequence: ESC [ ... <final byte in
-        // k_csi_final_byte_min..k_csi_final_byte_max>
         if(byte == k_escape_byte && i + 1 < text.size() && text[i + 1] == '[')
         {
-            std::size_t scan_index = i + 2;
-            while(scan_index < text.size())
-            {
-                const auto final_byte = static_cast<unsigned char>(text[scan_index]);
-                if(final_byte >= k_csi_final_byte_min &&
-                   final_byte <= k_csi_final_byte_max)
-                {
-                    ++scan_index;
-                    break;
-                }
-                ++scan_index;
-            }
-            i = scan_index;
+            i = skip_csi_sequence(text, i);
             continue;
         }
-        // Drop other C0 controls + DEL; keep tab and newline so downstream
-        // layout still sees structure.
-        if((byte < k_c0_control_max && byte != k_tab_byte && byte != k_line_feed_byte) ||
-           byte == k_del_byte)
+        if(is_droppable_control_byte(byte))
         {
             ++i;
             continue;
