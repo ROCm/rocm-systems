@@ -7582,8 +7582,9 @@ TEST(HsaHooksUnitTest, AutoReportLogsStaticMappingProvenance) {
   const size_t detail = log.find("ConSan access reader=101");
   ASSERT_NE(detail, std::string::npos) << log;
   for (std::string_view field :
-       {"dispatch=0x1122334455667788", "workgroup=(3,4,5)", "instruction=0x120", "trampoline=0x440",
-        "relocated_guest=0x448", "scratch_vgpr=12", "range=0", "bank=0", "mapped=true"}) {
+       {"dispatch=0x1122334455667788", "workgroup=(3,4,5)", "cluster_workgroup=0",
+        "instruction=0x120", "trampoline=0x440", "relocated_guest=0x448", "scratch_vgpr=12",
+        "range=0", "bank=0", "mapped=true"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
   }
   // Access-only ConSan reports cannot publish pending atomic acquires. Even
