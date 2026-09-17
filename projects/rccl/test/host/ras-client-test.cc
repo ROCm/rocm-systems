@@ -50,8 +50,6 @@
 #define main rasClientMain
 
 #include RAS_CLIENT_CC_PATH
-// rasTimeoutFactorSec (client.cc's only ras_param.cc dependency) comes from fakes/ras_param_fakes.cc,
-// already in RCCL_MICRO_TEST_SOURCES; the real ras_param.cc is not compiled into this TU.
 
 #undef main
 #include "fakes/libc_seam_undef.h"
