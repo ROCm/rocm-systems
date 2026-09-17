@@ -8,7 +8,9 @@
 // lives in ras_param.cc, which librccl does not export and which this binary
 // does not compile. Identity-factor stubs match NCCL_RAS_TIMEOUT_FACTOR=1.
 
-#include "ras_param.h"
+#include <stdint.h>
+
+extern "C" {
 
 float ncclParamRasTimeoutFactor(void) { return 1.0f; }
 
@@ -17,3 +19,5 @@ int64_t rasTimeoutFactorNs(int64_t baseSeconds) {
 }
 
 double rasTimeoutFactorSec(int baseSeconds) { return (double)baseSeconds; }
+
+} // extern "C"
