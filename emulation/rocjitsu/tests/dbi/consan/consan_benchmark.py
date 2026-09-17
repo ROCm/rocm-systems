@@ -21,7 +21,6 @@ from consan_coverage_gate import CoverageParseError, parse_coverage_evidence
 from consan_validation_catalog import (
     CONTROLLED_ENV_PREFIX,
     HSA_TOOL_ENVIRONMENT,
-    PROFILE_IDS,
     PROFILES,
     SOFTWARE_MODEL_ENVIRONMENT,
 )
@@ -36,9 +35,11 @@ HIPBLASLT_BENCH_ENV = "CONSAN_BENCHMARK_HIPBLASLT_BENCH"
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 SUPPORTED_TARGETS = ("gfx950", "gfx1201")
 MODE_LABELS = {
+    "default": "Default Mode",
+    "default-high": "Default Mode (high)",
     "supercollider": "SuperCollider",
-    "default": "ConSan",
 }
+PROFILE_IDS = tuple(MODE_LABELS)
 
 
 class BenchmarkError(RuntimeError):
@@ -394,7 +395,13 @@ def _clean_environment(
     if mode is None:
         return environment
     assert hook is not None
-    profile_environment = dict(PROFILES[mode].environment)
+    profile_environment = dict(
+        PROFILES["default" if mode == "default-high" else mode].environment
+    )
+    if mode in ("default", "default-high"):
+        profile_environment["RJ_CONSAN_PRESET"] = (
+            "high" if mode == "default-high" else "default"
+        )
     # Validation profiles require exhaustive dynamic evidence and reject
     # reported races. A performance benchmark instead gates on static site
     # instrumentation and numerical correctness. Keep dynamic diagnostics and

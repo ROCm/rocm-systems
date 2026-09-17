@@ -14,7 +14,8 @@ The prepared MI350X campaign invocation and evidence layout are in
 
 ## Measurement contract
 
-The runner executes a native baseline and both ConSan modes on one physical
+The runner executes a native baseline, Default Mode with the default preset,
+Default Mode with `RJ_CONSAN_PRESET=high`, and SuperCollider on one physical
 GPU. GPU work must be serialized: do not run two cells concurrently, and use
 `-j1` if the surrounding test driver has a job-count option. Each cell runs in a
 fresh process and performs the same bounded, synchronized operation twice.
@@ -116,8 +117,8 @@ For each workload, use this order:
 1. `rocprofv3` native kernel-inventory pass and allowlist conversion;
 2. two native timing processes, each containing Run1 and Run2, used immediately
    to establish a separate median for each run ordinal;
-3. `SuperCollider` and `ConSan`, updating the
-   target status row after each completed mode; and
+3. Default Mode, Default Mode (`high`), and SuperCollider, updating the
+   target status row after each completed variant; and
 4. one final native timing sample used only as a post-validation drift check.
 
 The final sample does not silently redefine the denominator after the modes
@@ -136,7 +137,13 @@ and binding their replacements. Concurrent transforms are therefore not
 double-counted.
 
 Each target status row begins with matching uninstrumented Startup and Run
-values, then reports two values per ConSan mode:
+values, then reports two values per benchmark variant, in the order Default
+Mode, Default Mode (`high`), and SuperCollider. The two Default Mode variants
+explicitly select `RJ_CONSAN_PRESET=default` and `RJ_CONSAN_PRESET=high`,
+respectively; `high` is a preset, not a separate sanitizer mode. Inherited
+expert sampling controls are cleared for all variants.
+
+The two values are:
 
 - **Startup (seconds)**: the total cold-path latency through completion of the
   first synchronized operation and its selected evidence checkpoints. It
