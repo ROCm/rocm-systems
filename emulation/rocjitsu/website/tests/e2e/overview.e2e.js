@@ -62,7 +62,7 @@ test('uses contrasting target series and engineering-tone comparison labels', as
   await page.getByLabel('Targets').click();
   await page.getByRole('option', { name: /Check all targets/ }).click();
   await page.keyboard.press('Escape');
-  await page.getByRole('heading', { name: 'RocJitsu Performance Health' }).click();
+  await page.getByRole('heading', { name: 'Rocjitsu Performance Health' }).click();
 
   const trend = page.getByRole('img', { name: 'Performance trend for ALL' });
   const targetSeriesColors = await readChart(trend, (instance) => instance.getOption().series

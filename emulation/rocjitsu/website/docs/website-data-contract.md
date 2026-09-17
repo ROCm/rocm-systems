@@ -1,6 +1,6 @@
-# RocJitsu Dashboard Data Contract
+# Rocjitsu Dashboard Data Contract
 
-Schema version 1 uses plain JSON, immutable test catalogs, and one run file per RocJitsu plugin execution. A run file contains every target measured by that execution; target groups contain result records that reference the shared catalog.
+Schema version 1 uses plain JSON, immutable test catalogs, and one run file per Rocjitsu plugin execution. A run file contains every target measured by that execution; target groups contain result records that reference the shared catalog.
 
 ## Published files
 
@@ -129,7 +129,7 @@ Because that union is keyed by test ID, a shared test ID must carry an identical
 
 ## Run file
 
-A run represents one RocJitsu plugin execution on one source revision and machine, across all targets required by its catalog.
+A run represents one Rocjitsu plugin execution on one source revision and machine, across all targets required by its catalog.
 
 ```json
 {
@@ -217,7 +217,7 @@ Plugin identity and options do not belong in `environment`, because plugins are 
 ### `source`
 
 - `branch`: required and currently must be `develop`.
-- `commit`: required full SHA of the tested RocJitsu commit.
+- `commit`: required full SHA of the tested Rocjitsu commit.
 - `committedAt`: required ISO-8601 timestamp of that commit.
 - `message`: optional commit message.
 

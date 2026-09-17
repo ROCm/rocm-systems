@@ -192,7 +192,7 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
   await clickLastCompletedChartPoint(aggregateChart, () => runDialog.isVisible());
   await expect(runDialog.getByText('Run Details')).toBeVisible();
   await expect(runDialog.getByText('Commit 31369c4d · Auto')).toBeVisible();
-  const commitLabel = await runDialog.getByText('RocJitsu commit', { exact: true }).boundingBox();
+  const commitLabel = await runDialog.getByText('Rocjitsu commit', { exact: true }).boundingBox();
   const messageLabel = await runDialog.getByText('Commit message', { exact: true }).boundingBox();
   expect(messageLabel.x).toBeGreaterThan(commitLabel.x);
   await expectDialogTypographyContained(runDialog);
@@ -357,7 +357,7 @@ test('historical rows and completed chart points open shared provenance details'
   await expect(dialog.getByText('PyTorch', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Raw problem configuration', { exact: true })).toHaveCount(0);
   const machineLabel = await dialog.getByText('Machine', { exact: true }).boundingBox();
-  const commitLabel = await dialog.getByText('RocJitsu commit', { exact: true }).boundingBox();
+  const commitLabel = await dialog.getByText('Rocjitsu commit', { exact: true }).boundingBox();
   expect(commitLabel.x).toBeGreaterThan(machineLabel.x);
   await expectDialogTypographyContained(dialog);
   await page.getByRole('button', { name: 'Close details' }).click();

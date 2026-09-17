@@ -143,7 +143,7 @@ function DashboardHero({ data = null }) {
   return (
     <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'flex-end' }, gap: 2, mb: 2.5 }}>
       <Box>
-        <Typography component="h1" variant="h1">RocJitsu Performance Health</Typography>
+        <Typography component="h1" variant="h1">Rocjitsu Performance Health</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.7, maxWidth: 760 }}>
           Track benchmark performance, regressions, and run coverage across selected GFX targets.
         </Typography>

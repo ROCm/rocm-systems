@@ -1,6 +1,6 @@
-# RocJitsu Performance Dashboard
+# Rocjitsu Performance Dashboard
 
-React + Vite source for the RocJitsu benchmark dashboard, with MUI components and
+React + Vite source for the Rocjitsu benchmark dashboard, with MUI components and
 ECharts visualizations. This directory contains application source, build configuration,
 and tests. The intended release flow copies the built application to a separate
 GitHub Pages deployment branch, where real benchmark data will be published

@@ -1,7 +1,7 @@
 # Dashboard test fixtures
 
 These fixtures are dummy measurements for tests and local development. They must
-never be published as real RocJitsu results.
+never be published as real Rocjitsu results.
 
 ## Static fixture data
 

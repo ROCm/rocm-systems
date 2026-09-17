@@ -11,14 +11,14 @@ test('loads the data-driven overview without browser errors', async ({ page }) =
   await expect(page.getByTestId('rocjitsu-logo')).toHaveCount(0);
   await expect(page.getByText('Beta', { exact: true })).toBeVisible();
   await expect(page.getByText('Demo', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rocjitsu Performance Health' })).toBeVisible();
   await expect(page.getByText('Performance Trend')).toBeVisible();
   await expect(page.getByText('Run coverage', { exact: true })).toBeVisible();
   await expect(page.getByText('Recent Runs')).toBeVisible();
-  await expect(page.getByText('RocJitsu Commit Activity')).toHaveCount(0);
+  await expect(page.getByText('Rocjitsu Commit Activity')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(1);
   await expect(page.getByText('GEMM BF16 4096³').first()).toBeVisible();
-  expect(await page.evaluate(() => Object.hasOwn(window, 'ROCJITSU_BENCHMARK_DATA'))).toBe(false);
+  expect(await page.evaluate(() => Object.hasOwn(window, 'ROCjITSU_BENCHMARK_DATA'))).toBe(false);
   expect(errors).toEqual([]);
 });
 
@@ -34,8 +34,8 @@ test('renders the dashboard shell and run progress while data is still loading',
 
   await page.goto('/');
   try {
-    await expect(page.getByText('RocJitsu / Performance Dashboard')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
+    await expect(page.getByText('Rocjitsu / Performance Dashboard')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Rocjitsu Performance Health' })).toBeVisible();
     await expect(page.getByText('Beta', { exact: true })).toBeVisible();
     const loadingState = page.getByTestId('dashboard-data-loading');
     await expect(loadingState).toBeVisible();
@@ -73,7 +73,7 @@ test('renders valid history with a warning when an indexed run is invalid', asyn
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rocjitsu Performance Health' })).toBeVisible();
   const warning = page.getByTestId('invalid-run-warning');
   await expect(warning).toContainText('Skipped 1 invalid run file');
   await expect(warning).toContainText(invalidRunFile);
@@ -126,5 +126,5 @@ test('offers a working Retry after a fatal data failure', async ({ page }) => {
 
   await expect(page.getByTestId('dashboard-data-error')).toHaveCount(0);
   await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rocjitsu Performance Health' })).toBeVisible();
 });

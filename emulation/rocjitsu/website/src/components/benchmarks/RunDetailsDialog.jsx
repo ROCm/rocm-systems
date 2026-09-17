@@ -109,7 +109,7 @@ export default function RunDetailsDialog({ run, filters, repository, onClose }) 
             <Divider sx={{ my: 2.5 }} />
             <DetailSectionHeading>Run Provenance</DetailSectionHeading>
             <DetailGrid>
-              <DetailItem label="RocJitsu commit">{commitSha}</DetailItem>
+              <DetailItem label="Rocjitsu commit">{commitSha}</DetailItem>
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
               {hasDisplayValue(run.plugin?.name) && <DetailItem label="Plugin">{run.plugin.name}</DetailItem>}
               {hasDisplayValue(run.plugin?.version) && <DetailItem label="Plugin version">{run.plugin.version}</DetailItem>}

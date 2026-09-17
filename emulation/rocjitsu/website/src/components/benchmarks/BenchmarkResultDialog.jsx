@@ -76,7 +76,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
               <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
               <DetailItem label="Run type">{run.trigger === 'manual' ? 'Manual' : 'Auto'}</DetailItem>
               {hasDisplayValue(run.machineId) && <DetailItem label="Machine">{run.machineId}</DetailItem>}
-              <DetailItem label="RocJitsu commit">{commitSha}</DetailItem>
+              <DetailItem label="Rocjitsu commit">{commitSha}</DetailItem>
               <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
               {hasDisplayValue(run.plugin?.name) && <DetailItem label="Plugin">{run.plugin.name}</DetailItem>}

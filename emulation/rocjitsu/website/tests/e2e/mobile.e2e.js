@@ -8,7 +8,7 @@ test('does not overflow the mobile viewport', async ({ page }) => {
     document: document.documentElement.scrollWidth,
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
-  await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rocjitsu Performance Health' })).toBeVisible();
 });
 
 test('replaces the recent-runs table with run cards that keep their labels', async ({ page }) => {

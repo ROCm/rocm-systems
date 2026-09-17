@@ -52,7 +52,7 @@ export default function DashboardHeader({ data, downloadData, loading = false, m
           <Box sx={{ minWidth: 0 }}>
             <Stack direction="row" sx={{ alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
               <Typography sx={{ fontSize: { xs: 16, sm: 19 }, fontWeight: 780, letterSpacing: '-.025em', lineHeight: 1.15 }}>
-                RocJitsu <Box component="span" sx={{ color: 'text.disabled', fontWeight: 400, mx: 0.45 }}>/</Box>{' '}
+                Rocjitsu <Box component="span" sx={{ color: 'text.disabled', fontWeight: 400, mx: 0.45 }}>/</Box>{' '}
                 <Box component="span" sx={{ color: 'text.secondary', fontWeight: 580 }}>Performance Dashboard</Box>
               </Typography>
               {data?.isBeta && (
