@@ -147,7 +147,7 @@ struct config_value_validation
 // ROCPROFSYS_TRACE_DURATION=abc -> 0.0. If timemory callbacks become
 // unconditional and available before constructor parsing, the explicit env and
 // config-file validation paths can be removed.
-const auto strict_config_value_validations = std::array<config_value_validation, 5>{ {
+const auto k_strict_config_value_validations = std::array<config_value_validation, 6>{ {
     { env_vars::MODE, config_value_rule::choice, "one of the registered choices" },
     { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
       "one of the registered choices" },
@@ -160,6 +160,9 @@ const auto strict_config_value_validations = std::array<config_value_validation,
     // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
     { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
       "a positive finite floating-point value" },
+    { .name        = env_vars::TRACE_PERIOD_CLOCK_ID,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
 } };
 
 [[nodiscard]] bool
@@ -237,10 +240,10 @@ get_setting_choices(const std::shared_ptr<settings>& _config, std::string_view n
 [[nodiscard]] const config_value_validation*
 find_config_value_validation(std::string_view name)
 {
-    auto itr = std::find_if(
-        strict_config_value_validations.begin(), strict_config_value_validations.end(),
+    auto itr = std::ranges::find_if(
+        k_strict_config_value_validations,
         [name](const auto& validation) { return validation.name == name; });
-    return (itr != strict_config_value_validations.end()) ? &*itr : nullptr;
+    return (itr != k_strict_config_value_validations.end()) ? &*itr : nullptr;
 }
 
 void
@@ -294,7 +297,7 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
 void
 validate_environment_config_values(const std::shared_ptr<settings>& _config)
 {
-    for(const auto& validation : strict_config_value_validations)
+    for(const auto& validation : k_strict_config_value_validations)
     {
         if(auto* raw_value = std::getenv(std::string{ validation.name }.c_str()))
             validate_config_setting_value(validation.name, raw_value,
@@ -362,7 +365,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
 void
 install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 {
-    for(const auto& validation : strict_config_value_validations)
+    for(const auto& validation : k_strict_config_value_validations)
     {
         auto itr = _config->find(std::string{ validation.name });
         if(itr == _config->end() || !itr->second) continue;
