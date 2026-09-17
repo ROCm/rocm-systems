@@ -4,7 +4,7 @@ run-name: profiler-hub-version-check
 on:
   pull_request:
     paths:
-      - '.github/workflows/profiler-hub-version-check.yml'
+      - '.github/workflows/profiler-hub-*.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'

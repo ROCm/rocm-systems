@@ -7,7 +7,7 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/profiler-hub-ci.yml'
+      - '.github/workflows/profiler-hub-*.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'
@@ -16,7 +16,7 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/profiler-hub-ci.yml'
+      - '.github/workflows/profiler-hub-*.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'
