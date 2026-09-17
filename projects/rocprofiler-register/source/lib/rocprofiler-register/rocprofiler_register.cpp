@@ -38,6 +38,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <regex>
@@ -60,8 +61,10 @@ using rocprofiler_register_library_api_table_func_t =
 extern "C" {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
+#pragma weak rocprofiler_load_attachment_tool
 #pragma weak rocprofiler_attach
 #pragma weak rocprofiler_detach
+#pragma weak rocprofiler_attach_initialize
 #pragma weak rocprofiler_attach_set_api_table
 #pragma weak rocprofiler_register_import_hip
 #pragma weak rocprofiler_register_import_hip_static
@@ -100,10 +103,15 @@ extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 extern int
+rocprofiler_load_attachment_tool(const char*);
+
+extern int
 rocprofiler_attach(void);
 
 extern int
 rocprofiler_detach(void);
+
+extern int rocprofiler_attach_initialize(rocprofiler_register_library_api_table_func_t);
 
 extern int
 rocprofiler_attach_set_api_table(const char*,
@@ -142,11 +150,14 @@ namespace
 {
 using namespace rocprofiler_register;
 using rocprofiler_set_api_table_t        = decltype(::rocprofiler_set_api_table)*;
+using rocprofiler_load_attachment_tool_t = decltype(::rocprofiler_load_attachment_tool)*;
+using rocprofiler_attach_initialize_t    = decltype(::rocprofiler_attach_initialize)*;
 using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api_table)*;
 using rocprofiler_attach_func_t          = decltype(::rocprofiler_attach)*;
 using rocprofiler_detach_func_t          = decltype(::rocprofiler_detach)*;
 using rocp_set_api_table_data_t          = std::tuple<void*,
                                              rocprofiler_set_api_table_t,
+                                             rocprofiler_load_attachment_tool_t,
                                              rocprofiler_attach_func_t,
                                              rocprofiler_detach_func_t>;
 
@@ -224,7 +235,7 @@ ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(attach,
                                                "rocprofiler-sdk-attach",
                                                1,
                                                1,
-                                               "rocprofiler_attach_set_api_table");
+                                               "rocprofiler_attach_initialize");
 
 #undef ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT
 
@@ -257,8 +268,13 @@ constexpr auto rocprofiler_lib_register_entrypoint =
     rocprofiler_sdk_load_trait::required_entrypoint;
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     rocprofiler_attach_load_trait::required_entrypoint;
-constexpr auto rocprofiler_lib_attach_entrypoint = "rocprofiler_attach";
-constexpr auto rocprofiler_lib_detach_entrypoint = "rocprofiler_detach";
+constexpr auto rocprofiler_attach_lib_set_api_table_entrypoint =
+    "rocprofiler_attach_set_api_table";
+constexpr auto rocprofiler_lib_load_attachment_tool_entrypoint =
+    "rocprofiler_load_attachment_tool";
+constexpr auto rocprofiler_lib_is_initialized_entrypoint = "rocprofiler_is_initialized";
+constexpr auto rocprofiler_lib_attach_entrypoint         = "rocprofiler_attach";
+constexpr auto rocprofiler_lib_detach_entrypoint         = "rocprofiler_detach";
 
 const auto rocprofiler_register_lib_name =
     get_versioned_library_name("rocprofiler-register", ROCPROFILER_REGISTER_SOVERSION);
@@ -446,20 +462,36 @@ struct opened_library
 opened_library open_library_local(std::string_view);
 
 loaded_library
-load_library(const std::vector<std::string>&, const char*, bool = false);
+load_library(const std::vector<std::string>&,
+             const char*,
+             bool prefer_colocated = false,
+             bool warn_on_failure  = true);
 
 rocp_set_api_table_data_t
 rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib);
 
 struct rocp_scan_data
 {
-    void*                       handle           = nullptr;
-    rocprofiler_set_api_table_t set_api_table_fn = nullptr;
-    rocprofiler_attach_func_t   attach_fn        = nullptr;
-    rocprofiler_detach_func_t   detach_fn        = nullptr;
+    void*                              handle                  = nullptr;
+    rocprofiler_set_api_table_t        set_api_table_fn        = nullptr;
+    rocprofiler_load_attachment_tool_t load_attachment_tool_fn = nullptr;
+    rocprofiler_attach_func_t          attach_fn               = nullptr;
+    rocprofiler_detach_func_t          detach_fn               = nullptr;
 };
 
 auto existing_scanned_data = rocp_scan_data{};
+
+bool
+is_attachment_enabled()
+{
+#if defined(ROCP_REG_DEFAULT_ATTACHMENT) && ROCP_REG_DEFAULT_ATTACHMENT != 0
+    constexpr auto default_attachment_enabled = true;
+#else
+    constexpr auto default_attachment_enabled = false;
+#endif
+
+    return common::get_env("ROCP_TOOL_ATTACH", default_attachment_enabled);
+}
 
 rocp_scan_data
 rocp_reg_scan_for_tools()
@@ -474,21 +506,25 @@ rocp_reg_scan_for_tools()
     bool _found_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
 
-    static void*                       rocprofiler_lib_handle    = nullptr;
-    static rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
-    static rocprofiler_attach_func_t   rocprofiler_lib_attach_fn = nullptr;
-    static rocprofiler_detach_func_t   rocprofiler_lib_detach_fn = nullptr;
+    static void*                              rocprofiler_lib_handle    = nullptr;
+    static rocprofiler_set_api_table_t        rocprofiler_lib_config_fn = nullptr;
+    static rocprofiler_load_attachment_tool_t rocprofiler_lib_load_attachment_tool_fn =
+        nullptr;
+    static rocprofiler_attach_func_t rocprofiler_lib_attach_fn = nullptr;
+    static rocprofiler_detach_func_t rocprofiler_lib_detach_fn = nullptr;
 
     if(_found_tool)
     {
         if(rocprofiler_lib_handle && rocprofiler_lib_config_fn)
             return rocp_scan_data{ rocprofiler_lib_handle,
                                    rocprofiler_lib_config_fn,
+                                   rocprofiler_lib_load_attachment_tool_fn,
                                    rocprofiler_lib_attach_fn,
                                    rocprofiler_lib_detach_fn };
 
         std::tie(rocprofiler_lib_handle,
                  rocprofiler_lib_config_fn,
+                 rocprofiler_lib_load_attachment_tool_fn,
                  rocprofiler_lib_attach_fn,
                  rocprofiler_lib_detach_fn) = rocp_load_rocprofiler_lib(_rocp_reg_lib);
 
@@ -497,17 +533,25 @@ rocp_reg_scan_for_tools()
             << ((_rocp_reg_lib.empty()) ? "the default rocprofiler-sdk library candidates"
                                         : _rocp_reg_lib);
     }
-    else if(_found_tool && rocprofiler_set_api_table)
-    {
-        rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
-        rocprofiler_lib_attach_fn = &rocprofiler_attach;
-        rocprofiler_lib_detach_fn = &rocprofiler_detach;
-    }
-
     return rocp_scan_data{ rocprofiler_lib_handle,
                            rocprofiler_lib_config_fn,
+                           rocprofiler_lib_load_attachment_tool_fn,
                            rocprofiler_lib_attach_fn,
                            rocprofiler_lib_detach_fn };
+}
+
+rocp_scan_data
+rocp_get_propagation_target()
+{
+    auto scan_result = rocp_reg_scan_for_tools();
+    if(scan_result.set_api_table_fn == nullptr &&
+       existing_scanned_data.set_api_table_fn != nullptr)
+    {
+        // Runtime attachment explicitly loads the SDK and is independent of startup
+        // FORCE_LOAD policy. Reuse that exact SDK for anytime and future propagation.
+        scan_result = existing_scanned_data;
+    }
+    return scan_result;
 }
 
 opened_library
@@ -571,7 +615,8 @@ format_library_candidates(const std::vector<std::string>& candidates)
 loaded_library
 load_library(const std::vector<std::string>& candidates,
              const char*                     required_entrypoint,
-             bool                            prefer_colocated)
+             bool                            prefer_colocated,
+             bool                            warn_on_failure)
 {
     auto search_candidates = std::vector<std::string>{};
     auto append_unique     = [&search_candidates](std::string candidate) {
@@ -638,46 +683,119 @@ load_library(const std::vector<std::string>& candidates,
         dlclose(opened.handle);
     }
 
-    LOG(WARNING) << "failed to load a library containing '" << required_entrypoint
-                 << "'. Tried: " << format_library_candidates(search_candidates);
+    LOG_IF(WARNING, warn_on_failure)
+        << "failed to load a library containing '" << required_entrypoint
+        << "'. Tried: " << format_library_candidates(search_candidates);
     return {};
+}
+
+void
+resolve_sdk_companion_entrypoints(
+    void*&                              sdk_handle,
+    rocprofiler_set_api_table_t         set_api_table_fn,
+    rocprofiler_load_attachment_tool_t& load_attachment_tool_fn,
+    rocprofiler_attach_func_t&          attach_fn,
+    rocprofiler_detach_func_t&          detach_fn)
+{
+    if(set_api_table_fn == nullptr) return;
+
+    auto owner_info = Dl_info{};
+    if(dladdr(reinterpret_cast<const void*>(set_api_table_fn), &owner_info) == 0 ||
+       owner_info.dli_fname == nullptr || owner_info.dli_fbase == nullptr)
+    {
+        LOG(WARNING) << "Could not identify the rocprofiler-sdk that owns "
+                     << rocprofiler_lib_register_entrypoint;
+        return;
+    }
+
+    auto* owner_handle =
+        dlopen(owner_info.dli_fname, RTLD_NOLOAD | RTLD_LOCAL | RTLD_LAZY);
+    if(owner_handle == nullptr)
+    {
+        LOG(WARNING) << "Could not retain the rocprofiler-sdk that owns "
+                     << rocprofiler_lib_register_entrypoint << ": " << dlerror();
+        return;
+    }
+
+    if(sdk_handle == owner_handle)
+    {
+        // dlopen(RTLD_NOLOAD) acquired one additional reference; the existing handle
+        // already pins this object.
+        dlclose(owner_handle);
+    }
+    else
+    {
+        if(sdk_handle != nullptr) dlclose(sdk_handle);
+        sdk_handle = owner_handle;
+    }
+
+    auto resolve_companion = [owner_handle, &owner_info](const char* symbol_name,
+                                                         auto&       output) {
+        auto* symbol = dlsym(owner_handle, symbol_name);
+        auto  info   = Dl_info{};
+        if(symbol != nullptr && dladdr(symbol, &info) != 0 &&
+           info.dli_fbase == owner_info.dli_fbase)
+        {
+            *(void**) (&output) = symbol;
+        }
+        else
+        {
+            output = nullptr;
+            LOG_IF(WARNING, symbol != nullptr)
+                << "Ignoring " << symbol_name
+                << " because it resolves from a different shared library than "
+                << rocprofiler_lib_register_entrypoint;
+        }
+    };
+
+    resolve_companion(rocprofiler_lib_load_attachment_tool_entrypoint,
+                      load_attachment_tool_fn);
+    resolve_companion(rocprofiler_lib_attach_entrypoint, attach_fn);
+    resolve_companion(rocprofiler_lib_detach_entrypoint, detach_fn);
 }
 
 rocp_set_api_table_data_t
 rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib)
 {
-    void*                       rocprofiler_lib_handle    = nullptr;
-    rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
-    rocprofiler_attach_func_t   rocprofiler_lib_attach_fn = nullptr;
-    rocprofiler_detach_func_t   rocprofiler_lib_detach_fn = nullptr;
+    void*                              rocprofiler_lib_handle                  = nullptr;
+    rocprofiler_set_api_table_t        rocprofiler_lib_config_fn               = nullptr;
+    rocprofiler_load_attachment_tool_t rocprofiler_lib_load_attachment_tool_fn = nullptr;
+    rocprofiler_attach_func_t          rocprofiler_lib_attach_fn               = nullptr;
+    rocprofiler_detach_func_t          rocprofiler_lib_detach_fn               = nullptr;
 
     if(rocprofiler_set_api_table)
     {
         rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
-        rocprofiler_lib_attach_fn = &rocprofiler_attach;
-        rocprofiler_lib_detach_fn = &rocprofiler_detach;
     }
 
-    // return if found via LD_PRELOAD
     if(rocprofiler_lib_config_fn)
+    {
+        resolve_sdk_companion_entrypoints(rocprofiler_lib_handle,
+                                          rocprofiler_lib_config_fn,
+                                          rocprofiler_lib_load_attachment_tool_fn,
+                                          rocprofiler_lib_attach_fn,
+                                          rocprofiler_lib_detach_fn);
         return std::make_tuple(rocprofiler_lib_handle,
                                rocprofiler_lib_config_fn,
+                               rocprofiler_lib_load_attachment_tool_fn,
                                rocprofiler_lib_attach_fn,
                                rocprofiler_lib_detach_fn);
+    }
 
     // look to see if entrypoint function is already a symbol
     *(void**) (&rocprofiler_lib_config_fn) =
         dlsym(RTLD_DEFAULT, rocprofiler_lib_register_entrypoint);
-    *(void**) (&rocprofiler_lib_attach_fn) =
-        dlsym(RTLD_DEFAULT, rocprofiler_lib_attach_entrypoint);
-    *(void**) (&rocprofiler_lib_detach_fn) =
-        dlsym(RTLD_DEFAULT, rocprofiler_lib_detach_entrypoint);
 
-    // return if found via RTLD_DEFAULT
     if(rocprofiler_lib_config_fn)
     {
+        resolve_sdk_companion_entrypoints(rocprofiler_lib_handle,
+                                          rocprofiler_lib_config_fn,
+                                          rocprofiler_lib_load_attachment_tool_fn,
+                                          rocprofiler_lib_attach_fn,
+                                          rocprofiler_lib_detach_fn);
         return std::make_tuple(rocprofiler_lib_handle,
                                rocprofiler_lib_config_fn,
+                               rocprofiler_lib_load_attachment_tool_fn,
                                rocprofiler_lib_attach_fn,
                                rocprofiler_lib_detach_fn);
     }
@@ -694,17 +812,21 @@ rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib)
     if(!rocprofiler_lib_handle)
         return std::make_tuple(rocprofiler_lib_handle,
                                rocprofiler_lib_config_fn,
+                               rocprofiler_lib_load_attachment_tool_fn,
                                rocprofiler_lib_attach_fn,
                                rocprofiler_lib_detach_fn);
 
-    *(void**) (&rocprofiler_lib_attach_fn) =
-        dlsym(rocprofiler_lib_handle, rocprofiler_lib_attach_entrypoint);
-
-    *(void**) (&rocprofiler_lib_detach_fn) =
-        dlsym(rocprofiler_lib_handle, rocprofiler_lib_detach_entrypoint);
+    resolve_sdk_companion_entrypoints(rocprofiler_lib_handle,
+                                      rocprofiler_lib_config_fn,
+                                      rocprofiler_lib_load_attachment_tool_fn,
+                                      rocprofiler_lib_attach_fn,
+                                      rocprofiler_lib_detach_fn);
 
     LOG_IF(INFO, rocprofiler_lib_config_fn != nullptr)
         << "Found " << rocprofiler_lib_register_entrypoint << " symbol";
+
+    LOG_IF(INFO, rocprofiler_lib_load_attachment_tool_fn != nullptr)
+        << "Found " << rocprofiler_lib_load_attachment_tool_entrypoint << " symbol";
 
     LOG_IF(INFO, rocprofiler_lib_attach_fn != nullptr)
         << "Found " << rocprofiler_lib_attach_entrypoint << " symbol";
@@ -714,6 +836,7 @@ rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib)
 
     return std::make_tuple(rocprofiler_lib_handle,
                            rocprofiler_lib_config_fn,
+                           rocprofiler_lib_load_attachment_tool_fn,
                            rocprofiler_lib_attach_fn,
                            rocprofiler_lib_detach_fn);
 }
@@ -792,35 +915,35 @@ rocp_add_registered_library_api_table(const char*                        common_
 }
 
 rocprofiler_register_error_code_t
+rocp_propagate_registrations(bool invoke_all, const rocp_scan_data& scan_result)
+{
+    if(scan_result.set_api_table_fn == nullptr) return ROCP_REG_SUCCESS;
+
+    existing_scanned_data = scan_result;
+    for(auto& itr : registered)
+    {
+        if(itr && (!itr->propagated || invoke_all))
+        {
+            auto _ret = scan_result.set_api_table_fn(itr->common_name,
+                                                     itr->lib_version,
+                                                     itr->instance_value,
+                                                     itr->api_tables.data(),
+                                                     itr->api_tables.size());
+            if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
+            itr->propagated = true;
+        }
+    }
+
+    return ROCP_REG_SUCCESS;
+}
+
+rocprofiler_register_error_code_t
 rocp_invoke_registrations(bool invoke_all)
 {
     auto _lk = common::checked_lock{ registration_mutex };
     if(_lk.recursive) return ROCP_REG_DEADLOCK;
 
-    for(auto& itr : registered)
-    {
-        if(itr && (!itr->propagated || invoke_all))
-        {
-            auto _scan_result = rocp_reg_scan_for_tools();
-
-            // rocprofiler_set_api_table has been found and we have pass the API data
-            auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
-
-            if(_activate_rocprofiler)
-            {
-                existing_scanned_data = _scan_result;
-                auto _ret             = _scan_result.set_api_table_fn(itr->common_name,
-                                                          itr->lib_version,
-                                                          itr->instance_value,
-                                                          itr->api_tables.data(),
-                                                          itr->api_tables.size());
-                if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
-                itr->propagated = true;
-            }
-        }
-    }
-
-    return ROCP_REG_SUCCESS;
+    return rocp_propagate_registrations(invoke_all, rocp_get_propagation_target());
 }
 
 void
@@ -845,6 +968,12 @@ load_environment_buffer(const char* environment_buffer)
         position += strlen(name) + 1;
         const char* value = position;
         position += strlen(value) + 1;
+
+        if(std::string_view{ name } == "ROCPROFILER_REGISTER_TOOL_ATTACHED")
+        {
+            LOG(INFO) << "Ignoring internal attachment marker from environment buffer";
+            continue;
+        }
 
         LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
         setenv(name, value, 1);
@@ -939,19 +1068,7 @@ rocprofiler_register_library_api_table(
     auto _lk = common::checked_lock{ registration_mutex };
     if(_lk.recursive) return ROCP_REG_DEADLOCK;
 
-    auto _scan_result = rocp_reg_scan_for_tools();
-
-    // rocprofiler library is dlopened and we have the functor to pass the API data
-    auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
-
-#if defined(ROCP_REG_DEFAULT_ATTACHMENT) && ROCP_REG_DEFAULT_ATTACHMENT != 0
-    constexpr auto default_attachment_enabled = true;
-#else
-    constexpr auto default_attachment_enabled = false;
-#endif
-
-    auto _attachment_enabled =
-        common::get_env("ROCP_TOOL_ATTACH", default_attachment_enabled);
+    const auto _attachment_enabled = is_attachment_enabled();
 
     rocp_import* _import_match = nullptr;
     for(auto& itr : import_info)
@@ -1013,57 +1130,111 @@ rocprofiler_register_library_api_table(
     auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
     _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
 
-    // if attachment is enabled the HSA API table should be forwarded to the attachment
-    // library
-    if(!_activate_rocprofiler && _attachment_enabled &&
-       _import_match->library_idx == ROCP_REG_HSA)
+    // Initialize attachment before scanning for startup tools so rocattach is always the
+    // first table propagated to rocprofiler-sdk. HSA-specific setup remains deferred
+    // until the HSA table arrives.
+    if(_attachment_enabled)
     {
-        auto loaded_attach_library =
+        const auto attachment_explicitly_enabled =
+            (std::getenv("ROCP_TOOL_ATTACH") != nullptr);
+        static auto loaded_attach_library =
             load_library(get_default_library_candidates<rocprofiler_attach_load_trait>(),
                          rocprofiler_attach_lib_register_entrypoint,
-                         true);
+                         true,
+                         attachment_explicitly_enabled);
         if(!loaded_attach_library.handle)
         {
-            LOG(ERROR)
-                << "Proxy queues for attachment are enabled, but the attach library "
-                   "was not found or able to be loaded. The attaching profiler will not "
-                   "be able to profile anything that requires proxy queues.";
-            return ROCP_REG_NO_TOOLS;
+            static auto warning_once = std::once_flag{};
+            std::call_once(warning_once, [attachment_explicitly_enabled]() {
+                LOG_IF(WARNING, attachment_explicitly_enabled)
+                    << "Attachment is enabled, but the attach library was not found or "
+                       "could not be loaded. Startup profiling remains available.";
+                LOG_IF(INFO, !attachment_explicitly_enabled)
+                    << "Default attachment support is unavailable because the attach "
+                       "library was not found. Startup profiling remains available.";
+            });
         }
-        rocprofiler_attach_set_api_table_t rocprofiler_attach_set_api_table_fn = nullptr;
-        *(void**) (&rocprofiler_attach_set_api_table_fn) =
-            loaded_attach_library.entrypoint;
-
-        if(!rocprofiler_attach_set_api_table_fn)
+        else
         {
-            LOG(ERROR)
-                << "Proxy queues for attachment are enabled, but the attach library's "
-                   "entry point was not found. The attaching profiler will not be able "
-                   "to profile anything that requires proxy queues.";
-            return ROCP_REG_NO_TOOLS;
+            auto rocprofiler_attach_initialize_fn = rocprofiler_attach_initialize_t{};
+            *(void**) (&rocprofiler_attach_initialize_fn) =
+                loaded_attach_library.entrypoint;
+            if(rocprofiler_attach_initialize_fn == nullptr)
+            {
+                LOG(ERROR)
+                    << "Attachment is enabled, but the attach library initialization "
+                       "entry point was not found. Startup profiling remains available.";
+            }
+            else
+            {
+                auto _ret = rocprofiler_attach_initialize_fn(&register_functor);
+                if(_ret != 0)
+                {
+                    LOG(ERROR) << "Attachment library initialization returned an error: "
+                               << _ret << ". Startup profiling remains available.";
+                }
+                else if(_import_match->library_idx == ROCP_REG_HSA)
+                {
+                    // If HSA is the first runtime, propagate the already-registered
+                    // rocattach table first. SDK client configuration can then determine
+                    // whether proxy interception is needed before HSA is modified.
+                    auto startup_scan = rocp_reg_scan_for_tools();
+                    if(startup_scan.set_api_table_fn != nullptr)
+                    {
+                        auto status = rocp_propagate_registrations(false, startup_scan);
+                        if(status != ROCP_REG_SUCCESS) return status;
+                    }
+
+                    using is_initialized_t = int (*)(int*);
+                    auto is_initialized_fn = is_initialized_t{};
+                    *(void**) (&is_initialized_fn) =
+                        dlsym(RTLD_DEFAULT, rocprofiler_lib_is_initialized_entrypoint);
+                    auto       sdk_init_status = int{ 0 };
+                    const auto sdk_is_initialized =
+                        (is_initialized_fn != nullptr &&
+                         is_initialized_fn(&sdk_init_status) == 0 && sdk_init_status > 0);
+
+                    if(sdk_is_initialized)
+                    {
+                        LOG(INFO)
+                            << "Skipping attachment-library HSA interception because "
+                               "rocprofiler-sdk is already initialized; anytime "
+                               "initialization will update SDK interception when the "
+                               "attachment client is loaded.";
+                    }
+                    else
+                    {
+                        auto rocprofiler_attach_set_api_table_fn =
+                            rocprofiler_attach_set_api_table_t{};
+                        *(void**) (&rocprofiler_attach_set_api_table_fn) =
+                            dlsym(loaded_attach_library.handle,
+                                  rocprofiler_attach_lib_set_api_table_entrypoint);
+                        if(rocprofiler_attach_set_api_table_fn == nullptr)
+                        {
+                            LOG(ERROR)
+                                << "Attachment is enabled, but the attach library HSA "
+                                   "entry point was not found. Startup profiling remains "
+                                   "available.";
+                        }
+                        else
+                        {
+                            _ret = rocprofiler_attach_set_api_table_fn(common_name,
+                                                                       lib_version,
+                                                                       _instance_val,
+                                                                       api_tables,
+                                                                       api_table_length,
+                                                                       &register_functor);
+                            LOG_IF(ERROR, _ret != 0)
+                                << "Attachment library HSA registration returned an "
+                                   "error: "
+                                << _ret << ". Startup profiling remains available.";
+                        }
+                    }
+                }
+
+                LOG(INFO) << "Successfully initialized attachment support";
+            }
         }
-
-        // Pass a functor to the attach library that it can use to pass back its own API
-        // table to us. This approach simplifies the interface and avoids having to modify
-        // the deadlock protection of this function.
-
-        auto _ret = rocprofiler_attach_set_api_table_fn(common_name,
-                                                        lib_version,
-                                                        _instance_val,
-                                                        api_tables,
-                                                        api_table_length,
-                                                        &register_functor);
-        if(_ret != 0)
-        {
-            LOG(ERROR) << "Proxy queues for attachment are enabled, but attach library "
-                          "registration returned an error: "
-                       << _ret
-                       << ". The attaching profiler may not be able to profile anything "
-                          "that requires proxy queues.";
-            return ROCP_REG_ROCPROFILER_ERROR;
-        }
-
-        LOG(INFO) << "Successfully registered for proxy queue creation";
     }
 
     auto* reginfo = rocp_add_registered_library_api_table(common_name,
@@ -1083,20 +1254,12 @@ rocprofiler_register_library_api_table(
     if(_bits.to_ulong() != register_id->handle)
         throw std::runtime_error("error encoding register_id");
 
-    if(_activate_rocprofiler)
+    auto _scan_result = rocp_get_propagation_target();
+    if(_scan_result.set_api_table_fn != nullptr)
     {
-        auto _ret = _scan_result.set_api_table_fn(
-            common_name, lib_version, _instance_val, api_tables, api_table_length);
-        if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
-
-        if(reginfo) (*reginfo)->propagated = true;
+        return rocp_propagate_registrations(false, _scan_result);
     }
-    else
-    {
-        return ROCP_REG_NO_TOOLS;
-    }
-
-    return ROCP_REG_SUCCESS;
+    return ROCP_REG_NO_TOOLS;
 }
 
 const char*
@@ -1167,10 +1330,22 @@ rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
 rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib_path)
 {
+    if(tool_lib_path == nullptr)
+    {
+        LOG(ERROR) << "rocprofiler_register_attach requires a tool library path";
+        return ROCP_REG_INVALID_ARGUMENT;
+    }
+
     // If the attachment library has not been loaded when attach is called, tracing
     // that relies on proxy queues will fail (e.g. kernel tracing).
     // Log error and abort.
-    if(!is_attachment_library_registered())
+    auto attachment_available = false;
+    {
+        auto _lk = common::checked_lock{ registration_mutex };
+        if(_lk.recursive) return ROCP_REG_DEADLOCK;
+        attachment_available = is_attachment_library_registered();
+    }
+    if(!attachment_available)
     {
         LOG(ERROR)
             << "rocprofiler-register attach was invoked, but the rocprofiler-attach "
@@ -1182,7 +1357,6 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
 
     static auto prev_tool_lib_path = std::string{};
 
-    // tool_lib_path is declared with non-null attribute
     if(!prev_tool_lib_path.empty() && prev_tool_lib_path != tool_lib_path)
     {
         LOG(WARNING) << "rocprofiler_register_attach invoked with a different "
@@ -1196,21 +1370,6 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     LOG(INFO) << "rocprofiler_register_attach started with tool_lib_path: "
               << tool_lib_path;
 
-    // Set default tool library path if not provided
-    setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", 1);
-
-    LOG_IF(FATAL, tool_lib_path == nullptr)
-        << "ROCP_TOOL_LIBRARIES is set, but tool_lib_path is NULL. "
-           "This is not supported. Please provide a valid tool library path.";
-
-    // TODO: should save old environment variables if they get overwritten and restore
-    // them on detach
-    // load_environment_buffer(environment_buffer);
-
-    // Use provided path. Must come after load_environment_buffer to ensure override
-    setenv("ROCP_TOOL_LIBRARIES", tool_lib_path, 1);
-    LOG(INFO) << "Using provided tool library: " << tool_lib_path;
-
     // TODO: should save old environment variables if they get overwritten and restore
     // them on detach
     load_environment_buffer(environment_buffer);
@@ -1218,19 +1377,62 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     // No previous tool library was attached
     if(prev_tool_lib_path.empty())
     {
-        auto status = rocprofiler_register_invoke_all_registrations();
-        if(status != ROCP_REG_SUCCESS)
+        auto _rocp_reg_lib =
+            common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
+        auto [handle, set_api_table_fn, load_attachment_tool_fn, attach_fn, detach_fn] =
+            rocp_load_rocprofiler_lib(_rocp_reg_lib);
+        auto attach_scan_data = rocp_scan_data{
+            handle, set_api_table_fn, load_attachment_tool_fn, attach_fn, detach_fn
+        };
         {
-            LOG(ERROR) << "error during invoke_all_registrations: " << status;
-            return status;
+            auto _lk = common::checked_lock{ registration_mutex };
+            if(_lk.recursive) return ROCP_REG_DEADLOCK;
+            existing_scanned_data = attach_scan_data;
+        }
+
+        if(attach_scan_data.load_attachment_tool_fn == nullptr)
+        {
+            LOG(ERROR)
+                << rocprofiler_lib_load_attachment_tool_entrypoint
+                << " was not found in rocprofiler-sdk. Runtime attachment requires a "
+                   "rocprofiler-sdk version with anytime attachment support.";
+            return ROCP_REG_NO_TOOLS;
+        }
+
+        const auto* marker_value = std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
+        const auto  had_marker   = (marker_value != nullptr);
+        const auto  old_marker =
+            (had_marker) ? std::string{ marker_value } : std::string{};
+        auto marker_scope = common::scope_destructor{
+            [had_marker, old_marker]() {
+                if(had_marker)
+                    setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", old_marker.c_str(), 1);
+                else
+                    unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
+            },
+            []() { setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", 1); }
+        };
+
+        auto _ret = attach_scan_data.load_attachment_tool_fn(tool_lib_path);
+        if(_ret != 0)
+        {
+            LOG(ERROR) << "rocprofiler-sdk failed to load attachment tool "
+                       << tool_lib_path << ": " << _ret;
+            return ROCP_REG_ROCPROFILER_ERROR;
         }
         prev_tool_lib_path = tool_lib_path;
     }
 
-    if(existing_scanned_data.attach_fn == nullptr) return ROCP_REG_NO_TOOLS;
+    auto attach_fn = rocprofiler_attach_func_t{};
+    {
+        auto _lk = common::checked_lock{ registration_mutex };
+        if(_lk.recursive) return ROCP_REG_DEADLOCK;
+        attach_fn = existing_scanned_data.attach_fn;
+    }
+    if(attach_fn == nullptr) return ROCP_REG_NO_TOOLS;
 
     LOG(INFO) << "rocprofiler-sdk attach starting...";
-    auto _ret = existing_scanned_data.attach_fn();
+    auto _ret = attach_fn();
 
     LOG(INFO) << "rocprofiler-sdk attach completed.";
 
@@ -1244,7 +1446,13 @@ rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
 
-    if(!is_attachment_library_registered())
+    auto attachment_available = false;
+    {
+        auto _lk = common::checked_lock{ registration_mutex };
+        if(_lk.recursive) return ROCP_REG_DEADLOCK;
+        attachment_available = is_attachment_library_registered();
+    }
+    if(!attachment_available)
     {
         LOG(ERROR)
             << "rocprofiler-register detach was invoked, but the rocprofiler-attach "
@@ -1254,26 +1462,22 @@ rocprofiler_register_detach()
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 
-    if(existing_scanned_data.detach_fn)
+    auto detach_fn = rocprofiler_detach_func_t{};
+    {
+        auto _lk = common::checked_lock{ registration_mutex };
+        if(_lk.recursive) return ROCP_REG_DEADLOCK;
+        detach_fn = existing_scanned_data.detach_fn;
+    }
+
+    if(detach_fn)
     {
         LOG(INFO) << "rocprofiler-sdk detach starting...";
-        existing_scanned_data.detach_fn();
+        auto _ret = detach_fn();
         LOG(INFO) << "rocprofiler-sdk detach completed.";
-    }
-    else
-    {
-        LOG(ERROR) << "detach entry point is NULL";
-        return ROCP_REG_NO_TOOLS;
+        return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
     }
 
-    return ROCP_REG_SUCCESS;
-    // auto _scan_result = rocp_reg_scan_for_tools();
-    // if(!_scan_result.detach_fn) return ROCP_REG_NO_TOOLS;
-
-    // LOG(INFO) << "rocprofiler-sdk detach starting...";
-    // auto _ret = _scan_result.detach_fn();
-
-    // LOG(INFO) << "rocprofiler-sdk detach completed.";
-    // return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
+    LOG(ERROR) << "detach entry point is NULL";
+    return ROCP_REG_NO_TOOLS;
 }
 }
