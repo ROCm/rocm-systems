@@ -67,7 +67,7 @@ debug(cstring, AMD_OCL_SUBST_OBJFILE, 0,                                      \
 release(size_t, GPU_PINNED_XFER_SIZE, 32,                                     \
         "The pinned buffer size for pinning in read/write transfers in MiB")  \
 release(size_t, GPU_PINNED_MIN_XFER_SIZE, 128,                                \
-        "The minimal buffer size for pinned read/write transfers in MiB")     \
+        "The minimal buffer size for pinned read/write transfers in KiB")     \
 release(size_t, GPU_RESOURCE_CACHE_SIZE, 64,                                  \
         "The resource cache size in MiB")                                     \
 release(size_t, GPU_MAX_RESOURCE_CACHE_SIZE, 16777216,                        \
@@ -178,6 +178,11 @@ release(uint, HIP_HIDDEN_FREE_MEM, 0,                                         \
         "0 = Disable")                                                        \
 release(size_t, GPU_FORCE_BLIT_COPY_SIZE, 16,                                 \
         "Use Blit until this size(in KB) for copies")                         \
+release(uint, GPU_FORCE_COPY_ENGINE, 0,                                       \
+        "Force copy engine: 0 = default, 1 = shader blit, 2 = SDMA. "         \
+        "Forced paths skip the other engine and do not probe it first")       \
+release(uint, GPU_FORCE_HOST_XFER, 0,                                         \
+        "Force host buffer: 0 = default size heuristic, 1 = pin, 2 = staging") \
 release(uint, ROC_ACTIVE_WAIT_TIMEOUT, 0,                                     \
         "Forces active wait of GPU interrup for the timeout(us)")             \
 release(bool, ROC_ENABLE_LARGE_BAR, true,                                     \

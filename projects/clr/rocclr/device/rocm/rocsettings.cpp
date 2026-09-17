@@ -44,7 +44,7 @@ Settings::Settings() {
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
   pinnedMinXferSize_ =
-      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Ki;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 

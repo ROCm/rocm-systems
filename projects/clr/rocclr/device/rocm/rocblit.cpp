@@ -11,6 +11,7 @@
 #include "device/rocm/rockernel.hpp"
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
+#include "utils/flags.hpp"
 #include <algorithm>
 #include <map>
 
@@ -1044,6 +1045,11 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
                                DmaBlitManager::BufferState& buffState) const {
   bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer);
+  if (GPU_FORCE_HOST_XFER == 1u) {
+    doHostPinning = true;
+  } else if (GPU_FORCE_HOST_XFER == 2u) {
+    doHostPinning = false;
+  }
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
 
@@ -1072,6 +1078,9 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
       return;
     }
     LogWarning("DmaBlitManager::getBuffer failed to pin a resource!");
+    if (GPU_FORCE_HOST_XFER == 1u) {
+      return;
+    }
   }
   // If Memory Pinning fails, failback to staging buffer
   xferSize = std::min(xferSize, StagingXferSize);
@@ -2119,6 +2128,28 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   return result;
 }
 
+namespace {
+
+enum class ForcedCopyEngine { kNone, kShader, kSdma };
+
+ForcedCopyEngine GetForcedCopyEngine(amd::CopyMetadata copy_metadata) {
+  if (GPU_FORCE_COPY_ENGINE == 1u) {
+    return ForcedCopyEngine::kShader;
+  }
+  if (GPU_FORCE_COPY_ENGINE == 2u) {
+    return ForcedCopyEngine::kSdma;
+  }
+  if (copy_metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT) {
+    return ForcedCopyEngine::kShader;
+  }
+  if (copy_metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA) {
+    return ForcedCopyEngine::kSdma;
+  }
+  return ForcedCopyEngine::kNone;
+}
+
+}  // namespace
+
 // ================================================================================================
 bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
                                    const amd::Coord3D& origin, const amd::Coord3D& size,
@@ -2137,16 +2168,15 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
     return result;
   } else {
     size_t totalSize = size[0];
-    // Do a staging copy
-    bool useShaderCopyPath =
-        setup_.disableHwlCopyBuffer_ || (totalSize <= dev().settings().sdmaCopyThreshold_) ||
-        (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT);
+    const ForcedCopyEngine forced_engine = GetForcedCopyEngine(copyMetadata);
+    const bool useShaderCopyPath =
+        forced_engine == ForcedCopyEngine::kShader ||
+        (forced_engine != ForcedCopyEngine::kSdma &&
+         (setup_.disableHwlCopyBuffer_ || totalSize <= dev().settings().sdmaCopyThreshold_));
 
     if (!useShaderCopyPath) {
-      // HSA copy using a staging resource
       result = DmaBlitManager::readBuffer(srcMemory, dstHost, origin, size, entire, copyMetadata);
-    }
-    if (!result) {
+    } else {
       // Blit copy using a staging resource
       address srcAddr = gpuMem(srcMemory).getDeviceMemory();
       address dstAddr = reinterpret_cast<address>(dstHost);
@@ -2271,17 +2301,15 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
     return result;
   } else {
     size_t totalSize = size[0];
-    // Do a staging copy
-    bool useShaderCopyPath =
-        setup_.disableHwlCopyBuffer_ || (totalSize <= dev().settings().sdmaCopyThreshold_) ||
-        (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT);
+    const ForcedCopyEngine forced_engine = GetForcedCopyEngine(copyMetadata);
+    const bool useShaderCopyPath =
+        forced_engine == ForcedCopyEngine::kShader ||
+        (forced_engine != ForcedCopyEngine::kSdma &&
+         (setup_.disableHwlCopyBuffer_ || totalSize <= dev().settings().sdmaCopyThreshold_));
 
     if (!useShaderCopyPath) {
-      // HSA copy using a staging resource
       result = DmaBlitManager::writeBuffer(srcHost, dstMemory, origin, size, entire, copyMetadata);
-    }
-
-    if (!result) {
+    } else {
       // Blit copy using a staging resource
       address dstAddr = gpuMem(dstMemory).getDeviceMemory();
       const_address srcAddr = reinterpret_cast<const_address>(srcHost);
@@ -2291,10 +2319,8 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
 
       while (totalSize > 0) {
         BufferState outBuffer = {0};
-        // Disable pinned writes
         constexpr bool kEnablePin = false;
         constexpr bool kFirstTx = false;
-        // Do not enable pinning for uploads. Always use staging buffer
         getBuffer(static_cast<const_address>(srcAddr + stagedCopyOffset), totalSize, kEnablePin,
                   kFirstTx, outBuffer);
         // Get an address from managed staging buffer
@@ -2305,6 +2331,8 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                   stagingBuffer, (void*)(srcAddr + stagedCopyOffset), copySize);
           memcpy(stagingBuffer, srcAddr + stagedCopyOffset, copySize);
+        } else {
+          gpu().addSystemScope();
         }
         ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
                 "Blit staging H2D copy dst=%p, stg buf=%p, "
@@ -2780,10 +2808,16 @@ bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const M
     isP2pOrIpc = false;
   }
 
+  const ForcedCopyEngine forced_engine = GetForcedCopyEngine(copyMetadata);
+  if (forced_engine == ForcedCopyEngine::kShader) {
+    return true;
+  }
+  if (forced_engine == ForcedCopyEngine::kSdma) {
+    return false;
+  }
+
   bool isSdmaPreference =
       copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
-  bool isBlitPreference =
-      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
   bool neitherMemoryIsHostDirectAccess =
       !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
   bool smallSizeWithNonSdmaPreference =
@@ -2791,7 +2825,7 @@ bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const M
   bool nonP2PIpcOrDirectAccess =
       !isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference;
 
-  return smallSizeWithNonSdmaPreference || nonP2PIpcOrDirectAccess || isBlitPreference;
+  return smallSizeWithNonSdmaPreference || nonP2PIpcOrDirectAccess;
 }
 
 // ================================================================================================
@@ -3288,8 +3322,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   const Memory& srcRocMemory = gpuMem(srcMemory);
   const Memory& dstRocMemory = gpuMem(dstMemory);
-  const bool requireSDMA =
-      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  const ForcedCopyEngine forced_engine = GetForcedCopyEngine(copyMetadata);
+  const bool requireSDMA = forced_engine == ForcedCopyEngine::kSdma;
   bool useLimitedP2pBlitWg = false;
   const bool useShaderCopyBuffer =
       useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0], copyMetadata,
