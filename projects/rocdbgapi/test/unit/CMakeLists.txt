@@ -175,6 +175,17 @@ add_dbgapi_unit_test(dbgapi_memory_io_test
   SOURCES memory_io_test.cpp
   LIBS amd-dbgapi-internal)
 
+# amd_dbgapi_read_register() and amd_dbgapi_write_register() C API entry
+# points at the argument-validation layer: NOT_INITIALIZED before
+# initialize, INVALID_WAVE_ID / INVALID_REGISTER_ID for bad handles.
+# Additional validation (WAVE_NOT_STOPPED, DISPLACED_STEPPING_ACTIVE,
+# PROCESS_FROZEN, REGISTER_NOT_AVAILABLE, value bounds) requires a real
+# stopped wave and is deferred to feature tests or covered by
+# register_test.cpp via the C++ API.
+add_dbgapi_unit_test(dbgapi_register_io_test
+  SOURCES register_io_test.cpp
+  LIBS amd-dbgapi-internal)
+
 # Per-OS notifier_t implementation.  The factory notifier_t::create()
 # lives in src/utils_linux.cpp on Linux and src/utils_windows.cpp on
 # Windows; each implementation has different semantics (pipe vs Event)
