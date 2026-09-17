@@ -44,6 +44,8 @@ import sys
 
 import pytest
 
+from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
+
 # Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
 _PASS_KEYS = ("replay_pass", "n")
 
@@ -270,27 +272,40 @@ def test_dispatch_id_nonzero_every_pass(json_data):
     ), f"{len(zero)} pass record(s) carry dispatch_id==0 (replay_pass indices {zero})"
 
 
-def test_common_counters_constant_across_passes(json_data, common_counters):
-    # Metric 2: the shared sanity counters appear in every pass and are constant for a kernel.
-    table = _records_by_dispatch(_sdk(json_data))
+def test_common_counters_constant_across_passes(json_data, common_counter):
+    # Check each shared counter separately so unavailable instruction counters do not
+    # skip the wave-count check or replay-structure validation.
+    sdk = _sdk(json_data)
+    table = _records_by_dispatch(sdk)
+    counter = common_counter
+    if counter == "SQ_INSTS_VALU" and all(
+        batch.get(counter) == 0
+        for entry in table.values()
+        for batch in entry["passes"].values()
+    ):
+        first_gpu = next((agent for agent in sdk["agents"] if agent["type"] == 2), None)
+        if first_gpu is not None and gpu_uses_auto_perf_level(first_gpu):
+            pytest.skip(
+                "SQ_INSTS_VALU is zero on gfx11/gfx12 with AUTO performance level"
+            )
+
     for dispatch_id, entry in table.items():
         passes = entry["passes"]
-        for counter in common_counters:
-            values = [batch[counter] for batch in passes.values() if counter in batch]
-            assert len(values) == len(passes), (
-                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
-                f"some passes: present in {len(values)}/{len(passes)}"
-            )
-            # A counter stuck at zero is constant, so the spread check below cannot see it.
-            assert min(values) > 0, (
-                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
-                f"in every replay pass: {values}"
-            )
-            tolerance = _pass_tolerance(counter)
-            assert _approx_equal(min(values), max(values), tolerance), (
-                f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
-                f"replay passes (allowed spread {tolerance:.0%}): {values}"
-            )
+        values = [batch[counter] for batch in passes.values() if counter in batch]
+        assert len(values) == len(passes), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
+            f"some passes: present in {len(values)}/{len(passes)}"
+        )
+        # A counter stuck at zero is constant, so the spread check below cannot see it.
+        assert min(values) > 0, (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
+            f"in every replay pass: {values}"
+        )
+        tolerance = _pass_tolerance(counter)
+        assert _approx_equal(min(values), max(values), tolerance), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
+            f"replay passes (allowed spread {tolerance:.0%}): {values}"
+        )
 
 
 def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):

@@ -27,10 +27,9 @@ import csv
 import pytest
 import json
 import pandas as pd
-import shutil
-import subprocess
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
+from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
@@ -227,36 +226,6 @@ def pftrace_data(pftrace_reader):
     return pftrace_reader.read()[0]
 
 
-def _gpu_uses_auto_perf_level(agent):
-    if not agent.get("name", "").startswith(("gfx11", "gfx12")):
-        return False
-
-    amd_smi = shutil.which("amd-smi") or os.path.join(
-        os.environ.get("ROCM_PATH", "/opt/rocm"), "bin", "amd-smi"
-    )
-    try:
-        result = subprocess.run(
-            [amd_smi, "metric", "--gpu", "0", "--perf-level", "--json"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            timeout=5,
-        )
-        metrics = json.loads(result.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        # An unavailable performance level must not hide a counter regression.
-        return False
-    if isinstance(metrics, dict):
-        metrics = metrics.get("gpu_data", [])
-    return (
-        isinstance(metrics, list)
-        and len(metrics) == 1
-        and isinstance(metrics[0], dict)
-        and metrics[0].get("perf_level") == "AMDSMI_DEV_PERF_LEVEL_AUTO"
-    )
-
-
 @pytest.fixture
 def zero_counters_in_auto_mode(json_data):
     data = json_data["rocprofiler-sdk-tool"]
@@ -265,4 +234,4 @@ def zero_counters_in_auto_mode(json_data):
     if not values or any(value != 0 for value in values):
         return False
     first_gpu = next((agent for agent in data["agents"] if agent["type"] == 2), None)
-    return first_gpu is not None and _gpu_uses_auto_perf_level(first_gpu)
+    return first_gpu is not None and gpu_uses_auto_perf_level(first_gpu)
