@@ -64,6 +64,14 @@ If it misses an expected race, try `higher`, then `max`. Even `max` retains boun
 and has analysis limitations; a clean run does not prove race freedom.
 
 Preset names are case-insensitive. Other settings keep their standard defaults.
+
+At shutdown, an applicable, complete analysis with no reported races prints a
+short suggestion to try the next preset (`low` → `default` → `high` → `higher`
+→ `max`). It distinguishes zero collected runtime evidence from evidence with
+no reported races; neither proves race freedom. The hint is omitted at `max`,
+for SuperCollider, for incomplete or non-applicable analysis, and whenever an
+explicit sampling stride or offset is supplied (including legacy controls).
+This is a host-side summary message, not additional GPU instrumentation.
 Explicit sampling overrides take precedence, so clear overrides from earlier
 experiments when comparing presets. Check the resolved settings with
 `RJ_CONSAN_LOG=1`; see the [expert reference](EXPERT_CONTROLS.md#consan-event-and-sampling-controls)

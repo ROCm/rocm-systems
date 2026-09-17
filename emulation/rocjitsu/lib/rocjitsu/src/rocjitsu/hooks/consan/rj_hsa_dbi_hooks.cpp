@@ -2418,6 +2418,21 @@ public:
     if (!active_)
       return;
     const bool supercollider_active = config_ && config_->mode == Mode::SuperCollider;
+    // Preserve the preset-only recommendation before clear_unlocked resets
+    // config_. Explicit sampling controls belong to expert workflows: do not
+    // suggest a preset that those controls would override.
+    const char *next_preset = nullptr;
+    if (config_ && config_->mode == Mode::Default && !config_->sampling_controls_explicit) {
+      const std::string_view preset = config_->preset;
+      if (preset == "low")
+        next_preset = "default";
+      else if (preset == "default")
+        next_preset = "high";
+      else if (preset == "high")
+        next_preset = "higher";
+      else if (preset == "higher")
+        next_preset = "max";
+    }
     const std::string process_concurrent_transform_ceiling =
         config_ && config_->process_concurrent_transform_limit_bytes
             ? std::to_string(*config_->process_concurrent_transform_limit_bytes)
@@ -2705,6 +2720,18 @@ public:
                    static_cast<unsigned long long>(report_summary.immediate_conflict_count));
       std::fflush(stderr);
       std::_Exit(89);
+    }
+    if (next_preset != nullptr && analysis_complete && !trust.has_diagnostics &&
+        report_summary.static_mapping_malformed_count == 0) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan coverage hint: %s "
+                   "For increased coverage, retry with RJ_CONSAN_PRESET=%s. "
+                   "No reports does not establish race freedom.\n",
+                   trust.visible_evidence_count == 0
+                       ? "No runtime evidence was collected under sampled coverage."
+                       : "No races were reported under sampled coverage.",
+                   next_preset);
+      std::fflush(stderr);
     }
   }
 

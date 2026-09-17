@@ -3589,6 +3589,7 @@ TEST(HsaHooksUnitTest, AutoReportDecoderRejectsStaleFullGenerationAcrossTagRollo
   };
   store();
   EXPECT_EQ(decode_report(input, snapshot, {}).failure, ReportDecodeFailure::GenerationMismatch);
+  EXPECT_EQ(decode_report(input, snapshot, {}).summary.stale_snapshot_count, 1u);
   header.generation = generation;
   store();
   auto decoded = decode_report(input, snapshot, {});
@@ -3656,10 +3657,13 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
   auto mismatched = input;
   ++mismatched.layout.watchpoint_capacity;
   EXPECT_EQ(decode_report(mismatched, snapshot, {}).failure, ReportDecodeFailure::LayoutMismatch);
+  EXPECT_EQ(decode_report(mismatched, snapshot, {}).summary.malformed_snapshot_count, 1u);
   snapshot.bytes[0] = 0;
   EXPECT_EQ(decode_report(input, snapshot, {}).failure, ReportDecodeFailure::InvalidHeader);
+  EXPECT_EQ(decode_report(input, snapshot, {}).summary.malformed_snapshot_count, 1u);
   snapshot.bytes.resize(sizeof(header) - 1);
   EXPECT_EQ(decode_report(input, snapshot, {}).failure, ReportDecodeFailure::SnapshotTooSmall);
+  EXPECT_EQ(decode_report(input, snapshot, {}).summary.incomplete_snapshot_count, 1u);
 }
 
 TEST(HsaHooksUnitTest, AutoReportPipelineCarriesOptionalMetadata) {
@@ -5716,6 +5720,89 @@ auto_report_transform_result(bool malformed_mapping = false,
   return result;
 }
 
+TEST(HsaHooksUnitTest, ConSanPresetCoverageHintRespectsOverridesAndApplicability) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+  ScopedEnvVar require_diagnostics("RJ_CONSAN_REQUIRE_DIAGNOSTICS", "0");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "0");
+  const auto run = [](bool load, bool complete, bool race = false, bool malformed = false) {
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = auto_report_transform_result(
+        false, race ? ReportOwnerScope::SharedOwnerPair : ReportOwnerScope::SingleMapping);
+    g_seed_auto_report_on_load = race;
+    g_seed_auto_conflict_pair = race;
+    if (!complete)
+      g_transform_override_result.coverage_ledger = {};
+    testing::internal::CaptureStderr();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      EXPECT_TRUE(hook.installed()) << hook.error();
+      if (load && hook.installed()) {
+        constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+        hsa_code_object_reader_t reader{};
+        EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                        original.size(), &reader),
+                  HSA_STATUS_SUCCESS);
+        EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                    reader, nullptr, nullptr),
+                  HSA_STATUS_SUCCESS);
+        if (malformed && !g_core_memory_allocations.empty())
+          static_cast<rocjitsu::consan::ReportHeader *>(g_core_memory_allocations.front())->magic =
+              0;
+      }
+    }
+    return testing::internal::GetCapturedStderr();
+  };
+  for (const auto &[preset, next] :
+       std::array{std::pair{static_cast<const char *>(nullptr), "high"}, std::pair{"", "high"},
+                  std::pair{"low", "default"}, std::pair{"default", "high"},
+                  std::pair{"high", "higher"}, std::pair{"HiGhEr", "max"}, std::pair{"max", ""}}) {
+    ScopedEnvVar selected("RJ_CONSAN_PRESET", preset);
+    const std::string log = run(true, true);
+    if (*next == '\0') {
+      EXPECT_EQ(log.find("ConSan coverage hint:"), std::string::npos) << log;
+    } else {
+      const auto hint = log.find("ConSan coverage hint:");
+      ASSERT_NE(hint, std::string::npos) << log;
+      EXPECT_EQ(log.find("ConSan coverage hint:", hint + 1), std::string::npos) << log;
+      EXPECT_NE(log.find("No runtime evidence was collected under sampled coverage."),
+                std::string::npos)
+          << log;
+      EXPECT_NE(log.find(std::string("retry with RJ_CONSAN_PRESET=") + next + "."),
+                std::string::npos)
+          << log;
+    }
+  }
+  ScopedEnvVar selected("RJ_CONSAN_PRESET", "default");
+  for (const char *control :
+       {"RJ_CONSAN_RUNTIME_SAMPLE_STRIDE", "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
+        "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE", "RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET",
+        "RJ_CONSAN_CELL_SAMPLE_STRIDE", "RJ_CONSAN_CELL_SAMPLE_OFFSET", "RJ_CONSAN_SAMPLE_STRIDE",
+        "RJ_CONSAN_SAMPLE_OFFSET"}) {
+    // Even explicitly supplying the default value opts out of the hint.
+    const bool offset = std::string_view(control).ends_with("OFFSET");
+    ScopedEnvVar expert(control, offset ? "0" : "1");
+    const auto log = run(true, true);
+    EXPECT_EQ(log.find("ConSan coverage hint:"), std::string::npos) << control << '\n' << log;
+  }
+  EXPECT_EQ(run(false, true).find("ConSan coverage hint:"), std::string::npos);
+  EXPECT_EQ(run(true, false).find("ConSan coverage hint:"), std::string::npos);
+  ScopedEnvVar diagnostic_logging("RJ_CONSAN_LOG", "1");
+  const auto race_log = run(true, true, true);
+  EXPECT_TRUE(g_seed_auto_report_succeeded) << race_log;
+  EXPECT_NE(race_log.find("conflicts=1"), std::string::npos) << race_log;
+  EXPECT_EQ(race_log.find("ConSan coverage hint:"), std::string::npos) << race_log;
+  const auto malformed_log = run(true, true, false, true);
+  EXPECT_NE(malformed_log.find("dynamic_complete=false"), std::string::npos) << malformed_log;
+  EXPECT_EQ(malformed_log.find("ConSan coverage hint:"), std::string::npos) << malformed_log;
+}
+
 TEST(HsaHooksUnitTest, ConSanAutoReportNeverReconstructsMissingEvidenceFromMechanismTelemetry) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
@@ -6671,6 +6758,7 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointRecyclesInPlace) {
 }
 
 TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
+  ScopedEnvVar preset("RJ_CONSAN_PRESET", "default");
   ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
   ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
@@ -6729,6 +6817,7 @@ TEST(HsaHooksUnitTest, ConSanEpochCheckpointAccumulatesEvidenceAcrossEpochs) {
   const std::string log = testing::internal::GetCapturedStderr();
   EXPECT_NE(log.find("completed_epochs=2"), std::string::npos) << log;
   EXPECT_NE(log.find("visible_evidence=8"), std::string::npos) << log;
+  EXPECT_NE(log.find("No races were reported under sampled coverage."), std::string::npos) << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanEpochCheckpointSustainsManyRepeatedRuns) {
