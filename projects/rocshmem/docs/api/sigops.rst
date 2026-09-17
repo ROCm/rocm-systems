@@ -35,8 +35,8 @@ ROCSHMEM_PUTMEM_SIGNAL
   :returns:        None.
 
 **Description:**
-This function writes contiguous data of ``nelems`` bytes from source on the calling PE to ``dest`` at ``pe``, 
-then applies ``sig_op`` at ``sig_addr`` with the signal value. 
+This function writes contiguous data of ``nelems`` bytes from source on the calling PE to ``dest`` at ``pe``,
+then applies ``sig_op`` at ``sig_addr`` with the signal value.
 Valid ``sig_op values`` are listed in SIGNAL_OPERATORS_.
 
 ROCSHMEM_PUT_SIGNAL
@@ -66,7 +66,7 @@ ROCSHMEM_PUT_SIGNAL
   :returns:        None.
 
 **Description:**
-This function writes contiguous data of ``nelems`` elements of ``TYPE`` from source on the calling PE to ``dest`` at ``pe``, 
+This function writes contiguous data of ``nelems`` elements of ``TYPE`` from source on the calling PE to ``dest`` at ``pe``,
 then applies ``sig_op`` at ``sig_addr`` with the signal value.
 Valid ``sig_op values`` are listed in SIGNAL_OPERATORS_.
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
@@ -112,12 +112,12 @@ Signal operators
 ----------------
 .. _SIGNAL_OPERATORS:
 
-.. list-table:: Signal Operators 
+.. list-table:: Signal Operators
     :widths: 20 40
     :header-rows: 1
 
-    * - Value 
-      - Description 
+    * - Value
+      - Description
     * - ROCSHMEM_SIGNAL_SET
       - The signaling operation routines will atomically set the signal value at ``sig_addr``.
     * - ROCSHMEM_SIGNAL_ADD
