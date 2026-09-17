@@ -836,32 +836,51 @@ namespace RcclUnitTesting
 
     InteractiveWait("Starting Finalize");
 
-    // Send Stop to all child processes
+    // Stop is best-effort: a worker may already have exited after reporting a
+    // HIP/RCCL failure. Teardown must still close every pipe, reap every child,
+    // and restore the empty-childList invariant.
     int const cmd = TestBedChild::CHILD_STOP;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
-      PIPE_WRITE(childId, cmd);
-
-      // Close pipes to child process
-      close(childList[childId]->parentWriteFd);
+      TestBedChild* child = childList[childId];
+      if (child == nullptr)
+        continue;
+      if (child->pid > 0 && child->parentWriteFd >= 0)
+        (void)RcclUnitTesting::detail::safe_pipe_write(child->parentWriteFd, &cmd, sizeof(cmd));
+      if (child->parentWriteFd >= 0)
+      {
+        close(child->parentWriteFd);
+        child->parentWriteFd = -1;
+      }
     }
 
     // Wait for processes to stop
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
+      TestBedChild* child = childList[childId];
+      if (child == nullptr)
+        continue;
       int returnVal = 0;
-      waitpid(childList[childId]->pid, &returnVal, 0);
-      if (WIFSIGNALED(returnVal))
+      pid_t waitResult = -1;
+      if (child->pid > 0)
+      {
+        do
+        {
+          waitResult = waitpid(child->pid, &returnVal, 0);
+        } while (waitResult == -1 && errno == EINTR);
+      }
+      if (waitResult > 0 && WIFSIGNALED(returnVal))
       {
         TEST_ERROR("Child process %d killed by signal %d", childId, WTERMSIG(returnVal));
       }
-      else if (WEXITSTATUS(returnVal) != 0)
+      else if (waitResult > 0 && WIFEXITED(returnVal) && WEXITSTATUS(returnVal) != 0)
       {
         TEST_ERROR("Child process %d exited with code %d", childId, WEXITSTATUS(returnVal));
       }
       // Only close the read end AFTER the child process is dead
-      close(childList[childId]->parentReadFd);
-      delete(childList[childId]);
+      if (child->parentReadFd >= 0)
+        close(child->parentReadFd);
+      delete child;
     }
 
     childList.clear();

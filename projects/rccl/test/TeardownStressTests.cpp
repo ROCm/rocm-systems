@@ -5,6 +5,9 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include <hip/hip_runtime.h>
+#include <cerrno>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace RcclUnitTesting
 {
@@ -104,6 +107,51 @@ namespace RcclUnitTesting
                         /*iterations*/ 1, isCorrect);
     EXPECT_TRUE(isCorrect);
     testBed.Finalize();
+  }
+
+  // A worker can exit before teardown after a HIP/RCCL failure. Its closed
+  // command pipe must not prevent the parent from reaping it and resetting the
+  // TestBed state.
+  TEST(Teardown, AlreadyExitedChildCleanup)
+  {
+    TestBed testBed;
+    testBed.poolMode = false;
+    testBed.configUsedPool = false;
+
+    TestBedChild* child = new TestBedChild(0, false, 0, false);
+    ASSERT_EQ(child->InitPipes(), TEST_SUCCESS);
+    child->pid = fork();
+    ASSERT_GE(child->pid, 0);
+    if (child->pid == 0)
+    {
+      close(child->parentWriteFd);
+      close(child->parentReadFd);
+      close(child->childWriteFd);
+      close(child->childReadFd);
+      _exit(0);
+    }
+
+    close(child->childWriteFd);
+    close(child->childReadFd);
+    child->childWriteFd = -1;
+    child->childReadFd = -1;
+    testBed.childList = {child};
+    testBed.numActiveChildren = 1;
+    testBed.numActiveRanks = 1;
+
+    // Wait until the worker has exited, but leave it for TestBed to reap.
+    siginfo_t childInfo{};
+    ASSERT_EQ(waitid(P_PID, child->pid, &childInfo, WEXITED | WNOWAIT), 0);
+    pid_t const childPid = child->pid;
+
+    testBed.TeardownOwnedChildList();
+
+    EXPECT_TRUE(testBed.childList.empty());
+    EXPECT_EQ(testBed.numActiveChildren, 0);
+    EXPECT_EQ(testBed.numActiveRanks, 0);
+    errno = 0;
+    EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
+    EXPECT_EQ(errno, ECHILD);
   }
 
   // Pool workers must start from a fresh process image even when an earlier
