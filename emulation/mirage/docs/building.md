@@ -305,8 +305,9 @@ test suite.
   `$ORIGIN`-based `RUNPATH`, with no loader override or hardware-capability
   alternative. It stays silent for user-built executables, Python or
   other programs that load ROCr later with `dlopen`, transitive
-  dependencies, legacy `RPATH`, cache-only resolution, preloads, and HSA
-  overrides, as well as set-ID or file-capability executables. Its
+  dependencies, legacy `RPATH`, cache-only resolution, preloads —
+  including a system-wide `/etc/ld.so.preload` — and HSA overrides, as
+  well as set-ID or file-capability executables. Its
   silence therefore does not rule the cause out. Broader coverage can be
   added later with a bounded, loader-equivalent static resolver; the
   preflight must never execute workload code or guess which runtime will

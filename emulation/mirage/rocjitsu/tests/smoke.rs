@@ -221,10 +221,21 @@ fn dropin_config_keeps_its_runtime_dir_inside_the_session() {
         runtime_dir.display(),
         session_dir.display()
     );
-    // It is still wired up: the discovery file names the user's config.
+    // It is still wired up, and what it names is the session's own copy
+    // of the user's config rather than the user's file: the interposer
+    // reopens this path for the life of the session, so it has to be a
+    // document the session owns and an edit cannot retarget.
     assert_eq!(
         std::fs::read_to_string(runtime_dir.join("config_path")).unwrap(),
-        format!("{}\n", user_config.display())
+        format!(
+            "{}\n",
+            mirage_rocjitsu::rj_config_path(&session_dir).display()
+        )
+    );
+    assert_eq!(
+        std::fs::read(mirage_rocjitsu::rj_config_path(&session_dir)).unwrap(),
+        std::fs::read(&user_config).unwrap(),
+        "the copy must be the user's bytes, not a re-synthesised config"
     );
     // And the user's directory is exactly as they left it.
     let left_behind: Vec<_> = std::fs::read_dir(&user_dir)

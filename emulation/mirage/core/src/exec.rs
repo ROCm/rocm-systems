@@ -233,8 +233,9 @@ pub struct InjectionDef {
     ///
     /// Captured while the backend materialises the injection so it stays
     /// tied to the exact configuration written for this session. A later
-    /// edit to a by-name profile, topology or agent must not change what
-    /// an already-running session reports.
+    /// edit to a by-name profile, topology or agent — or to a file a
+    /// drop-in `--config` named — must not change what an already-running
+    /// session reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emulated_isa: Option<String>,
 
