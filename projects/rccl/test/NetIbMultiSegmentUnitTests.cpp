@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -65,6 +66,18 @@ TEST(NetIbMultiSeg, ConnectCapabilitiesPreserveDeviceName) {
     char devName[32] = "bnxt_re0";
     ncclIbSetConnectCaps(devName, sizeof(devName), NCCL_IB_CAP_MULTISEG);
     EXPECT_STREQ(devName, "bnxt_re0");
+    EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)),
+              NCCL_IB_CAP_MULTISEG);
+}
+
+// Merged vNIC names can fill MAX_MERGED_DEV_NAME (648). The helper must still
+// terminate the C string before the 8-byte trailer and keep the trailer valid.
+TEST(NetIbMultiSeg, ConnectCapabilitiesTruncatesNameThatFillsTrailer) {
+    char devName[648];
+    std::memset(devName, 'x', sizeof(devName));
+    ncclIbSetConnectCaps(devName, sizeof(devName), NCCL_IB_CAP_MULTISEG);
+    const size_t trailer = sizeof(ncclIbConnectCapsTrailer);
+    EXPECT_EQ(devName[sizeof(devName) - trailer - 1], '\0');
     EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)),
               NCCL_IB_CAP_MULTISEG);
 }
