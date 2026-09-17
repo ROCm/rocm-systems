@@ -12,7 +12,7 @@
 
 #include "RmaMPITestBase.hpp"
 #include "RmaMultiSegmentHelpers.hpp"
-#include "../../HybridVmmHelpers.hpp"
+#include "HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "../../../src/transport/net_ib/gin.h"
 
@@ -32,6 +32,9 @@ constexpr size_t kSegRequestBytes = 2u * 1024 * 1024;
 constexpr int    kNumSegments     = 4;
 constexpr size_t kSignalSize      = 64;
 constexpr size_t kMiB             = 1024u * 1024;
+
+// INFO marker emitted by the backend when the per-segment path fires.
+constexpr const char* kMultiSegMarker = "multi-segment buffer";
 
 // Edge-case payload sizes from 0 up to `maxBytes`, anchored around byte/word,
 // page (4K), 64K, and the per-segment boundary `seg`. Deduplicated + sorted.
@@ -57,20 +60,30 @@ inline std::vector<size_t> EdgeCaseSizes(size_t seg, size_t maxBytes)
 
 } // namespace
 
-// RMA proxy fixture. Multi-segment coverage is gated on the MR handle's
-// nSegments, not on INFO log greps.
+// RMA proxy fixture + NCCL INFO log capture to confirm the per-segment path
+// fired (vs single-MR fallback when cuMem enumeration is unavailable).
 class RmaMultiSegmentMPITest : public RmaMPITestBase
 {
 protected:
     std::unique_ptr<MPIHelpers::MpiEnvGuard>             cuMemGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
+    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
 
     int GetNumContexts() const override { return 1; }
 
     void SetUp() override
     {
-        // Per-segment enumeration needs the cuMem path.
+        // Per-segment enumeration needs the cuMem path; the marker gate below
+        // covers cases where the param was already cached process-wide.
         cuMemGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE",  "1");
+        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG",         "INFO");
+        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS",  "ALL");
+
         RmaMPITestBase::SetUp();
+
+        logCtx_ = std::make_unique<MPIHelpers::TestLogAssertionContext>(
+            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
     }
 
     void TearDown() override
@@ -84,7 +97,16 @@ protected:
         for (auto& b : hybridBuffers_)
             RCCLHybridVmmTests::FreeHybridVmm(*b);
         hybridBuffers_.clear();
+        logCtx_.reset();
+        debugSubsysGuard_.reset();
+        debugGuard_.reset();
         cuMemGuard_.reset();
+    }
+
+    std::string readAllLogs() const
+    {
+        if (!logCtx_) return {};
+        return logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog();
     }
 
     // Collective skip: if ANY rank wants to skip, all ranks return true so they
@@ -94,15 +116,11 @@ protected:
         return MPIHelpers::anyRankTrue(wantSkip);
     }
 
-    bool HandleTookMultiSegPath(void* mh)
+    // True only if EVERY rank observed the per-segment registration marker.
+    bool AllTookMultiSegPath()
     {
-        return ncclRmaHandleNSegments(mh) > 1;
-    }
-
-    // True only if EVERY rank's MR handle split into more than one segment.
-    bool AllTookMultiSegPath(void* mh)
-    {
-        return MPIHelpers::allRanksTrue(HandleTookMultiSegPath(mh));
+        return MPIHelpers::allRanksTrue(
+            readAllLogs().find(kMultiSegMarker) != std::string::npos);
     }
 
     // Allocate a fixture-owned N-segment VMM window (freed in TearDown after MR
@@ -177,9 +195,9 @@ protected:
         return !SyncSkip(*src == nullptr || *dst == nullptr);
     }
 
-    bool MultiSegmentPathAvailable(void* mh)
+    bool MultiSegmentPathAvailable()
     {
-        return !SyncSkip(!HandleTookMultiSegPath(mh));
+        return !SyncSkip(!AllTookMultiSegPath());
     }
 
     void ExpectPayloadIsolated(const void* window, size_t totalSize,
@@ -218,13 +236,18 @@ protected:
                 FillSentinel(dst->ptr, total, sentinel);
 
             Barrier();
+            bool putOk = true;
             if (worldRank_ == 0)
             {
                 void* req = nullptr;
-                ASSERT_EQ(ncclSuccess,
-                          rma_->iput(rmaCtx_, 0, offset, srcMh, size,
-                                     offset, dstMh, 1, &req));
-                ASSERT_TRUE(PollUntilDone(req));
+                putOk = rma_->iput(rmaCtx_, 0, offset, srcMh, size,
+                                   offset, dstMh, 1, &req) == ncclSuccess;
+                if (putOk) putOk = PollUntilDone(req);
+            }
+            if (!MPIHelpers::allRanksTrue(putOk))
+            {
+                ADD_FAILURE() << "iput sweep failed " << context;
+                return;
             }
             Barrier();
 
@@ -261,7 +284,7 @@ TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
         << "multi-segment recv buffer registration failed (the AIRUNTIME-2351 bug)";
 
     // Confirm the per-segment path fired; otherwise the feature isn't exercised.
-    if (SyncSkip(!AllTookMultiSegPath(recvMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "Buffer registered as a single MR (cuMem disabled or "
                         "range not segmented) - multi-segment path not exercised";
 
@@ -311,7 +334,7 @@ TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
     ASSERT_EQ(ncclSuccess,
               RegMr(rb->ptr, registeredBytes, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(recvMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -355,7 +378,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(recvMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -394,7 +417,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, kSize, &mh, &gh));
 
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -437,7 +460,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &srcMh, &srcGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &dstMh, &dstGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(dstMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -484,7 +507,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     Barrier();
@@ -528,7 +551,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     for (int i = 0; i < kIterations; ++i)
@@ -597,7 +620,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
     Barrier();
@@ -639,7 +662,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
     for (int i = 0; i < kIterations; ++i)
@@ -732,7 +755,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(recvMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -784,7 +807,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(recvMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -880,7 +903,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize,       &recvMh, &recvGh));
     ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(sendMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -923,7 +946,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSizeSweepFromZero)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
 
-    if (!MultiSegmentPathAvailable(recvMh))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     RunIPutSizeSweep(sb, rb, sendMh, recvMh, /*offset=*/0,
@@ -948,7 +971,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSizeSweepAtBoundaryOffset)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
 
-    if (!MultiSegmentPathAvailable(recvMh))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     RunIPutSizeSweep(sb, rb, sendMh, recvMh, off,
@@ -969,7 +992,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
 
         void *pmh = nullptr, *pgh = nullptr;
         EXPECT_EQ(ncclSuccess, RegMr(probe->ptr, probe->totalSize, &pmh, &pgh));
-        if (SyncSkip(!AllTookMultiSegPath(pmh)))
+        if (!MultiSegmentPathAvailable())
             GTEST_SKIP() << "multi-segment path not exercised on this host";
     }
 
@@ -1037,7 +1060,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
 
     // Both ranks must have taken the per-segment path, else there is nothing to test.
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     // If enumeration happened to return identical counts there is no asymmetry
@@ -1068,7 +1091,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesRejected)
 
     void *mh = nullptr, *gh = nullptr;
     const ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
-    if (SyncSkip(!AllTookMultiSegPath(mh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     EXPECT_EQ(r, ncclInvalidUsage);
@@ -1088,7 +1111,7 @@ TEST_F(RmaMultiSegmentMPITest, RankLocalRegistrationFailureRejectedCollectively)
     void *probeMh = nullptr, *probeGh = nullptr;
     ASSERT_EQ(ncclSuccess,
               RegMr(probe->ptr, probe->totalSize, &probeMh, &probeGh));
-    if (SyncSkip(!AllTookMultiSegPath(probeMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     const int myNSeg =
@@ -1259,7 +1282,7 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath(recvMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     // Straddle each interior boundary k*seg with a chunk that lands in both the
@@ -1342,7 +1365,7 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
     void *srcMh, *srcGh, *dstMh, *dstGh;
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &srcMh, &srcGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &dstMh, &dstGh));
-    if (SyncSkip(!AllTookMultiSegPath(dstMh)))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     for (int i = 0; i < kIterations; ++i)

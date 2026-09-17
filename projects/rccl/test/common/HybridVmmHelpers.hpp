@@ -12,6 +12,10 @@
 #include "MPIHelpers.hpp"
 #include "ipcsocket.h"
 
+#ifdef RCCL_HAS_RMA_IB_PROXY
+#include "../transport/RmaMPI/RmaMultiSegmentHelpers.hpp"
+#endif
+
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 
@@ -142,6 +146,10 @@ inline bool CheckHybridVmmRuntimeSupport(int dev, bool requireReexport,
 
 inline void FreeHybridVmm(HybridVmmBuffer& b)
 {
+#ifdef RCCL_HAS_RMA_IB_PROXY
+    RCCLRmaTests::ReleaseMappedVmm(b.base, b.totalSize, b.handles, b.segSizes,
+                                   /*uniformSegSize=*/0);
+#else
     size_t offset = 0;
     for (size_t i = 0; i < b.handles.size(); ++i)
     {
@@ -155,11 +163,30 @@ inline void FreeHybridVmm(HybridVmmBuffer& b)
         if (b.handles[i] != 0)
             (void)hipMemRelease(b.handles[i]);
     }
-    if (b.exportFd >= 0)
-        (void)close(b.exportFd);
     if (b.base != 0 && b.totalSize != 0)
         (void)hipMemAddressFree(b.base, b.totalSize);
+#endif
+    if (b.exportFd >= 0) (void)close(b.exportFd);
     b = HybridVmmBuffer{};
+}
+
+inline bool SetHybridSegmentAccess(hipDeviceptr_t base, size_t offset, size_t bytes,
+                                   hipMemLocationType locType, int locId,
+                                   const char* failPrefix, size_t segment,
+                                   std::string* reason)
+{
+    hipMemAccessDesc access = {};
+    access.location.type = locType;
+    access.location.id   = locId;
+    access.flags         = hipMemAccessFlagsProtReadWrite;
+    hipDeviceptr_t va = reinterpret_cast<hipDeviceptr_t>(
+        reinterpret_cast<uintptr_t>(base) + offset);
+    hipError_t accessResult = hipMemSetAccess(va, bytes, &access, 1);
+    if (accessResult == hipSuccess) return true;
+    if (reason)
+        *reason = std::string(failPrefix) + std::to_string(segment) + "): " +
+                  hipGetErrorString(accessResult);
+    return false;
 }
 
 // Create a workload-independent hybrid VMM allocation. Each local rank creates
@@ -383,56 +410,36 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
 
     if (localOk)
     {
-        hipMemAccessDesc access = {};
-        access.location.type = hipMemLocationTypeDevice;
-        access.location.id   = dev;
-        access.flags         = hipMemAccessFlagsProtReadWrite;
         size_t accessOffset = 0;
         for (size_t segment = 0; segment < tmp.segSizes.size(); ++segment)
         {
-            size_t bytes = tmp.segSizes[segment];
-            hipDeviceptr_t segmentVa = reinterpret_cast<hipDeviceptr_t>(
-                reinterpret_cast<uintptr_t>(tmp.base) + accessOffset);
-            hipError_t accessResult =
-                hipMemSetAccess(segmentVa, bytes, &access, 1);
-            if (accessResult != hipSuccess)
+            const char* prefix = segment == 0
+                ? "hipMemSetAccess(hybrid GPU segment "
+                : "hipMemSetAccess(hybrid imported host segment ";
+            if (!SetHybridSegmentAccess(tmp.base, accessOffset, tmp.segSizes[segment],
+                                        hipMemLocationTypeDevice, dev, prefix, segment, reason))
             {
-                if (reason)
-                    *reason = std::string("hipMemSetAccess(hybrid segment ") +
-                        std::to_string(segment) +
-                        (segment == 0 ? " GPU): " : " imported host): ") +
-                        hipGetErrorString(accessResult);
                 localOk = false;
                 break;
             }
-            accessOffset += bytes;
+            accessOffset += tmp.segSizes[segment];
         }
     }
 
     if (localOk)
     {
-        hipMemAccessDesc access = {};
-        access.location.type = hipMemLocationTypeHost;
-        access.location.id   = 0;
-        access.flags         = hipMemAccessFlagsProtReadWrite;
         size_t accessOffset = gpuBytes;
         for (size_t segment = 1; segment < tmp.segSizes.size(); ++segment)
         {
-            size_t bytes = tmp.segSizes[segment];
-            hipDeviceptr_t segmentVa = reinterpret_cast<hipDeviceptr_t>(
-                reinterpret_cast<uintptr_t>(tmp.base) + accessOffset);
-            hipError_t accessResult =
-                hipMemSetAccess(segmentVa, bytes, &access, 1);
-            if (accessResult != hipSuccess)
+            if (!SetHybridSegmentAccess(tmp.base, accessOffset, tmp.segSizes[segment],
+                                        hipMemLocationTypeHost, 0,
+                                        "hipMemSetAccess(hybrid host segment ",
+                                        segment, reason))
             {
-                if (reason)
-                    *reason = std::string("hipMemSetAccess(hybrid host segment ") +
-                        std::to_string(segment) + "): " +
-                        hipGetErrorString(accessResult);
                 localOk = false;
                 break;
             }
-            accessOffset += bytes;
+            accessOffset += tmp.segSizes[segment];
         }
     }
 
