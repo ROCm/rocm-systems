@@ -43,11 +43,27 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int
 static void DefaultPlanSetDefaultKernel(struct ncclComm*, struct ncclKernelPlan*) {}
 std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel = DefaultPlanSetDefaultKernel;
 
+// No-op default: nothing here inspects the plan's work-batch fifo directly.
+static void DefaultAddWorkBatchToPlan(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int,
+                                     uint32_t, int, int, bool) {}
+std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int, int,
+                   bool)>
+    g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
+
+// Generous default: accepts every proxy op, matching an always-available proxy thread.
+static ncclResult_t DefaultAddProxyOpIfNeeded(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)> g_addProxyOpIfNeeded =
+    DefaultAddProxyOpIfNeeded;
+
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
   g_getAlgoInfo = DefaultGetAlgoInfo;
   g_planSetDefaultKernel = DefaultPlanSetDefaultKernel;
+  g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
+  g_addProxyOpIfNeeded = DefaultAddProxyOpIfNeeded;
   ncclDevFuncNameToId.clear();
 }
 
@@ -56,15 +72,16 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, i
                              int nTasksPerChannel, ncclSimInfo_t* simInfo) {
   return g_getAlgoInfo(comm, task, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo);
 }
-void ncclAddWorkBatchToPlan(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int,
-                            int, bool) {
-  FailLoudUnfaked("scheduler_fakes", "ncclAddWorkBatchToPlan");
+void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
+                            enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch,
+                            int p2pRound, bool newBatch) {
+  g_addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, workOffset, p2pEpoch, p2pRound, newBatch);
 }
 void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   g_planSetDefaultKernel(comm, plan);
 }
-ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclAddProxyOpIfNeeded");
+ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op) {
+  return g_addProxyOpIfNeeded(comm, plan, op);
 }
 ncclResult_t ncclGetCollNetSupport(struct ncclComm*, struct ncclTaskColl*, int*) {
   FailLoudUnfaked("scheduler_fakes", "ncclGetCollNetSupport");

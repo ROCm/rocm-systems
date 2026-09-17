@@ -16,3 +16,5 @@
 // Per-thread wait signal referenced by the inline MPSC-callback drain helpers
 // in utils.h.
 thread_local struct ncclThreadSignal ncclThreadSignalLocalInstance = {};
+
+// ncclMemoryStack::allocateSpilled is already faked in fakes/dev_runtime_micro_fakes.cc; reused, not duplicated.
