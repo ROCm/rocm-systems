@@ -29,18 +29,35 @@ export ROCM_PATH="$("$corpus/.venv/bin/rocm-sdk" path --root)"
 export LD_LIBRARY_PATH="$ROCM_PATH/lib:${LD_LIBRARY_PATH:-}"
 
 cmake -S "$src" -B "$build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DLTO=OFF \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLTO=OFF \
   -DRJ_ENABLE_ASAN=OFF -DRJ_ENABLE_MSAN=OFF \
   -DRJ_ENABLE_TSAN=OFF -DRJ_ENABLE_UBSAN=OFF \
   -DROCM_PATH="$ROCM_PATH" -DPython3_EXECUTABLE="$python"
-cmake --build "$build" --target rocjitsu_bin rocjitsu_shared \
-  rocjitsu_plugin_logging_so rocjitsu_plugin_race_so rocjitsu_plugin_throughput_so
+cmake --build "$build" --target rocjitsu_bin rocjitsu_shared
 
 cd "$corpus"
 "$python" -m benchmarks.runner \
   --rocjitsu-source-dir "$src" --build-dir "$build" \
+  --target-config "gfx950=$src/configs/gfx950_mi355x_kmd.json" \
+  --target-config "gfx1250=$src/configs/gfx1250_mi455x.json" \
+  --run-wrapper "\"$build/tools/rocjitsu/rocjitsu\" --config {config} --" \
   --manifest benchmarks/suites/smoke.toml --output /tmp/rocjitsu-benchmark-results
 ```
+
+The workflow and this command select the executable and base config paths.
+The corpus runner still validates the build and creates per-cell configs with
+the suite's thread count, unlimited ticks, and any selected plugin. The wrapper
+must launch the binary from the build recorded by `--build-dir`.
+
+For local plugin comparisons, additionally build the selected plugin target:
+
+```bash
+cmake --build "$build" --target rocjitsu_plugin_logging_so
+# Or rocjitsu_plugin_race_so / rocjitsu_plugin_throughput_so.
+```
+
+Then use the corpus's `plugin-overhead.toml` suite and matching
+`--plugin-profile`, with a fresh output directory for each profile.
 
 Suite TOML files define each Triton case and its input parameters.
 Use `--list` to inspect cases without building or installing GPU dependencies.
