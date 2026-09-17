@@ -1290,15 +1290,6 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
 // AllGather LL128
 // ---------------------------------------------------------------------------
 
-// Mirrors ddaLL128AGMaxPerRankBytes in dda_all_gather_fabric_ll128.cu. The scratch
-// holds 2 banks of nRanks slots, so this is the payload of one rank's slot.
-static size_t ddaLL128AGPerRankCapBytes(int nRanks, size_t scratchBytes)
-{
-    const size_t slices =
-        scratchBytes / ((size_t)2 * (size_t)nRanks * (size_t)dda::common::kDdaLL128WireBytesPerSlice);
-    return slices * (size_t)dda::common::kDdaLL128DataBytesPerSlice;
-}
-
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_EligibleFloat32)
 {
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
