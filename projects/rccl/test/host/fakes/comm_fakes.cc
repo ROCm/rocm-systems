@@ -57,5 +57,8 @@ roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}
 roctx_scoped_range_in::~roctx_scoped_range_in() {}
 
 thread_local ncclProfilerApiState_t ncclProfilerApiState = {};
+ncclResult_t ncclProfilerStartGroupApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
 ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
+ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }

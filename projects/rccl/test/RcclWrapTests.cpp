@@ -2674,7 +2674,7 @@ TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_AboveThreshold_NoDda)
 {
     ncclComm comm{};
     InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
-    size_t totalBytes = kDdaAlltoAllGfx1250ThresholdBytes + 1;
+    size_t totalBytes = rcclDdaEntryThreshold(&comm, ncclFuncAlltoAll) + 1;
     EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
 }
 

@@ -380,16 +380,18 @@ if(BUILD_TESTS)
   # UNIT UNDER TEST defines; a target that needs a real value where the floor
   # aborts gets a seam in the owning TU's fakes file instead.
   # ---------------------------------------------------------------------------
-  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves 34 undefined
-  # symbols: 33 ordinary externals of enqueue.cc that nothing in fakes/ defines at
-  # all -- among them hipFuncGetAttributes, netTransport, ncclGroupStartInternal
-  # and the 13-strong ncclProfiler* set -- plus ncclOsStrSep, an external of the
-  # hipified utils.cc oracle TU below. The control globals that used to make up
-  # most of this list are gone: each now lives in the per-production-TU fakes file
-  # that references it, so no *_stubs.cc leaves one dangling. All 34 that remain
-  # need fakes written. So a new test reaching one of those paths fails at LINK
+  # LINKS ONLY BECAUSE OF --gc-sections. Relinking without it leaves a few dozen
+  # undefined symbols: ordinary externals of enqueue.cc that nothing in fakes/
+  # defines at all -- among them hipFuncGetAttributes, netTransport and most of
+  # the ncclProfiler* set -- plus ncclOsStrSep, an external of the hipified
+  # utils.cc oracle TU below. The control globals that used to make up most of
+  # this list are gone: each now lives in the per-production-TU fakes file that
+  # references it, so no *_stubs.cc leaves one dangling. Every one that remains
+  # needs a fake written. So a new test reaching one of those paths fails at LINK
   # time, not as an assertion: e.g. ncclInitKernelsForDevice (enqueue.cc:90)
-  # needs a hipFuncGetAttributes fake before it can be called at all.
+  # needs a hipFuncGetAttributes fake before it can be called at all. A symbol
+  # that gc-sections stops dropping (enqueue.cc grew a reference from retained
+  # code) is the same signal: write the fake in its owning TU's fakes file.
   # To recount: take this target's CMakeFiles/.../link.txt, swap --gc-sections for
   # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
@@ -407,6 +409,7 @@ if(BUILD_TESTS)
     fakes/comm_fakes.cc                  # src/init.cc comm lifecycle
     fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/group_fakes.cc                 # src/group.cc (ncclGroupCommJoin's thread-locals)
     fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
     fakes/proxy_fakes.cc                 # src/proxy.cc
     fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
@@ -981,6 +984,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dev_runtime_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/group_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/proxy_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_wrap_fakes.cc
