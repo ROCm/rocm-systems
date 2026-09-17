@@ -107,7 +107,7 @@ void RequireFillCostIndependentOfPatternSize(const LinearAllocs allocation_type,
  * only becomes host mapped once the device local heap is exhausted.
  * Test source
  * ------------------------
- *  - catch/unit/memory/hipMemsetAsyncPatternScaling.cc
+ *  - catch/unit/memory/hipMemsetAsyncPatternScaling_test.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.1
