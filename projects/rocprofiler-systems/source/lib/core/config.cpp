@@ -12,7 +12,6 @@
 #include "common/path.hpp"
 #include "common/static_object.hpp"
 #include "common/string_utility.hpp"
-#include "constraint.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
 #include "mproc.hpp"
@@ -27,9 +26,15 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/papi/papi_common.hpp>
+#include <timemory/components/papi/papi_config.hpp>
+#include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/papi/types.hpp>
+#include <timemory/components/roofline/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -375,8 +380,8 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 // for ENV_NAME -- std::string{} can be constructed from either.
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
     [&]() {                                                                              \
-        auto _env_name = std::string{ ENV_NAME };                                        \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+        auto       _env_name = std::string{ ENV_NAME };                                  \
+        const auto _ret      = _config->insert<TYPE, TYPE>(                              \
             _env_name,                                                              \
             std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
             DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
@@ -821,29 +826,26 @@ configure_settings(bool _init)
         "roctxRangeStart/roctxRangeStop markers.",
         std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
 
-    auto _clock_choices = std::vector<std::string>{};
-    for(const auto& itr : constraint::get_valid_clock_ids())
-    {
-        _clock_choices.emplace_back(
-            fmt::format("({}|{}|{})", itr.name, itr.value, itr.raw_name));
-    }
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::TRACE_PERIODS,
-                              "Similar to specify trace delay and/or duration except in "
-                              "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
-                              "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>",
-                              std::string{}, "trace", "profile", "perfetto", "timemory");
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::TRACE_PERIODS,
+        "Space- or semicolon-separated list of trace windows. Each entry has the form "
+        "<DELAY>:<DURATION> or <DELAY>:<DURATION>:<REPEAT>. The clock used for all "
+        "entries is controlled by ROCPROFSYS_TRACE_PERIOD_CLOCK_ID.",
+        std::string{}, "trace", "profile", "perfetto", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
-        "Set the default clock ID for ROCPROFSYS_TRACE_DELAY, ROCPROFSYS_TRACE_DURATION, "
-        "and/or ROCPROFSYS_TRACE_PERIODS. E.g. \"realtime\" == the delay/duration is "
-        "governed by the elapsed realtime, \"cputime\" == the delay/duration is governed "
-        "by the elapsed CPU-time within the process, etc. Note: when using CPU-based "
-        "timing, it is recommened to scale the value by the number of threads and be "
-        "aware that rocprof-sys may contribute to advancing the process CPU-time",
-        "CLOCK_REALTIME", "trace", "profile", "perfetto", "timemory")
-        ->set_choices(_clock_choices);
+        "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
+        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
+        "    10 real seconds regardless of how many CPU cores are active.\n"
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
+        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
+        "    across all threads. Useful when you want to skip a fixed amount of\n"
+        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
+        "    instrumentation itself contributes to the CPU-time counter.",
+        "realtime", "trace", "profile", "perfetto", "timemory")
+        ->set_choices({ "realtime", "cputime" });
 
     ROCPROFSYS_CONFIG_SETTING(
         double, env_vars::SAMPLING_FREQ,
@@ -1435,23 +1437,42 @@ configure_settings(bool _init)
     const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
                                ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
 
+    // The PAPI net component reads /proc/net/dev and does not use perf_event.
+    // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
+    // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
-                    "CAP_SYS_ADMIN)",
-                    _paranoid);
-        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
-                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = std::string{};
+        constexpr std::string_view k_papi_net_component_prefix = "net:::";
+        const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [k_papi_net_component_prefix](const std::string& event) {
+                return event.starts_with(k_papi_net_component_prefix);
+            });
+        if(!all_events_network_related)
+        {
+            LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                        "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                        "CAP_SYS_ADMIN)",
+                        _paranoid);
+            LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                        "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                        "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+            _config->get_papi_events() = std::string{};
+        }
+        else if(!papi_events.empty())
+        {
+            LOG_DEBUG("perf_event_paranoid={} but all PAPI events use the net component "
+                      "(reads /proc/net/dev, no perf_event required). "
+                      "Proceeding with NIC profiling.",
+                      _paranoid);
+        }
     }
     else
     {
