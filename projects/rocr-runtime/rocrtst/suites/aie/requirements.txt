@@ -10,3 +10,5 @@
 
 mlir_aie==1.4.2
 llvm-aie
+pyelftools
+pytest
