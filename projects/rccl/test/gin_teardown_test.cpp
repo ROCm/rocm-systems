@@ -292,8 +292,8 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
 TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
   ASSERT_EQ(setenv("NCCL_ELASTIC_BUFFER_REGISTER", "0", 1), 0);
 
-  ncclComm comm{};
-  EXPECT_EQ(ncclDevrCheckRegistrationSupport(reinterpret_cast<void*>(0x100000), 4096, &comm,
+  auto comm = std::make_unique<ncclComm>();
+  EXPECT_EQ(ncclDevrCheckRegistrationSupport(reinterpret_cast<void*>(0x100000), 4096, comm.get(),
                                              /*hasSysmemSegment=*/true),
             ncclInvalidArgument);
 

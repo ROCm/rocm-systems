@@ -1081,9 +1081,9 @@ protected:
      *        mixed device/host "elastic" buffer.
      *
      * HIP/CLR has no host-NUMA VMM type and only accepts a plain Host location
-     * (id must be 0). Host VMM is only available on recent runtimes (ROCm >=
-     * 7.12); if it is unsupported, buf.totalSize is left 0 so the caller can
-     * GTEST_SKIP() instead of failing.
+     * (id must be 0). Host VMM follows NCCL_CUMEM_HOST_VERSION_SUPPORTED
+     * (native 7.12 or the 7.0.2.x backport); if it is unsupported,
+     * buf.totalSize is left 0 so the caller can GTEST_SKIP() instead of failing.
      */
     void createMixedMultiSegmentBuffer(int dev,
                                        size_t requestedSegmentSize,
@@ -1092,16 +1092,10 @@ protected:
                                        MultiSegmentBuffer& buf)
     {
         buf = MultiSegmentBuffer{};
-#if ROCM_VERSION >= 71200
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
         ASSERT_GE(numSegments, 1);
         ASSERT_GE(numHostSegments, 0);
         ASSERT_LE(numHostSegments, numSegments);
-
-#if ROCM_VERSION < 71200
-        // hipMemLocationTypeHost is unavailable before ROCm 7.12; leave buf.totalSize 0
-        // so callers GTEST_SKIP() instead of failing at compile or runtime.
-        if (numHostSegments > 0) return;
-#endif
 
         hipMemAllocationProp devProp = {};
         devProp.type                = hipMemAllocationTypePinned;
@@ -1111,11 +1105,7 @@ protected:
 
         hipMemAllocationProp hostProp = {};
         hostProp.type                = hipMemAllocationTypePinned;
-#if ROCM_VERSION >= 71200
         hostProp.location.type       = hipMemLocationTypeHost;
-#else
-        hostProp.location.type       = hipMemLocationTypeDevice; // unused (numHostSegments == 0)
-#endif
         hostProp.location.id         = 0;
         hostProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 
@@ -1175,7 +1165,7 @@ protected:
         buf.totalSize   = totalSize;
         buf.handles     = std::move(handles);
 #else
-        // Host VMM (hipMemLocationTypeHost) is only available on ROCm >= 7.12.
+        // Host VMM is compiled only inside NCCL_CUMEM_HOST_VERSION_SUPPORTED.
         // Leave buf.totalSize == 0 so callers GTEST_SKIP().
         (void)dev;
         (void)requestedSegmentSize;

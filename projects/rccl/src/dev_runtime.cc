@@ -476,44 +476,21 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                 ret, fail);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // TODO(ROCM-29810): Remove this workaround when the runtime preserves imported VMM location metadata.
-  // HIP reports imported host VMM handles as device memory. For symmetric
-  // layouts, propagate the owner's host classification so peer segments use
-  // the system-memory handle-reuse path.
+  // Reject mixed host/device owners of one segment index. Scan maxSegments so a
+  // rank with fewer local segments still fails with its peers instead of waiting
+  // at the closing barrier.
   if (ncclParamSymReuseSysmemHandles()) {
-    for (int segment = 0; segment < numSegments; segment++) {
-#if defined(__HIP_PLATFORM_AMD__)
-      CUmemLocationType hostType = hipMemLocationTypeHost;
-#else
-      CUmemLocationType hostType = CU_MEM_LOCATION_TYPE_HOST_NUMA;
-#endif
-      bool foundHost = false;
+    for (int segment = 0; segment < maxSegments; segment++) {
+      int nHost = 0, nDevice = 0;
       for (int r = 0; r < devr->lsaSize; r++) {
-        symLsaMessage* msg = messages + r * maxSegments + segment;
-        if (segment < segmentCounts[r] && ncclSymIsHostSegment(msg->type)) {
-          hostType = msg->type;
-          foundHost = true;
-          break;
-        }
+        if (segment >= segmentCounts[r]) continue;
+        if (ncclSymIsHostSegment(messages[r * maxSegments + segment].type)) nHost++;
+        else nDevice++;
       }
-      if (foundHost) {
-        int nHost = 0, nDevice = 0;
-        for (int r = 0; r < devr->lsaSize; r++) {
-          if (segment >= segmentCounts[r]) continue;
-          if (ncclSymIsHostSegment(messages[r * maxSegments + segment].type)) nHost++;
-          else nDevice++;
-        }
-        // HIP reports imported host VMM as device. Rewrite that 1-host case; reject true mixed owners.
-        if (nHost > 1 && nDevice > 0) {
-          WARN("Symmetric LSA segment %d mixes host and device owners", segment);
-          ret = ncclInvalidUsage;
-          goto fail;
-        }
-        for (int r = 0; r < devr->lsaSize; r++) {
-          if (segment < segmentCounts[r]) {
-            messages[r * maxSegments + segment].type = hostType;
-          }
-        }
+      if (nHost > 0 && nDevice > 0) {
+        WARN("Symmetric LSA segment %d mixes host and device owners", segment);
+        ret = ncclInvalidUsage;
+        goto fail;
       }
     }
   }
@@ -748,11 +725,15 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   for (int segment = 0; segment < mem->numGinSegments; segment++) {
     CUmemLocationType cuMemLocType = (CUmemLocationType)mem->ginSegmentInfos[segment].memType;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // AMD host-backed VMM uses DMA-BUF, so register every segment through
-    // NCCL_PTR_CUDA; ordinary ibv_reg_mr page pinning fails with EFAULT.
+    // Host VMM is still CPU memory. NCCL_PTR_CUDA selects the DMA-BUF MR path
+    // (ibv_reg_dmabuf_mr); NCCL_PTR_HOST would pin with ibv_reg_mr and EFAULT.
     int ptrType = NCCL_PTR_CUDA;
+    // ncclGinRegister only requires NCCL_PTR_DMABUF when multiSegment is true.
+    bool needDmabuf = mem->maxGlobalNumSegments > 1 || ncclSymIsHostSegment(cuMemLocType);
 #else
+    // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+    bool needDmabuf = mem->maxGlobalNumSegments > 1;
 #endif
     // Device put-fence checks HOST_NUMA. On ROCm < 7.12 that enumerator is a
     // #define int, so the ternary with locType would promote to int and fail
@@ -763,7 +744,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     }
     NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->ginSegmentInfos[segment].segmentSize,
                                   mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
-                                  mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
+                                  mem->winFlags, needDmabuf, ptrType),
                   ret, fail);
     numSegmentsRegistered++;
     offset += mem->ginSegmentInfos[segment].segmentSize;
@@ -1429,13 +1410,37 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
     // not probe ordinary allocations when cuMem is disabled: ROCm 7.0.2.2
     // faults in hipMemRetainAllocationHandle instead of returning an error.
     if (ncclCuMemEnable()) {
-      ncclResult_t probeRet =
-          ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments,
-                                   &hasSysmemSegment);
-      if (probeRet == ncclSuccess) {
+      // Match register.cc: classify the pointer before the retain walk in
+      // ncclCuMemGetAddressRange. hipMalloc is not cuMem; retaining it WARNs
+      // on every registration and can fault on HIP 7.0.
+      CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
+      CUCHECKGOTO(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)userPtr), ret,
+                  fail_locReg);
+      if (memType == CU_MEMORYTYPE_HOST) {
+        hasSysmemSegment = true;
+      } else {
+#if HIP_VERSION >= 71260540
+        int legacyIpcCap = 0;
+        CUdeviceptr base = 0;
+        size_t baseSize = 0;
+        CUCHECKGOTO(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)userPtr), ret, fail_locReg);
+        CUCHECKGOTO(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
+                                          (CUdeviceptr)base),
+                    ret, fail_locReg);
+        if (!legacyIpcCap) {
+          ncclResult_t probeRet =
+              ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize,
+                                       &numSegments, &hasSysmemSegment);
+          if (probeRet != ncclSuccess) hasSysmemSegment = false;
+        }
+#else
+        if (memType != CU_MEMORYTYPE_DEVICE) hasSysmemSegment = true;
+#endif
+      }
+      if (hasSysmemSegment) {
         NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
         // Non-sym IPC uses cudaIpcGetMemHandle, which cannot export host VMM for LSA>1.
-        if (hasSysmemSegment && comm->localRanks > 1) {
+        if (comm->localRanks > 1) {
           WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", comm->localRanks);
           ret = ncclInvalidArgument;
           goto fail_locReg;

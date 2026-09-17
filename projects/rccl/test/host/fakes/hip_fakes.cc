@@ -103,6 +103,9 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
     if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
         *static_cast<int*>(data) = 0;   // matches `int legacyIpcCap` in p2p.cc
     }
+    if (data && attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+        *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    }
     return hipSuccess;
 }
 
