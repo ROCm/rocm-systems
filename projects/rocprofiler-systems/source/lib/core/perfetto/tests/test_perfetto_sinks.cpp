@@ -4,9 +4,11 @@
 #include "gtest/gtest.h"
 
 #include "core/output_file_registry.hpp"
-#include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
-#include "core/perfetto/sinks/trace_sink.hpp"
+#include "core/perfetto/sinks/file_output.hpp"
+#include "core/perfetto/sinks/per_pid_file_sink.hpp"
+#include "core/perfetto/sinks/single_file_sink.hpp"
+#include "recording_sink.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +16,8 @@
 #include <iterator>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 TEST(recording_sink, default_state_is_empty_and_unfinalized)
 {
@@ -101,6 +105,92 @@ TEST(locked_file_append, status_name_handles_known_and_unknown_values)
               "write_failed");
     EXPECT_EQ(rocprofsys::core::status_name(static_cast<locked_append_status>(999)),
               "unknown");
+}
+
+// ----------------------------------------------------------------------------
+// write_proto_to
+// ----------------------------------------------------------------------------
+
+TEST(write_proto_to, nested_directory_write_succeeds_and_registers_file)
+{
+    const auto root =
+        std::filesystem::path{ ::testing::TempDir() } / "rocprofsys-write-proto-to-test";
+    const auto path = root / "nested" / "trace.proto";
+    std::filesystem::remove_all(root);
+
+    rocprofsys::output_file_registry registry;
+    const std::string                data{ "proto-bytes" };
+    EXPECT_TRUE(rocprofsys::core::write_proto_to(path.string(), data.data(), data.size(),
+                                                 registry));
+
+    std::ifstream     ifs{ path, std::ios::binary };
+    const std::string contents{ std::istreambuf_iterator<char>{ ifs },
+                                std::istreambuf_iterator<char>{} };
+    EXPECT_EQ(contents, data);
+
+    ::testing::internal::CaptureStdout();
+    registry.print_summary();
+    EXPECT_NE(::testing::internal::GetCapturedStdout().find(path.string()),
+              std::string::npos);
+
+    std::filesystem::remove_all(root);
+}
+
+TEST(write_proto_to, empty_filename_fails_and_does_not_register)
+{
+    rocprofsys::output_file_registry registry;
+    const std::string                data{ "x" };
+    EXPECT_FALSE(
+        rocprofsys::core::write_proto_to("", data.data(), data.size(), registry));
+
+    ::testing::internal::CaptureStdout();
+    registry.print_summary();
+    EXPECT_TRUE(::testing::internal::GetCapturedStdout().empty());
+}
+
+TEST(write_proto_to, unwritable_parent_directory_fails_and_does_not_register)
+{
+    if(geteuid() == 0)
+    {
+        GTEST_SKIP() << "root ignores directory write permissions";
+    }
+
+    const auto root = std::filesystem::path{ ::testing::TempDir() } /
+                      "rocprofsys-write-proto-to-readonly-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    std::filesystem::permissions(root, std::filesystem::perms::owner_read |
+                                           std::filesystem::perms::owner_exec);
+
+    const auto path = root / "nested" / "trace.proto";
+
+    rocprofsys::output_file_registry registry;
+    const std::string                data{ "x" };
+    EXPECT_FALSE(rocprofsys::core::write_proto_to(path.string(), data.data(), data.size(),
+                                                  registry));
+
+    ::testing::internal::CaptureStdout();
+    registry.print_summary();
+    EXPECT_TRUE(::testing::internal::GetCapturedStdout().empty());
+
+    std::filesystem::permissions(root, std::filesystem::perms::owner_all);
+    std::filesystem::remove_all(root);
+}
+
+TEST(write_proto_to, write_failure_after_open_fails_and_does_not_register)
+{
+    // /dev/full is a real Linux device: opening it for writing always
+    // succeeds, but every write() call fails with ENOSPC. Exercises the
+    // post-open write/close failure path without any fault-injection
+    // scaffolding in production code.
+    rocprofsys::output_file_registry registry;
+    const std::string                data{ "abc" };
+    EXPECT_FALSE(rocprofsys::core::write_proto_to("/dev/full", data.data(), data.size(),
+                                                  registry));
+
+    ::testing::internal::CaptureStdout();
+    registry.print_summary();
+    EXPECT_TRUE(::testing::internal::GetCapturedStdout().empty());
 }
 
 // ----------------------------------------------------------------------------

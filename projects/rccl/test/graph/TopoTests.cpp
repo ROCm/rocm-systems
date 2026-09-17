@@ -11,6 +11,9 @@
 #include "graph/xml.h"
 #include "gtest/gtest.h"
 
+#include "../common/ProcessIsolatedTestRunner.hpp"
+
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -187,26 +190,57 @@ protected:
     return pci;
   }
 
-  // A rail-local shape: one physical GPU carrying nGpus HIP devices and one NIC, on
-  // separate legs of a common PCIe switch, so GPU and NIC end up PATH_PXB apart.
-  // With partitioned=true the HIP devices are CPX partitions (mlopart 0..nGpus-1).
+  // A node of a single rail, the shape the MLO-partition cases need.
   struct ncclTopoSystem* buildRailSystem(uint64_t host, int nGpus, bool partitioned) {
-    struct ncclXmlNode* cpu = addSystemCpu(host);
-    struct ncclXmlNode* bridge = addPciBridge(cpu, "0000:0b:00.0");
-    struct ncclXmlNode* gpuLeg = addPciBridge(bridge, "0000:0b:01.0");
-    struct ncclXmlNode* nicLeg = addPciBridge(bridge, "0000:0b:02.0");
-    struct ncclXmlNode* pci = addGpuPci(gpuLeg, "0000:0c:00.0", "gfx942", /*rank=*/0,
-                                        /*dev=*/0, partitioned ? 0 : NCCL_TOPO_UNDEF);
-    for (int p = 1; p < nGpus; p++) {
-      addGpuUnderPci(pci, "gfx942", /*rank=*/p, /*dev=*/p, partitioned ? p : NCCL_TOPO_UNDEF);
-    }
-    addNic(nicLeg, "0000:0d:00.0", /*dev=*/0);
+    addRail(addSystemCpu(host), /*rail=*/0, nGpus, partitioned);
+    return buildSystem(host);
+  }
 
+  // ncclTopoGetSystemFromXml() leaves netGdrLevel zeroed; initTransportsRank() is what
+  // arms the "use the default level" sentinel, so do the same before computing paths.
+  struct ncclTopoSystem* buildSystem(uint64_t host) {
     struct ncclTopoSystem* built = nullptr;
     EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
-    // ncclTopoGetSystemFromXml() leaves netGdrLevel zeroed; initTransportsRank() is what
-    // arms the "use the default level" sentinel, so do the same before computing paths.
     if (built) built->netGdrLevel = -2;
+    return built;
+  }
+
+  // XGMI link entries name their peer by bus id, so a caller that links two rails needs this.
+  static void railGpuBusId(int rail, char* busId, size_t len) {
+    snprintf(busId, len, "0000:%02x:00.0", 0x0c + rail * 0x10);
+  }
+
+  // One rail of a rail-optimised node: a GPU carrying nGpus HIP devices and a NIC, on separate legs
+  // of their own PCIe switch, which puts a GPU at PATH_PXB from the NIC of its rail and at PATH_PHB
+  // from any other one. GPU and NIC of a rail share the dev index, which is what marks them a pair.
+  // With partitioned=true the HIP devices are CPX partitions (mlopart 0..nGpus-1).
+  // Returns the GPU's pci node, to attach <xgmi> entries below it.
+  struct ncclXmlNode* addRail(struct ncclXmlNode* cpu, int rail, int nGpus = 1,
+                              bool partitioned = false) {
+    const int busBase = 0x0b + rail * 0x10;
+    char switchBus[32], gpuLegBus[32], nicLegBus[32], gpuBus[32], nicBus[32];
+    snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", busBase);
+    snprintf(gpuLegBus, sizeof(gpuLegBus), "0000:%02x:01.0", busBase);
+    snprintf(nicLegBus, sizeof(nicLegBus), "0000:%02x:02.0", busBase);
+    railGpuBusId(rail, gpuBus, sizeof(gpuBus));
+    snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", busBase + 2);
+
+    struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
+    struct ncclXmlNode* gpuPci =
+        addGpuPci(addPciBridge(pciSwitch, gpuLegBus), gpuBus, "gfx942", /*rank=*/rail, /*dev=*/rail,
+                  partitioned ? 0 : NCCL_TOPO_UNDEF);
+    for (int p = 1; p < nGpus; p++) {
+      addGpuUnderPci(gpuPci, "gfx942", /*rank=*/rail + p, /*dev=*/rail + p,
+                     partitioned ? p : NCCL_TOPO_UNDEF);
+    }
+    addNic(addPciBridge(pciSwitch, nicLegBus), nicBus, /*dev=*/rail);
+    return gpuPci;
+  }
+
+  struct ncclTopoSystem* buildSystemWithPaths(uint64_t host) {
+    struct ncclTopoSystem* built = buildSystem(host);
+    if (built == nullptr) return nullptr;
+    EXPECT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
     return built;
   }
 
