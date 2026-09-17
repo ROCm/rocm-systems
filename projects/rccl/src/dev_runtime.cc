@@ -747,6 +747,26 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   }
 }
 
+// Unmap LSA-flat slices created by symMemoryMapLsaTeam. Must run before
+// ncclSpaceFree so a later obtain can remap the same bigOffset, and so
+// ncclDevrFinalize's cuMemAddressFree does not see leftover mappings.
+static void symMemoryUnmapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  if (comm == nullptr || mem == nullptr || mem->lsaNumSegments == nullptr) return;
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->lsaFlatBase == nullptr) return;
+  for (int r = 0; r < devr->lsaSize; r++) {
+    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+    uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
+    for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
+      CUdeviceptr tmpBase;
+      size_t tmpBaseSize;
+      CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
+      CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
+      addr = addr + tmpBaseSize;
+    }
+  }
+}
+
 // On success we take caller's reference on memHandle.
 // Due to multicast binds for each pre-exiting team, this function requires
 // caller do a world barrier before returning to user.
@@ -909,6 +929,7 @@ fail_mem_space_teams:
     symUnbindTeamLe(comm, mem, t->mcLeId);
   }
 fail_mem_space:
+  symMemoryUnmapLsaTeam(comm, mem);
   ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
 fail_mem:
   if (mem != nullptr) {
@@ -944,17 +965,7 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
     symUnbindTeamMemory(comm, t, mem);
     symUnbindTeamLe(comm, mem, t->mcLeId);
   }
-  for (int r = 0; r < devr->lsaSize; r++) {
-    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-    uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
-    for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
-      CUdeviceptr tmpBase;
-      size_t tmpBaseSize;
-      CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
-      CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
-      addr = addr + tmpBaseSize;
-    }
-  }
+  symMemoryUnmapLsaTeam(comm, mem);
 
   ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
   for (int segment = 0; segment < mem->numSegments; segment++) {

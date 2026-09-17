@@ -44,6 +44,8 @@
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.
 int rcclTestHipMemAddressFreeCount = 0;
+int rcclTestHipMemMapCount = 0;
+int rcclTestHipMemUnmapCount = 0;
 
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
@@ -355,10 +357,14 @@ HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandl
   return hipSuccess;
 }
 HIP_FAKE hipError_t hipMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+  rcclTestHipMemMapCount++;
   return hipSuccess;
 }
 HIP_FAKE hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
-HIP_FAKE hipError_t hipMemUnmap(void*, size_t) { return hipSuccess; }
+HIP_FAKE hipError_t hipMemUnmap(void*, size_t) {
+  rcclTestHipMemUnmapCount++;
+  return hipSuccess;
+}
 HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
 HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
   if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
@@ -366,7 +372,9 @@ HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t
 }
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
-  if (psize) *psize = 0;
+  // Host tests map one 4096-byte segment per LSA rank. Returning 0 would still
+  // call unmap once (the idx loop advances), but a real size matches destroy.
+  if (psize) *psize = 4096;
   return hipSuccess;
 }
 
