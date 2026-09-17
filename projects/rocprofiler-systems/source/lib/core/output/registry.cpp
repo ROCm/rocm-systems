@@ -69,8 +69,14 @@ registry::record_process(process_metadata meta)
         return;
     }
 
-    if(meta.ppid != NO_PID) it->second.value.ppid = meta.ppid;
-    if(!meta.command.empty()) it->second.value.command = std::move(meta.command);
+    if(meta.ppid != NO_PID)
+    {
+        it->second.value.ppid = meta.ppid;
+    }
+    if(!meta.command.empty())
+    {
+        it->second.value.command = std::move(meta.command);
+    }
 }
 
 std::vector<artifact>
@@ -80,7 +86,12 @@ registry::rows() const
     std::vector<artifact>       result;
     result.reserve(m_files.size());
     for(const auto& entry : m_files)
-        if(entry.session_id == m_session_id) result.push_back(entry.value);
+    {
+        if(entry.session_id == m_session_id)
+        {
+            result.push_back(entry.value);
+        }
+    }
     return result;
 }
 
@@ -91,7 +102,12 @@ registry::processes() const
     std::vector<process_metadata> result;
     result.reserve(m_processes.size());
     for(const auto& [pid, entry] : m_processes)
-        if(entry.session_id == m_session_id) result.push_back(entry.value);
+    {
+        if(entry.session_id == m_session_id)
+        {
+            result.push_back(entry.value);
+        }
+    }
     return result;
 }
 

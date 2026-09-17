@@ -68,7 +68,9 @@ TEST_F(RegistryTest, start_new_session_filters_prior_rows_from_view)
     const auto rows_v2 = registry::instance().rows();
     EXPECT_EQ(rows_v2.size(), 2u);
     for(const auto& r : rows_v2)
+    {
         EXPECT_FALSE(r.path.empty());
+    }
 }
 
 TEST_F(RegistryTest, start_new_session_compacts_entries_older_than_the_ended_session)
@@ -106,7 +108,9 @@ TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
     for(int round = 0; round < 5; ++round)
     {
         for(int i = 0; i < WRITES_PER_ROUND; ++i)
+        {
             std::this_thread::yield();
+        }
         const auto sid = registry::instance().start_new_session();
         EXPECT_GE(sid, 2u);
     }
@@ -115,7 +119,9 @@ TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
 
     const auto rows = registry::instance().rows();
     for(const auto& r : rows)
+    {
         EXPECT_FALSE(r.path.empty());
+    }
 }
 
 TEST_F(RegistryTest, missing_file_yields_zero_size)
@@ -171,7 +177,9 @@ TEST_F(RegistryTest, concurrent_register_is_thread_safe)
         });
     }
     for(auto& th : threads)
+    {
         th.join();
+    }
 
     EXPECT_EQ(registry::instance().rows().size(),
               static_cast<std::size_t>(THREAD_COUNT * PER_THREAD));
