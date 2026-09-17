@@ -193,6 +193,12 @@ inline std::map<std::string, Kernel> Parse(const std::uint8_t* image_data, std::
   if (symtab == nullptr || strtab == nullptr || symtab->sh_entsize != sizeof(Elf32_Sym)) {
     throw std::runtime_error("missing or malformed .symtab");
   }
+  // The three relocation tables are only meaningful together. With a partial set the relocation
+  // loop below reads nothing and returns a kernel with no patch sites, which is indistinguishable
+  // from a design that legitimately needs none - so reject it here instead.
+  if ((dynsym == nullptr) != (rela == nullptr) || (dynstr == nullptr) != (rela == nullptr)) {
+    throw std::runtime_error("incomplete .rela.dyn, .dynsym and .dynstr set");
+  }
 
   const std::uint32_t symtab_count = symtab->sh_size / sizeof(Elf32_Sym);
   const auto* symbols = image.As<Elf32_Sym>(symtab->sh_offset, symtab_count);
@@ -244,6 +250,12 @@ inline std::map<std::string, Kernel> Parse(const std::uint8_t* image_data, std::
       if (member_name != nullptr && std::strncmp(member_name, ".ctrltext", 9) == 0) {
         if (shdrs[member].sh_type != SHT_PROGBITS) {
           throw std::runtime_error("control code section holds no data");
+        }
+        // One control code section per group is the whole dispatch model: the kernel names a
+        // group and the group names the code to run. Keeping the last of several would dispatch
+        // an arbitrary one of them.
+        if (group.ctrltext_section != 0) {
+          throw std::runtime_error("group has more than one control code section");
         }
         group.ctrltext_section = member;
       }

@@ -256,10 +256,11 @@ constexpr uint32_t MAX_CMD_COUNT = (1u << 11) - 1;
 /// requirement - its address is a plain 64-bit store into the control code.
 constexpr uint32_t CTRL_CODE_DEV_ADDR_ALIGNMENT = 16384;
 
-/// @brief Number of argument dwords a full-ELF command carries.
+/// @brief Number of argument dwords a full-ELF command declares past its ert_npu_preempt_data.
 ///
 /// The arguments themselves are patched into the control code, so all the command has to carry
-/// is the kernel opcode, which the driver overwrites with its own TXN constant.
+/// is the kernel opcode, which the driver replaces with its own TXN constant. The driver does not
+/// copy these dwords, but it does size its bound check from them - see @ref ChainSlotBytesize.
 constexpr uint32_t ELF_CMD_ARG_DWORDS = sizeof(uint64_t) / sizeof(uint32_t);
 
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
@@ -273,15 +274,21 @@ constexpr uint32_t default_cu_func = 0;
 /// - PDI + instruction sequence goes through aie2_cmdlist_fill_npu_cf, which copies the command's
 ///   whole declared payload, so its arg_cnt is cmd->count - num_cu_masks. BuildPdiInstsCommand
 ///   reports exactly that.
-/// - Full ELF goes through aie2_cmdlist_fill_npu_elf, which ignores the declared payload and
-///   writes a fixed-size slot carrying only the kernel opcode. Its arg_cnt is therefore the
-///   constant @ref ELF_CMD_ARG_DWORDS and does not scale with cmd->count, even though a full-ELF
-///   command declares 13 dwords for the ert_npu_preempt_data it has to carry.
+/// - Full ELF goes through aie2_cmdlist_fill_npu_elf, which does not copy the declared payload at
+///   all: it writes arg_cnt = 1 and one hardcoded TXN opcode dword, so the slot it *consumes* is a
+///   fixed 56 bytes however many dwords cmd->count declares. What still scales with the declared
+///   payload is the driver's bound check, which demands
+///   sizeof(cmd_chain_slot_npu) + (declared payload - sizeof(amdxdna_cmd_preempt_data)) bytes of
+///   chain buffer before it writes anything. BuildFullElfCommand declares
+///   @ref ELF_CMD_ARG_DWORDS dwords past the preempt data, so that check asks for 60 bytes -
+///   which is the binding constraint and therefore what this must model. Reporting
+///   @ref ELF_CMD_ARG_DWORDS here gets exactly that.
 ///
-/// So a full-ELF slot is 60 bytes, not the 100 that count - 1 would suggest, and 64 of them fit a
-/// 4 KiB chain. FullElfDispatchTest.ElfFullQueueDispatch is what pins this down: it submits a full
-/// queue of 64 full-ELF packets under a single doorbell ring, so the runtime builds one 64-command
-/// chain. At 100 bytes per slot that chain would need 6400 bytes and the driver would reject it.
+/// So a full-ELF slot costs 60 bytes, not the 100 that count - 1 would suggest, and 68 of them fit
+/// a 4 KiB chain. FullElfDispatchTest.ElfFullQueueDispatch is what pins this down: it submits a
+/// full queue of 64 full-ELF packets under a single doorbell ring, so the runtime builds one
+/// 64-command chain. At 100 bytes per slot that chain would need 6400 bytes and the driver would
+/// reject it. The 68 ceiling itself is unreachable while the AIE queue holds 64 packets.
 ///
 /// @param[in] arg_cnt argument count
 constexpr uint32_t ChainSlotBytesize(uint32_t arg_cnt) {
@@ -1833,13 +1840,13 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // The save and restore buffers and the property count are left zero. This design has no
   // preemption sections, and aie2p firmware accepts null preemption buffers.
   //
-  // A zeroed 64-bit kernel opcode follows. The driver overwrites its low dword with its own TXN
-  // constant, so there is nothing for this code to fill in but the space has to be there,
-  // because the driver sizes the chain slot from it.
+  // A zeroed 64-bit kernel opcode follows. The driver never copies it - it writes its own TXN
+  // constant into the chain slot instead - so there is nothing for this code to fill in, but the
+  // space has to be there because the driver sizes its chain-buffer bound check from it.
 
   // Not cmd->count - 1, which is what the PDI + instruction sequence path reports. The ELF fill
-  // path writes a fixed-size slot and ignores the declared payload, so the slot does not grow with
-  // the ert_npu_preempt_data above. See ChainSlotBytesize.
+  // path writes a fixed-size slot and does not copy the declared payload, so the slot does not
+  // grow with the ert_npu_preempt_data above. See ChainSlotBytesize.
   *arg_cnt = ELF_CMD_ARG_DWORDS;
   return HSA_STATUS_SUCCESS;
 }
