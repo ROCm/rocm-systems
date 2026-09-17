@@ -2521,15 +2521,19 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
                                           handle),
                 ret, fail);
 
-fail:
-  if (segFds)
-    for (int s = 0; s < numSegments; s++)
+exit:
+  if (segFds) {
+    for (int s = 0; s < numSegments; s++) {
       if (segFds[s] != -1) (void)close(segFds[s]);
+    }
+  }
   free(segAddrs);
   free(segLens);
   free(segOffsets);
   free(segFds);
   return ret;
+fail:
+  goto exit;
 }
 #endif
 

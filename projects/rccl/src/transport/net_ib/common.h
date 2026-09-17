@@ -572,8 +572,8 @@ struct ncclIbSendComm {
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // Side table immediately after ctsFifo so one covering MR registers both.
-  // Receiver RDMA-writes this only when nSegments>1 and the peer advertised
-  // NCCL_IB_CAP_MULTISEG.
+  // Receiver RDMA-writes this whenever the peer advertised NCCL_IB_CAP_MULTISEG,
+  // including nSegments==1, so the sender can wait on idx.
   struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
@@ -607,6 +607,8 @@ static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
 static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
 static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
+// 16 segments × 8 devices, 64-byte aligned. The peer RDMA-writes this many bytes.
+static_assert(sizeof(struct ncclIbSegLayout) == 704, "side slot size is the RDMA write length");
 static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
                 offsetof(struct ncclIbSendComm, ctsFifo) + sizeof(((struct ncclIbSendComm*)0)->ctsFifo),
               "segLayoutFifo must immediately follow ctsFifo for a covering MR");
@@ -791,7 +793,6 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
 ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle);
-ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
 
 int ncclIbGetTrafficClass(void* ctx);
 void ncclIbSetTrafficClass(void* ctx, int trafficClass);
