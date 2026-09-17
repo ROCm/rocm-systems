@@ -17,6 +17,7 @@
 #include <memory.h>
 #include <sys/un.h>
 #endif
+#include <filesystem>
 #include "hip_test_context.hh"
 
 #define checkVMMSupported(device)                                                                  \
@@ -71,6 +72,13 @@ struct ipcHdl {
     char *name;
 };
 
+#ifdef __linux__
+// IPC socket path in the temp directory so tests work from read-only cwd.
+inline std::string ipcSocketPath(pid_t pid) {
+  return (std::filesystem::temp_directory_path() / std::to_string(pid)).string();
+}
+#endif
+
 class ipcSocketCom {
   ipcHdl *handle;
   // method to create socket from server
@@ -78,9 +86,8 @@ class ipcSocketCom {
     int server_fd;
     struct sockaddr_un servaddr;
 
-    char name[16];
-    // Create a unique socket name based on current pid
-    sprintf(name, "%u", getpid());
+    std::string nameStr = ipcSocketPath(getpid());
+    const char *name = nameStr.c_str();
 
     // Create the socket handle
     handle = new ipcHdl;
@@ -140,11 +147,14 @@ class ipcSocketCom {
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    char name[16];
 
-    // Create a unique socket name based on current process id.
-    sprintf(name, "%u", getpid());
+    std::string nameStr = ipcSocketPath(getpid());
+    const char *name = nameStr.c_str();
 
+    if (strlen(name) > (sizeof(cliaddr.sun_path) - 1)) {
+      perror("Socket failure: Cannot bind provided name to socket. Name too large");
+      return -1;
+    }
     strcpy(cliaddr.sun_path, name);
     if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
@@ -242,7 +252,12 @@ public:
     // Construct client address to send this SHareable handle to
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
+    std::string destPath = ipcSocketPath(process);
+    if (destPath.size() > (sizeof(cliaddr.sun_path) - 1)) {
+      perror("Socket failure: Cannot address socket. Name too large");
+      return -1;
+    }
+    strcpy(cliaddr.sun_path, destPath.c_str());
 
     // Send corresponding shareable handle to the client
     int sendfd = (int)shareableHdl;

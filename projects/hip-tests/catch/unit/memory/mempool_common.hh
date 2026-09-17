@@ -13,6 +13,7 @@
 #include <utils.hh>
 
 #include <chrono>
+#include <filesystem>
 #include <thread>
 
 namespace {
@@ -628,6 +629,13 @@ struct ipcHdl {
     char *name;
 };
 
+#if !HT_WIN
+// IPC socket path in the temp directory so tests work from read-only cwd.
+inline std::string ipcSocketPath(pid_t pid) {
+  return (std::filesystem::temp_directory_path() / std::to_string(pid)).string();
+}
+#endif
+
 class ipcSocketCom {
   ipcHdl *handle;
 
@@ -645,8 +653,8 @@ class ipcSocketCom {
     int server_fd;
     struct sockaddr_un servaddr;
 
-    char name[16];
-    sprintf(name, "%u", getpid());
+    std::string nameStr = ipcSocketPath(getpid());
+    const char *name = nameStr.c_str();
 
     handle = new ipcHdl;
     if (nullptr == handle) {
@@ -729,10 +737,14 @@ class ipcSocketCom {
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    char name[16];
 
-    sprintf(name, "%u", getpid());
+    std::string nameStr = ipcSocketPath(getpid());
+    const char *name = nameStr.c_str();
 
+    if (strlen(name) > (sizeof(cliaddr.sun_path) - 1)) {
+      perror("Socket failure: Cannot bind provided name to socket. Name too large");
+      return -1;
+    }
     strcpy(cliaddr.sun_path, name);
     if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
@@ -892,7 +904,12 @@ public:
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
+    std::string destPath = ipcSocketPath(process);
+    if (destPath.size() > (sizeof(cliaddr.sun_path) - 1)) {
+      perror("Socket failure: Cannot address socket. Name too large");
+      return -1;
+    }
+    strcpy(cliaddr.sun_path, destPath.c_str());
 
     int sendfd = (int)shareableHdl;
 

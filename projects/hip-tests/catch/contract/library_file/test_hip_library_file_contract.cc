@@ -8,12 +8,18 @@
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
 
-#include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 // The library-from-file and managed-symbol APIs (hipLibraryLoadFromFile,
 // hipLibraryGetManaged) are exercised on both backends: on NVIDIA they map to
@@ -77,12 +83,10 @@ std::string WriteCodeObjectFile(const char* suffix) {
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  // Add an address token to reduce collisions in the shared temp directory.
-  const std::string token =
-      std::to_string(static_cast<long long>(reinterpret_cast<intptr_t>(&code)));
   const std::string path =
       (std::filesystem::temp_directory_path() /
-       (std::string("hip-contract-library-file-") + suffix + "-" + token + ".code"))
+       ("hip-contract-library-file-" + std::string(suffix) + "-" +
+        std::to_string(getpid()) + ".code"))
           .string();
   std::ofstream out(path, std::ios::binary);
   REQUIRE(out.is_open());

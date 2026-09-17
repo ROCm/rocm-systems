@@ -7,9 +7,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <string>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -19,12 +26,12 @@ namespace {
 constexpr size_t kByteCount = 64;
 
 // Use the temp directory because installed test directories may be read-only.
-std::string UniqueDotPath() {
+std::string DotPath() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
   return (std::filesystem::temp_directory_path() /
-          (std::string("hip_contract_graph_debug_") + std::to_string(device) + "_" +
-           std::to_string(static_cast<long long>(reinterpret_cast<intptr_t>(&device))) + ".dot"))
+          ("hip_contract_graph_debug_" + std::to_string(device) + "_" +
+           std::to_string(getpid()) + ".dot"))
       .string();
 }
 
@@ -63,7 +70,7 @@ HIP_TEST_CASE(Contract_GraphDebug_HipGraphDebugDotPrint_Default_WritesNonEmptyFi
   hipMemsetParams memset_params = MakeByteMemsetParams(device_ptr, 0x5A);
   HIP_CHECK(hipGraphAddMemsetNode(&node, graph, nullptr, 0, &memset_params));
 
-  const std::string path = UniqueDotPath();
+  const std::string path = DotPath();
   std::remove(path.c_str());
 
   // Exporting a non-empty graph to a dot file must succeed (or report the
@@ -89,7 +96,7 @@ HIP_TEST_CASE(Contract_GraphDebug_HipGraphDebugDotPrint_Default_VerboseFlagIsAcc
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
   HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
-  const std::string path = UniqueDotPath();
+  const std::string path = DotPath();
   std::remove(path.c_str());
 
   // The verbose flag augments the output but must not change the success
