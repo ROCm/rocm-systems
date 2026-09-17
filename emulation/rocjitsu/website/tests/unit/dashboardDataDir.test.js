@@ -88,6 +88,10 @@ test('serves JSON from the mounted /data/ path and blocks escapes', async () => 
   const encodedEscape = await request(middleware, '/data/%2e%2e/README.md');
   expect(encodedEscape.status).toBe(400);
 
+  const malformedEncoding = await request(middleware, '/data/%');
+  expect(malformedEncoding.status).toBe(400);
+  expect(malformedEncoding.body).toHaveLength(0);
+
   const missing = await request(middleware, '/data/runs/does-not-exist.json');
   expect(missing.status).toBe(404);
 });

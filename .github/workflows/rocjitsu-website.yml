@@ -45,8 +45,20 @@ jobs:
       - name: Install Playwright browser
         run: npm run test:e2e:install
 
-      - name: Verify website
-        run: npm run verify
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+
+      - name: Run chart race tests
+        run: npm run test:e2e:chart-race
 
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() && failure() }}

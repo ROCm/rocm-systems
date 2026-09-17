@@ -209,6 +209,50 @@ test('catalog changes break Aggregate and normalize Overview history to the late
   );
 });
 
+test('1D baseline keeps catalog-imputed estimation across the previous day', () => {
+  const rawData = cloneBenchmarkData();
+  const previousRun = rawData.runs.find((run) => run.runId === 'benchmark-202608130530-784750dd');
+  const selectedRun = rawData.latestCommitRun;
+  expect(previousRun.catalogId).toBe('rocjitsu-core-v1');
+  expect(selectedRun.catalogId).toBe('rocjitsu-core-v2');
+
+  const selectedDay = '2026-08-31';
+  const previousDay = '2026-08-30';
+  rawData.runs = [
+    {
+      ...previousRun,
+      runId: 'previous-day-v1',
+      timestamp: `${previousDay}T12:00:00.000Z`,
+      commitTimestamp: `${previousDay}T18:00:00.000Z`,
+      provenance: {
+        ...previousRun.provenance,
+        rocjitsuCommitSha: 'aaaaaaaa00000000000000000000000000000000',
+      },
+    },
+    {
+      ...selectedRun,
+      runId: 'selected-day-v2',
+      timestamp: `${selectedDay}T12:00:00.000Z`,
+      commitTimestamp: `${selectedDay}T18:00:00.000Z`,
+      provenance: {
+        ...selectedRun.provenance,
+        rocjitsuCommitSha: 'bbbbbbbb00000000000000000000000000000000',
+      },
+    },
+  ];
+  const data = loadDashboardData(rawData);
+  const { history } = selectOverview(data, gfx1250Filters, '1D');
+  const measuredPrevious = previousRun.tests
+    .filter((test) => test.target === 'gfx1250' && gfx1250Filters.suites.includes(test.suite))
+    .reduce((total, test) => total + test.durationSeconds, 0);
+
+  expect(history.normalized).toBe(true);
+  expect(history.series[0].baselineEstimated).toBe(true);
+  expect(history.series[0].estimated.every((flag) => flag === false)).toBe(true);
+  expect(history.series[0].baseline).toBeGreaterThan(measuredPrevious);
+  expect(history.durationDelta).toBeTypeOf('number');
+});
+
 test('weekly history keeps multiple commits per day inside one band per calendar day', () => {
   const { history } = selectOverview(benchmarkData, gfx1250Filters, '1W');
   const slotsByDay = new Map();

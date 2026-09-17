@@ -33,4 +33,3 @@ test('rejects generated data that the website also rejects', async () => {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 });
-

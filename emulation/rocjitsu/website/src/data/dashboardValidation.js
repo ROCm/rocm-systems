@@ -516,4 +516,3 @@ export function validatePublishedDashboardData({
   }
   return { data, sourceData };
 }
-

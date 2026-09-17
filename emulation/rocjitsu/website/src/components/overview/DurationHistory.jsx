@@ -118,6 +118,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
             return `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatCompactDuration(duration)}</strong>`
               + `${Number.isFinite(perfChange) ? ` · Time change ${formatPercent(perfChange)}` : ''}`
               + `${Number.isFinite(series?.baseline) ? ` · Base time ${formatCompactDuration(series.baseline)}` : ''}`
+              + `${series?.baselineEstimated ? ' · Estimated normalized baseline' : ''}`
               + `${estimated ? ' · Estimated normalized workload' : ''}`;
           }),
         ].join('<br/>');
@@ -209,7 +210,9 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           symbol: 'none',
           label: {
             show: true,
-            formatter: `— (${formatCompactDuration(baselineValue)}) —`,
+            formatter: series.baselineEstimated
+              ? `— (${formatCompactDuration(baselineValue)} est.) —`
+              : `— (${formatCompactDuration(baselineValue)}) —`,
             position: 'insideEndTop',
           },
           lineStyle: { color: theme.palette.text.disabled, type: 'dashed', width: 1.25 },

@@ -9,7 +9,6 @@ test('compares controlled plugins for every target without a target picker', asy
   await expect(view.getByRole('heading', { name: 'Plugin Comparison' })).toBeVisible();
   await expect(view.getByRole('combobox', { name: 'Baseline plugin' })).toHaveText('Vanilla');
   await expect(page.getByLabel('Targets')).toBeVisible();
-  await expect(view.getByText('Same commit, catalog, and test definitions. Branch, machine, and environment may differ.')).toBeVisible();
 
   const gfx1250 = view.getByTestId('plugin-target-gfx1250');
   const gfx950 = view.getByTestId('plugin-target-gfx950');

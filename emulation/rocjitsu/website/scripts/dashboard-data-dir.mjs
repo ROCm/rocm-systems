@@ -55,9 +55,16 @@ export function createDashboardDataMiddleware(dataDirectory) {
       return;
     }
 
-    const relative = pathname === '/data' || pathname === '/data/'
-      ? ''
-      : decodeURIComponent(pathname.slice(prefix.length));
+    let relative;
+    try {
+      relative = pathname === '/data' || pathname === '/data/'
+        ? ''
+        : decodeURIComponent(pathname.slice(prefix.length));
+    } catch {
+      res.statusCode = 400;
+      res.end();
+      return;
+    }
     if (!relative || relative.endsWith('/')) {
       res.statusCode = 404;
       res.end();

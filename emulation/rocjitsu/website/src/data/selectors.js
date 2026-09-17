@@ -341,7 +341,7 @@ export function selectOverview(data, filters, range = 'ALL') {
       anchors,
     ));
     const firstValue = projected.find(({ value }) => Number.isFinite(value))?.value ?? null;
-    const previousValue = previousIntradayRun
+    const previousNormalized = previousIntradayRun
       ? normalizedDurationForRun(
         previousIntradayRun,
         target,
@@ -349,8 +349,9 @@ export function selectOverview(data, filters, range = 'ALL') {
         canonicalTestIds,
         candidate?.catalogId,
         anchors,
-      ).value
-      : null;
+      )
+      : { value: null, estimatedTests: [] };
+    const previousValue = previousNormalized.value;
     return {
       target,
       color: targetColor(target, index),
@@ -358,6 +359,7 @@ export function selectOverview(data, filters, range = 'ALL') {
       baseline: isIntraday && Number.isFinite(previousValue)
         ? previousValue
         : baselineIsCandidate ? null : firstValue,
+      baselineEstimated: isIntraday && previousNormalized.estimatedTests.length > 0,
       estimated: projected.map(({ estimatedTests }) => estimatedTests.length > 0),
     };
   });
@@ -419,7 +421,9 @@ export function selectOverview(data, filters, range = 'ALL') {
       ? ((normalizedCandidateDuration - normalizedBaselineDuration) / normalizedBaselineDuration) * 100
       : null,
     summary: `${representedRuns} commit${representedRuns === 1 ? '' : 's'} shown`,
-    normalized: normalizedSeries.some((series) => series.estimated.some(Boolean)),
+    normalized: normalizedSeries.some((series) => (
+      series.estimated.some(Boolean) || series.baselineEstimated
+    )),
     insufficientData,
     series: normalizedSeries,
   };

@@ -56,16 +56,40 @@ function chartGapPresentationForRange(points) {
   return { estimatedValues, segments };
 }
 
-export function chartGapPresentation(points = [], hardBreaks = []) {
+export function catalogSegmentBounds(length, hardBreaks = []) {
   const boundaries = [0, ...hardBreaks
-    .filter((index) => Number.isInteger(index) && index > 0 && index < points.length), points.length]
+    .filter((index) => Number.isInteger(index) && index > 0 && index < length), length]
     .sort((left, right) => left - right);
+  const ranges = [];
+  for (let boundaryIndex = 1; boundaryIndex < boundaries.length; boundaryIndex += 1) {
+    if (boundaries[boundaryIndex] > boundaries[boundaryIndex - 1]) {
+      ranges.push({
+        start: boundaries[boundaryIndex - 1],
+        end: boundaries[boundaryIndex],
+      });
+    }
+  }
+  return ranges;
+}
+
+export function catalogSolidLineSeries(points = [], hardBreaks = []) {
+  return catalogSegmentBounds(points.length, hardBreaks).map(({ start, end }) => {
+    const data = points.map((point, index) => (
+      index >= start && index < end ? point : null
+    ));
+    const finiteCount = data.filter((point) => Number.isFinite(numericPointValue(point))).length;
+    return {
+      data,
+      showSymbol: finiteCount === 1,
+    };
+  });
+}
+
+export function chartGapPresentation(points = [], hardBreaks = []) {
   const estimatedValues = Array(points.length).fill(null);
   const segments = [];
 
-  for (let boundaryIndex = 1; boundaryIndex < boundaries.length; boundaryIndex += 1) {
-    const start = boundaries[boundaryIndex - 1];
-    const end = boundaries[boundaryIndex];
+  catalogSegmentBounds(points.length, hardBreaks).forEach(({ start, end }) => {
     const presentation = chartGapPresentationForRange(points.slice(start, end));
     presentation.estimatedValues.forEach((value, index) => {
       estimatedValues[start + index] = value;
@@ -77,7 +101,7 @@ export function chartGapPresentation(points = [], hardBreaks = []) {
       });
       segments.push(paddedSegment);
     });
-  }
+  });
 
   return { estimatedValues, segments };
 }

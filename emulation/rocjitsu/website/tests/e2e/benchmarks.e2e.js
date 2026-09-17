@@ -108,6 +108,9 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
         name: series.name,
         showSymbol: series.showSymbol,
         hasLatestMarker: Boolean(series.markPoint?.data?.length),
+        finiteIndexes: series.data.flatMap((point, index) => (
+          point && Number.isFinite(point.value) ? [index] : []
+        )),
       })),
       gapBridgeTypes: option.series
         .filter((series) => series.name.includes('missed-data bridge'))
@@ -120,15 +123,20 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
       initialEnd: option.dataZoom[0].endValue,
     };
   });
-  expect(aggregateOption.lineSeries).toHaveLength(1);
+  expect(aggregateOption.lineSeries.length).toBeGreaterThan(1);
   expect(aggregateOption.lineSeries.every((series) => series.name === 'gfx1250')).toBe(true);
-  expect(aggregateOption.lineSeries.every((series) => series.showSymbol === false)).toBe(true);
+  expect(aggregateOption.lineSeries.every((series) => series.finiteIndexes.length > 0)).toBe(true);
+  expect(new Set(aggregateOption.lineSeries.flatMap((series) => series.finiteIndexes)).size)
+    .toBe(aggregateOption.lineSeries.reduce((total, series) => total + series.finiteIndexes.length, 0));
+  expect(aggregateOption.lineSeries
+    .filter((series) => series.finiteIndexes.length !== 1)
+    .every((series) => series.showSymbol === false)).toBe(true);
   expect(aggregateOption.lineSeries.every((series) => series.hasLatestMarker === false)).toBe(true);
   expect(aggregateOption.gapBridgeTypes.length).toBeGreaterThan(0);
   expect(aggregateOption.gapBridgeTypes.every((type) => type === 'dotted')).toBe(true);
   expect(aggregateOption.yAxisName).toBe('Seconds');
   expect(aggregateOption.yAxisScale).toBe(true);
-  expect(aggregateOption.legendTargets).toEqual(aggregateOption.lineSeries.map((series) => series.name));
+  expect(aggregateOption.legendTargets).toEqual(['gfx1250']);
   expect(aggregateOption.zoomTypes.sort()).toEqual(['inside', 'slider']);
   expect(aggregateOption.initialEnd - aggregateOption.initialStart + 1).toBe(45);
   expect(aggregateOption.runCount).toBeGreaterThan(aggregateOption.initialEnd - aggregateOption.initialStart);
@@ -197,6 +205,48 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
   expect(messageLabel.x).toBeGreaterThan(commitLabel.x);
   await expectDialogTypographyContained(runDialog);
   await page.getByRole('button', { name: 'Close Run Details' }).click();
+});
+
+test('aggregate duration history keeps a one-run new catalog vertex', async ({ page }) => {
+  await page.route('**/data/index.json', async (route) => {
+    const response = await route.fetch();
+    const index = await response.json();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...index,
+        runFiles: [
+          'runs/benchmark-202608130530-784750dd.json',
+          'runs/benchmark-202608311945-31369c4d.json',
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Benchmarks' }).click();
+  await page.getByRole('button', { name: 'Aggregate' }).click();
+  const aggregateChart = page.getByRole('img', { name: 'Aggregate duration history for all runs' });
+  const presentation = await readChart(aggregateChart, (instance) => {
+    const option = instance.getOption();
+    const lineSeries = option.series.filter((series) => (
+      series.type === 'line' && !series.name.includes('missed-data bridge')
+    ));
+    return lineSeries.map((series) => ({
+      showSymbol: series.showSymbol,
+      finiteIndexes: series.data.flatMap((point, index) => (
+        point && Number.isFinite(point.value) ? [index] : []
+      )),
+      lastValue: series.data.at(-1)?.value ?? null,
+    }));
+  });
+
+  expect(presentation).toHaveLength(2);
+  expect(presentation[0].showSymbol).toBe(true);
+  expect(presentation[1].showSymbol).toBe(true);
+  expect(presentation[1].finiteIndexes).toEqual([1]);
+  expect(typeof presentation[1].lastValue).toBe('number');
 });
 
 test('benchmark explorer scroll zoom is enabled by default and can be disabled', async ({ page }) => {

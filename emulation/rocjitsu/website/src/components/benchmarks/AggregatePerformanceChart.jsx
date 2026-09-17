@@ -6,7 +6,7 @@ import { selectAggregateRunSeries } from '../../data/selectors';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { escapeHtml, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { chartAreaGradient, chartLineStyle, chartPointStyle } from '../../utils/chartStyles';
-import { chartGapPresentation } from '../../utils/chartGaps';
+import { catalogSolidLineSeries, chartGapPresentation } from '../../utils/chartGaps';
 import { durationAxisBounds } from '../../utils/durationAxis';
 import {
   initialZoomWindow,
@@ -218,26 +218,26 @@ export default function AggregatePerformanceChart({
       },
     ],
     series: [
-      ...seriesPresentations.map((series) => ({
-        name: series.target,
-        type: 'line',
-        data: series.data.map((point, index) => (
-          series.catalogBreaks.includes(index) ? null : point
-        )),
-        showSymbol: false,
-        symbol: 'circle',
-        symbolSize: 7,
-        connectNulls: false,
-        smooth: 0.12,
-        lineStyle: chartLineStyle(series.color, 2.6),
-        itemStyle: chartPointStyle(series.color, theme.palette.background.paper),
-        emphasis: { focus: 'series', scale: 1.6, lineStyle: { width: 3.2 } },
-        areaStyle: {
-          color: chartAreaGradient(series.color, viewModel.series.length === 1 ? 0.24 : 0.1),
-          opacity: 1,
-        },
-        z: 3,
-      })),
+      ...seriesPresentations.flatMap((series) => (
+        catalogSolidLineSeries(series.data, series.catalogBreaks).map((segment) => ({
+          name: series.target,
+          type: 'line',
+          data: segment.data,
+          showSymbol: segment.showSymbol,
+          symbol: 'circle',
+          symbolSize: 7,
+          connectNulls: false,
+          smooth: 0.12,
+          lineStyle: chartLineStyle(series.color, 2.6),
+          itemStyle: chartPointStyle(series.color, theme.palette.background.paper),
+          emphasis: { focus: 'series', scale: 1.6, lineStyle: { width: 3.2 } },
+          areaStyle: {
+            color: chartAreaGradient(series.color, viewModel.series.length === 1 ? 0.24 : 0.1),
+            opacity: 1,
+          },
+          z: 3,
+        }))
+      )),
       ...seriesPresentations.flatMap((series) => (
         series.segments.map((segment, index) => ({
           name: `${series.target} missed-data bridge ${index + 1}`,
