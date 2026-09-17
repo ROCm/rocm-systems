@@ -942,7 +942,8 @@ typedef struct {
   rsmi_bit_field_t available_profiles;
 
   /**
-   * Which power profile is currently active
+   * Which power profile is currently active, or
+   * ::RSMI_PWR_PROF_PRST_INVALID if no profile is marked active
    */
   rsmi_power_profile_preset_masks_t current;
 
@@ -3847,7 +3848,9 @@ rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind, uint32_t* num_
  *  ::RSMI_PWR_PROF_PRST_VR_MASK AND'ed with
  *  ::rsmi_power_profile_status_t.available_profiles. Additionally,
  *  ::rsmi_power_profile_status_t.current will be set to the
- *  ::rsmi_power_profile_preset_masks_t of the profile that is currently active.
+ *  ::rsmi_power_profile_preset_masks_t of the profile that is currently active,
+ *  or ::RSMI_PWR_PROF_PRST_INVALID if the driver does not mark any profile as
+ *  active.
  *
  *  @param[in] dv_ind a device index
  *

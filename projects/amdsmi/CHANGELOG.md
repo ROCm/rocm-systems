@@ -60,6 +60,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi` aborting, and power profiles being misreported, on GPUs that use the transposed `pp_power_profile_mode` layout (e.g. gfx1102)**.  
+  - Newer SMU 13.0.x GPUs list every power profile and the `*` current marker on the first line of `pp_power_profile_mode`, followed by one row per tunable parameter, instead of one profile per line. `get_power_profiles()` skipped that first line as a column header, so it found no current profile and aborted the process (`SIGABRT`) in asserts-enabled builds; otherwise it reported no available profiles.
+  - The parser now detects and reads the transposed layout, so these GPUs report the correct current profile and available profiles. When no profile is marked current it reports `RSMI_PWR_PROF_PRST_INVALID` ("current unknown") instead of aborting, matching how the `pp_dpm_*` clock tables handle a missing marker. The CLI renders an unknown current profile as `UNKNOWN`.
+
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
 

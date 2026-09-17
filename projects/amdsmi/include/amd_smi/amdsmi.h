@@ -2006,9 +2006,11 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  amdsmi_bit_field_t available_profiles;        //!< Which profiles are supported by this system
-  amdsmi_power_profile_preset_masks_t current;  //!< Which power profile is currently active
-  uint32_t num_profiles;                        //!< How many power profiles are available
+  amdsmi_bit_field_t available_profiles;  //!< Which profiles are supported by this system
+  amdsmi_power_profile_preset_masks_t
+      current; /*!< Currently active power profile, or AMDSMI_PWR_PROF_PRST_INVALID if none is
+                    marked active */
+  uint32_t num_profiles;  //!< How many power profiles are available
 } amdsmi_power_profile_status_t;
 
 /**
@@ -5325,7 +5327,9 @@ amdsmi_status_t amdsmi_get_gpu_od_volt_curve_regions(amdsmi_processor_handle pro
  *  ::AMDSMI_PWR_PROF_PRST_VR_MASK AND'ed with
  *  ::amdsmi_power_profile_status_t.available_profiles. Additionally,
  *  ::amdsmi_power_profile_status_t.current will be set to the
- *  ::amdsmi_power_profile_preset_masks_t of the profile that is currently active.
+ *  ::amdsmi_power_profile_preset_masks_t of the profile that is currently active,
+ *  or ::AMDSMI_PWR_PROF_PRST_INVALID if the driver does not mark any profile as
+ *  active.
  *
  *  @param[in] processor_handle a processor handle
  *
