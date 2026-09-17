@@ -23,6 +23,7 @@ test_categories:
       - "RmaProxyLaunchTest.*"
       - "RmaProxyQueueTest.*"
       - "RmaProxyParamsTest.*"
+      - "RmaProxyReclaimTest.*"
       - "RmaProxyProgressTest.*"
       - "RmaCeLaunchTest.*"
       - "RmaCeInitTest.*"
