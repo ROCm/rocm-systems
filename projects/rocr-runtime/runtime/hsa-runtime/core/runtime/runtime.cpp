@@ -3010,6 +3010,21 @@ static std::vector<std::string> parse_tool_names(std::string tool_names) {
   return names;
 }
 
+// These implement both the v1 tool interface and rocprofiler-register (v3), so
+// loading one via v1 after it has registered wraps the API table twice.
+static bool is_rocprofiler_v1_tool(const std::string& path) {
+  static const char* const kRocprofilerLibs[] = {"librocprofiler64.so", "libroctracer64.so",
+                                                 "librocprofiler-sdk.so"};
+
+  const size_t sep = path.find_last_of("/\\");
+  const std::string base = (sep == std::string::npos) ? path : path.substr(sep + 1);
+
+  for (const char* lib : kRocprofilerLibs)
+    if (base.rfind(lib, 0) == 0) return true;
+
+  return false;
+}
+
 
 static int (*fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle) = NULL;
 
@@ -3077,6 +3092,9 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table; unrelated v1 tools still load.
+  bool skip_rocprofiler_v1_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -3107,9 +3125,9 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    // Suppress only rocprofiler's v1 libraries: returning here would also drop
+    // unrelated tools requested through HSA_TOOLS_LIB, such as the debug agent.
+    skip_rocprofiler_v1_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -3150,15 +3168,24 @@ void Runtime::LoadTools() {
     }
 #endif
 
+    if (skip_rocprofiler_v1_tools)
+      names.erase(std::remove_if(names.begin(), names.end(), is_rocprofiler_v1_tool), names.end());
+
     env_count = names.size();
   }
 
   // Discover loaded tools.
   std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
+    std::string lib_name = os::GetLibraryName(handle);
+    if (skip_rocprofiler_v1_tools && is_rocprofiler_v1_tool(lib_name)) {
+      os::CloseLib(handle);
+      continue;
+    }
+
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {
-      sorted.push_back(lib_t(handle, *order + env_count, os::GetLibraryName(handle)));
+      sorted.push_back(lib_t(handle, *order + env_count, std::move(lib_name)));
     } else {
       os::CloseLib(handle);
     }
