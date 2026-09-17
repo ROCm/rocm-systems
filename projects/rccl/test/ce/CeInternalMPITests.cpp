@@ -368,7 +368,8 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     }
 }
 
-// SYNC-02: ncclPrepUCSync produces one WRITE and one WAIT per remote LSA rank.
+// SYNC-02: ncclPrepUCSync produces exactly 2*(lsaSize-1) ops (one WRITE +
+//          one WAIT per remote LSA rank). On a single node lsaSize == nRanks.
 TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
@@ -376,7 +377,8 @@ TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
     const int lsaSize = ceComm->devrState.lsaSize;
     auto [batch, opIdx] = callPrepUCSync();
     EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
-        << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize;
+        << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize
+        << " nRanks=" << ceComm->nRanks;
 }
 
 // SYNC-03: No WRITE_VALUE op targets the local rank's own ready slot.

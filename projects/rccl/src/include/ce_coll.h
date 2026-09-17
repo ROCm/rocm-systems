@@ -22,9 +22,13 @@
 // scale-out MPI tests assert on this exact text.
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
-// Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
-// and the reduced output goes to the user recvbuff)
+// Largest message eligible for the unregistered forced CE AllReduce path.
 #define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
+
+// Total payload capacity of one reusable CE AllReduce staging slot. Messages
+// larger than this are pipelined; sizing each slot to NCCL_CE_AR_MAX_MSG_BYTES
+// wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
+#define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
@@ -34,10 +38,9 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf. ncclCeInit sizes the buffer from this
-// value, so every runtime offset must stay within it.
+// Per-rank staging capacity in ceARTmpBuf.
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
-  return (size_t)NCCL_CE_AR_MAX_MSG_BYTES / (size_t)nRanks;
+  return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
 }
 
 // Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
@@ -63,7 +66,14 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
+enum ncclCeMethodId {
+  ncclCeMethodId_AllGather_UC,
+  ncclCeMethodId_AllGather_MC,
+  ncclCeMethodId_Count
+};
+
 struct ncclCeColl {
+  bool initialized;
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
   size_t baseUCSymReadyOffset;
@@ -77,6 +87,7 @@ struct ncclCeColl {
   bool useCompletePtr;
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
+  int64_t agMulticastThreshold;  // user override (>=0); -1 -> use cost model
   struct ncclDevrWindow* ceSyncWin;
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
@@ -125,6 +136,7 @@ struct alignas(16) ncclCeCollArgs {
 
   void* collApiEventHandle;  // Parent API event handle for profiler hierarchy
   void* ceCollProfHandle;    // CE collective profiler event handle
+  uint64_t userTag;          // Per-call profiler annotation (0 == untagged)
   bool useDda;
   void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
   void*
@@ -147,7 +159,7 @@ struct ncclCeBatchOpsParams {
 };
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                     ncclSymRegType_t winRegType);
+                     ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                             ncclSymRegType_t winRegType);
@@ -155,7 +167,7 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDe
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                         ncclSymRegType_t winRegType);
+                         ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
 // True when an admitted CE task must run on the hierarchical path. The launch
 // site and the selection marker share this so they cannot disagree about which
@@ -182,6 +194,8 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
 ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan);
 
 ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
+
+int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace);
 
 ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 

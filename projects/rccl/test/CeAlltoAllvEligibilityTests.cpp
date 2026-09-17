@@ -14,6 +14,7 @@
 #include "collectives.h"
 #include "group.h"
 #include "nccl_common.h"
+#include "rma/rma_proxy.h"
 #include "sym_kernels.h"
 
 namespace RcclUnitTesting
@@ -123,7 +124,7 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_MultiNodeRejected)
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 // The LSA-local CE routines address peers by LSA rank, so a team that does not
@@ -166,7 +167,7 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_UnsupportedWindowRegistrationRejected)
@@ -178,12 +179,12 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_UnsupportedWindowRegistrationReje
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendNonregRecvNonreg));
+                                 ncclSymSendNonregRecvNonreg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvNonreg));
+                                 ncclSymSendRegRecvNonreg, nullptr, nullptr));
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, LocalMetadataPackingMatchesGatheredLayout)
@@ -387,12 +388,16 @@ TEST_F(CeAlltoAllEligibilityTest, MultiNodeHierAvailable_DoesNotYieldDda)
                                     ncclFuncAlltoAll,
                                     ncclDevSum,
                                     ncclFloat32,
-                                    ncclSymSendRegRecvReg));
+                                    ncclSymSendRegRecvReg,
+                                    /*sendWin=*/nullptr,
+                                    /*recvWin=*/nullptr));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAlltoAll,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg,
+                                 /*sendWin=*/nullptr,
+                                 /*recvWin=*/nullptr));
     EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
                                         ncclFloat32,
                                         ncclSymSendRegRecvReg,
@@ -411,7 +416,35 @@ TEST_F(CeAlltoAllEligibilityTest, UnequalRanksPerNode_HierUnavailable)
                                      ncclFuncAlltoAll,
                                      ncclDevSum,
                                      ncclFloat32,
-                                     ncclSymSendRegRecvReg));
+                                     ncclSymSendRegRecvReg,
+                                     /*sendWin=*/nullptr,
+                                     /*recvWin=*/nullptr));
+}
+
+// The internal RMA contexts ncclHierCeAvailable promises are allocated by
+// ncclRmaProxyConnectOnce, which only runs when ncclRmaProxyEnabled holds. If
+// ncclRmaWantInternalCtx re-derives those terms instead of deferring to that
+// predicate the two can disagree, and the comm admits the hierarchical path and
+// then dereferences a NULL rmaProxyCtxs at launch. numRmaCtx is the term this
+// pins: it appears in ncclRmaProxyEnabled and in no clause of its own here.
+TEST_F(CeAlltoAllEligibilityTest, WantInternalCtxRequiresProxyEnabled)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.configureHierEligible();
+    ASSERT_TRUE(ncclRmaWantInternalCtx(mockComm_.get()))
+        << "prerequisite: a hier-eligible comm must want internal RMA contexts";
+
+    mockComm_.comm.config.numRmaCtx = 0;
+    EXPECT_FALSE(ncclRmaWantInternalCtx(mockComm_.get()));
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAll,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg,
+                                     /*sendWin=*/nullptr,
+                                     /*recvWin=*/nullptr));
 }
 
 TEST_F(CeAlltoAllEligibilityTest, NoSymmetricSupportRejected)

@@ -61,6 +61,10 @@ struct CeAlltoAllvMockComm
         comm.node             = 0;
         comm.symmetricSupport = true;
         comm.hostRmaSupport   = true;
+        // On a multi-clique comm init.cc derives hostRmaSupport from
+        // globalRmaProxySupport, and ncclRmaProxyEnabled reads it directly, so
+        // setting only hostRmaSupport would describe a comm that cannot exist.
+        comm.globalRmaProxySupport = true;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm.config.numRmaCtx = 1;
         comm.maxLocalRanks    = localRanks;

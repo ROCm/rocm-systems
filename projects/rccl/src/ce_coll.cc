@@ -16,6 +16,11 @@
 #include "group.h"
 #include "alloc.h"
 #include "ce_fault_inject.h"
+#include "tuning.h"
+
+// User override: when set (>= 0) the cost model is bypassed and this byte
+// threshold decides multicast (sendSize <= threshold). -1 (unset) -> cost model.
+NCCL_PARAM(CeCollAgMulticastThreshold, "CE_COLL_AG_MULTICAST_THRESHOLD", -1);
 
 #ifdef ENABLE_FAULT_INJECTION
 // Common fault check helper
@@ -85,6 +90,53 @@ static void ceDestroyCopyStreams(struct ncclComm* comm, int nPairs) {
   comm->ceColl.nCopyStreams = 0;
 }
 
+// Maximum size of a single sub-chunk for hierarchical collective
+static constexpr size_t HIER_COLL_MAX_CHUNK_SIZE = 64 * 1024 * 1024;
+// Alignment of hierarchical-collective sub-chunks. Shared by the chunk-plan
+// builder and the chunk-width computation, which must agree on it.
+static constexpr size_t HIER_COLL_CHUNK_ALIGN = 8 * 1024;
+
+// Minimum per-peer transfer size (bytes) for the hierarchical CE collectives to
+// distribute their inter-node rail traffic across multiple internal RMA
+// contexts. Below the threshold the per-context launch/progress overhead
+// dominates, so the whole transfer stays on a single context. This only gates
+// how many of the provisioned contexts a given collective USES -- the internal
+// contexts themselves are always created at connect (ncclRmaProxyConnectOnce),
+// so later, larger transfers distribute regardless of what ran before.
+// 0 distributes regardless of size; -1 selects the built-in default. Like other
+// NCCL tuning variables, it must be set identically on all ranks.
+NCCL_PARAM(RmaMultiCtxThreshold, "RMA_MULTI_CTX_THRESHOLD", -1);
+static constexpr int64_t HIER_COLL_MULTI_CTX_THRESHOLD_DEFAULT = 4 * 1024 * 1024;
+
+// Number of internal RMA contexts used by hierarchical CE collectives.
+// Values above NCCL_NUM_RMA_INT_CTX are clamped.
+NCCL_PARAM(HierCeCollNumCtx, "HIER_CE_COLL_NUM_CTX", -1);
+
+// Decide multicast vs unicast for CE AllGather: a CE-only tuning mask lets
+// ncclTuningCompute pick the fastest CE method (UC vs MC).
+int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace) {
+  if (!comm->symkState.hasLsaMultimem) return 0;
+
+  int64_t thresholdOverride = comm->ceColl.agMulticastThreshold;
+  if (thresholdOverride >= 0) {
+    return ((int64_t)perRankBytes <= thresholdOverride) ? 1 : 0;
+  }
+
+  struct ncclTuningInput_t input = {};
+  input.comm = comm;
+  input.tuningMask = NCCL_TUNING_MASK_CE;
+  input.func = ncclFuncAllGather;
+  input.datatype = ncclInt8;
+  input.nBytes = perRankBytes;
+  input.count = perRankBytes;
+  input.captured = captured;
+  input.inPlace = inPlace;
+
+  struct ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
+  if (ncclTuningCompute(&input, &result) != ncclSuccess) return 0;
+  return (result.ceMethodId == ncclCeMethodId_AllGather_MC) ? 1 : 0;
+}
+
 ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
 
@@ -97,28 +149,17 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   // NCCLCHECKGOTO jumps over a variable initialization (ill-formed in C++).
   uint8_t* ceDevBase = nullptr;
   uint8_t* signalBuf = nullptr;
-  uint8_t* ceARTmpBuf = nullptr;
   ncclWindow_vidmem* ceWinDev = nullptr;
   ncclWindow_vidmem* ceWinDevHost = nullptr;
   ncclWindow_vidmem* sigWinDev = nullptr;
   ncclWindow_vidmem* sigWinDevHost = nullptr;
-  ncclWindow_vidmem* arWinDev = nullptr;
-  ncclWindow_vidmem* arWinDevHost = nullptr;
-  // Sized from the LSA team once ncclDevrInitOnce has populated devrState.
-  size_t ceDevBaseSize = 0;
+  size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  size_t maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
-  size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
-  bool isOneLsaTeam = false;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
   // Symmetric memory runtime must be initialized before any window registration.
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
-  isOneLsaTeam = ncclDevrIsOneLsaTeam(comm);
-
-  // Sync window holds one ready and one complete slot per LSA-local rank.
-  ceDevBaseSize = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16) * 2;
 
   // Local-only control words (no peer access -> no window registration needed).
   CUDACHECKGOTO(hipExtMallocWithFlags((void**)&comm->ceColl.d_barrierSync, 2 * sizeof(uint32_t),
@@ -126,19 +167,15 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
                 ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.scatterStream, cudaStreamNonBlocking), ret, fail);
   CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.synceEvent, cudaEventDisableTiming), ret, fail);
-  // The signal buffer is consumed only by CE AllReduce, which is LSA-local.
-  // Communicators initialized solely for hierarchical CE do not need it.
-  if (isOneLsaTeam) {
-    // [NUM_SLOTS][nRanks], indexed slot*nRanks + r. Symmetric so peers can
-    // ring each other's doorbells via LSA (same pattern as ceARTmpWin).
-    NCCLCHECKGOTO(ncclMemAlloc((void**)&signalBuf, sigBufferSize), ret, fail);
-    NCCLCHECKGOTO(
-      ncclDevrWindowRegisterInGroup(comm, signalBuf, sigBufferSize, NCCL_WIN_COLL_SYMMETRIC, &sigWinDev), ret, fail);
-    NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, sigWinDev, &sigWinDevHost), ret, fail);
-    comm->ceColl.signalWin = (struct ncclDevrWindow*)sigWinDevHost->winHost;
-    comm->ceColl.signalBuffer = (uint32_t*)comm->ceColl.signalWin->userPtr;
-    CUDACHECKGOTO(hipMemset(comm->ceColl.signalBuffer, 0, sigBufferSize), ret, fail);
-  }
+  // Signal buffer: [NUM_SLOTS][nRanks], indexed slot*nRanks + r. Symmetric window
+  // so peers can ring each other's doorbells via LSA (same pattern as ceARTmpWin).
+  NCCLCHECKGOTO(ncclMemAlloc((void**)&signalBuf, sigBufferSize), ret, fail);
+  NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, signalBuf, sigBufferSize, NCCL_WIN_COLL_SYMMETRIC, &sigWinDev), ret,
+                fail);
+  NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, sigWinDev, &sigWinDevHost), ret, fail);
+  comm->ceColl.signalWin = (struct ncclDevrWindow*)sigWinDevHost->winHost;
+  comm->ceColl.signalBuffer = (uint32_t*)comm->ceColl.signalWin->userPtr;
+  CUDACHECKGOTO(hipMemset(comm->ceColl.signalBuffer, 0, sigBufferSize), ret, fail);
 
   // ceSync window (ready/complete flag arrays).
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceDevBase, ceDevBaseSize), ret, fail);
@@ -148,7 +185,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.ceSyncWin = (struct ncclDevrWindow*)ceWinDevHost->winHost;
 
   comm->ceColl.baseUCSymReadyOffset = 0;
-  comm->ceColl.baseUCSymComplOffset = ceDevBaseSize / 2;
+  comm->ceColl.baseUCSymComplOffset = alignUp(comm->nRanks * sizeof(uint32_t), 16);
   comm->ceColl.baseUCSymReadyPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymReadyOffset;
   comm->ceColl.baseUCSymComplPtr = (uint8_t*)comm->ceColl.ceSyncWin->userPtr + comm->ceColl.baseUCSymComplOffset;
   comm->ceColl.ceSeqNum = 0;
@@ -160,6 +197,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
   comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
   comm->ceColl.nCopyStreams = 0;
+  comm->ceColl.agMulticastThreshold = (int64_t)ncclParamCeCollAgMulticastThreshold();
+  comm->ceColl.initialized = true;
   INFO(NCCL_INIT, "Init CE, rank %d baseUCSymReadyPtr %p, baseUCSymComplPtr %p, seq num %d", comm->rank,
        comm->ceColl.baseUCSymReadyPtr, comm->ceColl.baseUCSymComplPtr, comm->ceColl.ceSeqNum);
   {
@@ -178,26 +217,11 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
     }
   }
 
-  // CE AllReduce staging buffer (double-buffered scatter staging, no scratch):
-  //   [slot 0: nRanks chunks][slot 1: nRanks chunks].
-  // CE AllReduce is LSA-local only, so skip the staging buffer on communicators
-  // that reach ncclCeInit solely for the hierarchical path.
-  if (rcclParamCeAllReduce() && isOneLsaTeam) {
-    NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail_ar);
-    NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
-                  ret, fail_ar);
-    NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, arWinDev, &arWinDevHost), ret, fail_ar);
-    comm->ceColl.ceARTmpWin = (struct ncclDevrWindow*)arWinDevHost->winHost;
-    comm->ceColl.ceARTmpBuf = (uint8_t*)comm->ceColl.ceARTmpWin->userPtr;
-    INFO(NCCL_INIT, "Init CE AllReduce, rank %d ceARTmpBuf %p size %zu", comm->rank, comm->ceColl.ceARTmpBuf,
-         ceARTmpBufSize);
-  }
+  // AllReduce staging is allocated lazily in ncclCeEnsureAllReduceStaging so
+  // CE AllGather/AlltoAll/Scatter/Gather do not reserve hundreds of MiB of VMM.
 
 exit:
   return ret;
-fail_ar:
-  ceDestroyCopyStreams(comm, comm->ceColl.nCopyStreams);
-  goto fail;
 fail_ce_event:
   CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.copyStreams[i]));
 fail_ce_stream:
@@ -205,12 +229,11 @@ fail_ce_stream:
   ceDestroyCopyStreams(comm, i);
   goto fail;
 fail:
+  comm->ceColl.initialized = false;
   // ncclCeFinalize() runs unconditionally from commFree(), including after a failed
   // init, and keys its cleanup off these members being non-NULL. Clear everything we
   // release here so finalize does not deregister/free it a second time or dereference
   // a window that is already gone.
-  if (arWinDev != nullptr) ncclCommWindowDeregister(comm, arWinDev);
-  if (ceARTmpBuf != nullptr) ncclMemFree(ceARTmpBuf);
   comm->ceColl.ceARTmpBuf = nullptr;
   comm->ceColl.ceARTmpWin = nullptr;
   if (ceWinDev != nullptr) ncclCommWindowDeregister(comm, ceWinDev);
@@ -290,6 +313,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   if (comm->ceColl.d_barrierSync != nullptr) CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
   if (comm->ceColl.scatterStream != nullptr) CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.scatterStream));
   if (comm->ceColl.synceEvent != nullptr) CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.synceEvent));
+  comm->ceColl.initialized = false;
 
 exit:
   return ret;
@@ -302,33 +326,35 @@ fail:
 
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
-bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                            ncclSymRegType_t winRegType) {
+bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                     ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
   if (!ncclCeImplemented(coll, red, ty)) {
     TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: host-backed segments are not supported");
     return false;
   }
   if (comm->nNodes > 1) {
     TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
     return false;
   }
-  // The LSA-local routines address peers by LSA rank, so a team that does not
-  // cover the comm would gather only lsaSize slices, at the wrong indices.
-  // Reachable on a single node via NCCL_LSA_TEAM_SIZE.
-  if (!ncclDevrIsOneLsaTeam(comm)) {
-    TRACE(NCCL_TUNING, "Skipping CE collective: LSA team does not cover the comm");
+  // Prefer the initialized LSA team. Calling ncclTeamLsa before device-runtime
+  // init (unit-test mocks, pre-init comms) runs ncclDevrInitOnce on incomplete
+  // state and can SIGSEGV on a null peerInfo.
+  int lsaRanks = comm->nRanks;
+  if (comm->devrState.bigSize != 0) {
+    lsaRanks = ncclTeamLsa(comm).nRanks;
+  } else if (comm->localRanks > 0) {
+    lsaRanks = comm->localRanks;
+  }
+  if (lsaRanks < comm->nRanks) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not all ranks have direct GPU-to-GPU connectivity");
     return false;
   }
   if (!comm->symmetricSupport) {
     TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
-    return false;
-  }
-  return true;
-}
-
-bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                     ncclSymRegType_t winRegType) {
-  if (!ncclCeScratchAvailable(comm, coll, red, ty, winRegType)) {
     return false;
   }
   if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg) {
@@ -343,7 +369,7 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
   if (ncclGroupDepth != 0) return false;
   if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
   if (hasSysmemSegment || capturing) return false;
-  return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
+  return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType, nullptr, nullptr);
 }
 
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
@@ -352,7 +378,39 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
   if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
   if (hasSysmemSegment || capturing) return false;
   // Single-node CE only: hier CE is multi-node and launch is still LSA-only.
-  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
+  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType, nullptr, nullptr);
+}
+
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                            ncclSymRegType_t winRegType) {
+  if (!ncclCeImplemented(coll, red, ty)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (comm->nNodes > 1) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+    return false;
+  }
+  // The scratch routines address peers by LSA rank, so a team that does not
+  // cover the comm would touch only lsaSize slices, at the wrong indices.
+  // Reachable on a single node via NCCL_LSA_TEAM_SIZE. Prefer the initialized
+  // LSA team; calling ncclTeamLsa before device-runtime init (unit-test mocks,
+  // pre-init comms) can SIGSEGV on a null peerInfo.
+  int lsaRanks = comm->nRanks;
+  if (comm->devrState.bigSize != 0) {
+    lsaRanks = ncclTeamLsa(comm).nRanks;
+  } else if (comm->localRanks > 0) {
+    lsaRanks = comm->localRanks;
+  }
+  if (lsaRanks < comm->nRanks) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: LSA team does not cover the comm");
+    return false;
+  }
+  if (!comm->symmetricSupport) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  return true;
 }
 
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
@@ -384,7 +442,6 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  // Sync slots are addressed through LSA pointers, so index by LSA rank.
   int myLsaRank = comm->devrState.lsaSelf;
   int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
@@ -414,7 +471,7 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                               cudaMemcpyDeviceToDevice, stream),
               ret, fail);
 
-  // Add local wait operations for every other rank
+  // Add local wait operations for every other LSA rank.
   for (int r = 0; r < lsaSize; ++r) {
     if (r == myLsaRank) continue;
     batchParams[*opIdx] = {};
@@ -438,17 +495,16 @@ static ncclResult_t ncclPrepUCSyncCapture(struct ncclComm* comm, bool isComplete
   ncclResult_t ret = ncclSuccess;
   hipStreamBatchMemOpParams* writeParams = nullptr;
   size_t writeIdx = 0;
-  // Sync slots are addressed through LSA pointers, so index by LSA rank.
-  int myLsaRank = comm->devrState.lsaSelf;
-  int lsaSize = comm->devrState.lsaSize;
-  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
+  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
+  int lsaSize = comm->devrState.lsaSize;
+  int lsaSelf = comm->devrState.lsaSelf;
 
   NCCLCHECKGOTO(ncclCalloc(&writeParams, lsaSize), ret, fail);
-  for (int r = 0; r < lsaSize; ++r) {
-    if (r == myLsaRank) continue;
+  for (int i = 0; i < lsaSize; ++i) {
+    if (i == lsaSelf) continue;
     void* peerDstPtr;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, i, &peerDstPtr), ret, fail);
     writeParams[writeIdx] = {};
     writeParams[writeIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
     writeParams[writeIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
@@ -472,16 +528,15 @@ static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isCompl
                                             uint32_t* completePtrs, uint32_t waitValue,
                                             hipStreamBatchMemOpParams* batchParams, size_t* opIdx) {
   ncclResult_t ret = ncclSuccess;
-  // Sync slots are addressed through LSA pointers, so index by LSA rank.
-  int myLsaRank = comm->devrState.lsaSelf;
-  int lsaSize = comm->devrState.lsaSize;
-  void* dstPtr = isComplete ? (void*)&completePtrs[myLsaRank] : (void*)&readyPtrs[myLsaRank];
+  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
 
-  for (int r = 0; r < lsaSize; ++r) {
-    if (r == myLsaRank) continue;
+  int lsaSize = comm->devrState.lsaSize;
+  int lsaSelf = comm->devrState.lsaSelf;
+  for (int i = 0; i < lsaSize; ++i) {
+    if (i == lsaSelf) continue;
     void* peerDstPtr;
-    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, i, &peerDstPtr), ret, fail);
     batchParams[*opIdx] = {};
     batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
     batchParams[*opIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
@@ -500,19 +555,18 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  #ifdef ENABLE_FAULT_INJECTION
-    NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
-  #endif
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
+#endif
 
-  // Sync slots are addressed through LSA pointers, so index by LSA rank.
-  int myLsaRank = comm->devrState.lsaSelf;
-  int lsaSize = comm->devrState.lsaSize;
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
-
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
+  int lsaSize = comm->devrState.lsaSize;
+  int lsaSelf = comm->devrState.lsaSelf;
+  int* lsaRankList = comm->devrState.lsaRankList;
 
   if (capturing) {
     NCCLCHECKGOTO(ncclPrepUCSyncCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, stream), ret, fail);
@@ -521,9 +575,12 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
                   ret, fail);
   }
 
-  // Waits always go in batchParams (submitted by ncclMemOpSync; reset follows if capturing).
-  for (int r = 0; r < lsaSize; ++r) {
-    if (r == myLsaRank) continue;
+  // Wait on each LSA peer's slot in the local ready/complete array. Slots stay
+  // indexed by global rank (the arrays are nRanks-wide); lsaRankList maps LSA
+  // index -> global rank so the writer/waiter agree on the slot.
+  for (int i = 0; i < lsaSize; ++i) {
+    if (i == lsaSelf) continue;
+    int r = lsaRankList[i];
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address =
@@ -543,20 +600,23 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   ncclResult_t ret = ncclSuccess;
   void* ceSyncHandle = NULL;
   int lsaSize = comm->devrState.lsaSize;
-  bool useMCSync = false;
-  size_t batchSize = 0;
-  size_t opIdx = 0;
-  hipStreamBatchMemOpParams* batchParams = nullptr;
 
   // Get pointers to the ready and complete synchronization arrays
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
-  // Multicast synchronization is not available across scale-up cliques.
-  useMCSync = comm->nvlsSupport && !comm->p2pCrossClique;
+  // Multicast sync needs a multimem mapping over the LSA team, which a
+  // cross-clique (scale-up) comm does not have. hasLsaMultimem is the same
+  // signal the symmetric kernels and enqueue use, so the selection here, the
+  // op-count sizing below and the [Copy Engine] marker cannot disagree.
+  const bool useMCSync = comm->symkState.hasLsaMultimem;
 
-  // Allocate enough slots for all possible ops
-  batchSize = (useMCSync ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * lsaSize;
+  // Allocate enough slots for all possible ops. PrepUC/MC sync iterate the LSA
+  // team (not comm->nRanks); size with nRanks so a stale lsaSize of 0 cannot
+  // under-allocate, matching the nRanks-wide ready/complete arrays.
+  size_t batchSize = (useMCSync ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * comm->nRanks;
+  size_t opIdx = 0;
+  hipStreamBatchMemOpParams* batchParams = nullptr;
 
   NCCLCHECKGOTO(ncclProfilerStartCeSyncEvent(comm, args, stream, &ceSyncHandle), ret, fail);
 
@@ -575,21 +635,18 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // wait for the wait ops, so a reset can clobber a peer's flag mid-barrier
   // and hang graph replay. Issuing them as a separate, stream-ordered batch
   // forces reset-after-wait.
-  if (opIdx) {
-    CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
-  }
+  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
 
   // For graph capture, reset our flag array to 0 in a separate batch so the
   // fixed-value barrier can be replayed.
   if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
     size_t resetIdx = 0;
-    // The flag arrays and batchParams are both sized from the LSA team, so the
-    // reset must walk lsaSize, not nRanks.
     for (int i = 0; i < lsaSize; i++) {
+      int r = comm->devrState.lsaRankList[i];
       batchParams[resetIdx] = {};
       batchParams[resetIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
       batchParams[resetIdx].writeValue.address =
-        (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[i] : (void*)&readyPtrs[i]);
+        (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
       batchParams[resetIdx].writeValue.value = 0;
       // CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
       // This field must be initialized to satisfy the CUDA-compatible struct definition,
@@ -639,22 +696,28 @@ fail:
   goto exit;
 }
 
-// Safe to call more than once on the same params.
 void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
-  if (params->srcs) free(params->srcs);
-  params->srcs = nullptr;
-  if (params->dsts) free(params->dsts);
-  params->dsts = nullptr;
-  if (params->sizes) free(params->sizes);
-  params->sizes = nullptr;
-  params->numOps = 0;
-  params->intraBatchSync = false;
+  if (params->srcs) {
+    free(params->srcs);
+    params->srcs = nullptr;
+  }
+  if (params->dsts) {
+    free(params->dsts);
+    params->dsts = nullptr;
+  }
+  if (params->sizes) {
+    free(params->sizes);
+    params->sizes = nullptr;
+  }
 #ifdef CE_BATCH_ASYNC_SUPPORTED
-  if (params->attrs) free(params->attrs);
-  params->attrs = nullptr;
-  if (params->attrIdxs) free(params->attrIdxs);
-  params->attrIdxs = nullptr;
-  params->numAttrs = 0;
+  if (params->attrs) {
+    free(params->attrs);
+    params->attrs = nullptr;
+  }
+  if (params->attrIdxs) {
+    free(params->attrIdxs);
+    params->attrIdxs = nullptr;
+  }
 #endif
 }
 
@@ -821,33 +884,53 @@ ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
   // Ensure all ranks are ready before starting transfers
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
 
-  // Copy own data to receive buffer if operation is out-of-place
-  if (myRecvBuff != mySendBuff) {
+  // declare-then-assign: NCCLCHECKGOTO's goto can't cross a scalar initialization.
+  bool agUseMulticast;
+  // [RCCL] The DDA path addresses peers through ddaPeerBases instead of a window, so it
+  // cannot take the multicast route.
+  agUseMulticast = !args->useDda && ncclCeAllGatherUseMulticast(comm, chunkBytes,
+                                                               ncclCudaGraphValid(comm->planner.capturingGraph),
+                                                               mySendBuff == myRecvBuff);
+
+  if (agUseMulticast) {
+    // Multicast path: a single write to the multicast pointer covers
+    // every rank in the LSA team (including self), so no self-copy and
+    // no incast — incast never happens for multicast.
+    void* mcDstPtr;
+    offset = myRecvBuff - (uint8_t*)args->recvWin->userPtr;
+    NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, args->recvWin, offset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
     batchOpsParams.srcs[batchOpsParams.numOps] = (void*)mySendBuff;
-    batchOpsParams.dsts[batchOpsParams.numOps] = (void*)myRecvBuff;
+    batchOpsParams.dsts[batchOpsParams.numOps] = (void*)mcDstPtr;
     batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
     batchOpsParams.numOps++;
-  }
-
-  // Copy data to other ranks
-  for (int r = 1; r < lsaSize; r++) {
-    int targetRank = (myLsaRank + r) % lsaSize;
-    offset = myRecvBuff - (uint8_t*)args->recvBuff;
-    if (args->useDda) {
-      peerRecvBuff = (uint8_t*)args->ddaPeerBases[targetRank] + offset;
-    } else {
-      size_t winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, targetRank, &peerRecvBuff), ret, fail);
+    batchOpsParams.intraBatchSync = false;
+  } else {
+    // Unicast path (original behaviour).
+    // Copy own data to receive buffer if operation is out-of-place.
+    if (myRecvBuff != mySendBuff) {
+      batchOpsParams.srcs[batchOpsParams.numOps] = (void*)mySendBuff;
+      batchOpsParams.dsts[batchOpsParams.numOps] = (void*)myRecvBuff;
+      batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
+      batchOpsParams.numOps++;
     }
-    batchOpsParams.srcs[batchOpsParams.numOps] = (void*)mySendBuff;
-    batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
-    batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
-    batchOpsParams.numOps++;
+    // Copy data to other ranks.
+    for (int r = 1; r < lsaSize; r++) {
+      int targetRank = (myLsaRank + r) % lsaSize;
+      offset = myRecvBuff - (uint8_t*)args->recvBuff;
+      if (args->useDda) {
+        peerRecvBuff = (uint8_t*)args->ddaPeerBases[targetRank] + offset;
+      } else {
+        size_t winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, targetRank, &peerRecvBuff), ret, fail);
+      }
+      batchOpsParams.srcs[batchOpsParams.numOps] = (void*)mySendBuff;
+      batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
+      batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
+      batchOpsParams.numOps++;
+    }
+    batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq &&
+                                     chunkBytes * batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
   }
-
-  // Check if we need to perform intra-batch synchronization
-  batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq &&
-                                   chunkBytes * batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
 
   // Launch the batch operations
   NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream, args), ret, fail);
@@ -1138,9 +1221,13 @@ fail:
 }
 
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                         ncclSymRegType_t winRegType) {
+                         ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
   if (!ncclCeImplemented(coll, red, ty)) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: not implemented");
+    return false;
+  }
+  if (ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin)) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: host-backed cuMem segments are not supported");
     return false;
   }
   if (coll != ncclFuncAllGather && coll != ncclFuncAlltoAll) {
@@ -1171,8 +1258,11 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: symmetric support is not enabled");
     return false;
   }
-  // Need RMA proxy for inter-node puts
-  if (!comm->hostRmaSupport || comm->config.numRmaCtx == 0) {
+  // Need RMA proxy for inter-node puts, and the internal RMA contexts that back
+  // the rail step (provisioned under exactly this path's guard conditions). This
+  // is independent of the user's config.numRmaCtx -- the rail uses the internal
+  // context range, so numRmaCtx == 0 is fine.
+  if (!comm->hostRmaSupport || !ncclRmaWantInternalCtx(comm)) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: RMA proxy not available");
     return false;
   }
@@ -1198,15 +1288,12 @@ struct ncclHierChunkPlan {
                          //                          peer's perRankBytes slice
 };
 
-// Maximum chunk size used when building hierarchical-collective chunk plans.
-static constexpr size_t HIER_COLL_MAX_CHUNK_SIZE = 64 * 1024 * 1024;
-
 // Build a uniform chunking plan
 // Every peer gets the same chunk list, last chunk per peer absorbs the remainder.
 static ncclResult_t ncclHierCollBuildChunk(size_t perRankBytes, int nPeers, size_t maxChunk,
                                            struct ncclHierChunkPlan* outPlan) {
   ncclResult_t ret = ncclSuccess;
-  const size_t align = 8 * 1024;
+  const size_t align = HIER_COLL_CHUNK_ALIGN;
 
   outPlan->nPeers = nPeers;
   outPlan->chunkStart = nullptr;
@@ -1266,6 +1353,44 @@ static void ncclHierCollFreeChunkPlan(struct ncclHierChunkPlan* plan) {
   plan->nPeers = 0;
 }
 
+// Effective number of internal contexts for a hierarchical collective's rail
+static int ncclHierCollNumCtx(struct ncclRmaProxyState* rmaProxyState, size_t perPeerBytes, bool persistent) {
+  int numCtx = rmaProxyState->numIntCtx;
+  int64_t numCtxOverride = ncclParamHierCeCollNumCtx();
+  if (numCtxOverride > 0) {
+    if (numCtxOverride > numCtx) {
+      WARN("NCCL_HIER_CE_COLL_NUM_CTX=%lld exceeds provisioned contexts; using %d. "
+           "Increase NCCL_NUM_RMA_INT_CTX before init.",
+           (long long)numCtxOverride, numCtx);
+    }
+    return numCtxOverride < numCtx ? (int)numCtxOverride : numCtx;
+  }
+  if (persistent) return 1;
+  int64_t threshold = ncclParamRmaMultiCtxThreshold();
+  if (threshold < 0) threshold = HIER_COLL_MULTI_CTX_THRESHOLD_DEFAULT;
+  if (perPeerBytes < (size_t)threshold) numCtx = 1;
+  return numCtx;
+}
+
+// Max chunk width for the inter-node put-signal-group. With numCtx > 1, size
+// the chunks so each peer's transfer spreads evenly across all contexts: the
+// chunk count is a whole multiple of numCtx (one chunk per context, or more
+// when a per-context share would exceed HIER_COLL_MAX_CHUNK_SIZE — capping the
+// width alone would leave the round-robin stacking every peer's extra chunks
+// on the first contexts). Fewer chunks only when the HIER_COLL_CHUNK_ALIGN
+// floor binds. With numCtx == 1 this is the plain chunk width. Deterministic
+// in (perPeerBytes, numCtx), so sender and receiver derive the same chunking.
+static size_t ncclHierCollChunkWidth(size_t perPeerBytes, int numCtx) {
+  size_t maxChunk = HIER_COLL_MAX_CHUNK_SIZE;
+  if (numCtx > 1) {
+    size_t perCtx = DIVUP(perPeerBytes, (size_t)numCtx);
+    size_t chunksPerCtx = DIVUP(perCtx, HIER_COLL_MAX_CHUNK_SIZE);  // 1 unless the cap binds
+    size_t target = alignUp(DIVUP(perPeerBytes, numCtx * chunksPerCtx), HIER_COLL_CHUNK_ALIGN);
+    if (target < maxChunk) maxChunk = target;
+  }
+  return maxChunk;
+}
+
 // Cross-node rail-sync entry barrier for the hierarchical CE collectives.
 static ncclResult_t ncclRailSync(struct ncclComm* comm, struct ncclRmaProxyCtx* rmaProxyCtx,
                                  struct ncclKernelPlan* plan, int ctx, cudaStream_t stream) {
@@ -1280,6 +1405,7 @@ static ncclResult_t ncclRailSync(struct ncclComm* comm, struct ncclRmaProxyCtx* 
 
   int* railPeers = nullptr;
   int* railSigOnes = nullptr;
+  int* railSignalIdxs = nullptr;
   // One signal-only put op per rail peer, packed into a single group desc.
   struct ncclRmaPutSignalOp* groupOps = nullptr;
   struct ncclRmaProxyDesc* groupDesc = nullptr;
@@ -1289,6 +1415,7 @@ static ncclResult_t ncclRailSync(struct ncclComm* comm, struct ncclRmaProxyCtx* 
 
   NCCLCHECKGOTO(ncclCalloc(&railPeers, nRemoteNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&railSigOnes, nRemoteNodes), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&railSignalIdxs, nRemoteNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&groupOps, nRemoteNodes), ret, fail);
 
   // Build one signal-only put op per rail peer
@@ -1303,7 +1430,7 @@ static ncclResult_t ncclRailSync(struct ncclComm* comm, struct ncclRmaProxyCtx* 
       NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, rmaProxyCtx, ctx, persistent,
                                            /*srcWin=*/nullptr, /*srcOff=*/0,
                                            /*peerWin=*/nullptr, /*peerOff=*/0,
-                                           /*size=*/0, railPeer, NCCL_SIGNAL, &groupOps[idx]),
+                                           /*size=*/0, railPeer, /*signalIdx=*/0, NCCL_SIGNAL, &groupOps[idx]),
                     ret, fail);
       idx++;
     }
@@ -1316,7 +1443,8 @@ static ncclResult_t ncclRailSync(struct ncclComm* comm, struct ncclRmaProxyCtx* 
 
   // Build one wait descriptor that covers all nRemoteNodes inbound signals.
   NCCLCHECKGOTO(ncclCalloc(&waitDesc, 1), ret, fail);
-  NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, rmaProxyCtx, plan, nRemoteNodes, &railPeers, &railSigOnes, waitDesc),
+  NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, rmaProxyCtx, plan, nRemoteNodes, &railPeers, &railSigOnes,
+                                          &railSignalIdxs, waitDesc),
                 ret, fail);
 
   // ------------------------------------------------------------------
@@ -1354,6 +1482,7 @@ exit:
   free(groupOps);
   free(railPeers);
   free(railSigOnes);
+  free(railSignalIdxs);
   return ret;
 fail:
   goto exit;
@@ -1367,16 +1496,20 @@ static ncclResult_t ncclProxyWaitOnePeer(struct ncclComm* comm, struct ncclRmaPr
 
   int* waitPeers = nullptr;
   int* waitSigCounts = nullptr;
+  int* waitSignalIdxs = nullptr;
   struct ncclRmaProxyDesc* waitDesc = nullptr;
   CUstreamBatchMemOpParams* waitBatch = nullptr;
 
   NCCLCHECKGOTO(ncclCalloc(&waitPeers, 1), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&waitSigCounts, 1), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitSignalIdxs, 1), ret, fail);
   waitPeers[0] = peer;
   waitSigCounts[0] = nsignals;
 
   NCCLCHECKGOTO(ncclCalloc(&waitDesc, 1), ret, fail);
-  NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, rmaProxyCtx, plan, 1, &waitPeers, &waitSigCounts, waitDesc), ret, fail);
+  NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, rmaProxyCtx, plan, 1, &waitPeers, &waitSigCounts, &waitSignalIdxs,
+                                          waitDesc),
+                ret, fail);
 
   {
     int waitOps = ncclRmaProxyWaitNumStreamOps(waitDesc);
@@ -1391,6 +1524,7 @@ exit:
   if (waitDesc != nullptr) (void)ncclRmaProxyDestroyDesc(comm, &waitDesc);
   free(waitPeers);
   free(waitSigCounts);
+  free(waitSignalIdxs);
   return ret;
 fail:
   goto exit;
@@ -1413,7 +1547,17 @@ fail:
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  int ctx = 0;
+  // Distribute the cross-node rail puts/waits across the NCCL-internal RMA proxy
+  // contexts [numRmaCtx, numRmaCtx + numIntCtx); the user-addressable contexts
+  // [0, numRmaCtx) are never touched by the collective. baseCtx is the first
+  // internal context, and chunk-local index j maps to context baseCtx + j%numCtx.
+  // Both ranks build the same chunk plan, so sender and receiver agree on each
+  // chunk's context (a signal raised on context c is awaited on context c).
+  // RailSync (the entry barrier) stays on the first internal context. Small
+  // transfers stay on a single context (see ncclHierCollNumCtx).
+  struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
+  int baseCtx = comm->config.numRmaCtx;
+  int railCtx = baseCtx;
   int myRank = comm->rank;
   int localRank = comm->localRank;
   int nNodes = comm->nNodes;
@@ -1428,77 +1572,120 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclDevrWindow* sendWin = args->sendWin;
   struct ncclDevrWindow* recvWin = args->recvWin;
   size_t perRankBytes = args->nElts * args->eltSize;
+  int numCtx = ncclHierCollNumCtx(rmaProxyState, perRankBytes, persistent);
 
-  struct ncclRmaProxyCtx* rmaProxyCtx = (struct ncclRmaProxyCtx*)comm->rmaState.rmaProxyState.rmaProxyCtxs[ctx];
+  struct ncclRmaProxyCtx* railProxyCtx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[railCtx];
 
   // Per-(peer, chunk) plan.
   struct ncclHierChunkPlan chunkPlan = {};
-  // Inter-node put-signal-group descriptor.
-  struct ncclRmaProxyDesc* groupDesc = nullptr;
-  struct ncclRmaPutSignalOp* groupOps = nullptr;
-  CUstreamBatchMemOpParams* groupStartParam = nullptr;
-  CUstreamBatchMemOpParams* groupDoneParam = nullptr;
+  // Inter-node put-signal-group: one descriptor per RMA proxy context. The per-ctx
+  // arrays are calloc'd (null-initialized) so the exit path frees them uniformly.
+  int startOps = ncclRmaProxyPutGroupStartNumOps(persistent);
+  int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
+  int* ctxOps = nullptr;                                 // [numCtx] ops assigned per ctx
+  int* ctxFill = nullptr;                                // [numCtx] running fill index
+  struct ncclRmaProxyDesc** groupDesc = nullptr;         // [numCtx]
+  struct ncclRmaPutSignalOp** groupOps = nullptr;        // [numCtx]
+  // Start/done memop params for all active contexts, one contiguous slice per
+  // context, so each phase fires a single stream batch instead of one per ctx.
+  int nActiveCtx = 0;
+  CUstreamBatchMemOpParams* groupStartParams = nullptr;  // [nActiveCtx * startOps]
+  CUstreamBatchMemOpParams* groupDoneParams = nullptr;   // [nActiveCtx * doneOps]
   // Batch-ops scratch for intra-node broadcast.
   struct ncclCeBatchOpsParams ceBcastOps = {};
   // Batch-ops scratch for per-chunk intra-node CE scatter.
   struct ncclCeBatchOpsParams ceScatterOps = {};
 
+  NCCLCHECKGOTO(ncclCalloc(&ctxOps, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&ctxFill, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&groupDesc, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&groupOps, numCtx), ret, fail);
+
   // ====================================================================
   // Phase 1: Rail sync (cross-node entry barrier)
   // ====================================================================
-  NCCLCHECKGOTO(ncclRailSync(comm, rmaProxyCtx, plan, ctx, stream), ret, fail);
+  NCCLCHECKGOTO(ncclRailSync(comm, railProxyCtx, plan, railCtx, stream), ret, fail);
 
   // ====================================================================
-  // Phase 2: Start all inter-node puts (one group descriptor, chunked)
+  // Phase 2: Start all inter-node puts (one group descriptor per context, chunked)
   // ====================================================================
   {
-    NCCLCHECKGOTO(ncclHierCollBuildChunk(perRankBytes, nRemoteNodes, HIER_COLL_MAX_CHUNK_SIZE, &chunkPlan), ret, fail);
-    int totalOps = chunkPlan.chunkStart[chunkPlan.nPeers];
-
-    int startOps = ncclRmaProxyPutGroupStartNumOps(persistent);
-    int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
-    NCCLCHECKGOTO(ncclCalloc(&groupStartParam, startOps), ret, fail);
-    NCCLCHECKGOTO(ncclCalloc(&groupDoneParam, doneOps), ret, fail);
+    size_t maxChunk = ncclHierCollChunkWidth(perRankBytes, numCtx);
+    NCCLCHECKGOTO(ncclHierCollBuildChunk(perRankBytes, nRemoteNodes, maxChunk, &chunkPlan), ret, fail);
 
     // Window-relative offsets
     size_t srcWinOffset = (const uint8_t*)sendbuff - (const uint8_t*)sendWin->userPtr;
     size_t peerWinOffset = ((const uint8_t*)recvbuff + myRank * perRankBytes) - (const uint8_t*)recvWin->userPtr;
 
-    // Allocate desc + ops array
-    NCCLCHECKGOTO(ncclCalloc(&groupDesc, 1), ret, fail);
-    NCCLCHECKGOTO(ncclCalloc(&groupOps, totalOps), ret, fail);
+    // Pass 1: count ops per context. Each chunk is assigned to ctx (j % numCtx) by
+    // its peer-local chunk index j, so every rank agrees on a chunk's context.
+    for (int s = 1; s < nNodes; s++) {
+      int p = s - 1;
+      for (int c = chunkPlan.chunkStart[p]; c < chunkPlan.chunkStart[p + 1]; c++) {
+        ctxOps[(c - chunkPlan.chunkStart[p]) % numCtx]++;
+      }
+    }
 
+    // Allocate ops array + descriptor for each active context, then one memop
+    // param slice per active context.
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      NCCLCHECKGOTO(ncclCalloc(&groupOps[k], ctxOps[k]), ret, fail);
+      NCCLCHECKGOTO(ncclCalloc(&groupDesc[k], 1), ret, fail);
+      nActiveCtx++;
+    }
+    NCCLCHECKGOTO(ncclCalloc(&groupStartParams, (size_t)nActiveCtx * startOps), ret, fail);
+    NCCLCHECKGOTO(ncclCalloc(&groupDoneParams, (size_t)nActiveCtx * doneOps), ret, fail);
+
+    // Pass 2: build each chunk's put op into its context's ops array.
     for (int s = 1; s < nNodes; s++) {
       int p = s - 1;                                 // peer index in plan
       int n = (comm->node + s) % nNodes;
       int railPeer = comm->nodeRanks[n].localRankToRank[localRank];
 
       for (int c = chunkPlan.chunkStart[p]; c < chunkPlan.chunkStart[p + 1]; c++) {
+        int k = (c - chunkPlan.chunkStart[p]) % numCtx;
         size_t subBytes = chunkPlan.chunkBytes[c];
         size_t off = chunkPlan.chunkOff[c];
 
-        NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, rmaProxyCtx, ctx, persistent, sendWin, srcWinOffset + off, recvWin,
-                                             peerWinOffset + off, subBytes, railPeer, NCCL_SIGNAL, &groupOps[c]),
+        NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k],
+                                             baseCtx + k, persistent, sendWin, srcWinOffset + off, recvWin,
+                                             peerWinOffset + off, subBytes, railPeer, /*signalIdx=*/0, NCCL_SIGNAL,
+                                             &groupOps[k][ctxFill[k]++]),
                       ret, fail);
       }
     }
 
-    // Build the group desc
-    NCCLCHECKGOTO(ncclRmaProxyPutGroupBuildDesc(comm, rmaProxyCtx, plan, totalOps, &groupOps, ctx, groupDesc), ret,
-                  fail);
-
-    NCCLCHECKGOTO(ncclRmaProxyPutGroupStartParams(groupDesc, groupStartParam), ret, fail);
-    NCCLCHECKGOTO(ncclRmaProxyPutGroupDoneParams(groupDesc, groupDoneParam), ret, fail);
-
-    NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(rmaProxyCtx, &groupDesc), ret, fail);
-
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, startOps, groupStartParam), ret, fail);
+    // Build and enqueue each active context's group descriptor, then fire all
+    // the start memops as one stream batch.
+    int a = 0;
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupBuildDesc(comm, pc, plan, ctxOps[k], &groupOps[k], baseCtx + k, groupDesc[k]),
+                    ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupStartParams(groupDesc[k], groupStartParams + a * startOps), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupDoneParams(groupDesc[k], groupDoneParams + a * doneOps), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(pc, &groupDesc[k]), ret, fail);
+      a++;
+    }
+    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * startOps, groupStartParams), ret, fail);
   }
 
   // ====================================================================
   // Phase 3: Initial intra-node barrier
   // ====================================================================
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+  // Multicast/unicast switch for the intra-node scatters in Phase 4 + Phase 5.
+  // Same heuristic as ncclCeAllGather: short transfers fit nicely in a single
+  // multicast write to the LSA team, longer ones stay on the original N-1
+  // unicast loop (which is better at hiding tail latency).
+  // declare-then-assign: NCCLCHECKGOTO's goto can't cross a scalar initialization.
+  bool agUseMulticast;
+  agUseMulticast =
+    ncclCeAllGatherUseMulticast(comm, perRankBytes, ncclCudaGraphValid(comm->planner.capturingGraph),
+                                (const uint8_t*)sendbuff == (const uint8_t*)recvbuff + myRank * perRankBytes);
 
   // ====================================================================
   // Phase 4: Self-broadcast (intra-node CE Broadcast of own chunk)
@@ -1508,23 +1695,33 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
     uint8_t* myRecvSlot = (uint8_t*)recvbuff + myRank * perRankBytes;
     size_t offset = myRecvSlot - (uint8_t*)recvWin->userPtr;
 
-    // Out-of-place: copy own data to own recvbuf slot
-    if (myRecvSlot != (const uint8_t*)sendbuff) {
+    if (agUseMulticast) {
+      // Single multicast write covers self + all LSA peers; no self-copy needed.
+      void* mcDstPtr;
+      NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, recvWin, offset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
       ceBcastOps.srcs[ceBcastOps.numOps] = (void*)sendbuff;
-      ceBcastOps.dsts[ceBcastOps.numOps] = (void*)myRecvSlot;
+      ceBcastOps.dsts[ceBcastOps.numOps] = (void*)mcDstPtr;
       ceBcastOps.sizes[ceBcastOps.numOps] = perRankBytes;
       ceBcastOps.numOps++;
-    }
+    } else {
+      // Out-of-place: copy own data to own recvbuf slot
+      if (myRecvSlot != (const uint8_t*)sendbuff) {
+        ceBcastOps.srcs[ceBcastOps.numOps] = (void*)sendbuff;
+        ceBcastOps.dsts[ceBcastOps.numOps] = (void*)myRecvSlot;
+        ceBcastOps.sizes[ceBcastOps.numOps] = perRankBytes;
+        ceBcastOps.numOps++;
+      }
 
-    // Broadcast to all other LSA peers
-    for (int r = 1; r < lsaSize; r++) {
-      int targetLsaRank = (myLsaRank + r) % lsaSize;
-      void* peerBuf;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, offset, targetLsaRank, &peerBuf), ret, fail);
-      ceBcastOps.srcs[ceBcastOps.numOps] = (void*)sendbuff;
-      ceBcastOps.dsts[ceBcastOps.numOps] = peerBuf;
-      ceBcastOps.sizes[ceBcastOps.numOps] = perRankBytes;
-      ceBcastOps.numOps++;
+      // Broadcast to all other LSA peers
+      for (int r = 1; r < lsaSize; r++) {
+        int targetLsaRank = (myLsaRank + r) % lsaSize;
+        void* peerBuf;
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, offset, targetLsaRank, &peerBuf), ret, fail);
+        ceBcastOps.srcs[ceBcastOps.numOps] = (void*)sendbuff;
+        ceBcastOps.dsts[ceBcastOps.numOps] = peerBuf;
+        ceBcastOps.sizes[ceBcastOps.numOps] = perRankBytes;
+        ceBcastOps.numOps++;
+      }
     }
 
     NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceBcastOps, stream, args), ret, fail);
@@ -1547,19 +1744,33 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
         uint8_t* chunkSlot = (uint8_t*)recvbuff + peerSliceOffset + off;
         size_t winOffset = chunkSlot - (uint8_t*)recvWin->userPtr;
 
-        // ----- Wait for this sub-chunk's signal from railPeer -----
-        NCCLCHECKGOTO(ncclProxyWaitOnePeer(comm, rmaProxyCtx, plan, ctx, stream, railPeer, /*nsignals=*/1), ret, fail);
+        // ----- Wait for this sub-chunk's signal from railPeer on the chunk's context -----
+        int k = (c - chunkPlan.chunkStart[p]) % numCtx;
+        NCCLCHECKGOTO(ncclProxyWaitOnePeer(comm, (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k],
+                                           plan, baseCtx + k, stream, railPeer, /*nsignals=*/1),
+                      ret, fail);
 
         // ----- CE scatter this sub-chunk to all other LSA peers -----
         NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&ceScatterOps, lsaSize), ret, fail);
-        for (int r = 1; r < lsaSize; r++) {
-          int targetLsaRank = (myLsaRank + r) % lsaSize;
-          void* peerBuf;
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, winOffset, targetLsaRank, &peerBuf), ret, fail);
+        if (agUseMulticast) {
+          // One multicast write covers all LSA peers (including self, which
+          // already has the data — harmless self-store).
+          void* mcDstPtr;
+          NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, recvWin, winOffset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
           ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
-          ceScatterOps.dsts[ceScatterOps.numOps] = peerBuf;
+          ceScatterOps.dsts[ceScatterOps.numOps] = (void*)mcDstPtr;
           ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
           ceScatterOps.numOps++;
+        } else {
+          for (int r = 1; r < lsaSize; r++) {
+            int targetLsaRank = (myLsaRank + r) % lsaSize;
+            void* peerBuf;
+            NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, winOffset, targetLsaRank, &peerBuf), ret, fail);
+            ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
+            ceScatterOps.dsts[ceScatterOps.numOps] = peerBuf;
+            ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
+            ceScatterOps.numOps++;
+          }
         }
 
         NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceScatterOps, stream, args), ret, fail);
@@ -1569,12 +1780,9 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
   }
 
   // ====================================================================
-  // Phase 6: Wait for all outgoing data puts to complete
+  // Phase 6: Wait for all outgoing data puts to complete (all contexts, one batch)
   // ====================================================================
-  {
-    int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, doneOps, groupDoneParam), ret, fail);
-  }
+  NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * doneOps, groupDoneParams), ret, fail);
 
   // ====================================================================
   // Phase 7: Final intra-node barrier
@@ -1584,12 +1792,18 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
 exit:
   ncclCeFreeBatchOpsParams(&ceBcastOps);
   ncclCeFreeBatchOpsParams(&ceScatterOps);
-  free(groupStartParam);
-  free(groupDoneParam);
-  free(groupOps);
-  if (groupDesc != nullptr) {
-    (void)ncclRmaProxyDestroyDesc(comm, &groupDesc);
+  for (int k = 0; groupOps && k < numCtx; k++) free(groupOps[k]);
+  if (groupDesc) {
+    for (int k = 0; k < numCtx; k++) {
+      if (groupDesc[k] != nullptr) (void)ncclRmaProxyDestroyDesc(comm, &groupDesc[k]);
+    }
   }
+  free(groupOps);
+  free(groupStartParams);
+  free(groupDoneParams);
+  free(groupDesc);
+  free(ctxOps);
+  free(ctxFill);
   ncclHierCollFreeChunkPlan(&chunkPlan);
   return ret;
 fail:
@@ -1609,7 +1823,16 @@ fail:
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  int ctx = 0;
+  // Distribute the cross-node rail puts/waits across the NCCL-internal RMA proxy
+  // contexts [numRmaCtx, numRmaCtx + numIntCtx); the user-addressable contexts
+  // [0, numRmaCtx) are never touched by the collective. baseCtx is the first
+  // internal context, and chunk-local index j maps to context baseCtx + j%numCtx.
+  // Both ranks build the same chunk plan, so sender and receiver agree on each
+  // chunk's context. RailSync (the entry barrier) stays on the first internal
+  // context. Small transfers stay on a single context (see ncclHierCollNumCtx).
+  struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
+  int baseCtx = comm->config.numRmaCtx;
+  int railCtx = baseCtx;
   int myRank = comm->rank;
   int myNode = comm->node;
   int nNodes = comm->nNodes;
@@ -1625,29 +1848,51 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
   struct ncclDevrWindow* sendWin = args->sendWin;
   struct ncclDevrWindow* recvWin = args->recvWin;
   size_t perPeerBytes = args->nElts * args->eltSize;
+  int numCtx = ncclHierCollNumCtx(rmaProxyState, perPeerBytes, persistent);
   bool inPlace = (sendbuff == recvbuff);
 
-  struct ncclRmaProxyCtx* rmaProxyCtx = (struct ncclRmaProxyCtx*)comm->rmaState.rmaProxyState.rmaProxyCtxs[ctx];
+  struct ncclRmaProxyCtx* railProxyCtx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[railCtx];
 
   // Chunk plan for the inter-node put-signal-group.
   struct ncclHierChunkPlan chunkPlan = {};
-  // Inter-node put-signal-group descriptor.
-  struct ncclRmaProxyDesc* groupDesc = nullptr;
-  struct ncclRmaPutSignalOp* groupOps = nullptr;
-  CUstreamBatchMemOpParams* groupStartParam = nullptr;
-  CUstreamBatchMemOpParams* groupDoneParam = nullptr;
-  // Aggregate inbound wait descriptor (covers all remote peers).
-  int* waitPeers = nullptr;
-  int* waitSigCounts = nullptr;
-  struct ncclRmaProxyDesc* waitDesc = nullptr;
-  CUstreamBatchMemOpParams* waitBatch = nullptr;
+  // Inter-node put-signal-group + inbound wait: one descriptor per RMA proxy context.
+  // All per-ctx arrays are calloc'd (null-initialized) so the exit path frees them
+  // uniformly; the ownership-transferring builders (PutGroupBuildDesc, WaitBuildDesc)
+  // null the slots they consume.
+  int startOps = ncclRmaProxyPutGroupStartNumOps(persistent);
+  int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
+  int* ctxOps = nullptr;                                 // [numCtx] ops assigned per ctx
+  int* ctxFill = nullptr;                                // [numCtx] running fill index
+  struct ncclRmaProxyDesc** groupDesc = nullptr;         // [numCtx]
+  struct ncclRmaPutSignalOp** groupOps = nullptr;        // [numCtx]
+  // Start/done memop params for all active contexts, one contiguous slice per
+  // context, so each phase fires a single stream batch instead of one per ctx.
+  int nActiveCtx = 0;
+  CUstreamBatchMemOpParams* groupStartParams = nullptr;  // [nActiveCtx * startOps]
+  CUstreamBatchMemOpParams* groupDoneParams = nullptr;   // [nActiveCtx * doneOps]
+  // Per-context inbound wait descriptors (each covers the peers/counts whose chunks
+  // landed on that context); their stream memops are likewise fired as one batch.
+  int** waitPeers = nullptr;                             // [numCtx][]
+  int** waitSigCounts = nullptr;                         // [numCtx][]
+  int** waitSignalIdxs = nullptr;                        // [numCtx][] all-zero (hier-CE uses signal 0)
+  struct ncclRmaProxyDesc** waitDesc = nullptr;          // [numCtx]
+  CUstreamBatchMemOpParams* waitBatch = nullptr;         // [sum of per-ctx wait ops]
   // Intra-node alltoall scratch.
   struct ncclCeBatchOpsParams ceLocalA2A = {};
+
+  NCCLCHECKGOTO(ncclCalloc(&ctxOps, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&ctxFill, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&groupDesc, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&groupOps, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitPeers, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitSigCounts, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitSignalIdxs, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitDesc, numCtx), ret, fail);
 
   // ====================================================================
   // Phase 1: Rail sync (rail-only cross-node entry barrier)
   // ====================================================================
-  NCCLCHECKGOTO(ncclRailSync(comm, rmaProxyCtx, plan, ctx, stream), ret, fail);
+  NCCLCHECKGOTO(ncclRailSync(comm, railProxyCtx, plan, railCtx, stream), ret, fail);
 
   // ====================================================================
   // Phase 2: Intra-node barrier
@@ -1658,18 +1903,28 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
   // Phase 3: Build & submit put-signal-group (start memop).
   // ====================================================================
   {
-    NCCLCHECKGOTO(ncclHierCollBuildChunk(perPeerBytes, numRemotePeers, HIER_COLL_MAX_CHUNK_SIZE, &chunkPlan), ret,
-                  fail);
-    int totalOps = chunkPlan.chunkStart[chunkPlan.nPeers];
+    size_t maxChunk = ncclHierCollChunkWidth(perPeerBytes, numCtx);
+    NCCLCHECKGOTO(ncclHierCollBuildChunk(perPeerBytes, numRemotePeers, maxChunk, &chunkPlan), ret, fail);
 
-    int startOps = ncclRmaProxyPutGroupStartNumOps(persistent);
-    int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
-    NCCLCHECKGOTO(ncclCalloc(&groupStartParam, startOps), ret, fail);
-    NCCLCHECKGOTO(ncclCalloc(&groupDoneParam, doneOps), ret, fail);
+    // Pass 1: count ops per context (chunk j -> ctx j % numCtx by peer-local index).
+    for (int p = 0; p < numRemotePeers; p++) {
+      for (int c = chunkPlan.chunkStart[p]; c < chunkPlan.chunkStart[p + 1]; c++) {
+        ctxOps[(c - chunkPlan.chunkStart[p]) % numCtx]++;
+      }
+    }
 
-    NCCLCHECKGOTO(ncclCalloc(&groupDesc, 1), ret, fail);
-    NCCLCHECKGOTO(ncclCalloc(&groupOps, totalOps), ret, fail);
+    // Allocate ops array + descriptor for each active context, then one memop
+    // param slice per active context.
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      NCCLCHECKGOTO(ncclCalloc(&groupOps[k], ctxOps[k]), ret, fail);
+      NCCLCHECKGOTO(ncclCalloc(&groupDesc[k], 1), ret, fail);
+      nActiveCtx++;
+    }
+    NCCLCHECKGOTO(ncclCalloc(&groupStartParams, (size_t)nActiveCtx * startOps), ret, fail);
+    NCCLCHECKGOTO(ncclCalloc(&groupDoneParams, (size_t)nActiveCtx * doneOps), ret, fail);
 
+    // Pass 2: build each chunk's put op into its context's ops array.
     int p = 0;  // chunk plan slot index
     for (int s = 1; s < nNodes; s++) {
       int n = (myNode + s) % nNodes;
@@ -1681,25 +1936,34 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
           ((const uint8_t*)recvbuff + (size_t)myRank * perPeerBytes) - (const uint8_t*)recvWin->userPtr;
 
         for (int c = chunkPlan.chunkStart[p]; c < chunkPlan.chunkStart[p + 1]; c++) {
+          int k = (c - chunkPlan.chunkStart[p]) % numCtx;
           size_t subBytes = chunkPlan.chunkBytes[c];
           size_t off = chunkPlan.chunkOff[c];
 
-          NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, rmaProxyCtx, ctx, persistent, sendWin, srcWinOffset + off, recvWin,
-                                               peerWinOffset + off, subBytes, peer, NCCL_SIGNAL, &groupOps[c]),
+          NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k],
+                                               baseCtx + k, persistent, sendWin, srcWinOffset + off, recvWin,
+                                               peerWinOffset + off, subBytes, peer, /*signalIdx=*/0, NCCL_SIGNAL,
+                                               &groupOps[k][ctxFill[k]++]),
                         ret, fail);
         }
         p++;
       }
     }
 
-    NCCLCHECKGOTO(ncclRmaProxyPutGroupBuildDesc(comm, rmaProxyCtx, plan, totalOps, &groupOps, ctx, groupDesc), ret,
-                  fail);
-
-    NCCLCHECKGOTO(ncclRmaProxyPutGroupStartParams(groupDesc, groupStartParam), ret, fail);
-    NCCLCHECKGOTO(ncclRmaProxyPutGroupDoneParams(groupDesc, groupDoneParam), ret, fail);
-
-    NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(rmaProxyCtx, &groupDesc), ret, fail);
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, startOps, groupStartParam), ret, fail);
+    // Build and enqueue each active context's group descriptor, then fire all
+    // the start memops as one stream batch.
+    int a = 0;
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupBuildDesc(comm, pc, plan, ctxOps[k], &groupOps[k], baseCtx + k, groupDesc[k]),
+                    ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupStartParams(groupDesc[k], groupStartParams + a * startOps), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupDoneParams(groupDesc[k], groupDoneParams + a * doneOps), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(pc, &groupDesc[k]), ret, fail);
+      a++;
+    }
+    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * startOps, groupStartParams), ret, fail);
   }
 
   // ====================================================================
@@ -1731,38 +1995,65 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
   // Phase 5: Aggregate wait for all remote peers.
   // ====================================================================
   {
-    NCCLCHECKGOTO(ncclCalloc(&waitPeers, numRemotePeers), ret, fail);
-    NCCLCHECKGOTO(ncclCalloc(&waitSigCounts, numRemotePeers), ret, fail);
+    // Per context, build an inbound wait covering the peers whose chunks landed on
+    // that context, with per-peer signal count = number of that peer's chunks on the
+    // context. The chunk->ctx assignment mirrors Phase 3 exactly, so the signal
+    // accounting matches what the senders raised.
+    int waitOpsTotal = 0;
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
 
-    int p = 0;
-    for (int s = 1; s < nNodes; s++) {
-      int n = (myNode - s + nNodes) % nNodes;
-      for (int lr = 0; lr < localRanks; lr++) {
-        waitPeers[p] = comm->nodeRanks[n].localRankToRank[lr];
-        waitSigCounts[p] = chunkPlan.chunkStart[p + 1] - chunkPlan.chunkStart[p];
-        p++;
+      NCCLCHECKGOTO(ncclCalloc(&waitPeers[k], numRemotePeers), ret, fail);
+      NCCLCHECKGOTO(ncclCalloc(&waitSigCounts[k], numRemotePeers), ret, fail);
+      // Signal indices default to 0 for hier-CE; allocated so WaitBuildDesc can index it.
+      NCCLCHECKGOTO(ncclCalloc(&waitSignalIdxs[k], numRemotePeers), ret, fail);
+
+      int wp = 0;
+      int p = 0;
+      for (int s = 1; s < nNodes; s++) {
+        int n = (myNode - s + nNodes) % nNodes;
+        for (int lr = 0; lr < localRanks; lr++) {
+          int sig = 0;
+          for (int c = chunkPlan.chunkStart[p]; c < chunkPlan.chunkStart[p + 1]; c++) {
+            if ((c - chunkPlan.chunkStart[p]) % numCtx == k) sig++;
+          }
+          if (sig > 0) {
+            waitPeers[k][wp] = comm->nodeRanks[n].localRankToRank[lr];
+            waitSigCounts[k][wp] = sig;
+            wp++;
+          }
+          p++;
+        }
       }
+
+      struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+      NCCLCHECKGOTO(ncclCalloc(&waitDesc[k], 1), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, pc, plan, wp, &waitPeers[k], &waitSigCounts[k], &waitSignalIdxs[k],
+                                              waitDesc[k]),
+                    ret, fail);
+      waitOpsTotal += ncclRmaProxyWaitNumStreamOps(waitDesc[k]);
     }
 
-    NCCLCHECKGOTO(ncclCalloc(&waitDesc, 1), ret, fail);
-    NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, rmaProxyCtx, plan, numRemotePeers, &waitPeers, &waitSigCounts,
-                                            waitDesc),
-                  ret, fail);
-
-    int waitOps = ncclRmaProxyWaitNumStreamOps(waitDesc);
-    NCCLCHECKGOTO(ncclCalloc(&waitBatch, waitOps), ret, fail);
-    NCCLCHECKGOTO(ncclRmaProxyWaitParams(rmaProxyCtx, waitDesc, waitBatch), ret, fail);
-    NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(rmaProxyCtx, &waitDesc), ret, fail);
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, waitOps, waitBatch), ret, fail);
+    // Fill each context's wait memops into one contiguous array, enqueue the
+    // descriptors, and fire all the waits as one stream batch.
+    NCCLCHECKGOTO(ncclCalloc(&waitBatch, waitOpsTotal), ret, fail);
+    int off = 0;
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+      int waitOps = ncclRmaProxyWaitNumStreamOps(waitDesc[k]);
+      NCCLCHECKGOTO(ncclRmaProxyWaitParams(pc, waitDesc[k], waitBatch + off), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(pc, &waitDesc[k]), ret, fail);
+      off += waitOps;
+    }
+    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, waitOpsTotal, waitBatch), ret, fail);
   }
 
   // ====================================================================
-  // Phase 6: PutGroupDone memop (outbound puts complete on the wire).
+  // Phase 6: PutGroupDone memop (outbound puts complete on the wire), all
+  // contexts in one batch.
   // ====================================================================
-  {
-    int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
-    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, doneOps, groupDoneParam), ret, fail);
-  }
+  NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * doneOps, groupDoneParams), ret, fail);
 
   // ====================================================================
   // Phase 7: Intra-node barrier
@@ -1771,28 +2062,79 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
 
 exit:
   ncclCeFreeBatchOpsParams(&ceLocalA2A);
-  free(groupStartParam);
-  free(groupDoneParam);
+  for (int k = 0; groupOps && k < numCtx; k++) free(groupOps[k]);
+  if (groupDesc) {
+    for (int k = 0; k < numCtx; k++) {
+      if (groupDesc[k] != nullptr) (void)ncclRmaProxyDestroyDesc(comm, &groupDesc[k]);
+    }
+  }
+  if (waitDesc) {
+    for (int k = 0; k < numCtx; k++) {
+      if (waitDesc[k] != nullptr) (void)ncclRmaProxyDestroyDesc(comm, &waitDesc[k]);
+    }
+  }
+  for (int k = 0; waitPeers && k < numCtx; k++) free(waitPeers[k]);
+  for (int k = 0; waitSigCounts && k < numCtx; k++) free(waitSigCounts[k]);
+  for (int k = 0; waitSignalIdxs && k < numCtx; k++) free(waitSignalIdxs[k]);
   free(groupOps);
-  if (groupDesc != nullptr) {
-    (void)ncclRmaProxyDestroyDesc(comm, &groupDesc);
-  }
+  free(groupStartParams);
+  free(groupDoneParams);
+  free(groupDesc);
   free(waitBatch);
-  if (waitDesc != nullptr) {
-    (void)ncclRmaProxyDestroyDesc(comm, &waitDesc);
-  }
+  free(waitDesc);
   free(waitPeers);
   free(waitSigCounts);
+  free(waitSignalIdxs);
+  free(ctxOps);
+  free(ctxFill);
   ncclHierCollFreeChunkPlan(&chunkPlan);
   return ret;
 fail:
   goto exit;
 }
 
+// Allocate CE AllReduce scatter staging on first AllReduce, not during generic
+// CE init. AlltoAll/AllGather should not reserve two staging slots of VMM.
+static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
+  ncclResult_t ret = ncclSuccess;
+  uint8_t* ceARTmpBuf = nullptr;
+  ncclWindow_vidmem* arWinDev = nullptr;
+  ncclWindow_vidmem* arWinDevHost = nullptr;
+  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
+  size_t maxChunkBytes = 0;
+  size_t ceARTmpBufSize = 0;
+
+  if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
+  if (!rcclParamCeAllReduce()) return ncclSuccess;
+
+  maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
+  ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
+  NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail);
+  NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
+                ret, fail);
+  NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, arWinDev, &arWinDevHost), ret, fail);
+  comm->ceColl.ceARTmpWin = (struct ncclDevrWindow*)arWinDevHost->winHost;
+  comm->ceColl.ceARTmpBuf = (uint8_t*)comm->ceColl.ceARTmpWin->userPtr;
+  INFO(NCCL_INIT, "Init CE AllReduce staging, rank %d ceARTmpBuf %p size %zu", comm->rank, comm->ceColl.ceARTmpBuf,
+       ceARTmpBufSize);
+  return ncclSuccess;
+fail:
+  if (arWinDev != nullptr) ncclCommWindowDeregister(comm, arWinDev);
+  if (ceARTmpBuf != nullptr) ncclMemFree(ceARTmpBuf);
+  comm->ceColl.ceARTmpBuf = nullptr;
+  comm->ceColl.ceARTmpWin = nullptr;
+  return ret;
+}
+
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
   ncclResult_t ret = ncclSuccess;
+  NCCLCHECK(ncclCeEnsureAllReduceStaging(comm));
+  if (comm->ceColl.ceARTmpBuf == nullptr) {
+    WARN("CE AllReduce staging is not available");
+    return ncclInvalidUsage;
+  }
 
   const size_t eltSize = ncclTypeSize(datatype);
   const size_t totalBytes = count * eltSize;
@@ -2058,7 +2400,9 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Hierarchical path: inter-node RMA plus intra-node CE. This predicate must
   // match the one ncclHierCeAvailable admitted the task under, otherwise a
   // single-node comm with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be
-  // dispatched here without the RMA prerequisites having been checked.
+  // dispatched here without the RMA prerequisites having been checked. The
+  // single-node ncclCe* paths treat every global rank as an LSA rank and fail
+  // ncclDevrGetLsaRankPtr once nRanks > lsaSize.
   if (ncclHierCeDispatch(comm)) {
     switch (args->func) {
     case ncclFuncAllGather:
@@ -2089,10 +2433,9 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
       break;
     case ncclFuncAllReduce:
-      // CE init runs (in ncclCommGroupRegisterSymmetric) before doLaunches, so
-      // ceARTmpBuf is guaranteed non-NULL by the time we get here.
+      NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
       if (comm->ceColl.ceARTmpBuf == NULL) {
-        WARN("CE AllReduce invoked before CE init; this should not happen");
+        WARN("CE AllReduce invoked without staging buffer");
         ret = ncclInvalidUsage;
         break;
       }
@@ -2164,6 +2507,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
   plan->ceCollArgs->redOp = task->opHost;
   plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
+  plan->ceCollArgs->userTag = task->profilerTag;
   plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
   if (comm->rank == 0) {
@@ -2173,9 +2517,8 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
       INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype));
     } else {
-      // Matches the useMCSync predicate in ncclMemOpSync: multicast sync is not
-      // available across scale-up cliques.
-      const char* nvlsSync = comm->nvlsSupport && !comm->p2pCrossClique ? "; CE synchronization with NVLS" : "";
+      // Matches the useMCSync predicate in ncclMemOpSync.
+      const char* nvlsSync = comm->symkState.hasLsaMultimem ? "; CE synchronization with NVLS" : "";
       INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype), nvlsSync);
     }
