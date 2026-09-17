@@ -551,6 +551,13 @@ struct externals
 
     static constexpr std::string_view rocm_hip_api_category_name = "rocm_hip_api";
 
+    // ─── Members required by domains::callback::hsa::{core,amd_ext,image_ext,
+    // finalize_ext}_api ─────────────────────────────────────────────────────────
+    struct rocm_hsa_api_category
+    {};
+
+    static constexpr std::string_view rocm_hsa_api_category_name = "rocm_hsa_api";
+
     struct region_sample
     {
         std::uint64_t thread_id       = 0;

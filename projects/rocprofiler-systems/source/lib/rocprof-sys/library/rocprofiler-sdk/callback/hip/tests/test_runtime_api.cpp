@@ -25,7 +25,7 @@ TEST(runtime_api_test, descriptor_reports_correct_metadata)
 {
     constexpr const auto& k_domain = k_runtime_api<mock_sdk, externals>;
 
-    EXPECT_EQ(k_domain.meta.name, "runtime_api");
+    EXPECT_EQ(k_domain.meta.name, "hip_runtime_api");
     EXPECT_EQ(k_domain.meta.id, mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::callback);
     ASSERT_TRUE(k_domain.meta.group.has_value());
