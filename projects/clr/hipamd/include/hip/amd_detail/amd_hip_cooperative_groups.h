@@ -1477,7 +1477,7 @@ template <>
 struct CGIdentity<bool, cooperative_groups::greater<bool>> {
   __CG_QUALIFIER__ bool operator()()
   {
-    return true;
+    return false;
   }
 };
 
