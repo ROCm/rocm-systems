@@ -5,7 +5,19 @@ include_guard(DIRECTORY)
 
 set(SPDLOG_VERSION "1.15.3" CACHE STRING "Minimum spdlog version")
 
-if(PROFILER_HUB_FETCH_DEPENDENCIES)
+# Fetching is Off by default: a missing or old package errors out.
+if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    find_package(spdlog ${SPDLOG_VERSION})
+
+    if(NOT spdlog_FOUND)
+        message(
+            FATAL_ERROR
+            "profiler-hub requires spdlog ${SPDLOG_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+        )
+    endif()
+
+    message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
+else()
     include(FetchContent)
 
     FetchContent_Declare(
@@ -13,6 +25,7 @@ if(PROFILER_HUB_FETCH_DEPENDENCIES)
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG v${SPDLOG_VERSION}
         GIT_SHALLOW TRUE
+        # Without this, the MakeAvailable below always fetches.
         FIND_PACKAGE_ARGS ${SPDLOG_VERSION}
     )
 
@@ -25,6 +38,7 @@ if(PROFILER_HUB_FETCH_DEPENDENCIES)
     set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
 
+    # Tries find_package() first, fetches only if that fails.
     FetchContent_MakeAvailable(spdlog)
 
     set(BUILD_SHARED_LIBS ${_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP})
@@ -37,17 +51,6 @@ if(PROFILER_HUB_FETCH_DEPENDENCIES)
     if(NOT TARGET spdlog::spdlog)
         add_library(spdlog::spdlog ALIAS spdlog)
     endif()
-else()
-    find_package(spdlog ${SPDLOG_VERSION})
-
-    if(NOT spdlog_FOUND)
-        message(
-            FATAL_ERROR
-            "profiler-hub requires spdlog ${SPDLOG_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
-        )
-    endif()
-
-    message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
 endif()
 
 # The exported target's interface definitions are the only reliable record

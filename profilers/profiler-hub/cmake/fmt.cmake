@@ -5,7 +5,19 @@ include_guard(DIRECTORY)
 
 set(FMT_VERSION "11.1.3" CACHE STRING "Minimum fmt version")
 
-if(PROFILER_HUB_FETCH_DEPENDENCIES)
+# Fetching is Off by default: a missing or old package errors out.
+if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    find_package(fmt ${FMT_VERSION})
+
+    if(NOT fmt_FOUND)
+        message(
+            FATAL_ERROR
+            "profiler-hub requires fmt ${FMT_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+        )
+    endif()
+
+    message(STATUS "Using system fmt (version ${fmt_VERSION})")
+else()
     include(FetchContent)
 
     FetchContent_Declare(
@@ -13,6 +25,7 @@ if(PROFILER_HUB_FETCH_DEPENDENCIES)
         GIT_REPOSITORY https://github.com/fmtlib/fmt.git
         GIT_TAG ${FMT_VERSION}
         GIT_SHALLOW TRUE
+        # Without this, the MakeAvailable below always fetches.
         FIND_PACKAGE_ARGS ${FMT_VERSION}
     )
 
@@ -27,6 +40,7 @@ if(PROFILER_HUB_FETCH_DEPENDENCIES)
     set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
 
+    # Tries find_package() first, fetches only if that fails.
     FetchContent_MakeAvailable(fmt)
 
     set(BUILD_SHARED_LIBS ${_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP})
@@ -39,15 +53,4 @@ if(PROFILER_HUB_FETCH_DEPENDENCIES)
     if(NOT TARGET fmt::fmt)
         add_library(fmt::fmt ALIAS fmt)
     endif()
-else()
-    find_package(fmt ${FMT_VERSION})
-
-    if(NOT fmt_FOUND)
-        message(
-            FATAL_ERROR
-            "profiler-hub requires fmt ${FMT_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
-        )
-    endif()
-
-    message(STATUS "Using system fmt (version ${fmt_VERSION})")
 endif()
