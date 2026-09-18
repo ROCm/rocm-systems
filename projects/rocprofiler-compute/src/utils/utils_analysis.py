@@ -21,6 +21,7 @@ from utils.logger import (
 )
 from utils.ml_api_trace_errors import (
     ForwardThreadNotFoundError,
+    MarkerNotNestedError,
     OverlappingMarkerRangeError,
     PassMarkerMismatchError,
     UnaccountedKernelError,
@@ -92,9 +93,9 @@ class CallTreeNode:
     """A node in the operator call tree.
 
     children is the list of child operator nodes. file_name, line_number,
-    backend, start_timestamp, end_timestamp, t_tid, and f_tid are optional
-    fields copied from a marker row when set. invocation_ids stores
-    marker-start strings for this node.
+    backend, start_timestamp, end_timestamp, t_tid, f_tid, and thread_id
+    are optional fields copied from a marker row when set. invocation_ids
+    stores marker-start strings for this node.
 
     Inclusive over this node plus all descendants:
       kernel_launches, total_duration_ms, min/max/mean dispatch stats.
@@ -116,6 +117,7 @@ class CallTreeNode:
     end_timestamp: Optional[float] = None
     t_tid: Optional[str] = None
     f_tid: Optional[str] = None
+    thread_id: Optional[str] = None
 
     @property
     def call_count(self) -> int:
@@ -368,6 +370,7 @@ def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
         end_timestamp=float(row.End_Timestamp),
         t_tid=_optional_pytorch_tid(getattr(row, "T_Tid", "")),
         f_tid=_optional_pytorch_tid(getattr(row, "F_Tid", "")),
+        thread_id=str(getattr(row, "Thread_Id", "")),
     )
     node.invocation_ids.add(str(row.Start_Timestamp))
     return node
@@ -520,6 +523,48 @@ def attach_unlocated_trees_by_forward_thread(
             rollup_node_stats(node)
 
 
+def _nested_invocation_keys(
+    forest: dict[str, list[CallTreeNode]],
+) -> set[tuple[str, str]]:
+    """Return (Thread_Id, marker-start) pairs present in the forest."""
+    keys: set[tuple[str, str]] = set()
+
+    def walk(node: CallTreeNode) -> None:
+        thread_id = node.thread_id or ""
+        for invocation_id in node.invocation_ids:
+            keys.add((thread_id, invocation_id))
+        for child in node.children:
+            walk(child)
+
+    for roots in forest.values():
+        for root in roots:
+            walk(root)
+    return keys
+
+
+def _validate_all_markers_nested(
+    trace_df: pd.DataFrame, forest: dict[str, list[CallTreeNode]]
+) -> None:
+    """Exit if a consolidated marker row is missing from the nested forest."""
+    if trace_df.empty:
+        return
+    nested_keys = _nested_invocation_keys(forest)
+    for row in trace_df.itertuples(index=False):
+        thread_id = str(row.Thread_Id)
+        start_key = str(row.Start_Timestamp)
+        if (thread_id, start_key) not in nested_keys:
+            console_error(
+                "analysis",
+                str(
+                    MarkerNotNestedError(
+                        operator_name=str(row.Operator_Name),
+                        thread_id=thread_id,
+                        start_timestamp=row.Start_Timestamp,
+                    )
+                ),
+            )
+
+
 def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
     """Deep-copy a call-tree node, including descendants and kernel stats."""
     copied = CallTreeNode(
@@ -546,6 +591,7 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
         end_timestamp=node.end_timestamp,
         t_tid=node.t_tid,
         f_tid=node.f_tid,
+        thread_id=node.thread_id,
     )
     copied.invocation_ids = set(node.invocation_ids)
     copied.children = [clone_call_tree_node(child) for child in node.children]
@@ -1156,7 +1202,7 @@ def process_ml_api_trace_output(
     workload: schema.Workload,
     workload_dir: str,
 ) -> None:
-    """Load, join, and drop unmatched kernel rows for each profiling pass."""
+    """Load, join, nest, and validate ML API marker rows for operator analyze."""
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
     if not csv_pairs:
@@ -1200,6 +1246,7 @@ def process_ml_api_trace_output(
     )
     workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df)
     attach_unlocated_trees_by_forward_thread(workload.ml_api_call_trees)
+    _validate_all_markers_nested(workload.ml_api_trace_df, workload.ml_api_call_trees)
 
 
 def validate_workload(path: str) -> None:
