@@ -59,7 +59,7 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service);
 // which is called by the HSA async signal handler in hsa/queue.cpp.
 void
 kernel_completion_cb(const rocprofiler_agent_t*                    rocp_agent,
-                     rocprofiler::hsa::rocprofiler_packet&         kernel_pkt,
+                     const rocprofiler::hsa::rocprofiler_packet&   kernel_pkt,
                      const rocprofiler::hsa::queue_info_session_t& session);
 
 rocprofiler_status_t
