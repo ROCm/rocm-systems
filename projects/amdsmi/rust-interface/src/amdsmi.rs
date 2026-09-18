@@ -6227,6 +6227,13 @@ pub fn amdsmi_get_link_topology_nearest(
 ///
 /// This function retrieves the link weight, status, type, hop count, and framebuffer sharing flag for the connection between the source and destination processor handles.
 ///
+/// On the current baremetal backend, every successful call reports `ENABLED`;
+/// `UNKNOWN` to `DISABLED` is only a defensive mapping, not an observed success case.
+/// Status is retained for host API parity, not live link health or P2P accessibility.
+/// A self pair returns `INTERNAL`/`ENABLED`, zero weight and hops, and `fb_sharing=1`.
+/// For distinct GPUs, `fb_sharing` is best-effort P2P accessibility: 0 also covers
+/// an unsuccessful P2P query. The fields are queried sequentially, not atomically.
+///
 /// # Arguments
 ///
 /// * `processor_handle_src` - A handle to the source processor.
