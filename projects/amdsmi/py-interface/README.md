@@ -24,19 +24,24 @@ portal](https://rocm.docs.amd.com/projects/amdsmi/en/latest/index.html).
 
 ## Install paths
 
-The AMD SMI Python wrapper supports two coexisting install modes. Both
-expose the same `import amdsmi` entry point.
+The wrapper supports three install modes, all exposing the same
+`import amdsmi` entry point. See
+[Packaging and install paths](../docs/packaging.md) for the full matrix.
 
 | Mode | What ships | Loader resolves to |
 |------|-----------|--------------------|
-| System package (`amd-smi-lib` rpm/deb) | The wrapper installed directly into the system Python's `site-packages` so plain `import amdsmi` works. The shared library lives at `/opt/rocm/lib/libamd_smi.so` and is registered with the dynamic linker via `ldconfig`. | `libamd_smi.so` resolved by the dynamic linker (SONAME). |
-| `pip install amdsmi` (manylinux wheel) | The wrapper plus a SONAME-renamed `libamd_smi_python.so` directly inside `<site-packages>/amdsmi/`. | `libamd_smi_python.so` next to the wrapper. |
+| Staged in a ROCm tree (ROCm Core SDK package, `rocm-sdk-core` wheel, tarball) | The wrapper at `<root>/share/amd_smi/amdsmi/`, the library at `<root>/lib/`. Nothing is registered with an interpreter, so `import amdsmi` needs `<root>/share/amd_smi` on `sys.path`. | `<root>/lib/libamd_smi.so.<MAJOR>`, by a path relative to the wrapper. |
+| Classic system package (`amd-smi-lib` rpm/deb) | The wrapper installed directly into the system Python's `site-packages` so plain `import amdsmi` works. The shared library lives at `/opt/rocm/lib/libamd_smi.so` and is registered with the dynamic linker via `ldconfig`. | `libamd_smi.so` resolved by the dynamic linker (SONAME). |
+| Wheel built with `-DBUILD_PYTHON_WHEEL=ON` | The wrapper plus a SONAME-renamed `libamd_smi_python.so` directly inside `<site-packages>/amdsmi/`. | `libamd_smi_python.so` next to the wrapper. |
 
-When both are installed, the pip wheel wins because the bundled
-`libamd_smi_python.so` sits next to the wrapper and is loaded before the
-system fallback is consulted. The SONAME split (`libamd_smi.so` vs
-`libamd_smi_python.so`) prevents a single process from double-loading the
-same library.
+When a bundling wheel and a system package are both installed, the wheel
+wins because its `libamd_smi_python.so` sits next to the wrapper and is
+loaded before the system fallback is consulted. The SONAME split
+(`libamd_smi.so` vs `libamd_smi_python.so`) prevents a single process from
+double-loading the same library.
+
+The `amdsmi` wheel currently published on PyPI is not built that way: it
+bundles no library and loads `libamd_smi.so` from the host.
 
 ## Environment variables
 
