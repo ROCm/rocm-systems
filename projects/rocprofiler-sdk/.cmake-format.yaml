@@ -380,7 +380,7 @@ parse:
         PASS_REGEX: '*'
         APP_EXTRA_FLAGS: '*'
         ROCPROFV3_EXTRA_FLAGS: '*'
-    ROCPROFILER_ADD_INVALID_YAML_TEST:
+    rocprofiler_add_invalid_yaml_test:
       kwargs:
         NAME: '*'
         ERROR_REGEX: '*'
