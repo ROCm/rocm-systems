@@ -930,12 +930,6 @@ configure(bool _setup, std::int64_t _tid)
     return (_signal_types) ? *_signal_types : std::set<int>{};
 }
 
-std::vector<timer_sampling_data>
-parse_timer_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
-
-std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
-
 void
 post_process_perfetto(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
