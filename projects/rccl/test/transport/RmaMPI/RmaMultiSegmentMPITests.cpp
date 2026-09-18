@@ -1292,7 +1292,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, /*size=*/0, 0, recvMh, 1,
                                    /*signalOff=*/kSignalSize, sigMh, 0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "signal offset at the window end must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
