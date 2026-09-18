@@ -39,7 +39,7 @@ Counter collection never runs alone. Every counter collection invocation must pr
 
 Kernel replay controls services by starting and stopping contexts around individual passes. That
 control is only available over contexts the native tool owns, and only over services sharing a
-context with nothing that must stay running. Neither condition holds today.
+context when they need to be managed as a unit.
 
 | Prerequisite | Why kernel replay needs it |
 | --- | --- |
@@ -51,47 +51,46 @@ context with nothing that must stay running. Neither condition holds today.
 
 The SDK owns dispatch repetition, memory restoration, and queue isolation. The tool chooses which
 dispatches to replay, how many passes to request, and which profiling services collect on each pass.
-`rocprofiler-sdk/experimental/kernel_replay.h` defines the experimental public API.
 
 The component diagram shows these responsibilities inside the profiled process. Replay uses the
 ordinary dispatch profiling path for every pass; it is independent of counter collection.
 
 ```mermaid
 flowchart TD
-    App["Application and HIP/HSA runtime"]
-    Tool["Profiling tool<br/>Dispatch selection, pass policy,<br/>service control and results"]
+    App["Application<br/>HIP/HSA runtime"]
+    Tool["Profiling tool<br/>Dispatch selection<br/>Pass policy<br/>Service control<br/>and results"]
 
     subgraph SDK["rocprofiler-sdk · profiled process"]
-        Queue["Queue interception<br/>Eligibility and per-agent isolation"]
-        Replay["Replay callbacks and pass loop"]
-        Tracker["Allocation tracking<br/>HSA allocate/free interception"]
-        Modules["Loaded code objects<br/>Module-variable discovery"]
-        Snapshot["Snapshot manager<br/>Agent memory copied to host"]
-        Services["Dispatch profiling services<br/>and async completion handler"]
+        Queue["Queue interception<br/>Eligibility<br/>Per-agent isolation"]
+        Replay["Replay callbacks<br/>and pass loop"]
+        Tracker["Allocation tracking<br/>HSA allocate/free<br/>interception"]
+        Modules["Loaded code objects<br/>Module-variable<br/>discovery"]
+        Snapshot["Snapshot manager<br/>Agent memory copied<br/>to host"]
+        Services["Dispatch profiling<br/>services<br/>Async completion<br/>handler"]
         Queue --> Replay
         Tracker --> Snapshot
         Modules --> Snapshot
-        Replay -- "capture and restore" --> Snapshot
+        Replay -- "capture<br/>and restore" --> Snapshot
         Replay -- "each pass" --> Services
     end
 
-    GPU["GPU agent and queues"]
-    App -- "dispatch submission" --> Queue
-    App -- "allocation lifecycle" --> Tracker
-    Tool -- "configure and start replay context" --> Replay
-    Replay -- "CONFIG and PASS callbacks" --> Tool
-    Tool -- "pass count, continuation,<br/>local context overrides" --> Replay
-    Services -- "instrumented dispatch" --> GPU
-    GPU -- "completion" --> Services
-    Services -- "counter and trace records" --> Tool
-    Snapshot <-->|"device/host copies"| GPU
+    subgraph GPU["GPU agent"]
+        Queues["Queues"]
+        Memory["Memory"]
+    end
+
+    App -- "dispatch<br/>submission" --> Queue
+    App -- "allocation<br/>lifecycle" --> Tracker
+    Tool <-->|"configure and start<br/>CONFIG/PASS callbacks<br/>pass policy and overrides"| Replay
+    Services <-->|"instrumented dispatch<br/>and completion"| Queues
+    Services -- "counter and<br/>trace records" --> Tool
+    Snapshot <-->|"device/host<br/>copies"| Memory
 ```
 
 #### Registration and activation
 
 The tool configures `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` through
-`rocprofiler_configure_callback_tracing_service` during tool initialization. No separate replay
-counting service is required.
+`rocprofiler_configure_callback_tracing_service` during tool initialization.
 
 | Condition | SDK behavior |
 | --- | --- |
@@ -127,7 +126,7 @@ tool callback stored in `replay_pass_count`; `replay_continue_cb` names the call
 The fixed-count limit is checked before continuation. For *N* passes, `replay_continue_cb` is
 consulted only after passes 0 through *N*−2; `PASS` exit still runs after every pass.
 An indefinite loop consults continuation after every pass and has no overall SDK pass or time limit.
-If the tool never stops it, application completion remains withheld.
+If the tool never stops it, application never exits.
 
 | Payload field | `CONFIG` | `PASS` |
 | --- | --- | --- |
@@ -154,7 +153,7 @@ snapshot-failure field.
 
 Per-pass storage therefore needs both logical dispatch identity and pass index. Other profiling
 services do not automatically receive replay metadata; the tool must associate their records with
-the pass selected at `PASS` enter. Completion handlers may run on a different thread.
+the pass selected at `PASS` enter.
 
 #### Per-pass context control
 
@@ -168,7 +167,7 @@ context start/stop APIs.
 | Local enable | Undoes a prior local disable; cannot promote a globally inactive context. |
 | Called outside `PASS` enter | Returns `ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR`. |
 | Context was not active when the loop began | Returns `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED`. |
-| Loop ends | Discards the thread-local override map. Global context state was never changed. |
+| Loop ends | Discards the thread-local override map. Global context state is never changed. |
 
 #### Replay execution and isolation
 
@@ -239,7 +238,7 @@ sequenceDiagram
 
 Replay runs synchronously on the submitting thread; there is no replay worker. Waiting for the
 profiling handler before `PASS` exit prevents the next pass from reusing signals or buffers still
-in use. It also completes counter delivery before the continuation decision.
+in use.
 
 | Isolation boundary | SDK behavior |
 | --- | --- |
@@ -252,8 +251,13 @@ in use. It also completes counter delivery before the continuation decision.
 #### Memory capture and lifetime
 
 HSA allocation/free interception maintains the live allocation inventory and its owning agents.
+For example, this inventory can contain an input or output array created with `hipMalloc` that
+remains allocated while a dispatch is replayed.
 At capture time, the SDK also enumerates loaded executables for module-scope variables, which do
-not come from the allocation inventory.
+not come from the allocation inventory. Examples include a `__device__` global counter or a
+`__constant__` lookup table compiled into a loaded code object. A kernel can access these examples
+through a pointer or symbol without the underlying storage appearing directly in its launch
+arguments.
 
 | Stage | SDK behavior |
 | --- | --- |
@@ -278,9 +282,6 @@ not come from the allocation inventory.
 | Asynchronous SDMA or HSA copies | Bypass the replay gate and are not fenced by the replay window. |
 | Other processes, ranks, and cross-agent shared state | Not coordinated by the process-local per-agent locks. Collectives and external writes can make replay unsafe. |
 | Host-memory capacity | Requires the captured bytes plus metadata, including module variables. Concurrent replay on different agents can retain multiple snapshots. |
-
-Successful capture does not certify that every allocation a kernel can access was included.
-Repeatability requires supported memory and no external mutation during the replay window.
 
 ## Problem statement
 
