@@ -46,21 +46,12 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
         uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-#if 1 // TODO: does this work like I think it should?
-        if constexpr (__builtin_constant_p(hasSignal) && hasSignal) {
-          // we know at compile time that we have a signal afterwards, so don't ring the doorbell
-          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<false>});
-        } else {
-          // we either don't have a signal or don't know at compile time, so be safe
-          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<true>});
-        }
-#else
+        // GIN API design prevents us from determining at compile-time whether we have a signal
         if (hasSignal) {
           qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<false>});
         } else {
           qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<true>});
         }
-#endif
       }
 
       if (hasSignal) {
@@ -114,21 +105,12 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       // (inline_threshold >= sizeof(T)), so no registered MR is needed.
       static_assert(rocshmem::QueuePair::can_inline<rocshmem::QueuePair::OpCode::RDMA_WRITE>(sizeof(T)),
                     "ncclGin::putValue must inline srcVal into WQE");
-#if 1 // TODO: does this work like I think it should?
-      if constexpr (__builtin_constant_p(hasSignal) && hasSignal) {
-        // we know at compile time that we have a signal afterwards, so don't ring the doorbell
-        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<false>});
-      } else {
-        // we either don't have a signal or don't know at compile time, so be safe
-        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<true>});
-      }
-#else
+      // GIN API design prevents us from determining at compile-time whether we have a signal
       if (hasSignal) {
         qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<false>});
       } else {
         qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<true>});
       }
-#endif
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
