@@ -194,6 +194,18 @@ bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symk
   return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendbuff, recvbuff, agreeAcrossRanks);
 }
 
+// The window-taking twin: rcclSelectXxx hoists the ncclDevrFindWindow lookups
+// and asks this one, so it drives `symEligible` on every path a fixture can
+// reach. Routed through the SAME seam rather than a second hook so one
+// ScopedHook still controls the decision; the windows stand in for the buffers,
+// which no fixture inspects. agreeAcrossRanks is false because the production
+// window overload is the rank-local check (its caller does the agreement).
+bool isSymmetricKernelRequestedWin(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+                                   size_t nElts, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
+  return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendWin, recvWin,
+                                      /*agreeAcrossRanks=*/false);
+}
+
 // rcclAllReduceShouldTakeDdaPath: real body lives in collectives.cc (not
 // linked here), same abort-floor-turned-seam treatment as the rest. Default
 // false: DDA not taken, letting CE-registered/symmetric/plain-kernel run.
