@@ -38,7 +38,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -440,7 +439,7 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
         postcreate,
         libs,
         data,
-        client_id.value_or(std::numeric_limits<uint32_t>::max()),
+        client_id.value_or(rocprofiler::context::invalid_client_idx),
         rocprofiler::internal_threading::creation_notifier_library_seq);
     return ROCPROFILER_STATUS_SUCCESS;
 }

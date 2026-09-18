@@ -46,6 +46,9 @@ typedef enum
 } rocprofiler_attach_queue_phase_t;
 
 typedef void (*rocprof_attach_queue_iterator_t)(hsa_queue_t*, hsa_agent_t, void*);
+// For ROCPROFILER_ATTACH_QUEUE_DESTROYED, agent.handle is zero when the queue
+// predates rocattach's HSA ownership. Consumers must identify such queues by
+// the queue pointer rather than treating the synthetic agent as meaningful.
 typedef void (*rocprofiler_attach_queue_cb_t)(hsa_queue_t*,
                                               hsa_agent_t,
                                               rocprofiler_attach_queue_phase_t,

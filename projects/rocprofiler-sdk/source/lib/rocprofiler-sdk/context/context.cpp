@@ -56,8 +56,6 @@ using reserve_size_t       = common::container::reserve_size;
 using stable_context_vec_t = common::container::stable_vector<std::optional<context>, 8>;
 using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
 
-constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
-
 auto&
 get_contexts_mutex()
 {
