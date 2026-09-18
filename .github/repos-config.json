@@ -64,6 +64,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "hrr",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "rdc",
       "url": "ROCm/rdc",
       "branch": "amd-staging",
@@ -103,6 +112,15 @@
       "name": "rocprofiler",
       "url": "ROCm/rocprofiler",
       "branch": "amd-staging",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocprof-trace-decoder",
+      "url": "ROCm/rocprof-trace-decoder",
+      "branch": "amd-mainline",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": false,
