@@ -9,6 +9,7 @@
 #define NCCL_SHM_H_
 
 #include "comm.h"
+#include "p2p.h" // defines the CUmemFabricHandle compat typedef used in shmCuIpc
 
 struct shmLegacyIpc {
   char shmSuffix[32];
