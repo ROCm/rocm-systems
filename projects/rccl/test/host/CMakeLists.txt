@@ -95,7 +95,6 @@ set(RCCL_MICRO_TEST_SOURCES
   gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
   fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
   fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
-  fakes/gdr_fakes.cc                   # process-wide GDR state used by CPU-accessible allocations
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
