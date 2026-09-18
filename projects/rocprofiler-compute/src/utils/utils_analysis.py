@@ -19,7 +19,12 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.ml_api_trace_errors import PassMarkerMismatchError, UnaccountedKernelError
+from utils.ml_api_trace_errors import (
+    ForwardThreadNotFoundError,
+    PassMarkerMismatchError,
+    UnaccountedKernelError,
+    UncorrelatedForwardIntervalError,
+)
 from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
@@ -86,8 +91,9 @@ class CallTreeNode:
     """A node in the operator call tree.
 
     children is the list of child operator nodes. file_name, line_number,
-    and backend are optional fields copied from a marker row when set.
-    invocation_ids stores marker-start strings for this node.
+    backend, start_timestamp, end_timestamp, t_tid, and f_tid are optional
+    fields copied from a marker row when set. invocation_ids stores
+    marker-start strings for this node.
 
     Inclusive over this node plus all descendants:
       kernel_launches, total_duration_ms, min/max/mean dispatch stats.
@@ -105,6 +111,10 @@ class CallTreeNode:
     file_name: Optional[str] = None
     line_number: Optional[int] = None
     backend: Optional[str] = None
+    start_timestamp: Optional[float] = None
+    end_timestamp: Optional[float] = None
+    t_tid: Optional[str] = None
+    f_tid: Optional[str] = None
 
     @property
     def call_count(self) -> int:
@@ -295,6 +305,15 @@ def _optional_marker_line_number(value: object) -> Optional[int]:
     return int(value)
 
 
+def _optional_pytorch_tid(value: object) -> Optional[str]:
+    if value is None or value == "" or pd.isna(value):
+        return None
+    text = str(value)
+    if text in ("n/a", "0"):
+        return None
+    return text
+
+
 def _sequence_from_cell(value: object) -> list[object]:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return []
@@ -344,6 +363,10 @@ def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
         file_name=_optional_marker_file_name(getattr(row, "File_Name", "")),
         line_number=_optional_marker_line_number(getattr(row, "Line_Number", "")),
         backend=backend,
+        start_timestamp=float(row.Start_Timestamp),
+        end_timestamp=float(row.End_Timestamp),
+        t_tid=_optional_pytorch_tid(getattr(row, "T_Tid", "")),
+        f_tid=_optional_pytorch_tid(getattr(row, "F_Tid", "")),
     )
     node.invocation_ids.add(str(row.Start_Timestamp))
     return node
@@ -374,6 +397,109 @@ def nest_marker_intervals(
             rollup_node_stats(root)
         forest[str(thread_id)] = roots
     return forest
+
+
+def _forward_tid_from_tree(node: CallTreeNode) -> Optional[str]:
+    if node.f_tid is not None:
+        return node.f_tid
+    for child in node.children:
+        found = _forward_tid_from_tree(child)
+        if found is not None:
+            return found
+    return None
+
+
+def _tree_has_t_tid(node: CallTreeNode, pytorch_tid: str) -> bool:
+    if node.t_tid == pytorch_tid:
+        return True
+    return any(_tree_has_t_tid(child, pytorch_tid) for child in node.children)
+
+
+def _thread_ids_with_pytorch_tid(
+    forest: dict[str, list[CallTreeNode]], pytorch_tid: str
+) -> list[str]:
+    return [
+        thread_id
+        for thread_id, roots in forest.items()
+        if any(_tree_has_t_tid(root, pytorch_tid) for root in roots)
+    ]
+
+
+def _interval_contains(node: CallTreeNode, start: float, end: float) -> bool:
+    if node.start_timestamp is None or node.end_timestamp is None:
+        return False
+    return node.start_timestamp <= start and end <= node.end_timestamp
+
+
+def _deepest_containing_node(
+    nodes: list[CallTreeNode], start: float, end: float
+) -> Optional[CallTreeNode]:
+    for node in nodes:
+        if not _interval_contains(node, start, end):
+            continue
+        nested = _deepest_containing_node(node.children, start, end)
+        return nested if nested is not None else node
+    return None
+
+
+def attach_unlocated_trees_by_forward_thread(
+    forest: dict[str, list[CallTreeNode]],
+) -> None:
+    """Stack torch/triton trees with no source onto the matching forward thread."""
+    pending: list[tuple[str, CallTreeNode]] = []
+    for thread_id, roots in forest.items():
+        for root in roots:
+            if root.file_name is not None:
+                continue
+            if root.backend not in KNOWN_ML_API_BACKENDS:
+                continue
+            pending.append((thread_id, root))
+    for thread_id, root in pending:
+        start = float(root.start_timestamp or 0.0)
+        end = float(root.end_timestamp or 0.0)
+        f_tid = _forward_tid_from_tree(root)
+        f_tid_text = f_tid if f_tid is not None else "n/a"
+        matches = (
+            _thread_ids_with_pytorch_tid(forest, f_tid) if f_tid is not None else []
+        )
+        if f_tid is None or len(matches) != 1:
+            console_error(
+                "analysis",
+                str(
+                    ForwardThreadNotFoundError(
+                        operator_name=root.name,
+                        thread_id=thread_id,
+                        start_timestamp=start,
+                        f_tid=f_tid_text,
+                    )
+                ),
+            )
+            continue
+        forward_thread_id = matches[0]
+        dest_roots = [node for node in forest[forward_thread_id] if node is not root]
+        parent = _deepest_containing_node(dest_roots, start, end)
+        if parent is None:
+            console_error(
+                "analysis",
+                str(
+                    UncorrelatedForwardIntervalError(
+                        operator_name=root.name,
+                        thread_id=thread_id,
+                        start_timestamp=start,
+                        end_timestamp=end,
+                        f_tid=f_tid_text,
+                        forward_thread_id=forward_thread_id,
+                    )
+                ),
+            )
+            continue
+        parent.children.append(root)
+        forest[thread_id] = [node for node in forest[thread_id] if node is not root]
+    for thread_id in [tid for tid, roots in forest.items() if not roots]:
+        del forest[thread_id]
+    for roots in forest.values():
+        for node in roots:
+            rollup_node_stats(node)
 
 
 def build_operator_summary(
@@ -871,6 +997,7 @@ def process_ml_api_trace_output(
         ])
     )
     workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df)
+    attach_unlocated_trees_by_forward_thread(workload.ml_api_call_trees)
 
 
 def validate_workload(path: str) -> None:
