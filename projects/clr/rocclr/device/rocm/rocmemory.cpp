@@ -1274,8 +1274,15 @@ bool Buffer::ExportHandle(void* handle) const {
 }
 
 // ================================================================================================
-bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
-                               unsigned long long flags) {
+static amd::HandleExportResult MapHsaExportError(hsa_status_t status) {
+  return (status == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+      ? amd::HandleExportResult::kNotSupported
+      : amd::HandleExportResult::kError;
+}
+
+// ================================================================================================
+amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm,
+                                                  void* handle, unsigned long long flags) {
   int dmabuffd = -1;
   size_t offset = 0;
 
@@ -1293,7 +1300,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError("Cannot retain alloc handle for dev_ptr: 0x%x hsa returned status: %d",
                      dev_ptr, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
 
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
@@ -1308,7 +1315,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
                      mem_handle, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
     if (release_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
@@ -1319,7 +1326,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
 #if !IS_WINDOWS
       close(dmabuffd);
 #endif
-      return false;
+      return amd::HandleExportResult::kError;
     }
   } else {
     // Retrieve a shareable handle for the device ptr.
@@ -1330,17 +1337,17 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
           "Cannot export a portable fd for dev_ptr: 0x%x with size: %lu,"
           "hsa returned status: %d",
           dev_ptr, size, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
   }
   if (dmabuffd <= 0) {
     LogPrintfError("Invalid file descriptor handle: %d returned", dmabuffd);
-    return false;
+    return amd::HandleExportResult::kError;
   }
 
   // As per spec, handle passed through HIP API is ptr to int.
   *(reinterpret_cast<int*>(handle)) = dmabuffd;
-  return true;
+  return amd::HandleExportResult::kSuccess;
 }
 
 // ======================================= roc::Image =============================================
