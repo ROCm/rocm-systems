@@ -1,0 +1,90 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: RCCL cluster runner allowlist
+
+# Cluster scale runners may only appear in workflows listed in
+# .github/scripts/allowlist/cluster-runners.allowlist.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/allowlist/cluster-runners.allowlist'
+      - '.github/scripts/check_rccl_cluster_runner_allowlist.py'
+      - '.github/scripts/rccl_detect_coco_changes.py'
+      - '.github/scripts/ci_utils.py'
+      - '.github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py'
+      - '.github/scripts/tests/rccl_detect_coco_changes_test.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs PR-authored scripts, so it holds no write scope. Requesting the review
+  # needs pull-requests: write and is a separate job for that reason.
+  allowlist:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      new_runner_lines: ${{ steps.check.outputs.new_runner_lines }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # The commit checked out for a PR is the merge commit, whose first
+          # parent is the tip of the base branch, so the diff needs two
+          # commits and no more.
+          fetch-depth: 2
+
+      # Stdlib unittest, so these need no dependency install.
+      - name: Test the RCCL CI scripts
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py
+          python3 .github/scripts/tests/rccl_detect_coco_changes_test.py
+
+      - name: Check RCCL cluster runner allowlist
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -o pipefail
+          args=()
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            args+=(--base HEAD^ --head HEAD)
+          fi
+          python3 .github/scripts/check_rccl_cluster_runner_allowlist.py "${args[@]}"
+
+  # always(): the guard above exits non-zero on disallowed usage, and that is
+  # exactly when the review is wanted. Step outputs are published regardless.
+  request-review:
+    needs: allowlist
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.allowlist.outputs.new_runner_lines == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Request rccl-ci review for new cluster runner usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if gh api \
+            --method POST \
+            "repos/${REPO}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -f "team_reviewers[]=rccl-ci" 2>/tmp/reviewer_err; then
+            echo "Requested review from @ROCm/rccl-ci."
+          else
+            # Already requested, or fork PR with a read-only token.
+            cat /tmp/reviewer_err >&2 || true
+          fi

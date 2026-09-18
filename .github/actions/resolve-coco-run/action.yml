@@ -1,0 +1,175 @@
+name: 'Resolve coco run parameters'
+description: >-
+  Check out the coco harness at the requested ref and resolve which coco run
+  this trigger maps to: pr/nightly/weekly/monthly mode, trigger_kind, the
+  pinned harness commit, and the coco CLI flags to pass.
+
+inputs:
+  coco_ref:
+    description: 'ROCm/tRCCL ref for the coco harness.'
+    required: false
+    default: 'main'
+  dry_run:
+    description: 'Resolve stacks and submissions without building or running anything.'
+    required: false
+    default: 'false'
+  periodic_mode:
+    description: 'Which periodic run to drive by hand (workflow_dispatch without pr_number). Ignored otherwise.'
+    required: false
+    default: 'nightly'
+  schedule:
+    description: 'The cron expression that fired, from github.event.schedule. Required on a schedule event.'
+    required: false
+    default: ''
+  pr_number:
+    description: 'Pull request number. Set to test a PR head; leave unset for a periodic run.'
+    required: false
+    default: ''
+  pr_sha:
+    description: 'Full 40-hex PR head SHA. Required when pr_number is set.'
+    required: false
+    default: ''
+  pr_repo:
+    description: 'Monorepo slug. Required when pr_number is set.'
+    required: false
+    default: ''
+  client-id:
+    description: 'GitHub App client ID used to mint the harness checkout token.'
+    required: true
+  app-private-key:
+    description: 'Private key for client-id.'
+    required: true
+
+outputs:
+  mode:
+    description: 'pr | nightly | weekly | monthly'
+    value: ${{ steps.resolve.outputs.mode }}
+  coco_ref:
+    description: 'Resolved commit SHA of the checked-out coco harness.'
+    value: ${{ steps.resolve.outputs.coco_ref }}
+  coco_args:
+    description: 'Additional coco CLI flags for this run.'
+    value: ${{ steps.resolve.outputs.coco_args }}
+  trigger_kind:
+    description: 'coco --trigger-kind for this run.'
+    value: ${{ steps.resolve.outputs.trigger_kind }}
+  pr_number:
+    description: 'Pull request number under test, empty for a periodic run.'
+    value: ${{ steps.resolve.outputs.pr_number }}
+  pr_sha:
+    description: 'PR head SHA under test, empty for a periodic run.'
+    value: ${{ steps.resolve.outputs.pr_sha }}
+  pr_repo:
+    description: 'Repository slug the PR belongs to, empty for a periodic run.'
+    value: ${{ steps.resolve.outputs.pr_repo }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout the coco harness
+      uses: ./.github/actions/checkout-coco-harness
+      with:
+        ref: ${{ inputs.coco_ref }}
+        path: _coco
+        client-id: ${{ inputs.client-id }}
+        app-private-key: ${{ inputs.app-private-key }}
+
+    - name: Resolve run parameters
+      id: resolve
+      shell: bash
+      working-directory: _coco
+      env:
+        DRY_RUN: ${{ inputs.dry_run }}
+        PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
+        PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
+        PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
+        EVENT_NAME: ${{ github.event_name }}
+        PERIODIC_MODE: ${{ inputs.periodic_mode }}
+        SCHEDULE: ${{ inputs.schedule }}
+      run: |
+        set -euo pipefail
+        # The trend queries select on `scheduled` vs `manual`, so a hand-driven
+        # catch-up run must not be recorded as that cron's data point.
+        if [[ -n "${PR_NUMBER}" ]]; then
+          mode=pr
+          trigger_kind=ci
+        elif [[ "${EVENT_NAME}" == "schedule" ]]; then
+          trigger_kind=scheduled
+          # Which cron fired, not the wall clock: GitHub delays scheduled runs
+          # routinely, and a Saturday run that starts after midnight reads as
+          # Sunday and would record the weekly sweep as that night's nightly.
+          # These must stay in step with the cron entries in rccl-coco.yml.
+          case "${SCHEDULE}" in
+            '47 3 * * 1-5')
+              mode=nightly
+              ;;
+            '47 3 * * 6')
+              # Saturday drives both weekly and monthly; cron has no nth-weekday
+              # syntax, so "3rd Saturday" is a day-of-month check instead.
+              day_of_month="$(date -u +%-d)"
+              if (( day_of_month >= 15 && day_of_month <= 21 )); then
+                mode=monthly
+              else
+                mode=weekly
+              fi
+              ;;
+            *)
+              echo "::error::Unrecognised schedule '${SCHEDULE}'. Add it here alongside the cron entry in rccl-coco.yml."
+              exit 1
+              ;;
+          esac
+        else
+          mode="${PERIODIC_MODE}"
+          trigger_kind=manual
+        fi
+
+        # An unrecognised mode matches no fan-out job, so the run would report
+        # success having done nothing. A caller's `type: choice` constrains
+        # only its own dispatch input, not this value.
+        case "${mode}" in
+          pr|nightly|weekly|monthly) ;;
+          *)
+            echo "::error::Unknown mode '${mode}'; expected pr, nightly, weekly or monthly."
+            exit 1
+            ;;
+        esac
+
+        # Every fan-out job re-clones the harness independently; passing an
+        # unresolved ref would let them land on different commits if the ref
+        # moves mid-run.
+        coco_sha="$(git rev-parse HEAD)"
+
+        # -vv because the only record of a failed unattended run is this log.
+        # --skip-failed-builds so one stack failing to build doesn't cost the
+        # others their data point.
+        args='-vv --skip-failed-builds'
+        if [[ "${mode}" == "pr" ]]; then
+          # --prune-build must NOT be added here: the two halves of a PR gate
+          # share one directory, and prune deletes every build tree the running
+          # job's own stacks do not reference -- from smoke's side, the debug
+          # and backtrace stacks build just produced.
+          args="${args} --skip-baselines"
+        else
+          # Periodic runs reuse a persistent stage_dir, so old build and src
+          # trees have to be swept or they grow without bound.
+          args="${args} --prune-build"
+        fi
+        if [[ "${DRY_RUN}" == "true" ]]; then
+          args="${args} --dry-run"
+        fi
+        {
+          echo "mode=${mode}"
+          echo "trigger_kind=${trigger_kind}"
+          echo "coco_ref=${coco_sha}"
+          echo "coco_args=${args}"
+          echo "pr_number=${PR_NUMBER}"
+          echo "pr_sha=${PR_SHA}"
+          echo "pr_repo=${PR_REPO}"
+        } >> "${GITHUB_OUTPUT}"
+
+    # Harmless on an ephemeral runner, required on a self-hosted one, whose
+    # workspace survives between runs.
+    - name: Clean up harness checkout
+      if: always()
+      shell: bash
+      run: rm -rf _coco
