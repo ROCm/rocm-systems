@@ -613,7 +613,7 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
            update_mode _mode, std::string_view _join_delim, UpdatedEnvsT& _updated_envs,
            const std::unordered_set<std::string>& _original_envs)
 {
-    using updated_value_t = typename UpdatedEnvsT::value_type;
+    using updated_value_t = UpdatedEnvsT::value_type;
     _updated_envs.emplace(updated_value_t{ _env_var });
 
     const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
