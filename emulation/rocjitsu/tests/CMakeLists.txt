@@ -454,6 +454,9 @@ add_executable(
     lds_test.cpp
     l2_cache_test.cpp
     instruction_cache_test.cpp
+    async_mma_policy_test.cpp
+    matrix_coexecution_test.cpp
+    matrix_coexecution_lifetime_test.cpp
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
