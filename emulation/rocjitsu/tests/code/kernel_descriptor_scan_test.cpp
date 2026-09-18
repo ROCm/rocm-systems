@@ -244,4 +244,36 @@ TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
 }
 
 } // namespace
+
+// The dense system-SGPR block following the user block. DBT uses it as the range
+// to repair when it inserts a kernarg pointer; DBI as a floor for framework
+// storage. Distinct values per field so a dropped or double-counted term shows.
+TEST(KernelDescriptorScan, InitialSgprCountFoldsTheSystemBlockOntoTheUserBlock) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+
+  KD none{};
+  set_kernel_descriptor_user_sgpr_count(kArch, none, 6);
+  EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, none), 6u);
+
+  KD ids = none;
+  AMDHSA_BITS_SET(ids.compute_pgm_rsrc2,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  AMDHSA_BITS_SET(ids.compute_pgm_rsrc2,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+  EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, ids), 8u);
+
+  // WORKGROUP_INFO follows the enabled dimensions and is the term the DBI copy
+  // of this walk was missing before it was shared.
+  KD info = ids;
+  AMDHSA_BITS_SET(info.compute_pgm_rsrc2,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+  EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, info), 9u);
+
+  // ENABLE_PRIVATE_SEGMENT is deliberately excluded.
+  KD priv = info;
+  AMDHSA_BITS_SET(priv.compute_pgm_rsrc2,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
+  EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, priv), 9u);
+}
+
 } // namespace rocjitsu

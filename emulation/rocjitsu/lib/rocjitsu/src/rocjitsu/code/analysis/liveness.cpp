@@ -160,6 +160,36 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
+namespace {
+
+void raise_sgpr_bound_for_operand(uint32_t &bound, const Operand *operand) {
+  if (operand == nullptr)
+    return;
+  const auto ref = operand->to_register_ref();
+  if (!ref || ref->cls != RegClass::SGPR)
+    return;
+  if (ref->index >= REGISTER_SET_ALLOCATABLE_SGPRS)
+    return;
+  bound = std::max<uint32_t>(bound, static_cast<uint32_t>(ref->index) + ref->width);
+}
+
+} // namespace
+
+uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks) {
+  uint32_t bound = 0;
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      for (int i = 0; i < inst.num_src_operands(); ++i)
+        raise_sgpr_bound_for_operand(bound, inst.src_operand(i));
+      for (int i = 0; i < inst.num_dst_operands(); ++i)
+        raise_sgpr_bound_for_operand(bound, inst.dst_operand(i));
+    }
+  }
+  return bound;
+}
+
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec,
                                    LivenessAnalysisOptions options,
                                    std::span<const ScopedCfgEdge> extra_edges) {

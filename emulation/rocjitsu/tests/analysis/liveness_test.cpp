@@ -6753,5 +6753,109 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
   EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
 }
 
+// explicit_ordinary_sgpr_bound is the cheap whole-scope scan shared by DBT's
+// virtual-LDS reservation and DBI's entry-prologue storage selection. It answers
+// only "how far up the scalar file does this kernel reach", with no dataflow.
+
+// A scope with no scalar operands leaves a caller free to place storage at s0.
+TEST(ExplicitOrdinarySgprBound, ReportsZeroForAScopeNamingNoScalars) {
+  std::vector<uint32_t> words = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 0u);
+}
+
+// The bound is one past the highest index, and an operand's width counts: the
+// pair write ends at s22 even though its base is lower than the single write.
+TEST(ExplicitOrdinarySgprBound, CountsOperandWidthNotJustTheBase) {
+  std::vector<uint32_t> words = {
+      build_s_mov_b32(/*sdst=*/8, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_CDNA4),
+      cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 128, .sdst = 20})[0],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 22u);
+}
+
+// RDNA exposes 106 ordinary SGPRs against CDNA's 102, and both consumers bound
+// selection by the cross-family minimum. An operand above that bound must not
+// push the result out of reach of every caller.
+TEST(ExplicitOrdinarySgprBound, IgnoresIndicesPastTheAllocatableMaximum) {
+  std::vector<uint32_t> words = {
+      build_s_mov_b32(/*sdst=*/104, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(/*sdst=*/12, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 13u);
+}
+
+// s_and_saveexec_b64 s[0:1], s[0:1] names one pair twice and additionally
+// touches EXEC and SCC. Those are special classes, so they cannot raise the
+// bound; a scan that folded in implicit operands would still have to filter
+// them out by class.
+TEST(ExplicitOrdinarySgprBound, SpecialRegisterEffectsDoNotRaiseTheBound) {
+  std::vector<uint32_t> words = {
+      0xBE802000u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 2u);
+}
+
+// FLAT/GLOBAL saddr appears in both the explicit operand list and
+// Flat::implicit_uses. The explicit-only scan must still see it, or a caller
+// placing storage above the bound would take a pair the kernel is addressing
+// memory through.
+TEST(ExplicitOrdinarySgprBound, SeesAnSgprThatIsAlsoAnImplicitUse) {
+  // global_load_dwordx2 v[0:1], v[2:3], s[10:11]
+  std::vector<uint32_t> words = {
+      0xDC548000u,
+      0x000A0002u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(blocks.empty());
+
+  std::vector<BasicBlock *> scope;
+  for (const auto &b : blocks)
+    scope.push_back(b.get());
+  EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope)), 12u);
+}
+
 } // namespace
 } // namespace rocjitsu

@@ -253,27 +253,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return -1;
 }
 
-[[nodiscard]] uint32_t source_initial_sgpr_count(const KD &desc, rj_code_arch_t arch) {
-  // USER_SGPR_COUNT covers only the user block. Enabled workgroup IDs and
-  // WORKGROUP_INFO are dense system SGPRs that follow it and must move when a
-  // kernarg pointer is inserted into that user block.
-  uint32_t sgprs = user_sgpr_count(desc, arch);
-  const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
-    ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
-    ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-    ++sgprs;
-  if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
-    ++sgprs;
-  // Virtual-LDS translation currently has a gfx950 source. On gfx950 (and its
-  // gfx942 target), ENABLE_PRIVATE_SEGMENT initializes architected FLAT_SCRATCH
-  // special registers rather than appending an ordinary system SGPR, so it is
-  // deliberately absent from this repair range.
-  return sgprs;
-}
-
 [[nodiscard]] bool uses_gfx90a_accum_offset(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
          arch == ROCJITSU_CODE_ARCH_CDNA4;
@@ -737,7 +716,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
         result.has_kernarg_segment_ptr = true;
         result.kernarg_segment_ptr_sgpr = inserted_slot;
         result.target_user_sgpr_count = result.source_user_sgpr_count + 2u;
-        const uint32_t source_initial_sgprs = source_initial_sgpr_count(src, guest_arch);
+        const uint32_t source_initial_sgprs = kernel_descriptor_initial_sgpr_count(guest_arch, src);
         if (source_initial_sgprs > inserted_slot) {
           const uint32_t repair_count = source_initial_sgprs - inserted_slot;
           if (repair_count > std::numeric_limits<uint16_t>::max()) {

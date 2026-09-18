@@ -243,6 +243,20 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
                   user_sgpr_count);
 }
 
+uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+  uint32_t sgprs = kernel_descriptor_user_sgpr_count(arch, desc);
+  const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    ++sgprs;
+  return sgprs;
+}
+
 bool has_kernarg_segment_ptr(const KD &desc) {
   return AMDHSA_BITS_GET(
              desc.kernel_code_properties,

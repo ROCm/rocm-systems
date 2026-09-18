@@ -154,6 +154,20 @@ struct LivenessAnalysisOptions {
 /// walking into other decoded code.
 [[nodiscard]] std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
 
+/// @brief One past the highest ordinary SGPR named by an explicit operand in
+///        @p blocks, counting operand width, or 0 if the scope names none.
+///
+/// @details An allocation floor for callers placing new scalar storage, computed
+/// without dataflow or a LivenessAnalysis instance. Implicit operands are
+/// excluded: an ordinary SGPR reached implicitly is also named explicitly
+/// (FLAT/GLOBAL `saddr` is both), so only special state would come in, which is
+/// not allocatable. Indices at or past REGISTER_SET_ALLOCATABLE_SGPRS are
+/// excluded as unreachable by any caller bound.
+///
+/// A partial scope understates the result and the gap it reports may hold
+/// registers the kernel is using.
+[[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks);
+
 /// @brief Kernel-global register usage plus deferred backward CFG liveness.
 ///
 /// @details Construction eagerly resolves gfx1250 VGPR banks and scans global
