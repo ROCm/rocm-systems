@@ -1713,7 +1713,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
   const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegForce = force && !symEligible && ceRegInWindow;
-  const bool ceStagedUnregistered = force && ceAllReduceAllowed;
+  // FORCE unregistered CE copies through ceARTmpBuf. Cap this arm on the staging
+  // size so a larger message stays on the kernel path instead of selecting CE and failing.
+  const bool ceStagedUnregistered =
+    force && ceAllReduceAllowed && (msgBytes <= ncclCeAllReduceStagingBufBytes(comm->nRanks));
   if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
