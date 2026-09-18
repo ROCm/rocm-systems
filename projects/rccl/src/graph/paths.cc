@@ -1353,12 +1353,6 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
 
   // comm->p2pnChannelsPerPeer was set by ncclTopoComputeP2pChannelsPerPeer().
   int minChannels = comm->p2pnChannelsPerPeer;
-  // On AINIC a single NIC already saturates the GPU's host path, but we need two communicators to utilise it completely
-  // depending on scale/p2pnChannels values rise minimal number of net-p2p-channels
-  if (rcclUseAinic() && comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
-    int nChannelsMax = (2 * comm->nRanks > comm->p2pnChannels) ? 1 : 2;
-    minChannels = std::min(minChannels, std::max(comm->minNetCount, nChannelsMax));
-  }
   const bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 
   int arch, vendor, model;
@@ -1454,6 +1448,14 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
            comm->p2pnChannelsPerPeer > 1)
       comm->p2pnChannelsPerPeer /= 2;
+    if (rcclUseAinic()) {
+      // A single AINIC NIC is only saturated by two net-p2p channels per peer.
+      // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
+      bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
+      int nChannelsMax = atScale ? 1 : 2;
+      comm->p2pnChannelsPerPeer = std::max(
+        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+    }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }

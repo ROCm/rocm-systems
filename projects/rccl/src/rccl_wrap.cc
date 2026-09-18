@@ -54,6 +54,7 @@ RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
+constexpr int AinicMaxDirectAGScale = 8;
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", -1);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
@@ -741,13 +742,12 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
 }
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
-  // RCCL_DIRECT_ALLGATHER_DISABLE: negative selects the automatic policy,
-  // 0 forces the algorithm on, any other value - forces it off.
-  static const int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
+  // Check if user explicitly disabled direct AllGather
+  static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
   if (userDirectAllGatherInput < 0) {
     // DIRECT ALLGATHER disabled on AINIC by default on scale >8 nodes, and enabled otherwise.
-    if (rcclUseAinic() && (comm->nNodes > 8)) {
-      INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC by default for 8+ nodes. ");
+    if (rcclUseAinic() && (comm->nNodes > AinicMaxDirectAGScale)) {
+      INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC by default for %d+ nodes. ", AinicMaxDirectAGScale);
       return false;
     }
   } else if (userDirectAllGatherInput != 0) {
