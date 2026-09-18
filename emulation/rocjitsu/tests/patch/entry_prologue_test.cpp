@@ -4,6 +4,7 @@
 #include "decode_test_util.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
@@ -13,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -81,6 +83,28 @@ private:
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::vector<BasicBlock *> scope_;
 };
+
+/// A descriptor that enables the kernarg segment pointer, placing it at s[0:1]
+/// when no earlier user-SGPR property is set.
+[[nodiscard]] KD kernarg_descriptor(uint32_t kernarg_size = 0) {
+  KD desc{};
+  set_kernel_descriptor_user_sgpr_count(kArch, desc, 2);
+  AMDHSA_BITS_SET(desc.kernel_code_properties,
+                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  desc.kernarg_size = kernarg_size;
+  return desc;
+}
+
+/// A descriptor whose kernarg pointer follows an earlier user-SGPR property, so
+/// the pair lands above s[0:1].
+[[nodiscard]] KD kernarg_descriptor_at_slot(uint16_t expected_slot) {
+  KD desc = kernarg_descriptor();
+  AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                  1);
+  set_kernel_descriptor_user_sgpr_count(kArch, desc, 4);
+  EXPECT_EQ(kernarg_segment_ptr_sgpr(desc).value_or(0xFFFF), expected_slot);
+  return desc;
+}
 
 [[nodiscard]] KD descriptor(uint32_t user_sgpr_count, bool workgroup_id_x = false,
                             bool workgroup_id_y = false, bool workgroup_id_z = false) {
@@ -204,6 +228,155 @@ TEST(PlanDbiEntryStorage, ClampsTheBoundToTheAllocatableSgprMaximum) {
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
                              /*kernel_sgpr_count=*/256, link_pair(), &error);
   EXPECT_FALSE(storage.has_value());
+  EXPECT_FALSE(error.empty());
+}
+
+// The prologue is two loads through the kernarg pair, one wait, then the two
+// moves that restore the guest's pointer over it. Asserted against the same
+// builders rather than against hand-computed words, so this pins the order and
+// the operands; smem_builder_test pins the encodings.
+TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
+  const KD desc = kernarg_descriptor(/*kernarg_size=*/16);
+  constexpr DbiEntryStorage kStorage{.persistent_base = 26, .entry_temp_base = 28};
+
+  std::string error;
+  const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
+  ASSERT_TRUE(prologue.has_value()) << error;
+
+  const auto payload =
+      build_s_load_dwordx2(kStorage.persistent_base, 0, prologue->payload_byte_offset, kArch);
+  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, 0,
+                                             prologue->original_kernarg_pointer_offset, kArch);
+  const std::vector<uint32_t> expected{
+      payload[0],
+      payload[1],
+      original[0],
+      original[1],
+      build_wait_scalar_loads_complete(kArch),
+      build_s_mov_b32(0, kStorage.entry_temp_base, kArch),
+      build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
+  };
+  EXPECT_EQ(prologue->words, expected);
+}
+
+// The two offsets must differ, and the payload must sit past the copied kernarg
+// prefix. Equal offsets would load the same pointer twice and leave the payload
+// unread; a payload inside the prefix would alias a guest kernarg.
+TEST(BuildDbiEntryPrologue, PlacesThePayloadPastTheCopiedKernargPrefix) {
+  constexpr uint32_t kKernargSize = 24;
+  const auto prologue = build_dbi_entry_prologue(kernarg_descriptor(kKernargSize), kArch,
+                                                 {.persistent_base = 26, .entry_temp_base = 28});
+  ASSERT_TRUE(prologue.has_value());
+  EXPECT_GE(prologue->original_kernarg_pointer_offset, kKernargSize);
+  EXPECT_GT(prologue->payload_byte_offset, prologue->original_kernarg_pointer_offset);
+  EXPECT_EQ(prologue->payload_byte_offset % kDbiEntryPayloadLayout.alignment, 0u);
+}
+
+// The offsets the caller gets back are the ones encoded in the loads. 1c
+// re-derives the layout and checks it against these, which is only a check if
+// they came from the words rather than from a second call to the same helper.
+TEST(BuildDbiEntryPrologue, ReportsTheOffsetsItEncoded) {
+  const auto prologue = build_dbi_entry_prologue(kernarg_descriptor(/*kernarg_size=*/16), kArch,
+                                                 {.persistent_base = 26, .entry_temp_base = 28});
+  ASSERT_TRUE(prologue.has_value());
+  ASSERT_GE(prologue->words.size(), 4u);
+
+  auto decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  const auto offset_of = [&](size_t word_index) {
+    std::array<rj_code_binary_inst_t, 2> words{prologue->words[word_index],
+                                               prologue->words[word_index + 1]};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    EXPECT_NE(inst, nullptr);
+    return inst == nullptr ? -1 : inst->src_operand(1)->encoding_value();
+  };
+  EXPECT_EQ(offset_of(0), static_cast<int>(prologue->payload_byte_offset));
+  EXPECT_EQ(offset_of(2), static_cast<int>(prologue->original_kernarg_pointer_offset));
+}
+
+TEST(BuildDbiEntryPrologue, FailsClosedWithoutAKernargSegmentPointer) {
+  std::string error;
+  const auto prologue =
+      build_dbi_entry_prologue(descriptor(/*user_sgpr_count=*/0), kArch,
+                               {.persistent_base = 26, .entry_temp_base = 28}, &error);
+  EXPECT_FALSE(prologue.has_value());
+  EXPECT_FALSE(error.empty());
+}
+
+// A value-initialized DbiEntryStorage names s[0:1] twice. Without a
+// pairs-against-each-other check the second load overwrites the payload pointer
+// with the guest's and the prologue is emitted with no diagnostic.
+TEST(BuildDbiEntryPrologue, FailsClosedOnStoragePairsThatAreNotOneRun) {
+  const KD desc = kernarg_descriptor();
+  std::string error;
+  EXPECT_FALSE(build_dbi_entry_prologue(desc, kArch, DbiEntryStorage{}, &error).has_value());
+  EXPECT_FALSE(error.empty());
+
+  // Same pair named twice, clear of the kernarg pair, so only the run check can
+  // reject it.
+  EXPECT_FALSE(build_dbi_entry_prologue(desc, kArch, {.persistent_base = 26, .entry_temp_base = 26})
+                   .has_value());
+  // Right registers, wrong order.
+  EXPECT_FALSE(build_dbi_entry_prologue(desc, kArch, {.persistent_base = 28, .entry_temp_base = 26})
+                   .has_value());
+  // Contiguous but not adjacent.
+  EXPECT_FALSE(build_dbi_entry_prologue(desc, kArch, {.persistent_base = 26, .entry_temp_base = 30})
+                   .has_value());
+}
+
+// Storage overlapping the kernarg pair would have the restore overwrite the
+// payload pointer, or a load corrupt its own address.
+TEST(BuildDbiEntryPrologue, FailsClosedOnStorageOverlappingTheKernargPair) {
+  std::string error;
+  // s[0:3] covers the kernarg pair at s[0:1] with its persistent half.
+  EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(), kArch,
+                                        {.persistent_base = 0, .entry_temp_base = 2}, &error)
+                   .has_value());
+  EXPECT_FALSE(error.empty());
+  // A kernarg pair inside the run's temp half is equally fatal, and is what a
+  // per-pair check on the persistent half alone would miss.
+  EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor_at_slot(2), kArch,
+                                        {.persistent_base = 0, .entry_temp_base = 2})
+                   .has_value());
+}
+
+// Neither of these rejections is reachable from plan_dbi_entry_storage, which
+// bounds both. They guard the hand-built path.
+TEST(BuildDbiEntryPrologue, FailsClosedOnStoragePastTheSbaseField) {
+  std::string error;
+  EXPECT_FALSE(build_dbi_entry_prologue(
+                   kernarg_descriptor(), kArch,
+                   {.persistent_base = kMaxSmemSbase + 2, .entry_temp_base = kMaxSmemSbase + 4},
+                   &error)
+                   .has_value());
+  EXPECT_FALSE(error.empty());
+}
+
+TEST(BuildDbiEntryPrologue, FailsClosedOnAKernargSizeThatOverflowsTheWrapper) {
+  std::string error;
+  EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(0xFFFFFFF8u), kArch,
+                                        {.persistent_base = 26, .entry_temp_base = 28}, &error)
+                   .has_value());
+  EXPECT_FALSE(error.empty());
+}
+
+TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
+  std::string error;
+  EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(), kArch,
+                                        {.persistent_base = 27, .entry_temp_base = 29}, &error)
+                   .has_value());
+  EXPECT_FALSE(error.empty());
+}
+
+// A kernel with more kernarg bytes than the SMEM immediate can reach pushes the
+// payload out of range. The field is signed, so the limit is one bit below the
+// field width.
+TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
+  std::string error;
+  const auto prologue =
+      build_dbi_entry_prologue(kernarg_descriptor(max_smem_byte_offset(kArch)), kArch,
+                               {.persistent_base = 26, .entry_temp_base = 28}, &error);
+  EXPECT_FALSE(prologue.has_value());
   EXPECT_FALSE(error.empty());
 }
 

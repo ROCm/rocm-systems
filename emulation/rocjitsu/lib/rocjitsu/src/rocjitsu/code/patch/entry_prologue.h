@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 /// @file entry_prologue.h
-/// @brief Framework-reserved SGPR storage for the DBI kernel-entry prologue.
+/// @brief The DBI kernel-entry prologue: reserved SGPR storage and its words.
 
 #pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
 RJ_DIAGNOSTIC_PUSH
@@ -18,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -63,5 +65,44 @@ struct DbiEntryStorage {
 plan_dbi_entry_storage(KernelBlockScope blocks, const rocr::llvm::amdhsa::kernel_descriptor_t &desc,
                        rj_code_arch_t arch, uint32_t kernel_sgpr_count, const RegisterSet &reserved,
                        std::string *error_out = nullptr);
+
+/// @brief The one payload DBI appends to a kernel's kernarg wrapper: a 64-bit
+///        pointer the prologue loads into its persistent pair.
+inline constexpr KernargExtensionPayloadLayout kDbiEntryPayloadLayout{.size = 8, .alignment = 8};
+
+/// @brief Prologue words plus the wrapper offsets they encode.
+///
+/// @details The offsets are returned rather than recomputed by consumers because
+/// they are baked into @ref words as immediates. The producer of the
+/// `.rocjitsu.kernarg` record and this prologue must agree, and re-deriving the
+/// layout at the other end is only a check if there is something to check against.
+struct DbiEntryPrologue {
+  std::vector<uint32_t> words;
+  uint32_t payload_byte_offset = 0;             ///< Wrapper offset of the DBI payload.
+  uint32_t original_kernarg_pointer_offset = 0; ///< Wrapper offset of the guest's pointer.
+};
+
+/// @brief Build the words that run before the kernel's first original instruction.
+///
+/// @details Loads the DBI payload pointer into the persistent pair and restores
+/// the guest's original kernarg segment pointer, which the CP replaced with a
+/// pointer to the rocjitsu wrapper. The emitted sequence is laid out in the
+/// implementation.
+///
+/// @param desc The kernel's descriptor. Its kernarg_size sizes the wrapper, and
+///        it must enable ENABLE_SGPR_KERNARG_SEGMENT_PTR.
+/// @param arch ISA to encode for, which sets the SMEM immediate range.
+/// @param storage The run from @ref plan_dbi_entry_storage. Must be one
+///        contiguous aligned run and must not overlap the kernarg segment pair.
+/// @param error_out Optional; filled with the reason on failure.
+/// @returns nullopt on a descriptor with no kernarg pointer, storage that is
+///          misaligned, out of range, not one run, or overlapping, or a wrapper
+///          whose offsets do not fit the target's SMEM immediate.
+///
+/// @throws util::UnimplementedInst for a non-AMDGPU architecture, matching the
+///         builders it emits through. Every other rejection is fail-closed.
+[[nodiscard]] std::optional<DbiEntryPrologue>
+build_dbi_entry_prologue(const rocr::llvm::amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
+                         DbiEntryStorage storage, std::string *error_out = nullptr);
 
 } // namespace rocjitsu
