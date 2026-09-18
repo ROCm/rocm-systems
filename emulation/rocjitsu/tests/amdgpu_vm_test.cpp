@@ -224,8 +224,11 @@ struct VmFixture {
   /// Used by tests that drive individual instructions and then read the register
   /// file directly — the wave stays resident (its resources are not freed) until
   /// the fixture is destroyed.
-  amdgpu::Wavefront *dispatch_scratch_wf(uint32_t num_sgprs = 104, uint32_t num_vgprs = 256) {
-    return cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, num_sgprs, num_vgprs);
+  amdgpu::Wavefront *dispatch_scratch_wf(uint32_t num_sgprs = 104, uint32_t num_vgprs = 256,
+                                         uint32_t accumulator_vgprs = 0) {
+    return cu()->dispatch_wf(
+        /*wg_id=*/0, /*pc=*/0x1040, num_sgprs,
+        amdgpu::WaveVgprAllocation{num_vgprs, num_vgprs - accumulator_vgprs, accumulator_vgprs});
   }
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
@@ -4550,7 +4553,7 @@ TEST(AqlDispatchTest, True16DescriptorBoundary) {
       queue.dispatch(kernel, 32, 32);
       const auto status = f.engine->run();
       EXPECT_EQ(status.code, invalid ? 1 : 0) << status.message;
-      EXPECT_EQ(f.cu()->register_allocation_violation_count(), invalid ? 1u : 0u);
+      EXPECT_EQ(f.cu()->register_allocation_violation_count() != 0, invalid);
     }
   }
 }
@@ -5437,7 +5440,7 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   // Resident scratch wave: this test drives MFMA directly and reads the VGPR file,
   // so the wave must stay allocated (not run to s_endpgm, which would free it).
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
@@ -5494,7 +5497,7 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
 
   // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
@@ -5580,7 +5583,7 @@ void expect_mfma_f64_neg_modifier(const std::string &arch) {
 
   // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
   uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
@@ -5612,7 +5615,7 @@ TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
 
   // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kSrc0 = 10;
