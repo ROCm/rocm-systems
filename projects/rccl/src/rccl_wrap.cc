@@ -997,7 +997,7 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
   return funcThresholdFromTable(table->ddaVmmMax, func);
 }
 
-inline bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
   // is configured per communicator. Use the resolved communicator value:
   // testing the raw sentinel as a boolean disables DDA by default, while
@@ -1502,6 +1502,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (6) Standard ring/tree/pat kernel. Fill algo/protocol/channels for reporting
   // (query mode); on the live path taskAppend() recomputes these downstream, so
   // skip the getAlgoInfo() cost there and leave a valid non-CE placeholder.
+  }
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllReduce, count, datatype, query, decision);
 }
 
@@ -1728,124 +1729,9 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           INFO(NCCL_TUNING, "AG CE-registered disqualified: totalBytes=%zu outside ceRegMax window (winRegType=%d)",
                totalBytes, (int)winRegType);
       }
-    } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
-               ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-      decision->algo = RCCL_DDA_IPC;
-      decision->nMaxChannels = ncclAllGatherDdaIpcBlocks(comm, sendcount, datatype);
-      return ncclSuccess;
     }
-  }
 
-  // (2) Hierarchical AllGather. Live dispatch requires being outside a group
-  // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
-  // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
-  if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
-    decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
-    if (query) {
-      // -A reports the inter-comm proto/channels; intra values are logged only.
-      ncclComm* interComm = comm->hierarchicalInterComm;
-      ncclComm* intraComm = comm->hierarchicalIntraComm;
-      int nNodes = interComm->nRanks;
-      size_t interMsgSize = sendcount * typeSize * nNodes;
-      if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
-        decision->protocol = NCCL_PROTO_SIMPLE;
-        decision->nMaxChannels = interComm->p2pnChannels;
-      } else {
-        struct ncclTaskColl task;
-        task.func = ncclFuncAllGather;
-        task.count = sendcount;
-        task.datatype = datatype;
-        NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
-        decision->protocol = task.protocol;
-        decision->nMaxChannels = task.nMaxChannels;
-      }
-      int intraProto, intraChan;
-      size_t intraCount = sendcount * nNodes;
-      size_t intraMsgSize = intraCount * typeSize * intraComm->nRanks;
-      if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-        intraProto = NCCL_PROTO_SIMPLE;
-        intraChan = intraComm->p2pnChannels;
-      } else {
-        struct ncclTaskColl task;
-        task.func = ncclFuncAllGather;
-        task.count = intraCount;
-        task.datatype = datatype;
-        NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
-        intraProto = task.protocol;
-        intraChan = task.nMaxChannels;
-      }
-      INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%u, intra: proto=%d channels=%d", decision->protocol,
-           decision->nMaxChannels, intraProto, intraChan);
-    }
-    return ncclSuccess;
   }
-
-  // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect
-  // order. Live and query share these gates; taskAppend honors the decision.
-  {
-    const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-    // Branch #2: CE via DDA scratch (unregistered windows).
-    // Fires either via RCCL_FORCE_CE or automatically when totalBytes falls in the
-    // [ceNonRegMin, ceNonRegMax] window from the arch table.  The scratch buffer
-    // must be large enough to hold the receive (ddaScratchBytes >= totalBytes).
-    const bool ceScratch =
-      !ceCapturing && ncclCeScratchAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    const size_t agCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllGather);
-    const size_t agCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAllGather);
-    const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
-                                   totalBytes >= agCeNonRegMin &&
-                                   totalBytes <= agCeNonRegMax;
-    if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
-        !hasSysmemSegment &&
-        comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
-      decision->algo = RCCL_CE_SCRATCH;
-      return ncclSuccess;
-    }
-    // Branch #3: CE via registered symmetric windows. Taken when symk is not
-    // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
-    // CE for every size.
-    const bool ceAvailable =
-      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
-    if (ceAvailable && !hasSysmemSegment &&
-        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
-         (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing)))) {
-      decision->algo = RCCL_CE_REGISTERED;
-      return ncclSuccess;
-    }
-    // Hierarchical CE (multi-node). Same CTAPolicy=ZERO funnel as taskAppend.
-    if (!ceCapturing && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !hasSysmemSegment &&
-        ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType)) {
-      decision->algo = RCCL_CE_REGISTERED;
-      return ncclSuccess;
-    }
-  }
-
-  // (4) Direct AllGather (per-peer Send/Recv). Beats symmetric extraction: live
-  // dispatch posts P2P tasks and never reaches ncclMakeSymmetricTaskList.
-  if (rcclUseAllGatherDirect(comm, msgSize)) {
-    decision->algo = RCCL_DIRECT_ALLGATHER;
-    decision->protocol = NCCL_PROTO_SIMPLE;
-    decision->nMaxChannels = comm->p2pnChannels;
-    return ncclSuccess;
-  }
-
-  // (5) Symmetric-window kernel. After CE and Direct so those keep their
-  // previous live priority. Live must return RCCL_SYMMETRIC (not only query)
-  // so collTaskAppend can set symkExtract=1 once decisionValid is true.
-  if (symEligible) {
-    decision->algo = RCCL_SYMMETRIC;
-    if (query) {
-      int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-        decision->protocol = p;
-        decision->nMaxChannels = ch;
-      }
-    }
-    return ncclSuccess;
-  }
-
-  // (6) Standard ring kernel. Fill algo/protocol/channels for reporting; the live
-  // path recomputes these in taskAppend(), so only the query needs them.
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllGather, sendcount, datatype, query, decision);
 }
 
@@ -2157,7 +2043,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
-        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
+        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
@@ -2175,7 +2061,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
     // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
-        ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
+        ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
       if (query) {
         int a, p, ch;

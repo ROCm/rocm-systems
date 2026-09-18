@@ -68,6 +68,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
   fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
+  fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
   fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
   fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc query seams
   fakes/transport_stubs.cc             # transport/PXN/AINIC seams
@@ -405,6 +406,7 @@ if(BUILD_TESTS)
     fakes/hip_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/ce_fakes.cc                    # src/ce_coll.cc
+    fakes/collconfig_fakes.cc            # src/config/collconfig.cc
     fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
     fakes/comm_fakes.cc                  # src/init.cc comm lifecycle
     fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc
@@ -980,6 +982,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collconfig_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dev_runtime_fakes.cc
