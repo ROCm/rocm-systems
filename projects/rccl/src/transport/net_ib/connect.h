@@ -68,8 +68,8 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
 };
-static_assert(sizeof(struct ncclIbConnectionMetadata) == offsetof(struct ncclIbConnectionMetadata, isP2p) + sizeof(int),
-              "connection metadata must not add trailing wire bytes");
+static_assert(sizeof(struct ncclIbConnectionMetadata) == offsetof(struct ncclIbConnectionMetadata, isP2p) + 8,
+              "connection metadata must not add trailing wire fields");
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 ncclResult_t ncclIbQpInit(struct ncclIbQp* qp);
