@@ -67,10 +67,13 @@ namespace impl {
   };
 
   // all the arithmetic operations accept the same types, so we just based it on the overload being
-  // present for scan_add
+  // present for scan_add. We require the overload picked for T to return T exactly (rather than just
+  // being callable with a T), otherwise an unsupported type could sneak in via an implicit promotion/
+  // conversion to one of the supported types (e.g. bool -> int) and silently produce the wrong result.
   template <typename T>
   struct has_arithmetic_scan<T,
-                 __hip_internal::void_t<decltype(scan_add<false>(T {}))>
+                 typename __hip_internal::enable_if<__hip_internal::is_same<
+                     decltype(scan_add<false>(__hip_internal::declval<T>())), T>::value>::type
     > : __hip_internal::true_type {
   };
 
@@ -79,10 +82,11 @@ namespace impl {
   };
 
   // all the arithmetic operations accept the same types, so we just based it on the overload being
-  // present for scan_and
+  // present for scan_and. See has_arithmetic_scan above for why we require an exact return type match.
   template <typename T>
   struct has_boolean_scan<T,
-                 __hip_internal::void_t<decltype(scan_and<false>(T {}))>
+                 typename __hip_internal::enable_if<__hip_internal::is_same<
+                     decltype(scan_and<false>(__hip_internal::declval<T>())), T>::value>::type
     > : __hip_internal::true_type {
   };
 
