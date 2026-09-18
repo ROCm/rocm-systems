@@ -34,11 +34,14 @@
 
 #include <dlfcn.h>
 #include <pthread.h>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -131,6 +134,12 @@ check_registration_info(const char*          name,
 }
 }  // namespace rocprofiler
 
+namespace
+{
+auto active_attach_calls         = std::atomic<int>{ 0 };
+auto max_concurrent_attach_calls = std::atomic<int>{ 0 };
+}  // namespace
+
 extern "C" {
 int
 rocprofiler_load_attachment_tool(const char* tool_path)
@@ -159,9 +168,28 @@ int
 rocprofiler_attach()
 {
     printf("[%s] rocprofiler_attach\n", ROCP_REG_FILE_NAME);
+    auto active = ++active_attach_calls;
+    auto prior  = max_concurrent_attach_calls.load();
+    while(prior < active &&
+          !max_concurrent_attach_calls.compare_exchange_weak(prior, active))
+    { }
+    if(const auto* delay = std::getenv("ROCPROFILER_REGISTER_TEST_ATTACH_DELAY_MS"))
+        std::this_thread::sleep_for(std::chrono::milliseconds{ std::atoi(delay) });
+
+    auto status = int{ 0 };
     if(const auto* value = std::getenv("ROCPROFILER_REGISTER_TEST_ATTACH_FAILURE"))
-        return std::atoi(value);
-    return 0;
+        status = std::atoi(value);
+    --active_attach_calls;
+    return status;
+}
+
+int
+rocprofiler_test_max_concurrent_attach_calls() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_test_max_concurrent_attach_calls()
+{
+    return max_concurrent_attach_calls.load();
 }
 
 int

@@ -860,6 +860,10 @@ auto           registered =
     std::array<std::optional<registered_library_api_table>, max_instances>{};
 // Serialises concurrent callers and detects (disallowed) recursive re-entry.
 auto registration_mutex = common::checked_mutex{};
+// Serialises process-attachment lifecycle operations without holding
+// registration_mutex across SDK and tool callbacks.
+auto attachment_operation_mutex    = common::checked_mutex{};
+auto previous_attachment_tool_path = std::string{};
 
 std::optional<registered_library_api_table>*
 rocp_add_registered_library_api_table(const char*                        common_name,
@@ -1077,6 +1081,126 @@ register_functor(const char*                                 common_name,
 
     return ROCP_REG_SUCCESS;
 };
+
+rocprofiler_register_error_code_t
+initialize_attachment_hsa_interception(const loaded_library& attach_library,
+                                       const char*           common_name,
+                                       uint32_t              lib_version,
+                                       uint64_t              instance_value,
+                                       void**                api_tables,
+                                       uint64_t              api_table_length)
+{
+    // If HSA is the first runtime, propagate the already-registered rocattach
+    // table first. SDK client configuration can then determine whether proxy
+    // interception is needed before HSA is modified.
+    auto startup_scan = rocp_reg_scan_for_tools();
+    if(startup_scan.set_api_table_fn != nullptr)
+    {
+        auto status = rocp_propagate_registrations(false, startup_scan);
+        if(status != ROCP_REG_SUCCESS) return status;
+    }
+
+    using is_initialized_t = int (*)(int*);
+    auto is_initialized_fn = is_initialized_t{};
+    *(void**) (&is_initialized_fn) =
+        dlsym(RTLD_DEFAULT, rocprofiler_lib_is_initialized_entrypoint);
+    auto       sdk_init_status = int{ 0 };
+    const auto sdk_is_initialized =
+        (is_initialized_fn != nullptr && is_initialized_fn(&sdk_init_status) == 0 &&
+         sdk_init_status > 0);
+    if(sdk_is_initialized)
+    {
+        LOG(INFO) << "Skipping attachment-library HSA interception because "
+                     "rocprofiler-sdk is already initialized; anytime initialization "
+                     "will update SDK interception when the attachment client is loaded.";
+        return ROCP_REG_SUCCESS;
+    }
+
+    auto set_api_table_fn = rocprofiler_attach_set_api_table_t{};
+    *(void**) (&set_api_table_fn) =
+        dlsym(attach_library.handle, rocprofiler_attach_lib_set_api_table_entrypoint);
+    if(set_api_table_fn == nullptr)
+    {
+        LOG(ERROR) << "Attachment is enabled, but the attach library HSA entry point "
+                      "was not found. Startup profiling remains available.";
+        return ROCP_REG_SUCCESS;
+    }
+
+    auto status = set_api_table_fn(common_name,
+                                   lib_version,
+                                   instance_value,
+                                   api_tables,
+                                   api_table_length,
+                                   &register_functor);
+    LOG_IF(ERROR, status != 0)
+        << "Attachment library HSA registration returned an error: " << status
+        << ". Startup profiling remains available.";
+    return ROCP_REG_SUCCESS;
+}
+
+rocprofiler_register_error_code_t
+initialize_attachment_library(bool               attachment_enabled,
+                              const rocp_import& import_info_entry,
+                              const char*        common_name,
+                              uint32_t           lib_version,
+                              uint64_t           instance_value,
+                              void**             api_tables,
+                              uint64_t           api_table_length)
+{
+    if(!attachment_enabled) return ROCP_REG_SUCCESS;
+
+    const auto attachment_explicitly_enabled =
+        (std::getenv("ROCP_TOOL_ATTACH") != nullptr);
+    static auto loaded_attach_library =
+        load_library(get_default_library_candidates<rocprofiler_attach_load_trait>(),
+                     rocprofiler_attach_lib_register_entrypoint,
+                     true,
+                     attachment_explicitly_enabled);
+    if(!loaded_attach_library.handle)
+    {
+        static auto warning_once = std::once_flag{};
+        std::call_once(warning_once, [attachment_explicitly_enabled]() {
+            LOG_IF(WARNING, attachment_explicitly_enabled)
+                << "Attachment is enabled, but the attach library was not found or "
+                   "could not be loaded. Startup profiling remains available.";
+            LOG_IF(INFO, !attachment_explicitly_enabled)
+                << "Default attachment support is unavailable because the attach "
+                   "library was not found. Startup profiling remains available.";
+        });
+        return ROCP_REG_SUCCESS;
+    }
+
+    auto initialize_fn         = rocprofiler_attach_initialize_t{};
+    *(void**) (&initialize_fn) = loaded_attach_library.entrypoint;
+    if(initialize_fn == nullptr)
+    {
+        LOG(ERROR) << "Attachment is enabled, but the attach library initialization "
+                      "entry point was not found. Startup profiling remains available.";
+        return ROCP_REG_SUCCESS;
+    }
+
+    auto status = initialize_fn(&register_functor);
+    if(status != 0)
+    {
+        LOG(ERROR) << "Attachment library initialization returned an error: " << status
+                   << ". Startup profiling remains available.";
+        return ROCP_REG_SUCCESS;
+    }
+
+    static auto success_log_once = std::once_flag{};
+    std::call_once(success_log_once,
+                   []() { LOG(INFO) << "Successfully initialized attachment listener"; });
+
+    if(import_info_entry.library_idx == ROCP_REG_HSA)
+        return initialize_attachment_hsa_interception(loaded_attach_library,
+                                                      common_name,
+                                                      lib_version,
+                                                      instance_value,
+                                                      api_tables,
+                                                      api_table_length);
+
+    return ROCP_REG_SUCCESS;
+}
 }  // namespace
 
 extern "C" {
@@ -1165,112 +1289,17 @@ rocprofiler_register_library_api_table(
     auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
     _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
 
-    // Initialize attachment before scanning for startup tools so rocattach is always the
-    // first table propagated to rocprofiler-sdk. HSA-specific setup remains deferred
-    // until the HSA table arrives.
-    if(_attachment_enabled)
-    {
-        const auto attachment_explicitly_enabled =
-            (std::getenv("ROCP_TOOL_ATTACH") != nullptr);
-        static auto loaded_attach_library =
-            load_library(get_default_library_candidates<rocprofiler_attach_load_trait>(),
-                         rocprofiler_attach_lib_register_entrypoint,
-                         true,
-                         attachment_explicitly_enabled);
-        if(!loaded_attach_library.handle)
-        {
-            static auto warning_once = std::once_flag{};
-            std::call_once(warning_once, [attachment_explicitly_enabled]() {
-                LOG_IF(WARNING, attachment_explicitly_enabled)
-                    << "Attachment is enabled, but the attach library was not found or "
-                       "could not be loaded. Startup profiling remains available.";
-                LOG_IF(INFO, !attachment_explicitly_enabled)
-                    << "Default attachment support is unavailable because the attach "
-                       "library was not found. Startup profiling remains available.";
-            });
-        }
-        else
-        {
-            auto rocprofiler_attach_initialize_fn = rocprofiler_attach_initialize_t{};
-            *(void**) (&rocprofiler_attach_initialize_fn) =
-                loaded_attach_library.entrypoint;
-            if(rocprofiler_attach_initialize_fn == nullptr)
-            {
-                LOG(ERROR)
-                    << "Attachment is enabled, but the attach library initialization "
-                       "entry point was not found. Startup profiling remains available.";
-            }
-            else
-            {
-                auto _ret = rocprofiler_attach_initialize_fn(&register_functor);
-                if(_ret != 0)
-                {
-                    LOG(ERROR) << "Attachment library initialization returned an error: "
-                               << _ret << ". Startup profiling remains available.";
-                }
-                else if(_import_match->library_idx == ROCP_REG_HSA)
-                {
-                    // If HSA is the first runtime, propagate the already-registered
-                    // rocattach table first. SDK client configuration can then determine
-                    // whether proxy interception is needed before HSA is modified.
-                    auto startup_scan = rocp_reg_scan_for_tools();
-                    if(startup_scan.set_api_table_fn != nullptr)
-                    {
-                        auto status = rocp_propagate_registrations(false, startup_scan);
-                        if(status != ROCP_REG_SUCCESS) return status;
-                    }
-
-                    using is_initialized_t = int (*)(int*);
-                    auto is_initialized_fn = is_initialized_t{};
-                    *(void**) (&is_initialized_fn) =
-                        dlsym(RTLD_DEFAULT, rocprofiler_lib_is_initialized_entrypoint);
-                    auto       sdk_init_status = int{ 0 };
-                    const auto sdk_is_initialized =
-                        (is_initialized_fn != nullptr &&
-                         is_initialized_fn(&sdk_init_status) == 0 && sdk_init_status > 0);
-
-                    if(sdk_is_initialized)
-                    {
-                        LOG(INFO)
-                            << "Skipping attachment-library HSA interception because "
-                               "rocprofiler-sdk is already initialized; anytime "
-                               "initialization will update SDK interception when the "
-                               "attachment client is loaded.";
-                    }
-                    else
-                    {
-                        auto rocprofiler_attach_set_api_table_fn =
-                            rocprofiler_attach_set_api_table_t{};
-                        *(void**) (&rocprofiler_attach_set_api_table_fn) =
-                            dlsym(loaded_attach_library.handle,
-                                  rocprofiler_attach_lib_set_api_table_entrypoint);
-                        if(rocprofiler_attach_set_api_table_fn == nullptr)
-                        {
-                            LOG(ERROR)
-                                << "Attachment is enabled, but the attach library HSA "
-                                   "entry point was not found. Startup profiling remains "
-                                   "available.";
-                        }
-                        else
-                        {
-                            _ret = rocprofiler_attach_set_api_table_fn(common_name,
-                                                                       lib_version,
-                                                                       _instance_val,
-                                                                       api_tables,
-                                                                       api_table_length,
-                                                                       &register_functor);
-                            LOG_IF(ERROR, _ret != 0)
-                                << "Attachment library HSA registration returned an "
-                                   "error: "
-                                << _ret << ". Startup profiling remains available.";
-                        }
-                    }
-                }
-
-                LOG(INFO) << "Successfully initialized attachment support";
-            }
-        }
-    }
+    // Initialize attachment before scanning for startup tools so rocattach is
+    // always the first table propagated to rocprofiler-sdk.
+    if(auto status = initialize_attachment_library(_attachment_enabled,
+                                                   *_import_match,
+                                                   common_name,
+                                                   lib_version,
+                                                   _instance_val,
+                                                   api_tables,
+                                                   api_table_length);
+       status != ROCP_REG_SUCCESS)
+        return status;
 
     auto* reginfo = rocp_add_registered_library_api_table(common_name,
                                                           import_func,
@@ -1371,6 +1400,9 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
         return ROCP_REG_INVALID_ARGUMENT;
     }
 
+    auto operation_lk = common::checked_lock{ attachment_operation_mutex };
+    if(operation_lk.recursive) return ROCP_REG_DEADLOCK;
+
     // If the attachment library has not been loaded when attach is called, tracing
     // that relies on proxy queues will fail (e.g. kernel tracing).
     // Log error and abort.
@@ -1390,15 +1422,13 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 
-    static auto prev_tool_lib_path = std::string{};
-
-    if(!prev_tool_lib_path.empty() && prev_tool_lib_path != tool_lib_path)
+    if(!previous_attachment_tool_path.empty() &&
+       previous_attachment_tool_path != tool_lib_path)
     {
         LOG(WARNING) << "rocprofiler_register_attach invoked with a different "
                         "tool_lib_path ("
-                     << tool_lib_path
-                     << ") than a previous attach (previous=" << prev_tool_lib_path
-                     << "). This is not supported.";
+                     << tool_lib_path << ") than a previous attach (previous="
+                     << previous_attachment_tool_path << "). This is not supported.";
         return ROCP_REG_INVALID_ARGUMENT;
     }
 
@@ -1414,7 +1444,7 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     } };
 
     // No previous tool library was attached
-    if(prev_tool_lib_path.empty())
+    if(previous_attachment_tool_path.empty())
     {
         auto _rocp_reg_lib =
             common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
@@ -1459,7 +1489,7 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
                        << tool_lib_path << ": " << _ret;
             return ROCP_REG_ROCPROFILER_ERROR;
         }
-        prev_tool_lib_path = tool_lib_path;
+        previous_attachment_tool_path = tool_lib_path;
     }
 
     auto attach_fn = rocprofiler_attach_func_t{};
@@ -1484,6 +1514,9 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
 rocprofiler_register_error_code_t
 rocprofiler_register_detach()
 {
+    auto operation_lk = common::checked_lock{ attachment_operation_mutex };
+    if(operation_lk.recursive) return ROCP_REG_DEADLOCK;
+
     LOG(INFO) << "rocprofiler_register_detach started";
 
     auto attachment_available = false;

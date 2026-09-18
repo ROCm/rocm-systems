@@ -27,11 +27,13 @@
 
 #include <dlfcn.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 struct rocprofiler_client_id_t;
@@ -121,6 +123,40 @@ verify_runtime_attach()
 
     auto attach = reinterpret_cast<attach_func_t>(attach_symbol);
     auto detach = reinterpret_cast<detach_func_t>(detach_symbol);
+
+    setenv("ROCPROFILER_REGISTER_TEST_ATTACH_DELAY_MS", "50", 1);
+    auto concurrent_status =
+        std::array<rocprofiler_register_error_code_t, 2>{ ROCP_REG_ERROR_CODE_END,
+                                                          ROCP_REG_ERROR_CODE_END };
+    auto first_attach = std::thread{ [&]() {
+        concurrent_status[0]= attach(nullptr, "libgeneric-tool.so");
+    } };
+    auto second_attach = std::thread{ [&]() {
+        concurrent_status[1]= attach(nullptr, "libgeneric-tool.so");
+    } };
+    first_attach.join();
+    second_attach.join();
+    unsetenv("ROCPROFILER_REGISTER_TEST_ATTACH_DELAY_MS");
+
+    using max_concurrent_attach_calls_t = int (*)();
+    auto* max_concurrent_symbol =
+        dlsym(RTLD_DEFAULT, "rocprofiler_test_max_concurrent_attach_calls");
+    if(max_concurrent_symbol == nullptr)
+    {
+        std::cerr << "Test FAILED: attach concurrency query is not discoverable\n";
+        return false;
+    }
+    auto max_concurrent_attach_calls =
+        reinterpret_cast<max_concurrent_attach_calls_t>(max_concurrent_symbol);
+    auto observed_max_concurrent_attach_calls = max_concurrent_attach_calls();
+    if(concurrent_status[0] != ROCP_REG_SUCCESS ||
+       concurrent_status[1] != ROCP_REG_SUCCESS ||
+       observed_max_concurrent_attach_calls != 1 || detach() != ROCP_REG_SUCCESS)
+    {
+        std::cerr << "Test FAILED: runtime attachment calls were not serialized\n";
+        return false;
+    }
+
     auto status = attach(nullptr, "libgeneric-tool.so");
     if(status != ROCP_REG_SUCCESS || detach() != ROCP_REG_SUCCESS)
     {
