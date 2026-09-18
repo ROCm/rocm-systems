@@ -466,6 +466,38 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(high["RJ_CONSAN_PRESET"], "high")
         self.assertEqual(high["RJ_CONSAN_EPOCH_ANALYSIS"], "manual")
         self.assertNotIn("RJ_CONSAN_CELL_SAMPLE_STRIDE", high)
+
+    def test_presets_are_explicit_and_do_not_leak_into_supercollider(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RJ_CONSAN_PRESET": "max",
+                "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE": "1",
+            },
+            clear=True,
+        ):
+            for configuration, preset in (
+                ("default", "default"),
+                ("default-high", "high"),
+            ):
+                environment = benchmark._clean_environment(
+                    "gfx1201",
+                    Path("/hook"),
+                    configuration,
+                    True,
+                    epoch_analysis="manual",
+                )
+                self.assertEqual(environment["RJ_CONSAN_MODE"], "default")
+                self.assertEqual(environment["RJ_CONSAN_PRESET"], preset)
+                self.assertEqual(environment["RJ_CONSAN_EPOCH_ANALYSIS"], "manual")
+                self.assertNotIn("RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE", environment)
+            environment = benchmark._clean_environment(
+                "gfx1201",
+                Path("/hook"),
+                "supercollider",
+                True,
+            )
+            self.assertNotIn("RJ_CONSAN_PRESET", environment)
         self.assertEqual(PROFILE_IDS, ("default", "default-high", "supercollider"))
 
     def test_payload_parser_requires_one_successful_machine_record(self) -> None:
