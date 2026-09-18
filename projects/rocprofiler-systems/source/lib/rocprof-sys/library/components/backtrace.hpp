@@ -31,12 +31,12 @@ struct backtrace : comp::empty_base
     static constexpr size_t stack_depth = ROCPROFSYS_MAX_UNWIND_DEPTH;
 
     using data_t            = tim::unwind::stack<stack_depth>;
-    using cache_type        = typename data_t::cache_type;
+    using cache_type        = data_t::cache_type;
     using entry_type        = tim::unwind::processed_entry;
     using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
     using system_clock      = std::chrono::system_clock;
-    using system_time_point = typename system_clock::time_point;
+    using system_time_point = system_clock::time_point;
 
     static std::string label();
     static std::string description();

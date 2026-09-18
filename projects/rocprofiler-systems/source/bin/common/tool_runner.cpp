@@ -48,7 +48,7 @@ namespace
 {
 using rocprofsys::common::update_mode;
 using parser_t     = argparse::argument_parser;
-using parser_err_t = typename parser_t::result_type;
+using parser_err_t = parser_t::result_type;
 
 constexpr int    HELP_PADDING          = 8;
 constexpr int    MAX_DESC_WIDTH        = 120;

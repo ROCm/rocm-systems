@@ -96,11 +96,11 @@ private:
 };
 
 template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
+thread_local roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
 
 template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
+thread_local roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_started_ranges{};
 
 template <typename MarkerWriterPolicy>
