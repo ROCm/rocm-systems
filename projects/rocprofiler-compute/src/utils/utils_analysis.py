@@ -22,6 +22,7 @@ from utils.logger import (
 from utils.ml_api_trace_errors import (
     ForwardThreadNotFoundError,
     MarkerNotNestedError,
+    MissingSourceLocationError,
     OverlappingMarkerRangeError,
     PassMarkerMismatchError,
     UnaccountedKernelError,
@@ -479,11 +480,20 @@ def attach_unlocated_trees_by_forward_thread(
         start = float(root.start_timestamp or 0.0)
         end = float(root.end_timestamp or 0.0)
         f_tid = _forward_tid_from_tree(root)
-        f_tid_text = f_tid if f_tid is not None else "n/a"
-        matches = (
-            _thread_ids_with_pytorch_tid(forest, f_tid) if f_tid is not None else []
-        )
-        if f_tid is None or len(matches) != 1:
+        if f_tid is None:
+            console_error(
+                "analysis",
+                str(
+                    MissingSourceLocationError(
+                        operator_name=root.name,
+                        thread_id=thread_id,
+                        start_timestamp=start,
+                    )
+                ),
+            )
+            continue
+        matches = _thread_ids_with_pytorch_tid(forest, f_tid)
+        if len(matches) != 1:
             console_error(
                 "analysis",
                 str(
@@ -491,7 +501,7 @@ def attach_unlocated_trees_by_forward_thread(
                         operator_name=root.name,
                         thread_id=thread_id,
                         start_timestamp=start,
-                        f_tid=f_tid_text,
+                        f_tid=f_tid,
                     )
                 ),
             )
@@ -508,7 +518,7 @@ def attach_unlocated_trees_by_forward_thread(
                         thread_id=thread_id,
                         start_timestamp=start,
                         end_timestamp=end,
-                        f_tid=f_tid_text,
+                        f_tid=f_tid,
                         forward_thread_id=forward_thread_id,
                     )
                 ),
