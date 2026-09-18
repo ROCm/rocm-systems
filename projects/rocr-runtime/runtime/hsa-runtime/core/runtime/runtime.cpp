@@ -4559,6 +4559,57 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   return HSA_STATUS_SUCCESS;
 }
 
+/* Any GPU can import a dmabuf for peer access, but only its exporter can CPU map it. */
+Agent* Runtime::ImportedHandleCpuMmapAgent(MemoryHandle* memHandle) {
+  assert(memHandle->imported && "Exporter lookup only applies to imported handles");
+
+  if (memHandle->cpu_mmap_agent_resolved) return memHandle->cpu_mmap_agent;
+  memHandle->cpu_mmap_agent_resolved = true;
+
+  /* hsaKmtHandleImport mints a fabric handle's dmabuf on whichever device it is handed, so that
+   * device is the exporter by construction and any GPU agent serves. */
+  if (memHandle->is_fabric_handle) {
+    memHandle->cpu_mmap_agent = KfdGttAnchorGpu();
+    return memHandle->cpu_mmap_agent;
+  }
+
+  const int dmabuf_fd = memHandle->driver_handle.dmabuf_fd;
+
+  if (dmabuf_fd >= 0) {
+    HsaGraphicsResourceInfo info = {};
+    HSA_REGISTER_MEM_FLAGS regFlags{0};
+    regFlags.ui32.requiresVAddr = 0;
+
+    if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd),
+                                                           &info, 0, nullptr, regFlags)) ==
+        HSAKMT_STATUS_SUCCESS) {
+      const uint32_t exporter_node = info.NodeId;
+      HSAKMT_CALL(hsaKmtDeregisterMemory(info.MemoryAddress));
+
+      /* Take the exporting agent if it is visible, and return if it is not. */
+      auto it = agents_by_node_.find(exporter_node);
+      if (it != agents_by_node_.end()) {
+        for (Agent* agent : it->second) {
+          if (agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
+            memHandle->cpu_mmap_agent = agent;
+            return memHandle->cpu_mmap_agent;
+          }
+        }
+      }
+      debug_print("CPU mapping of imported handle: exporting node %u is not a visible GPU agent\n",
+                  exporter_node);
+      return memHandle->cpu_mmap_agent;
+    }
+    debug_print("CPU mapping of imported handle: could not query the exporting node\n");
+  }
+
+  /* With one visible GPU there is no other device the BO could have come from,
+   * so it is the exporter. With more than one, reject it. */
+  if (gpu_agents_.size() == 1) memHandle->cpu_mmap_agent = gpu_agents_[0];
+
+  return memHandle->cpu_mmap_agent;
+}
+
 Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappedHandle,
                                                             Agent* targetAgent, void* va,
                                                             size_t size,
@@ -4568,12 +4619,28 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
       targetAgent(targetAgent),
       permissions(perms),
       mappedHandle(_mappedHandle) {
-  // CPU agents have access as the memory is already mapped to the host.
+  MemoryHandle* memHandle = mappedHandle->mem_handle;
+
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    /* A locally-created handle already has a CPU mapping from CreateShareableHandle. An imported
+     * one owns only the fd, so import the dmabuf here for an offset EnableAccess can mmap. It has
+     * to land in the exporting GPU's DRM context as in ImportedHandleCpuMmapAgent. */
+    if (!memHandle->imported) return;
+
+    core::Agent* drm_agent =
+        core::Runtime::runtime_singleton_->ImportedHandleCpuMmapAgent(memHandle);
+    if (drm_agent == nullptr) return;
+
+    hsa_status_t status = drm_agent->driver().ImportMemoryHandle(
+        *drm_agent, &driver_handle,
+        memHandle->is_fabric_handle ? ShareType::FABRIC_HANDLE : ShareType::DMABUF_FD,
+        &memHandle->driver_handle);
+    if (status != HSA_STATUS_SUCCESS) {
+      throw AMD::hsa_exception(status, "Failed to import memory for CPU access");
+    }
+    cpu_mmap_drm_agent = drm_agent;
     return;
   }
-
-  MemoryHandle* memHandle = mappedHandle->mem_handle;
 
   /* Avoid creating multiple amdgpu bos in the same gpu agent that was used
   for drm import of host memory during the creation of a shareable_handle */
@@ -4600,10 +4667,20 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
 
-    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
-    bool result = rocr::os::UncommitMemory(va, size);
-    assert(result && "Failed to remap VA to anonymous");
-    (void)result;
+    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation.
+     * Only if one was made. On the EnableAccess failure path this would drop a live reservation. */
+    if (cpu_mapped) {
+      bool result = rocr::os::UncommitMemory(va, size);
+      assert(result && "Failed to remap VA to anonymous");
+      (void)result;
+    }
+
+    /* Release the BO imported by the constructor for the imported-handle CPU mapping. */
+    if (cpu_mmap_drm_agent != nullptr) {
+      hsa_status_t status = cpu_mmap_drm_agent->driver().DestroyMemoryHandle(&driver_handle);
+      assert(status == HSA_STATUS_SUCCESS);
+      (void)status;
+    }
   } else {
     if (owns_driver_handle) {
       hsa_status_t status = targetAgent->driver().DestroyMemoryHandle(&driver_handle);
@@ -4619,26 +4696,40 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
     core::Agent* agent = nullptr;
     int mmap_fd = -1;
+    const DriverMemoryHandle* cpu_mmap_handle = nullptr;
 
-    /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
-     * The driver_handle created during import should have the correct mmap_offset. */
+    /* An mmap offset is only valid on the DRM fd whose context holds the BO, so both must come
+     * from the same import. The constructor's for an imported handle, CreateShareableHandle's
+     * for a locally-created one. */
     if (mappedHandle->mem_handle->imported) {
-      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
-      if (drm_agent != nullptr) {
-        agent = drm_agent;
-        agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+      agent = cpu_mmap_drm_agent;
+      if (agent == nullptr) {
+        debug_print(
+            "EnableAccess: cannot CPU map an imported handle whose exporting GPU is unknown\n");
+        return HSA_STATUS_ERROR;
       }
+      agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+      cpu_mmap_handle = &driver_handle;
     } else if (mappedHandle->mem_handle->region) {
       agent = mappedHandle->mem_handle->drmAgent();
       /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it
        * is valid for mmap_fd to be -1*/
       agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+      cpu_mmap_handle = &mappedHandle->mem_handle->driver_handle;
+    }
+
+    /* Check the mmap offset first. A driver that never populates mmap_offset (KfdVirtioDriver)
+     * would otherwise map offset 0 on a real DRM fd and silently get an unrelated BO. */
+    if (cpu_mmap_handle == nullptr || !cpu_mmap_handle->mmap_offset_valid) {
+      debug_print("EnableAccess: no valid DRM mmap offset for a CPU mapping of this handle\n");
+      return HSA_STATUS_ERROR;
     }
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+                             cpu_mmap_handle->mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
+    cpu_mapped = true;
   } else {
     hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size,
                                                     perms, targetAgent->node_id());
