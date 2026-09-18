@@ -703,6 +703,25 @@ class ConSanCoverageGateTest(unittest.TestCase):
                 )
             )
 
+    def test_preset_hint_is_not_coverage_evidence(self) -> None:
+        for message in (
+            "No races were reported under sampled coverage.",
+            "No runtime evidence was collected under sampled coverage.",
+        ):
+            hint = (
+                "[rocjitsu-dbi-hooks] ConSan coverage hint: " + message
+                + " For increased coverage, retry with RJ_CONSAN_PRESET=high."
+                + " No reports does not establish race freedom."
+            )
+            with self.subTest(message=message):
+                original = log(coverage(), verdict())
+                self.assertEqual(
+                    parse_coverage_evidence(original + "\n" + hint),
+                    parse_coverage_evidence(original),
+                )
+                with self.assertRaisesRegex(CoverageParseError, "missing ConSan coverage"):
+                    parse_coverage_evidence(hint + "\n" + log(verdict()))
+
     def test_rejects_duplicate_keys_and_malformed_fields(self) -> None:
         cases = {
             "duplicate key": coverage() + " access_supported=20",
