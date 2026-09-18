@@ -523,8 +523,8 @@ def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
 
 
 def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
-    """A pre-stripped + tagged CSV (as produced by _augment_marker_csv)
-    surfaces the per-row Backend value into the consolidated dataframe.
+    """A pre-stripped + tagged CSV surfaces the per-row Backend value into
+    the consolidated dataframe.
     """
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)

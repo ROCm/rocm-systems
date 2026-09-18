@@ -17,38 +17,16 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
-from utils.inject_roctx._backends.torch_cpp_loader import (
-    CollectorUnavailableError,
-)
-from utils.inject_roctx._backends.torch_cpp_loader import (
-    load as load_torch_trace_collector,
-)
+from utils.inject_roctx._backends import torch_trace_collector
+from utils.inject_roctx.marker_format import cap_args, encode_args
 from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "torch"
 
 
-class _RecordFnHook:
-    def active(self) -> bool:
-        return _STATE.using_c_tier and _STATE.torch_trace_collector is not None
-
-    def push(self, marker: str, context: str, backend: str) -> bool:
-        try:
-            _STATE.torch_trace_collector.push_user_scope(marker, context, backend)
-            return True
-        except Exception:
-            return False
-
-    def pop(self) -> None:
-        try:
-            _STATE.torch_trace_collector.pop_user_scope()
-        except Exception:
-            pass
-
-
 class _TorchState:
-    """Resolved torch modules, collector, and active tracing tier."""
+    """Resolved torch modules used by the instrumentation wrappers."""
 
     def __init__(self) -> None:
         self.torch: Any = None
@@ -61,12 +39,6 @@ class _TorchState:
         self.function: Any = None
         self.nn: Any = None
         self.torch_root: str = ""
-
-        self.load_torch_trace_collector: Optional[Callable[..., Any]] = None
-        self.torch_trace_collector: Any = None
-        self.using_c_tier: bool = False
-        self.c_tier_initialized: bool = False
-        self.native_hook: Optional[_RecordFnHook] = None
 
         self.active_dispatch_mode: Any = None
 
@@ -130,65 +102,51 @@ PROCESS_GROUP_METHODS = (
 )
 
 
-# The native C++ RecordFunction tier is installed by _initialize_c_tier().
+def _render_tensor(obj: object) -> Optional[str]:
+    shape = getattr(obj, "shape", None)
+    dtype = getattr(obj, "dtype", None)
+    if shape is None or dtype is None:
+        return None
+    try:
+        dims = "x".join(str(int(d)) for d in shape)
+        dt = str(dtype).replace("torch.", "")
+        return f"{dt}[{dims}]"
+    except Exception:
+        return None
 
 
-def _get_tier_stack() -> list[bool]:
-    # Per-frame record of the tier that handled each push: True for the native
-    # C++ RecordFunction tier, False for the Python tier.
-    if not hasattr(_thread_local, "tier_stack"):
-        _thread_local.tier_stack = []
-    return _thread_local.tier_stack
+def format_wrap_args(args: tuple[object, ...], kwargs: dict[str, object]) -> str:
+    items: list[str] = []
+    for value in args:
+        if len(items) >= 32:
+            break
+        rendered = _render_tensor(value)
+        if rendered is None:
+            continue
+        items.append(rendered)
+    for name, value in kwargs.items():
+        if len(items) >= 32:
+            break
+        rendered = _render_tensor(value)
+        if rendered is None:
+            continue
+        items.append(f"{name}={rendered}")
+    if not items:
+        return "n/a"
+    return encode_args(cap_args("(" + ", ".join(items) + ")"))
 
 
-def _push_scope(marker: str, context: str, backend: str = "") -> None:
-    """Push a scope, routing through the native C++ RecordFunction tier when
-    active and otherwise emitting on the Python tier.
-    """
-    marker_stack = core.get_marker_stack()
-    context_stack = core.get_context_stack()
-    tier_stack = _get_tier_stack()
-
-    used_native = False
-    hook = _STATE.native_hook
-    if hook is not None and hook.active():
-        try:
-            used_native = bool(hook.push(marker, context, backend))
-        except Exception:
-            used_native = False
-
-    if not used_native:
-        full = core.compose_marker(marker, context, backend)
-        range_push, _ = core.get_python_tier_io()
-        range_push(full)
-
-    tier_stack.append(used_native)
-    marker_stack.append(marker)
-    context_stack.append(context)
+def _push_scope(
+    marker: str,
+    context: str,
+    backend: str = "",
+    args: str = "n/a",
+) -> None:
+    core._push_scope(marker, context, backend, args)
 
 
 def _pop_scope() -> None:
-    """Pop a scope, routing to the tier that handled its push."""
-    marker_stack = core.get_marker_stack()
-    context_stack = core.get_context_stack()
-    tier_stack = _get_tier_stack()
-
-    # Unmatched pop: no-op.
-    if not tier_stack:
-        return
-
-    used_native = tier_stack.pop()
-    try:
-        if used_native and _STATE.native_hook is not None:
-            _STATE.native_hook.pop()
-        else:
-            _, range_pop = core.get_python_tier_io()
-            range_pop()
-    finally:
-        if marker_stack:
-            marker_stack.pop()
-        if context_stack:
-            context_stack.pop()
+    core._pop_scope()
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.
@@ -206,13 +164,16 @@ def roctx_wrapper(
     if getattr(func, "_roctx_wrapped", False):
         return func
     func_name = name or func.__name__
-    call_counter = {"count": 0}
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> object:
-        call_counter["count"] += 1
         location = core.resolve_user_caller_location()
-        _push_scope(func_name, f"#{call_counter['count']}@{location}", backend=backend)
+        _push_scope(
+            func_name,
+            location,
+            backend=backend,
+            args=format_wrap_args(args, kwargs),
+        )
         try:
             return func(*args, **kwargs)
         finally:
@@ -228,12 +189,10 @@ def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any
     Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
     cuda.Stream).
     """
-    call_counter = {"count": 0}
 
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
-        call_counter["count"] += 1
         location = core.resolve_user_caller_location()
-        _push_scope(name, f"#{call_counter['count']}@{location}", backend=backend)
+        _push_scope(name, location, backend=backend)
         try:
             return object.__init__(self)
         finally:
@@ -250,65 +209,8 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
         _walk_subclasses(sub, fn)
 
 
-def _initialize_c_tier() -> bool:
-    """Load and install torch_trace_collector.so once per process."""
-    if _STATE.c_tier_initialized:
-        return _STATE.using_c_tier
-
-    _STATE.c_tier_initialized = True
-
-    if _STATE.load_torch_trace_collector is None:
-        _STATE.torch_trace_collector = None
-        _STATE.using_c_tier = False
-        return False
-
-    try:
-        module = _STATE.load_torch_trace_collector()
-    except CollectorUnavailableError as exc:
-        console_warning(
-            "ml api trace",
-            f"{exc} Falling back to the Python tier.",
-        )
-        module = None
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            "C++ RecordFunction tier unavailable "
-            f"({type(exc).__name__}: {exc}); falling back to Python tier",
-        )
-        module = None
-
-    _STATE.torch_trace_collector = module
-
-    if _STATE.torch_trace_collector is not None:
-        try:
-            _STATE.torch_trace_collector.install()
-            console_log(
-                "ml api trace",
-                (
-                    "Coverage tier: C++ RecordFunction "
-                    "(global callback; covers every thread)."
-                ),
-            )
-            _STATE.using_c_tier = True
-            _STATE.native_hook = _RecordFnHook()
-            return True
-        except Exception as exc:
-            console_warning(
-                "ml api trace",
-                "C++ RecordFunction tier install failed "
-                f"({type(exc).__name__}: {exc}); falling back to Python tier",
-            )
-            _STATE.torch_trace_collector = None
-
-    _STATE.using_c_tier = False
-    return False
-
-
 def _emit_python_tier_fallback_warning() -> None:
     """Emit one warning when the C++ tier is unavailable."""
-    if _STATE.using_c_tier:
-        return
     console_warning(
         "ml api trace",
         "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
@@ -526,7 +428,12 @@ def patch_compile_callable() -> None:
         **kwargs: Any,
     ) -> object:
         location = core.resolve_user_caller_location()
-        _push_scope("torch.compile", f"#1@{location}", backend=_BACKEND_NAME)
+        _push_scope(
+            "torch.compile",
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args((model_or_fn, *args), kwargs),
+        )
         try:
             compiled = original_compile(model_or_fn, *args, **kwargs)
         finally:
@@ -540,7 +447,12 @@ def patch_compile_callable() -> None:
         @wraps(compiled)
         def invocation_wrapper(*c_args: Any, **c_kwargs: Any) -> object:
             loc = core.resolve_user_caller_location()
-            _push_scope(f"torch.compile.{fn_label}", f"#1@{loc}", backend=_BACKEND_NAME)
+            _push_scope(
+                f"torch.compile.{fn_label}",
+                loc,
+                backend=_BACKEND_NAME,
+                args=format_wrap_args(c_args, c_kwargs),
+            )
             try:
                 return compiled(*c_args, **c_kwargs)
             finally:
@@ -564,16 +476,6 @@ def patch_compile_callable() -> None:
 
 
 # Dispatcher: C++ tier covers fwd+bwd; Python tier covers forward only.
-
-
-def next_dispatcher_index(op_name: str) -> int:
-    """Per-thread occurrence count for op_name."""
-    counters = getattr(_thread_local, "dispatcher_counters", None)
-    if counters is None:
-        counters = {}
-        _thread_local.dispatcher_counters = counters
-    counters[op_name] = counters.get(op_name, 0) + 1
-    return counters[op_name]
 
 
 def warn_dispatcher_failure_once(phase: str, error: Exception) -> None:
@@ -619,15 +521,7 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
 
 
 def install_dispatcher_hook() -> str:
-    """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
-    if _STATE.using_c_tier:
-        console_log(
-            "ml api trace",
-            "Operator coverage: C++ RecordFunction callback "
-            "(FUNCTION + BACKWARD_FUNCTION).",
-        )
-        return "c_tier"
-
+    """Enter TorchDispatchMode on this thread."""
     torch_dispatch_mode = _STATE.torch_dispatch_mode
     if torch_dispatch_mode is None:
         console_warning(
@@ -637,26 +531,21 @@ def install_dispatcher_hook() -> str:
         )
         return "none"
 
-    def start_disp(op_name: str) -> None:
-        idx = next_dispatcher_index(op_name)
+    def start_disp(
+        op_name: str,
+        args: tuple[object, ...] = (),
+        kwargs: Optional[dict[str, object]] = None,
+    ) -> None:
         location = core.resolve_user_caller_location()
-        marker_stack = core.get_marker_stack()
-        context_stack = core.get_context_stack()
-        context = f"#{idx}@{location}"
-        rangePush(core.compose_marker(op_name, context, _BACKEND_NAME))
-        marker_stack.append(op_name)
-        context_stack.append(context)
+        _push_scope(
+            op_name,
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs or {}),
+        )
 
     def end_disp() -> None:
-        marker_stack = core.get_marker_stack()
-        context_stack = core.get_context_stack()
-        try:
-            rangePop()
-        finally:
-            if marker_stack:
-                marker_stack.pop()
-            if context_stack:
-                context_stack.pop()
+        _pop_scope()
 
     class RoctxDispatchMode(torch_dispatch_mode):
         def __torch_dispatch__(
@@ -670,7 +559,7 @@ def install_dispatcher_hook() -> str:
             op_name = dispatcher_marker_name_for(func)
             pushed = False
             try:
-                start_disp(op_name)
+                start_disp(op_name, args, kwargs)
                 pushed = True
             except Exception as exc:
                 warn_dispatcher_failure_once("start", exc)
@@ -705,19 +594,18 @@ def install_tensor_backward_wrapper() -> None:
         return
 
     original_backward = torch.Tensor.backward
-    backward_counter = {"count": 0}
 
     def backward_with_roctx(
         self: object,
         *args: Any,
         **kwargs: Any,
     ) -> object:
-        backward_counter["count"] += 1
         location = core.resolve_user_caller_location()
         _push_scope(
             "torch.Tensor.backward",
-            f"#{backward_counter['count']}@{location}",
+            location,
             backend=_BACKEND_NAME,
+            args=format_wrap_args((self, *args), kwargs),
         )
         try:
             return original_backward(self, *args, **kwargs)
@@ -793,12 +681,9 @@ def inject_roctx_into_optimizer() -> None:
             **kwargs: Any,
         ) -> object:
             location = core.resolve_user_caller_location()
-            if not hasattr(self, "_roctx_step_call_count"):
-                self._roctx_step_call_count = 0
-            self._roctx_step_call_count += 1
             _push_scope(
                 f"optimizer.{type(self).__name__}.step",
-                f"#{self._roctx_step_call_count}@{location}",
+                location,
                 backend=_BACKEND_NAME,
             )
             try:
@@ -875,6 +760,12 @@ EXTRA_STRUCTURAL_WRAPS = (
     ("torch.nn.functional", "log_softmax", "torch.nn.functional.log_softmax"),
     ("torch.nn.functional", "softmax", "torch.nn.functional.softmax"),
     ("torch.nn.functional", "relu", "torch.nn.functional.relu"),
+    ("torch", "randn", "torch.randn"),
+    ("torch", "rand", "torch.rand"),
+    ("torch", "zeros", "torch.zeros"),
+    ("torch", "ones", "torch.ones"),
+    ("torch", "empty", "torch.empty"),
+    ("torch", "tensor", "torch.tensor"),
 )
 
 
@@ -940,7 +831,7 @@ def install_function_apply_wrappers() -> bool:
             location = core.resolve_user_caller_location()
             _push_scope(
                 "torch.autograd.Function.apply",
-                f"#1@{location}",
+                location,
                 backend=_BACKEND_NAME,
             )
             try:
@@ -1091,6 +982,57 @@ def install_extra_structural_wrappers() -> None:
         )
 
 
+def _wrap_nn_module_method(method_name: str) -> bool:
+    """Replace nn.Module.method_name with a ROCTX-wrapped version."""
+    nn = _STATE.nn
+    if nn is None:
+        return False
+    original = getattr(nn.Module, method_name, None)
+    if original is None or not callable(original):
+        return False
+    if getattr(original, "_roctx_wrapped", False):
+        return True
+
+    def wrapped(self: object, *args: Any, **kwargs: Any) -> object:
+        class_name = self.__class__.__name__
+        location = core.resolve_user_caller_location()
+        _push_scope(
+            f"nn.Module.{class_name}.{method_name}",
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs),
+        )
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            _pop_scope()
+
+    wrapped._roctx_wrapped = True
+    try:
+        setattr(nn.Module, method_name, wrapped)
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch nn.Module.{method_name}: {exc}",
+        )
+        return False
+    return getattr(nn.Module, method_name) is wrapped
+
+
+def inject_roctx_into_module_methods() -> None:
+    """Wrap nn.Module __init__, cuda, to, and cpu."""
+    wrapped_methods = []
+    for method_name in ("__init__", "cuda", "to", "cpu"):
+        if _wrap_nn_module_method(method_name):
+            wrapped_methods.append(method_name)
+    if wrapped_methods:
+        console_log(
+            "ml api trace",
+            "Wrapped nn.Module methods with ROCTX markers: "
+            + ", ".join(wrapped_methods),
+        )
+
+
 def inject_roctx_into_model() -> None:
     """Wrap nn.Module.__call__ (not forward(), so hooks are covered)."""
     nn = _STATE.nn
@@ -1103,14 +1045,12 @@ def inject_roctx_into_model() -> None:
 
     def call_with_roctx(self: object, *args: Any, **kwargs: Any) -> object:
         class_name = self.__class__.__name__
-        if not hasattr(self, "_roctx_call_count"):
-            self._roctx_call_count = 0
-        self._roctx_call_count += 1
         location = core.resolve_user_caller_location()
         _push_scope(
             f"nn.Module.{class_name}.forward",
-            f"#{self._roctx_call_count}@{location}",
+            location,
             backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs),
         )
         try:
             return original_call(self, *args, **kwargs)
@@ -1126,21 +1066,6 @@ def inject_roctx_into_model() -> None:
         console_warning("ml api trace", f"Could not patch nn.Module.__call__: {exc}")
     if did_wrap:
         console_log("ml api trace", "Wrapped nn.Module forward() with ROCTX markers\n")
-
-
-def using_c_tier() -> bool:
-    """Return True if the C++ RecordFunction tier is active."""
-    return _STATE.using_c_tier
-
-
-def dump_torch_trace_stats() -> Optional[dict[str, object]]:
-    """Return the collector counters, or None when the C++ module is not loaded."""
-    if _STATE.torch_trace_collector is None:
-        return None
-    try:
-        return _STATE.torch_trace_collector.dump_stats()
-    except Exception:
-        return None
 
 
 def _resolve_torch() -> bool:
@@ -1218,8 +1143,6 @@ def _resolve_torch() -> bool:
         _STATE.nn = _nn_mod
     except Exception:
         _STATE.nn = None
-    _STATE.load_torch_trace_collector = load_torch_trace_collector
-
     return True
 
 
@@ -1247,19 +1170,20 @@ class TorchBackend:
         if not _resolve_torch():
             return
 
-        _initialize_c_tier()
-        _emit_python_tier_fallback_warning()
+        if not torch_trace_collector.install():
+            _emit_python_tier_fallback_warning()
+            install_dispatcher_hook()
         patch_distributed_collectives()
         patch_process_group_methods()
         patch_cuda_graph()
         patch_compile_callable()
-        install_dispatcher_hook()
         install_tensor_backward_wrapper()
         inject_roctx_into_optimizer()
         install_function_apply_wrappers()
         install_tensor_method_wrappers()
         install_extra_structural_wrappers()
         inject_roctx_into_model()
+        inject_roctx_into_module_methods()
 
 
 register(TorchBackend())

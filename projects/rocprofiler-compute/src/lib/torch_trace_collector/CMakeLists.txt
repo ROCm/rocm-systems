@@ -1,7 +1,6 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 
-# Builds the collector against the PyTorch install beside ROCM_PATH.
 macro(_skip_collector reason)
     message(WARNING "torch_trace_collector not built: ${reason}")
     return()
@@ -35,11 +34,11 @@ endforeach()
 if(NOT _torch_version)
     _skip_collector("no PyTorch version header under ${_torch_prefix}")
 endif()
-if(NOT _torch_version MATCHES "^2\\.(13|14)$")
-    _skip_collector(
-        "PyTorch ${_torch_version} is not supported; requires 2.13 or 2.14"
-    )
-endif()
+
+message(
+    STATUS
+    "torch_trace_collector: torch prefix ${_torch_prefix} version ${_torch_version}"
+)
 
 set(_torch_lib_dir "${_torch_prefix}/lib")
 set(_torch_include_dirs
@@ -64,48 +63,36 @@ if(NOT rocprofiler-sdk-roctx_FOUND)
     _skip_collector("rocprofiler-sdk-roctx not found")
 endif()
 
-# Headers only; the interpreter that loads the module resolves Python symbols.
-find_package(Python3 COMPONENTS Development.Module QUIET)
-if(NOT Python3_Development.Module_FOUND)
-    _skip_collector("Python 3 development headers not found")
-endif()
-
-# Skip rather than let target_compile_features fail the whole configure.
 if(NOT cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     _skip_collector("compiler does not support C++20")
 endif()
 
-add_library(torch-trace-collector STATIC torch_trace_collector.cpp snapshot_store.cpp)
-target_include_directories(torch-trace-collector PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(torch-trace-collector SYSTEM PUBLIC ${_torch_include_dirs})
-target_link_libraries(
-    torch-trace-collector
-    PUBLIC
-        ${_torch_libraries}
-        rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
-        synchronized
-        gsl_assert
+add_library(
+    torch-trace-collector-module MODULE
+    torch_trace_collector.cpp
+    schema_arg_names.cpp
 )
-# PyTorch headers need a newer standard than the C++17 used across src/lib.
-target_compile_features(torch-trace-collector PUBLIC cxx_std_20)
-target_compile_options(torch-trace-collector PRIVATE -fvisibility=hidden)
-
-add_library(torch-trace-collector-module MODULE torch_trace_collector_module.cpp)
-target_link_libraries(torch-trace-collector-module PRIVATE torch-trace-collector)
+target_include_directories(
+    torch-trace-collector-module
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+)
 target_include_directories(
     torch-trace-collector-module
     SYSTEM
-    PRIVATE ${Python3_INCLUDE_DIRS}
+    PUBLIC ${_torch_include_dirs}
 )
+target_link_libraries(
+    torch-trace-collector-module
+    PRIVATE
+        ${_torch_libraries}
+        rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
+)
+target_compile_features(torch-trace-collector-module PRIVATE cxx_std_20)
 target_compile_options(torch-trace-collector-module PRIVATE -fvisibility=hidden)
 set_target_properties(
     torch-trace-collector-module
     PROPERTIES
         PREFIX ""
         OUTPUT_NAME "torch_trace_collector-${_torch_version}"
-        SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        SUFFIX "${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
-
-if(ENABLE_TESTS)
-    add_subdirectory(tests)
-endif()

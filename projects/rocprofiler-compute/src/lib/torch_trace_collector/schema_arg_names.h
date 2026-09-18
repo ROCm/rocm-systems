@@ -1,17 +1,16 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
-//
-// Global RecordFunction callback registration.
 
 #pragma once
 
-#include <cstdint>
+#include <ATen/core/operator_name.h>
+
+#include <string>
+#include <vector>
 
 namespace torch_trace_collector::detail
 {
 
-std::int64_t install();
-void         uninstall();
-bool         is_installed();
+std::vector<std::string> schema_arg_names(const c10::OperatorName& operator_name);
 
 }  // namespace torch_trace_collector::detail

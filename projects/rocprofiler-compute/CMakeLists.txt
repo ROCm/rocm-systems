@@ -419,13 +419,6 @@ add_test(
         tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
 )
 
-add_test(
-    NAME test_profile_triton_trace
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_triton_trace.xml
-        ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
-)
-
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -443,7 +436,6 @@ set_tests_properties(
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
-    test_profile_triton_trace
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -873,27 +865,6 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-if(TARGET test-torch-trace-collector)
-    if(TEST_FROM_INSTALL)
-        set(_ttc_test_cmd tests/test-torch-trace-collector)
-    else()
-        set(_ttc_test_cmd $<TARGET_FILE:test-torch-trace-collector>)
-    endif()
-    add_test(NAME test-torch-trace-collector COMMAND ${_ttc_test_cmd})
-    get_target_property(
-        _ttc_ld_path
-        test-torch-trace-collector
-        ROCPROF_TEST_LD_LIBRARY_PATH
-    )
-    set(_ttc_test_env "LD_LIBRARY_PATH=${_ttc_ld_path}:$ENV{LD_LIBRARY_PATH}")
-    sanitizer_runtime_env(_san_env OFF)
-    list(APPEND _ttc_test_env ${_san_env})
-    set_tests_properties(
-        test-torch-trace-collector
-        PROPERTIES LABELS "profile" ENVIRONMENT "${_ttc_test_env}"
-    )
-endif()
-
 # -----------------------------------
 # Torch trace tests
 # -----------------------------------
@@ -903,26 +874,6 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_rocpd_data.xml
         ${COV_OPTION} tests/unit/utils/test_rocpd_data.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_torch_trace_coverage
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_coverage.xml
-        ${COV_OPTION} tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
-)
-
-set_tests_properties(
-    test_torch_trace_coverage
-    PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
-)
-
-add_test(
-    NAME test_torch_cpp_loader
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_cpp_loader.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py
-        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1116,10 +1067,7 @@ if(${ENABLE_COVERAGE})
         test_tui_utils
         test_collapsibles
         test_rocpd_data
-        test_torch_trace_coverage
         test_profile_torch_trace
-        test_profile_triton_trace
-        test_torch_cpp_loader
         test_inject_roctx_package
         test_analysis_db
         test_analysis_base
@@ -1330,14 +1278,11 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so and
-# torch_trace_collector-<torch-version>.so
+# install librocprofiler-compute-tool.so
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
-# The collector is skipped when PyTorch is absent or an unsupported version.
-# The loader searches lib/rocprofiler-compute/ for the versioned artifact.
 if(TARGET torch-trace-collector-module)
     install(
         TARGETS torch-trace-collector-module
