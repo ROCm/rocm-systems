@@ -4,10 +4,10 @@
 #pragma once
 
 #include "common/defines.h"
-#include "core/control/clocks/posix.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto/emitter.hpp"

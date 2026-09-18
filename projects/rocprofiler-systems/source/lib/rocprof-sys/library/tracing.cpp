@@ -5,6 +5,7 @@
 #include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/perfetto/emitter.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/state.hpp"

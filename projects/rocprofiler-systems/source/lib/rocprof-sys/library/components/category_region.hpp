@@ -89,7 +89,7 @@ inline constexpr std::size_t renumber_growth_slack = 16;
 
 struct wall_clock_source
 {
-    timestamp_t now() const { return control::clocks::timeline_ns(); }
+    [[nodiscard]] timestamp_t now() const { return control::clocks::timeline_ns(); }
 };
 
 struct trace_cache_region_sink

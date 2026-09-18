@@ -10,7 +10,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <gtest/gtest.h>
+#include <ratio>
 #include <string>
 #include <thread>
 #include <time.h>
