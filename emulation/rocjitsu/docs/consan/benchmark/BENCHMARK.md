@@ -117,8 +117,9 @@ For each workload, use this order:
 1. `rocprofv3` native kernel-inventory pass and allowlist conversion;
 2. two native timing processes, each containing Run1 and Run2, used immediately
    to establish a separate median for each run ordinal;
-3. Default Mode, Default Mode (`high`), and SuperCollider, updating the
-   target status row after each completed variant; and
+3. Default Mode (`RJ_CONSAN_PRESET=default`), Default Mode
+   (`RJ_CONSAN_PRESET=high`), and SuperCollider, updating the target status row
+   after each completed configuration; and
 4. one final native timing sample used only as a post-validation drift check.
 
 The final sample does not silently redefine the denominator after the modes
@@ -143,7 +144,10 @@ explicitly select `RJ_CONSAN_PRESET=default` and `RJ_CONSAN_PRESET=high`,
 respectively; `high` is a preset, not a separate sanitizer mode. Inherited
 expert sampling controls are cleared for all variants.
 
-The two values are:
+The default and high presets use workgroup/LDS-cell strides of 256/256 and
+16/16, respectively. SuperCollider runs with the preset unset.
+
+Each pair contains:
 
 - **Startup (seconds)**: the total cold-path latency through completion of the
   first synchronized operation and its selected evidence checkpoints. It
