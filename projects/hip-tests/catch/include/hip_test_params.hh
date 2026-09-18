@@ -32,9 +32,10 @@ THE SOFTWARE.
 /**
  * @brief Global parameter store for test configuration.
  * 
- * Parameters are loaded from compile-time constants generated from 
- * definitions.yaml at build time. The event listener detects the test
- * level from command-line filters and loads appropriate parameters.
+ * Parameters are loaded from compile-time constants generated from
+ * definitions.yaml at build time. main() (see hip_test_level.cc) resolves
+ * the active test level before any test runs and loads the corresponding
+ * parameters.
  * 
  * Thread Safety:
  *   This class is designed for single-threaded test execution (Catch2 default).
@@ -68,13 +69,13 @@ public:
 
     /**
      * @brief Initialize parameter store from generated compile-time constants
-     * Called once at test startup by event listener
+     * Called once at test startup by main()
      */
     void initialize();
 
     /**
      * @brief Load parameters for a specific level
-     * Called by event listener when [level_X] tag is detected
+     * Called by main() once the active level has been resolved
      * @param level Level name (e.g., "level_0", "level_1")
      */
     void loadLevelConfig(const std::string& level);
@@ -115,7 +116,7 @@ public:
     void clear();
 
     /**
-     * @brief Current test level (set by event listener)
+     * @brief Current test level (set by main())
      */
     std::string currentTestLevel;
 
