@@ -143,7 +143,7 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Skipping... GroupCall.MixedAllToAllAndP2pDirections requires at least 4 GPUs";
 
     constexpr size_t p2pElements = 2 * 1024 * 1024; // 8 MiB: large enough to scale beyond one channel.
-    constexpr size_t allToAllElementsPerPeer = 1024;
+    constexpr size_t allToAllElementsPerPeer = 32 * 1024; // 128 KiB per peer: scales beyond one channel.
     constexpr int numCollPerGroup = 3;
     bool const inPlace = false;
     bool const useManagedMem = false;

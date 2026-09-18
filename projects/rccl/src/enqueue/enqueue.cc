@@ -1276,7 +1276,8 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
     {"gfx110", ncclFuncAlltoAll, 1},
   };
   for (const auto& policy : policies) {
-    if (task->collAPI == policy.collAPI && IsArchMatch(comm->archName, policy.arch)) return policy.nChannels;
+    if (task->collAPI == policy.collAPI &&
+        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, policy.arch)) return policy.nChannels;
   }
   return -1;
 }
