@@ -4,14 +4,9 @@
 Looking for install steps? See
 {ref}`Choose an installation method <install_choose>`. This page is the
 reference *behind* those steps: what each delivery channel puts where, how the
-Python module finds the native library, and which copy wins when more than one
-is present.
+Python module finds the native library, which copy wins when more than one is
+present, and the loader contract `py-interface/amdsmi_wrapper.py` implements.
 :::
-
-AMD SMI ships through several delivery channels. This page describes each one,
-how the Python module locates the native library in each, which combinations
-are supported, and how upgrades and downgrades behave. It is the reference for
-the loader contract that `py-interface/amdsmi_wrapper.py` implements.
 
 ## Delivery paths
 
@@ -62,11 +57,10 @@ action:
 
 The three "no" rows share one cause: the module travels as ordinary files in a
 ROCm tree, and nothing in the delivery registers that tree with an interpreter.
-Extracting a tarball runs no package manager, no `ldconfig` and no pip; the ROCm
-Core SDK package installs a prefix and runs no scriptlet that could touch
-`site-packages`; and the ROCm pip wheels unpack their prefix *under*
-`site-packages` (as `_rocm_sdk_core/`), which puts the tree on disk without
-putting `amdsmi` on `sys.path`.
+Extracting a tarball runs no package manager, `ldconfig` or pip; the ROCm Core
+SDK package installs a prefix and runs no scriptlet; and the ROCm pip wheels
+unpack their prefix *under* `site-packages`, as `_rocm_sdk_core/`, which puts
+the tree on disk without putting `amdsmi` on `sys.path`.
 
 `<root>/share/amd_smi/amdsmi` is a plain importable directory with no
 `pyproject.toml`, `setup.py`, or `.dist-info`, so it is **not** pip-installable

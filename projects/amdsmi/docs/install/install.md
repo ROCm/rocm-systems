@@ -15,8 +15,7 @@ system requirements and every supported way to get them onto a Linux system.
 ## Choose an installation method
 
 Every method below delivers the same AMD SMI release. They differ in what else
-they pull in, where the files land, and how much wiring you do yourself. Find
-the row that matches your situation and follow its link.
+they pull in, where the files land, and how much wiring you do yourself.
 
 | Method | `amd-smi` CLI | `import amdsmi` | Use this when |
 |---|---|---|---|
@@ -130,9 +129,6 @@ sudo python3 -m pip install more_itertools
 (install_rocm)=
 ## Install the ROCm Core SDK
 
-**Use this when** you want ROCm on the machine anyway. This is the default path
-and the one most users should take.
-
 AMD SMI is included with most installations of the ROCm Core SDK on Linux.
 
 For instructions, see {doc}`Install AMD ROCm <rocm:install/rocm>`. Use the
@@ -148,9 +144,6 @@ the CLI is on `PATH` with no further setup. The Python module is staged at
 
 (install_without_rocm)=
 ## Install AMD SMI standalone on Linux
-
-**Use this when** you want AMD SMI managed by your package manager, but not the
-rest of the ROCm libraries and tools.
 
 Install the `amdrocm-amdsmi` package. It includes AMD SMI and the ROCm system
 dependencies it needs, and nothing else.
@@ -216,9 +209,6 @@ installs nothing into any interpreter.
 (install_nightly)=
 ## Install a nightly build
 
-**Use this when** you need a fix that has not shipped in a release yet, or you
-are validating against an unreleased ROCm.
-
 Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
 [TheRock](https://github.com/ROCm/TheRock) to a unified pip index.
 
@@ -257,14 +247,9 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
 (install_tarball)=
 ## Install from a tarball
 
-**Use this when** you cannot use a package manager: no root access, multiple
-versions side by side, or an air-gapped host.
-
-A tarball has no install step. Extracting it runs no package manager, no
-`ldconfig`, and no pip, so nothing is registered with Python. The `amd-smi` CLI
-and the `amdsmi` Python module both ship inside the archive and run from
-wherever you extract it, so you point your tools at the tree instead of
-installing out of it.
+A tarball has no install step: the CLI, the library and the Python module run
+from wherever you extract them, and you point your tools at that tree rather
+than installing out of it.
 
 1. Download a ROCm Core tarball,
    `therock-dist-linux-<gpu-family>-<version>.tar.gz`, from the channel you
@@ -319,9 +304,6 @@ coexistence rules.
 (install_pypi)=
 ## Install the Python bindings from PyPI
 
-**Use this when** you want `import amdsmi` to work with no `sys.path` setup on a
-host that already has an AMD SMI library, and you do not need the CLI.
-
 This method installs the `amdsmi` module only. It does not provide the
 `amd-smi` CLI, and it does not ship a native library: the published wheel is a
 pure-Python `py3-none-any` package whose loader looks for `libamd_smi.so` under
@@ -343,16 +325,15 @@ already be on the host, as must the `amdgpu` kernel driver.
    ```
 
 :::{important}
-The PyPI release cadence is independent of ROCm, and the wheel is versioned by
-the AMD SMI library version rather than the ROCm version. The published wheel
-routinely lags the AMD SMI in a current ROCm installation, and it binds against
-whatever `libamd_smi.so` the host provides — which is *not* guaranteed to match
-the bindings it ships.
+The PyPI release cadence is independent of ROCm, so the published wheel can sit
+several releases behind the AMD SMI in a current ROCm installation, and its
+bindings are generated from a different release than the `libamd_smi.so` it
+loads off the host.
 
 Compare the published version against `amd-smi version` on the host before
 depending on it, and prefer one of the ROCm-managed methods above when ROCm is
-already installed: they always pair the module with the library it was
-generated from.
+already installed: those pair the module with the library it was generated
+from.
 :::
 
 (install_python_module)=
