@@ -854,13 +854,29 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     // WarpSpeed loads one batch chain from the lead channel per physical block.
     // Multi-collective plans must reuse the same channel range so every channel
     // queues all colls (AG#1 then AG#2 via nextJump), not sequential channel slices.
-    if (warpSpeedPlan && planCollCount > 1 && (planCollCount - nPlanColls) > 0) {
-      channelId = 0;
-      currentTraffic = 0;
+    // Pack each coll from its own trafficBytes across the full channel set. The
+    // plan-wide trafficBytes[kind] sum would keep each coll on nChannels/K even
+    // after resetting channelId to 0 (Argus/Alex on ROCM-29990 / PR 10799).
+    bool const warpSpeedReuseChannels = warpSpeedPlan && planCollCount > 1;
+    if (warpSpeedReuseChannels) {
+      int const nPackChannels = nMaxChannels[kind] > 0 ? nMaxChannels[kind] : 1;
+      size_t const taskTraffic = std::max(MinTrafficPerChannel, task->trafficBytes);
+      trafficPerChannel =
+          std::max<size_t>(MinTrafficPerChannel, divUp(taskTraffic / nPackChannels, 16) * 16);
+      if ((planCollCount - nPlanColls) > 0) {
+        channelId = 0;
+        currentTraffic = 0;
+      }
     }
 #endif
     if (kind != kindPrev) {
-      trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+#ifdef ENABLE_WARP_SPEED
+      if (!warpSpeedReuseChannels)
+#endif
+      {
+        trafficPerChannel =
+            std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+      }
       kindPrev = kind;
       channelId = 0;
       currentTraffic = 0;
