@@ -2938,6 +2938,10 @@ void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
 {
     InitDdaDecisionComm(comm, arch, nRanks, /*nNodes=*/1, /*symmetricSupport=*/false);
     comm.archThresholds        = rcclGetArchThresholds(arch);
+    // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
+    // predicate (before any arch or DDA logic). Zero-initialised: pivotA2AEnabled=false,
+    // so the pivot branch is skipped and falls through to the DDA logic under test.
+    comm.topo                  = new ncclTopoSystem();
     // Sentinel pointers satisfy the non-null checks in the fabric eligibility
     // predicates (the values are never dereferenced by query=true calls).
     comm.bootstrap             = reinterpret_cast<void*>(0x1);
