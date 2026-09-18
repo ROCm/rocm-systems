@@ -214,14 +214,18 @@ ph_ctx::initialize_track_list()
         m_tracks.push_back(track);
         m_track_by_id.emplace(static_cast<std::uint32_t>(track->id), track);
         m_c_tracks.push_back(ph_track_t{
-            .id         = static_cast<std::uint32_t>(track->id),
-            .track_name = track->name.c_str(),
-            .nid        = static_cast<std::uint32_t>(track->node_info->node_id),
-            .pid        = static_cast<std::uint32_t>(track->process_info->pid),
-            .tid = track->thread_info  // Workaround, some tracks are missing thread
-                                       // info (we need an investigation)
-                       ? static_cast<std::uint32_t>(track->thread_info->thread_id)
-                       : 0,
+            .id          = static_cast<std::uint32_t>(track->id),
+            .track_name  = track->name.c_str(),
+            .nid         = track->node_info
+                               ? static_cast<std::uint32_t>(track->node_info->node_id)
+                               : 0,
+            .pid         = track->process_info
+                               ? static_cast<std::uint32_t>(track->process_info->pid)
+                               : 0,
+            .tid         = track->thread_info  // Some tracks have no thread (e.g. per
+                                       // agent+queue category tracks)
+                               ? static_cast<std::uint32_t>(track->thread_info->thread_id)
+                               : 0,
             .event_count = static_cast<std::uint32_t>(track->event_count),
             .agent_id    = static_cast<std::uint32_t>(track->agent_id),
         });
