@@ -63,7 +63,7 @@ What the system shall do:
   same range as nested ATen ops.
 - Marker strings remain compatible with existing analyze: split `Function`
   on `:#`; optional `|backend` moved to a `Backend` column.
-- A workload PyTorch version with no matching collector module fails with a
+- A workload PyTorch version the collector does not describe fails with a
   list of supported versions.
 
 Non-functional:
@@ -80,7 +80,7 @@ Two producers share one per-thread stack. Each ROCTX range is the full stack.
 ```mermaid
 flowchart LR
   profile["profile --torch-trace"] --> wraps["Python wraps"]
-  profile --> collector["versioned collector module"]
+  profile --> collector["collector module"]
   wraps --> stack["per-thread stack"]
   collector --> stack
   stack --> roctx["ROCTX ranges"]
@@ -129,11 +129,15 @@ flowchart LR
 | --- | --- | --- |
 | Compile at profile time | Matches any Torch | Slow first run; extra toolchain in the user env |
 | Link into the native tool `.so` | One artifact | Wrong load path: the callback must live in the Python process |
-| **Prebuilt `torch_trace_collector-<version>.so` (chosen)** | **No compile at profile time** | One artifact per supported Torch |
+| **Prebuilt `torch_trace_collector.so` (chosen)** | **No compile at profile time; one artifact; no Torch in the build** | Stub ATen headers have to track the real layout |
 
-- Build finds Torch at `$ROCM_PATH/../torch`.
-- The loader selects the artifact whose version matches the workload
-  Torch version.
+- The build has no Torch dependency. The collector compiles against stub
+  headers declaring the six ATen and c10 symbols it calls.
+- Those symbols resolve against the workload's own libtorch at load time.
+- The stubs stay opaque where PyTorch's API has changed shape, and resolve
+  the difference at runtime.
+- The module reports the versions it supports. The loader rejects anything
+  else.
 
 ---
 
@@ -154,5 +158,5 @@ Details: `lld-torch-trace-collector.md`.
 | --- | --- |
 | Inductor static launcher | Those kernels launch without Triton's Python entry point now, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
 | Offline correlation | Encode `seqNr` and PyTorch thread ids in the ROCTX string, larger payload to `roctxRangePushA`. Analyze splices the worker leaf to the matching forward nest (main thread, same `seqNr`). No snapshot store. We may still need overlay to append `Tensor.backward` wrap range (also a main-thread write; no `seqNr`).|
-| Further Torch versions | Each new version needs a built artifact and a CMake version gate. |
+| Further Torch versions | Each new version needs its layout confirmed against the stubs; no new artifact. |
 | DispatchMode fallback | Unsupported version is fatal; install failures fall back. Whether fallback should remain is not settled. |

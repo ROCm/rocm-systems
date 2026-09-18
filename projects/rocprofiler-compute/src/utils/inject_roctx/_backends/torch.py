@@ -4,8 +4,8 @@
 """ROCTX instrumentation for PyTorch.
 
 ATen operators use torch_trace_collector when it is installed, otherwise
-TorchDispatchMode. No collector for the workload PyTorch version, or a
-failure to load the collector, terminates the process.
+TorchDispatchMode. A workload PyTorch version the collector does not
+describe, or a failure to load it, warns and falls back to TorchDispatchMode.
 """
 
 import importlib.util

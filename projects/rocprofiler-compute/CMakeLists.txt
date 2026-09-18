@@ -1330,14 +1330,14 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so and
-# torch_trace_collector-<torch-version>.so
+# install librocprofiler-compute-tool.so and torch_trace_collector.<abi>.so
 install(
     TARGETS rocprofiler-compute-tool
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
-# The collector is skipped when PyTorch is absent or an unsupported version.
-# The loader searches lib/rocprofiler-compute/ for the versioned artifact.
+# One collector covers every PyTorch version its stub headers describe. It is
+# skipped only when roctx, the Python headers or C++20 are missing. The loader
+# searches lib/rocprofiler-compute/ for it.
 if(TARGET torch-trace-collector-module)
     install(
         TARGETS torch-trace-collector-module

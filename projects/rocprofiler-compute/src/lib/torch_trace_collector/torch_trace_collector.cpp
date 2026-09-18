@@ -7,6 +7,7 @@
 #include "record_function_installation.h"
 #include "stack_entry.h"
 #include "user_scope.h"
+#include "user_scope_kind.h"
 #include "wire_format.h"
 
 #include <ATen/record_function.h>
@@ -20,7 +21,6 @@
 #include <exception>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -33,9 +33,7 @@ namespace
 {
 using namespace torch_trace_collector::detail;
 
-constexpr std::string_view kRoctxUserScopeKindName = "rocprofiler-compute.user_scope";
-const c10::DebugInfoKind   kRoctxUserScopeKind{&kRoctxUserScopeKindName};
-constexpr const char*      kRecordFnBackend = "torch";
+constexpr const char* kRecordFnBackend = "torch";
 
 class RoctxUserScopeChain : public c10::DebugInfoBase
 {
@@ -73,7 +71,7 @@ std::unique_ptr<c10::DebugInfoGuard> publish_user_scope_chain(const std::vector<
     try
     {
         auto info = std::make_shared<RoctxUserScopeChain>(stack);
-        return std::make_unique<c10::DebugInfoGuard>(kRoctxUserScopeKind, std::move(info));
+        return std::make_unique<c10::DebugInfoGuard>(user_scope_kind(), std::move(info));
     }
     catch (...)
     {
@@ -142,7 +140,7 @@ std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
 std::size_t apply_user_scope_overlay()
 {
     auto* chain_info = dynamic_cast<const RoctxUserScopeChain*>(
-        c10::ThreadLocalDebugInfo::get(kRoctxUserScopeKind));
+        c10::ThreadLocalDebugInfo::get(user_scope_kind()));
     if (chain_info == nullptr || chain_info->chain.empty())
     {
         return 0;
@@ -156,6 +154,10 @@ std::size_t apply_user_scope_overlay()
     return pushed;
 }
 
+// scope is a template argument rather than record_fn.scope() so the stub does
+// not have to model at::StepCallbacks. install() registers one callback per
+// scope instead.
+template<at::RecordScope scope>
 std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
 {
     std::unique_ptr<RoctxObserverContext> observer_ctx;
@@ -166,9 +168,8 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
         ProcessState&            state = process_state();
         std::vector<StackEntry>& stack = thread_state().stack;
 
-        const at::RecordScope scope  = record_fn.scope();
-        const std::int64_t    seq_nr = record_fn.seqNr();
-        const char*           name   = record_fn.name();
+        const std::int64_t seq_nr = record_fn.seqNr();
+        const char*        name   = record_fn.name();
         if (name == nullptr || name[0] == '\0')
         {
             name = "<anonymous>";
@@ -367,13 +368,16 @@ std::int64_t install()
     return process_state().install.wlock(
         [](InstallState& state)
         {
-            if (state.handle == at::INVALID_CALLBACK_HANDLE)
+            if (state.forward_handle == at::INVALID_CALLBACK_HANDLE)
             {
-                state.handle = at::addGlobalCallback(
-                    at::RecordFunctionCallback(start_cb, end_cb)
-                        .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
+                state.forward_handle = at::addGlobalCallback(
+                    at::RecordFunctionCallback(start_cb<at::RecordScope::FUNCTION>, end_cb)
+                        .scopes({at::RecordScope::FUNCTION}));
+                state.backward_handle = at::addGlobalCallback(
+                    at::RecordFunctionCallback(start_cb<at::RecordScope::BACKWARD_FUNCTION>, end_cb)
+                        .scopes({at::RecordScope::BACKWARD_FUNCTION}));
             }
-            return static_cast<std::int64_t>(state.handle);
+            return static_cast<std::int64_t>(state.forward_handle);
         });
 }
 
@@ -382,10 +386,13 @@ void uninstall()
     process_state().install.wlock(
         [](InstallState& state)
         {
-            const auto handle = std::exchange(state.handle, at::INVALID_CALLBACK_HANDLE);
-            if (handle != at::INVALID_CALLBACK_HANDLE)
+            for (at::CallbackHandle* slot : {&state.forward_handle, &state.backward_handle})
             {
-                at::removeCallback(handle);
+                const auto handle = std::exchange(*slot, at::INVALID_CALLBACK_HANDLE);
+                if (handle != at::INVALID_CALLBACK_HANDLE)
+                {
+                    at::removeCallback(handle);
+                }
             }
             process_state().snapshots.clear();
         });
@@ -393,8 +400,8 @@ void uninstall()
 
 bool is_installed()
 {
-    return process_state().install.rlock([](const InstallState& state)
-                                         { return state.handle != at::INVALID_CALLBACK_HANDLE; });
+    return process_state().install.rlock(
+        [](const InstallState& state) { return state.forward_handle != at::INVALID_CALLBACK_HANDLE; });
 }
 
 }  // namespace torch_trace_collector::detail

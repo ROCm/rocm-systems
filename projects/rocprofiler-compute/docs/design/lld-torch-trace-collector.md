@@ -13,7 +13,7 @@ flowchart LR
   launch["launch.py"] --> torch["torch.py"]
   torch --> loader["torch_cpp_loader.py"]
   loader --> finder["native_tool_finder.py"]
-  loader --> so["torch_trace_collector-*.so"]
+  loader --> so["torch_trace_collector.*.so"]
   so --> module["torch_trace_collector_module.cpp"]
   torch --> module
   module --> core["torch_trace_collector.cpp"]
@@ -152,24 +152,28 @@ ROCTX range, the leaf, then those extras.
 
 ## Build and load
 
-- `src/lib/torch_trace_collector/CMakeLists.txt` skips the build when PyTorch is missing or unsupported. CMake looks for the PyTorch install in the `torch` directory beside `$ROCM_PATH` (sibling of the ROCm prefix).
-- The version comes from `TORCH_VERSION_MAJOR` and `TORCH_VERSION_MINOR` in the PyTorch headers, not `find_package(Torch)`, and must be 2.13 or 2.14. The MODULE takes the Python include dirs and links no Python library. `PREFIX` is empty.
-- CMake names the artifact `torch_trace_collector-<major>.<minor>.<Python3_SOABI>.so`. Library output is `${CMAKE_BINARY_DIR}/lib`. Install destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or `lib64`).
-- `torch_cpp_loader.py` keys on the workload PyTorch major and minor version, from `Version(torch.__version__).release[:2]`. The ABI tag in the filename records the interpreter the artifact was built for; the loader reports it but does not require a match.
+- The collector builds against the stub headers in `src/lib/torch_trace_collector/torch_abi/`, not a PyTorch install. `CMakeLists.txt` skips it only when roctx, the Python development headers, or C++20 are missing. The stub include directory is `PRIVATE`, so the tests never see it.
+- The stubs declare the six ATen and c10 symbols the collector calls. Those stay undefined; the module links with `--unresolved-symbols=ignore-all`. `torch_abi.h` holds the few layout facts the stubs need, verified identical in 2.12, 2.13 and 2.14; 2.13 and 2.14 are advertised.
+- `scope()` is not read. `install()` registers one global callback per observed scope, so the scope is a template argument and `at::StepCallbacks` stays out of the stub.
+- `c10::DebugInfoKind` is opaque in the stub. 2.12 makes it a one-byte enum of fixed slots, 2.13 a pointer wrapper that lets callers own one. `user_scope_kind.cpp` dlsyms a symbol only 2.13 exports and picks the payload.
+- The MODULE uses the CPython C API, not pybind11, which only ships inside the PyTorch wheel. It takes the Python include dirs and links no Python library. `PREFIX` is empty.
+- CMake names the artifact `torch_trace_collector.<Python3_SOABI>.so`; one artifact covers every supported version. Library output is `${CMAKE_BINARY_DIR}/lib`. Install destination is `${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute` (`lib` or `lib64`).
+- `torch_cpp_loader.py` reopens the workload's `libc10.so` and `libtorch_cpu.so` with `RTLD_GLOBAL` before importing the artifact; Python opens extensions `RTLD_LOCAL` and `import torch` leaves those symbols out of the global scope.
+- The module exports `supported_torch_versions` from `torch_abi.h`. The loader compares it against `Version(torch.__version__).release[:2]` and raises `UnsupportedTorchVersionError` on a mismatch.
 
 Search is rooted at the executing Python package (checkout: `src/`; install: `<prefix>/libexec/rocprofiler-compute/`). Order, via `find_prebuilt_artifacts` in `native_tool_finder.py`:
 
-1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector-*.so`
+1. `<package_root>/../../lib*/rocprofiler-compute/torch_trace_collector.*.so`
 2. `<package_root>/../build/lib`
 3. `<package_root>/lib/_build/lib`
 
-First unique resolved path per version wins. Install is scanned first, so a packaged `.so` beats a source build **in the same process**. Run the in-tree `rocprof-compute` (package root `src/`) to use a source build; the install glob then does not see `/opt/rocm`.
+First unique resolved path wins. Install is scanned first, so a packaged `.so` beats a source build **in the same process**. Run the in-tree `rocprof-compute` (package root `src/`) to use a source build; the install glob then does not see `/opt/rocm`.
 
 ---
 
 ## Tests
 
   - `src/lib/torch_trace_collector/tests/test_torch_trace_collector.cpp`: verifies snapshot join of backward to forward, overlay of wrap frames on a worker, dummy locations, marker encoding, and install.
-  - `tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py`: verifies the loader finds a matching collector artifact.
+  - `tests/unit/utils/inject_roctx/_backends/test_torch_cpp_loader.py`: verifies the loader finds the collector artifact and rejects an unsupported workload version.
   - `tests/integration/test_profile_torch_trace.py`: verifies end-to-end `--torch-trace` on a sample workload.
   - `tests/integration/test_torch_trace_coverage.py`: compares `--torch-trace` operator and kernel coverage to `torch.profiler`.
