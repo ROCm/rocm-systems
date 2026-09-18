@@ -4200,6 +4200,9 @@ TEST_F(P2pFreeMicrotest, SendFree_LegacyIpcCloseFails_Propagates)
     send.transportResources = res;
 
     EXPECT_NE(p2pTransport.send.free(nullptr, &send), ncclSuccess);
+    // The forced close failure returns before production's free(resources),
+    // so the test owns the block (else LeakSanitizer reports it under ASAN).
+    std::free(res);
 }
 
 // The recv-handle close arm (reached only after the send-handle close
@@ -4221,6 +4224,7 @@ TEST_F(P2pFreeMicrotest, SendFree_LegacyIpcRecvCloseFails_Propagates)
     send.transportResources = res;
 
     EXPECT_NE(p2pTransport.send.free(nullptr, &send), ncclSuccess);
+    std::free(res);  // forced failure returns before free(resources)
 }
 
 TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcCloseFails_Propagates)
@@ -4235,6 +4239,7 @@ TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcCloseFails_Propagates)
     recv.transportResources = res;
 
     EXPECT_NE(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
+    std::free(res);  // forced failure returns before free(resources)
 }
 
 TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcRecvCloseFails_Propagates)
@@ -4254,6 +4259,7 @@ TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcRecvCloseFails_Propagates)
     recv.transportResources = res;
 
     EXPECT_NE(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
+    std::free(res);  // forced failure returns before free(resources)
 }
 
 // ===========================================================================
@@ -6634,25 +6640,16 @@ protected:
     }
 };
 
-// ncclP2pFreeShareableBuffer is the release counterpart of the allocator: a
-// descriptor that was populated by a successful allocation is accepted and
-// released without error. (The allocator's own contract -- what it writes into
-// the descriptor -- is pinned by the Allocate_* tests; this pins only that the
-// free counterpart completes.)
-TEST_F(P2pProxyLifecycleMicrotest, FreeShareableBuffer_PopulatedDescriptor_ReleasesSuccessfully)
+// ncclP2pFreeShareableBuffer is currently an unconditional
+// `{ return ncclSuccess; }` (p2p.cc): it never dereferences its ncclIpcDesc*
+// argument. This test pins exactly that no-op contract, so if the release
+// counterpart ever grows real behaviour (touching the descriptor, failing on a
+// bad handle) this becomes the place it has to be re-specified. It deliberately
+// does NOT set up a populated descriptor -- that would falsely suggest the
+// descriptor contents matter to the result.
+TEST_F(P2pProxyLifecycleMicrotest, FreeShareableBuffer_IsCurrentlyNoopSuccess)
 {
     ncclIpcDesc ipcDesc{};
-    void*       ptr = nullptr;
-
-    ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [](hipIpcMemHandle_t* h, void*) -> hipError_t {
-            if (h) std::memset(h, 0x11, sizeof(*h));
-            return hipSuccess;
-        });
-    ASSERT_EQ(ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
-                                             &ipcDesc, &ptr),
-              ncclSuccess);
-
     EXPECT_EQ(ncclP2pFreeShareableBuffer(&ipcDesc), ncclSuccess);
 }
 
