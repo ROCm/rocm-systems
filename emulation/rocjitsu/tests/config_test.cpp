@@ -1879,7 +1879,8 @@ TEST(CheckpointTest, PreservesStrictVgprAllocationAndPhysicalOccupancy) {
   }
 
   test::ScopedTempFile checkpoint("rocjitsu-vgpr-allocation-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
   flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
