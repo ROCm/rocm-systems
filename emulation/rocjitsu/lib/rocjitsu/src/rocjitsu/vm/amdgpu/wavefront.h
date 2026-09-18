@@ -1039,10 +1039,10 @@ private:
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
 
-  // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
-  // storage. They intentionally bypass instruction read-observation because
-  // completion writes produced memory results rather than instruction source
-  // reads.
+  // Memory pipelines synchronously write completed VM loads into physical
+  // SGPR/VGPR storage. They intentionally bypass instruction read-observation
+  // because completion writes produce memory results rather than instruction
+  // source reads. (a.k.a "immediate writes")
   friend class GlobalMemPipeline;
   friend class LocalMemPipeline;
   friend class ScalarMemPipeline;
