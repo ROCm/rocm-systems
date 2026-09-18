@@ -188,12 +188,14 @@ protected:
             dev, gpuBytes, localCpuBytes, expectedLocalRanks, buf.get(), &localReason);
         if (reason && reason->empty())
             *reason = localReason;
+        // TearDown is the only FreeHybridVmm for a successful alloc. A peer skip
+        // after this rank succeeded used to destroy the unique_ptr without that call.
+        if (ok) hybridBuffers_.push_back(std::move(buf));
         if (SyncSkip(!ok)) {
             if (reason && reason->empty())
                 *reason = "hybrid VMM allocation failed on another rank";
             return false;
         }
-        hybridBuffers_.push_back(std::move(buf));
         *out = hybridBuffers_.back().get();
         return true;
     }
