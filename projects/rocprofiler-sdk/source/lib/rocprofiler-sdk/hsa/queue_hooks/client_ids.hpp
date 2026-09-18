@@ -30,30 +30,35 @@ namespace hsa
 {
 namespace queue_hooks
 {
-// Tags identifying the producer subsystem of each inst_pkt_t entry.
-// Only distinctness matters; values are fixed for test-order stability.
-// Services are migrated off the per-queue callback registry one at a time; the
-// unused ids are reserved so the tag values stay stable across those PRs.
+// Tags identifying the producer subsystem of each inst_pkt_t entry, stored in the
+// inst_pkt_t pair as an hsa::ClientID.
 //
-// The underlying type is fixed to int64_t to match hsa::ClientID, which is how the
-// tag is stored in inst_pkt_t. The enum is deliberately unscoped rather than an
-// enum class: unscoped keeps the implicit conversion to ClientID, so the emplace
-// sites need no cast, while still grouping the values under one type.
+// The underlying type is fixed to int64_t to match hsa::ClientID. The enum is
+// deliberately unscoped rather than an enum class: unscoped keeps the implicit
+// conversion to ClientID, so the emplace sites need no cast, while still grouping
+// the values under one type.
 //
-// These values numerically overlap the per-queue registry's auto-incrementing
-// ClientID, which also starts at 1 and is still in use by the services that have
-// not been migrated yet. That is inert only because no consumer routes on the tag:
-// counters' completed_cb and thread trace's post_kernel_call both identify their
-// own packets by pointer lookup or dynamic_cast. Before adding a consumer that
-// dispatches on these values, either finish migrating the remaining services off
-// the registry or move this enum to a range the registry cannot produce.
+// The values are negative because they share the inst_pkt_t tag space with the
+// per-queue callback registry, whose QueueController::add_callback hands out
+// strictly positive ids counting up from 1. Migrated services (counters, thread
+// trace, SPM) select their own packets by comparing against these tags, so a tag
+// drawn from the registry's range could match a packet the service does not own.
+// Services that have not migrated yet still receive registry ids, so the two
+// ranges must stay disjoint until the registry is gone. Any tag added here must
+// likewise be negative; -1 is left unused because QueueController::add_callback
+// uses it as a local "unassigned" initializer.
 enum client_id : int64_t
 {
-    COUNTERS_CLIENT_ID     = 1,
-    THREAD_TRACE_CLIENT_ID = 2,
-    PC_SAMPLING_CLIENT_ID  = 3,
-    SPM_CLIENT_ID          = 4,
+    COUNTERS_CLIENT_ID     = -1001,
+    THREAD_TRACE_CLIENT_ID = -1002,
+    PC_SAMPLING_CLIENT_ID  = -1003,
+    SPM_CLIENT_ID          = -1004,
 };
+
+static_assert(COUNTERS_CLIENT_ID < 0 && THREAD_TRACE_CLIENT_ID < 0 && PC_SAMPLING_CLIENT_ID < 0 &&
+                  SPM_CLIENT_ID < 0,
+              "queue hook tags must stay disjoint from the positive ids handed out by "
+              "QueueController::add_callback");
 }  // namespace queue_hooks
 }  // namespace hsa
 }  // namespace rocprofiler
