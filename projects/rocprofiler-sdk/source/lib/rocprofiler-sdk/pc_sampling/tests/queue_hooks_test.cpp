@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,13 +40,13 @@ TEST(pc_sampling_queue_hooks, is_configured_on_agent_unconfigured)
 
 TEST(pc_sampling_queue_hooks, signal_completion_hook_null_session_is_noop)
 {
-    rocprofiler::hsa::rocprofiler_packet kern_pkt{};
+    rocprofiler::hsa::rocprofiler_packet                    kern_pkt{};
     std::shared_ptr<rocprofiler::hsa::queue_info_session_t> null_session;
     rocprofiler::hsa::packet_data_t                         packet{};
     rocprofiler::hsa::inst_pkt_t                            inst_pkt{};
 
     rocprofiler::pc_sampling::signal_completion_hook(
-        *reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
+        nullptr,
         kern_pkt,
         null_session,
         packet,

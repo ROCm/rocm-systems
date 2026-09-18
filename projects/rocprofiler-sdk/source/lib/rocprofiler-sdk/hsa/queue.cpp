@@ -171,7 +171,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         // PC sampling completion is no longer routed through the per-queue
         // callback registry; invoke its hook explicitly.
-        pc_sampling::signal_completion_hook(queue_info_session.queue,
+        pc_sampling::signal_completion_hook(&queue_info_session.queue,
                                             packet.kernel_packet,
                                             _session,
                                             packet,
@@ -367,8 +367,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    // these are for the services (dispatch counter collection, pc sampling, ATT) which use
-    // the queue/queue_controller callback mechanism
+    // Services that attach packet instrumentation or need dispatch correlation data. Some are
+    // still routed through queue-controller callbacks while migrated services use explicit hooks.
     const auto queue_callback_context_filter = [](const context::context* ctx) {
         return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
                 ctx->dispatch_spm);
