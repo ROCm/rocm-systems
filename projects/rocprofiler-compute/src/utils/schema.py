@@ -70,8 +70,6 @@ class Workload:
     ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
     # Glob-matched operator nodes from --torch-operator / --triton-operator.
     ml_api_glob_matches: list[Any] = field(default_factory=list)
-    # Matched ML API trace rows keyed by backend, populated by operator filters.
-    matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None
 
 
