@@ -12,8 +12,8 @@
             "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'rocm_ompt_api' appears in category at least 100 times in table regions",
-                    "error_message": "'rocm_ompt_api' category entries are fewer than expected in regions",
+                    "description": "Verify that 'rocm_ompt_api' appears in category at least 100 times in table regions (discrete GPU / explicit map)",
+                    "error_message": "'rocm_ompt_api' category entries are fewer than expected in regions (discrete GPU threshold)",
                     "expected_result": 100,
                     "gpu_category_to_skip": [
                         "apu"
@@ -22,9 +22,13 @@
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Verify rocm_ompt_api count for APU / shared-memory paths (fewer data-op callbacks)",
+                    "description": "Verify that 'rocm_ompt_api' appears in category at least 30 times in table regions (APU / unified memory)",
                     "error_message": "'rocm_ompt_api' category entries are fewer than expected in regions (APU threshold)",
                     "expected_result": 30,
+                    "gpu_category_to_skip": [
+                        "instinct",
+                        "radeon"
+                    ],
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api';"
                 },
                 {
