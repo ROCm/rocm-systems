@@ -123,6 +123,17 @@ constexpr int32_t ZERO_OFFSET = 0;
 template <int WAIT_CNT = 0>
 __device__ ASYNC_API void asyncWait() ASYNC_DELETED;
 
+// Block-wide barrier that also retires the calling wave's async-to/from-LDS transfers.  Drains to
+// WAIT_CNT outstanding FIRST, then rendezvous with the rest of the block.  That order is what makes the
+// guarantee block-wide: ASYNCcnt is per-wave, so a wave can only drain its own transfers, but because
+// every wave must drain before it can arrive, passing the barrier implies EVERY wave's transfers landed.
+// Barrier-then-wait would only prove the caller's own transfers retired.  This is the one-call form of
+// the drain + __syncthreads() pair the ByBlock/ByTeam transfers document.  WAIT_CNT is an immediate on
+// the instruction, so it must be a constant; a non-zero count is a pipelining throttle and does not on
+// its own give the block-wide guarantee.  Call from ALL threads of the block -- it contains a barrier.
+template <int WAIT_CNT = 0>
+__device__ ASYNC_API void asyncBlockBarrier() ASYNC_DELETED;
+
 /* Async load/Store APIs */
 // The async-to/from-LDS builtins move a single b8/b32/b64/b128 access per lane between global memory and LDS.
 // A whole warp issues one instruction, so a warp moves (warpSize * accessWidth) bytes at a time, with each
@@ -418,6 +429,21 @@ __device__ inline bool ldsTeamSlice(size_t sizeInBytes, uint32_t startWarpId, ui
 template <int WAIT_CNT>
 __device__ inline void asyncWait() {
   __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
+}
+
+// The barrier is spelled out rather than written as __syncthreads(); see tdm::tdmBlockBarrier for the
+// full reasoning.  In short: a BARE __builtin_amdgcn_s_barrier() carries no memory fence, so a wave can
+// signal it with ordinary LDS stores still in flight and a peer warp reads stale bytes -- the
+// release/acquire pair is what __syncthreads() expands to and is what makes it safe.  And
+// cmake/scripts/add_faults.sh rewrites any __syncthreads() under src/device/ into a call that only
+// exists for TUs pulling in common.h, which this standalone header does not.  The async transfers
+// themselves are covered by the ASYNCcnt wait below, which the fences know nothing about.
+template <int WAIT_CNT>
+__device__ inline void asyncBlockBarrier() {
+  asyncWait<WAIT_CNT>();
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+  __builtin_amdgcn_s_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 }
 
 template <SyncPolicy sp, CachePolicy cp, bool Aligned>
@@ -732,6 +758,12 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 /// \see tdm::tdmWait. The blocking copy forms already drain internally.
 __device__ ASYNC_API void tdmWait() ASYNC_DELETED;
 
+/// \brief Block-wide barrier that also retires the calling wave's transfers.
+/// \see tdm::tdmBlockBarrier for the drain-then-rendezvous rationale and what a
+///      non-zero \p WaitCnt does (and does not) guarantee.
+template <int WaitCnt = 0>
+__device__ ASYNC_API void tdmBlockBarrier() ASYNC_DELETED;
+
 /// \brief Non-blocking block-collective copy: issue and return.
 /// \see tdm::tdmCopyAsync.
 template <CachePolicy cp = DEFAULT_CACHE_POLICY>
@@ -761,6 +793,11 @@ __device__ ASYNC_API void tdmCopyByTeam(void* dst, const void* src, size_t sizeB
 
 __device__ inline void tdmWait() {
   asyncWait<0>();
+}
+
+template <int WaitCnt>
+__device__ inline void tdmBlockBarrier() {
+  asyncBlockBarrier<WaitCnt>();
 }
 
 template <CachePolicy cp>
