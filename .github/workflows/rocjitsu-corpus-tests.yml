@@ -83,8 +83,10 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 45
-            corpus_hard_timeout: 60
+            # Leave scheduling headroom for concurrent simulator processes;
+            # retries run only the failed cases and see less host contention.
+            corpus_soft_timeout: 60
+            corpus_hard_timeout: 90
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
