@@ -34,6 +34,9 @@ constexpr int INPUT_GROUP_ARG = 3;
 /// for the duration of a benchmark case.
 struct XrtContext {
   xrt::device device;
+  // The hardware context has to outlive the kernel built from it, so it is held here rather than
+  // left as a local in setup_xrt. Declared before `kernel` so it is destroyed after it.
+  xrt::hw_context context;
   xrt::kernel kernel;
   int group = 0;
 };
@@ -63,8 +66,8 @@ bool setup_xrt(benchmark::State& state, XrtContext* ctx) {
     }
 
     ctx->device.register_xclbin(xclbin);
-    xrt::hw_context context(ctx->device, xclbin.get_uuid());
-    ctx->kernel = xrt::kernel(context, xkernel_it->get_name());
+    ctx->context = xrt::hw_context(ctx->device, xclbin.get_uuid());
+    ctx->kernel = xrt::kernel(ctx->context, xkernel_it->get_name());
     ctx->group = ctx->kernel.group_id(INPUT_GROUP_ARG);
   } catch (const std::exception& e) {
     state.SkipWithError((std::string("XRT setup failed: ") + e.what()).c_str());
