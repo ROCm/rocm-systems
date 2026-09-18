@@ -74,6 +74,7 @@ set(COMMON_FILES
   common.h
   common.cu
   gin_sdma_allgather_policy.h
+  gin_sdma_broadcast_policy.h
   gin_sdma_devtime.h
   gin_sdma_devtime_host.h
   nccl1_compat.h
@@ -184,6 +185,16 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
 endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+    # GIN-SDMA hybrid Broadcast (broadcast_perf -D 3): same device-RDC link as
+    # alltoall_perf/all_gather_perf so the Gin*BroadcastKernel variants resolve
+    # the GIN device backend (SDMA puts + LSA/LL peer stores).
+    target_compile_definitions(broadcast_perf PRIVATE ENABLE_ROCSHMEM_GIN)
+    target_compile_options(broadcast_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+    target_link_libraries(broadcast_perf PRIVATE
+        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+    target_link_options(broadcast_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
+endif()
 add_rccl_test(gather)
 add_rccl_test(hypercube)
 add_rccl_test(reduce_scatter)
