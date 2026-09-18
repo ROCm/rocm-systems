@@ -163,14 +163,19 @@ static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
 #endif
 
 // ---------------------------------------------------------------------------
-// ncclSymIsHostSegment: true for host-NUMA, and on AMD inside
-// NCCL_CUMEM_HOST_VERSION_SUPPORTED also for plain host. The second arm is
-// #if-gated, so the guard is mirrored below.
+// ncclSymIsHostSegment: true for host-NUMA on CUDA, and on AMD inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED also for plain host. HOST_NUMA is not
+// a sysmem type on AMD until the HostNuma runtime tickets land.
 
-// Branch: the unconditional host-NUMA check.
+#if defined(__HIP_PLATFORM_AMD__)
+TEST(SymIsHostSegment, HostNuma_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(kLocHostNuma));
+}
+#else
 TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
   EXPECT_TRUE(ncclSymIsHostSegment(kLocHostNuma));
 }
+#endif
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 // Branch: AMD allocates host segments as plain host, so they count as sysmem.
@@ -226,6 +231,7 @@ protected:
   static void InstallRealSegmentHelpers() {
     g_devrVerifySegmentLayouts = RealDevrVerifySegmentLayouts;
     g_devrBuildGinSegmentInfos = RealDevrBuildGinSegmentInfos;
+    g_devrCheckRegistrationSupport = RealDevrCheckRegistrationSupport;
   }
 
   // Move nRanks, not lsaSize: lsaSize indexes the fixture's two-element
@@ -1114,7 +1120,11 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
 // Branch: the second clause of reuseLocal -- remote rank, param on, CPU-backed
 // segment -- so the caller's handle is reused without an import.
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+  messages[1 * kMaxSegments].type = kLocHost;
+#else
   messages[1 * kMaxSegments].type = kLocHostNuma;
+#endif
   ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
@@ -1345,8 +1355,10 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
   EXPECT_EQ(barrier.calls, 1);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 // Reuse-param path: a genuine 2-rank host/device split must reject rather than
 // stamp host onto the device owner's message (nHost==1 used to skip the check).
+// Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
 TEST_F(SymMemoryMapLsaTeamTest, MixedHostAndDeviceOwners_ReturnsInvalidUsage) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
@@ -1427,6 +1439,7 @@ TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
   EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
 }
+#endif
 
 
 // ---------------------------------------------------------------------------
@@ -1932,7 +1945,11 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
                    [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
                      if (prop) {
                        *prop = hipMemAllocationProp{};
-                       prop->location.type = kLocHostNuma;  // CPU-backed
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+                       prop->location.type = kLocHost;
+#else
+                       prop->location.type = kLocHostNuma;
+#endif
                      }
                      return hipSuccess;
                    });
@@ -1954,8 +1971,14 @@ TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegme
   EXPECT_EQ(addrs[1], base + 4096);  // advanced by the first segment's size
   EXPECT_EQ(sizes[0], 4096u);
   EXPECT_EQ(sizes[1], 8192u);
-  EXPECT_EQ(types[0], NCCL_PTR_HOST);  // host-NUMA segments register as host
+  EXPECT_EQ(types[0],
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+            NCCL_PTR_CUDA);  // DMA-BUF MR; NCCL_PTR_HOST would ibv_reg_mr and EFAULT
+  EXPECT_EQ(types[1], NCCL_PTR_CUDA);
+#else
+            NCCL_PTR_HOST);  // host-NUMA segments register as host
   EXPECT_EQ(types[1], NCCL_PTR_HOST);
+#endif
   EXPECT_EQ(mem.numGinSegments, 2);
 }
 
@@ -3561,6 +3584,74 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// A host-VMM rank used to return at fail_locReg before the IPC allgather, so a
+// device peer hung in windowRegisterNonSym. Allgather a host/device bit first.
+TEST_F(DevrWindowRegisterInGroupTest, HostVmmLsaTeam_AllgathersThenRejects) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook memType(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+      *static_cast<hipMemoryType*>(data) = hipMemoryTypeHost;
+    }
+    return hipSuccess;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int, int, void*, int) { return ncclSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Device rank must wait for the host peer's bit instead of entering the IPC
+// exchange alone.
+TEST_F(DevrWindowRegisterInGroupTest, DevicePeerHostVmm_AllgathersThenRejects) {
+  comm->nRanks = 2;
+  comm->localRanks = 2;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaSelf = 0;
+  lsaRankList.assign({0, 1});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  peers.assign(2, ncclPeerInfo{});
+  comm->peerInfo = peers.data();
+
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook ptrAttr(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+    if (data && attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) {
+      *static_cast<hipMemoryType*>(data) = hipMemoryTypeDevice;
+    }
+    if (data && attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+      *static_cast<int*>(data) = 1;  // skip the retain walk; this rank is not host VMM
+    }
+    return hipSuccess;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, [](void*, int*, int self, int, void* buf, int) {
+    auto* kinds = static_cast<int*>(buf);
+    kinds[self] = 0;
+    kinds[1] = 1;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(gather.calls, 1);
   EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(out, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);

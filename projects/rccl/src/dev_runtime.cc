@@ -1413,6 +1413,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
       // Match register.cc: classify the pointer before the retain walk in
       // ncclCuMemGetAddressRange. hipMalloc is not cuMem; retaining it WARNs
       // on every registration and can fault on HIP 7.0.
+      ncclResult_t probeRet = ncclSuccess;
       CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
       CUCHECKGOTO(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)userPtr), ret,
                   fail_locReg);
@@ -1428,22 +1429,52 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                                           (CUdeviceptr)base),
                     ret, fail_locReg);
         if (!legacyIpcCap) {
-          ncclResult_t probeRet =
-              ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize,
-                                       &numSegments, &hasSysmemSegment);
-          if (probeRet != ncclSuccess) hasSysmemSegment = false;
+          probeRet = ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize,
+                                              &numSegments, &hasSysmemSegment);
         }
 #else
         if (memType != CU_MEMORYTYPE_DEVICE) hasSysmemSegment = true;
 #endif
       }
-      if (hasSysmemSegment) {
-        NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
-        // Non-sym IPC uses cudaIpcGetMemHandle, which cannot export host VMM for LSA>1.
-        if (comm->localRanks > 1) {
+      // Host VMM cannot cudaIpcGetMemHandle. Allgather the classify result so a
+      // host rank cannot return while a device peer still enters the IPC exchange.
+      struct ncclDevrState* devr = &comm->devrState;
+      if (devr->lsaSize > 1) {
+        int* kinds = nullptr;
+        // 0 = device, 1 = host, 2 = probe failed.
+        int localKind = (probeRet != ncclSuccess) ? 2 : (hasSysmemSegment ? 1 : 0);
+        NCCLCHECKGOTO(ncclCalloc(&kinds, devr->lsaSize), ret, fail_locReg);
+        kinds[devr->lsaSelf] = localKind;
+        ncclResult_t agRet = bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf,
+                                                         devr->lsaSize, kinds, sizeof(int));
+        int anyHost = 0, anyFail = 0;
+        if (agRet == ncclSuccess) {
+          for (int r = 0; r < devr->lsaSize; r++) {
+            if (kinds[r] == 2) anyFail = 1;
+            if (kinds[r] == 1) anyHost = 1;
+          }
+        }
+        free(kinds);
+        if (agRet != ncclSuccess) {
+          ret = agRet;
+          goto fail_locReg;
+        }
+        if (anyFail) {
+          ret = (probeRet != ncclSuccess) ? probeRet : ncclInternalError;
+          goto fail_locReg;
+        }
+        if (anyHost) {
           WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", comm->localRanks);
           ret = ncclInvalidArgument;
           goto fail_locReg;
+        }
+      } else {
+        if (probeRet != ncclSuccess) {
+          ret = probeRet;
+          goto fail_locReg;
+        }
+        if (hasSysmemSegment) {
+          NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
         }
       }
     }

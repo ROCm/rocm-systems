@@ -403,6 +403,18 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
+// Real body lives in dev_runtime_segments.cc. dev-runtime-test.cc compiles that
+// file as RealDevrCheckRegistrationSupport so this seam stays injectable; the
+// fixture points the hook at the real body.
+static ncclResult_t DefaultCheckRegistrationSupport(void*, size_t, struct ncclComm*, bool) { return ncclSuccess; }
+std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool)> g_devrCheckRegistrationSupport =
+    DefaultCheckRegistrationSupport;
+
+ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
+                                              bool hasSysmemSegment) {
+  return g_devrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment);
+}
+
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
 // ---------------------------------------------------------------------------
@@ -552,6 +564,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}
