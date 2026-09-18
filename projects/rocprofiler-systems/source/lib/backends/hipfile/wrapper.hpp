@@ -94,7 +94,10 @@ private:
             void* _handle = dlopen(ROCPROFSYS_HIPFILE_SONAME, RTLD_LAZY | RTLD_LOCAL);
             if(_handle == nullptr)
             {
-                LOG_WARNING("hipFile telemetry unavailable: {} could not be loaded",
+                LOG_WARNING("hipFile telemetry unavailable: {} could not be loaded. "
+                            "Install the hipFile runtime package (apt install "
+                            "amdrocm-hipfile, or dnf install amdrocm-hipfile) or add "
+                            "its directory to LD_LIBRARY_PATH.",
                             ROCPROFSYS_HIPFILE_SONAME);
                 return _value;
             }
@@ -107,8 +110,13 @@ private:
             if(_value.get_version == nullptr || _value.get_stats_l3 == nullptr)
             {
                 LOG_WARNING("hipFile telemetry unavailable: {} does not export the "
-                            "per-GPU stats API",
-                            ROCPROFSYS_HIPFILE_SONAME);
+                            "per-GPU stats API. Upgrade the hipFile runtime package "
+                            "(apt install amdrocm-hipfile, or dnf install "
+                            "amdrocm-hipfile) to {}.{}.{} or later.",
+                            ROCPROFSYS_HIPFILE_SONAME,
+                            ROCPROFSYS_HIPFILE_MIN_VERSION_MAJOR,
+                            ROCPROFSYS_HIPFILE_MIN_VERSION_MINOR,
+                            ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH);
                 return api{};
             }
 

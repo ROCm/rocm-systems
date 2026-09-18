@@ -79,6 +79,12 @@ Requirements
 * A ROCm release that includes **hipFile 0.5.0 or later**, with the hipFile runtime
   and development packages installed. The per-GPU statistics API this collector
   reads (``hipFileGetStatsL3``) is not present in earlier versions.
+
+  .. code-block:: shell
+
+     apt install amdrocm-hipfile     # or: apt install amd-rocmcore
+     dnf install amdrocm-hipfile     # or: dnf install amd-rocmcore
+
 * ROCm Systems Profiler built with hipFile support (see `Build support`_).
 * A target application that links and uses hipFile. The statistics API is
   in-process, so telemetry is only produced when the profiled application
@@ -251,6 +257,15 @@ Troubleshooting
   I/O. If the application never calls into hipFile, no statistics are produced.
   ``rocprof-sys-avail --settings | grep HIPFILE`` is empty in a build that left
   the collector out.
+* **"hipFile telemetry unavailable" in the log**: The collector is compiled in but
+  could not use the hipFile runtime, and the rest of the profile is unaffected. The
+  message says which case it is. ``could not be loaded`` means ``libhipfile.so.0`` is
+  absent or not on the search path - install ``amdrocm-hipfile`` (or
+  ``amd-rocmcore``) with ``apt``/``dnf``, or add its directory to
+  ``LD_LIBRARY_PATH``. ``does not export the per-GPU stats API`` means a pre-0.5
+  hipFile is installed; because its SOVERSION is also ``0`` it satisfies the library
+  name without providing the API, so upgrade the package. A message naming the
+  loaded version means the runtime is older than the required minimum.
 * **Counters are zero**: Verify that process sampling is enabled and that the
   workload runs long enough to be sampled at least once during active I/O.
 * **A track has gaps**: Samples taken while hipFile could not be queried are
