@@ -331,7 +331,7 @@ int
 main(int argc, char** argv)
 {
     const char* trace_path = argc > 1 ? argv[1] : "/home/amd/test_dbs/rocpd-3930708-0.db";
-    ph_ctx_t    ctx        = {};
+    ph_ctx_t    ctx        = NULL;
     TIME_CALL("ph_ctx_create", ph_ctx_create(&ctx, trace_path));
 
     print_version(ctx);
