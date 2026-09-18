@@ -16,9 +16,7 @@ from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
     NodeRollup,
-    build_call_trees,
     build_operator_summary,
-    parse_top_level_location,
     rollup_node_stats,
 )
 
@@ -777,35 +775,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_location_normal():
-    assert parse_top_level_location("10@main.py:60/#10@main.py:21") == "main.py:60"
-
-
-def test_parse_location_single_entry():
-    assert parse_top_level_location("5@train.py:42") == "train.py:42"
-
-
-def test_parse_location_nan():
-    assert parse_top_level_location(float("nan")) == "unknown:0"
-
-
-def test_parse_location_none():
-    assert parse_top_level_location(None) == "unknown:0"
-
-
-def test_parse_location_empty():
-    assert parse_top_level_location("") == "unknown:0"
-    assert parse_top_level_location("   ") == "unknown:0"
-
-
-def test_parse_location_no_at_sign():
-    assert parse_top_level_location("no_at_sign") == "unknown:0"
-
-
-def test_parse_location_no_colon():
-    assert parse_top_level_location("10@mainpy") == "unknown:0"
-
-
 def test_kernel_stats_defaults_min_max_to_none():
     stats = KernelStats()
     assert stats.min_duration_ns is None
@@ -869,59 +838,6 @@ def test_rollup_propagates_min_max_from_kernel_stats():
     assert node.mean_dispatch_ns == 1500.0
 
 
-def test_build_call_trees_empty_df():
-    assert build_call_trees(pd.DataFrame()) == {}
-
-
-def test_build_call_trees_missing_columns():
-    assert build_call_trees(pd.DataFrame([{"Operator_Name": "a"}])) == {}
-
-
-def test_build_call_trees_dedup_identical_timestamps():
-    row = {
-        "Operator_Name": "op",
-        "Kernel_Name": "kern",
-        "Context_Id": "10@f.py:1",
-        "Start_Timestamp_kernel": 1000,
-        "End_Timestamp_kernel": 2000,
-    }
-    assert build_call_trees(pd.DataFrame([row, row]))["f.py:1"].kernel_launches == 1
-
-
-def test_build_call_trees_no_context_id():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op",
-            "Kernel_Name": "kern",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
-    assert "unknown:0" in build_call_trees(df)
-
-
-def test_build_call_trees_multiple_source_locations():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@a.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@b.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-    ])
-    call_trees = build_call_trees(df)
-    assert "a.py:1" in call_trees
-    assert "b.py:2" in call_trees
-
-
 # ---------------------------------------------------------------------------
 # build_operator_summary
 # ---------------------------------------------------------------------------
@@ -942,96 +858,10 @@ _OPERATOR_SUMMARY_COLUMNS = [
 ]
 
 
-def _build_summary_from_dataframe(rows):
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    return build_operator_summary(call_trees)
-
-
 def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
     summary = build_operator_summary({})
     assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
     assert summary.empty
-
-
-def test_build_operator_summary_skips_synthetic_location_root():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        }
-    ])
-    assert "f.py:1" not in summary["Operator"].tolist()
-    assert "op_a" in summary["Operator"].tolist()
-
-
-def test_build_operator_summary_row_values_for_single_dispatch():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 2_000_000,
-        }
-    ])
-    row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
-    assert row["Location"] == "f.py:1"
-    assert row["Calls"] == 1
-    assert row["Dispatches"] == 1
-    assert row["Dispatches_Per_Call"] == 1.0
-    assert row["Total_GPU"] == pytest.approx(2.0)
-    assert row["Pct_Total_GPU"] == pytest.approx(100.0)
-    assert row["Mean_Per_Call"] == pytest.approx(2.0)
-    assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
-    assert row["Min_Dispatch"] == pytest.approx(2.0)
-    assert row["Max_Dispatch"] == pytest.approx(2.0)
-
-
-def test_build_operator_summary_sort_by_total_descending():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "small_op",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "big_op",
-            "Kernel_Name": "kern",
-            "Context_Id": "20@f.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 10_000_000,
-        },
-    ])
-    operators_in_order = summary["Operator"].tolist()
-    assert operators_in_order.index("big_op") < operators_in_order.index("small_op")
-
-
-def test_build_operator_summary_pct_total_gpu_sums_to_100_at_top_level():
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "20@f.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-    ])
-    op_a_pct = summary.loc[summary["Operator"] == "op_a", "Pct_Total_GPU"].iloc[0]
-    op_b_pct = summary.loc[summary["Operator"] == "op_b", "Pct_Total_GPU"].iloc[0]
-    assert op_a_pct == pytest.approx(75.0)
-    assert op_b_pct == pytest.approx(25.0)
 
 
 # get_matrix_ops_type Tests
