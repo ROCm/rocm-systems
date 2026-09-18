@@ -267,6 +267,36 @@ __device__ TDM_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t si
 ///       __threadfence_block() so those ordinary global stores are observed.
 __device__ TDM_API void tdmWait() TDM_DELETED;
 
+/// \brief Block-wide barrier that also retires the calling wave's TDM ops.
+///
+/// Drains to \p WaitCnt outstanding TDM ops FIRST, then rendezvous with the rest
+/// of the block. That order is what makes the guarantee block-wide: TENSORcnt is
+/// per-wave, so a wave can only ever drain its own ops, but because every wave
+/// must drain before it can arrive, passing the barrier implies that EVERY wave's
+/// transfers have landed. The reverse order (barrier, then wait) would only prove
+/// the CALLER's ops retired, which is not enough to read a slice another warp
+/// transferred.
+///
+/// This is the one-call form of the drain + __syncthreads() pair that the ByBlock
+/// and ByTeam transfers document, and it is the right way to hand an LDS tile from
+/// one warp team to another.
+///
+/// \tparam WaitCnt Ops permitted to remain in flight. It is an immediate on the
+///                 instruction, so it must be a constant. The default 0 drains
+///                 fully; a non-zero count is a pipelining throttle and does NOT
+///                 on its own give the block-wide guarantee described above.
+///
+/// \note Call from ALL threads of the block. It contains a barrier, so letting
+///       some warps skip it hangs the block -- the same rule as __syncthreads().
+///
+/// \code
+///   tdm::asyncLoadToLDSByTeam<SyncPolicy::Async>(src, tile, n, 0, 2);
+///   tdm::tdmBlockBarrier();   // tile is complete and visible block-wide
+///   tdm::asyncStoreFromLDSByTeam<SyncPolicy::Async>(tile, dst, n, 2, 5);
+/// \endcode
+template <int WaitCnt = 0>
+__device__ TDM_API void tdmBlockBarrier() TDM_DELETED;
+
 // ============================================================================
 //  ONE-WAY GLOBAL <-> LDS TRANSFERS
 // ----------------------------------------------------------------------------
@@ -491,8 +521,14 @@ __device__ inline void store(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GRO
   __builtin_amdgcn_tensor_store_from_lds(g0.m_bitfield, g1.m_bitfield, u32x4{}, u32x4{}, u32x8{},
                                          /*cpol=*/cp);
 }
+// The wait count is an immediate on the instruction, so it must be a compile-time
+// constant -- hence a template parameter (same reason TileMover::waitTile takes one).
+template <int WaitCnt>
+__device__ inline void waitTensor() {
+  __builtin_amdgcn_s_wait_tensorcnt(WaitCnt);
+}
 __device__ inline void waitTensor0() {
-  __builtin_amdgcn_s_wait_tensorcnt(0);
+  waitTensor<0>();
 }
 
 // ---- cooperative vector copy of a small byte range, by one warp ------------
@@ -725,6 +761,28 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 
 __device__ inline void tdmWait() {
   detail::waitTensor0();
+}
+
+// The barrier is spelled out rather than written as __syncthreads(), for two reasons.
+//
+// Correctness: a BARE __builtin_amdgcn_s_barrier() carries no memory fence, so the
+// compiler emits no s_wait_dscnt ahead of it and a wave can signal the barrier with
+// its ordinary LDS stores still in flight, leaving a peer warp to read stale bytes.
+// The release/acquire pair is exactly what HIP's __syncthreads() expands to, and it
+// is what makes the barrier safe for the vector head's ordinary stores and for
+// anything the caller staged into LDS by hand. The TDM ops are covered separately by
+// the TENSORcnt wait below, which the fences know nothing about.
+//
+// Mechanics: __syncthreads() cannot be used in this header anyway --
+// cmake/scripts/add_faults.sh rewrites every __syncthreads() under src/device/ into a
+// call to insert_random_delay_per_warp(), which only exists for translation units that
+// pull in common.h and its ncclShmem. These headers are deliberately standalone.
+template <int WaitCnt>
+__device__ inline void tdmBlockBarrier() {
+  detail::waitTensor<WaitCnt>();
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+  __builtin_amdgcn_s_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 }
 
 template <CachePolicy cp>

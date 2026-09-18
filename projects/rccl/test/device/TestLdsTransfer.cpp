@@ -29,6 +29,11 @@
 // staging kernel, because the property under test is different: slices must cover
 // the range exactly once, and a warp must see bytes another warp staged.
 //
+// That same team kernel then doubles as the harness for the block-level barrier
+// (tdmBlockBarrier / asyncBlockBarrier): a flag swaps the drain + __syncthreads()
+// pair for one barrier call, so the barrier suites inherit the disjoint-team cases
+// that can actually detect a barrier which rendezvous without draining.
+//
 // NOTE ON ALIGNMENT: both implementations peel their head against the GLOBAL
 // pointer and apply the same offset to the LDS side, so the contract is that the
 // two pointers share a sub-128B offset. The kernel therefore skews each warp's
@@ -130,6 +135,13 @@ struct TdmLdsOps {
     tdm::tdmWait();
 #endif
   }
+
+  template<int WaitCnt>
+  __device__ static void blockBarrier() {
+#if TDM_SUPPORTED
+    tdm::tdmBlockBarrier<WaitCnt>();
+#endif
+  }
 };
 
 struct AsyncLdsOps {
@@ -197,6 +209,13 @@ struct AsyncLdsOps {
   __device__ static void wait() {
 #if ASYNC_COPY_SUPPORTED
     asyncWait<0>();
+#endif
+  }
+
+  template<int WaitCnt>
+  __device__ static void blockBarrier() {
+#if ASYNC_COPY_SUPPORTED
+    ::asyncBlockBarrier<WaitCnt>();
 #endif
   }
 };
@@ -454,7 +473,12 @@ struct LdsTeam {
   uint32_t stop;
 };
 
-template<typename LoadOps, typename StoreOps, SyncPolicy SP, CachePolicy CP, bool ALIGNED, bool USE_BLOCK_FORM>
+// USE_BARRIER swaps both hand-offs for a single blockBarrier<BARRIER_WAIT>() call, which
+// is the property the barrier suites below are there to pin: one call has to do the job
+// of the drain AND the rendezvous. Everything else about the kernel stays identical, so a
+// barrier run and a non-barrier run of the same case are directly comparable.
+template<typename LoadOps, typename StoreOps, SyncPolicy SP, CachePolicy CP, bool ALIGNED,
+         bool USE_BLOCK_FORM, bool USE_BARRIER = false, int BARRIER_WAIT = 0>
 __global__ void kLdsTeamStage(uint8_t* dst, const uint8_t* src, size_t totalBytes, uint32_t ldsSkew,
                               LdsTeam loadTeam, LdsTeam storeTeam) {
   extern __shared__ __align__(128) uint8_t lds[];
@@ -465,23 +489,42 @@ __global__ void kLdsTeamStage(uint8_t* dst, const uint8_t* src, size_t totalByte
   } else {
     LoadOps::template loadTeam<SP, CP, ALIGNED>(src, tile, totalBytes, loadTeam.start, loadTeam.stop);
   }
-  // Under Async nothing has drained yet, so each warp must retire its own slice
-  // before the barrier publishes the tile.
-  if constexpr (SP == SyncPolicy::Async) LoadOps::wait();
 
-  // Required by the API contract: completion is per-wave, so Sync alone only
-  // covers the calling warp's slice. Without this the store team may read tile
-  // bytes another warp has not landed yet.
-  __syncthreads();
+  if constexpr (USE_BARRIER) {
+    // The only synchronization between the load team filling the tile and the store
+    // team draining it. A barrier that rendezvoused without retiring the transfers
+    // would hand the store team bytes that are still in flight.
+    LoadOps::template blockBarrier<BARRIER_WAIT>();
+    // A non-zero count deliberately leaves transfers outstanding, so it is not
+    // sufficient on its own; finish the drain before handing the tile over.
+    if constexpr (BARRIER_WAIT != 0) {
+      LoadOps::wait();
+      __syncthreads();
+    }
+  } else {
+    // Under Async nothing has drained yet, so each warp must retire its own slice
+    // before the barrier publishes the tile.
+    if constexpr (SP == SyncPolicy::Async) LoadOps::wait();
+
+    // Required by the API contract: completion is per-wave, so Sync alone only
+    // covers the calling warp's slice. Without this the store team may read tile
+    // bytes another warp has not landed yet.
+    __syncthreads();
+  }
 
   if constexpr (USE_BLOCK_FORM) {
     StoreOps::template storeBlock<SP, CP, ALIGNED>(tile, dst, totalBytes);
   } else {
     StoreOps::template storeTeam<SP, CP, ALIGNED>(tile, dst, totalBytes, storeTeam.start, storeTeam.stop);
   }
-  if constexpr (SP == SyncPolicy::Async) StoreOps::wait();
 
-  __syncthreads();
+  if constexpr (USE_BARRIER) {
+    StoreOps::template blockBarrier<BARRIER_WAIT>();
+    if constexpr (BARRIER_WAIT != 0) StoreOps::wait();
+  } else {
+    if constexpr (SP == SyncPolicy::Async) StoreOps::wait();
+    __syncthreads();
+  }
 }
 
 struct LdsTeamCase {
@@ -543,7 +586,8 @@ protected:
     return Base::roundUpLine(static_cast<size_t>(c.off) + c.totalBytes);
   }
 
-  template<typename LoadOps, typename StoreOps, SyncPolicy SP, CachePolicy CP, bool ALIGNED, bool USE_BLOCK_FORM>
+  template<typename LoadOps, typename StoreOps, SyncPolicy SP, CachePolicy CP, bool ALIGNED,
+           bool USE_BLOCK_FORM, bool USE_BARRIER = false, int BARRIER_WAIT = 0>
   void runTeamWith(const LdsTeamCase& c) {
     if (!LoadOps::hostSupported() || !StoreOps::hostSupported())
       GTEST_SKIP() << LoadOps::kName << "/" << StoreOps::kName
@@ -564,7 +608,8 @@ protected:
     DeviceBuffer<uint8_t> d_dst(dstTotal);
     d_dst.copyFrom(h_dstInit);
 
-    kLdsTeamStage<LoadOps, StoreOps, SP, CP, ALIGNED, USE_BLOCK_FORM><<<1, c.block, sharedFor(c)>>>(
+    kLdsTeamStage<LoadOps, StoreOps, SP, CP, ALIGNED, USE_BLOCK_FORM, USE_BARRIER, BARRIER_WAIT>
+      <<<1, c.block, sharedFor(c)>>>(
         d_dst.ptr + copyStart, d_src.ptr + c.off, c.totalBytes,
         static_cast<uint32_t>(c.off), c.loadTeam, c.storeTeam);
     this->syncAndCheck();
@@ -583,6 +628,22 @@ protected:
   template<SyncPolicy SP, CachePolicy CP = DEFAULT_CACHE_POLICY, bool ALIGNED = false>
   void runTeam(const LdsTeamCase& c) {
     runTeamWith<Ops, Ops, SP, CP, ALIGNED, /*USE_BLOCK_FORM=*/false>(c);
+  }
+
+  // Barrier forms: blockBarrier() alone carries the tile from the load team to the
+  // store team. Always SyncPolicy::Async -- under Sync the transfers have already
+  // drained by the time the barrier is reached, so a barrier that forgot to wait
+  // would still pass and the test would prove nothing.
+  template<int BarrierWait = 0>
+  void runTeamBarrier(const LdsTeamCase& c) {
+    runTeamWith<Ops, Ops, SyncPolicy::Async, DEFAULT_CACHE_POLICY, /*ALIGNED=*/false,
+                /*USE_BLOCK_FORM=*/false, /*USE_BARRIER=*/true, BarrierWait>(c);
+  }
+
+  template<int BarrierWait = 0>
+  void runBlockBarrier(const LdsTeamCase& c) {
+    runTeamWith<Ops, Ops, SyncPolicy::Async, DEFAULT_CACHE_POLICY, /*ALIGNED=*/false,
+                /*USE_BLOCK_FORM=*/true, /*USE_BARRIER=*/true, BarrierWait>(c);
   }
 
   // An empty team (start >= clamped stop) must select no warps at all. Checked on
@@ -719,6 +780,68 @@ protected:
 
 TEST_F(MixedLdsTeamTransferTest, TdmLoadAsyncStore) { runTeamGamut<TdmLdsOps, AsyncLdsOps>(); }
 TEST_F(MixedLdsTeamTransferTest, AsyncLoadTdmStore) { runTeamGamut<AsyncLdsOps, TdmLdsOps>(); }
+
+// ===========================================================================
+//  Block-level barrier.
+// ===========================================================================
+// tdmBlockBarrier() / asyncBlockBarrier() retire the calling wave's transfers and
+// only THEN rendezvous, so passing the barrier implies every wave's transfers have
+// landed -- the thing a bare __syncthreads() cannot promise, because the completion
+// counters are per-wave.
+//
+// The suites re-run the team gamut with that single call replacing the drain +
+// __syncthreads() pair, under SyncPolicy::Async so nothing has drained on its own.
+// The disjoint-team cases are what give this teeth: the warps that store the tile
+// are not the warps that loaded it, so a barrier that rendezvoused WITHOUT draining
+// would hand the store team bytes still in flight and corrupt the copy. Reversing
+// the barrier's two instructions is enough to make these fail.
+
+#define LDS_BARRIER_GAMUT_SUITE(FIXTURE)                                                  \
+  TEST_P(FIXTURE, BarrierTeam)  { this->template runTeamBarrier<0>(GetParam());  }        \
+  TEST_P(FIXTURE, BarrierBlock) { this->template runBlockBarrier<0>(GetParam()); }        \
+  INSTANTIATE_TEST_SUITE_P(BarrierGamut, FIXTURE, ::testing::ValuesIn(ldsTeamGamut()), ldsTeamCaseName)
+
+#define LDS_BARRIER_FEATURE_SUITE(FIXTURE)                                                         \
+  /* A non-zero WaitCnt leaves transfers outstanding on purpose, so the kernel pairs it with a  */ \
+  /* full drain. This pins that the count reaches the instruction's immediate and that the      */ \
+  /* rendezvous still happens, rather than the whole call folding away.                         */ \
+  TEST_F(FIXTURE, NonZeroWaitCount) {                                                              \
+    this->template runTeamBarrier<3>(                                                              \
+        LdsTeamCase{4096, 0, 256, {0, 2}, {2, 5}, "barrier_waitcnt_3"});                           \
+  }
+
+class TdmLdsBarrierGamutTest   : public LdsTeamGamutBase<TdmLdsOps>   {};
+class AsyncLdsBarrierGamutTest : public LdsTeamGamutBase<AsyncLdsOps> {};
+
+LDS_BARRIER_GAMUT_SUITE(TdmLdsBarrierGamutTest);
+LDS_BARRIER_GAMUT_SUITE(AsyncLdsBarrierGamutTest);
+
+class TdmLdsBarrierFeatureTest   : public LdsTeamTransferBase<TdmLdsOps>   {};
+class AsyncLdsBarrierFeatureTest : public LdsTeamTransferBase<AsyncLdsOps> {};
+
+LDS_BARRIER_FEATURE_SUITE(TdmLdsBarrierFeatureTest)
+LDS_BARRIER_FEATURE_SUITE(AsyncLdsBarrierFeatureTest)
+
+// Each leg's barrier drains its OWN counter -- TENSORcnt for the TDM leg, ASYNCcnt
+// for the async leg -- so a mixed round trip puts both counters in flight at once
+// and checks that each barrier retires the right one. Picking the wrong counter
+// still compiles and still rendezvous, and would only show up here.
+
+class MixedLdsBarrierTest : public LdsTeamTransferBase<TdmLdsOps> {
+protected:
+  template<typename LoadOps, typename StoreOps>
+  void runBarrierGamut() {
+    for (const LdsTeamCase& c : ldsTeamGamut()) {
+      SCOPED_TRACE(c.name);
+      runTeamWith<LoadOps, StoreOps, SyncPolicy::Async, DEFAULT_CACHE_POLICY, /*ALIGNED=*/false,
+                  /*USE_BLOCK_FORM=*/false, /*USE_BARRIER=*/true, /*BARRIER_WAIT=*/0>(c);
+      if (HasFatalFailure() || IsSkipped()) return;
+    }
+  }
+};
+
+TEST_F(MixedLdsBarrierTest, TdmLoadAsyncStore) { runBarrierGamut<TdmLdsOps, AsyncLdsOps>(); }
+TEST_F(MixedLdsBarrierTest, AsyncLoadTdmStore) { runBarrierGamut<AsyncLdsOps, TdmLdsOps>(); }
 
 // ===========================================================================
 //  Capability queries agree between host and device for both implementations.
