@@ -175,7 +175,7 @@ counter_metrics_t
 loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
     // Stores metrics that are added via the API
-    static MetricMap added_metrics {};
+    static MetricMap added_metrics{};
     auto             append_yaml = YAML::Node{};
 
     MetricMap ret;
