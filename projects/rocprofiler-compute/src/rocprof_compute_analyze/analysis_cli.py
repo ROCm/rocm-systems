@@ -14,6 +14,7 @@ from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
+    filter_forest_by_backend,
     get_matrix_ops_type,
     process_ml_api_trace_output,
 )
@@ -272,19 +273,6 @@ class cli_analysis(OmniAnalyze_Base):
                 roof_plot=roof_plot,
             )
 
-    @staticmethod
-    def _filter_by_backend(consolidated_df: pd.DataFrame, backend: str) -> pd.DataFrame:
-        """Return the rows attributed to ``backend``.
-
-        When the Backend column is absent, rows are treated as the torch
-        backend.
-        """
-        if "Backend" in consolidated_df.columns:
-            return consolidated_df[consolidated_df["Backend"] == backend].copy()
-        if backend == "torch":
-            return consolidated_df.copy()
-        return consolidated_df.iloc[0:0].copy()
-
     def list_operators(
         self,
         workload_path: str,
@@ -293,7 +281,10 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Render the operator call tree for a single backend."""
         label = _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
-        tty.list_ml_operators(workload_path, {}, framework_label=label)
+        forest_view = filter_forest_by_backend(
+            self._runs[workload_path].ml_api_call_trees, backend
+        )
+        tty.list_ml_operators(workload_path, forest_view, framework_label=label)
 
     def apply_operator_filter(
         self,
