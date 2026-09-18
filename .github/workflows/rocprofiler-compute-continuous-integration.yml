@@ -204,6 +204,9 @@ jobs:
           python3 -m venv "${ROCM_VENV}"
           "${ROCM_VENV}/bin/pip" install --upgrade pip
 
+          # cmake 3.21 misses Python 3.12 headers. Drop once the nightly image has this.
+          "${ROCM_VENV}/bin/pip" install 'cmake==3.28'
+
           # rocprof-compute is tested against PyTorch 2.14. The torch wheel pins
           # the ROCm build it was made against, which pins ROCm here too.
           "${ROCM_VENV}/bin/pip" install \
