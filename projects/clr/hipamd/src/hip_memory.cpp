@@ -4946,7 +4946,14 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
       !device->info().largeBar_) {
     HIP_RETURN(hipErrorNotSupported);
   }
-  if (!device->GetHandleForAddressRange(dptr, size, handle, flags)) {
+  const amd::HandleExportResult result =
+      device->GetHandleForAddressRange(dptr, size, handle, flags);
+  // The request was well formed, the device just cannot satisfy it. Reported separately so
+  // callers can fall back instead of treating it as a programming error.
+  if (result == amd::HandleExportResult::kNotSupported) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+  if (result != amd::HandleExportResult::kSuccess) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

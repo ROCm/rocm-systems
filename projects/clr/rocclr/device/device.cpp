@@ -1370,8 +1370,8 @@ std::vector<amd::CommandQueue*> Device::getActiveQueues() {
 }
 
 // =================================================================================================
-bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
-                                      unsigned long long flags) {
+HandleExportResult Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                                    unsigned long long flags) {
   // Check if the ptr is created through VMM APIs, if true we use different ROCr APIs.
   amd::Memory* amd_base_obj = amd::MemObjMap::FindVirtualMemObj(dev_ptr);
   bool VmmPtr = (amd_base_obj != nullptr) ? true : false;
@@ -1382,7 +1382,7 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
-    return false;
+    return HandleExportResult::kError;
   }
   
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
