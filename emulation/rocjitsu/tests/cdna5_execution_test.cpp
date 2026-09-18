@@ -2030,9 +2030,8 @@ TEST(Gfx1251F64WmmaExecutionTest, StagesAllInputsBeforeOverlappingDestinationWri
   }
 }
 
-TEST(Gfx1251F64WmmaExecutionTest, HonorsExecMaskOnDestinationLanes) {
+TEST(Gfx1251F64WmmaExecutionTest, RejectsNonFullExecBeforeReadingOrWritingRegisters) {
   constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
-  constexpr uint64_t kExec = 0x5a5aa5a5u;
   WmmaF64InputMatrix a{};
   WmmaF64InputMatrix b{};
   WmmaF64OutputMatrix c{};
@@ -2055,22 +2054,26 @@ TEST(Gfx1251F64WmmaExecutionTest, HonorsExecMaskOnDestinationLanes) {
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf(64);
   ASSERT_NE(wf, nullptr);
-  wf->set_exec(kExec);
   wf->set_mode_raw(3u << 6);
   write_wmma_f64_ab(*cu, *wf, 0, a);
   write_wmma_f64_ab(*cu, *wf, 4, b);
   write_wmma_f64_cd(*cu, *wf, 8, c);
   write_wmma_f64_cd(*cu, *wf, 32, initial);
 
-  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
-  const WmmaF64OutputMatrix result = read_wmma_f64_cd(*cu, *wf, 32);
-  for (uint32_t row = 0; row < 16; ++row)
-    for (uint32_t col = 0; col < 16; ++col) {
-      const uint32_t lane = col + 16u * (row / 8u);
-      EXPECT_EQ(result[row * 16 + col],
-                (kExec & (uint64_t{1} << lane)) != 0 ? bits(19.0) : initial[row * 16 + col])
-          << row << ", " << col;
-    }
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  cu->set_plugin_group(plugin_group);
+  plugin_group->onInit();
+
+  for (const uint64_t exec : {uint64_t{0}, uint64_t{0x5a5aa5a5u}}) {
+    SCOPED_TRACE(exec);
+    wf->set_exec(exec);
+    EXPECT_THROW((void)cu->execute_instruction(decoded.get(), *wf), util::InvalidInst);
+  }
+  EXPECT_EQ(recorder_ptr->read_count, 0u);
+  EXPECT_EQ(read_wmma_f64_cd(*cu, *wf, 32), initial);
 }
 
 TEST(Gfx1251F64WmmaExecutionTest, ExecutesEveryPublicLlvmModifierAndInlineForm) {
@@ -2331,6 +2334,48 @@ TEST(Gfx1251F64WmmaExecutionTest, RejectsUnsupportedControlsSourcesAndRegisterTu
     fields = kValid;
     fields.src2 = static_cast<uint16_t>(selector);
     rejected(fields);
+  }
+}
+
+TEST(Gfx1251F64WmmaExecutionTest, RejectsDpp16AndDpp8ExtensionEncodings) {
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  const auto rejected_as_dpp = [&](const auto &raw) {
+    std::vector<std::string> diagnostics;
+    auto collect = [&](std::string_view message) { diagnostics.emplace_back(message); };
+    DecodeResult decoded =
+        decoder->decode(reinterpret_cast<const uint32_t *>(&raw), DecodeErrorEmitter(collect));
+    EXPECT_TRUE(decoded.failed());
+    ASSERT_EQ(diagnostics.size(), 1u);
+    EXPECT_EQ(diagnostics.front(), "V_WMMA_F64_16X16X4_F64 does not support DPP");
+  };
+
+  cdna5::Vop3pVopDpp16MachineInst dpp16{};
+  dpp16.vdst = 8;
+  dpp16.op = cdna5::kVWmmaF6416x16x4F64Vop3p;
+  dpp16.encoding = 204;
+  dpp16.src0 = amdgpu::SRC_DPP;
+  dpp16.src1 = 260;
+  dpp16.src2 = 264;
+  dpp16.opsel_hi = 3;
+  dpp16.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE;
+  dpp16.bank_mask = 0xf;
+  dpp16.row_mask = 0xf;
+  static_assert(sizeof(dpp16) == 3 * sizeof(uint32_t));
+  rejected_as_dpp(dpp16);
+
+  for (const uint32_t marker : {amdgpu::SRC_DPP8_FI_0, amdgpu::SRC_DPP8_FI_1}) {
+    cdna5::Vop3pVopDpp8MachineInst dpp8{};
+    dpp8.vdst = 8;
+    dpp8.op = cdna5::kVWmmaF6416x16x4F64Vop3p;
+    dpp8.encoding = 204;
+    dpp8.src0 = marker;
+    dpp8.src1 = 260;
+    dpp8.src2 = 264;
+    dpp8.opsel_hi = 3;
+    static_assert(sizeof(dpp8) == 3 * sizeof(uint32_t));
+    rejected_as_dpp(dpp8);
   }
 }
 

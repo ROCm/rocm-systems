@@ -250,6 +250,12 @@ inline void require_wmma_wave32(const auto &cu) {
     throw util::ConfigError("CDNA5 WMMA requires wave32");
 }
 
+inline void require_gfx1251_wmma_full_exec(uint64_t exec_mask) {
+  constexpr uint64_t kWave32FullExec = 0xffff'ffffu;
+  if (exec_mask != kWave32FullExec) [[unlikely]]
+    throw util::InvalidInst("V_WMMA_F64_16X16X4_F64 requires EXEC to be all ones", "");
+}
+
 inline void require_gfx11_wmma_wave_size(uint32_t wave_size) {
   if (wave_size != WMMA_WAVE32 && wave_size != WMMA_WAVE64)
     throw util::ConfigError("gfx11 WMMA requires wave32 or wave64");
@@ -3772,7 +3778,7 @@ inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uin
 /// Matrix reuse bits are scheduling hints and therefore do not enter this
 /// functional helper. All source and accumulator values are staged before any
 /// destination write so overlapping C/D and A/B tuples preserve read-before-
-/// write behavior.
+/// write behavior. CDNA5 also requires EXEC to contain all 32 wave lanes.
 inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                                       uint64_t const_acc, uint32_t neg, uint32_t neg_hi,
                                       uint64_t exec_mask) {
@@ -3787,6 +3793,8 @@ inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint3
   constexpr uint32_t N = 16;
   constexpr uint32_t K = 4;
   require_wmma_wave32(cu);
+  const uint64_t kFullExec = mfma_full_lane_mask(WMMA_WAVE32);
+  require_gfx1251_wmma_full_exec(exec_mask);
 
   auto toggle_sign = [](uint64_t value, bool toggle) {
     return toggle ? value ^ (uint64_t{1} << 63) : value;
@@ -3832,8 +3840,7 @@ inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint3
   }
 
   RegisterAccess regs(cu);
-  auto writes =
-      regs.write_vgpr_region(dst, /*reg_count=*/16, exec_mask & mfma_full_lane_mask(WMMA_WAVE32));
+  auto writes = regs.write_vgpr_region(dst, /*reg_count=*/16, kFullExec);
   for (uint32_t row = 0; row < M; ++row)
     for (uint32_t col = 0; col < N; ++col) {
       const auto out = wmma_output_loc_64(M, N, row, col);

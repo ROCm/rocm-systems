@@ -5172,15 +5172,21 @@ DecodeResult decodeVWmmaF6416x16x4F64Vop3p(const MachineInst *opcode,
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst & 1u) != 0u) [[unlikely]]
     return emit_error.emit()
            << "V_WMMA_F64_16X16X4_F64 has an invalid vdst register tuple alignment";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u) [[unlikely]]
+  if (!(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+        amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0)) &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 < 256u ||
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 > 508u)) [[unlikely]]
     return emit_error.emit()
-           << "V_WMMA_F64_16X16X4_F64 has a src0 register tuple that exceeds the selector range";
-  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u) [[unlikely]]
+           << "V_WMMA_F64_16X16X4_F64 has a src0 register tuple outside the selector range";
+  if (!(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+        amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0)) &&
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 & 1u) != 0u) [[unlikely]]
     return emit_error.emit()
            << "V_WMMA_F64_16X16X4_F64 has an invalid src0 register tuple alignment";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 508u) [[unlikely]]
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 < 256u ||
+       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 > 508u)) [[unlikely]]
     return emit_error.emit()
-           << "V_WMMA_F64_16X16X4_F64 has a src1 register tuple that exceeds the selector range";
+           << "V_WMMA_F64_16X16X4_F64 has a src1 register tuple outside the selector range";
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u) [[unlikely]]
     return emit_error.emit()
            << "V_WMMA_F64_16X16X4_F64 has an invalid src1 register tuple alignment";

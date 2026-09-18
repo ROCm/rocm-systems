@@ -335,6 +335,11 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         and input_type == 'F64'
         and (M, N, K) == (16, 16, 4)
     )
+    if is_gfx1251_f64_wmma:
+        # Reject an architecturally illegal EXEC value before resolving or
+        # reading any instruction operand. The helper repeats this check as a
+        # defense for direct callers.
+        L.append('  amdgpu::require_gfx1251_wmma_full_exec(wf.exec());')
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
     if ctx.profile.uses_vgpr_msb_indexing:
         L.append(

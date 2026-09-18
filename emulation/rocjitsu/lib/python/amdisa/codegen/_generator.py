@@ -10426,13 +10426,24 @@ class CodeGenerator:
                             'vdst register tuple alignment";'
                         )
                         for src_name in ('src0', 'src1'):
+                            # Keep the src0 DPP markers alive until the common
+                            # DPP validation below so malformed extension forms
+                            # receive the intended diagnostic. Every other A/B
+                            # operand must be a four-register VGPR tuple.
+                            dpp_exclusion = ''
+                            if src_name == 'src0':
+                                dpp_exclusion = (
+                                    f'!({raw_inst}->src0 == amdgpu::SRC_DPP || '
+                                    f'amdgpu::dpp::is_src_dpp8({raw_inst}->src0)) && '
+                                )
                             factory_validation_parts.append(
-                                f'if ({raw_inst}->{src_name} > 508u) '
+                                f'if ({dpp_exclusion}({raw_inst}->{src_name} < 256u || '
+                                f'{raw_inst}->{src_name} > 508u)) '
                                 f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
-                                f'{src_name} register tuple that exceeds the selector range";'
+                                f'{src_name} register tuple outside the selector range";'
                             )
                             factory_validation_parts.append(
-                                f'if (({raw_inst}->{src_name} & 1u) != 0u) '
+                                f'if ({dpp_exclusion}({raw_inst}->{src_name} & 1u) != 0u) '
                                 f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                                 f'{src_name} register tuple alignment";'
                             )

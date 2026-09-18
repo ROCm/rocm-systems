@@ -5369,10 +5369,14 @@ def test_gfx1251_f64_wmma_validates_fields_sources_and_register_tuples(
     assert 'has unsupported modifier bits' in body
     assert 'vdst register tuple that exceeds the selector range' in body
     assert 'invalid vdst register tuple alignment' in body
-    assert 'src0 register tuple that exceeds the selector range' in body
+    assert 'src0 register tuple outside the selector range' in body
     assert 'invalid src0 register tuple alignment' in body
-    assert 'src1 register tuple that exceeds the selector range' in body
+    assert 'src1 register tuple outside the selector range' in body
     assert 'invalid src1 register tuple alignment' in body
+    assert 'src0 < 256u ||' in body
+    assert 'src1 < 256u ||' in body
+    assert 'src0 == amdgpu::SRC_DPP ||' in body
+    assert 'amdgpu::dpp::is_src_dpp8' in body
     assert 'requires a legal inline accumulator or ' in body
     assert '16-register VGPR tuple' in body
     assert 'src2 >= 128u &&' in body
@@ -5540,6 +5544,12 @@ def test_cdna5_variant_execution_callback_inventory(
     assert 'read_lane_pair32(operand, lane)' in u32_read_helper
     assert 'is_general_register' not in u64_read_helper
     assert 'exec_wmma_f64_16x16x4_f64' in execution_source
+    execute_body = execution_source.split(
+        'void VWmmaF6416x16x4F64Vop3p::execute_impl', 1
+    )[1].split('\n}', 1)[0]
+    assert execute_body.index('require_gfx1251_wmma_full_exec') < execute_body.index(
+        'resolved_vgpr_offset'
+    )
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(

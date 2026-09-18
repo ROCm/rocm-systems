@@ -3153,6 +3153,7 @@ void VPkLshlAddU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF6416x16x4F64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
+  amdgpu::require_gfx1251_wmma_full_exec(wf.exec());
   uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
                                                  vdst.vgpr_msb_role());
   uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
