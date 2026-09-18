@@ -1232,6 +1232,22 @@
         {"name": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: the finalize() guard must not suppress cleanup when init() succeeded and devices() failed", "test_filter": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit"}
       ]
     },
+    "gin_plugin_init_fail": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() fails after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesFailsAfterInit"},
+        {"name": "GinPluginInitFail.FinalizesWhenDevicesReportsZero", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: ncclGinPluginInit() must finalize() the context when devices() reports ndev <= 0 after a successful init()", "test_filter": "GinPluginInitFail.FinalizesWhenDevicesReportsZero"},
+        {"name": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: finalize() must not run for a GIN plugin whose init() failed", "test_filter": "GinPluginInitFail.DoesNotFinalizeAfterFailedInit"}
+      ]
+    },
     "debug_tests": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -4316,6 +4332,12 @@
       "name": "Net Plugin Reload",
       "description": "AICOMRCCL-1534: custom NCCL_NET_PLUGIN reloads after comm destroy",
       "config": "net_plugin_reload",
+      "enabled": true
+    },
+    {
+      "name": "GIN Plugin Init Context Leak",
+      "description": "NCCL 2.30.7 / NVIDIA/nccl#2179: GIN plugin finalize() after devices() fails",
+      "config": "gin_plugin_init_fail",
       "enabled": true
     },
     {
