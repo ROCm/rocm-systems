@@ -217,6 +217,7 @@ typedef struct {
 	int drm_render_minor;
 	uint32_t drm_vm_timeline_syncobj;   /* per GPU global timeline syncobj */
 	uint64_t drm_vm_timeline_seqnum;    /* per GPU global sequence number */
+	bool stall_on_retry_fault;          /* node runs in recoverable-fault mode */
 } gpu_mem_t;
 
 enum svm_aperture_type {
@@ -2185,12 +2186,18 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	if (mflags.ui32.OnlyAddress)
 		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
 
+	/* KFD refuses userptr on a node in recoverable-fault mode: evicting a
+	 * userptr BO invalidates its PTEs instead of preempting the queues,
+	 * which the mmu-notifier path cannot do for a stalled wave.
+	 */
+	bool use_userptr = fmm_ctx->svm.userptr_for_paged_mem &&
+			   !fmm_ctx->gpu_mem[gpu_mem_id].stall_on_retry_fault;
+
 	/* Paged memory is allocated as a userptr mapping, non-paged
 	 * memory is allocated from KFD
 	 */
-retry:
 	if (!mflags.ui32.NonPaged &&
-	    (fmm_ctx->svm.userptr_for_paged_mem ||
+	    (use_userptr ||
 	     (fmm_ctx->svm.svm_for_paged_mem && ctx->hsakmt_is_svm_api_supported))) {
 		int advice = MADV_NORMAL;
 
@@ -2217,7 +2224,7 @@ retry:
 
 		madvise(mem, MemorySizeInBytes, advice);
 
-		if (!fmm_ctx->svm.userptr_for_paged_mem) {
+		if (!use_userptr) {
 			/* No BO. The pages are served by SVM, but keep the
 			 * object so map, unmap and release still find the range.
 			 */
@@ -2244,26 +2251,8 @@ retry:
 			vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
 							       aperture, &mmap_offset,
 							       ioc_flags);
-			if (!vm_obj) {
-				/* KFD refuses userptr on GPUs in recoverable-fault
-				 * mode. Evicting a userptr BO there means invalidating
-				 * its PTEs rather than preempting the queues, which the
-				 * userptr mmu-notifier path cannot do. Stop asking for
-				 * userptr and retry: SVM serves the pages when
-				 * svm_for_paged_mem is on, a KFD allocation otherwise.
-				 */
-				if (errno != EOPNOTSUPP)
-					goto out_release_area;
-
-				fmm_ctx->svm.userptr_for_paged_mem = false;
-				pthread_mutex_lock(&aperture->fmm_mutex);
-				aperture_release_area(aperture, mem, size);
-				pthread_mutex_unlock(&aperture->fmm_mutex);
-				mem = NULL;
-				mmap_offset = 0;
-				ioc_flags &= ~KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
-				goto retry;
-			}
+			if (!vm_obj)
+				goto out_release_area;
 		}
 	} else {
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_GTT;
@@ -3081,6 +3070,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].local_mem_size = props.LocalMemSize;
 			gpu_mem[gpu_mem_count].device_id = props.DeviceId;
 			gpu_mem[gpu_mem_count].node_id = i;
+			gpu_mem[gpu_mem_count].stall_on_retry_fault =
+				props.Capability2.ui32.StallOnRetryFault;
 			ctx->hsakmt_is_svm_api_supported &= props.Capability.ui32.SVMAPISupported;
 
 			gpu_mem[gpu_mem_count].scratch_physical.align = PAGE_SIZE;
