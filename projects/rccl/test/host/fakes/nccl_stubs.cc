@@ -97,10 +97,21 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // The src/os/*.cc entry points (ncclOsCpuCount, ncclOsGetAffinity, ncclOsSetAffinity,
 // ncclOsTopoGetStrFromSys) and their seams: os_fakes.cc.
-ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
+// src/plugin/profiler.cc. These two are seams, not plain stubs, because commFree's
+// teardown ORDER around them is load-bearing and a return code cannot see it: the
+// profiler thread polls comm->profiler.workStarted/workCompleted/workPhases, which
+// the comm->destructorHead loop frees. See
+// InitMicrotest.CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls.
+static ncclResult_t DefaultNcclProfilerPluginFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize =
+    DefaultNcclProfilerPluginFinalize;
+ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return g_ncclProfilerPluginFinalize(comm); }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
-ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSuccess; }
+static ncclResult_t DefaultNcclProfilerThreadDestroy(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy =
+    DefaultNcclProfilerThreadDestroy;
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclProfilerThreadDestroy(comm); }
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
@@ -232,6 +243,8 @@ void ResetNcclStubs() {
   g_ncclSymkFinalize = DefaultNcclSymkFinalize;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
+  g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
   g_initChannelResult = ncclSuccess;
   g_initChannelLastId = -1;

@@ -33,6 +33,13 @@ extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
 
+// src/plugin/profiler.cc: commFree stops the background profiler thread and then
+// finalizes the plugin through these. Seams rather than plain stubs so a test can
+// pin WHEN they run relative to the comm->destructorHead loop -- the thread reads
+// host-pinned buffers that loop frees, so the order is a correctness contract.
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;
+
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 

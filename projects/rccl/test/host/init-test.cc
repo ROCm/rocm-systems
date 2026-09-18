@@ -2087,6 +2087,91 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
+// ---------------------------------------------------------------------------
+// commFree teardown ORDER around the background profiler thread.
+//
+// This is a lifetime contract, not a preference. The thread started by
+// ncclProfilerThreadCreate polls, for every op still queued in pt->active:
+//
+//     op->workStarted[ch].data[slot].counter        (src/plugin/profiler.cc)
+//
+// comm->profiler.workStarted/workCompleted/workPhases are host-pinned
+// (ncclCudaHostCalloc) and are released by ncclDestructorFnCudaHostFree entries
+// that ncclCommPushCudaHostFree puts on comm->destructorHead -- i.e. by the
+// destructor loop inside commFree. If the thread is torn down AFTER that loop,
+// it keeps dereferencing an unmapped mapping and takes SIGSEGV
+// ("address not mapped to object"). commPoison(comm), also in commFree,
+// likewise overwrites fields the thread reads.
+//
+// That regression shipped once (the NCCL v2.31.2-1 sync), and it was invisible
+// to every existing test: it needs a real profiler plugin attached AND an op
+// that has not completed yet, so it only ever showed up as a GPU-run segfault.
+// Asserting the order here means the next sync that reshuffles commFree fails
+// in CI, on a CPU, with a message that says what broke -- instead of in
+// somebody's profiling run.
+//
+// The assertions are deliberately relative (LT), not absolute indices: steps may
+// legitimately be added between these three, but they may never swap.
+// ---------------------------------------------------------------------------
+TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  // Stands in for comm->profiler.workStarted/workCompleted/workPhases: a
+  // host-pinned allocation released by the destructor loop, exactly as
+  // ncclCommPushCudaHostFree does for the real ones.
+  int pinnedProfilerBuffer = 0;
+  ncclCommPushCudaHostFree(comm, &pinnedProfilerBuffer);
+
+  std::vector<std::string> order;
+  ScopedHook threadDestroy(g_ncclProfilerThreadDestroy, [&](struct ncclComm*) {
+    order.push_back("profilerThreadDestroy");
+    return ncclSuccess;
+  });
+  ScopedHook hostFree(g_hipHostFree, [&](void* p) {
+    if (p == &pinnedProfilerBuffer) order.push_back("freePinnedProfilerBuffer");
+    return hipSuccess;
+  });
+  ScopedHook pluginFinalize(g_ncclProfilerPluginFinalize, [&](struct ncclComm*) {
+    order.push_back("profilerPluginFinalize");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, abortRef);
+
+  // Each step has to have happened at all -- an ordering assertion over a
+  // missing step would pass vacuously.
+  ASSERT_EQ(1, threadDestroy.calls) << "commFree never stopped the profiler thread";
+  ASSERT_EQ(1, pluginFinalize.calls) << "commFree never finalized the profiler plugin";
+  auto indexOf = [&](const std::string& name) -> std::ptrdiff_t {
+    auto it = std::find(order.begin(), order.end(), name);
+    return it == order.end() ? -1 : std::distance(order.begin(), it);
+  };
+  ASSERT_NE(-1, indexOf("freePinnedProfilerBuffer"))
+      << "the destructor loop never released the pinned buffer; this test is no longer "
+         "exercising the window it exists to guard";
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("freePinnedProfilerBuffer"))
+      << "commFree freed the host-pinned profiler buffers while the profiler thread was "
+         "still polling them. The thread must be stopped and joined BEFORE the "
+         "comm->destructorHead loop runs, or profilerProgressOps() dereferences an "
+         "unmapped mapping and the process takes SIGSEGV. Observed order: "
+      << ::testing::PrintToString(order);
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("profilerPluginFinalize"))
+      << "ncclProfilerThreadDestroy must precede ncclProfilerPluginFinalize: it purges this "
+         "comm's queued ops, and the plugin's profilerContext is gone after finalize. "
+         "Observed order: "
+      << ::testing::PrintToString(order);
+}
+
 // ===========================================================================
 // commCleanup (init.cc:3696). Pure ordering + error propagation: set the device,
 // optionally finalize-then-unload the tuner, then commFree. Every assertion below
