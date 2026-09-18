@@ -511,19 +511,80 @@ def _node_source_location(node: CallTreeNode) -> str:
     return f"{node.file_name}:{node.line_number}"
 
 
+def _is_nan(value: object) -> bool:
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _aggregate_operator_summary_rows(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combine per-node rows that share an Operator path across locations."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["Operator"]), []).append(row)
+
+    aggregated: list[dict[str, Any]] = []
+    for operator, group in grouped.items():
+        locations = {row["Location"] for row in group}
+        location = next(iter(locations)) if len(locations) == 1 else ""
+        call_values = [row["Calls"] for row in group]
+        has_calls = not any(_is_nan(value) for value in call_values)
+        calls = float(sum(call_values)) if has_calls else float("nan")
+        dispatches = float(sum(row["Dispatches"] for row in group))
+        total_gpu = float(sum(row["Total_GPU"] for row in group))
+        min_values = [
+            row["Min_Dispatch"] for row in group if not _is_nan(row["Min_Dispatch"])
+        ]
+        max_values = [
+            row["Max_Dispatch"] for row in group if not _is_nan(row["Max_Dispatch"])
+        ]
+        mean_weights = [
+            (row["Mean_Per_Dispatch"], row["Dispatches"])
+            for row in group
+            if not _is_nan(row["Mean_Per_Dispatch"])
+        ]
+        weight_sum = sum(weight for _, weight in mean_weights)
+        if mean_weights and weight_sum:
+            mean_dispatch = (
+                sum(mean * weight for mean, weight in mean_weights) / weight_sum
+            )
+        else:
+            mean_dispatch = float("nan")
+        aggregated.append({
+            "Operator": operator,
+            "Location": location,
+            "Calls": calls,
+            "Dispatches": dispatches,
+            "Dispatches_Per_Call": (
+                dispatches / calls if has_calls and calls else float("nan")
+            ),
+            "Total_GPU": total_gpu,
+            "Pct_Total_GPU": float("nan"),
+            "Mean_Per_Call": (
+                total_gpu / calls if has_calls and calls else float("nan")
+            ),
+            "Mean_Per_Dispatch": mean_dispatch,
+            "Min_Dispatch": min(min_values) if min_values else float("nan"),
+            "Max_Dispatch": max(max_values) if max_values else float("nan"),
+        })
+    return aggregated
+
+
 def build_operator_summary(
     call_trees: dict[str, list[CallTreeNode]],
 ) -> pd.DataFrame:
     """Build a one-row-per-operator summary table from the call trees.
 
-    Each row describes one operator (e.g. aten::matmul) that ran at least
-    one GPU kernel. All time values are in milliseconds.
+    Each row describes one operator path (e.g. aten::matmul) that ran at
+    least one GPU kernel. Calls of that path at different locations are
+    combined. All time values are in milliseconds.
 
     Columns:
 
     - Operator: full path of the operator (e.g. "aten::matmul/aten::mm").
 
-    - Location: file:line from the operator node when file_name is set.
+    - Location: file:line when every combined node shares one; empty when
+      locations differ or file_name is unset.
 
     - Calls: how many times this operator was invoked. NaN when the trace
       did not include marker-start invocation ids.
@@ -551,7 +612,7 @@ def build_operator_summary(
     Operators that ran no GPU kernels are skipped. Empty input returns an
     empty DataFrame with the full column list.
 
-    Sorted by Total_GPU descending, then Operator and Location ascending.
+    Sorted by Total_GPU descending, then Operator ascending.
     """
     columns = [
         "Operator",
@@ -613,15 +674,16 @@ def build_operator_summary(
     if not rows:
         return pd.DataFrame(columns=columns)
 
+    rows = _aggregate_operator_summary_rows(rows)
     grand_total_ms = sum(root.total_duration_ms for root in all_roots)
     if grand_total_ms > 0:
-        for r in rows:
-            r["Pct_Total_GPU"] = 100.0 * r["Total_GPU"] / grand_total_ms
+        for row in rows:
+            row["Pct_Total_GPU"] = 100.0 * row["Total_GPU"] / grand_total_ms
 
     df = pd.DataFrame(rows, columns=columns)
     return df.sort_values(
-        by=["Total_GPU", "Operator", "Location"],
-        ascending=[False, True, True],
+        by=["Total_GPU", "Operator"],
+        ascending=[False, True],
         ignore_index=True,
     )
 
