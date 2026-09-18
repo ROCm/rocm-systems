@@ -9,6 +9,12 @@ test('compares controlled plugins for every target without a target picker', asy
   await expect(view.getByRole('heading', { name: 'Plugin Comparison' })).toBeVisible();
   await expect(view.getByRole('combobox', { name: 'Baseline plugin' })).toHaveText('Vanilla');
   await expect(page.getByLabel('Targets')).toBeVisible();
+  const contract = view.getByText(/source commit/i);
+  await expect(contract).toContainText(/catalog/i);
+  await expect(contract).toContainText(/trigger/i);
+  await expect(contract).toContainText(/machine/i);
+  await expect(contract).toContainText(/environment/i);
+  await expect(contract).toContainText(/target set/i);
 
   const gfx1250 = view.getByTestId('plugin-target-gfx1250');
   const gfx950 = view.getByTestId('plugin-target-gfx950');
