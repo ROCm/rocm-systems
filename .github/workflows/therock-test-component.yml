@@ -57,11 +57,24 @@ jobs:
       THEROCK_BIN_DIR: "./build/bin"
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
+      - name: "Checkout rocm-systems ref config"
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .github/therock_ref.json
+            .github/actions/therock-ref
+          sparse-checkout-cone-mode: true
+          path: "rocm-systems-ref"
+
+      - name: Resolve TheRock ref
+        id: therock_ref
+        uses: ./rocm-systems-ref/.github/actions/therock-ref
+
       - name: "Fetch 'build_tools' from repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
+          ref: ${{ steps.therock_ref.outputs.ref }}
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -79,7 +92,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
+          ref: ${{ steps.therock_ref.outputs.ref }}
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'

@@ -1,0 +1,148 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Internal wrapper around ROCm/TheRock's setup_multi_arch.yml reusable workflow.
+#
+# Why this wrapper exists: `jobs.<id>.uses:` for an external reusable
+# workflow must be a static string literal (GitHub Actions does not allow
+# expressions there), so callers can't pass the resolved TheRock ref
+# dynamically the way they do for a plain `actions/checkout`. Rather than
+# hardcoding `ROCm/TheRock/...@<sha>` at every call site that needs this
+# workflow, callers instead do `uses: ./.github/workflows/_therock_setup_multi_arch.yml`
+# (a local path, no `@ref` required) and this file is the single place
+# that owns the literal pin on their behalf.
+#
+# This file (along with _therock_multi_arch_ci_linux.yml and
+# _therock_multi_arch_ci_windows.yml) holds the only hardcoded ROCm/TheRock
+# commit pins in this repo's job-level `uses:` targets. Do not hand-edit the
+# pin; use .github/scripts/update_therock_ref.py, which keeps this file, the
+# other two wrappers, and .github/therock_ref.json in sync. Drift is
+# checked by .github/scripts/tests/therock_ref_drift_test.py.
+
+name: "[Internal] TheRock Setup (Multi-Arch)"
+
+on:
+  workflow_call:
+    inputs:
+      build_variant:
+        type: string
+        default: "release"
+      release_type:
+        type: string
+        default: ci
+      prerelease_version:
+        type: string
+        default: ""
+      linux_amdgpu_families:
+        type: string
+        default: ""
+      windows_amdgpu_families:
+        type: string
+        default: ""
+      linux_test_labels:
+        type: string
+        default: ""
+      windows_test_labels:
+        type: string
+        default: ""
+      prebuilt_stages:
+        type: string
+        default: ""
+      build_stages:
+        type: string
+        default: ""
+      baseline_run_id:
+        type: string
+        default: ""
+      baseline_repository:
+        type: string
+        default: ""
+      stage_reuse_mode:
+        type: string
+        default: "dry-run"
+      stage_reuse_max_age_hours:
+        type: string
+        default: "72"
+      stage_reuse_commit_history:
+        type: string
+        default: "50"
+      build_python_packages:
+        type: boolean
+        default: true
+      build_pytorch:
+        type: boolean
+        default: true
+      build_jax:
+        type: boolean
+        default: false
+      build_native_linux:
+        type: boolean
+        default: true
+      python_version:
+        type: string
+        default: ""
+      external_repo:
+        type: string
+        default: ""
+      changed_projects:
+        type: string
+        default: ""
+      quartz_tracking_id:
+        type: string
+        default: ""
+    outputs:
+      enable_build_jobs:
+        value: ${{ jobs.call.outputs.enable_build_jobs }}
+      linux_build_config:
+        value: ${{ jobs.call.outputs.linux_build_config }}
+      windows_build_config:
+        value: ${{ jobs.call.outputs.windows_build_config }}
+      test_type:
+        value: ${{ jobs.call.outputs.test_type }}
+      linux_test_labels:
+        value: ${{ jobs.call.outputs.linux_test_labels }}
+      windows_test_labels:
+        value: ${{ jobs.call.outputs.windows_test_labels }}
+      rocm_package_version:
+        value: ${{ jobs.call.outputs.rocm_package_version }}
+      rocm_deb_package_version:
+        value: ${{ jobs.call.outputs.rocm_deb_package_version }}
+      rocm_rpm_package_version:
+        value: ${{ jobs.call.outputs.rocm_rpm_package_version }}
+      ref:
+        value: ${{ jobs.call.outputs.ref }}
+      external_repo_config:
+        value: ${{ jobs.call.outputs.external_repo_config }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  call:
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18
+    with:
+      build_variant: ${{ inputs.build_variant }}
+      release_type: ${{ inputs.release_type }}
+      prerelease_version: ${{ inputs.prerelease_version }}
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families }}
+      linux_test_labels: ${{ inputs.linux_test_labels }}
+      windows_test_labels: ${{ inputs.windows_test_labels }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages }}
+      build_stages: ${{ inputs.build_stages }}
+      baseline_run_id: ${{ inputs.baseline_run_id }}
+      baseline_repository: ${{ inputs.baseline_repository }}
+      stage_reuse_mode: ${{ inputs.stage_reuse_mode }}
+      stage_reuse_max_age_hours: ${{ inputs.stage_reuse_max_age_hours }}
+      stage_reuse_commit_history: ${{ inputs.stage_reuse_commit_history }}
+      build_python_packages: ${{ inputs.build_python_packages }}
+      build_pytorch: ${{ inputs.build_pytorch }}
+      build_jax: ${{ inputs.build_jax }}
+      build_native_linux: ${{ inputs.build_native_linux }}
+      python_version: ${{ inputs.python_version }}
+      external_repo: ${{ inputs.external_repo }}
+      changed_projects: ${{ inputs.changed_projects }}
+      quartz_tracking_id: ${{ inputs.quartz_tracking_id }}
+      repository: ROCm/TheRock
+      ref: 01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18

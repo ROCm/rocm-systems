@@ -1,0 +1,31 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: Resolve TheRock ref
+description: >-
+  Reads the pinned ROCm/TheRock commit from .github/therock_ref.json, the
+  single source of truth for TheRock's ref across all rocm-systems CI
+  workflows. Update it via .github/scripts/update_therock_ref.py.
+
+outputs:
+  ref:
+    description: The pinned ROCm/TheRock commit SHA.
+    value: ${{ steps.read.outputs.ref }}
+  commit_date:
+    description: The date of the pinned commit (YYYY-MM-DD).
+    value: ${{ steps.read.outputs.commit_date }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read TheRock ref config
+      id: read
+      shell: bash
+      run: |
+        python3 -c "
+        import json
+        with open('${GITHUB_ACTION_PATH}/../../therock_ref.json') as f:
+            config = json.load(f)
+        print(f'ref={config[\"ref\"]}')
+        print(f'commit_date={config[\"commit_date\"]}')
+        " >> "$GITHUB_OUTPUT"
