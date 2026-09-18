@@ -1457,7 +1457,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   const bool ceRegisteredWindows = !symEligible && ceRegInWindow && ceAvailable &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force);
-  const bool ceStagedUnregistered = force && ceArGraphAllowed && ceUsable;
+  // FORCE unregistered CE copies through ceARTmpBuf. ceUsable still admits
+  // NCCL_CE_AR_MAX_MSG_BYTES (256 MiB), but !fastPath refuses anything above the
+  // staging buffer (32 MiB at 8 ranks). Cap this arm on the staging size so
+  // those messages take the kernel path instead of selecting CE then failing.
+  const bool ceStagedUnregistered =
+    force && ceArGraphAllowed && ceUsable && (msgBytes <= ncclCeAllReduceStagingBufBytes(comm->nRanks));
   if (!hasSysmemSegment && (ceRegisteredWindows || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
