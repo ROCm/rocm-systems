@@ -1884,3 +1884,31 @@ void rcclApplyTuningOverrides(struct ncclTopoSystem* system) {
     }
   }
 }
+
+
+/**
+ * takes gfx arch name as C-style string and returns a tuning index to
+ */
+int rcclGetTuningIndexForArch(const char* gfxarch) {
+  static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 11}, {"gfx1030", 0},
+    {"gfx1100", 10}, {"gfx1101", 10}, {"gfx1102", 10}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
+  };
+
+  static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},  {"gfx1250", 11},
+    {"gfx1030", 0}, {"gfx1100", 10}, {"gfx1102", 10}, {"gfx1200", 7}, {"gfx1201", 7}
+  };
+
+  if (gfxarch == nullptr) return 0;
+  std::string arch(gfxarch);
+  auto nicInfo = rcclPrimaryNic();
+  const auto& tuningMap = (nicInfo.type == rcclIBNicTypeAINIC) ? tuningIndexMapAINIC : tuningIndexMap;
+  for (const auto& p : tuningMap) {
+    const std::string& prefix = p.first;
+    if (arch.size() >= prefix.size() && arch.compare(0, prefix.size(), prefix) == 0) {
+      return p.second;
+    }
+  }
+  return 0;
+}

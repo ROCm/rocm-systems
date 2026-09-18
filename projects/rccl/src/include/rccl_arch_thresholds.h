@@ -82,6 +82,5 @@ struct rcclArchThresholds {
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
-int rcclGetTuningIndexForArch(const char* gfxarch);
 
 #endif  // RCCL_ARCH_THRESHOLDS_H_
