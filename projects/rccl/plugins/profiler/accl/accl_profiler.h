@@ -109,14 +109,12 @@ struct acclCollInfo {
   void*       commCtx;
 };
 
-// Schema for the "decomposition" JSON object: one row per field, driving the
-// acclCompletedRecord members, the JSON keys and the fprintf argument list from
-// one list so a key can never drift onto another field's value. XE marks the
-// last row, which emits no trailing comma. Rows are (C type, JSON key, printf
-// conversion, acclCompletedRecord member); the row order is the emission order.
-//
-// The macro body cannot carry // comments, since the line-continuation backslash
-// would be swallowed by them, so the field meanings live here:
+// Schema for the "decomposition" JSON object. Drives the acclCompletedRecord
+// members, the JSON keys and the fprintf argument list from one list, so a key
+// cannot drift onto another field's value. Rows are (C type, JSON key, printf
+// conversion, member) in emission order; XE marks the last, which emits no
+// trailing comma. Field meanings live here because the macro body cannot carry
+// // comments -- the line-continuation backslash would be swallowed:
 //   gpu_kernel_avg_us      avg kernel duration across channels
 //   proxy_gpu_wait_us      proxy waiting for the GPU to produce data
 //   proxy_network_us       actual network send/recv
@@ -194,9 +192,8 @@ struct acclCommContext {
   int         proxyStepPoolWarned;
   uint64_t    commHash;
   // ACCL_PROFILER_MIN_SIZE_BYTES as read when THIS communicator was created.
-  // Per-comm, not process-global: a later communicator created after the
-  // variable changed must not retroactively re-filter this one, and the
-  // minSize= this comm echoed in its init log has to keep describing it.
+  // Per-comm, not process-global: a comm created later must not retroactively
+  // re-filter an earlier one, whose init log already echoed its own minSize=.
   size_t      minMsgSize;
   int         rank;
   int         nRanks;
