@@ -43,6 +43,7 @@ class MlApiTracePair:
 
     marker_df: pd.DataFrame
     counter_path: Path
+    joined_df: Optional[pd.DataFrame] = None
 
 
 @dataclass
