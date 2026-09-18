@@ -187,6 +187,9 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
     hipError_t hip_error = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
     hip::tls.last_error_ = hip_error;                                                              \
     hip::tls.last_command_error_ = hip_error;                                                      \
+    /* Consume-once: after surfacing a recoverable GPU error (e.g. scratch OOM), */               \
+    /* clear the latch so the context recovers instead of returning it forever.  */               \
+    amd::Device::ClearRecoverableGPUError();                                                       \
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \

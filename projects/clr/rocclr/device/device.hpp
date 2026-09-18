@@ -1782,6 +1782,9 @@ class Device : public RuntimeObject {
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
   static std::atomic<cl_int> gpu_error_;  //!< Store the GPU error cause during kernel launch
+  //!< True when gpu_error_ carries a recoverable fault (e.g. transient scratch
+  //!< OOM) that must be surfaced once and then cleared, rather than latched.
+  static std::atomic<bool> gpu_error_recoverable_;
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -2443,6 +2446,15 @@ class Device : public RuntimeObject {
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
+  //! If the latched GPU error is a recoverable fault (e.g. transient scratch
+  //! OOM), consume it exactly once: clear the recoverable flag and the error
+  //! latch so the process is not permanently bricked. No-op otherwise.
+  static void ClearRecoverableGPUError() {
+    if (gpu_error_recoverable_.load(std::memory_order_relaxed)) {
+      gpu_error_recoverable_.store(false, std::memory_order_relaxed);
+      gpu_error_.store(CL_SUCCESS, std::memory_order_relaxed);
+    }
+  }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
                                 unsigned long long flags);

@@ -4505,7 +4505,23 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
     if (should_abort) {
       abort();
     }
-    amd::Device::gpu_error_.store(ConvertHSAErrorIntoCLError(status), std::memory_order_relaxed);
+    if (is_oom) {
+      // Recoverable scratch OOM. Surface it as a catchable out-of-memory error
+      // (CL_OUT_OF_HOST_MEMORY -> hipErrorOutOfMemory) and mark it consume-once
+      // so the context is not permanently bricked. Flag the faulting queue's
+      // vgpu(s) so the next dispatch re-homes onto a healthy queue (the faulting
+      // queue stays suspended in the runtime).
+      for (auto it : dev->vgpus()) {
+        roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
+        if (vgpu->gpu_queue() == queue) {
+          vgpu->MarkQueueFaulted();
+        }
+      }
+      amd::Device::gpu_error_recoverable_.store(true, std::memory_order_relaxed);
+      amd::Device::gpu_error_.store(CL_OUT_OF_HOST_MEMORY, std::memory_order_release);
+    } else {
+      amd::Device::gpu_error_.store(ConvertHSAErrorIntoCLError(status), std::memory_order_relaxed);
+    }
   }
 }
 

@@ -624,6 +624,9 @@ class VirtualGPU : public device::VirtualDevice {
   void UnpinQueue() override { queue_pinned_ = false; }
   //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
   bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) override;
+  //! Mark this vgpu's HW queue as faulted (e.g. scratch OOM). The next dispatch
+  //! will re-home onto a healthy queue before submitting.
+  void MarkQueueFaulted() { queue_faulted_.store(true, std::memory_order_relaxed); }
 
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }
@@ -975,6 +978,8 @@ class VirtualGPU : public device::VirtualDevice {
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
+  std::atomic<bool> queue_faulted_{false};  //!< TRUE if current HW queue faulted (scratch OOM);
+                                            //!< next dispatch re-homes to a healthy queue
   bool heap_init_fence_emitted_ = false;  //!< True once this queue has emitted system scope
                                           //!< fence after hidden heap init.
 

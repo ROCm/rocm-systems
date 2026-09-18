@@ -1524,6 +1524,14 @@ void VirtualGPU::CompleteAqlSubmission(const AqlSlotReservation& reservation) {
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
                                           bool blocking, bool attach_signal) {
+  if (queue_faulted_.load(std::memory_order_relaxed)) {
+    // The current HW queue faulted (e.g. scratch OOM) and is suspended in the
+    // runtime. Re-home this vgpu onto a healthy queue before dispatching so the
+    // relaunch after an OOM recovery does not target the dead queue.
+    const uint64_t dead_id = gpu_queue_->id;
+    ReacquireQueueExcluding({dead_id});
+    queue_faulted_.store(false, std::memory_order_relaxed);
+  }
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
