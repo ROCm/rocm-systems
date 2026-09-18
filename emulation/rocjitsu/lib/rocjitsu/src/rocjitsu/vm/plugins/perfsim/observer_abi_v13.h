@@ -11,17 +11,17 @@
 #include <utility>
 
 #if !defined(__linux__)
-#error "The private FFM v8 ABI mirror is supported only on Linux"
+#error "The private FFM v13 ABI mirror is supported only on Linux"
 #endif
 
 #if !defined(__GXX_ABI_VERSION)
-#error "The private FFM v8 ABI mirror requires the GCC/Clang Itanium C++ ABI"
+#error "The private FFM v13 ABI mirror requires the GCC/Clang Itanium C++ ABI"
 #endif
 
-namespace rocjitsu::plugins::perfsim::observer_abi_v8 {
+namespace rocjitsu::plugins::perfsim::observer_abi_v13 {
 
 inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION = 5;
-inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION = 8;
+inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION = 13;
 inline constexpr std::uint32_t FFM_MAX_WAVE_SIZE = 64;
 
 using EntityId = std::uint64_t;
@@ -54,6 +54,7 @@ struct FfmDispatchMetadata {
   std::uint32_t num_waves_per_wg;
   std::uint32_t grid_size[3];
   std::uint32_t workgroup_size[3];
+  const char *dispatch_name;
 };
 
 struct FfmClusterInfo {
@@ -159,17 +160,30 @@ struct FfmTdmMemoryAccess {
   const std::uint64_t *addresses;
   std::uint32_t data_size_bytes;
   std::uint8_t flags;
+  std::uint32_t tile_dim0;
+  std::uint32_t tile_dim1;
+  std::uint32_t data_size;
+  std::int64_t tensor_dim0_stride;
+  std::int64_t tensor_dim1_stride;
 };
 
 struct FfmResourceAccess;
 struct FfmBarrier;
 
+using FfmLogLevel = std::uint32_t;
+inline constexpr FfmLogLevel FFM_LOG_DEBUG = 0;
+inline constexpr FfmLogLevel FFM_LOG_INFO = 1;
+inline constexpr FfmLogLevel FFM_LOG_WARN = 2;
+inline constexpr FfmLogLevel FFM_LOG_ERROR = 3;
+
 struct FfmHostApi {
   std::uint32_t api_version;
+  void (*log)(FfmLogLevel level, const char *msg);
 };
 
 // Only the stable instruction-observer prefix used by this adapter is mirrored.
-// Later v8 graphics callbacks deliberately remain outside RocJITsu.
+// Later graphics and experimental callbacks deliberately remain outside
+// RocJITsu. The prefix through on_tdm_memory_access has remained stable.
 struct FfmObserverPluginApiPrefix {
   std::uint32_t api_version;
   const char *name;
@@ -248,7 +262,7 @@ static_assert(sizeof(FfmDispatchInfo) == 8);
 static_assert(alignof(FfmDispatchInfo) == 8);
 static_assert(offsetof(FfmDispatchInfo, dispatch_id) == 0);
 
-static_assert(sizeof(FfmDispatchMetadata) == 56);
+static_assert(sizeof(FfmDispatchMetadata) == 64);
 static_assert(alignof(FfmDispatchMetadata) == 8);
 static_assert(offsetof(FfmDispatchMetadata, dispatch_info) == 0);
 static_assert(offsetof(FfmDispatchMetadata, vgpr_count) == 8);
@@ -258,6 +272,7 @@ static_assert(offsetof(FfmDispatchMetadata, wave_size) == 20);
 static_assert(offsetof(FfmDispatchMetadata, num_waves_per_wg) == 24);
 static_assert(offsetof(FfmDispatchMetadata, grid_size) == 28);
 static_assert(offsetof(FfmDispatchMetadata, workgroup_size) == 40);
+static_assert(offsetof(FfmDispatchMetadata, dispatch_name) == 56);
 
 static_assert(sizeof(FfmClusterInfo) == 16);
 static_assert(alignof(FfmClusterInfo) == 8);
@@ -316,7 +331,7 @@ static_assert(offsetof(FfmMemoryAccess, data_size_bytes) == 576);
 static_assert(offsetof(FfmMemoryAccess, resource_type) == 580);
 static_assert(offsetof(FfmMemoryAccess, flags) == 584);
 
-static_assert(sizeof(FfmTdmMemoryAccess) == 72);
+static_assert(sizeof(FfmTdmMemoryAccess) == 104);
 static_assert(alignof(FfmTdmMemoryAccess) == 8);
 static_assert(offsetof(FfmTdmMemoryAccess, instruction_id) == 0);
 static_assert(offsetof(FfmTdmMemoryAccess, wave_info) == 8);
@@ -324,10 +339,16 @@ static_assert(offsetof(FfmTdmMemoryAccess, num_addresses) == 48);
 static_assert(offsetof(FfmTdmMemoryAccess, addresses) == 56);
 static_assert(offsetof(FfmTdmMemoryAccess, data_size_bytes) == 64);
 static_assert(offsetof(FfmTdmMemoryAccess, flags) == 68);
+static_assert(offsetof(FfmTdmMemoryAccess, tile_dim0) == 72);
+static_assert(offsetof(FfmTdmMemoryAccess, tile_dim1) == 76);
+static_assert(offsetof(FfmTdmMemoryAccess, data_size) == 80);
+static_assert(offsetof(FfmTdmMemoryAccess, tensor_dim0_stride) == 88);
+static_assert(offsetof(FfmTdmMemoryAccess, tensor_dim1_stride) == 96);
 
-static_assert(sizeof(FfmHostApi) == 4);
-static_assert(alignof(FfmHostApi) == 4);
+static_assert(sizeof(FfmHostApi) == 16);
+static_assert(alignof(FfmHostApi) == 8);
 static_assert(offsetof(FfmHostApi, api_version) == 0);
+static_assert(offsetof(FfmHostApi, log) == 8);
 
 static_assert(sizeof(FfmObserverPluginApiPrefix) == 168);
 static_assert(alignof(FfmObserverPluginApiPrefix) == 8);
@@ -366,4 +387,4 @@ static_assert(encode_tdm_flags(true, false) == 0x01);
 static_assert(encode_tdm_flags(false, true) == 0x02);
 static_assert(encode_tdm_flags(true, true) == 0x03);
 
-} // namespace rocjitsu::plugins::perfsim::observer_abi_v8
+} // namespace rocjitsu::plugins::perfsim::observer_abi_v13
