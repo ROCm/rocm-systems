@@ -149,6 +149,60 @@ static void ResetP2pFakes();
 #define hipPointerGetAttribute(data, attribute, ptr) \
     g_hipPointerGetAttribute((data), (attribute), (ptr))
 
+// ---------------------------------------------------------------------------
+// Recording shim for the alloc.h free primitives (ncclCuMemFreeAddr,
+// ncclCuMemFree, ncclCudaFree).
+//
+// These are header-only functions in alloc.h, so there is no external symbol
+// or hookable seam to observe them. But the p2p.cc free paths (send/recv
+// connector free and proxyFree) call them with the retained device pointer as
+// the first argument -- exactly the observable a test needs to prove the right
+// handle was released on the right arm. Without this, a test can only assert
+// ncclSuccess, which the shutdown-flag short-circuit (ShutdownFlagGuard)
+// guarantees regardless of what the free path actually did, so deleting the
+// free call under test leaves the test green.
+//
+// The wrappers record (kind, ptr) and then delegate to the real inline. The
+// ShutdownFlagGuard those tests install makes the real inline return before it
+// reaches any HIP symbol, so recording does not change behaviour -- it only
+// makes the release observable. g_freeCalls is cleared in ResetP2pFakes().
+//
+// Defined here, while the real inline names are still callable (the #define
+// shims below would otherwise make the wrapper bodies recurse).
+namespace {
+enum class FreeKind { CuMemFreeAddr, CuMemFree, CudaFree };
+struct FreeCall {
+    FreeKind    kind;
+    const void* ptr;
+    bool operator==(const FreeCall& o) const { return kind == o.kind && ptr == o.ptr; }
+};
+std::vector<FreeCall> g_freeCalls;
+
+inline ncclResult_t RecordCuMemFreeAddr(void* ptr, struct ncclMemManager* mgr,
+                                        int numSegments = 1) {
+    g_freeCalls.push_back({FreeKind::CuMemFreeAddr, ptr});
+    return ncclCuMemFreeAddr(ptr, mgr, numSegments);
+}
+inline ncclResult_t RecordCuMemFree(void* ptr, struct ncclMemManager* mgr,
+                                    int numSegments = 1) {
+    g_freeCalls.push_back({FreeKind::CuMemFree, ptr});
+    return ncclCuMemFree(ptr, mgr, numSegments);
+}
+template <typename T>
+inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
+                                   int numSegments = 1) {
+    g_freeCalls.push_back({FreeKind::CudaFree, static_cast<const void*>(ptr)});
+    return ncclCudaFree(ptr, mgr, numSegments);
+}
+}  // namespace
+
+// Route every call site in the included p2p.cc through the recording wrappers.
+// Variadic so both the 2-arg (manager only) and 3-arg (manager, numSegments)
+// call sites expand.
+#define ncclCuMemFreeAddr(...) RecordCuMemFreeAddr(__VA_ARGS__)
+#define ncclCuMemFree(...)     RecordCuMemFree(__VA_ARGS__)
+#define ncclCudaFree(...)      RecordCudaFree(__VA_ARGS__)
+
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
 // P2P_CC_PATH is defined by this target's CMakeLists.txt as a string
@@ -244,6 +298,7 @@ static void ResetP2pFakes()
     SetP2pCallocFailSize(0);  // disarm any ncclCalloc failure arming
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
+    g_freeCalls.clear();  // discard any recorded alloc.h free calls
 }
 
 // ===========================================================================
@@ -4037,7 +4092,15 @@ TEST_F(P2pFreeMicrotest, SendFree_CuMemResources_ReleasesEachRetainedHandle)
     res->sendMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
     res->recvMemSameProc = 0;  // cross-proc => ncclCudaFree
     send.transportResources = res;
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.send.free(nullptr, &send), ncclSuccess);
+    // Each retained handle is released on its selected arm, in order: the
+    // send handle same-proc (ncclCuMemFreeAddr), the recv handle cross-proc
+    // (ncclCudaFree). Deleting either release call under test drops the
+    // matching entry and fails this.
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x1000)},
+        {FreeKind::CudaFree,      reinterpret_cast<void*>(0x2000)}}));
 
     ncclConnector send2{};
     auto* res2 = MakeResources();
@@ -4046,7 +4109,12 @@ TEST_F(P2pFreeMicrotest, SendFree_CuMemResources_ReleasesEachRetainedHandle)
     res2->sendMemSameProc = 0;  // cross-proc => ncclCudaFree
     res2->recvMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
     send2.transportResources = res2;
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.send.free(nullptr, &send2), ncclSuccess);
+    // Complementary flags swap the arms.
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree,      reinterpret_cast<void*>(0x1000)},
+        {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x2000)}}));
 }
 
 TEST_F(P2pFreeMicrotest, RecvFree_NoResources_IsNoopSuccess)
@@ -4067,7 +4135,11 @@ TEST_F(P2pFreeMicrotest, RecvFree_CuMemResources_ReleasesEachRetainedHandle)
     res->sendMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
     res->recvMemSameProc = 0;  // cross-proc => ncclCudaFree
     recv.transportResources = res;
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x3000)},
+        {FreeKind::CudaFree,      reinterpret_cast<void*>(0x4000)}}));
 
     ncclConnector recv2{};
     auto* res2 = MakeResources();
@@ -4076,7 +4148,11 @@ TEST_F(P2pFreeMicrotest, RecvFree_CuMemResources_ReleasesEachRetainedHandle)
     res2->sendMemSameProc = 0;  // cross-proc => ncclCudaFree
     res2->recvMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
     recv2.transportResources = res2;
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv2), ncclSuccess);
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree,      reinterpret_cast<void*>(0x3000)},
+        {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x4000)}}));
 }
 
 TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcResources_ClosesEachRetainedHandle)
@@ -6845,7 +6921,12 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_CuMemResources_ReleasesBufferAn
     info->p2pBuff.directPtr = reinterpret_cast<void*>(0x5000);
     conn_.transportResources = info;
 
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+    // The stashed directPtr is released through ncclCudaFree; deleting that
+    // call in production drops this entry.
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree, reinterpret_cast<void*>(0x5000)}}));
     // production free(proxyInfo) already released `info`.
 }
 
@@ -6876,7 +6957,10 @@ TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_CuMemResources_ReleasesBufferAn
     info->p2pBuff.directPtr = reinterpret_cast<void*>(0x6000);
     conn_.transportResources = info;
 
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree, reinterpret_cast<void*>(0x6000)}}));
 }
 
 // Recv proxyFree, non-cuMem arm: the stashed raw device pointer is handed to
@@ -6885,7 +6969,11 @@ TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_DirectResources_ReleasesThrough
 {
     ShutdownFlagGuard shutdown;
     conn_.transportResources = reinterpret_cast<void*>(0x7000);
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+    // The else arm hands transportResources straight to ncclCudaFree.
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree, reinterpret_cast<void*>(0x7000)}}));
 }
 
 // Send proxyFree, non-cuMem arm with no stash: the else arm hands the (null)
@@ -6894,7 +6982,10 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_DirectResources_ReleasesThrough
 {
     ShutdownFlagGuard shutdown;
     conn_.transportResources = reinterpret_cast<void*>(0x9000);
+    g_freeCalls.clear();
     EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree, reinterpret_cast<void*>(0x9000)}}));
 }
 
 // Recv proxyFree also drains the mem-handle queue before releasing its buffer.
