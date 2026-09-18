@@ -1260,6 +1260,28 @@ static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize
                               rcclParamP2pBatchThreshold());
 }
 
+static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task) {
+  struct Policy {
+    const char* arch;
+    ncclFunc_t collAPI;
+    int nChannels;
+  };
+  // This workaround targets direct P2P/IPC traffic only. When P2P is disabled,
+  // preserve the normal channel selection for the fallback transport.
+  if (task == nullptr || ncclParamP2pDisable()) return -1;
+  constexpr Policy policies[] = {
+    // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
+    // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
+    // their higher-throughput multi-channel paths.
+    {"gfx110", ncclFuncAlltoAll, 1},
+  };
+  for (const auto& policy : policies) {
+    if (task->collAPI == policy.collAPI &&
+        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, policy.arch)) return policy.nChannels;
+  }
+  return -1;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1281,6 +1303,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
   uint64_t p2pDirChannelMask[2] = {0, 0}; // per-direction channels (idx 0 recv, 1 send)
+  // Keep policy direction-local so a different task paired in the same planner
+  // round cannot change the channel count selected by this task's peer.
+  int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
   bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
@@ -1370,10 +1395,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
+      int nChStart =
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
@@ -1474,10 +1501,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
+      int nChStart =
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
@@ -4303,23 +4332,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
       }
 
-      // Trigger CE initialization on the first CE-capable collective.
-      // This covers collectives whose user buffers ARE registered (AllGather,
-      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
-      // ceCollTaskAppend path when user buffers are not symmetrically registered.
-      // Without this trigger, CE AllReduce-only workloads would never initialize
-      // the CE runtime (ceARTmpBuf stays NULL).
-      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
-          comm->nNodes == 1 && comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-        struct ncclCeInitTask* ceTask;
-        NCCLCHECK(ncclCalloc(&ceTask, 1));
-        ceTask->comm = comm;
-        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-      }
-
-      // Size gate for CE AllReduce without symmetric memory registration: ceARTmpBuf is sized for at most
-      // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
+      // Window registration type and CE eligibility, hoisted above the CE-init trigger below,
+      // which now consults hierCeAvailable. ceAllReduceFits is the size gate for CE AllReduce
+      // without symmetric registration: ceARTmpBuf holds at most NCCL_CE_AR_MAX_MSG_BYTES.
       bool ceAllReduceFits = false;
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
@@ -4329,6 +4344,28 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // path; keep it graph-capture-safe by gating on !ceCapturing like ceAvailable.
       bool hierCeAvailable = !ceCapturing && ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType,
                                                                  sendWin, recvWin);
+
+      // Trigger CE initialization on the first CE-capable collective.
+      // This covers collectives whose user buffers ARE registered (AllGather,
+      // AlltoAll, Scatter, Gather) as well as AllReduce, which may bypass the
+      // ceCollTaskAppend path when user buffers are not symmetrically registered.
+      // Without this trigger, CE AllReduce-only workloads would never initialize
+      // the CE runtime (ceARTmpBuf stays NULL). Hierarchical CE is multi-node by
+      // construction, so it needs the same trigger despite nNodes > 1. Keep
+      // that arm behind the policy bit which actually selects hierarchical CE;
+      // otherwise a default-policy collective initializes and registers CE
+      // resources only to take the kernel path.
+      if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
+          (comm->nNodes == 1 ||
+           (hierCeAvailable && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO))) &&
+          comm->ceColl.baseUCSymReadyPtr == NULL &&
+          ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
       if (info->coll == ncclFuncAllReduce) {
         const bool ceAllReduceOpSupported =
           (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
