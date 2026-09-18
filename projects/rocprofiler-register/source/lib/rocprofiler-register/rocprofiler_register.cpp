@@ -946,9 +946,20 @@ rocp_invoke_registrations(bool invoke_all)
     return rocp_propagate_registrations(invoke_all, rocp_get_propagation_target());
 }
 
-void
+struct environment_variable_state
+{
+    std::string name    = {};
+    std::string value   = {};
+    bool        was_set = false;
+};
+
+using environment_snapshot_t = std::vector<environment_variable_state>;
+
+environment_snapshot_t
 load_environment_buffer(const char* environment_buffer)
 {
+    auto snapshot = environment_snapshot_t{};
+
     // environment_buffer is a null-character delimited list of name value pairs.
     // Each name and value is delimited separately.
     // The first 4 bytes contain a uint32_t count of pairs.
@@ -957,7 +968,7 @@ load_environment_buffer(const char* environment_buffer)
     {
         LOG(WARNING) << "Attachment was invoked with no environment variables provided "
                         "for what to trace.";
-        return;
+        return snapshot;
     }
 
     const uint32_t pair_count = *reinterpret_cast<const uint32_t*>(environment_buffer);
@@ -976,7 +987,31 @@ load_environment_buffer(const char* environment_buffer)
         }
 
         LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
-        setenv(name, value, 1);
+        const auto* old_value = std::getenv(name);
+        snapshot.emplace_back(environment_variable_state{
+            std::string{ name },
+            (old_value != nullptr) ? std::string{ old_value } : std::string{},
+            old_value != nullptr,
+        });
+        if(setenv(name, value, 1) != 0)
+        {
+            LOG(ERROR) << "Failed to set attachment environment variable " << name;
+            snapshot.pop_back();
+        }
+    }
+
+    return snapshot;
+}
+
+void
+restore_environment(const environment_snapshot_t& snapshot)
+{
+    for(auto itr = snapshot.rbegin(); itr != snapshot.rend(); ++itr)
+    {
+        auto status = (itr->was_set) ? setenv(itr->name.c_str(), itr->value.c_str(), 1)
+                                     : unsetenv(itr->name.c_str());
+        LOG_IF(ERROR, status != 0)
+            << "Failed to restore attachment environment variable " << itr->name;
     }
 }
 
@@ -1351,7 +1386,7 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
             << "rocprofiler-register attach was invoked, but the rocprofiler-attach "
                "library was never loaded. Start the app with environment variable "
                "ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option "
-               "ROCP_REG_DEFAULT_ATTACHMENT=ON";
+               "ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON";
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 
@@ -1370,9 +1405,13 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     LOG(INFO) << "rocprofiler_register_attach started with tool_lib_path: "
               << tool_lib_path;
 
-    // TODO: should save old environment variables if they get overwritten and restore
-    // them on detach
-    load_environment_buffer(environment_buffer);
+    // Successful sessions retain these values for same-configuration reattach.
+    // Failed attempts must not poison the retained environment.
+    auto environment_snapshot = load_environment_buffer(environment_buffer);
+    auto attach_succeeded     = false;
+    auto environment_scope    = common::scope_destructor{ [&]() {
+        if(!attach_succeeded) restore_environment(environment_snapshot);
+    } };
 
     // No previous tool library was attached
     if(prev_tool_lib_path.empty())
@@ -1436,7 +1475,8 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
 
     LOG(INFO) << "rocprofiler-sdk attach completed.";
 
-    return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
+    attach_succeeded = (_ret == 0);
+    return (attach_succeeded) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
 }
 
 //
@@ -1458,7 +1498,7 @@ rocprofiler_register_detach()
             << "rocprofiler-register detach was invoked, but the rocprofiler-attach "
                "library was never loaded. Start the app with environment variable "
                "ROCP_TOOL_ATTACH=1 or build rocprofiler-register with cmake option "
-               "ROCP_REG_DEFAULT_ATTACHMENT=ON";
+               "ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON";
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 

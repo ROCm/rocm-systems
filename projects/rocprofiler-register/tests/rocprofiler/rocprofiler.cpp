@@ -34,6 +34,7 @@
 
 #include <dlfcn.h>
 #include <pthread.h>
+#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -158,6 +159,8 @@ int
 rocprofiler_attach()
 {
     printf("[%s] rocprofiler_attach\n", ROCP_REG_FILE_NAME);
+    if(const auto* value = std::getenv("ROCPROFILER_REGISTER_TEST_ATTACH_FAILURE"))
+        return std::atoi(value);
     return 0;
 }
 
