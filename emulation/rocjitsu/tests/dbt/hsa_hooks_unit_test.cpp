@@ -2025,6 +2025,7 @@ TEST(HsaHooksUnitTest, ConSanProcessExitFinalizesWithoutRuntimeUnload) {
   EXPECT_EXIT(
       {
         ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+        ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
         FakeApiTable api;
         const int saved_stderr = dup(STDERR_FILENO);
         FILE *quiet = std::fopen("/dev/null", "w");
@@ -2039,7 +2040,8 @@ TEST(HsaHooksUnitTest, ConSanProcessExitFinalizesWithoutRuntimeUnload) {
         // std::exit deliberately skips the fixture's automatic OnUnload.
         std::exit(0);
       },
-      ::testing::ExitedWithCode(0), "ConSan analysis verdict");
+      ::testing::ExitedWithCode(0),
+      "ConSan instrumentation timing total_ns=[0-9]+(.|\n)*ConSan analysis verdict");
 }
 
 TEST(HsaHooksUnitTest, ConSanExitFinalizationRetainsCachedRuntimeCallbacks) {
@@ -2074,6 +2076,7 @@ TEST(HsaHooksUnitTest, ConSanExitFinalizationRetainsCachedRuntimeCallbacks) {
 
 TEST(HsaHooksUnitTest, ConSanRepeatedUnloadDoesNotEmitAnotherVerdict) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   FakeApiTable api;
   InstalledDbiHook hook(api);
   ASSERT_TRUE(hook.installed()) << hook.error();
@@ -2084,6 +2087,10 @@ TEST(HsaHooksUnitTest, ConSanRepeatedUnloadDoesNotEmitAnotherVerdict) {
   const auto first = log.find("ConSan analysis verdict");
   ASSERT_NE(first, std::string::npos) << log;
   EXPECT_EQ(log.find("ConSan analysis verdict", first + 1), std::string::npos) << log;
+  const auto timing = log.find("ConSan instrumentation timing total_ns=");
+  ASSERT_NE(timing, std::string::npos) << log;
+  EXPECT_EQ(log.find("ConSan instrumentation timing total_ns=", timing + 1), std::string::npos)
+      << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsTo) {
