@@ -943,7 +943,8 @@ typedef struct {
 
   /**
    * Which power profile is currently active, or
-   * ::RSMI_PWR_PROF_PRST_INVALID if no profile is marked active
+   * ::RSMI_PWR_PROF_PRST_INVALID if no profile is marked active or the active
+   * profile has no corresponding RSMI preset
    */
   rsmi_power_profile_preset_masks_t current;
 
