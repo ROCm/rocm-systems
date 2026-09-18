@@ -3466,6 +3466,20 @@ private:
     }
     RegisterSet implicit_uses;
     inst.implicit_uses(implicit_uses);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      // The flat hook loses each operand's VGPR-MSB role. Keep its non-VGPR
+      // reads (including encoded-field SGPRs), and resolve implicit VGPR reads
+      // through their operands, just as for explicit sources above.
+      implicit_uses.clear_class(RegClass::VGPR);
+      std::vector<const Operand *> operands;
+      inst.implicit_use_operands(operands);
+      for (const Operand *op : operands) {
+        if (op == nullptr)
+          continue;
+        if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
+          expand_vgpr_msb_ref(implicit_uses, *ref, *op, state, arch);
+      }
+    }
     // D16 memory loads preserve the opposite half for liveness, but the two
     // asynchronous half writes do not consume one another at issue time.
     if (const auto partial = partial_d16_load_def(inst, arch))
@@ -4936,6 +4950,12 @@ private:
         }
         if (!reg)
           continue;
+        // Writelane's destination input preserves the other lanes for whole-
+        // register dataflow; it is not a hardware read. A pending definition
+        // overlapping this destination conflicts with the selected lane write.
+        if (access == WaitcheckAccessKind::Use && event.check_defs &&
+            inst.mnemonic() == "v_writelane_b32" && du.defs.contains(*reg))
+          access = WaitcheckAccessKind::Def;
         if (access == WaitcheckAccessKind::Def && ordered_waw(event, current_events))
           continue;
 
