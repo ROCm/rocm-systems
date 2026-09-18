@@ -77,6 +77,11 @@ static constexpr uint16_t AMD_AQL_FORMAT_PM4_IB = 0x1;
 // dereference is a value the compiler may cache. Both spins below - whether a
 // frame may be reused, whether the GPU has drained - need an actual load,
 // ordered like every other read of memory the GPU publishes here.
+//
+// sync_addr is the KMD's read-only CPU mapping of the fence value, so
+// whatever reads it must never write: an atomic read-modify-write here
+// raises 0xC0000005. That is a property of the mapping rather than of
+// this function, so it rules out a fetch-or or compare-exchange too.
 static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
   return rocr::atomic::Load(sync_addr, std::memory_order_acquire);
 }
