@@ -23,10 +23,10 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/kfd/resource.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/kfd_resource.hpp"
 
 #include <fmt/format.h>
 #include <cstddef>
@@ -157,19 +157,10 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 
     if(pool.kfd_memory)
     {
-        try
-        {
-            *ptr = pool.kfd_memory->allocate(size,
-                                             flags.host_access
-                                                 ? thread_trace::kfd_memory_kind_t::host
-                                                 : thread_trace::kfd_memory_kind_t::device);
-            return HSA_STATUS_SUCCESS;
-        } catch(const std::exception& e)
-        {
-            ROCP_ERROR << "Could not allocate KFD thread-trace memory: " << e.what();
-            *ptr = nullptr;
-            return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-        }
+        *ptr = pool.kfd_memory->allocate(
+            size,
+            flags.host_access ? kfd::kfd_memory_kind_t::host : kfd::kfd_memory_kind_t::device);
+        return (*ptr || size == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
@@ -209,25 +200,18 @@ TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
+    if(size == 0) return HSA_STATUS_SUCCESS;
+    if(!dst || !src) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if(pool.kfd_memory)
     {
-        try
+        if(pool.kfd_memory->is_device_pointer(src))
         {
-            if(pool.kfd_memory->is_device_pointer(src))
-            {
-                if(!pool.kfd_copy_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-                pool.kfd_copy_queue->copy(dst, src, size);
-            }
-            else
-            {
-                std::memcpy(dst, src, size);
-            }
-            return HSA_STATUS_SUCCESS;
-        } catch(const std::exception& e)
-        {
-            ROCP_ERROR << "Could not copy KFD thread-trace memory: " << e.what();
-            return HSA_STATUS_ERROR;
+            if(!pool.kfd_copy_queue || !pool.kfd_copy_queue->copy(dst, src, size))
+                return HSA_STATUS_ERROR;
         }
+        else
+            std::memcpy(dst, src, size);
+        return HSA_STATUS_SUCCESS;
     }
 
     if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
