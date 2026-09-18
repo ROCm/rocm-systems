@@ -86,6 +86,19 @@ rocprofiler_add_integration_execute_test(
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
+    rocprofv3-avail-test-broken-pipe
+    COMMAND
+        sh -c
+        "${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info --pmc | head -3"
+    DEPENDS rocprofiler-sdk::rocprofv3-avail
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "GPU:[0-9]"
+    FAIL_REGULAR_EXPRESSION "Traceback|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-info
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info
     DEPENDS rocprofiler-sdk::rocprofv3-avail

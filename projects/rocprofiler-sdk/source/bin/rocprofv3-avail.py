@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import contextlib
 import os
 import argparse
 import sys
@@ -603,7 +604,15 @@ def main(argv=None):
     )
     args = parse_arguments(argv)
     if args.command:
-        args.func(args)
+        try:
+            args.func(args)
+        except BrokenPipeError:
+            # A reader such as `head` closed the pipe. Send what is still
+            # buffered to /dev/null so the interpreter does not fail again
+            # while flushing at shutdown.
+            with contextlib.suppress(OSError, ValueError):
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 1
 
 
 if __name__ == "__main__":
