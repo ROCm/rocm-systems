@@ -68,6 +68,17 @@ target_link_libraries(rocjitsu_plugin_data_hazard PUBLIC util)
 # The plugin reads its own configuration object out of the resolved JSON.
 target_link_libraries(rocjitsu_plugin_data_hazard PRIVATE flatbuffers)
 add_dependencies(rocjitsu_plugin_data_hazard flatbuffers_schemas)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    rj_add_object_library(
+        rocjitsu_plugin_perfsim
+        perfsim/plugin.cpp
+    )
+    target_link_libraries(
+        rocjitsu_plugin_perfsim
+        PRIVATE flatbuffers
+        PUBLIC ${CMAKE_DL_LIBS}
+    )
+endif()
 
 # Host-side loader: discovers and dlopen()s plugin shared objects named in the
 # config file. Linked into the interposer and main shared library.
@@ -219,4 +230,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RJ_BUILD_DATA_HAZARD_CORE)
         FILES ${CMAKE_SOURCE_DIR}/lib/util/include/util/spinlock.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard/util
     )
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        rj_add_plugin_so(perfsim rocjitsu_plugin_perfsim
+            ${CMAKE_CURRENT_SOURCE_DIR}/perfsim/plugin_export.cpp
+        )
+        # Perfsim builds may run LLVM-global cleanup from an ELF destructor.
+        # Keep this adapter and its backend-handle registry mapped across a
+        # loader dlclose() after a failed factory call. The registry's retained
+        # handles keep the Perfsim backends themselves mapped for the process lifetime.
+        target_link_options(
+            rocjitsu_plugin_perfsim_so
+            PRIVATE "-Wl,-z,nodelete"
+        )
+    endif()
 endif()
