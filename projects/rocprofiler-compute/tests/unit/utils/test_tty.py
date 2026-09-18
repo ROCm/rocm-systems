@@ -1315,3 +1315,33 @@ class TestRenderMembwGuidance:
         output = _render_membw_guidance(result)
         assert "No bottlenecks detected" not in output
         assert "Bottlenecks detected" in output
+
+
+def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
+    """Constructed nodes: file:line, duration order, and kernel_id print."""
+    longer = CallTreeNode(name="nn.Module.SimpleModel.forward")
+    longer.total_duration_ms = 8.0
+    longer.invocation_ids.add("0")
+    child = CallTreeNode(
+        name="nn.Module.Linear.forward",
+        file_name="simple_torch_code.py",
+        line_number=19,
+    )
+    child.total_duration_ms = 5.0
+    child.invocation_ids.add("10")
+    child.kernels["addmm_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=5_000_000.0,
+        kernel_id=4,
+    )
+    longer.children = [child]
+    shorter = CallTreeNode(name="aten::relu")
+    shorter.total_duration_ms = 1.0
+    shorter.invocation_ids.add("90")
+    show_call_tree({"1": [longer], "2": [shorter]})
+    output = capsys.readouterr().out
+    assert "Thread_Id" not in output
+    assert output.find("nn.Module.SimpleModel.forward") < output.find("aten::relu")
+    assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
+    assert "aten::relu simple_torch_code.py" not in output
+    assert "(id 4)" in output
