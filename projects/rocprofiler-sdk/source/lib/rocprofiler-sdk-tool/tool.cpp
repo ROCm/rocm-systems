@@ -2460,7 +2460,7 @@ if_pc_sample_config_match(rocprofiler_agent_id_t           agent_id,
     return false;
 }
 
-void
+bool
 configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
                                     uint64_t                        buffer_watermark,
                                     void*                           tool_data,
@@ -2507,8 +2507,10 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     {
         ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents."
                    << "See supported configurations with 'rocprofv3-avail info --pc-sampling'";
-        std::exit(EXIT_FAILURE);
+        return false;
     }
+
+    return true;
 }
 
 // Kernel replay: the SDK calls this during CONFIG to learn how many passes to run for a dispatch.
@@ -3576,13 +3578,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().pc_sampling_host_trap)
     {
-        configure_pc_sampling_on_all_agents(
-            buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling);
+        // non-zero return propagates the failure to rocprofiler-sdk instead of calling
+        // std::exit() from here -- see the comment on configure_pc_sampling_on_all_agents().
+        if(!configure_pc_sampling_on_all_agents(
+               buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling))
+            return -1;
     }
     else if(tool::get_config().pc_sampling_stochastic)
     {
-        configure_pc_sampling_on_all_agents(
-            buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling);
+        if(!configure_pc_sampling_on_all_agents(
+               buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling))
+            return -1;
     }
 
     for(auto itr : get_buffers().pc_sampling_buffers_as_array())

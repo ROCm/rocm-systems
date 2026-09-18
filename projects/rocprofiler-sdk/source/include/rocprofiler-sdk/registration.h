@@ -68,6 +68,9 @@ typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
  * client
  * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
  * ::rocprofiler_tool_configure_result_t.
+ * @return int
+ * @retval 0 Initialization succeeded.
+ * @retval (non-zero) Initialization failed.
  */
 typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
                                              void*                         tool_data);
