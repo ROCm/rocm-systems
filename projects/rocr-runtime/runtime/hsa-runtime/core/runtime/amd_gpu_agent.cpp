@@ -5180,12 +5180,17 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
     // Two swaps == net identity: which_buffer returns to the worker's bound half.
     // BOTH drains MUST run unconditionally regardless of the first status; an odd
     // swap count reintroduces the permanent selector desync this fix resolves.
-    [[maybe_unused]] const uint32_t before =
+    const uint32_t before =
         pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
     hsa_status_t flush_status = drain_active_buffer(xcc_id);       // swap 1
     hsa_status_t other_half_status = drain_active_buffer(xcc_id);  // swap 2
-    assert(pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire) == before &&
-           "PcSamplingFlush must leave the selector on the worker's half");
+    const uint32_t after =
+        pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
+    if (after != before) {
+      log_warning_n(1, "PC sampling XCC %u: flush left the buffer selector at %u, expected %u\n",
+                    xcc_id, after, before);
+    }
+    assert(after == before && "PcSamplingFlush must leave the selector on the worker's half");
     if (flush_status == HSA_STATUS_SUCCESS) flush_status = other_half_status;
 
     if (flush_status != HSA_STATUS_SUCCESS) {
