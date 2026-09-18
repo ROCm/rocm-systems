@@ -679,33 +679,34 @@ QueueController::serializer(const Queue* queue)
     CHECK(queue);
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
-    // Read the refcount before taking the serializer lock: update_serialization() acquires
-    // them in that order, and reversing it here would deadlock. A concurrent enable/disable
-    // for this agent can therefore race with the creation below, exactly as the previous
-    // _serialized_enabled load could, and is resolved the same way -- the next transition
-    // through update_serialization() reaches the entry once it is in the map.
-    const bool should_serialize = is_serialization_enabled(agent_id);
-
     common::Synchronized<hsa::profiler_serializer>* ret = nullptr;
-    _profiler_serializer.ulock(
-        [&](const auto& m) {
-            if(auto ptr = m.find(agent_id); ptr != m.end())
-            {
-                ret = ptr->second.get();
+    // Hold the refcount read lock across the lookup/insertion so that a concurrent
+    // update_serialization() cannot run between reading the refcount and inserting the
+    // entry: if it did, it would find no serializer to transition and the new entry would
+    // be created in the wrong state.  update_serialization() holds the refcount write lock
+    // then the serializer write lock, so taking them in the same order here is deadlock-free.
+    _serialization_refcount.rlock([&](const auto& state) {
+        const bool should_serialize = state.enabled(agent_id);
+        _profiler_serializer.ulock(
+            [&](const auto& m) {
+                if(auto ptr = m.find(agent_id); ptr != m.end())
+                {
+                    ret = ptr->second.get();
+                    return true;
+                }
+                return false;
+            },
+            [&](auto& m) {
+                ret = m.emplace(agent_id,
+                                std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                          .first->second.get();
+                if(should_serialize)
+                {
+                    ret->wlock([&](auto& serializer) { serializer.enable({}); });
+                }
                 return true;
-            }
-            return false;
-        },
-        [&](auto& m) {
-            ret = m.emplace(agent_id,
-                            std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                      .first->second.get();
-            if(should_serialize)
-            {
-                ret->wlock([&](auto& serializer) { serializer.enable({}); });
-            }
-            return true;
-        });
+            });
+    });
     return *ret;
 }
 
@@ -729,13 +730,10 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
     _queues.rlock([&](const queue_map_t& _queues_v) {
         auto pd_map = per_dev_map(_queues_v);
 
-        // Agents whose effective state changed in this call; only those get their serializer
-        // toggled. Each entry stores the agent id together with its new effective state so
-        // that the serializer action is derived from the post-update refcount rather than
-        // from the caller's `enable` flag (which could be stale if another thread races
-        // between the refcount unlock and the serializer lock).
-        auto transitioned = std::vector<std::pair<rocprofiler_agent_id_t, bool>>{};
-        bool any_enabled  = false;
+        // Agents whose effective refcount crossed zero in this call; only those get their
+        // serializer toggled. Both refcount mutation and serializer transitions happen
+        // together inside the refcount lock to prevent concurrent calls from interleaving.
+        bool any_enabled = false;
 
         _serialization_refcount.wlock([&](auto& state) {
             // An agent can be covered by `all` and by an explicit entry at the same time, so
@@ -766,14 +764,28 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                 }
             }
 
-            _profiler_serializer.rlock([&](const auto& serializers) {
+            _profiler_serializer.wlock([&](auto& serializers) {
                 for(const auto& [agent_id, _] : serializers)
                 {
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
-                    bool now_enabled = state.enabled(agent_id);
-                    if(itr->second != now_enabled)
-                        transitioned.emplace_back(agent_id, now_enabled);
+                    const bool now_enabled = state.enabled(agent_id);
+                    if(itr->second == now_enabled) continue;
+
+                    auto queues = hsa_barrier::queue_map_ptr_t{};
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
+
+                    auto ser_itr = serializers.find(agent_id);
+                    if(ser_itr == serializers.end() || !ser_itr->second) continue;
+                    // Derived from the post-update refcount rather than the caller's `enable`
+                    // flag, so the applied state cannot disagree with the count that produced
+                    // the transition.
+                    ser_itr->second->wlock([&](auto& serializer) {
+                        if(now_enabled)
+                            serializer.enable(queues);
+                        else
+                            serializer.disable(queues);
+                    });
                 }
             });
 
@@ -781,26 +793,6 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
         });
 
         _serialized_enabled.store(any_enabled);
-
-        if(transitioned.empty()) return;
-
-        _profiler_serializer.wlock([&](auto& m) {
-            for(const auto& [agent_id, now_enabled] : transitioned)
-            {
-                auto itr = m.find(agent_id);
-                if(itr == m.end() || !itr->second) continue;
-
-                auto queues = hsa_barrier::queue_map_ptr_t{};
-                if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
-
-                itr->second->wlock([&](auto& serializer) {
-                    if(now_enabled)
-                        serializer.enable(queues);
-                    else
-                        serializer.disable(queues);
-                });
-            }
-        });
     });
 }
 
