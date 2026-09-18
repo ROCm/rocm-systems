@@ -378,6 +378,12 @@ void RaceDetectorPlugin::onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf,
   s->race_state->checkScalarRead(reg);
 }
 
+void RaceDetectorPlugin::onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  s->race_state->checkScalarWrite(reg);
+}
+
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);

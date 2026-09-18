@@ -13,6 +13,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -41,32 +42,6 @@ enum MemPipelineTag : uint8_t {
   SCALAR_MEM = 1,
   GLOBAL_MEM = 2,
   LOCAL_MEM = 3,
-};
-
-/// @brief Atomic read-modify-write operation type.
-enum class AtomicOp : uint8_t {
-  NONE = 0,       ///< Not an atomic operation.
-  SWAP,           ///< Exchange.
-  CMPSWAP,        ///< Compare-and-swap (data[0] = src, data[1] = cmp).
-  MSKOR,          ///< Masked OR (data[0] = mask, data[1] = src).
-  ADD,            ///< Atomic add.
-  SUB,            ///< Atomic subtract (mem - data).
-  RSUB,           ///< Atomic reverse subtract (data - mem).
-  SMIN,           ///< Signed minimum.
-  UMIN,           ///< Unsigned minimum.
-  SMAX,           ///< Signed maximum.
-  UMAX,           ///< Unsigned maximum.
-  AND,            ///< Bitwise AND.
-  OR,             ///< Bitwise OR.
-  XOR,            ///< Bitwise XOR.
-  INC,            ///< Increment (wrapping).
-  DEC,            ///< Decrement (wrapping).
-  FADD,           ///< Floating-point add.
-  FMIN,           ///< Floating-point minimum.
-  FMAX,           ///< Floating-point maximum.
-  APPEND,         ///< LDS append counter.
-  CONSUME,        ///< LDS consume counter.
-  BARRIER_ARRIVE, ///< LDS barrier-arrive state update.
 };
 
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).
@@ -183,10 +158,26 @@ struct VectorMemState : DynamicInstState {
   bool scratch_swizzle = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
+  // Low bits of the uniform address contribution applied after swizzling. The
+  // cache walker subtracts this contribution when locating logical dword
+  // boundaries, while per_lane_addr remains the actual first-byte address.
+  uint32_t scratch_addr_base_offset = 0;
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
-  bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
+  // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
+  // by default, including FLAT atomics routed to LDS through the shared
+  // aperture (RDNA4 ISA MODE.FP_DENORM). Direct DS execution overrides this.
+  uint32_t packed_denorm_mode = 3;
+  /// Scalar atomic policies are captured at issue, before MODE can change.
+  /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
+  uint32_t atomic_denorm_mode = 3;
+  uint32_t atomic_lds_denorm_mode = 3;
+  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
+  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  bool atomic_legacy_minmax = true;
+  bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG

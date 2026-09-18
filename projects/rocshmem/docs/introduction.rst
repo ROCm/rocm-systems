@@ -18,13 +18,13 @@ ongoing active discussion within the OpenSHMEM community, and the OpenSHMEM
 specification has yet to coalesce on this topic.
 rocSHMEM extends beyond the OpenSHMEM specification to add semantics that
 support GPU kernel communication while maintaining close resemblance to
-the original OpenSHMEM specification semantics. 
+the original OpenSHMEM specification semantics.
 
 Applications using :doc:`HIP <hip:index>` can interface with rocSHMEM.
 Using the HIP programming model,
 rocSHMEM provides ``__host__`` APIs for host code,
 and ``__device__`` APIs for GPU kernels.
-Device APIs without special suffixes or infixes , for example, ``_wg`` or ``_wave``, 
+Device APIs without special suffixes or infixes , for example, ``_wg`` or ``_wave``,
 must be called by a single thread.
 GPU specific ``_wg`` and ``_wave`` APIs are designed to be called by multiple GPU threads
 and will block until the calling scope completes.

@@ -99,9 +99,13 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     int legacyIpcCap = 0;
     if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
     if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
+#if HIP_VERSION >= 71260540
     if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
         hipSuccess)
       goto cleanup;
+#else
+    (void)legacyIpcCap;
+#endif
   }
 
   ok = 1;
@@ -116,8 +120,10 @@ done:
   return ok;
 }
 
-// Determine whether CUMEM & VMM RDMA is supported on this platform
-int ncclIsCuMemSupported() {
+// Returns 1 when the platform can run the cuMem VMM path at runtime.
+// When requireGfx1250ForAutoEnable is set, also enforces the gfx1250 gate used
+// by NCCL_CUMEM_ENABLE=-2 auto-detect; NCCL_CUMEM_ENABLE=1 bypasses that gate.
+static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
   CUdevice currentDev;
   int cudaDev;
   int cudaDriverVersion;
@@ -126,13 +132,13 @@ int ncclIsCuMemSupported() {
   ncclResult_t ret = ncclSuccess;
   char gcnArch[256] = "unknown";
 
-  // Auto-detect (NCCL_CUMEM_ENABLE=-2) only turns cuMem on where the VMM path is
-  // required; NCCL_CUMEM_ENABLE=1 bypasses this gate.
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
-  if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
-    INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
-         gcnArch);
-    return 0;
+  if (requireGfx1250ForAutoEnable) {
+    if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
+      INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
+           gcnArch);
+      return 0;
+    }
   }
 
   if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
@@ -166,11 +172,30 @@ error:
   return (ret == ncclSuccess);
 }
 
+// Determine whether CUMEM & VMM RDMA is supported on this platform
+int ncclIsCuMemSupported() {
+  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/1);
+}
+
+// Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
+// NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+#if defined(__GNUC__)
+__attribute__((visibility("default")))
+#endif
+int ncclCuMemRuntimeSupported() {
+  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
+}
+
 int ncclCuMemEnable() {
 #if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
-  return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+  if (param == 0) return 0;
+  // Force-on (param>0) still requires a usable VMM/dma-buf stack. Returning 1
+  // here on a kernel without DMA-BUF (e.g. 5.15) made P2P/CUMEM paths
+  // dereference uninitialized state and SIGSEGV.
+  if (param > 0) return ncclCuMemRuntimeSupported();
+  return param == -2 && ncclCuMemSupported;
 #else
   if (ncclParamCuMemEnable() > 0)
     WARN(

@@ -37,7 +37,7 @@
 #include "PM4Packet.hpp"
 #include "SDMAQueue.hpp"
 #include "SDMAPacket.hpp"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 /* Captures user specified time (seconds) to sleep */
 extern unsigned int g_SleepTime;

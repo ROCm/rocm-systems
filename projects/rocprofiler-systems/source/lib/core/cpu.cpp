@@ -3,6 +3,7 @@
 
 #include "cpu.hpp"
 #include "agent_manager.hpp"
+#include "common/string_utility.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -42,13 +43,6 @@ process_cpu_info_data()
         {
             return -1;
         }
-    };
-
-    auto trim_whitespace = [](const std::string& str) -> std::string {
-        const size_t start = str.find_first_not_of(" \t");
-        if(start == std::string::npos) return "";
-        const size_t end = str.find_last_not_of(" \t");
-        return str.substr(start, end - start + 1);
     };
 
     static const std::unordered_map<std::string,
@@ -103,15 +97,14 @@ process_cpu_info_data()
             continue;
         }
 
-        std::string       key   = trim_whitespace(line.substr(0, colon_pos));
-        const std::string value = trim_whitespace(line.substr(colon_pos + 1));
-
-        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+        const std::string key =
+            utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
+        const auto value = utility::string::trim(line.substr(colon_pos + 1));
 
         auto it = field_parsers.find(key);
         if(it != field_parsers.end())
         {
-            it->second(current_cpu, value);
+            it->second(current_cpu, std::string{ value });
             if(key == "processor")
             {
                 has_processor_entry = true;
@@ -176,18 +169,19 @@ query_cpu_agents()
     {
         const auto node_id     = node_count++;
         const auto device_name = "CPU" + std::to_string(socket_id);
-        auto       cur_agent   = agent{ agent_type::CPU,
-                                0,
-                                static_cast<std::uint32_t>(socket_id),
-                                node_id,
-                                static_cast<std::int32_t>(socket_id),
-                                static_cast<std::int32_t>(socket_id),
-                                device_name,
-                                model_name,
-                                socket_vendor_ids[socket_id],
-                                "",
-                                0,
-                                "" };
+        auto       cur_agent =
+            agent{ .type                 = agent_type::cpu,
+                   .handle               = 0,
+                   .device_id            = static_cast<std::uint32_t>(socket_id),
+                   .node_id              = node_id,
+                   .logical_node_id      = static_cast<std::int32_t>(socket_id),
+                   .logical_node_type_id = static_cast<std::int32_t>(socket_id),
+                   .name                 = device_name,
+                   .model_name           = model_name,
+                   .vendor_name          = socket_vendor_ids[socket_id],
+                   .product_name         = "",
+                   .device_type_index    = 0,
+                   .agent_info           = "" };
         mgr.insert_agent(cur_agent);
     }
 }

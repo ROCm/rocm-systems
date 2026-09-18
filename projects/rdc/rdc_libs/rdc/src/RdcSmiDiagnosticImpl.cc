@@ -300,7 +300,7 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
   int64_t max_temp = 0;
   err = amdsmi_get_temp_metric(processor_handle, type, met, &max_temp);
   if (err == AMDSMI_STATUS_SUCCESS) {
-    if (current_temp >= max_temp) {
+    if (max_temp > 0 && current_temp >= max_temp) {
       result = RDC_DIAG_RESULT_WARN;
       per_gpu_info += "Max ";
       per_gpu_info += get_temperature_string(type);
@@ -349,7 +349,7 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
   int64_t critical_temp = 0;
   err = amdsmi_get_temp_metric(processor_handle, type, met, &critical_temp);
   if (err == AMDSMI_STATUS_SUCCESS) {
-    if (current_temp >= critical_temp) {
+    if (critical_temp > 0 && current_temp >= critical_temp) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Critical ";
       per_gpu_info += get_temperature_string(type);
@@ -373,7 +373,7 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
   int64_t emergency_temp = 0;
   err = amdsmi_get_temp_metric(processor_handle, type, met, &emergency_temp);
   if (err == AMDSMI_STATUS_SUCCESS) {
-    if (current_temp >= critical_temp) {
+    if (emergency_temp > 0 && current_temp >= emergency_temp) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Emergency ";
       per_gpu_info += get_temperature_string(type);
