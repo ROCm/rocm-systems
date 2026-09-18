@@ -241,7 +241,7 @@ protected:
             {
                 void* req = nullptr;
                 putOk = rma_->iput(rmaCtx_, 0, offset, srcMh, size,
-                                   offset, dstMh, 1, &req) == ncclSuccess;
+                                   offset, dstMh, 1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
                 if (putOk) putOk = PollUntilDone(req);
             }
             if (!MPIHelpers::allRanksTrue(putOk))
@@ -295,7 +295,7 @@ TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, /*context=*/0,
                              /*srcOff=*/0, sendMh, kSize,
-                             /*dstOff=*/0, recvMh, /*peerRank=*/1, &req));
+                             /*dstOff=*/0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -343,7 +343,7 @@ TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, 0, transferOffset, sendMh, transferBytes,
-                             transferOffset, recvMh, 1, &req));
+                             transferOffset, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -387,7 +387,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
-                             /*dstOff=*/off, recvMh, 1, &req));
+                             /*dstOff=*/off, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -426,7 +426,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, kSize,
-                             /*localOff=*/0, mh, /*peerRank=*/1, &req));
+                             /*localOff=*/0, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
         EXPECT_TRUE(VerifyBuf(bb->ptr, kSize, /*seed=*/0xC3))
             << "iget data corrupted across segment boundaries";
@@ -469,7 +469,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0, /*remoteOff=*/off, srcMh, kSize,
-                             /*localOff=*/off, dstMh, /*peerRank=*/1, &req));
+                             /*localOff=*/off, dstMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
 
         ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
@@ -517,7 +517,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0,
                              /*remoteOff=*/kRemoteOff, mh, kPayload,
-                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, &req));
+                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
         ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
                               /*seed=*/0x4D, kSentinel,
@@ -576,7 +576,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
             void* req = nullptr;
             ASSERT_EQ(ncclSuccess,
                       rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                                 localOff, mh, /*peerRank=*/1, &req))
+                                 localOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req))
                 << "DeepEP Engram IGet post failed at iteration " << i;
             ASSERT_TRUE(PollUntilDone(req))
                 << "DeepEP Engram IGet stalled at iteration " << i;
@@ -627,7 +627,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
     void* req = nullptr;
     ASSERT_EQ(ncclSuccess,
               rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
-                         kLocalOff, mh, peer, &req));
+                         kLocalOff, mh, peer, ncclRmaOptFlagsDefault, &req));
     ASSERT_TRUE(PollUntilDone(req));
     ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
                           static_cast<uint8_t>(0x30 + peer), kSentinel,
@@ -689,7 +689,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                             localOff, mh, peer, &req))
+                             localOff, mh, peer, ncclRmaOptFlagsDefault, &req))
             << "hybrid IGet post failed at iteration " << i;
         ASSERT_TRUE(PollUntilDone(req))
             << "hybrid IGet stalled at iteration " << i;
@@ -729,7 +729,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     void* req = nullptr;
     EXPECT_EQ(ncclInvalidArgument,
               rma_->iget(rmaCtx_, 0, window->totalSize - 32, mh, 64,
-                         /*localOff=*/0, mh, peer, &req));
+                         /*localOff=*/0, mh, peer, ncclRmaOptFlagsDefault, &req));
     EXPECT_EQ(req, nullptr);
     EXPECT_TRUE(AllSentinel(window->ptr, kGpuBytes, kSentinel));
     Barrier();
@@ -763,7 +763,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -816,7 +816,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
-                             /*dstOff=*/off, recvMh, /*peerRank=*/1, &req));
+                             /*dstOff=*/off, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -863,7 +863,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -915,7 +915,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
                                    /*srcOff=*/0, sendMh, kSize,
                                    /*dstOff=*/0, recvMh, /*peerRank=*/1,
                                    /*signalOff=*/0, sigMh, /*signalValue=*/0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req));
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -1034,7 +1034,7 @@ TEST_F(RmaMultiSegmentMPITest, SingleSegmentRegression)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -1152,15 +1152,15 @@ TEST_F(RmaMultiSegmentMPITest, IPutOutOfRangeRejectedNoCorruption)
         void* req = nullptr;
         // size exactly one byte past the window.
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1, &req))
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req))
             << "oversized transfer must be rejected";
         // valid size but srcOff pushes the source past the end.
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iput(rmaCtx_, 0, /*srcOff=*/1, sendMh, total, 0, recvMh, 1, &req))
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/1, sendMh, total, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req))
             << "src offset overrun must be rejected";
         // valid size but dstOff pushes the destination past the end.
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, /*dstOff=*/1, recvMh, 1, &req))
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, /*dstOff=*/1, recvMh, 1, ncclRmaOptFlagsDefault, &req))
             << "dst offset overrun must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iput must not produce a request";
     }
@@ -1191,13 +1191,13 @@ TEST_F(RmaMultiSegmentMPITest, IGetOutOfRangeRejected)
     {
         void* req = nullptr;
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, total + 1, 0, mh, 1, &req))
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, total + 1, 0, mh, 1, ncclRmaOptFlagsDefault, &req))
             << "oversized iget must be rejected";
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/1, mh, total, 0, mh, 1, &req))
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/1, mh, total, 0, mh, 1, ncclRmaOptFlagsDefault, &req))
             << "remote offset overrun must be rejected";
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iget(rmaCtx_, 0, 0, mh, total, /*localOff=*/1, mh, 1, &req))
+                  rma_->iget(rmaCtx_, 0, 0, mh, total, /*localOff=*/1, mh, 1, ncclRmaOptFlagsDefault, &req))
             << "local offset overrun must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iget must not produce a request";
     }
@@ -1235,18 +1235,18 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1,
                                    /*signalOff=*/0, sigMh, 0, NCCL_NET_SIGNAL_OP_INC,
-                                   /*isStrongSignal=*/false, &req))
+                                   /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "oversized iputSignal payload must be rejected";
         // Signal atomic straddles the end of the signal window (signalOff+8 > size).
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
                                    /*signalOff=*/kSignalSize - 4, sigMh, 0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "out-of-range signal offset must be rejected";
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
                                    /*signalOff=*/4, sigMh, 0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "unaligned signal atomic must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
@@ -1304,7 +1304,7 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
         {
             void* req = nullptr;
             ASSERT_EQ(ncclSuccess,
-                      rma_->iput(rmaCtx_, 0, off, sendMh, len, off, recvMh, 1, &req))
+                      rma_->iput(rmaCtx_, 0, off, sendMh, len, off, recvMh, 1, ncclRmaOptFlagsDefault, &req))
                 << "iput failed straddling boundary " << k;
             ASSERT_TRUE(PollUntilDone(req)) << "iput stalled at boundary " << k;
         }
@@ -1329,7 +1329,7 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -1390,7 +1390,7 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
             void* req = nullptr;
             ASSERT_EQ(ncclSuccess,
                       rma_->iget(rmaCtx_, 0, remoteOff, srcMh, len,
-                                 localOff, dstMh, /*peerRank=*/1, &req))
+                                 localOff, dstMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req))
                 << "iget post failed at iteration " << i;
             ASSERT_TRUE(PollUntilDone(req)) << "iget stalled at iteration " << i;
             ExpectPayloadIsolated(rb->ptr, total, localOff, len, seed,
