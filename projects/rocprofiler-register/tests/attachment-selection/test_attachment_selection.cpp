@@ -28,8 +28,11 @@
 #include <dlfcn.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string_view>
+#include <vector>
 
 struct rocprofiler_client_id_t;
 struct rocprofiler_tool_configure_result_t;
@@ -50,6 +53,19 @@ rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 
 namespace
 {
+std::vector<char>
+make_environment_buffer(std::string_view name, std::string_view value)
+{
+    auto pair_count = uint32_t{ 1 };
+    auto buffer     = std::vector<char>(sizeof(pair_count));
+    std::memcpy(buffer.data(), &pair_count, sizeof(pair_count));
+    buffer.insert(buffer.end(), name.begin(), name.end());
+    buffer.emplace_back('\0');
+    buffer.insert(buffer.end(), value.begin(), value.end());
+    buffer.emplace_back('\0');
+    return buffer;
+}
+
 bool
 verify_configure_symbol()
 {
@@ -93,19 +109,44 @@ bool
 verify_runtime_attach()
 {
     using attach_func_t = rocprofiler_register_error_code_t (*)(const char*, const char*);
+    using detach_func_t = rocprofiler_register_error_code_t (*)();
 
-    auto* symbol = dlsym(RTLD_DEFAULT, "rocprofiler_register_attach");
-    if(symbol == nullptr)
+    auto* attach_symbol = dlsym(RTLD_DEFAULT, "rocprofiler_register_attach");
+    auto* detach_symbol = dlsym(RTLD_DEFAULT, "rocprofiler_register_detach");
+    if(attach_symbol == nullptr || detach_symbol == nullptr)
     {
-        std::cerr << "Test FAILED: rocprofiler_register_attach is not discoverable\n";
+        std::cerr << "Test FAILED: runtime attachment functions are not discoverable\n";
         return false;
     }
 
-    auto attach = reinterpret_cast<attach_func_t>(symbol);
+    auto attach = reinterpret_cast<attach_func_t>(attach_symbol);
+    auto detach = reinterpret_cast<detach_func_t>(detach_symbol);
     auto status = attach(nullptr, "libgeneric-tool.so");
-    if(status != ROCP_REG_SUCCESS)
+    if(status != ROCP_REG_SUCCESS || detach() != ROCP_REG_SUCCESS)
     {
-        std::cerr << "Test FAILED: runtime attachment returned " << status << '\n';
+        std::cerr << "Test FAILED: initial runtime attachment lifecycle failed\n";
+        return false;
+    }
+
+    constexpr auto failure_env = "ROCPROFILER_REGISTER_TEST_ATTACH_FAILURE";
+    setenv(failure_env, "0", 1);
+    auto failure_buffer        = make_environment_buffer(failure_env, "1");
+    status                     = attach(failure_buffer.data(), "libgeneric-tool.so");
+    const auto* restored_value = std::getenv(failure_env);
+    if(status != ROCP_REG_ROCPROFILER_ERROR || restored_value == nullptr ||
+       std::string_view{ restored_value } != "0")
+    {
+        std::cerr << "Test FAILED: failed runtime attachment did not restore the "
+                     "target environment\n";
+        return false;
+    }
+
+    status = attach(nullptr, "libgeneric-tool.so");
+    unsetenv(failure_env);
+    if(status != ROCP_REG_SUCCESS || detach() != ROCP_REG_SUCCESS)
+    {
+        std::cerr << "Test FAILED: runtime attachment lifecycle did not recover after "
+                     "rollback\n";
         return false;
     }
 
