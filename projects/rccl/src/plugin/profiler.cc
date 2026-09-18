@@ -964,7 +964,12 @@ ncclResult_t ncclProfilerRecordProxyDiagState(int s, struct ncclProxyArgs* args,
 
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) {
   if (ncclProfilerProxyTraceDumpFn && profilerContext) {
+    // commFree() runs under NOWARN(..., NCCL_DESTROY); this dump is requested,
+    // not an incidental teardown warning, so keep the level it asks for.
+    int oldNoWarn = ncclDebugNoWarn;
+    ncclDebugNoWarn = 0;
     ncclProfilerProxyTraceDumpFn(profilerContext, ncclDebugLog);
+    ncclDebugNoWarn = oldNoWarn;
   }
 }
 
