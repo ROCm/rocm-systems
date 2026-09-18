@@ -568,6 +568,34 @@ auto ForceLegacyIpcCapable()
     };
 }
 
+// TopoDirectP2p -- the g_ncclTopoCheckP2p hook every direct-P2P case in the
+// canConnect tests needs: reports the pair as p2p-capable (p2p = 1) with no
+// intermediate hop (inter = -1). Returned as a plain lambda so call sites
+// compose: ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p()). Cases that
+// need an intermediate hop (inter != -1) keep their own inline hook.
+auto TopoDirectP2p()
+{
+    return [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+        if (p2p) *p2p = 1;
+        if (inter) *inter = -1;
+        return ncclSuccess;
+    };
+}
+
+// ForceP2pUseCudaMemcpy -- the g_loadParam hook that the CE-memcpy tests
+// install to make ncclParamP2pUseCudaMemcpy() report enabled. Non-capturing,
+// so it composes inside the RUN_ISOLATED_TEST child lambdas:
+//     ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
+// The raw env string (no "NCCL_" prefix) matches the redirector's arg, as with
+// ForceLegacyCudaRegister above.
+auto ForceP2pUseCudaMemcpy()
+{
+    return [](const char* env, int64_t deft) -> int64_t {
+        if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+        return deft;
+    };
+}
+
 // CannedRmtRegAddr -- the ncclProxyCallBlocking lambda that every fresh-reg
 // happy path needs: writes a fixed rmtRegAddr into the response buffer so
 // the post-loop bookkeeping fires. It performs no request-struct assertions
@@ -2964,10 +2992,7 @@ class P2pMicrotestIsolated : public P2pMicrotest {};
 TEST_F(P2pMicrotestIsolated, UsesMemcpy_ParamEnabled_ReportsTrue)
 {
     RUN_ISOLATED_TEST("P2p_UsesMemcpy_ParamEnabled_ReportsTrue", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ASSERT_TRUE(ncclP2pUsesMemcpy());
     });
 }
@@ -2988,10 +3013,7 @@ TEST_F(P2pMicrotestIsolated, Prime_MemcpyEnabled_PatchesSendProxySlots)
         ASSERT_EQ(p2pTransport.send.proxyConnect, nullptr);
         ASSERT_EQ(p2pTransport.send.proxyProgress, nullptr);
 
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
 
         // Priming through the public surface patches the send-side CE slots.
         ncclP2pUsesMemcpy();
@@ -3133,12 +3155,7 @@ TEST_F(P2pCanConnectMicrotest, TopoRejectsP2p_ReturnsCannotConnect)
 
 TEST_F(P2pCanConnectMicrotest, NetIsBetter_ReturnsCannotConnect)
 {
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     ScopedHook net(g_ncclTopoCheckNet, [](int, int, int* useNet) -> ncclResult_t {
         if (useNet) *useNet = 1;  // NET would work better
         return ncclSuccess;
@@ -3171,12 +3188,7 @@ TEST_F(P2pCanConnectMicrotest, FirstPeerCrossHost_ShortCircuitsBeforeDeviceCheck
     myInfo_[0].hostHash = 0x1234;
     info1_.hostHash = 0xABCD;
     info2_.hostHash = 0xABCD;
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
                          [](int*, int, int) -> hipError_t {
                              ADD_FAILURE() << "device access queried for a cross-host peer";
@@ -3190,12 +3202,7 @@ TEST_F(P2pCanConnectMicrotest, CrossHostPeers_ShortCircuitsBeforeDeviceCheck)
     // Peer on a different host: p2pCanConnect returns as soon as it sees the
     // host mismatch, before any device-access query.
     info2_.hostHash = 0xBEEF;
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
                          [](int*, int, int) -> hipError_t {
                              ADD_FAILURE() << "device access queried for a cross-host peer";
@@ -3208,12 +3215,7 @@ TEST_F(P2pCanConnectMicrotest, BusIdUnresolved_ReportsEligibleOnHip)
 {
     // hipDeviceGetPCIBusId fails -> busIdToCudaDev yields -1. On HIP the
     // invisible-device arm returns success with the topo verdict intact.
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     // Default g_hipDeviceGetPCIBusId returns error (g_hipDeviceGetPCIBusIdResult
     // is hipErrorInvalidValue), so both busIds resolve to -1.
     EXPECT_EQ(Call(), 1);
@@ -3232,12 +3234,7 @@ TEST_F(P2pCanConnectMicrotest, SecondBusIdUnresolved_ReportsEligibleOnHip)
                      });
     info1_.busId = BusIdForDev(0);   // resolves to dev 0
     info2_.busId = BusIdForDev(5);   // no device reports this bus -> -1
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     EXPECT_EQ(Call(), 1);
 }
 
@@ -3247,12 +3244,7 @@ TEST_F(P2pCanConnectMicrotest, SameDevicePeers_ReportsEligible)
     // (multi-rank GPU) without querying cudaDeviceCanAccessPeer.
     info2_.busId = info1_.busId;  // same device index 0
     ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
                          [](int*, int, int) -> hipError_t {
                              ADD_FAILURE() << "same-device path must not query peer access";
@@ -3264,12 +3256,7 @@ TEST_F(P2pCanConnectMicrotest, SameDevicePeers_ReportsEligible)
 TEST_F(P2pCanConnectMicrotest, DistinctDevicesCanAccessPeer_ReportsEligible)
 {
     ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
                          [](int* ok, int, int) -> hipError_t {
                              if (ok) *ok = 1;
@@ -3281,12 +3268,7 @@ TEST_F(P2pCanConnectMicrotest, DistinctDevicesCanAccessPeer_ReportsEligible)
 TEST_F(P2pCanConnectMicrotest, DistinctDevicesCannotAccessPeer_ReturnsCannotConnect)
 {
     ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     // Query succeeds but reports peer access is unavailable -> verdict 0.
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
                          [](int* ok, int, int) -> hipError_t {
@@ -3299,12 +3281,7 @@ TEST_F(P2pCanConnectMicrotest, DistinctDevicesCannotAccessPeer_ReturnsCannotConn
 TEST_F(P2pCanConnectMicrotest, PeerAccessQueryFails_ReturnsCannotConnect)
 {
     ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
-    ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
-                        if (p2p) *p2p = 1;
-                        if (inter) *inter = -1;
-                        return ncclSuccess;
-                    });
+    ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
     // Query itself fails -> verdict 0.
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
                          [](int*, int, int) -> hipError_t { return hipErrorInvalidValue; });
@@ -3319,10 +3296,7 @@ class P2pCanConnectMicrotestIsolated : public P2pMicrotest {};
 TEST_F(P2pCanConnectMicrotestIsolated, IntermediateRankWithMemcpy_ReturnsCannotConnect)
 {
     RUN_ISOLATED_TEST("P2p_CanConnect_IntermediateRankWithMemcpy_ReturnsCannotConnect", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ScopedHook topo(g_ncclTopoCheckP2p,
                         [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
                             if (p2p) *p2p = 1;
@@ -3783,7 +3757,7 @@ TEST_F(P2pSetupMicrotest, SendSetupThenConnect_WritePath_WiresConnBuffers)
     // connect wired the SIMPLE buffer pointer and the proxyProgress slot
     // (NULL here, matching the un-primed CE path).
     EXPECT_NE(send_.conn.buffs[NCCL_PROTO_SIMPLE], nullptr);
-    EXPECT_EQ(send_.proxyConn.proxyProgress, p2pTransport.send.proxyProgress);
+    EXPECT_EQ(send_.proxyConn.proxyProgress, nullptr);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -5248,13 +5222,13 @@ TEST_F(P2pRegisterFamilyMicrotest, LocalRegister_DelegateFails_PropagatesAndZero
 namespace {
 struct GraphRegisterState {
     RegFamilyReuseState reuse;
-    std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
-    std::unique_ptr<ScopedHook<ncclResult_t(struct ncclComm*, void*, size_t, void**)>> graphReg;
+    std::optional<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
+    std::optional<ScopedHook<ncclResult_t(struct ncclComm*, void*, size_t, void**)>> graphReg;
 
     explicit GraphRegisterState(bool legacyIpcCap) : reuse(legacyIpcCap) {
         // ncclCuMemGetAddressRange loops until it spans the buffer; one
         // segment starting at userbuff and sized to the request covers it.
-        memGet = std::make_unique<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>>(
+        memGet.emplace(
             g_hipMemGetAddressRange,
             [](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t dptr) -> hipError_t {
                 if (pbase) *pbase = dptr;
@@ -5264,7 +5238,7 @@ struct GraphRegisterState {
         // ncclCommGraphRegister hands back the reuse-armed record so the
         // delegate's reuse arm succeeds.
         ncclReg* rec = &reuse.regRecord;
-        graphReg = std::make_unique<ScopedHook<ncclResult_t(struct ncclComm*, void*, size_t, void**)>>(
+        graphReg.emplace(
             g_commGraphRegister,
             [rec](struct ncclComm*, void*, size_t, void** handle) -> ncclResult_t {
                 if (handle) *handle = rec;
@@ -5643,27 +5617,27 @@ struct SegmentRangeEmulator {
     int retainCalls  = 0;
     int releaseCalls = 0;
 
-    std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
-    std::unique_ptr<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)>> retain;
-    std::unique_ptr<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)>> release;
+    std::optional<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
+    std::optional<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)>> retain;
+    std::optional<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)>> release;
 
     explicit SegmentRangeEmulator(std::size_t segSize_) : segSize(segSize_) {
         std::size_t s = segSize;
-        memGet = std::make_unique<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>>(
+        memGet.emplace(
             g_hipMemGetAddressRange,
             [s](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t dptr) -> hipError_t {
                 if (pbase) *pbase = dptr;      // segment starts at the query address
                 if (psize) *psize = s;         // fixed physical span
                 return hipSuccess;
             });
-        retain = std::make_unique<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)>>(
+        retain.emplace(
             g_hipMemRetainAllocationHandle,
             [this](hipMemGenericAllocationHandle_t* h, void* addr) -> hipError_t {
                 ++retainCalls;
                 if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(addr);
                 return hipSuccess;
             });
-        release = std::make_unique<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)>>(
+        release.emplace(
             g_hipMemRelease,
             [this](hipMemGenericAllocationHandle_t) -> hipError_t {
                 ++releaseCalls;
@@ -6956,8 +6930,8 @@ TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_DirectResources_ReleasesThrough
         {FreeKind::CudaFree, reinterpret_cast<void*>(0x7000)}}));
 }
 
-// Send proxyFree, non-cuMem arm with no stash: the else arm hands the (null)
-// transportResources to ncclCudaFree, which is a no-op success.
+// Send proxyFree, non-cuMem arm: the stashed raw device pointer is handed to
+// ncclCudaFree (short-circuited by the shutdown guard) and the call succeeds.
 TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_DirectResources_ReleasesThroughCudaFree)
 {
     ShutdownFlagGuard shutdown;
@@ -7027,10 +7001,7 @@ class P2pProxyCeMicrotestIsolated : public P2pMicrotest {};
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_ValidRequest_RecordsFifoAndArmsAppend)
 {
     RUN_ISOLATED_TEST("P2p_ProxyConnect_ValidRequest_RecordsFifoAndArmsAppend", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();  // prime -> patches p2pTransport.send.proxyConnect
         ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
 
@@ -7062,10 +7033,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_ValidRequest_RecordsFifoAndArms
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_WrongRequestSize_ReturnsInternalError)
 {
     RUN_ISOLATED_TEST("P2p_ProxyConnect_WrongRequestSize_ReturnsInternalError", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();
         ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
 
@@ -7093,10 +7061,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_WrongRequestSize_ReturnsInterna
 TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStateAndPublishes)
 {
     RUN_ISOLATED_TEST("P2p_SendProxySetup_MemcpyEnabled_AllocatesCeStateAndPublishes", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();  // prime -> useMemcpy = 1
 
         // ncclCudaHostCalloc swaps the stream-capture mode via the async-ops
@@ -7139,10 +7104,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStat
 TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabledWrongResponseSize_ReturnsInternalError)
 {
     RUN_ISOLATED_TEST("P2p_SendProxySetup_MemcpyEnabledWrongResponseSize_ReturnsInternalError", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();
 
         ScopedHook shmAlloc(g_shmAllocateShareableBuffer,
@@ -7169,10 +7131,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabledWrongResponseSiz
 TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeState)
 {
     RUN_ISOLATED_TEST("P2p_SendProxyFree_MemcpyResources_TearsDownCeState", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();  // prime -> useMemcpy = 1
 
         // The device-buffer free routes through ncclCudaFree; the shutdown
@@ -7200,10 +7159,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeSta
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_StreamCreateFails_Propagates)
 {
     RUN_ISOLATED_TEST("P2p_ProxyConnect_StreamCreateFails_Propagates", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();
         ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
 
@@ -7233,10 +7189,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_StreamCreateFails_Propagates)
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocolTailNotReady_SkipsCopyAndStaysInProgress)
 {
     RUN_ISOLATED_TEST("P2p_ProxyProgress_SimpleProtocolTailNotReady_SkipsCopyAndStaysInProgress", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();
         ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
 
@@ -7279,10 +7232,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocolTailNotReady_Ski
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_ResumedWithTransmittedSub_DrainsCompletionAndFinishes)
 {
     RUN_ISOLATED_TEST("P2p_ProxyProgress_ResumedWithTransmittedSub_DrainsCompletionAndFinishes", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();
         ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
 
@@ -7328,10 +7278,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_ResumedWithTransmittedSub_Drai
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_NonSimpleProtocol_CompletesWithoutCopy)
 {
     RUN_ISOLATED_TEST("P2p_ProxyProgress_NonSimpleProtocol_CompletesWithoutCopy", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();  // prime -> patches p2pTransport.send.proxyProgress
         ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
 
@@ -7368,10 +7315,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_NonSimpleProtocol_CompletesWit
 TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndCompletes)
 {
     RUN_ISOLATED_TEST("P2p_ProxyProgress_SimpleProtocol_CopiesAndCompletes", []() {
-        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
-            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
-            return deft;
-        });
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ncclP2pUsesMemcpy();
         ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
 

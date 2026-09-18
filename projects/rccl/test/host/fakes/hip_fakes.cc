@@ -654,8 +654,9 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
 
 hipError_t hipEventCreate(hipEvent_t* event)
 {
-    if (event) *event = (g_hipEventCreateResult == hipSuccess)
-                            ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
+    if (event) {
+        *event = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
+    }
     return g_hipEventCreateResult;
 }
 
