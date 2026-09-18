@@ -91,8 +91,6 @@ rocprofiler_add_invalid_yaml_test(
     missing_description
     "Invalid extra counters YAML: Counter 'TEST': missing 'description'")
 rocprofiler_add_invalid_yaml_test(
-    mixed_definition
-    "Invalid extra counters YAML:.*'expression' cannot be combined")
-rocprofiler_add_invalid_yaml_test(
-    conflicting_duplicate
-    "Conflicting counter definitions for 'GRBM_GUI_ACTIVE'")
+    mixed_definition "Invalid extra counters YAML:.*'expression' cannot be combined")
+rocprofiler_add_invalid_yaml_test(conflicting_duplicate
+                                  "Conflicting counter definitions for 'GRBM_GUI_ACTIVE'")
