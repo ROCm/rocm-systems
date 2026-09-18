@@ -12,11 +12,17 @@
 #include "user_scope.h"
 #include "wire_format.h"
 
-#include <ATen/ATen.h>
-#include <ATen/Context.h>
-#include <ATen/ThreadLocalState.h>
-#include <ATen/record_function.h>
 #include <gtest/gtest.h>
+
+// The tests below reach libtorch, so they drop out when no PyTorch install
+// was found at build time.
+#if __has_include(<ATen/ATen.h>)
+#    define ROCPROF_HAVE_TORCH 1
+#    include <ATen/ATen.h>
+#    include <ATen/Context.h>
+#    include <ATen/ThreadLocalState.h>
+#    include <ATen/record_function.h>
+#endif
 
 extern "C"
 {
@@ -29,6 +35,7 @@ extern "C"
 #include <cstdint>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace torch_trace_collector::detail;
@@ -77,6 +84,7 @@ protected:
     void TearDown() override { reset_state(); }
 };
 
+#ifdef ROCPROF_HAVE_TORCH
 class TorchTraceCollectorRealOpsTest : public TorchTraceCollectorTest
 {
 protected:
@@ -89,6 +97,7 @@ protected:
         }
     }
 };
+#endif
 
 // Stand-in thread ids. Real ids come from at::RecordFunction::currentThreadId();
 // zero means no forward identity.
@@ -404,6 +413,10 @@ TEST_F(TorchTraceCollectorTest, ConcurrentOverlappingSeqNrsAreIsolated)
     EXPECT_EQ(snapshots().pending(), 0u);
 }
 
+// Everything below reaches libtorch: push_user_scope publishes to
+// ThreadLocalDebugInfo, and install registers the RecordFunction callback.
+#ifdef ROCPROF_HAVE_TORCH
+
 TEST_F(TorchTraceCollectorTest, PushPopAreBalanced)
 {
     constexpr int n = 100;
@@ -472,9 +485,11 @@ TEST_F(TorchTraceCollectorTest, UninstallClearsState)
 
     uninstall();
     EXPECT_FALSE(is_installed());
-    const auto handle = process_state().install.rlock([](const InstallState& state)
-                                                      { return state.handle; });
-    EXPECT_EQ(handle, at::INVALID_CALLBACK_HANDLE);
+    const auto handles = process_state().install.rlock(
+        [](const InstallState& state)
+        { return std::pair{state.forward_handle, state.backward_handle}; });
+    EXPECT_EQ(handles.first, at::INVALID_CALLBACK_HANDLE);
+    EXPECT_EQ(handles.second, at::INVALID_CALLBACK_HANDLE);
 }
 
 TEST_F(TorchTraceCollectorTest, UninstallWhenNotInstalledIsNoOp)
@@ -752,3 +767,5 @@ TEST_F(TorchTraceCollectorRealOpsTest, ConcurrentThreadsScopedMarkers)
     EXPECT_EQ(stats().pushes.load(), stats().pops.load());
     EXPECT_EQ(stats().user_scope_pushes.load(), stats().user_scope_pops.load());
 }
+
+#endif  // ROCPROF_HAVE_TORCH
