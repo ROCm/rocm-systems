@@ -696,8 +696,7 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List torch operators",
         help=(
-            "\t\tList PyTorch operators as a unified call tree grouped by "
-            "source location with kernel launch stats."
+            "\t\tList PyTorch operators as a nested call tree with kernel launch stats."
         ),
     )
     analyze_group.add_argument(
@@ -714,16 +713,13 @@ Examples:
             "\t\tFilter operators using shell-style glob patterns (fnmatch),\n"
             "\t\t\tselect their kernels, and display metrics.\n"
             "\t\t\tWith no arguments, matches all operators (default: **).\n"
-            "\t\t\tExamples (operator hierarchy is /-separated):\n"
-            "\t\t\t  *relu               ends with relu\n"
-            "\t\t\t  *conv*              contains conv\n"
-            "\t\t\t  torch.nn.functional.relu   exact match\n"
-            "\t\t\t  */torch.nn.functional.relu two-level match\n"
-            "\t\t\t  */*functional*/*    intermediate component match\n"
+            "\t\t\t/ in patterns is the reconstructed call path.\n"
+            "\t\t\tExamples:\n"
+            "\t\t\t  *relu*              contains relu\n"
+            "\t\t\t  */aten::addmm       addmm leaf on the reconstructed path\n"
             "\t\t\t  all  or  '*'        match every operator\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
-            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
-            "\t\t\t  --torch-operator */*conv2d */*relu\n"
+            "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
             "\t\t\tCombine with -k to intersect with kernel IDs."
         ),
     )
@@ -738,8 +734,7 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List triton operators",
         help=(
-            "\t\tList Triton kernels as a unified call tree grouped by "
-            "source location with kernel launch stats."
+            "\t\tList Triton kernels as a nested call tree with kernel launch stats."
         ),
     )
     analyze_group.add_argument(
