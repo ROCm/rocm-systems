@@ -1266,7 +1266,9 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
     ncclFunc_t collAPI;
     int nChannels;
   };
-  if (task == nullptr) return -1;
+  // This workaround targets direct P2P/IPC traffic only. When P2P is disabled,
+  // preserve the normal channel selection for the fallback transport.
+  if (task == nullptr || ncclParamP2pDisable()) return -1;
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
     // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
