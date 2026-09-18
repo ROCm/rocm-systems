@@ -565,6 +565,26 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindo
   }
 }
 
+// Releasing the stream is the first thing teardown does after the task queue, so
+// a failure there propagates with the contexts still standing.
+TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_Propagates) {
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
+  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+}
+
+// A device buffer that will not release stops teardown rather than carrying on
+// and reporting a clean finalize.
+TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  g_hipFree = [](void*) { return hipErrorInvalidValue; };
+
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
+  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+}
+
 // Finalizing a comm that was never initialised is not an error: every field it
 // would release is null, so the guards skip and it reports success.
 TEST_F(RmaCeFinalizeTest, Finalize_NeverInitialised_IsANoOpSuccess) {
@@ -1016,6 +1036,48 @@ TEST_F(RmaCeNonPersistTest, NonPersist_NonZeroSignalIndex_TargetsTheIndexedSlot)
   EXPECT_EQ(ceCtx->signalOpSeqs[LsaOf(kPeer)], 0u);   // index 0 is a different slot
 }
 
+// A peer outside the LSA team cannot be resolved to a local rank, so the launch
+// reports rather than indexing the signal region with a bogus slot.
+TEST_F(RmaCeNonPersistTest, NonPersist_PeerOutsideLsaTeam_Propagates) {
+  PushTask(/*peer=*/5, 32, /*signal=*/false);   // 5 is in nRanks but not in the LSA team
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+}
+
+// Sizing the batch params is the first thing the round loop needs; a failure
+// there aborts before anything is submitted.
+TEST_F(RmaCeNonPersistTest, NonPersist_BatchParamsSizingFails_Propagates) {
+  PushTask(/*peer=*/1, 32, /*signal=*/false);
+  ScopedHook init(g_ceInitBatchOpsParams,
+                  [](ncclCeBatchOpsParams*, int) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+  EXPECT_TRUE(log_.empty());
+}
+
+// The staging writes go on the stream before the copies; if that submission
+// fails the round stops there.
+TEST_F(RmaCeNonPersistTest, NonPersist_StagingSubmitFails_Propagates) {
+  PushTask(/*peer=*/1, 32, /*signal=*/true);
+  ScopedHook memop(g_cuStreamBatchMemOp,
+                   [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+  EXPECT_TRUE(Batches().empty());   // never reached the data batch
+}
+
+// ...and a failing data batch stops the round with the staging already on the
+// stream, which is the same partial-submission shape the wait path has.
+TEST_F(RmaCeNonPersistTest, NonPersist_DataBatchFails_Propagates) {
+  PushTask(/*peer=*/1, 32, /*signal=*/false);
+  ScopedHook launch(g_ceLaunchBatchOps,
+                    [](ncclComm*, ncclCeBatchOpsParams*, hipStream_t, ncclCeCollArgs*) {
+                      return ncclSystemError;
+                    });
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+}
+
 // ---------------------------------------------------------------------------
 // ncclRmaCePutLaunchPersist
 // ---------------------------------------------------------------------------
@@ -1163,6 +1225,35 @@ TEST_F(RmaCePersistTest, Persist_NonZeroSignalIndex_UsesTheIndexedAckAndSignalSl
   ASSERT_EQ(batches[1].size(), 1u);
   const char* expected = SelfSlotIn(kPeer, ceCtx->graphSignalOffset, kSigIdx);
   EXPECT_EQ(batches[1][0].dst, expected);
+}
+
+// Same rejection on the graph path: an unresolvable peer stops the launch.
+TEST_F(RmaCePersistTest, Persist_PeerOutsideLsaTeam_Propagates) {
+  PushTask(/*peer=*/5, 32, /*signal=*/false);
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+}
+
+// The ack handshake is submitted before the copies, so a failure there leaves
+// the task's data unsent rather than half-sent.
+TEST_F(RmaCePersistTest, Persist_AckHandshakeFails_Propagates) {
+  PushTask(/*peer=*/1, 32, /*signal=*/true);
+  ScopedHook memop(g_cuStreamBatchMemOp,
+                   [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+  EXPECT_TRUE(Batches().empty());
+}
+
+// A failing data batch propagates rather than continuing to the signal batch.
+TEST_F(RmaCePersistTest, Persist_DataBatchFails_Propagates) {
+  PushTask(/*peer=*/1, 32, /*signal=*/false);
+  ScopedHook launch(g_ceLaunchBatchOps,
+                    [](ncclComm*, ncclCeBatchOpsParams*, hipStream_t, ncclCeCollArgs*) {
+                      return ncclSystemError;
+                    });
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,6 +1462,39 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_TaskCountIsNotOne_ReportsInvalidTask) {
   EXPECT_TRUE(log_.empty());
   // Rejected, not leaked: the one task this pushed comes back to the pool.
   EXPECT_EQ(PoolFreeList().size(), 1u);
+}
+
+// An unresolvable peer stops the wait before any threshold is computed.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PeerOutsideLsaTeam_Propagates) {
+  PushWaitTask({5}, {1});
+
+  EXPECT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+  EXPECT_TRUE(log_.empty());
+}
+
+// The batched arm puts one wait per peer on the stream in a single submission;
+// a failure there reports and submits nothing.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_NonPersistentBatchSubmitFails_Propagates) {
+  PushWaitTask({1}, {1});
+  ScopedHook memop(g_cuStreamBatchMemOp,
+                   [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+}
+
+// On the graph arm the ack is a copy; a failure there surfaces after the cycle's
+// wait pair, the partial-submission shape the defect note above describes.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentAckCopyFails_Propagates) {
+  plan_->persistent = true;
+  PushWaitTask({1}, {1});
+  ScopedHook launch(g_ceLaunchBatchOps,
+                    [](ncclComm*, ncclCeBatchOpsParams*, hipStream_t, ncclCeCollArgs*) {
+                      return ncclSystemError;
+                    });
+
+  EXPECT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+  ASSERT_EQ(log_.size(), 1u);              // the wait pair went out first
+  EXPECT_EQ(log_[0].kind, Submission::kMemOps);
 }
 
 }  // namespace

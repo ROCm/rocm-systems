@@ -9,6 +9,9 @@
 #include "rma/rma_ce.h"
 #include "rma/rma_proxy.h"
 
+#include "rocmwrap.h"   // ncclCuStreamBatchMemOp
+
+#include "fail_loud.h"
 #include "rma_fakes.h"
 
 // Anchor each seam to its production declaration so a signature change becomes
@@ -21,6 +24,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rmaProxyPutLaunch,   ncclRmaProxyPutLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaCePutLaunch,      ncclRmaCePutLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaProxyWaitLaunch,  ncclRmaProxyWaitLaunch);
 ASSERT_HOOK_MATCHES_PROD(g_rmaCeWaitLaunch,     ncclRmaCeWaitLaunch);
+ASSERT_HOOK_MATCHES_PROD(g_cuStreamBatchMemOp,  ncclCuStreamBatchMemOp);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -102,6 +106,19 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
 // Reset
 // ---------------------------------------------------------------------------
 
+// Fail-loud: the memops a unit puts on a stream are what its tests observe.
+static ncclResult_t DefaultCuStreamBatchMemOp(hipStream_t, unsigned int,
+                                              hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclCuStreamBatchMemOp");
+}
+std::function<ncclResult_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*)>
+    g_cuStreamBatchMemOp = DefaultCuStreamBatchMemOp;
+
+ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps,
+                                    hipStreamBatchMemOpParams* batchParams) {
+  return g_cuStreamBatchMemOp(stream, numOps, batchParams);
+}
+
 void ResetRmaFakes() {
   g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;
   g_rmaDestroyDesc      = DefaultRmaDestroyDesc;
@@ -109,4 +126,5 @@ void ResetRmaFakes() {
   g_rmaCePutLaunch      = DefaultRmaLaunch;
   g_rmaProxyWaitLaunch  = DefaultRmaLaunch;
   g_rmaCeWaitLaunch     = DefaultRmaLaunch;
+  g_cuStreamBatchMemOp  = DefaultCuStreamBatchMemOp;
 }

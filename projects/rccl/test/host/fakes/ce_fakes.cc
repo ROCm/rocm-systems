@@ -61,12 +61,13 @@ bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, nccl
   return g_hierCeAvailable;
 }
 
-// Allocates the op arrays as src/ce_coll.cc does: callers write straight into
-// params->srcs[numOps], so leaving them null would fault rather than report.
+// Allocates the op arrays, as src/ce_coll.cc does: callers write straight into
+// params->srcs[numOps]. A capacity of 0 leaves them null and still succeeds,
+// which is what ncclCalloc does for zero elements.
 static ncclResult_t DefaultCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int capacity) {
-  if (params == nullptr) return ncclInvalidArgument;
   *params = {};
-  const size_t n = capacity > 0 ? static_cast<size_t>(capacity) : 1;
+  if (capacity <= 0) return ncclSuccess;
+  const size_t n = static_cast<size_t>(capacity);
   params->srcs = static_cast<void**>(calloc(n, sizeof(void*)));
   params->dsts = static_cast<void**>(calloc(n, sizeof(void*)));
   params->sizes = static_cast<size_t*>(calloc(n, sizeof(size_t)));
@@ -100,7 +101,6 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
 }
 // Paired with Init above. No seam: nothing asserts on the free.
 void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
-  if (params == nullptr) return;
   free(params->srcs);
   free(params->dsts);
   free(params->sizes);
@@ -113,7 +113,6 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   params->attrs = nullptr;
   params->attrIdxs = nullptr;
 #endif
-  params->numOps = 0;
 }
 
 void ResetCeFakes() {
