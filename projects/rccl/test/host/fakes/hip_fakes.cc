@@ -47,6 +47,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,          hipMemAddressReserve);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
