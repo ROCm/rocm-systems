@@ -11,35 +11,36 @@
 # The gfx950 race detector cases include CDNA-specific inline assembly
 # sequences for LDS and waitcnt coverage. Keep that binary on gfx950 even when
 # generic HIP smoke tests are overridden for local validation on another ISA.
+set(RJ_HAZARD_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/tests/hazard)
 set(RJ_RACE_TEST_SUPPORT_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/race_log_expectation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/race_test_support.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../hazard/hip_test_support.hpp
+    ${RJ_HAZARD_TEST_SOURCE_DIR}/hip_test_support.hpp
 )
 
 rj_add_hip_test(
     hip_race_tests_gfx950
     ARCH gfx950
     SOURCE hip_race_gfx950_test.hip
+    EXTRA_SOURCES ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hip
     DEPENDENCIES
         ${RJ_RACE_TEST_SUPPORT_HEADERS}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../hazard/vgpr_waitcnt_cases.hpp
-    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../hazard
+        ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hpp
+    INCLUDE_DIRS ${RJ_HAZARD_TEST_SOURCE_DIR}
     PLUGIN_TARGETS rocjitsu_plugin_race_so
 )
 rj_add_hip_test(
     hip_race_tests_gfx1151
     ARCH gfx1151
     SOURCE hip_race_gfx1151_test.hip
+    EXTRA_SOURCES ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hip
     DEPENDENCIES
         ${RJ_RACE_TEST_SUPPORT_HEADERS}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../hazard/vgpr_waitcnt_cases.hpp
-    INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../hazard
+        ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hpp
+    INCLUDE_DIRS ${RJ_HAZARD_TEST_SOURCE_DIR}
     PLUGIN_TARGETS rocjitsu_plugin_race_so
 )
-set(RJ_RACE_GFX950_CONFIG
-    ${CMAKE_CURRENT_SOURCE_DIR}/../hazard/gfx950_test_config.json
-)
+set(RJ_RACE_GFX950_CONFIG ${RJ_HAZARD_TEST_SOURCE_DIR}/gfx950_test_config.json)
 if(RJ_INSTALL_TESTS)
     install(
         FILES ${RJ_RACE_GFX950_CONFIG}

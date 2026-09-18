@@ -2987,17 +2987,27 @@ if(RJ_ENABLE_HIP_TESTS)
             ARG
             ""
             "ARCH;SOURCE"
-            "DEPENDENCIES;EXTRA_LIBS;INCLUDE_DIRS;PLUGIN_TARGETS"
+            "DEPENDENCIES;EXTRA_LIBS;EXTRA_SOURCES;INCLUDE_DIRS;PLUGIN_TARGETS"
             ${ARGN}
         )
         if(NOT ARG_ARCH)
             set(ARG_ARCH ${RJ_HIP_TEST_ARCH})
         endif()
         if(ARG_SOURCE)
-            set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE})
+            set(HIP_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE})
         else()
-            set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.cpp)
+            set(HIP_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.cpp)
         endif()
+        foreach(_source IN LISTS ARG_EXTRA_SOURCES)
+            if(IS_ABSOLUTE "${_source}")
+                list(APPEND HIP_TEST_SOURCES ${_source})
+            else()
+                list(
+                    APPEND HIP_TEST_SOURCES
+                    ${CMAKE_CURRENT_SOURCE_DIR}/${_source}
+                )
+            endif()
+        endforeach()
         set(HIP_TEST_BIN ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
         set(HIP_EXTRA_LIBS)
         if(ARG_EXTRA_LIBS)
@@ -3014,11 +3024,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
                 -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_DIRS} -o
-                ${HIP_TEST_BIN} ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS}
+                ${HIP_TEST_BIN} ${HIP_TEST_SOURCES} ${HIP_EXTRA_LIBS}
                 -L${GTEST_LIB_DIR} -lgtest -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
                 -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
-                ${HIP_TEST_SRC}
+                ${HIP_TEST_SOURCES}
                 ${AMDCXX}
                 ${ARG_DEPENDENCIES}
                 GTest::gtest
@@ -3029,9 +3039,14 @@ if(RJ_ENABLE_HIP_TESTS)
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
         add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
         foreach(_plugin_target IN LISTS ARG_PLUGIN_TARGETS)
-            if(TARGET ${_plugin_target})
-                add_dependencies(${TEST_NAME}_target ${_plugin_target})
+            if(NOT TARGET ${_plugin_target})
+                message(
+                    FATAL_ERROR
+                    "rj_add_hip_test(${TEST_NAME}): PLUGIN_TARGETS entry "
+                    "'${_plugin_target}' does not name an existing target"
+                )
             endif()
+            add_dependencies(${TEST_NAME}_target ${_plugin_target})
         endforeach()
         if(RJ_INSTALL_TESTS)
             rj_install_test_program(${HIP_TEST_BIN})
