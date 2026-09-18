@@ -117,6 +117,28 @@ def test_rendered_slurm_script_has_valid_bash_syntax(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_slurm_script_does_not_inherit_runner_python_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "PATH",
+        "/apps/actions-runner/_work/_tool/Python/3.12.14/x64/bin:/usr/bin",
+    )
+    monkeypatch.setenv(
+        "LD_LIBRARY_PATH",
+        "/apps/actions-runner/_work/_tool/Python/3.12.14/x64/lib",
+    )
+
+    script = render_slurm_script(
+        _artifact_paths(tmp_path), tmp_path / "work", RunConfig()
+    )
+
+    assert "_tool/Python" not in script
+    assert f"export PATH={tmp_path}/bin:/usr/bin:/bin:/usr/sbin:/sbin" in script
+    assert f"export LD_LIBRARY_PATH={tmp_path}" in script
+    assert "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV" in script
+    assert '"$ROCM_PATH/bin/rocminfo"' in script
+    assert '/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator"' in script
+
+
 def test_validate_collective_output_accepts_complete_rank_coverage(tmp_path):
     for rank in range(2):
         _write_rank_file(tmp_path, rank)
