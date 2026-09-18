@@ -21,6 +21,7 @@ from utils.logger import (
 )
 from utils.ml_api_trace_errors import (
     ForwardThreadNotFoundError,
+    OverlappingMarkerRangeError,
     PassMarkerMismatchError,
     UnaccountedKernelError,
     UncorrelatedForwardIntervalError,
@@ -381,21 +382,38 @@ def nest_marker_intervals(
         return forest
     for thread_id, group in trace_df.groupby("Thread_Id", sort=False):
         roots: list[CallTreeNode] = []
-        open_ranges: list[tuple[CallTreeNode, float]] = []
+        open_ranges: list[tuple[CallTreeNode, float, float]] = []
+        thread_key = str(thread_id)
         for row in group.itertuples(index=False):
             start = float(row.Start_Timestamp)
             end = float(row.End_Timestamp)
-            while open_ranges and open_ranges[-1][1] <= start:
+            while open_ranges and open_ranges[-1][2] <= start:
                 open_ranges.pop()
+            if open_ranges and end > open_ranges[-1][2]:
+                parent_node, parent_start, parent_end = open_ranges[-1]
+                console_error(
+                    "analysis",
+                    str(
+                        OverlappingMarkerRangeError(
+                            thread_id=thread_key,
+                            first_name=parent_node.name,
+                            first_start=parent_start,
+                            first_end=parent_end,
+                            second_name=str(row.Operator_Name),
+                            second_start=start,
+                            second_end=end,
+                        )
+                    ),
+                )
             node = _call_tree_node_from_marker_row(row)
-            if open_ranges and end <= open_ranges[-1][1]:
+            if open_ranges:
                 open_ranges[-1][0].children.append(node)
             else:
                 roots.append(node)
-            open_ranges.append((node, end))
+            open_ranges.append((node, start, end))
         for root in roots:
             rollup_node_stats(root)
-        forest[str(thread_id)] = roots
+        forest[thread_key] = roots
     return forest
 
 
