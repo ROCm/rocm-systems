@@ -4126,6 +4126,23 @@ TEST(WaitcheckTest, Gfx1250ImplicitUsesRetainHighBankDependencies) {
   }
 }
 
+TEST(WaitcheckTest, Gfx1250UnknownWindowKeepsImplicitHighBankDependency) {
+  // Load v257, then make the window unknown. The partial write must retain
+  // its possible dependency on v257 rather than assuming bank zero.
+  const std::vector<uint32_t> program{
+      0xbf860140,                         // s_set_vgpr_msb 0x140
+      0xc405007c, 0x40800001, 0x0000001c, // buffer_load_b32 v1, v28, s[0:3], null offen
+      0xb908f801,                         // s_setreg_b32 hwreg(HW_REG_MODE), s8
+      0x64020702,                         // v_add_f16 v1, v2, v3
+  };
+  auto report = analyze_gfx1250_normal(program);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 257, 1}));
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+}
+
 TEST(WaitcheckTest, Gfx1250HighVgprModeSeparatesLowLoadFromHighStoreData) {
   std::vector<uint32_t> program;
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 0, 0, 0)));
