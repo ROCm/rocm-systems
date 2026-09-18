@@ -376,6 +376,67 @@ def nest_marker_intervals(
     return forest
 
 
+def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
+    """Deep-copy a call-tree node, including descendants and kernel stats."""
+    copied = CallTreeNode(
+        name=node.name,
+        kernels={
+            kernel_name: KernelStats(
+                launches=stats.launches,
+                total_duration_ns=stats.total_duration_ns,
+                min_duration_ns=stats.min_duration_ns,
+                max_duration_ns=stats.max_duration_ns,
+                kernel_id=stats.kernel_id,
+            )
+            for kernel_name, stats in node.kernels.items()
+        },
+        kernel_launches=node.kernel_launches,
+        total_duration_ms=node.total_duration_ms,
+        min_dispatch_ns=node.min_dispatch_ns,
+        max_dispatch_ns=node.max_dispatch_ns,
+        mean_dispatch_ns=node.mean_dispatch_ns,
+        file_name=node.file_name,
+        line_number=node.line_number,
+        backend=node.backend,
+    )
+    copied.invocation_ids = set(node.invocation_ids)
+    copied.children = [clone_call_tree_node(child) for child in node.children]
+    return copied
+
+
+def filter_forest_by_backend(
+    forest: dict[str, list[CallTreeNode]],
+    backend: Optional[str],
+) -> dict[str, list[CallTreeNode]]:
+    """Copy a forest, keeping ``backend`` nodes and their ancestors.
+
+    ``backend=None`` keeps every node, including ``user``.
+    """
+
+    def copy_matching_view(node: CallTreeNode) -> Optional[CallTreeNode]:
+        kept_children: list[CallTreeNode] = []
+        for child in node.children:
+            copied_child = copy_matching_view(child)
+            if copied_child is not None:
+                kept_children.append(copied_child)
+        if backend is not None and node.backend != backend and not kept_children:
+            return None
+        copied_node = clone_call_tree_node(node)
+        copied_node.children = kept_children
+        return copied_node
+
+    filtered: dict[str, list[CallTreeNode]] = {}
+    for thread_id, roots in forest.items():
+        kept_roots: list[CallTreeNode] = []
+        for root in roots:
+            copied_root = copy_matching_view(root)
+            if copied_root is not None:
+                kept_roots.append(copied_root)
+        if kept_roots:
+            filtered[thread_id] = kept_roots
+    return filtered
+
+
 def _node_source_location(node: CallTreeNode) -> str:
     """file:line from the node, or empty when file_name is unset."""
     if not node.file_name:
