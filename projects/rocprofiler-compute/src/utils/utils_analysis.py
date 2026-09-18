@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import math
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -297,18 +296,6 @@ def build_call_trees(
     return call_trees
 
 
-def write_ml_api_trace_consolidated_csv(
-    consolidated_df: pd.DataFrame,
-    ml_api_trace_path: Path,
-) -> None:
-    """Write the consolidated ML API trace DataFrame to consolidated.csv."""
-    output_file = ml_api_trace_path / "consolidated.csv"
-    consolidated_df.sort_values("Operator_Name", ignore_index=True).to_csv(
-        output_file, index=False
-    )
-    console_log(f"Saved consolidated trace to {output_file}")
-
-
 def build_call_trees_with_kernel_ids(
     consolidated_df: pd.DataFrame,
     kernel_top_df: pd.DataFrame,
@@ -440,148 +427,90 @@ def build_operator_summary(
     )
 
 
+_REQUIRED_MARKER_COLUMNS = (
+    "Function",
+    "Thread_Id",
+    "Correlation_ID",
+    "Start_Timestamp",
+    "End_Timestamp",
+)
+
+
+def _find_ml_api_trace_csv_pairs(workload_dir: Path) -> list[tuple[Path, Path]]:
+    """Return (marker, counter) paths for each profiling pass."""
+    marker_glob = f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
+    pairs: list[tuple[Path, Path]] = []
+    for marker_path in sorted(workload_dir.glob(marker_glob)):
+        marker_csv_name = marker_path.name
+        if marker_csv_name.endswith(csv_compression.GZIP_SUFFIX):
+            marker_csv_name = marker_csv_name[: -len(csv_compression.GZIP_SUFFIX)]
+        counter_csv_name = marker_csv_name.replace(
+            "_marker_api_trace.csv", "_counter_collection.csv"
+        )
+        counter_path = csv_compression.compressed_name(
+            marker_path.parent / counter_csv_name
+        )
+        if counter_path.is_file():
+            pairs.append((marker_path, counter_path))
+    return pairs
+
+
+def _rename_correlation_id_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Correlation_Id to Correlation_ID when that alias is present."""
+    if "Correlation_Id" in frame.columns and "Correlation_ID" not in frame.columns:
+        return frame.rename(columns={"Correlation_Id": "Correlation_ID"})
+    if "Correlation_Id" in frame.columns:
+        return frame.drop(columns=["Correlation_Id"])
+    return frame
+
+
+def _load_marker_trace_dataframe(marker_path: Path) -> pd.DataFrame:
+    """Load one marker CSV and keep the columns used by later analyze steps."""
+    marker_df = _rename_correlation_id_column(pd.read_csv(marker_path))
+    missing_columns = [
+        column for column in _REQUIRED_MARKER_COLUMNS if column not in marker_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            "analysis",
+            f"Marker CSV {marker_path} is missing required columns {missing_columns}",
+        )
+    kept_columns = list(_REQUIRED_MARKER_COLUMNS)
+    if "GUID" in marker_df.columns:
+        kept_columns.append("GUID")
+    null_columns = [column for column in kept_columns if marker_df[column].isna().any()]
+    if null_columns:
+        console_error(
+            "analysis",
+            f"Marker CSV {marker_path} has null values in {null_columns}",
+        )
+    return marker_df[kept_columns].copy()
+
+
 @demarcate
 def process_ml_api_trace_output(
+    workload: schema.Workload,
     workload_dir: str,
-) -> tuple[pd.DataFrame, Path]:
-    """
-    Build consolidated ML API trace rows and prepare output directory.
-
-    - Performs inner join on Correlation_ID, filtering out unmatched entries
-    - Consolidates data across passes and normalizes required columns
-    - Prepares a clean workload_dir/ml_api_trace/ directory for output files
-
-    Returns (consolidated_df, ml_api_trace_path) on success.
-    """
+) -> None:
+    """Load marker CSV and sibling counter path pairs onto the workload."""
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
-    marker_api_trace_csvs = list(
-        Path(workload_dir).glob(
-            f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
-        )
-    )
-    counter_collection_csvs = [
-        markers_file.parent
-        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-        for markers_file in marker_api_trace_csvs
-    ]
-    existing_csv_files = [
-        [marker_api_trace_csvs[i], counter_collection_csvs[i]]
-        for i in range(len(marker_api_trace_csvs))
-        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
-    ]
-
-    if not existing_csv_files:
+    csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
+    if not csv_pairs:
         console_warning(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with ML API tracing enabled "
             "(e.g., via '--torch-trace')."
         )
-        return pd.DataFrame(), Path(f"{workload_dir}/ml_api_trace")
+        workload.ml_api_trace_pairs = []
+        return
 
-    ml_api_trace_path = Path(f"{workload_dir}/ml_api_trace")
-    if ml_api_trace_path.exists():
-        shutil.rmtree(ml_api_trace_path)
-        console_log(f"Removed previous ml_api_trace directory: {ml_api_trace_path}")
-    ml_api_trace_path.mkdir(parents=True, exist_ok=True)
-
-    # Join marker and counter data
-    def _merge_pair(
-        marker_path: Path,
-        counter_path: Path,
-        join_keys: tuple[str, ...] = ("Correlation_ID",),
-    ) -> pd.DataFrame:
-        """Merge a pair of marker and counter csv files on specified keys,
-        return the merged dataframe.
-        """
-        marker_df = pd.read_csv(marker_path)
-        counter_df = pd.read_csv(counter_path)
-        # Normalize column names to handle case inconsistencies
-        marker_df.columns = marker_df.columns.str.replace(
-            "Correlation_Id", "Correlation_ID"
+    workload.ml_api_trace_pairs = [
+        schema.MlApiTracePair(
+            marker_df=_load_marker_trace_dataframe(marker_path),
+            counter_path=counter_path,
         )
-        counter_df.columns = counter_df.columns.str.replace(
-            "Correlation_Id", "Correlation_ID"
-        )
-
-        return pd.merge(
-            marker_df,
-            counter_df,
-            on=join_keys,
-            how="inner",
-            suffixes=("_function", "_kernel"),
-        )
-
-    # If rocpd format, pairs are present in workload_dir, one pair per fbase
-    # If csv format, pairs are present in workload/{fbase}/ one pair per process
-    # Extracting the output_format used in profiling from the path of a marker file
-    if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
-        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
-    else:
-        join_keys = ("Correlation_ID",)  # output_format "csv"
-    consolidated_df = pd.concat(
-        [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
-        ignore_index=True,
-    )
-    required_columns = [
-        "Function",
-        "Kernel_Name",
-        "Counter_Name",
-        "Counter_Value",
-        "Start_Timestamp_function",
-        "End_Timestamp_function",
-        "Start_Timestamp_kernel",
-        "End_Timestamp_kernel",
+        for marker_path, counter_path in csv_pairs
     ]
-    missing_columns = [
-        col for col in required_columns if col not in consolidated_df.columns
-    ]
-    if missing_columns:
-        console_error(
-            f"Consolidated ML API trace is missing required columns {missing_columns}"
-        )
-        raise ValueError(
-            f"Consolidated ML API trace is missing required columns {missing_columns}"
-        )
-    # Default Backend to torch when the marker CSV has no Backend column.
-    has_backend = "Backend" in consolidated_df.columns
-    projection = [*required_columns, "Backend"] if has_backend else required_columns
-    consolidated_df = consolidated_df[projection]
-    if not has_backend:
-        consolidated_df = consolidated_df.assign(Backend="torch")
-    if consolidated_df.drop(columns=["Backend"]).isnull().values.any():
-        console_warning("Consolidated ML API trace contains missing values")
-        raise ValueError("Consolidated ML API trace contains missing values")
-    consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
-    split_columns = consolidated_df["Function"].str.split(":#", expand=True)
-    consolidated_df["Operator_Name"] = (
-        split_columns[0] if len(split_columns.columns) > 0 else None
-    )
-    consolidated_df["Context_Id"] = (
-        split_columns[1] if len(split_columns.columns) > 1 else None
-    )
-    consolidated_df.drop(columns=["Function"], inplace=True)
-    consolidated_df = consolidated_df[
-        [
-            "Operator_Name",
-            "Context_Id",
-            "Backend",
-            "Kernel_Name",
-            "Counter_Name",
-            "Counter_Value",
-            "Start_Timestamp_function",
-            "End_Timestamp_function",
-            "Start_Timestamp_kernel",
-            "End_Timestamp_kernel",
-        ]
-    ]
-    if consolidated_df.isnull().values.any():
-        console_error(
-            "Missing values in consolidated ML API trace after splitting ",
-            "the Function name.",
-        )
-        raise ValueError("Missing values in consolidated ML API trace after splitting")
-
-    return consolidated_df, ml_api_trace_path
 
 
 def validate_workload(path: str) -> None:
