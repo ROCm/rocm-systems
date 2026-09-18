@@ -21,6 +21,7 @@
 #define RCCL_TEST_HOST_HIP_FAKES_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 #include <functional>
 
@@ -180,12 +181,20 @@ extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
 
-// hipStreamBatchMemOp: the HIP primitive behind rma_proxy_launch.cc's chunking
-// wrapper. Keep this distinct from g_cuStreamBatchMemOp, which is the RCCL
-// wrapper used as a seam by rma_ce.cc.
+// HIP primitives behind rma_proxy_launch.cc's batch-mem-op wrapper. Newer HIP
+// uses hipStreamBatchMemOp; older HIP falls back to one write/wait call per op.
+// Keep these distinct from g_cuStreamBatchMemOp, which is the RCCL wrapper used
+// as a seam by rma_ce.cc.
 extern std::function<hipError_t(hipStream_t /*stream*/, unsigned int /*count*/,
                                 hipStreamBatchMemOpParams* /*params*/, unsigned int /*flags*/)>
     g_hipStreamBatchMemOp;
+extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
+                                std::uint64_t /*value*/, unsigned int /*flags*/)>
+    g_hipStreamWriteValue64;
+extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
+                                std::uint64_t /*value*/, unsigned int /*flags*/,
+                                std::uint64_t /*mask*/)>
+    g_hipStreamWaitValue64;
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
