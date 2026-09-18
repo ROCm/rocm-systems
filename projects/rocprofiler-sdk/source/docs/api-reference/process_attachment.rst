@@ -105,7 +105,8 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
 
 - **rocattach_detach(int pid)**: Detaches from a single process.
    - Takes the target process ID as a parameter.
-   - Cleans up attachment resources and terminates profiling.
+   - Ends the active attachment session. The retained attachment client and any
+     startup or ordinary anytime clients remain initialized.
    - A PID of 0 can be specified to detach from all the current sessions.
 
 Function call sequence
@@ -173,7 +174,9 @@ temporary implementation detail, not a client-lifecycle guarantee. Attaching a
 different tool, changing the enabled service set, or attaching a tool DSO that
 is already active as a non-attachment client is not currently supported. A
 request that changes the enabled service set fails the attachment request
-without terminating the target process.
+without terminating the target process. Environment changes from a failed
+attachment request are rolled back so the retained configuration can be used
+again.
 
 Use ``rocprofiler-register``, ``rocprofiler-sdk``, and
 ``rocprofiler-sdk-attach`` packages from the same ROCm release. Attachment uses
@@ -186,8 +189,8 @@ The attachment system can use any tool library. ``librocprofiler-sdk-tool.so`` i
 
 .. code-block:: cpp
 
-   // Attachment libraries to be used
-   setenv("ROCPROF_ATTACH_TOOL_LIBRARY", "example-tool-1.so:example-tool-2.so", 1);
+   // Attachment library to use
+   setenv("ROCPROF_ATTACH_TOOL_LIBRARY", "example-tool.so", 1);
 
 Using the attachment functions
 ===============================

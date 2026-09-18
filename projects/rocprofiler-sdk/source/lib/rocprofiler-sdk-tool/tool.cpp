@@ -152,6 +152,10 @@ auto output_generation_thread = common::Synchronized<std::optional<std::thread>>
 // Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
 std::atomic<bool> detach_output_generated = false;
 
+// A failed tool_attach is followed by tool_detach so tools can roll back partial setup.
+// Keep rejection before setup side-effect free by making that tool_detach a no-op.
+std::atomic<bool> attachment_session_started = false;
+
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
 using sigaction_func_t = int (*)(int signum,
@@ -2801,6 +2805,20 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    auto original_config  = tool::get_config();
+    auto requested_config = tool::config{};
+
+    // NOTE: this retained-client restriction is temporary. Validate before changing
+    // tool state so a rejected request leaves the previous session reusable.
+    if(!tool::is_attach_invariant(requested_config, original_config))
+    {
+        ROCP_ERROR
+            << "configuration mismatch between attachment sessions. rocprofv3 does not "
+               "yet support changing the set of enabled tracing services between attachment "
+               "sessions; this attachment was rejected without changing the retained client.";
+        return 1;
+    }
+
     // Reset the detach output flag for this new session. If the process exits during this
     // attach (without a corresponding tool_detach), tool_fini will see false and generate
     // output for whatever was captured. tool_detach sets it true when it produces output.
@@ -2809,30 +2827,14 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
     // reset any existing output thread from prior tool usage
     // Only log if previous attachment used async mode (where background thread may still be
     // running)
-    if(!tool::get_config().attach_output_generation_sync)
+    if(!original_config.attach_output_generation_sync)
     {
         ROCP_INFO << "If files are still being written from the last detach, there will be a delay "
                      "until this process is finished";
     }
     ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
-    // save the existing config for comparison
-    auto original_config = tool::get_config();
-
-    // reset config for attach (i.e. re-parse environment variables)
-    tool::get_config() = tool::config{};
-
-    // ensure the config has not changed which services were requested.
-    // NOTE: this is a temporary restriction
-    if(!tool::is_attach_invariant(tool::get_config(), original_config))
-    {
-        tool::get_config() = std::move(original_config);
-        ROCP_ERROR
-            << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
-               "yet support changing the set of enabled tracing services between attachment "
-               "sessions; this attachment was rejected without changing the retained client.";
-        return 1;
-    }
+    tool::get_config() = std::move(requested_config);
 
     assign_attach_output_session_suffix();
 
@@ -2843,6 +2845,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
     // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
     tool_metadata->set_process_id(instrumented_pid, parent_pid);
 
+    attachment_session_started.store(true, std::memory_order_release);
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
         if(int status = 0;
@@ -4161,6 +4164,12 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 void
 tool_detach(void* /*tool_data*/)
 {
+    if(!attachment_session_started.exchange(false, std::memory_order_acq_rel))
+    {
+        ROCP_INFO << "Ignoring tool_detach because the attachment session did not start";
+        return;
+    }
+
     detach_output_generated = true;
 
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
