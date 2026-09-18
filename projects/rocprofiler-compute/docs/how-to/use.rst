@@ -35,7 +35,8 @@ default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
 via the ``-n`` argument. When an MPI rank is detected, the default output
 directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
-the gpu model. Use ``--output-directory`` to override the output location.
+the gpu model. Use ``-d``, ``--output-directory`` to override the output
+location.
 
 .. note::
 
@@ -57,8 +58,11 @@ Common filters to customize data collection include:
 ``-k``, ``--kernel``
    Enables filtering kernels by name.
 
+``--kernel-iteration-range``
+   In profile mode, selects which iterations of each kernel to profile.
+
 ``-d``, ``--dispatch``
-   Enables filtering based on dispatch iteration.
+   In analyze mode, selects which already-profiled dispatches to report on.
 
 ``-b``, ``--block``
    Enables collection metrics for only the specified analysis report blocks.
