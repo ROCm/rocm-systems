@@ -1862,7 +1862,8 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                             verification_status = rocprofiler::sdk::pc_sampling::verify_sample(
                                 *pc_sample,
                                 tool_metadata->get_instruction(instruction_index),
-                                agent->gfx_target_version);
+                                agent->gfx_target_version,
+                                tool_metadata->pc_sampling_verification_cache);
                         }
                     }
                 }
