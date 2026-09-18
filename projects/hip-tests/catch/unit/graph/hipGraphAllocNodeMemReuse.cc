@@ -130,6 +130,15 @@ static GraphMemStats queryGraphMem(int device) {
   return s;
 }
 
+static void skipIfVmmUnsupported(int device) {
+  int supported = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeVirtualMemoryManagementSupported,
+                                  device));
+  if (supported == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+  }
+}
+
 void printDeviceMem(const char* label) {
     size_t freeMem = 0, totalMem = 0;
     HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
@@ -160,6 +169,7 @@ void printDeviceMem(const char* label) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -218,6 +228,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -280,6 +291,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) 
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -329,6 +341,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -376,6 +389,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -466,6 +480,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -567,6 +582,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSiz
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
@@ -684,6 +700,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard1(Streams::created);
   hipStream_t stream1 = stream_guard1.stream();
@@ -745,6 +762,7 @@ HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
 HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
+  skipIfVmmUnsupported(device);
 
   StreamGuard stream_guard1(Streams::created);
   hipStream_t stream1 = stream_guard1.stream();

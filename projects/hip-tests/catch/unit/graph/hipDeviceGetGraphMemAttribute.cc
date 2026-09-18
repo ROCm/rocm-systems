@@ -203,8 +203,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters) {
  */
 
 static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0) {
+  int vmm_support = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&vmm_support, hipDeviceAttributeVirtualMemoryManagementSupported,
+                                  deviceId));
+  if (!vmm_support) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+  }
+
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(
+      hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, deviceId));
   if (!mem_pool_support) {
     HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
