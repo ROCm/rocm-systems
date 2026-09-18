@@ -2021,16 +2021,17 @@ TEST(WrapMicrotestIsolated, UseAllGatherDirect_NonMultipleOf8RanksReturnsFalse) 
       });
 }
 
-// rcclUseAinic() had no controllable seam before (hardcoded false), so this
-// branch had literally never fired -- now a seam, closing a real,
-// previously-structural gap.
+// Default policy disables Direct AllGather on AINIC only for nNodes > 8.
+// nNodes=9 plus gfx950 / nRanks=8 / small msgSize would otherwise return
+// true (cust-coll + threshold + rank-multiple all pass), so this isolates
+// the AINIC scale gate.
 TEST(WrapMicrotestIsolated, UseAllGatherDirect_AinicDisablesDirect) {
   RUN_ISOLATED_TEST(
       "Wrap_UseAllGatherDirect_AinicDisablesDirect",
       []() {
         ScopedHook useAinic(g_useAinic, []() { return true; });
         ncclComm* comm = MakeCommWithArch("gfx950");
-        comm->nNodes = 1;
+        comm->nNodes = 9;
         comm->nRanks = 8;
         size_t msgSize = 1024;
         EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
