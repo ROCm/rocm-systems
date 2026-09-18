@@ -74,10 +74,23 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
     return InstructionFamily::Global;
   }
 
+  // Some generated encodings never set MEMORY_OP, so the flag test above does
+  // not see them and they would fall through to `other`: the image encodings
+  // (e.g. generated/rdna4/vimage.cpp, which mentions MEMORY_OP nowhere) and the
+  // CDNA5 tensor transfers. They are memory traffic, so classify them by
+  // mnemonic instead. The tensor pair moves between global memory and LDS;
+  // they are bucketed as global for the same reason the fallback above sends a
+  // non-`ds_` memory op there -- the global side is the access being described.
+  if (has_prefix("image_") || has_prefix("tensor_"))
+    return InstructionFamily::Global;
+
   constexpr uint64_t control_flags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
                                      PROGRAM_TERMINATOR | WAITCNT | BARRIER;
+  // `s_barrier` catches the split barrier family: on CDNA5 only `s_barrier_wait`
+  // carries the BARRIER flag, so init/join/leave/signal/signal_isfirst would
+  // otherwise land in `scalar` next to ordinary ALU work.
   if ((inst.flags() & control_flags) != 0 || has_prefix("s_nop") || has_prefix("s_sleep") ||
-      has_prefix("s_delay"))
+      has_prefix("s_delay") || has_prefix("s_barrier"))
     return InstructionFamily::Control;
   if (has_prefix("s_"))
     return InstructionFamily::Scalar;

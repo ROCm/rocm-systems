@@ -1895,33 +1895,56 @@ TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
 // plugin growing its own override, or the family list being reordered on one
 // side -- fails here instead of silently desynchronising the two schemas.
 TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
+  using plugins::instruction_mix::InstructionFamily;
   struct Case {
     const char *mnemonic;
     uint64_t flags;
+    InstructionFamily expected;
   };
   // One representative per family, plus the cases where the two classifiers
   // could plausibly drift: flag-driven vs prefix-driven, and the mnemonics
   // that are control flow despite a scalar prefix.
+  //
+  // The expectations matter as much as the agreement: two classifiers can agree
+  // and both be wrong. The image, tensor and split-barrier entries below are
+  // exactly that case -- their generated constructors set neither MEMORY_OP nor
+  // BARRIER, so before the mnemonic fallbacks they agreed on `other` and
+  // `scalar` respectively.
   constexpr Case kCases[] = {
-      {"s_add_u32", 0},
-      {"v_add_f32", 0},
-      {"v_mfma_f32_16x16x16_f16", MFMA},
-      {"v_smfmac_f32_16x16x32_f16", 0},
-      {"v_wmma_f32_16x16x16_f16", 0},
-      {"v_swmmac_f32_16x16x32_f8", 0},
-      {"ds_read_b32", MEMORY_OP},
-      {"global_load_b32", MEMORY_OP},
-      {"buffer_load_dword", MEMORY_OP},
-      {"s_load_dword", MEMORY_OP},
-      {"s_branch", BRANCH | IGNORES_EXEC},
-      {"s_cbranch_execz", COND_BRANCH},
-      {"s_endpgm", PROGRAM_TERMINATOR},
-      {"s_waitcnt", WAITCNT},
-      {"s_barrier", BARRIER},
-      {"s_nop", 0},
-      {"s_sleep", 0},
-      {"s_delay_alu", 0},
-      {"exp", 0},
+      {"s_add_u32", 0, InstructionFamily::Scalar},
+      {"v_add_f32", 0, InstructionFamily::Vector},
+      {"v_mfma_f32_16x16x16_f16", MFMA, InstructionFamily::Matrix},
+      {"v_smfmac_f32_16x16x32_f16", 0, InstructionFamily::Matrix},
+      {"v_wmma_f32_16x16x16_f16", 0, InstructionFamily::Matrix},
+      {"v_swmmac_f32_16x16x32_f8", 0, InstructionFamily::Matrix},
+      {"ds_read_b32", MEMORY_OP, InstructionFamily::Lds},
+      {"global_load_b32", MEMORY_OP, InstructionFamily::Global},
+      {"buffer_load_dword", MEMORY_OP, InstructionFamily::Global},
+      {"s_load_dword", MEMORY_OP, InstructionFamily::Global},
+      // Image and tensor encodings carry no MEMORY_OP flag (see
+      // generated/rdna4/vimage.cpp and generated/cdna5/vimage.cpp), so these
+      // reach the classifier exactly as the decoder produces them.
+      {"image_load", 0, InstructionFamily::Global},
+      {"image_sample", 0, InstructionFamily::Global},
+      {"image_atomic_add", 0, InstructionFamily::Global},
+      {"tensor_load_to_lds", 0, InstructionFamily::Global},
+      {"tensor_store_from_lds", 0, InstructionFamily::Global},
+      {"s_branch", BRANCH | IGNORES_EXEC, InstructionFamily::Control},
+      {"s_cbranch_execz", COND_BRANCH, InstructionFamily::Control},
+      {"s_endpgm", PROGRAM_TERMINATOR, InstructionFamily::Control},
+      {"s_waitcnt", WAITCNT, InstructionFamily::Control},
+      {"s_barrier", BARRIER, InstructionFamily::Control},
+      // On CDNA5 only s_barrier_wait carries BARRIER; the rest of the split
+      // barrier family arrives unflagged.
+      {"s_barrier_leave", 0, InstructionFamily::Control},
+      {"s_barrier_init", 0, InstructionFamily::Control},
+      {"s_barrier_join", 0, InstructionFamily::Control},
+      {"s_barrier_signal", 0, InstructionFamily::Control},
+      {"s_barrier_signal_isfirst", 0, InstructionFamily::Control},
+      {"s_nop", 0, InstructionFamily::Control},
+      {"s_sleep", 0, InstructionFamily::Control},
+      {"s_delay_alu", 0, InstructionFamily::Control},
+      {"exp", 0, InstructionFamily::Other},
   };
 
   for (const auto &c : kCases) {
@@ -1929,6 +1952,7 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
         InstructionMixTestInstruction(c.mnemonic, c.flags));
     const auto throughput_family = plugins::throughput::ThroughputPlugin::classify(
         ThroughputTestInstruction(c.mnemonic, c.flags));
+    EXPECT_EQ(mix_family, c.expected) << "wrong family for " << c.mnemonic;
     EXPECT_EQ(plugins::instruction_mix::InstructionMixPlugin::family_name(mix_family),
               plugins::throughput::ThroughputPlugin::family_name(throughput_family))
         << "instruction-mix and throughput disagree on " << c.mnemonic;

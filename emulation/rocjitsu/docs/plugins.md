@@ -97,6 +97,14 @@ bytes, its family, and the first dispatch that reached it. Mnemonics are
 emitted in sorted order so two runs of the same workload produce
 byte-comparable output.
 
+Two mnemonics need care when joining the report against an ISA inventory. A
+VOPD instruction reports its *pair*, not either operation: the generated CDNA5
+`Vopd` constructor joins the two slot names with `" :: "`, so a record key looks
+like `v_dual_add_f32 :: v_dual_mov_b32`. An exact-name
+lookup matches neither half and silently loses both. Split on `" :: "` and look
+the two slot operations up separately — while still counting the record as the
+one wave instruction it is, since the pair issues together.
+
 A mnemonic absent from the summary was not executed — provided the summary says
 `"complete": true`. The summary also carries `dispatches` (how many reached
 execution-end) and `incomplete_dispatches` (how many were still in flight when
