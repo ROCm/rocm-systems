@@ -120,6 +120,45 @@ def parsed_marker_row(
     }
 
 
+LINEAR_FORWARD_WIRE = (
+    "nn.Module.Linear.forward:simple_torch_code.py:19"
+    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+)
+ADDMM_WIRE = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+
+
+def linear_marker_row(correlation_id, start, end, thread_id=1, function=None):
+    return {
+        "Function": LINEAR_FORWARD_WIRE if function is None else function,
+        "Thread_Id": thread_id,
+        "Correlation_ID": correlation_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+    }
+
+
+def counter_row(
+    correlation_id,
+    kernel_name,
+    start,
+    end,
+    dispatch_id=1,
+    counter_name="SQ_WAVES",
+    guid=None,
+):
+    row = {
+        "Correlation_ID": correlation_id,
+        "Kernel_Name": kernel_name,
+        "Dispatch_ID": dispatch_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+        "Counter_Name": counter_name,
+    }
+    if guid is not None:
+        row["GUID"] = guid
+    return row
+
+
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
 #
@@ -2973,3 +3012,284 @@ def test_build_operator_summary_location_from_node_file_line():
     by_name = summary.set_index("Operator")
     assert by_name.loc["linear", "Location"] == "simple_torch_code.py:19"
     assert by_name.loc["linear/addmm", "Location"] == ""
+
+
+def test_process_outer_join_keeps_wrap_with_empty_kernel_names(tmp_path):
+    workload_dir = tmp_path / "empty_kernels"
+    workload_dir.mkdir()
+    pd.DataFrame([linear_marker_row(1, 10, 80)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    assert workload.ml_api_call_trees["1"][0].kernels == {}
+
+
+def test_process_collapses_two_counter_rows_to_one_dispatch_duration(tmp_path):
+    workload_dir = tmp_path / "two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 200)],
+        [
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.launches == 1
+    assert stats.total_duration_ns == 50
+
+
+def test_process_two_dispatches_same_marker_keep_both_kernel_names(tmp_path):
+    workload_dir = tmp_path / "two_kernels"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(5, 0, 200)],
+        [
+            counter_row(5, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(5, "kernel_b", 30, 40, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    names = list(workload.ml_api_trace_df["Kernel_Names"].iloc[0])
+    assert names == ["kernel_a", "kernel_b"]
+    assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
+
+
+def test_process_unmatched_kernel_exits_before_ml_api_trace_df(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "unmatched"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(99, "orphan_kernel", 10, 20)],
+    )
+    messages = record_console_error_and_exit(monkeypatch)
+    workload = schema.Workload()
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "UnaccountedKernelError" in messages[0] or (
+        "no matching ROCTX marker" in messages[0] and "orphan_kernel" in messages[0]
+    )
+    assert len(workload.unmatched_kernel_frames) == 1
+    assert not workload.unmatched_kernel_frames[0].empty
+    assert workload.ml_api_trace_df.empty
+
+
+def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "unmatched_two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    record_console_error_and_exit(monkeypatch)
+    workload = schema.Workload()
+    with pytest.raises(SystemExit):
+        process_ml_api_trace_output(workload, str(workload_dir))
+    unmatched = workload.unmatched_kernel_frames[0]
+    assert len(unmatched) == 1
+    assert unmatched.iloc[0]["Kernel_Name"] == "orphan_kernel"
+
+
+def test_process_joins_on_guid_and_correlation_id(tmp_path):
+    workload_dir = tmp_path / "guid_join"
+    marker = linear_marker_row(1, 0, 100)
+    marker["GUID"] = "gpu-a"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [marker],
+        [counter_row(1, "addmm_kernel", 10, 40, guid="gpu-a")],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == ["addmm_kernel"]
+
+
+def test_process_one_pass_builds_ml_api_trace_df(tmp_path):
+    workload_dir = tmp_path / "one_pass"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "addmm_kernel", 10, 40)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+def test_process_two_passes_collapse_to_one_launch(tmp_path):
+    workload_dir = tmp_path / "two_pass_collapse"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1040, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+def test_process_two_wraps_same_stitch_key_keep_ordinals(tmp_path):
+    workload_dir = tmp_path / "two_ordinals"
+    first = linear_marker_row(1, 0, 50)
+    second = linear_marker_row(2, 60, 110)
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [first, second],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(8, 200, 250), linear_marker_row(9, 260, 310)],
+        [
+            counter_row(8, "kernel_a", 210, 220, dispatch_id=1),
+            counter_row(9, "kernel_b", 270, 280, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 2
+    roots = workload.ml_api_call_trees["1"]
+    assert len(roots) == 2
+    assert [root.call_count for root in roots] == [1, 1]
+
+
+def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "kernel_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "kernel_a", 10, 40)],
+    )
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([linear_marker_row(1, 0, 100)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(schema.Workload(), str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "PassMarkerMismatchError" in messages[0] or "Kernel_Names" in messages[0]
+
+
+def test_process_pass_marker_count_mismatch_exits(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "count_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 50), linear_marker_row(2, 60, 110)],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(1, 0, 50)],
+        [counter_row(1, "kernel_a", 10, 20)],
+    )
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(schema.Workload(), str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "PassMarkerMismatchError" in messages[0] or (
+        "per-pass marker counts" in messages[0]
+    )
