@@ -72,6 +72,7 @@ public:
         size_t bytes = host_.size() * sizeof(T);
         if (host_.size() > capacity_) {
             if (dev_) { (void)hipFree(dev_); dev_ = nullptr; }
+            capacity_ = 0;
             hipError_t status = hipMalloc(reinterpret_cast<void **>(&dev_), bytes);
             if (status != hipSuccess) return status;
             capacity_ = host_.size();
