@@ -83,7 +83,7 @@ const std::vector<MaxChunkEltsCase>& MaxChunkEltsCases() {
   static const std::vector<MaxChunkEltsCase> kCases = {
       // AllGather is not in kernelMask_AR|kernelMask_RS: accMult stays 1 no matter how small eltSize is.
       {"AllGatherLL_f8e4m3_NonReduceAccMultOne", ncclSymkKernelId_AllGather_LL, ncclDevSum, ncclFloat8e4m3, 100, 100},
-      {"AllGatherST_f32_NonReduceAccMultOne", ncclSymkKernelId_AllGather_ST, ncclDevSum, ncclFloat32, 400, 100},
+      {"AllGatherST_f32_NonReduceEltSizeFour", ncclSymkKernelId_AllGather_ST, ncclDevSum, ncclFloat32, 400, 100},
       // AllReduce is in kernelMask_AR; f32's eltSize==4 pins the "< 4", not "<= 4", accMult boundary.
       {"AllReduceAGxLLR_f32_EltSizeFourBoundaryAccMultOne", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevSum,
        ncclFloat32, 800, 200},
@@ -91,7 +91,7 @@ const std::vector<MaxChunkEltsCase>& MaxChunkEltsCases() {
        200},
       {"AllReduceRSxLDAGxST_f8e4m3_EltSizeOneAccMultTwo", ncclSymkKernelId_AllReduce_RSxLD_AGxST, ncclDevSum,
        ncclFloat8e4m3, 600, 300},
-      // ReduceScatter is in kernelMask_RS, not kernelMask_AR: pins the OR, not just the AR half of it.
+      // ReduceScatter is in kernelMask_RS, not kernelMask_AR; the bf16 case below pins the OR.
       {"ReduceScatterLL_f32_EltSizeFourBoundaryAccMultOne", ncclSymkKernelId_ReduceScatter_LL, ncclDevSum,
        ncclFloat32, 400, 100},
       {"ReduceScatterLD_bf16_EltSizeTwoAccMultTwo", ncclSymkKernelId_ReduceScatter_LD, ncclDevSumPostDiv,
@@ -172,9 +172,7 @@ TEST_F(SymKernelMaskTest, CompCapJustBelowBoundary_TmaKernelCleared) {
 
 TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
   comm_->minCompCap = 100;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? 0 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, [](const char*, int64_t) -> int64_t { return 0; });
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -210,9 +208,7 @@ TEST_F(SymKernelMaskTest, NeedGinFalse_HasGinFalse_GinKernelClearedNonGinKernelS
     t.nRanks = c->nRanks;
     return t;
   });
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? 0 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, [](const char*, int64_t) -> int64_t { return 0; });
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
@@ -238,9 +234,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
     t.nRanks = 2;
     return t;
   });
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? 0 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, [](const char*, int64_t) -> int64_t { return 0; });
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));

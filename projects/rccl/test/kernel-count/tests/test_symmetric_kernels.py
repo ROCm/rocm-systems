@@ -273,6 +273,11 @@ def test_requirements_values_match_required_cuda(sym_host, sym_module):
     )
     mismatches = []
     for (emitted_cudart, index, name), k in zip(entries, kernel_list):
+        # Anchors the zip to identity: only 3 distinct cudart values exist, so a reorder could hide behind one.
+        assert name == sym_module.kernel_cname(k), (
+            "position %d: ncclSymkKernelRequirements[] names %r, enumerate_kernels() yields %r"
+            % (index, name, sym_module.kernel_cname(k))
+        )
         expected_cudart, _, _ = sym_module.required_cuda(k)
         expected_cudart = expected_cudart or 0
         if emitted_cudart != expected_cudart:

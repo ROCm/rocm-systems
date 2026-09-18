@@ -94,7 +94,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
-  GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelsMicrotest.*`,
+  GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
   `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
   pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
   `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
