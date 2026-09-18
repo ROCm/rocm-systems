@@ -443,12 +443,28 @@ mode_lingering_child()
     if(pid == 0)
     {
         // Compile-worker-pool style: ignore term signals and outlive the parent's exit.
-        // Self-cleaning: bail out once orphaned (parent gone), with a hard cap as a safety
-        // net so a stray child can never linger indefinitely on the test host.
         signal(SIGINT, SIG_IGN);
         signal(SIGTERM, SIG_IGN);
-        for(int i = 0; i < 600 && getppid() != 1; ++i)
+
+        // Detach stdio so the harness capturing our output gets EOF when the parent exits;
+        // otherwise this child holds the inherited pipe write-end open and the reader blocks.
+        int devnull = open("/dev/null", O_RDWR);
+        if(devnull >= 0)
+        {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if(devnull > STDERR_FILENO) close(devnull);
+        }
+
+        // Exit once the original parent is gone (robust to subreapers that adopt orphans),
+        // with a hard cap as a safety net.
+        const pid_t orig_parent = getppid();
+        for(int i = 0; i < 30 && getppid() == orig_parent; ++i)
+        {
             sleep(1);
+        }
+
         _exit(0);
     }
 
