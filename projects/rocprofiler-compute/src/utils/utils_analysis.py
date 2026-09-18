@@ -17,6 +17,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.ml_api_trace_errors import UnaccountedKernelError
 from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
@@ -572,12 +573,61 @@ def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
     return _outer_join_dispatches_and_markers(dispatch_df, pair.marker_df)
 
 
+def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
+    """Dispatches whose Correlation_ID is not in that pass's marker CSV."""
+    return joined_df[
+        joined_df["Kernel_Name"].notna() & joined_df["Function"].isna()
+    ].copy()
+
+
+def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
+    """Collect Kernel_Names for each marker identity in one pass row."""
+    if joined_df.empty:
+        return joined_df
+    ordered = joined_df
+    if "_marker_order" in joined_df.columns:
+        ordered = joined_df.sort_values("_marker_order", kind="mergesort")
+    group_keys = ["Function", "Thread_Id", "Start_Timestamp", "End_Timestamp"]
+    records: list[dict[str, Any]] = []
+    for _, group in ordered.groupby(group_keys, sort=False, dropna=False):
+        first = group.iloc[0]
+        kernel_names: list[str] = []
+        kernel_starts: list[object] = []
+        kernel_ends: list[object] = []
+        for row in group.itertuples(index=False):
+            kernel_name = row.Kernel_Name
+            if pd.isna(kernel_name):
+                continue
+            kernel_names.append(str(kernel_name))
+            kernel_starts.append(row.Kernel_Start_Timestamp)
+            kernel_ends.append(row.Kernel_End_Timestamp)
+        record: dict[str, Any] = {
+            "Function": first["Function"],
+            "Thread_Id": first["Thread_Id"],
+            "Start_Timestamp": first["Start_Timestamp"],
+            "End_Timestamp": first["End_Timestamp"],
+            "Correlation_ID": first["Correlation_ID"],
+            "Kernel_Names": kernel_names,
+            "Kernel_Start_Timestamps": kernel_starts,
+            "Kernel_End_Timestamps": kernel_ends,
+        }
+        if "GUID" in group.columns:
+            record["GUID"] = first["GUID"]
+        if "_marker_order" in group.columns:
+            record["_marker_order"] = first["_marker_order"]
+        records.append(record)
+    grouped = pd.DataFrame.from_records(records)
+    if "_marker_order" in grouped.columns:
+        grouped = grouped.sort_values("_marker_order", kind="mergesort")
+    return grouped
+
+
 @demarcate
 def process_ml_api_trace_output(
     workload: schema.Workload,
     workload_dir: str,
 ) -> None:
-    """Load marker/counter pairs and full-outer-join each pass onto the workload."""
+    """Load, join, and drop unmatched kernel rows for each profiling pass."""
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
     if not csv_pairs:
@@ -596,8 +646,22 @@ def process_ml_api_trace_output(
         )
         for marker_path, counter_path in csv_pairs
     ]
+    unmatched_kernel_frames: list[pd.DataFrame] = []
     for pair in workload.ml_api_trace_pairs:
         pair.joined_df = _join_pass_marker_and_counter(pair)
+        unmatched_kernel_frames.append(_unmatched_kernel_rows(pair.joined_df))
+    workload.unmatched_kernel_frames = unmatched_kernel_frames
+    nonempty_unmatched = [frame for frame in unmatched_kernel_frames if not frame.empty]
+    if nonempty_unmatched:
+        console_error(
+            "analysis",
+            str(
+                UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True))
+            ),
+        )
+    for pair in workload.ml_api_trace_pairs:
+        marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()
+        pair.joined_df = _group_kernels_onto_markers(marker_rows)
 
 
 def validate_workload(path: str) -> None:
