@@ -247,13 +247,7 @@ inline OutputLoc output_loc_64(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
 
 inline void require_wmma_wave32(const auto &cu) {
   if (cu.wf_size() != WMMA_WAVE32)
-    throw util::ConfigError("CDNA5 WMMA requires wave32");
-}
-
-inline void require_gfx1251_wmma_full_exec(uint64_t exec_mask) {
-  constexpr uint64_t kWave32FullExec = 0xffff'ffffu;
-  if (exec_mask != kWave32FullExec) [[unlikely]]
-    throw util::InvalidInst("V_WMMA_F64_16X16X4_F64 requires EXEC to be all ones", "");
+    throw util::ConfigError("gfx1250 WMMA requires wave32");
 }
 
 inline void require_gfx11_wmma_wave_size(uint32_t wave_size) {
@@ -1130,6 +1124,10 @@ inline PackedOutputLoc physicalize_packed_out(const PackedOutputLoc &loc, uint32
 
 inline uint64_t mfma_full_lane_mask(uint32_t wf_size) {
   return wf_size >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf_size) - 1);
+}
+
+inline bool is_gfx1251_wmma_execution_state_valid(uint32_t wf_size, uint64_t exec_mask) {
+  return wf_size == WMMA_WAVE32 && exec_mask == mfma_full_lane_mask(WMMA_WAVE32);
 }
 
 inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bits,
@@ -3781,7 +3779,7 @@ inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uin
 /// write behavior. CDNA5 also requires EXEC to contain all 32 wave lanes.
 inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                                       uint64_t const_acc, uint32_t neg, uint32_t neg_hi,
-                                      uint64_t exec_mask) {
+                                      [[maybe_unused]] uint64_t exec_mask) {
   // LLVM marks GFX12 WMMA as ReadsModeReg=0. Until physical gfx1251 validation
   // establishes a more specific fixed arithmetic policy, use the IEEE baseline:
   // round-to-nearest-even and preserve input/output denormals.
@@ -3792,9 +3790,9 @@ inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint3
   constexpr uint32_t M = 16;
   constexpr uint32_t N = 16;
   constexpr uint32_t K = 4;
-  require_wmma_wave32(cu);
   const uint64_t kFullExec = mfma_full_lane_mask(WMMA_WAVE32);
-  require_gfx1251_wmma_full_exec(exec_mask);
+  assert(is_gfx1251_wmma_execution_state_valid(cu.wf_size(), exec_mask) &&
+         "gfx1251 F64 WMMA requires wave32 with EXEC set to all ones");
 
   auto toggle_sign = [](uint64_t value, bool toggle) {
     return toggle ? value ^ (uint64_t{1} << 63) : value;

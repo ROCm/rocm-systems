@@ -2070,7 +2070,9 @@ TEST(Gfx1251F64WmmaExecutionTest, RejectsNonFullExecBeforeReadingOrWritingRegist
   for (const uint64_t exec : {uint64_t{0}, uint64_t{0x5a5aa5a5u}}) {
     SCOPED_TRACE(exec);
     wf->set_exec(exec);
-    EXPECT_THROW((void)cu->execute_instruction(decoded.get(), *wf), util::InvalidInst);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
   }
   EXPECT_EQ(recorder_ptr->read_count, 0u);
   EXPECT_EQ(read_wmma_f64_cd(*cu, *wf, 32), initial);
@@ -2379,13 +2381,12 @@ TEST(Gfx1251F64WmmaExecutionTest, RejectsDpp16AndDpp8ExtensionEncodings) {
   }
 }
 
-TEST(Gfx1251F64WmmaExecutionTest, RejectsWave64Execution) {
-  struct WaveSizeProbe {
-    uint32_t size;
-    uint32_t wf_size() const { return size; }
-  };
-  EXPECT_NO_THROW(amdgpu::require_wmma_wave32(WaveSizeProbe{32}));
-  EXPECT_THROW(amdgpu::require_wmma_wave32(WaveSizeProbe{64}), util::ConfigError);
+TEST(Gfx1251F64WmmaExecutionTest, ValidatesRequiredWaveAndExecStateWithoutExceptions) {
+  constexpr uint64_t kFullExec = 0xffff'ffffu;
+  EXPECT_TRUE(amdgpu::is_gfx1251_wmma_execution_state_valid(32, kFullExec));
+  EXPECT_FALSE(amdgpu::is_gfx1251_wmma_execution_state_valid(32, 0x5a5aa5a5u));
+  EXPECT_FALSE(amdgpu::is_gfx1251_wmma_execution_state_valid(32, 0));
+  EXPECT_FALSE(amdgpu::is_gfx1251_wmma_execution_state_valid(64, kFullExec));
 }
 
 TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesBothElementsAndHonorsExec) {

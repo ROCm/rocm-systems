@@ -5546,10 +5546,13 @@ def test_cdna5_variant_execution_callback_inventory(
     assert 'exec_wmma_f64_16x16x4_f64' in execution_source
     execute_body = execution_source.split(
         'void VWmmaF6416x16x4F64Vop3p::execute_impl', 1
-    )[1].split('\n}', 1)[0]
-    assert execute_body.index('require_gfx1251_wmma_full_exec') < execute_body.index(
-        'resolved_vgpr_offset'
-    )
+    )[1].split('void VWmmaScaleF32Vop3px2::execute_impl', 1)[0]
+    assert execute_body.index(
+        'is_gfx1251_wmma_execution_state_valid'
+    ) < execute_body.index('resolved_vgpr_offset')
+    assert 'report_instruction_execution_error' in execute_body
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in execute_body
+    assert 'throw ' not in execute_body
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(
