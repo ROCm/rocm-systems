@@ -339,7 +339,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                      ncclSymkKernelListProfile[kernelIndex] :
                      ncclSymkKernelList[kernelIndex];
   int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
-  plan->kernelDynSmem = (1 & ncclSymkDynamicSmemKernelMask() >> (int)kernelId) ? maxDynamicSmem : 0;
+  plan->kernelDynSmem = (1 & (ncclSymkDynamicSmemKernelMask() >> (int)kernelId)) ? maxDynamicSmem : 0;
   task = headTask;
   while (task != nullptr && task->devFuncId == devFuncId) {
     workCount++;
