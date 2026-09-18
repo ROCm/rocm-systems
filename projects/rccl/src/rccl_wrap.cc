@@ -970,12 +970,14 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
   return funcThresholdFromTable(table->ddaVmmMax, func);
 }
 
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
+                    bool query, const char* prefix) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
   // is configured per communicator. Use the resolved communicator value:
   // testing the raw sentinel as a boolean disables DDA by default, while
   // testing only the environment would ignore an explicit config value.
   if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || ncclGroupDepth != 0) {
+    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d launchOrderImplicit=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), comm->config.launchOrderImplicit, ncclGroupDepth);
     return false;
   }
   if (IsArchMatch(comm->archName, "gfx1250")) {
@@ -985,17 +987,13 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   } else {
     return false;
   }
-  return threshold > 0 && totalBytes <= threshold;
+  const bool ok = threshold > 0 && totalBytes <= threshold;
+  if (!ok && !query && prefix)
+    INFO(NCCL_TUNING, "%s DDA disqualified: totalBytes=%zu > entryThreshold=%zu",
+         prefix, totalBytes, threshold);
+  return ok;
 }
 
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
-                    size_t gfx1250Default) {
-  size_t threshold = 0;
-  if (IsArchMatch(comm->archName, "gfx942"))       threshold = gfx942Default;
-  else if (IsArchMatch(comm->archName, "gfx950"))  threshold = gfx950Default;
-  else if (IsArchMatch(comm->archName, "gfx1250")) threshold = gfx1250Default;
-  return rcclDdaEnabled(comm, totalBytes, threshold);
-}
 
 
 bool rcclUseAlltoAllGda(struct ncclComm* comm) {
@@ -1302,7 +1300,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       isSymmetricKernelRequestedWin(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendWin, recvWin);
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedByMax;
-    INFO(NCCL_COLL,
+    INFO(NCCL_TUNING,
          "rcclSelectAllReduce: graph=%d symkRequested=%d symSuppressedByMax=%d symEligible=%d symMaxR2=%zu",
          (int)ceCapturing, (int)symkRequested, (int)symSuppressedByMax, (int)symEligible, symMaxR2);
     if (!query && symkRequested && symSuppressedByMin)
@@ -1357,7 +1355,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // Hoist thresholds and the path decision so dispatch and logging share them.
     const size_t arDdaLLMax    = ddaFabricArch1250 ? rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce)    : 0;
     const size_t arDdaLL128Max = ddaFabricArch1250 ? rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce) : 0;
-    const bool arShouldTakeDda = rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed);
+    const bool arShouldTakeDda = rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed, query);
     if (arShouldTakeDda) {
       if (ddaFabricArch1250) {
         // Small-message fast lane: LL protocol (no GPU barrier).
@@ -1393,41 +1391,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       }
     }
 
-  if (!query) {
-    if (!arShouldTakeDda) {
-      if (ddaSymEligible)
-        INFO(NCCL_TUNING, "AR DDA disqualified: symk requested+eligible (symEligible=%d ddaSymEligible=%d)", (int)symEligible, (int)ddaSymEligible);
-      else if (!rcclParamDdaEnable())
-        INFO(NCCL_TUNING, "AR DDA disqualified: RCCL_DDA_ENABLE=0");
-      else if (ceAllReduceAllowed && !ddaFabricArch1250)
-        INFO(NCCL_TUNING, "AR DDA disqualified: ceAllReduceAllowed=1 on non-gfx1250 arch");
-      else
-        INFO(NCCL_TUNING, "AR DDA disqualified: msgBytes=%zu > entryThreshold (LL=%zu LL128=%zu VMM=%zu)",
-             msgBytes, arDdaLLMax, arDdaLL128Max, arDdaVmmMax);
-    } else if (ddaFabricArch1250) {
-      if (!rcclParamDdaLL() || msgBytes > arDdaLLMax ||
-          !ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op))
-        INFO(NCCL_TUNING, "AR DDA/LL disqualified: paramDdaLL=%d msgBytes=%zu arDdaLLMax=%zu",
-             (int)rcclParamDdaLL(), msgBytes, arDdaLLMax);
-      if ((!rcclParamDdaLL128() || msgBytes > arDdaLL128Max) && msgBytes > arDdaLLMax)
-        INFO(NCCL_TUNING, "AR DDA/LL128 disqualified: paramDdaLL128=%d msgBytes=%zu arDdaLL128Max=%zu",
-             (int)rcclParamDdaLL128(), msgBytes, arDdaLL128Max);
-      if ((arDdaVmmMax == 0 || msgBytes > arDdaVmmMax) && msgBytes > arDdaLL128Max)
-        INFO(NCCL_TUNING, "AR DDA/VMM disqualified: arDdaVmmMax=%zu msgBytes=%zu",
-             arDdaVmmMax, msgBytes);
-    }
-  }
   // (5) Enqueue-bound backends: CE registered (Branch B) vs symmetric vs kernel.
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
-  // && ((CTAPolicy & ZERO) || force): ceAvailable starts from ncclCeAvailable(op) then
-  // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
-  bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
+  // && ((CTAPolicy & ZERO) || force): ceAvailable is the conjunction of the four
+  // sub-conditions below; split out so the disqualification log can name the blocker.
+  const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
-  if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) ||
-      !rcclCeAllReduceEnabledDef(ceArArchDefault)) {
-    ceAvailable = false;
-  }
+  const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
+  const bool ceEnabledByArch     = rcclCeAllReduceEnabledDef(ceArArchDefault);
+  const bool ceAvailable         = ceArGraphAllowed && ceBufferOk && ceAllReduceOpSupported && ceCountDivisible && ceEnabledByArch;
   // Tuning cap only: registered CE has no staging allocation, so this does not
   // size a buffer. kThreshUnlimited (or null table) = no upper bound;
   // env var 0 returns 0, making ceRegInWindow false (disables registered CE).
@@ -1440,21 +1413,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
-  if (!query && !symEligible) {
-    if (!ceAvailable)
-      INFO(NCCL_TUNING, "AR CE-registered disqualified: ceAvailable=0 (ceCapturing=%d op=%d datatype=%d winRegType=%d ceArOpOk=%d countDiv=%d ceEnabled=%d)",
-           (int)ceCapturing, (int)op, (int)datatype, (int)winRegType,
-           (int)(op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax),
-           (int)(count % (size_t)comm->nRanks == 0),
-           (int)rcclCeAllReduceEnabledDef(ceArArchDefault));
-    else if (!ceRegInWindow)
-      INFO(NCCL_TUNING, "AR CE-registered disqualified: msgBytes=%zu > ceArRegMax=%zu", msgBytes, ceArRegMax);
-    else if (hasSysmemSegment)
-      INFO(NCCL_TUNING, "AR CE-registered disqualified: hasSysmemSegment=1");
-    else
-      INFO(NCCL_TUNING, "AR CE-registered disqualified: CTAPolicy=%d force=%d",
-           (int)comm->config.CTAPolicy, (int)force);
-  }
+  if (!query && !symEligible) INFO(NCCL_TUNING,
+       "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
+       " ceRegInWindow=%d hasSysmem=%d CTAPolicy=%d force=%d",
+       (int)ceAvailable, (int)ceArGraphAllowed, (int)ceBufferOk, (int)ceAllReduceOpSupported,
+       (int)ceCountDivisible, (int)ceEnabledByArch,
+       (int)ceRegInWindow, (int)hasSysmemSegment, (int)comm->config.CTAPolicy, (int)force);
 
   if (symEligible) {
     decision->algo = RCCL_SYMMETRIC;
@@ -1542,20 +1506,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // the CE-registered check so it loses to CE exactly as dispatch does
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
     // symk never reclaims it), mirroring rcclSelectAllReduce.
-    const size_t agDdaVmmMax = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllGather, winRegType, ceCapturing);
-    if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather))) {
-      if (IsArchMatch(comm->archName, "gfx1250")) {
-        const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather);
-        const size_t agDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather);
-        if (!query && (!rcclParamDdaLL() || totalBytes > agDdaLLMax))
-          INFO(NCCL_TUNING, "AG DDA/LL disqualified: paramDdaLL=%d totalBytes=%zu agDdaLLMax=%zu",
-               (int)rcclParamDdaLL(), totalBytes, agDdaLLMax);
-        if (!query && ((!rcclParamDdaLL128() || totalBytes > agDdaLL128Max) && totalBytes > agDdaLLMax))
-          INFO(NCCL_TUNING, "AG DDA/LL128 disqualified: paramDdaLL128=%d totalBytes=%zu agDdaLL128Max=%zu",
-               (int)rcclParamDdaLL128(), totalBytes, agDdaLL128Max);
-        if (!query && ((agDdaVmmMax == 0 || totalBytes > agDdaVmmMax) && totalBytes > agDdaLL128Max))
-          INFO(NCCL_TUNING, "AG DDA/VMM disqualified: agDdaVmmMax=%zu totalBytes=%zu",
-               agDdaVmmMax, totalBytes);
+    const size_t agDdaVmmMax  = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllGather, winRegType, ceCapturing);
+    const bool agFabricArch   = IsArchMatch(comm->archName, "gfx1250");
+    const size_t agDdaLLMax   = agFabricArch ? rcclDdaLLThresholdTab(archTable, ncclFuncAllGather)    : 0;
+    const size_t agDdaLL128Max = agFabricArch ? rcclDdaLL128ThresholdTab(archTable, ncclFuncAllGather) : 0;
+    if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather), query, "AG")) {
+      if (agFabricArch) {
         if (rcclParamDdaLL() && msgSize <= agDdaLLMax &&
             ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1585,17 +1541,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       }
     }
 
-    if (!query) {
-      if (symEligible)
-        INFO(NCCL_TUNING, "AG DDA disqualified: symk eligible (symEligible=1)");
-      else if (!rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather))) {
-        if (!rcclParamDdaEnable())
-          INFO(NCCL_TUNING, "AG DDA disqualified: RCCL_DDA_ENABLE=0");
-        else
-          INFO(NCCL_TUNING, "AG DDA disqualified: totalBytes=%zu > entryThreshold=%zu",
-               totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather));
-      }
-    }
+    if (!query && symEligible) INFO(NCCL_TUNING, "AG DDA disqualified: symk eligible");
     // (2) Hierarchical AllGather. Live dispatch requires being outside a group
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
     // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
@@ -1661,23 +1607,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         decision->algo = RCCL_CE_SCRATCH;
         return ncclSuccess;
       }
-      if (!query) {
-        if (rcclParamForceCe() || agCeNonRegWindow) {
-          if (!ceScratch)
-            INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=0 (ceCapturing=%d winRegType=%d)",
-                 (int)ceCapturing, (int)winRegType);
-          else if (hasSysmemSegment)
-            INFO(NCCL_TUNING, "AG CE-scratch disqualified: hasSysmemSegment=1");
-          else if (comm->ddaScratch == nullptr)
-            INFO(NCCL_TUNING, "AG CE-scratch disqualified: ddaScratch=nullptr");
-          else if (totalBytes > (size_t)comm->ddaScratchBytes)
-            INFO(NCCL_TUNING, "AG CE-scratch disqualified: totalBytes=%zu > ddaScratchBytes=%zu",
-                 totalBytes, (size_t)comm->ddaScratchBytes);
-        } else {
-          INFO(NCCL_TUNING, "AG CE-scratch disqualified: FORCE_CE=0 totalBytes=%zu outside [ceNonRegMin=%zu,ceNonRegMax=%zu]",
-               totalBytes, agCeNonRegMin, agCeNonRegMax);
-        }
-      }
+      if (!query) INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ddaScratch=%p totalBytes=%zu ddaScratchBytes=%zu forceCe=%d agCeNonRegWindow=%d",
+           (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes, (int)rcclParamForceCe(), (int)agCeNonRegWindow);
       // Branch #3: CE via registered symmetric windows. Taken when symk is not
       // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
       // CE for every size.
@@ -1689,18 +1620,9 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         decision->algo = RCCL_CE_REGISTERED;
         return ncclSuccess;
       }
-      if (!query) {
-        if (!ceAvailable)
-          INFO(NCCL_TUNING, "AG CE-registered disqualified: ceAvailable=0 (ceCapturing=%d winRegType=%d)",
-               (int)ceCapturing, (int)winRegType);
-        else if (hasSysmemSegment)
-          INFO(NCCL_TUNING, "AG CE-registered disqualified: hasSysmemSegment=1");
-        else if (symEligible && !(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO))
-          INFO(NCCL_TUNING, "AG CE-registered disqualified: symEligible=1 and CTAPolicy!=%d", NCCL_CTA_POLICY_ZERO);
-        else if (!rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing))
-          INFO(NCCL_TUNING, "AG CE-registered disqualified: totalBytes=%zu outside ceRegMax window (winRegType=%d)",
-               totalBytes, (int)winRegType);
-      }
+      if (!query) INFO(NCCL_TUNING, "AG CE-registered disqualified: ceAvailable=%d hasSysmem=%d symEligible=%d ceRegWindow=%d",
+           (int)ceAvailable, (int)hasSysmemSegment, (int)symEligible,
+           (int)rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing));
     }
 
   }
@@ -1750,22 +1672,13 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
     // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
-    const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-    const size_t rsDdaVmmMax = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
+    const bool ddaFabricArch   = IsArchMatch(comm->archName, "gfx1250");
+    const size_t rsDdaVmmMax   = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
+    const size_t rsDdaLLMax    = ddaFabricArch ? rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter)    : 0;
+    const size_t rsDdaLL128Max = ddaFabricArch ? rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter) : 0;
     if (!symEligible &&
-        rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter))) {
+        rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), query, "RS")) {
       if (ddaFabricArch) {
-        const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
-        const size_t rsDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter);
-        if (!query && (!rcclParamDdaLL() || totalBytes > rsDdaLLMax))
-          INFO(NCCL_TUNING, "RS DDA/LL disqualified: paramDdaLL=%d totalBytes=%zu rsDdaLLMax=%zu",
-               (int)rcclParamDdaLL(), totalBytes, rsDdaLLMax);
-        if (!query && ((!rcclParamDdaLL128() || totalBytes > rsDdaLL128Max) && totalBytes > rsDdaLLMax))
-          INFO(NCCL_TUNING, "RS DDA/LL128 disqualified: paramDdaLL128=%d totalBytes=%zu rsDdaLL128Max=%zu",
-               (int)rcclParamDdaLL128(), totalBytes, rsDdaLL128Max);
-        if (!query && ((rsDdaVmmMax == 0 || totalBytes > rsDdaVmmMax) && totalBytes > rsDdaLL128Max))
-          INFO(NCCL_TUNING, "RS DDA/VMM disqualified: rsDdaVmmMax=%zu totalBytes=%zu",
-               rsDdaVmmMax, totalBytes);
         if (rcclParamDdaLL() && totalBytes <= rsDdaLLMax &&
             ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1792,17 +1705,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       }
     }
 
-    if (!query) {
-      if (symEligible)
-        INFO(NCCL_TUNING, "RS DDA disqualified: symk eligible (symEligible=1)");
-      else if (!rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter))) {
-        if (!rcclParamDdaEnable())
-          INFO(NCCL_TUNING, "RS DDA disqualified: RCCL_DDA_ENABLE=0");
-        else
-          INFO(NCCL_TUNING, "RS DDA disqualified: totalBytes=%zu > entryThreshold=%zu",
-               totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter));
-      }
-    }
+    if (!query && symEligible) INFO(NCCL_TUNING, "RS DDA disqualified: symk eligible");
     // (3) Hierarchical ReduceScatter (multi-node, sum only). Live dispatch requires
     // being outside a group; the reporting query always runs outside a group, so the
     // same gate reproduces rcclGetAlgoInfo's group-agnostic reporting.
@@ -1933,19 +1836,12 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
   // Symmetric-registered buffers defer to the symmetric kernel; DDA gated on !a2aSymEligible.
-  const size_t a2aDdaMax = rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll);
-  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll))) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
-      const size_t llThresh   = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll);
-      const size_t ll128Thresh = rcclDdaLL128ThresholdTab(archTable, ncclFuncAlltoAll);
-      if (!query && (!rcclParamDdaLL() || llThresh == 0 || totalBytes > llThresh))
-        INFO(NCCL_TUNING, "A2A DDA/LL disqualified: paramDdaLL=%d llThresh=%zu totalBytes=%zu",
-             (int)rcclParamDdaLL(), llThresh, totalBytes);
-      if (!query && ((!rcclParamDdaLL128() || ll128Thresh == 0 || totalBytes > ll128Thresh) && totalBytes > llThresh))
-        INFO(NCCL_TUNING, "A2A DDA/LL128 disqualified: paramDdaLL128=%d ll128Thresh=%zu totalBytes=%zu",
-             (int)rcclParamDdaLL128(), ll128Thresh, totalBytes);
-      if (!query && ((a2aDdaMax == 0 || totalBytes > a2aDdaMax) && totalBytes > ll128Thresh))
-        INFO(NCCL_TUNING, "A2A DDA/VMM disqualified: a2aDdaMax=%zu totalBytes=%zu", a2aDdaMax, totalBytes);
+  const size_t a2aDdaMax    = rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll);
+  const bool a2aFabricArch  = IsArchMatch(comm->archName, "gfx1250");
+  const size_t llThresh     = a2aFabricArch ? rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll)    : 0;
+  const size_t ll128Thresh  = a2aFabricArch ? rcclDdaLL128ThresholdTab(archTable, ncclFuncAlltoAll) : 0;
+  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), query, "A2A")) {
+    if (a2aFabricArch) {
       if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= llThresh &&
           ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
@@ -1975,17 +1871,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     }
   }
 
-  if (!query) {
-    if (a2aSymEligible)
-      INFO(NCCL_TUNING, "A2A DDA disqualified: symk eligible (a2aSymEligible=1)");
-    else if (!rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll))) {
-      if (!rcclParamDdaEnable())
-        INFO(NCCL_TUNING, "A2A DDA disqualified: RCCL_DDA_ENABLE=0");
-      else
-        INFO(NCCL_TUNING, "A2A DDA disqualified: totalBytes=%zu > entryThreshold=%zu",
-             totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll));
-    }
-  }
+  if (!query && a2aSymEligible) INFO(NCCL_TUNING, "A2A DDA disqualified: symk eligible");
   // CE is graph-unsafe. Live probes the stream; reporting uses graphCapturingHint.
   // taskAppend honors this decision, so capture must be recorded here rather than
   // re-probed at enqueue.
@@ -2019,16 +1905,9 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-    if (!query) {
-      if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO))
-        INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d (need ZERO=%d)",
-             (int)comm->config.CTAPolicy, (int)NCCL_CTA_POLICY_ZERO);
-      else if (a2aHasSysmem)
-        INFO(NCCL_TUNING, "A2A CE-registered disqualified: hasSysmemSegment=1");
-      else
-        INFO(NCCL_TUNING, "A2A CE-registered disqualified: ncclCeAvailable=0 (ceCapturing=%d winRegType=%d)",
-             (int)ceCapturing, (int)a2aWinRegType);
-    }
+    if (!query) INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d hasSysmem=%d ceAvailable=%d",
+         (int)comm->config.CTAPolicy, (int)a2aHasSysmem,
+         (int)ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin));
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
     // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.

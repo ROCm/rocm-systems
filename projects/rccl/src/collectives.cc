@@ -229,7 +229,7 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
 // through both the early CE return and this guard keeps the two decisions from silently drifting apart
 // as CE AllReduce's own eligibility rules evolve.
 bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
-                                    bool ceAllReduceAllowed) {
+                                    bool ceAllReduceAllowed, bool query) {
   const size_t msgBytes = count * ncclTypeSize(datatype);
   // !symEligible is required on every arch: gfx1250 fabric does not override it.
   // ddaFabricArch1250 only skips the CE yield -- fabric AR may still run when CE
@@ -240,8 +240,20 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   // with no DDA and no CE, falling back to the generic ring/tree kernel across
   // the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
-         rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
+  const bool result = !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
+                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
+  if (!result && !query) {
+    if (symEligible)
+      INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");
+    else if (!rcclParamDdaEnable())
+      INFO(NCCL_TUNING, "AR DDA disqualified: RCCL_DDA_ENABLE=0");
+    else if (ceAllReduceAllowed && !ddaFabricArch1250)
+      INFO(NCCL_TUNING, "AR DDA disqualified: ceAllReduceAllowed=1 on non-gfx1250");
+    else
+      INFO(NCCL_TUNING, "AR DDA disqualified: msgBytes=%zu > entryThreshold=%zu",
+           msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
+  }
+  return result;
 }
 
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
