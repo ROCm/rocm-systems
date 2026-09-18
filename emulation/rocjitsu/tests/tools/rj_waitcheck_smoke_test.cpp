@@ -59,6 +59,20 @@ bool contains(std::string_view haystack, std::string_view needle) {
   return haystack.find(needle) != std::string_view::npos;
 }
 
+// Debug builds trace fat-binary unpacking. Keep other stderr output (including
+// sanitizer reports) visible as a test failure.
+bool has_only_debug_logs(std::string_view text) {
+  while (!text.empty()) {
+    const size_t end = text.find('\n');
+    if (!text.substr(0, end).starts_with("[rj debug] "))
+      return false;
+    if (end == std::string_view::npos)
+      break;
+    text.remove_prefix(end + 1);
+  }
+  return true;
+}
+
 bool command_exited_with(int status, int code) {
   return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == code;
 }
@@ -239,7 +253,7 @@ TEST(RjWaitcheck, ListsAndScansConcatenatedCompressedGfx950Bundles) {
   ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
                                          << stderr_text << "\nstdout:\n"
                                          << stdout_text;
-  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(has_only_debug_logs(stderr_text)) << stderr_text;
   EXPECT_TRUE(contains(stdout_text, "gfx950: 2")) << stdout_text;
 
   command = shell_quote(g_waitcheck_tool.string()) + " --all-code-objects --no-fail " +
@@ -251,7 +265,7 @@ TEST(RjWaitcheck, ListsAndScansConcatenatedCompressedGfx950Bundles) {
   ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
                                          << stderr_text << "\nstdout:\n"
                                          << stdout_text;
-  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(has_only_debug_logs(stderr_text)) << stderr_text;
   EXPECT_TRUE(contains(stdout_text, "missing s_waitcnt vmcnt(0)")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text,
                        "rj_waitcheck: scanned inputs=1 skipped=0 code-objects=2 diagnostics=1"))
