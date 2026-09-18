@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import math
-import shutil
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -11,12 +11,22 @@ import numpy as np
 import pandas as pd
 
 from utils import csv_compression, schema
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
     console_log,
     console_warning,
     demarcate,
+)
+from utils.ml_api_trace_errors import (
+    ForwardThreadNotFoundError,
+    MarkerNotNestedError,
+    MissingSourceLocationError,
+    OverlappingMarkerRangeError,
+    PassMarkerMismatchError,
+    UnaccountedKernelError,
+    UncorrelatedForwardIntervalError,
 )
 from utils.utils_counter_defs import UNIT_COUNTER
 
@@ -83,19 +93,17 @@ class KernelStats:
 class CallTreeNode:
     """A node in the operator call tree.
 
-    Local to this frame:
-      - invocation_ids: distinct Context_Id prefixes at this frame's depth.
-      - call_count: derived as len(invocation_ids); see the property below.
+    children is the list of child operator nodes. file_name, line_number,
+    backend, start_timestamp, end_timestamp, t_tid, f_tid, and thread_id
+    are optional fields copied from a marker row when set. invocation_ids
+    stores marker-start strings for this node.
 
     Inclusive over this node plus all descendants:
-      - kernel_launches: kernel dispatches in the subtree.
-      - total_duration_ms: cumulative GPU time in the subtree.
-      - min_dispatch_ns / max_dispatch_ns / mean_dispatch_ns: per-kernel-dispatch
-        duration stats. None when no non-zero-duration dispatch is in the subtree.
+      kernel_launches, total_duration_ms, min/max/mean dispatch stats.
     """
 
     name: str
-    children: dict[str, "CallTreeNode"] = field(default_factory=dict)
+    children: list["CallTreeNode"] = field(default_factory=list)
     kernels: dict[str, KernelStats] = field(default_factory=dict)
     kernel_launches: int = 0
     total_duration_ms: float = 0.0
@@ -103,6 +111,14 @@ class CallTreeNode:
     min_dispatch_ns: Optional[float] = None
     max_dispatch_ns: Optional[float] = None
     mean_dispatch_ns: Optional[float] = None
+    file_name: Optional[str] = None
+    line_number: Optional[int] = None
+    backend: Optional[str] = None
+    start_timestamp: Optional[float] = None
+    end_timestamp: Optional[float] = None
+    t_tid: Optional[str] = None
+    f_tid: Optional[str] = None
+    thread_id: Optional[str] = None
 
     @property
     def call_count(self) -> int:
@@ -144,21 +160,6 @@ def simplify_kernel_name(full_kernel_name: str) -> str:
     return main_part.strip()
 
 
-def parse_top_level_location(context_id: object) -> str:
-    """Extract 'file:line' from the first entry of a Context_Id string.
-
-    Context_Id format: ``10@main.py:60/#10@main.py:21/...``
-    Returns ``main.py:60`` or ``unknown:0`` on failure.
-    """
-    if pd.isna(context_id) or not str(context_id).strip():
-        return "unknown:0"
-    first_entry = str(context_id).split("/")[0]
-    if "@" not in first_entry:
-        return "unknown:0"
-    _, location = first_entry.split("@", 1)
-    return location if ":" in location else "unknown:0"
-
-
 def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
     """Bottom-up rollup over this node and all descendants.
 
@@ -181,7 +182,7 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
         if stats.max_duration_ns is not None:
             maxes.append(stats.max_duration_ns)
 
-    for child in node.children.values():
+    for child in node.children:
         child_rollup = rollup_node_stats(child)
         launches += child_rollup.launches
         total_duration_ns += child_rollup.total_duration_ns
@@ -209,137 +210,571 @@ def decode_marker_name(name: str) -> str:
     return name.replace("%2F", "/").replace("%25", "%")
 
 
-def build_call_trees(
-    df: pd.DataFrame,
-) -> dict[str, CallTreeNode]:
-    """Build per-source-location call trees from a consolidated ML API trace DataFrame.
+def _split_name_and_location(first_token: str) -> tuple[str, str, object]:
+    """Split `{name}:{location}` from the right into name, file, and line."""
+    if first_token.endswith(":n/a"):
+        return first_token[: -len(":n/a")], "", ""
+    parts = first_token.rsplit(":", 2)
+    if len(parts) == 3:
+        operator_name, file_part, line_part = parts
+        if file_part and line_part.isdigit():
+            return operator_name, Path(file_part).name, int(line_part)
+    return first_token, "", ""
 
-    Returns a dict mapping ``file:line`` to a CallTreeNode root whose
-    children form the full operator/kernel hierarchy.
 
-    Each kernel entry is stored as a ``KernelStats`` record.
-    Full kernel names are used; shortening is left to the display layer.
-    """
-    required = {"Operator_Name", "Kernel_Name"}
-    if df.empty or not required.issubset(df.columns):
-        return {}
-
-    has_kernel_timestamps = (
-        "Start_Timestamp_kernel" in df.columns and "End_Timestamp_kernel" in df.columns
-    )
-    has_context_id = "Context_Id" in df.columns
-    has_kernel_id = "Kernel_ID" in df.columns
-
-    deduplication_columns = ["Operator_Name", "Kernel_Name"]
-    if has_kernel_timestamps:
-        deduplication_columns.append("Start_Timestamp_kernel")
-    if has_context_id:
-        deduplication_columns.append("Context_Id")
-    dispatches = df.drop_duplicates(subset=deduplication_columns)
-
-    call_trees: dict[str, CallTreeNode] = {}
-
-    for row in dispatches.itertuples(index=False):
-        op_path = str(row.Operator_Name).strip()
-        kernel_name = str(row.Kernel_Name).strip()
-        if not op_path or not kernel_name:
-            continue
-
-        context_id = getattr(row, "Context_Id", None) if has_context_id else None
-        location = parse_top_level_location(context_id)
-
-        duration_ns = 0.0
-        if has_kernel_timestamps:
-            try:
-                duration_ns = float(row.End_Timestamp_kernel) - float(
-                    row.Start_Timestamp_kernel
-                )
-            except (ValueError, TypeError):
-                pass
-
-        if location not in call_trees:
-            call_trees[location] = CallTreeNode(name=location)
-        location_root = call_trees[location]
-
-        ctx_segments = (
-            str(context_id).split("/")
-            if has_context_id and context_id is not None and pd.notna(context_id)
-            else []
+def parse_marker_function(function_value: object) -> dict[str, Any]:
+    """Parse one Function cell into operator, location, backend, and wire keys."""
+    if function_value is None or (
+        isinstance(function_value, float) and pd.isna(function_value)
+    ):
+        raw = ""
+    else:
+        raw = str(function_value)
+    tokens = raw.split("|") if raw else [""]
+    first_token = tokens[0]
+    if ":#" in first_token or "@" in first_token:
+        console_error(
+            "analysis",
+            f"Stacked marker wire is not supported: {raw}",
         )
-
-        current_node = location_root
-        for i, encoded_segment in enumerate(op_path.split("/")):
-            path_segment = decode_marker_name(encoded_segment)
-            if path_segment not in current_node.children:
-                current_node.children[path_segment] = CallTreeNode(name=path_segment)
-            current_node = current_node.children[path_segment]
-            if i < len(ctx_segments):
-                current_node.invocation_ids.add("/".join(ctx_segments[: i + 1]))
-
-        if kernel_name not in current_node.kernels:
-            kernel_id = None
-            kernel_id_value = getattr(row, "Kernel_ID", None) if has_kernel_id else None
-            if pd.notna(kernel_id_value):
-                kernel_id = int(kernel_id_value)
-            current_node.kernels[kernel_name] = KernelStats(kernel_id=kernel_id)
-        kstats = current_node.kernels[kernel_name]
-        kstats.launches += 1
-        kstats.total_duration_ns += duration_ns
-        if duration_ns > 0:
-            if kstats.min_duration_ns is None or duration_ns < kstats.min_duration_ns:
-                kstats.min_duration_ns = duration_ns
-            if kstats.max_duration_ns is None or duration_ns > kstats.max_duration_ns:
-                kstats.max_duration_ns = duration_ns
-
-    for location_root in call_trees.values():
-        rollup_node_stats(location_root)
-
-    return call_trees
-
-
-def write_ml_api_trace_consolidated_csv(
-    consolidated_df: pd.DataFrame,
-    ml_api_trace_path: Path,
-) -> None:
-    """Write the consolidated ML API trace DataFrame to consolidated.csv."""
-    output_file = ml_api_trace_path / "consolidated.csv"
-    consolidated_df.sort_values("Operator_Name", ignore_index=True).to_csv(
-        output_file, index=False
-    )
-    console_log(f"Saved consolidated trace to {output_file}")
-
-
-def build_call_trees_with_kernel_ids(
-    consolidated_df: pd.DataFrame,
-    kernel_top_df: pd.DataFrame,
-) -> dict[str, CallTreeNode]:
-    """Attach Kernel_ID values and build call trees from consolidated trace rows."""
-    kernel_name_to_id = {
-        str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
+    operator_name, file_name, line_number = _split_name_and_location(first_token)
+    parsed_keys = {
+        "seqNr": "n/a",
+        "tid": "n/a",
+        "ftid": "n/a",
+        "scope": "n/a",
+        "args": "n/a",
     }
-    consolidated_with_ids = consolidated_df.copy()
-    consolidated_with_ids["Kernel_ID"] = (
-        consolidated_with_ids["Kernel_Name"].str.strip().map(kernel_name_to_id)
+    backend = "user"
+    for token in tokens[1:]:
+        if token in KNOWN_ML_API_BACKENDS:
+            backend = token
+            continue
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        if key == "args":
+            parsed_keys["args"] = value.replace("%7C", "|")
+        elif key in parsed_keys:
+            parsed_keys[key] = value
+    t_tid = "" if parsed_keys["tid"] in ("", "n/a") else parsed_keys["tid"]
+    f_tid = "" if parsed_keys["ftid"] in ("", "n/a") else parsed_keys["ftid"]
+    return {
+        "Operator_Name": decode_marker_name(operator_name),
+        "File_Name": file_name,
+        "Line_Number": line_number,
+        "Backend": backend,
+        "seqNr": parsed_keys["seqNr"],
+        "T_Tid": t_tid,
+        "F_Tid": f_tid,
+        "scope": parsed_keys["scope"],
+        "args": parsed_keys["args"],
+    }
+
+
+_PARSED_FUNCTION_COLUMNS = (
+    "Operator_Name",
+    "File_Name",
+    "Line_Number",
+    "Backend",
+    "seqNr",
+    "T_Tid",
+    "F_Tid",
+    "scope",
+    "args",
+)
+
+
+def _apply_parsed_function_columns(trace_df: pd.DataFrame) -> pd.DataFrame:
+    """Add parse_marker_function columns, keeping Function and Thread_Id."""
+    if trace_df.empty:
+        parsed = trace_df.copy()
+        for column in _PARSED_FUNCTION_COLUMNS:
+            parsed[column] = pd.Series(dtype=object)
+        return parsed
+    parsed_rows = trace_df["Function"].map(parse_marker_function)
+    parsed_df = pd.DataFrame(list(parsed_rows), index=trace_df.index)
+    return pd.concat([trace_df, parsed_df], axis=1)
+
+
+def _optional_marker_file_name(value: object) -> Optional[str]:
+    if value is None or value == "" or pd.isna(value):
+        return None
+    return str(value)
+
+
+def _optional_marker_line_number(value: object) -> Optional[int]:
+    if value is None or value == "" or pd.isna(value):
+        return None
+    return int(value)
+
+
+def _optional_pytorch_tid(value: object) -> Optional[str]:
+    if value is None or value == "" or pd.isna(value):
+        return None
+    text = str(value)
+    if text in ("n/a", "0"):
+        return None
+    return text
+
+
+def _sequence_from_cell(value: object) -> list[object]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _kernel_stats_from_marker_row(row: object) -> dict[str, KernelStats]:
+    kernel_names = _sequence_from_cell(getattr(row, "Kernel_Names", []))
+    kernel_starts = _sequence_from_cell(getattr(row, "Kernel_Start_Timestamps", []))
+    kernel_ends = _sequence_from_cell(getattr(row, "Kernel_End_Timestamps", []))
+    kernels: dict[str, KernelStats] = {}
+    for kernel_name, kernel_start, kernel_end in zip(
+        kernel_names, kernel_starts, kernel_ends
+    ):
+        duration_ns = 0.0
+        try:
+            duration_ns = float(kernel_end) - float(kernel_start)
+        except (TypeError, ValueError):
+            duration_ns = 0.0
+        name = str(kernel_name)
+        if name not in kernels:
+            kernels[name] = KernelStats()
+        stats = kernels[name]
+        stats.launches += 1
+        stats.total_duration_ns += duration_ns
+        if duration_ns > 0:
+            if stats.min_duration_ns is None or duration_ns < stats.min_duration_ns:
+                stats.min_duration_ns = duration_ns
+            if stats.max_duration_ns is None or duration_ns > stats.max_duration_ns:
+                stats.max_duration_ns = duration_ns
+    return kernels
+
+
+def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
+    backend_value = getattr(row, "Backend", None)
+    if backend_value is None or (
+        isinstance(backend_value, float) and pd.isna(backend_value)
+    ):
+        backend = None
+    else:
+        backend = str(backend_value)
+    node = CallTreeNode(
+        name=str(row.Operator_Name),
+        kernels=_kernel_stats_from_marker_row(row),
+        file_name=_optional_marker_file_name(getattr(row, "File_Name", "")),
+        line_number=_optional_marker_line_number(getattr(row, "Line_Number", "")),
+        backend=backend,
+        start_timestamp=float(row.Start_Timestamp),
+        end_timestamp=float(row.End_Timestamp),
+        t_tid=_optional_pytorch_tid(getattr(row, "T_Tid", "")),
+        f_tid=_optional_pytorch_tid(getattr(row, "F_Tid", "")),
+        thread_id=str(getattr(row, "Thread_Id", "")),
     )
-    return build_call_trees(consolidated_with_ids)
+    node.invocation_ids.add(str(row.Start_Timestamp))
+    return node
+
+
+def nest_marker_intervals(
+    trace_df: pd.DataFrame,
+) -> dict[str, list[CallTreeNode]]:
+    """Nest marker intervals per Thread_Id using timestamp containment."""
+    forest: dict[str, list[CallTreeNode]] = {}
+    if trace_df.empty:
+        return forest
+    for thread_id, group in trace_df.groupby("Thread_Id", sort=False):
+        roots: list[CallTreeNode] = []
+        open_ranges: list[tuple[CallTreeNode, float, float]] = []
+        thread_key = str(thread_id)
+        for row in group.itertuples(index=False):
+            start = float(row.Start_Timestamp)
+            end = float(row.End_Timestamp)
+            while open_ranges and open_ranges[-1][2] <= start:
+                open_ranges.pop()
+            if open_ranges and end > open_ranges[-1][2]:
+                parent_node, parent_start, parent_end = open_ranges[-1]
+                console_error(
+                    "analysis",
+                    str(
+                        OverlappingMarkerRangeError(
+                            thread_id=thread_key,
+                            first_name=parent_node.name,
+                            first_start=parent_start,
+                            first_end=parent_end,
+                            second_name=str(row.Operator_Name),
+                            second_start=start,
+                            second_end=end,
+                        )
+                    ),
+                )
+            node = _call_tree_node_from_marker_row(row)
+            if open_ranges:
+                open_ranges[-1][0].children.append(node)
+            else:
+                roots.append(node)
+            open_ranges.append((node, start, end))
+        for root in roots:
+            rollup_node_stats(root)
+        forest[thread_key] = roots
+    return forest
+
+
+def _forward_tid_from_tree(node: CallTreeNode) -> Optional[str]:
+    if node.f_tid is not None:
+        return node.f_tid
+    for child in node.children:
+        found = _forward_tid_from_tree(child)
+        if found is not None:
+            return found
+    return None
+
+
+def _tree_has_t_tid(node: CallTreeNode, pytorch_tid: str) -> bool:
+    if node.t_tid == pytorch_tid:
+        return True
+    return any(_tree_has_t_tid(child, pytorch_tid) for child in node.children)
+
+
+def _thread_ids_with_pytorch_tid(
+    forest: dict[str, list[CallTreeNode]], pytorch_tid: str
+) -> list[str]:
+    return [
+        thread_id
+        for thread_id, roots in forest.items()
+        if any(_tree_has_t_tid(root, pytorch_tid) for root in roots)
+    ]
+
+
+def _interval_contains(node: CallTreeNode, start: float, end: float) -> bool:
+    if node.start_timestamp is None or node.end_timestamp is None:
+        return False
+    return node.start_timestamp <= start and end <= node.end_timestamp
+
+
+def _deepest_containing_node(
+    nodes: list[CallTreeNode], start: float, end: float
+) -> Optional[CallTreeNode]:
+    for node in nodes:
+        if not _interval_contains(node, start, end):
+            continue
+        nested = _deepest_containing_node(node.children, start, end)
+        return nested if nested is not None else node
+    return None
+
+
+def attach_unlocated_trees_by_forward_thread(
+    forest: dict[str, list[CallTreeNode]],
+) -> None:
+    """Stack torch/triton trees with no source onto the matching forward thread."""
+    pending: list[tuple[str, CallTreeNode]] = []
+    for thread_id, roots in forest.items():
+        for root in roots:
+            if root.file_name is not None:
+                continue
+            if root.backend not in KNOWN_ML_API_BACKENDS:
+                continue
+            pending.append((thread_id, root))
+    for thread_id, root in pending:
+        start = float(root.start_timestamp or 0.0)
+        end = float(root.end_timestamp or 0.0)
+        f_tid = _forward_tid_from_tree(root)
+        if f_tid is None:
+            console_error(
+                "analysis",
+                str(
+                    MissingSourceLocationError(
+                        operator_name=root.name,
+                        thread_id=thread_id,
+                        start_timestamp=start,
+                    )
+                ),
+            )
+            continue
+        matches = _thread_ids_with_pytorch_tid(forest, f_tid)
+        if len(matches) != 1:
+            console_error(
+                "analysis",
+                str(
+                    ForwardThreadNotFoundError(
+                        operator_name=root.name,
+                        thread_id=thread_id,
+                        start_timestamp=start,
+                        f_tid=f_tid,
+                    )
+                ),
+            )
+            continue
+        forward_thread_id = matches[0]
+        dest_roots = [node for node in forest[forward_thread_id] if node is not root]
+        parent = _deepest_containing_node(dest_roots, start, end)
+        if parent is None:
+            console_error(
+                "analysis",
+                str(
+                    UncorrelatedForwardIntervalError(
+                        operator_name=root.name,
+                        thread_id=thread_id,
+                        start_timestamp=start,
+                        end_timestamp=end,
+                        f_tid=f_tid,
+                        forward_thread_id=forward_thread_id,
+                    )
+                ),
+            )
+            continue
+        parent.children.append(root)
+        forest[thread_id] = [node for node in forest[thread_id] if node is not root]
+    for thread_id in [tid for tid, roots in forest.items() if not roots]:
+        del forest[thread_id]
+    for roots in forest.values():
+        for node in roots:
+            rollup_node_stats(node)
+
+
+def _nested_invocation_keys(
+    forest: dict[str, list[CallTreeNode]],
+) -> set[tuple[str, str]]:
+    """Return (Thread_Id, marker-start) pairs present in the forest."""
+    keys: set[tuple[str, str]] = set()
+
+    def walk(node: CallTreeNode) -> None:
+        thread_id = node.thread_id or ""
+        for invocation_id in node.invocation_ids:
+            keys.add((thread_id, invocation_id))
+        for child in node.children:
+            walk(child)
+
+    for roots in forest.values():
+        for root in roots:
+            walk(root)
+    return keys
+
+
+def _validate_all_markers_nested(
+    trace_df: pd.DataFrame, forest: dict[str, list[CallTreeNode]]
+) -> None:
+    """Exit if a consolidated marker row is missing from the nested forest."""
+    if trace_df.empty:
+        return
+    nested_keys = _nested_invocation_keys(forest)
+    for row in trace_df.itertuples(index=False):
+        thread_id = str(row.Thread_Id)
+        start_key = str(row.Start_Timestamp)
+        if (thread_id, start_key) not in nested_keys:
+            console_error(
+                "analysis",
+                str(
+                    MarkerNotNestedError(
+                        operator_name=str(row.Operator_Name),
+                        thread_id=thread_id,
+                        start_timestamp=row.Start_Timestamp,
+                    )
+                ),
+            )
+
+
+def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
+    """Deep-copy a call-tree node, including descendants and kernel stats."""
+    copied = CallTreeNode(
+        name=node.name,
+        kernels={
+            kernel_name: KernelStats(
+                launches=stats.launches,
+                total_duration_ns=stats.total_duration_ns,
+                min_duration_ns=stats.min_duration_ns,
+                max_duration_ns=stats.max_duration_ns,
+                kernel_id=stats.kernel_id,
+            )
+            for kernel_name, stats in node.kernels.items()
+        },
+        kernel_launches=node.kernel_launches,
+        total_duration_ms=node.total_duration_ms,
+        min_dispatch_ns=node.min_dispatch_ns,
+        max_dispatch_ns=node.max_dispatch_ns,
+        mean_dispatch_ns=node.mean_dispatch_ns,
+        file_name=node.file_name,
+        line_number=node.line_number,
+        backend=node.backend,
+        start_timestamp=node.start_timestamp,
+        end_timestamp=node.end_timestamp,
+        t_tid=node.t_tid,
+        f_tid=node.f_tid,
+        thread_id=node.thread_id,
+    )
+    copied.invocation_ids = set(node.invocation_ids)
+    copied.children = [clone_call_tree_node(child) for child in node.children]
+    return copied
+
+
+def filter_forest_by_backend(
+    forest: dict[str, list[CallTreeNode]],
+    backend: Optional[str],
+) -> dict[str, list[CallTreeNode]]:
+    """Copy a forest, keeping ``backend`` nodes and their ancestors.
+
+    ``backend=None`` keeps every node, including ``user``.
+    """
+
+    def copy_matching_view(node: CallTreeNode) -> Optional[CallTreeNode]:
+        kept_children: list[CallTreeNode] = []
+        for child in node.children:
+            copied_child = copy_matching_view(child)
+            if copied_child is not None:
+                kept_children.append(copied_child)
+        if backend is not None and node.backend != backend and not kept_children:
+            return None
+        copied_node = clone_call_tree_node(node)
+        copied_node.children = kept_children
+        return copied_node
+
+    filtered: dict[str, list[CallTreeNode]] = {}
+    for thread_id, roots in forest.items():
+        kept_roots: list[CallTreeNode] = []
+        for root in roots:
+            copied_root = copy_matching_view(root)
+            if copied_root is not None:
+                kept_roots.append(copied_root)
+        if kept_roots:
+            filtered[thread_id] = kept_roots
+    return filtered
+
+
+def copy_matched_operator_subtree(
+    forest: dict[str, list[CallTreeNode]],
+    matched_nodes: list[CallTreeNode],
+) -> dict[str, list[CallTreeNode]]:
+    """Copy each matched node with its ancestors and descendants."""
+    match_ids = {id(node) for node in matched_nodes}
+    keep_ids: set[int] = set()
+
+    def walk(node: CallTreeNode, ancestor_matched: bool) -> bool:
+        is_match = id(node) in match_ids
+        keep_below = ancestor_matched or is_match
+        descendant_kept = False
+        for child in node.children:
+            if walk(child, keep_below):
+                descendant_kept = True
+        keep_this = keep_below or descendant_kept
+        if keep_this:
+            keep_ids.add(id(node))
+        return keep_this
+
+    for roots in forest.values():
+        for root in roots:
+            walk(root, False)
+
+    def copy_kept(node: CallTreeNode) -> Optional[CallTreeNode]:
+        if id(node) not in keep_ids:
+            return None
+        copied = clone_call_tree_node(node)
+        kept_children: list[CallTreeNode] = []
+        for child in node.children:
+            copied_child = copy_kept(child)
+            if copied_child is not None:
+                kept_children.append(copied_child)
+        copied.children = kept_children
+        return copied
+
+    subtree: dict[str, list[CallTreeNode]] = {}
+    for thread_id, roots in forest.items():
+        kept_roots: list[CallTreeNode] = []
+        for root in roots:
+            copied_root = copy_kept(root)
+            if copied_root is not None:
+                kept_roots.append(copied_root)
+        if kept_roots:
+            subtree[thread_id] = kept_roots
+    return subtree
+
+
+def _node_source_location(node: CallTreeNode) -> str:
+    """file:line from the node, or empty when file_name is unset."""
+    if not node.file_name:
+        return ""
+    if node.line_number is None:
+        return node.file_name
+    return f"{node.file_name}:{node.line_number}"
+
+
+def _is_nan(value: object) -> bool:
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _aggregate_operator_summary_rows(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combine per-node rows that share an Operator path across locations."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["Operator"]), []).append(row)
+
+    aggregated: list[dict[str, Any]] = []
+    for operator, group in grouped.items():
+        locations = {row["Location"] for row in group}
+        location = next(iter(locations)) if len(locations) == 1 else ""
+        call_values = [row["Calls"] for row in group]
+        has_calls = not any(_is_nan(value) for value in call_values)
+        calls = float(sum(call_values)) if has_calls else float("nan")
+        dispatches = float(sum(row["Dispatches"] for row in group))
+        total_gpu = float(sum(row["Total_GPU"] for row in group))
+        min_values = [
+            row["Min_Dispatch"] for row in group if not _is_nan(row["Min_Dispatch"])
+        ]
+        max_values = [
+            row["Max_Dispatch"] for row in group if not _is_nan(row["Max_Dispatch"])
+        ]
+        mean_weights = [
+            (row["Mean_Per_Dispatch"], row["Dispatches"])
+            for row in group
+            if not _is_nan(row["Mean_Per_Dispatch"])
+        ]
+        weight_sum = sum(weight for _, weight in mean_weights)
+        if mean_weights and weight_sum:
+            mean_dispatch = (
+                sum(mean * weight for mean, weight in mean_weights) / weight_sum
+            )
+        else:
+            mean_dispatch = float("nan")
+        aggregated.append({
+            "Operator": operator,
+            "Location": location,
+            "Calls": calls,
+            "Dispatches": dispatches,
+            "Dispatches_Per_Call": (
+                dispatches / calls if has_calls and calls else float("nan")
+            ),
+            "Total_GPU": total_gpu,
+            "Pct_Total_GPU": float("nan"),
+            "Mean_Per_Call": (
+                total_gpu / calls if has_calls and calls else float("nan")
+            ),
+            "Mean_Per_Dispatch": mean_dispatch,
+            "Min_Dispatch": min(min_values) if min_values else float("nan"),
+            "Max_Dispatch": max(max_values) if max_values else float("nan"),
+        })
+    return aggregated
 
 
 def build_operator_summary(
-    call_trees: dict[str, CallTreeNode],
+    call_trees: dict[str, list[CallTreeNode]],
 ) -> pd.DataFrame:
     """Build a one-row-per-operator summary table from the call trees.
 
-    Each row describes one operator (e.g. aten::matmul) that ran at least
-    one GPU kernel. All time values are in milliseconds.
+    Each row describes one operator path (e.g. aten::matmul) that ran at
+    least one GPU kernel. Calls of that path at different locations are
+    combined. All time values are in milliseconds.
 
     Columns:
 
     - Operator: full path of the operator (e.g. "aten::matmul/aten::mm").
 
-    - Location: Python file:line where the outermost caller lives.
+    - Location: file:line when every combined node shares one; empty when
+      locations differ or file_name is unset.
 
     - Calls: how many times this operator was invoked. NaN when the trace
-      did not include Context_Id information to count invocations.
+      did not include marker-start invocation ids.
 
     - Dispatches: how many GPU kernels ran while this operator was on the
       call stack (kernels launched by operators it called also count).
@@ -361,11 +796,10 @@ def build_operator_summary(
     - Mean_Per_Dispatch, Min_Dispatch, Max_Dispatch: per-kernel timings
       across kernels launched while this operator was on the call stack.
 
-    Operators that ran no GPU kernels and the synthetic location-root nodes
-    are skipped. Empty input returns an empty DataFrame with the full
-    column list.
+    Operators that ran no GPU kernels are skipped. Empty input returns an
+    empty DataFrame with the full column list.
 
-    Sorted by Total_GPU descending, then Operator and Location ascending.
+    Sorted by Total_GPU descending, then Operator ascending.
     """
     columns = [
         "Operator",
@@ -383,206 +817,446 @@ def build_operator_summary(
     rows: list[dict[str, Any]] = []
 
     def walk(node: CallTreeNode, location: str, path_parts: list[str]) -> None:
-        for child_name, child in node.children.items():
-            full_path = path_parts + [child_name]
-            if child.kernel_launches > 0:
-                has_calls = len(child.invocation_ids) > 0
-                calls = len(child.invocation_ids) if has_calls else float("nan")
-                dispatches = child.kernel_launches
-                total_gpu_ms = child.total_duration_ms
-                rows.append({
-                    "Operator": "/".join(full_path),
-                    "Location": location,
-                    "Calls": calls,
-                    "Dispatches": dispatches,
-                    "Dispatches_Per_Call": (
-                        dispatches / calls if has_calls else float("nan")
-                    ),
-                    "Total_GPU": total_gpu_ms,
-                    "Pct_Total_GPU": float("nan"),  # filled in if grand total > 0
-                    "Mean_Per_Call": (
-                        total_gpu_ms / calls if has_calls else float("nan")
-                    ),
-                    "Mean_Per_Dispatch": (
-                        child.mean_dispatch_ns * NS_TO_MS
-                        if child.mean_dispatch_ns is not None
-                        else float("nan")
-                    ),
-                    "Min_Dispatch": (
-                        child.min_dispatch_ns * NS_TO_MS
-                        if child.min_dispatch_ns is not None
-                        else float("nan")
-                    ),
-                    "Max_Dispatch": (
-                        child.max_dispatch_ns * NS_TO_MS
-                        if child.max_dispatch_ns is not None
-                        else float("nan")
-                    ),
-                })
-            walk(child, location, full_path)
+        if node.kernel_launches > 0:
+            has_calls = len(node.invocation_ids) > 0
+            calls = len(node.invocation_ids) if has_calls else float("nan")
+            dispatches = node.kernel_launches
+            total_gpu_ms = node.total_duration_ms
+            rows.append({
+                "Operator": "/".join(path_parts),
+                "Location": location,
+                "Calls": calls,
+                "Dispatches": dispatches,
+                "Dispatches_Per_Call": (
+                    dispatches / calls if has_calls else float("nan")
+                ),
+                "Total_GPU": total_gpu_ms,
+                "Pct_Total_GPU": float("nan"),
+                "Mean_Per_Call": (total_gpu_ms / calls if has_calls else float("nan")),
+                "Mean_Per_Dispatch": (
+                    node.mean_dispatch_ns * NS_TO_MS
+                    if node.mean_dispatch_ns is not None
+                    else float("nan")
+                ),
+                "Min_Dispatch": (
+                    node.min_dispatch_ns * NS_TO_MS
+                    if node.min_dispatch_ns is not None
+                    else float("nan")
+                ),
+                "Max_Dispatch": (
+                    node.max_dispatch_ns * NS_TO_MS
+                    if node.max_dispatch_ns is not None
+                    else float("nan")
+                ),
+            })
+        for child in node.children:
+            walk(child, _node_source_location(child), path_parts + [child.name])
 
-    for location, root in call_trees.items():
-        walk(root, location, [])
+    all_roots: list[CallTreeNode] = []
+    for roots in call_trees.values():
+        all_roots.extend(roots)
+        for root in roots:
+            walk(root, _node_source_location(root), [root.name])
 
     if not rows:
         return pd.DataFrame(columns=columns)
 
-    grand_total_ms = sum(root.total_duration_ms for root in call_trees.values())
+    rows = _aggregate_operator_summary_rows(rows)
+    grand_total_ms = sum(root.total_duration_ms for root in all_roots)
     if grand_total_ms > 0:
-        for r in rows:
-            r["Pct_Total_GPU"] = 100.0 * r["Total_GPU"] / grand_total_ms
+        for row in rows:
+            row["Pct_Total_GPU"] = 100.0 * row["Total_GPU"] / grand_total_ms
 
     df = pd.DataFrame(rows, columns=columns)
     return df.sort_values(
-        by=["Total_GPU", "Operator", "Location"],
-        ascending=[False, True, True],
+        by=["Total_GPU", "Operator"],
+        ascending=[False, True],
         ignore_index=True,
     )
 
 
+_REQUIRED_MARKER_COLUMNS = (
+    "Function",
+    "Thread_Id",
+    "Correlation_ID",
+    "Start_Timestamp",
+    "End_Timestamp",
+)
+
+
+def _find_ml_api_trace_csv_pairs(workload_dir: Path) -> list[tuple[Path, Path]]:
+    """Return (marker, counter) paths for each profiling pass."""
+    marker_glob = f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
+    pairs: list[tuple[Path, Path]] = []
+    for marker_path in sorted(workload_dir.glob(marker_glob)):
+        marker_csv_name = marker_path.name
+        if marker_csv_name.endswith(csv_compression.GZIP_SUFFIX):
+            marker_csv_name = marker_csv_name[: -len(csv_compression.GZIP_SUFFIX)]
+        counter_csv_name = marker_csv_name.replace(
+            "_marker_api_trace.csv", "_counter_collection.csv"
+        )
+        counter_path = csv_compression.compressed_name(
+            marker_path.parent / counter_csv_name
+        )
+        if counter_path.is_file():
+            pairs.append((marker_path, counter_path))
+    return pairs
+
+
+def _rename_correlation_id_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Correlation_Id to Correlation_ID when that alias is present."""
+    if "Correlation_Id" in frame.columns and "Correlation_ID" not in frame.columns:
+        return frame.rename(columns={"Correlation_Id": "Correlation_ID"})
+    if "Correlation_Id" in frame.columns:
+        return frame.drop(columns=["Correlation_Id"])
+    return frame
+
+
+def _load_marker_trace_dataframe(marker_path: Path) -> pd.DataFrame:
+    """Load one marker CSV and keep the columns used by later analyze steps."""
+    marker_df = _rename_correlation_id_column(pd.read_csv(marker_path))
+    missing_columns = [
+        column for column in _REQUIRED_MARKER_COLUMNS if column not in marker_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            "analysis",
+            f"Marker CSV {marker_path} is missing required columns {missing_columns}",
+        )
+    kept_columns = list(_REQUIRED_MARKER_COLUMNS)
+    if "GUID" in marker_df.columns:
+        kept_columns.append("GUID")
+    null_columns = [column for column in kept_columns if marker_df[column].isna().any()]
+    if null_columns:
+        console_error(
+            "analysis",
+            f"Marker CSV {marker_path} has null values in {null_columns}",
+        )
+    return marker_df[kept_columns].copy()
+
+
+_DISPATCH_KEEP_COLUMNS = (
+    "Kernel_Name",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Correlation_ID",
+    "Dispatch_ID",
+    "GUID",
+)
+
+
+def _collapse_counter_dispatches(counter_df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse long counter rows to one row per GPU dispatch."""
+    required_columns = (
+        "Correlation_ID",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+    )
+    missing_columns = [
+        column for column in required_columns if column not in counter_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            "analysis",
+            f"Counter CSV is missing required columns {missing_columns}",
+        )
+    if "Dispatch_ID" in counter_df.columns:
+        group_keys = ["Dispatch_ID"]
+        if "GUID" in counter_df.columns:
+            group_keys.append("GUID")
+    else:
+        group_keys = ["Kernel_Name", "Start_Timestamp", "End_Timestamp"]
+    keep_columns = [
+        column for column in _DISPATCH_KEEP_COLUMNS if column in counter_df.columns
+    ]
+    for group_key in group_keys:
+        if group_key not in keep_columns:
+            keep_columns.append(group_key)
+    collapsed = (
+        counter_df[keep_columns]
+        .groupby(group_keys, sort=False, dropna=False)
+        .first()
+        .reset_index()
+    )
+    return collapsed.rename(
+        columns={
+            "Start_Timestamp": "Kernel_Start_Timestamp",
+            "End_Timestamp": "Kernel_End_Timestamp",
+        }
+    )
+
+
+def _join_keys_for_marker_and_dispatch(
+    marker_df: pd.DataFrame,
+    dispatch_df: pd.DataFrame,
+) -> list[str]:
+    """Correlation_ID, plus GUID when both frames have that column."""
+    join_keys = ["Correlation_ID"]
+    if "GUID" in marker_df.columns and "GUID" in dispatch_df.columns:
+        join_keys.append("GUID")
+    return join_keys
+
+
+def _outer_join_dispatches_and_markers(
+    dispatch_df: pd.DataFrame,
+    marker_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Full-outer-join unique dispatches with one pass of marker rows."""
+    marker_ordered = marker_df.copy()
+    marker_ordered["_marker_order"] = range(len(marker_ordered))
+    return pd.merge(
+        dispatch_df,
+        marker_ordered,
+        on=_join_keys_for_marker_and_dispatch(marker_df, dispatch_df),
+        how="outer",
+    )
+
+
+def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
+    """Load one counter CSV, collapse dispatches, and outer-join markers."""
+    counter_df = _rename_correlation_id_column(pd.read_csv(pair.counter_path))
+    dispatch_df = _collapse_counter_dispatches(counter_df)
+    return _outer_join_dispatches_and_markers(dispatch_df, pair.marker_df)
+
+
+_STITCH_STRIP_RE = re.compile(r"\|(?:seqNr|tid|ftid)=[^|]*")
+
+
+def _stitch_key_from_function(function_value: object) -> str:
+    """Function with |seqNr=, |tid=, and |ftid= tokens stripped."""
+    return _STITCH_STRIP_RE.sub("", str(function_value))
+
+
+def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
+    """Add stitch_key and function_ordinal in this pass's marker order."""
+    if pass_frame.empty:
+        result = pass_frame.copy()
+        result["stitch_key"] = pd.Series(dtype=str)
+        result["function_ordinal"] = pd.Series(dtype=int)
+        return result
+    ordered = pass_frame
+    if "_marker_order" in pass_frame.columns:
+        ordered = pass_frame.sort_values("_marker_order", kind="mergesort")
+    result = ordered.copy()
+    result["stitch_key"] = result["Function"].map(_stitch_key_from_function)
+    result["function_ordinal"] = result.groupby("stitch_key", sort=False).cumcount()
+    return result
+
+
+_PASS_DROP_COLUMNS = (
+    "Correlation_ID",
+    "GUID",
+    "stitch_key",
+    "function_ordinal",
+    "_pass_id",
+    "_marker_order",
+)
+_COLLAPSED_MARKER_COLUMNS = (
+    "Function",
+    "Thread_Id",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Kernel_Names",
+    "Kernel_Start_Timestamps",
+    "Kernel_End_Timestamps",
+)
+
+
+def _kernel_names_as_set(names: object) -> frozenset[str]:
+    if names is None or (isinstance(names, float) and pd.isna(names)):
+        return frozenset()
+    return frozenset(str(name) for name in names)
+
+
+def _collapse_matching_markers_across_passes(
+    pass_frames: list[pd.DataFrame],
+) -> pd.DataFrame:
+    """Match operator occurrences across passes and keep the first pass row."""
+    if not pass_frames:
+        return pd.DataFrame(columns=list(_COLLAPSED_MARKER_COLUMNS))
+    labeled_frames = []
+    for pass_id, frame in enumerate(pass_frames):
+        labeled = frame.copy()
+        labeled["_pass_id"] = pass_id
+        labeled_frames.append(labeled)
+    concatenated = pd.concat(labeled_frames, ignore_index=True)
+    if concatenated.empty:
+        collapsed = concatenated
+    elif len(pass_frames) == 1:
+        collapsed = concatenated
+    else:
+        pass_counts = [len(frame) for frame in pass_frames]
+        if len(set(pass_counts)) != 1:
+            console_error(
+                "analysis",
+                str(
+                    PassMarkerMismatchError(
+                        stitch_key="",
+                        function_ordinal=None,
+                        disagreeing_values=f"per-pass marker counts {pass_counts}",
+                    )
+                ),
+            )
+        expected_passes = set(range(len(pass_frames)))
+        records: list[dict[str, Any]] = []
+        grouped = concatenated.groupby(
+            ["stitch_key", "function_ordinal"], sort=False, dropna=False
+        )
+        for (stitch_key, ordinal), group in grouped:
+            present_passes = set(group["_pass_id"].tolist())
+            missing_passes = sorted(expected_passes - present_passes)
+            if missing_passes:
+                console_error(
+                    "analysis",
+                    str(
+                        PassMarkerMismatchError(
+                            stitch_key=str(stitch_key),
+                            function_ordinal=int(ordinal),
+                            disagreeing_values=f"missing passes {missing_passes}",
+                        )
+                    ),
+                )
+            kernel_name_sets = [
+                _kernel_names_as_set(
+                    group[group["_pass_id"] == pass_id].iloc[0]["Kernel_Names"]
+                )
+                for pass_id in range(len(pass_frames))
+            ]
+            if len(set(kernel_name_sets)) != 1:
+                console_error(
+                    "analysis",
+                    str(
+                        PassMarkerMismatchError(
+                            stitch_key=str(stitch_key),
+                            function_ordinal=int(ordinal),
+                            disagreeing_values=f"Kernel_Names {list(kernel_name_sets)}",
+                        )
+                    ),
+                )
+            first = group[group["_pass_id"] == 0].iloc[0]
+            records.append({
+                "Function": first["Function"],
+                "Thread_Id": first["Thread_Id"],
+                "Start_Timestamp": first["Start_Timestamp"],
+                "End_Timestamp": first["End_Timestamp"],
+                "Kernel_Names": first["Kernel_Names"],
+                "Kernel_Start_Timestamps": first["Kernel_Start_Timestamps"],
+                "Kernel_End_Timestamps": first["Kernel_End_Timestamps"],
+            })
+        collapsed = pd.DataFrame.from_records(records)
+    drop_columns = [
+        column for column in _PASS_DROP_COLUMNS if column in collapsed.columns
+    ]
+    if drop_columns:
+        collapsed = collapsed.drop(columns=drop_columns)
+    if collapsed.empty:
+        return collapsed
+    return collapsed.sort_values(
+        by=["Thread_Id", "Start_Timestamp", "End_Timestamp"],
+        kind="mergesort",
+    )
+
+
+def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
+    """Dispatches whose Correlation_ID is not in that pass's marker CSV."""
+    return joined_df[
+        joined_df["Kernel_Name"].notna() & joined_df["Function"].isna()
+    ].copy()
+
+
+def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
+    """Collect Kernel_Names for each marker identity in one pass row."""
+    if joined_df.empty:
+        return joined_df
+    ordered = joined_df
+    if "_marker_order" in joined_df.columns:
+        ordered = joined_df.sort_values("_marker_order", kind="mergesort")
+    group_keys = ["Function", "Thread_Id", "Start_Timestamp", "End_Timestamp"]
+    records: list[dict[str, Any]] = []
+    for _, group in ordered.groupby(group_keys, sort=False, dropna=False):
+        first = group.iloc[0]
+        kernel_names: list[str] = []
+        kernel_starts: list[object] = []
+        kernel_ends: list[object] = []
+        for row in group.itertuples(index=False):
+            kernel_name = row.Kernel_Name
+            if pd.isna(kernel_name):
+                continue
+            kernel_names.append(str(kernel_name))
+            kernel_starts.append(row.Kernel_Start_Timestamp)
+            kernel_ends.append(row.Kernel_End_Timestamp)
+        record: dict[str, Any] = {
+            "Function": first["Function"],
+            "Thread_Id": first["Thread_Id"],
+            "Start_Timestamp": first["Start_Timestamp"],
+            "End_Timestamp": first["End_Timestamp"],
+            "Correlation_ID": first["Correlation_ID"],
+            "Kernel_Names": kernel_names,
+            "Kernel_Start_Timestamps": kernel_starts,
+            "Kernel_End_Timestamps": kernel_ends,
+        }
+        if "GUID" in group.columns:
+            record["GUID"] = first["GUID"]
+        if "_marker_order" in group.columns:
+            record["_marker_order"] = first["_marker_order"]
+        records.append(record)
+    grouped = pd.DataFrame.from_records(records)
+    if "_marker_order" in grouped.columns:
+        grouped = grouped.sort_values("_marker_order", kind="mergesort")
+    return grouped
+
+
 @demarcate
 def process_ml_api_trace_output(
+    workload: schema.Workload,
     workload_dir: str,
-) -> tuple[pd.DataFrame, Path]:
-    """
-    Build consolidated ML API trace rows and prepare output directory.
-
-    - Performs inner join on Correlation_ID, filtering out unmatched entries
-    - Consolidates data across passes and normalizes required columns
-    - Prepares a clean workload_dir/ml_api_trace/ directory for output files
-
-    Returns (consolidated_df, ml_api_trace_path) on success.
-    """
+) -> None:
+    """Load, join, nest, and validate ML API marker rows for operator analyze."""
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
-    marker_api_trace_csvs = list(
-        Path(workload_dir).glob(
-            f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
-        )
-    )
-    counter_collection_csvs = [
-        markers_file.parent
-        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-        for markers_file in marker_api_trace_csvs
-    ]
-    existing_csv_files = [
-        [marker_api_trace_csvs[i], counter_collection_csvs[i]]
-        for i in range(len(marker_api_trace_csvs))
-        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
-    ]
-
-    if not existing_csv_files:
+    csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
+    if not csv_pairs:
         console_warning(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with ML API tracing enabled "
             "(e.g., via '--torch-trace')."
         )
-        return pd.DataFrame(), Path(f"{workload_dir}/ml_api_trace")
+        workload.ml_api_trace_pairs = []
+        return
 
-    ml_api_trace_path = Path(f"{workload_dir}/ml_api_trace")
-    if ml_api_trace_path.exists():
-        shutil.rmtree(ml_api_trace_path)
-        console_log(f"Removed previous ml_api_trace directory: {ml_api_trace_path}")
-    ml_api_trace_path.mkdir(parents=True, exist_ok=True)
-
-    # Join marker and counter data
-    def _merge_pair(
-        marker_path: Path,
-        counter_path: Path,
-        join_keys: tuple[str, ...] = ("Correlation_ID",),
-    ) -> pd.DataFrame:
-        """Merge a pair of marker and counter csv files on specified keys,
-        return the merged dataframe.
-        """
-        marker_df = pd.read_csv(marker_path)
-        counter_df = pd.read_csv(counter_path)
-        # Normalize column names to handle case inconsistencies
-        marker_df.columns = marker_df.columns.str.replace(
-            "Correlation_Id", "Correlation_ID"
+    workload.ml_api_trace_pairs = [
+        schema.MlApiTracePair(
+            marker_df=_load_marker_trace_dataframe(marker_path),
+            counter_path=counter_path,
         )
-        counter_df.columns = counter_df.columns.str.replace(
-            "Correlation_Id", "Correlation_ID"
-        )
-
-        return pd.merge(
-            marker_df,
-            counter_df,
-            on=join_keys,
-            how="inner",
-            suffixes=("_function", "_kernel"),
-        )
-
-    # If rocpd format, pairs are present in workload_dir, one pair per fbase
-    # If csv format, pairs are present in workload/{fbase}/ one pair per process
-    # Extracting the output_format used in profiling from the path of a marker file
-    if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
-        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
-    else:
-        join_keys = ("Correlation_ID",)  # output_format "csv"
-    consolidated_df = pd.concat(
-        [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
-        ignore_index=True,
-    )
-    required_columns = [
-        "Function",
-        "Kernel_Name",
-        "Counter_Name",
-        "Counter_Value",
-        "Start_Timestamp_function",
-        "End_Timestamp_function",
-        "Start_Timestamp_kernel",
-        "End_Timestamp_kernel",
+        for marker_path, counter_path in csv_pairs
     ]
-    missing_columns = [
-        col for col in required_columns if col not in consolidated_df.columns
-    ]
-    if missing_columns:
+    unmatched_kernel_frames: list[pd.DataFrame] = []
+    for pair in workload.ml_api_trace_pairs:
+        pair.joined_df = _join_pass_marker_and_counter(pair)
+        unmatched_kernel_frames.append(_unmatched_kernel_rows(pair.joined_df))
+    workload.unmatched_kernel_frames = unmatched_kernel_frames
+    nonempty_unmatched = [frame for frame in unmatched_kernel_frames if not frame.empty]
+    if nonempty_unmatched:
         console_error(
-            f"Consolidated ML API trace is missing required columns {missing_columns}"
+            "analysis",
+            str(
+                UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True))
+            ),
         )
-        raise ValueError(
-            f"Consolidated ML API trace is missing required columns {missing_columns}"
+    for pair in workload.ml_api_trace_pairs:
+        marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()
+        pair.joined_df = _add_stitch_key_and_ordinal(
+            _group_kernels_onto_markers(marker_rows)
         )
-    # Backend is added by utils_profile._augment_marker_csv. When absent,
-    # default to "torch".
-    has_backend = "Backend" in consolidated_df.columns
-    projection = [*required_columns, "Backend"] if has_backend else required_columns
-    consolidated_df = consolidated_df[projection]
-    if not has_backend:
-        consolidated_df = consolidated_df.assign(Backend="torch")
-    if consolidated_df.drop(columns=["Backend"]).isnull().values.any():
-        console_warning("Consolidated ML API trace contains missing values")
-        raise ValueError("Consolidated ML API trace contains missing values")
-    consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
-    split_columns = consolidated_df["Function"].str.split(":#", expand=True)
-    consolidated_df["Operator_Name"] = (
-        split_columns[0] if len(split_columns.columns) > 0 else None
+    workload.ml_api_trace_df = _apply_parsed_function_columns(
+        _collapse_matching_markers_across_passes([
+            pair.joined_df for pair in workload.ml_api_trace_pairs
+        ])
     )
-    consolidated_df["Context_Id"] = (
-        split_columns[1] if len(split_columns.columns) > 1 else None
-    )
-    consolidated_df.drop(columns=["Function"], inplace=True)
-    consolidated_df = consolidated_df[
-        [
-            "Operator_Name",
-            "Context_Id",
-            "Backend",
-            "Kernel_Name",
-            "Counter_Name",
-            "Counter_Value",
-            "Start_Timestamp_function",
-            "End_Timestamp_function",
-            "Start_Timestamp_kernel",
-            "End_Timestamp_kernel",
-        ]
-    ]
-    if consolidated_df.isnull().values.any():
-        console_error(
-            "Missing values in consolidated ML API trace after splitting ",
-            "the Function name.",
-        )
-        raise ValueError("Missing values in consolidated ML API trace after splitting")
-
-    return consolidated_df, ml_api_trace_path
+    workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df)
+    attach_unlocated_trees_by_forward_thread(workload.ml_api_call_trees)
+    _validate_all_markers_nested(workload.ml_api_trace_df, workload.ml_api_call_trees)
 
 
 def validate_workload(path: str) -> None:
