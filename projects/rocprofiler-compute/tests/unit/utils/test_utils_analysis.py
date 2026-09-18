@@ -12,13 +12,116 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
+from utils import csv_compression, schema
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
     NodeRollup,
     build_operator_summary,
+    nest_marker_intervals,
+    parse_marker_function,
+    process_ml_api_trace_output,
     rollup_node_stats,
 )
+
+
+def record_console_error_and_exit(monkeypatch):
+    """Replace console_error so tests see the message and SystemExit."""
+    messages = []
+
+    def _console_error(*argv, exit=True, exit_code=1):
+        if len(argv) > 1:
+            messages.append(str(argv[1]))
+        elif argv:
+            messages.append(str(argv[0]))
+        else:
+            messages.append("")
+        if exit:
+            raise SystemExit(exit_code)
+
+    monkeypatch.setattr(utils_analysis, "console_error", _console_error)
+    return messages
+
+
+def write_ml_api_pass(workload_dir, pass_id, marker_rows, counter_rows):
+    """Write one gzip marker/counter pair for process_ml_api_trace_output."""
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"ml_api_trace_pmc_perf_{pass_id}"
+    marker_path = csv_compression.compressed_name(
+        workload_dir / f"{stem}_marker_api_trace.csv"
+    )
+    counter_path = csv_compression.compressed_name(
+        workload_dir / f"{stem}_counter_collection.csv"
+    )
+    pd.DataFrame(marker_rows).to_csv(marker_path, index=False, compression="gzip")
+    pd.DataFrame(counter_rows).to_csv(counter_path, index=False, compression="gzip")
+
+
+def parsed_marker_row(
+    operator_name,
+    start,
+    end,
+    thread_id=1,
+    file_name="",
+    line_number="",
+    backend="torch",
+    kernel_names=None,
+    kernel_starts=None,
+    kernel_ends=None,
+):
+    """One already-parsed marker interval for nest_marker_intervals."""
+    return {
+        "Operator_Name": operator_name,
+        "Thread_Id": thread_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+        "File_Name": file_name,
+        "Line_Number": line_number,
+        "Backend": backend,
+        "Kernel_Names": [] if kernel_names is None else kernel_names,
+        "Kernel_Start_Timestamps": [] if kernel_starts is None else kernel_starts,
+        "Kernel_End_Timestamps": [] if kernel_ends is None else kernel_ends,
+    }
+
+
+LINEAR_FORWARD_WIRE = (
+    "nn.Module.Linear.forward:simple_torch_code.py:19"
+    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+)
+ADDMM_WIRE = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+
+
+def linear_marker_row(correlation_id, start, end, thread_id=1, function=None):
+    return {
+        "Function": LINEAR_FORWARD_WIRE if function is None else function,
+        "Thread_Id": thread_id,
+        "Correlation_ID": correlation_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+    }
+
+
+def counter_row(
+    correlation_id,
+    kernel_name,
+    start,
+    end,
+    dispatch_id=1,
+    counter_name="SQ_WAVES",
+    guid=None,
+):
+    row = {
+        "Correlation_ID": correlation_id,
+        "Kernel_Name": kernel_name,
+        "Dispatch_ID": dispatch_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+        "Counter_Name": counter_name,
+    }
+    if guid is not None:
+        row["GUID"] = guid
+    return row
+
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
@@ -2378,3 +2481,591 @@ def test_undersampled_kernel_nullified_against_perfmon_file_count(
     # Timestamps and kernel name preserved for Top Stats.
     assert result["Start_Timestamp"].iloc[0] == 1000
     assert result["Kernel_Name"].iloc[0] == "kernel_a"
+
+
+def test_parse_marker_function_aten_addmm_n_a():
+    parsed = parse_marker_function(
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+    )
+    assert parsed["Operator_Name"] == "aten::addmm"
+    assert parsed["File_Name"] == ""
+    assert parsed["Line_Number"] == ""
+    assert parsed["T_Tid"] == "1"
+    assert parsed["Backend"] == "torch"
+
+
+def test_parse_marker_function_autograd_keeps_inner_colon_and_space():
+    parsed = parse_marker_function(
+        "autograd::engine::evaluate_function: SumBackward0:n/a"
+        "|seqNr=n/a|tid=2|ftid=0|scope=FUNCTION|args=n/a|torch"
+    )
+    assert (
+        parsed["Operator_Name"] == "autograd::engine::evaluate_function: SumBackward0"
+    )
+    assert parsed["File_Name"] == ""
+    assert parsed["Line_Number"] == ""
+
+
+def test_parse_marker_function_linear_forward_file_and_line():
+    parsed = parse_marker_function(
+        "nn.Module.Linear.forward:simple_torch_code.py:19"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+    )
+    assert parsed["Operator_Name"] == "nn.Module.Linear.forward"
+    assert parsed["File_Name"] == "simple_torch_code.py"
+    assert parsed["Line_Number"] == 19
+    assert parsed["T_Tid"] == ""
+
+
+def test_parse_marker_function_triton_backend_and_location():
+    parsed = parse_marker_function(
+        "triton.JITFunction.rmsnorm_kernel:llama_triton_layer.py:381"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=n/a|triton"
+    )
+    assert parsed["Backend"] == "triton"
+    assert parsed["File_Name"] == "llama_triton_layer.py"
+    assert parsed["Line_Number"] == 381
+
+
+def test_parse_marker_function_user_range_without_keys():
+    parsed = parse_marker_function("training_loop")
+    assert parsed["Operator_Name"] == "training_loop"
+    assert parsed["File_Name"] == ""
+    assert parsed["Line_Number"] == ""
+    assert parsed["Backend"] == "user"
+
+
+def test_parse_marker_function_stacked_wire_exits(monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        parse_marker_function("triton.JITFunction.foo:#1@file.py:1")
+    assert excinfo.value.code == 1
+    assert "Stacked marker wire is not supported" in messages[0]
+
+
+def test_parse_marker_function_ftid_and_thread_id_unchanged(tmp_path):
+    parsed = parse_marker_function(
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=1|scope=FUNCTION|args=()|torch"
+    )
+    assert parsed["F_Tid"] == "1"
+    workload_dir = tmp_path / "ftid_thread"
+    function = (
+        "nn.Module.Linear.forward:simple_torch_code.py:19"
+        "|seqNr=n/a|tid=n/a|ftid=1|scope=n/a|args=()|torch"
+    )
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [
+            {
+                "Function": function,
+                "Thread_Id": 42,
+                "Correlation_ID": 8,
+                "Start_Timestamp": 20,
+                "End_Timestamp": 70,
+            }
+        ],
+        [
+            {
+                "Correlation_ID": 8,
+                "Kernel_Name": "addmm_kernel",
+                "Dispatch_ID": 1,
+                "Start_Timestamp": 30,
+                "End_Timestamp": 60,
+                "Counter_Name": "SQ_WAVES",
+            }
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert workload.ml_api_trace_df["Thread_Id"].tolist() == [42]
+    assert workload.ml_api_trace_df["F_Tid"].tolist() == ["1"]
+
+
+def test_nest_marker_intervals_three_deep_with_file_line():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row(
+                "nn.Module.SimpleModel.forward",
+                0,
+                100,
+                file_name="simple_torch_code.py",
+                line_number=27,
+            ),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                10,
+                80,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+            parsed_marker_row("aten::addmm", 20, 70),
+        ])
+    )
+    roots = forest["1"]
+    assert len(roots) == 1
+    simple = roots[0]
+    linear = simple.children[0]
+    addmm = linear.children[0]
+    assert simple.name == "nn.Module.SimpleModel.forward"
+    assert simple.file_name == "simple_torch_code.py"
+    assert simple.line_number == 27
+    assert linear.name == "nn.Module.Linear.forward"
+    assert linear.file_name == "simple_torch_code.py"
+    assert linear.line_number == 19
+    assert addmm.name == "aten::addmm"
+    assert addmm.file_name is None
+    assert addmm.line_number is None
+
+
+def test_nest_marker_intervals_disjoint_linear_siblings():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row(
+                "nn.Module.SimpleModel.forward",
+                0,
+                200,
+                file_name="simple_torch_code.py",
+                line_number=27,
+            ),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                10,
+                80,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+            parsed_marker_row(
+                "nn.Module.Linear.forward",
+                90,
+                160,
+                file_name="simple_torch_code.py",
+                line_number=19,
+            ),
+        ])
+    )
+    siblings = forest["1"][0].children
+    assert [child.name for child in siblings] == [
+        "nn.Module.Linear.forward",
+        "nn.Module.Linear.forward",
+    ]
+    assert siblings[0].call_count == 1
+    assert siblings[1].call_count == 1
+    assert siblings[0] is not siblings[1]
+
+
+def test_nest_marker_intervals_adjacent_ranges_are_siblings():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row("A", 0, 50, backend="user"),
+            parsed_marker_row("B", 50, 80, backend="user"),
+        ])
+    )
+    roots = forest["1"]
+    assert [root.name for root in roots] == ["A", "B"]
+
+
+def test_nest_marker_intervals_overlap_exits(monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        nest_marker_intervals(
+            pd.DataFrame([
+                parsed_marker_row("A", 0, 50, backend="user"),
+                parsed_marker_row("B", 40, 80, backend="user"),
+            ])
+        )
+    assert excinfo.value.code == 1
+    assert "OverlappingMarkerRangeError" in messages[0] or (
+        "Overlapping marker ranges" in messages[0] and "B" in messages[0]
+    )
+
+
+def test_nest_marker_intervals_tensor_backward_and_autograd_worker(monkeypatch):
+    nested = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row(
+                "torch.Tensor.backward",
+                0,
+                100,
+                file_name="simple_torch_code.py",
+                line_number=52,
+            ),
+        ])
+    )
+    assert nested["1"][0].name == "torch.Tensor.backward"
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        nest_marker_intervals(
+            pd.DataFrame([
+                parsed_marker_row(
+                    "torch.Tensor.backward",
+                    0,
+                    100,
+                    file_name="simple_torch_code.py",
+                    line_number=52,
+                ),
+                parsed_marker_row(
+                    "autograd::engine::evaluate_function: AddmmBackward0",
+                    10,
+                    40,
+                    thread_id=2,
+                ),
+            ])
+        )
+    assert excinfo.value.code == 1
+    assert "MissingSourceLocationError" in messages[0] or (
+        "Missing source location" in messages[0] and "AddmmBackward0" in messages[0]
+    )
+
+
+def test_nest_marker_intervals_user_root_without_file():
+    forest = nest_marker_intervals(
+        pd.DataFrame([parsed_marker_row("training_loop", 0, 100, backend="user")])
+    )
+    root = forest["1"][0]
+    assert root.name == "training_loop"
+    assert root.backend == "user"
+    assert root.file_name is None
+
+
+def test_nest_marker_intervals_torch_root_without_file_exits(monkeypatch):
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        nest_marker_intervals(pd.DataFrame([parsed_marker_row("aten::addmm", 0, 50)]))
+    assert excinfo.value.code == 1
+    assert "MissingSourceLocationError" in messages[0] or (
+        "Missing source location" in messages[0] and "aten::addmm" in messages[0]
+    )
+
+
+def test_process_ml_api_trace_output_leaves_no_ml_api_trace_dir(tmp_path):
+    workload_dir = tmp_path / "no_ml_api_dir"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [
+            {
+                "Function": (
+                    "nn.Module.Linear.forward:simple_torch_code.py:19"
+                    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+                ),
+                "Thread_Id": 1,
+                "Correlation_ID": 4,
+                "Start_Timestamp": 10,
+                "End_Timestamp": 80,
+            }
+        ],
+        [
+            {
+                "Correlation_ID": 4,
+                "Kernel_Name": "addmm_kernel",
+                "Dispatch_ID": 1,
+                "Start_Timestamp": 20,
+                "End_Timestamp": 70,
+                "Counter_Name": "SQ_WAVES",
+            }
+        ],
+    )
+    process_ml_api_trace_output(schema.Workload(), str(workload_dir))
+    assert not (workload_dir / "ml_api_trace").exists()
+
+
+def test_build_operator_summary_location_from_node_file_line():
+    located = CallTreeNode(
+        name="linear",
+        file_name="simple_torch_code.py",
+        line_number=19,
+    )
+    located.kernel_launches = 1
+    located.total_duration_ms = 1.0
+    located.invocation_ids.add("10")
+    missing = CallTreeNode(name="addmm")
+    missing.kernel_launches = 1
+    missing.total_duration_ms = 0.5
+    missing.invocation_ids.add("20")
+    located.children = [missing]
+    summary = build_operator_summary({"1": [located]})
+    by_name = summary.set_index("Operator")
+    assert by_name.loc["linear", "Location"] == "simple_torch_code.py:19"
+    assert by_name.loc["linear/addmm", "Location"] == ""
+
+
+def test_process_outer_join_keeps_wrap_with_empty_kernel_names(tmp_path):
+    workload_dir = tmp_path / "empty_kernels"
+    workload_dir.mkdir()
+    pd.DataFrame([linear_marker_row(1, 10, 80)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    assert workload.ml_api_call_trees["1"][0].kernels == {}
+
+
+def test_process_collapses_two_counter_rows_to_one_dispatch_duration(tmp_path):
+    workload_dir = tmp_path / "two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 200)],
+        [
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.launches == 1
+    assert stats.total_duration_ns == 50
+
+
+def test_process_two_dispatches_same_marker_keep_both_kernel_names(tmp_path):
+    workload_dir = tmp_path / "two_kernels"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(5, 0, 200)],
+        [
+            counter_row(5, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(5, "kernel_b", 30, 40, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    names = list(workload.ml_api_trace_df["Kernel_Names"].iloc[0])
+    assert names == ["kernel_a", "kernel_b"]
+    assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
+
+
+def test_process_unmatched_kernel_exits_before_ml_api_trace_df(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "unmatched"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(99, "orphan_kernel", 10, 20)],
+    )
+    messages = record_console_error_and_exit(monkeypatch)
+    workload = schema.Workload()
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "UnaccountedKernelError" in messages[0] or (
+        "no matching ROCTX marker" in messages[0] and "orphan_kernel" in messages[0]
+    )
+    assert len(workload.unmatched_kernel_frames) == 1
+    assert not workload.unmatched_kernel_frames[0].empty
+    assert workload.ml_api_trace_df.empty
+
+
+def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "unmatched_two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    record_console_error_and_exit(monkeypatch)
+    workload = schema.Workload()
+    with pytest.raises(SystemExit):
+        process_ml_api_trace_output(workload, str(workload_dir))
+    unmatched = workload.unmatched_kernel_frames[0]
+    assert len(unmatched) == 1
+    assert unmatched.iloc[0]["Kernel_Name"] == "orphan_kernel"
+
+
+def test_process_joins_on_guid_and_correlation_id(tmp_path):
+    workload_dir = tmp_path / "guid_join"
+    marker = linear_marker_row(1, 0, 100)
+    marker["GUID"] = "gpu-a"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [marker],
+        [counter_row(1, "addmm_kernel", 10, 40, guid="gpu-a")],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == ["addmm_kernel"]
+
+
+def test_process_one_pass_builds_ml_api_trace_df(tmp_path):
+    workload_dir = tmp_path / "one_pass"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "addmm_kernel", 10, 40)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+def test_process_two_passes_collapse_to_one_launch(tmp_path):
+    workload_dir = tmp_path / "two_pass_collapse"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1040, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+def test_process_two_wraps_same_stitch_key_keep_ordinals(tmp_path):
+    workload_dir = tmp_path / "two_ordinals"
+    first = linear_marker_row(1, 0, 50)
+    second = linear_marker_row(2, 60, 110)
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [first, second],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(8, 200, 250), linear_marker_row(9, 260, 310)],
+        [
+            counter_row(8, "kernel_a", 210, 220, dispatch_id=1),
+            counter_row(9, "kernel_b", 270, 280, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 2
+    roots = workload.ml_api_call_trees["1"]
+    assert len(roots) == 2
+    assert [root.call_count for root in roots] == [1, 1]
+
+
+def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "kernel_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "kernel_a", 10, 40)],
+    )
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([linear_marker_row(1, 0, 100)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(schema.Workload(), str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "PassMarkerMismatchError" in messages[0] or "Kernel_Names" in messages[0]
+
+
+def test_process_pass_marker_count_mismatch_exits(tmp_path, monkeypatch):
+    workload_dir = tmp_path / "count_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 50), linear_marker_row(2, 60, 110)],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(1, 0, 50)],
+        [counter_row(1, "kernel_a", 10, 20)],
+    )
+    messages = record_console_error_and_exit(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(schema.Workload(), str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "PassMarkerMismatchError" in messages[0] or (
+        "per-pass marker counts" in messages[0]
+    )
