@@ -103,6 +103,8 @@ class ipcSocketCom {
     // Creating socket
     if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == 0) {
       perror("Socket failure: Socket creation failed");
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -113,6 +115,9 @@ class ipcSocketCom {
     size_t len = strlen(name);
     if (len > (sizeof(servaddr.sun_path) - 1)) {
       fprintf(stderr, "Socket failure: Cannot bind provided name to socket. Name too large\n");
+      close(server_fd);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -120,6 +125,9 @@ class ipcSocketCom {
 
     if (bind(server_fd, (struct sockaddr *)&servaddr, SUN_LEN(&servaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
+      close(server_fd);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -142,6 +150,8 @@ class ipcSocketCom {
 
     if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("IPC failure:Socket creation error");
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -153,11 +163,17 @@ class ipcSocketCom {
 
     if (strlen(name) > (sizeof(cliaddr.sun_path) - 1)) {
       fprintf(stderr, "Socket failure: Cannot bind provided name to socket. Name too large\n");
+      close(sock);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
     strcpy(cliaddr.sun_path, name);
     if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
+      close(sock);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
