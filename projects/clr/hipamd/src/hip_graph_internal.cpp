@@ -1129,7 +1129,7 @@ hipError_t GraphExecBase::EnsureCrossDeviceStream() {
   if (cross_device_stream_ != nullptr) {
     return hipSuccess;
   }
-  if (captureDeviceId_ < 0 || captureDeviceId_ >= g_devices.size() ||
+  if (captureDeviceId_ < 0 || static_cast<size_t>(captureDeviceId_) >= g_devices.size() ||
       g_devices[captureDeviceId_] == nullptr) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
             "[hipGraph] Invalid capture device ID %d for cross-device stream creation",
