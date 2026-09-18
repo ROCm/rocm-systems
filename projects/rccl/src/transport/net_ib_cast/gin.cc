@@ -13,6 +13,7 @@
 #include "alloc.h"
 
 #include <sched.h>
+#include <time.h>
 
 const int IBCAST_GIN_IB_ALLGATHER_TAG = 0xa0;
 const int IBCAST_GIN_IB_ALLTOALL_TAG = 0xa1;
@@ -354,12 +355,13 @@ struct IbCastRmaProxyMrHandle {
   int nSegments;
   // segOff[0]==0, segOff[nSegments]==size; per-segment local MRs.
   // base_vas indexed [rank*nSegments + seg].
-  // rkeys indexed [rank][seg][dev]:
-  //   (rank * nSegments + seg) * NCCL_IB_MAX_DEVS_PER_NIC + remDevIdx
+  // rkeys indexed [rank][seg][registration slot].
+  // ibDevNs indexed [rank][registration slot] = physical ibDevN, or -1.
   size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];
   struct ncclIbMrHandle* mrHandle[NCCL_RMA_MAX_SEGMENTS];
   uintptr_t* base_vas;
   uint32_t* rkeys;
+  int* ibDevNs;
 };
 
 // Fixed-size registration transcript. All ranks exchange this record even when
@@ -387,10 +389,13 @@ static inline uint32_t IbCastRmaRemoteRkey(const struct IbCastRmaProxyMrHandle* 
   return h->rkeys[IbCastRmaRkeyIndex(h->nSegments, rank, seg, remDevIdx)];
 }
 
+static int IbCastRmaDevSlot(const struct IbCastRmaProxyMrHandle* h, int rank, int ibDevN) {
+  if (h == NULL) return -1;
+  return ncclRmaDevSlotOf(h->ibDevNs, rank, ibDevN, NCCL_IB_MAX_DEVS_PER_NIC);
+}
+
 static inline int IbCastRmaSegOf(const struct IbCastRmaProxyMrHandle* h, uint64_t off) {
-  for (int s = 0; s < h->nSegments; s++)
-    if (off < h->segOff[s + 1]) return s;
-  return h->nSegments - 1;
+  return ncclRmaSegIndexOf(h->nSegments, h->segOff, off);
 }
 
 static inline uint64_t IbCastRmaMrBytes(const struct IbCastRmaProxyMrHandle* h) {
@@ -398,8 +403,7 @@ static inline uint64_t IbCastRmaMrBytes(const struct IbCastRmaProxyMrHandle* h) 
 }
 
 static inline bool IbCastRmaRangeOk(const struct IbCastRmaProxyMrHandle* h, uint64_t off, size_t size) {
-  uint64_t bytes = IbCastRmaMrBytes(h);
-  return off <= bytes && (uint64_t)size <= bytes - off;
+  return ncclRmaOffsetRangeOk(h->nSegments, h->segOff, off, size);
 }
 
 // Build a chained RDMA WR list, splitting at segment boundaries so every WR
@@ -413,10 +417,21 @@ static inline bool IbCastRmaRangeOk(const struct IbCastRmaProxyMrHandle* h, uint
 // RDMA_READ per remote segment touched by [remoteOff, remoteOff+size), each
 // landing a single byte in the caller's flush scratch.
 static ncclResult_t IbCastRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr,
-                                               enum ibv_wr_opcode opcode, uint64_t wrId, const struct ncclIbQp* qp,
-                                               struct IbCastRmaProxyMrHandle* localH, int localRank, uint64_t localOff,
-                                               struct IbCastRmaProxyMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
-                                               size_t size, const struct ibv_sge* flushSge) {
+                                               enum ibv_wr_opcode opcode, struct ncclIbNetCommBase* commBase,
+                                               const struct ncclIbQp* qp, struct IbCastRmaProxyMrHandle* localH,
+                                               int localRank, uint64_t localOff, struct IbCastRmaProxyMrHandle* remoteH,
+                                               int remoteRank, uint64_t remoteOff, size_t size,
+                                               const struct ibv_sge* flushSge) {
+  struct ncclIbNetCommDevBase* localDev = IbCastGetNetCommDevBase(commBase, qp->devIndex);
+  int localIbDevN = localDev->ibDevN;
+  int remoteIbDevN = commBase->remDevs[qp->remDevIdx].ibv_dev_index;
+  int rkeyIbDevN = ncclRmaRkeyIbDevN(localIbDevN, remoteIbDevN, flushSge != NULL);
+  int remoteDevSlot = IbCastRmaDevSlot(remoteH, remoteRank, rkeyIbDevN);
+  int localDevSlot = flushSge == NULL ? IbCastRmaDevSlot(localH, localRank, localIbDevN) : -1;
+  if (remoteDevSlot < 0 || (flushSge == NULL && localDevSlot < 0)) {
+    WARN("NET/IB-CAST/RMA: no registration slot for local/remote IB devices %d/%d", localIbDevN, remoteIbDevN);
+    return ncclInternalError;
+  }
   int n = 0;
   uint64_t lOff = localOff, rOff = remoteOff;
   size_t rem = size;
@@ -445,10 +460,9 @@ static ncclResult_t IbCastRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ib
     memset(&wr[n], 0, sizeof(wr[n]));
     memset(&sge[n], 0, sizeof(sge[n]));
     wr[n].opcode = opcode;
-    wr[n].wr_id = wrId;
     wr[n].next = NULL;
     wr[n].wr.rdma.remote_addr = (uint64_t)rAddr;
-    wr[n].wr.rdma.rkey = IbCastRmaRemoteRkey(remoteH, remoteRank, rs, qp->remDevIdx);
+    wr[n].wr.rdma.rkey = IbCastRmaRemoteRkey(remoteH, remoteRank, rs, remoteDevSlot);
     wr[n].sg_list = &sge[n];
     wr[n].num_sge = 1;
     if (flushSge != NULL) {
@@ -456,9 +470,9 @@ static ncclResult_t IbCastRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ib
       sge[n].length = 1;
     } else {
       uintptr_t lAddr = localH->base_vas[(size_t)localRank * localH->nSegments + ls] + (lOff - localH->segOff[ls]);
-      struct ibv_mr* lmr = localH->mrHandle[ls]->mrs[qp->devIndex];
+      struct ibv_mr* lmr = localH->mrHandle[ls]->mrs[localDevSlot];
       if (lmr == NULL) {
-        WARN("NET/IB-CAST/RMA: no local MR for segment %d device %d", ls, qp->devIndex);
+        WARN("NET/IB-CAST/RMA: no local MR for segment %d device %d", ls, localIbDevN);
         return ncclInternalError;
       }
       sge[n].addr = (uintptr_t)lAddr;
@@ -604,16 +618,28 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
   struct IbCastRmaProxyMrHandle* ginMrHandle = NULL;
   struct IbCastRmaProxyRegistration localRegistration = {};
+  struct IbCastRmaProxyRegistration registrationsStack[64];
   struct IbCastRmaProxyRegistration* registrations = NULL;
+  int registrationsHeap = 0;
   uintptr_t localVas[NCCL_RMA_MAX_SEGMENTS] = {};
   uint32_t localRkeys[NCCL_RMA_MAX_SEGMENTS * NCCL_IB_MAX_DEVS_PER_NIC] = {};
+  int localIbDevNs[NCCL_IB_MAX_DEVS_PER_NIC];
   ncclResult_t ret = ncclSuccess;
   int nSeg = 1;
   int registered = 0;
 
+  for (int d = 0; d < NCCL_IB_MAX_DEVS_PER_NIC; d++) localIbDevNs[d] = -1;
+
   *mhandle = NULL;
-  NCCLCHECK(ncclCalloc(&ginMrHandle, 1));
-  NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+  if (cComm->nranks <= (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
+    registrations = registrationsStack;
+    memset(registrations, 0, sizeof(*registrations) * (size_t)cComm->nranks);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+    registrationsHeap = 1;
+  }
+  ret = ncclCalloc(&ginMrHandle, 1);
+  if (ret != ncclSuccess) goto reconcile;
   // calloc zeroes nSegments; fail paths below only dereg `registered` complete
   // handles, so a half-built ncclIbMrHandle is never passed to deregMr.
 
@@ -643,8 +669,9 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
     registered = 1;
     ginMrHandle->segOff[1] = size;
     localVas[0] = (uintptr_t)data;
-  } else {
+  }
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  else {
     uintptr_t segPtr = (uintptr_t)data;
     size_t remaining = size;
     size_t cum = 0;
@@ -652,7 +679,8 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
       CUdeviceptr segBase = 0;
       size_t segSize = 0;
       CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, reconcile);
-      size_t inSeg = segSize - (segPtr - (uintptr_t)segBase);
+      // Host VMM can report segBase==0; subtracting then wraps the length.
+      size_t inSeg = (segBase == 0) ? segSize : segSize - (segPtr - (uintptr_t)segBase);
       size_t thisLen = remaining < inSeg ? remaining : inSeg;
       int segFd = -1;
       CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)segPtr, thisLen,
@@ -669,14 +697,16 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
       segPtr += thisLen;
       remaining -= thisLen;
     }
+    if (remaining != 0) {
+      WARN("NET/IB-CAST/RMA: enumerated %d/%d segments for buffer %p but %zu bytes remain unregistered", registered,
+           nSeg, data, remaining);
+      ret = ncclInvalidUsage;
+      goto reconcile;
+    }
     INFO(NCCL_NET | NCCL_REG, "NET/IB-CAST/RMA: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs", data,
          size, nSeg);
-#else
-    WARN("NET/IB-CAST/RMA: multi-segment (%d) registration requires HIP >= 7.12.60540", nSeg);
-    ret = ncclInvalidUsage;
-    goto reconcile;
-#endif
   }
+#endif
 
   {
     struct ncclIbNetCommBase* recvBase = (struct ncclIbNetCommBase*)cComm->recvComm;
@@ -698,6 +728,9 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
         localRkeys[(size_t)s * NCCL_IB_MAX_DEVS_PER_NIC + d] = mr->rkey;
       }
     }
+    for (int d = 0; d < ndevs; d++) {
+      localIbDevNs[d] = IbCastGetNetCommDevBase(recvBase, d)->ibDevN;
+    }
   }
 
 reconcile:
@@ -705,13 +738,13 @@ reconcile:
   localRegistration.version = IBCAST_RMA_REGISTRATION_VERSION;
   localRegistration.status = ret;
   localRegistration.nSegments = nSeg;
-  if (nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS)
+  if (ncclRmaRegistrationHandleReady(ginMrHandle, nSeg))
     memcpy(localRegistration.segOff, ginMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(localRegistration)), ret, fail);
 
   for (int r = 0; r < cComm->nranks; r++) {
-    if (registrations[r].magic != IBCAST_RMA_REGISTRATION_MAGIC ||
-        registrations[r].version != IBCAST_RMA_REGISTRATION_VERSION) {
+    if (!ncclRmaTranscriptHeaderOk(registrations[r].magic, registrations[r].version, IBCAST_RMA_REGISTRATION_MAGIC,
+                                   IBCAST_RMA_REGISTRATION_VERSION)) {
       WARN("NET/IB-CAST/RMA: rank %d has unsupported registration transcript magic/version 0x%x/%u", r,
            registrations[r].magic, registrations[r].version);
       ret = ncclInvalidUsage;
@@ -737,6 +770,8 @@ reconcile:
   ret = ncclCalloc(&ginMrHandle->base_vas, (size_t)cComm->nranks * nSeg);
   if (ret == ncclSuccess)
     ret = ncclCalloc(&ginMrHandle->rkeys, (size_t)cComm->nranks * nSeg * NCCL_IB_MAX_DEVS_PER_NIC);
+  if (ret == ncclSuccess)
+    ret = ncclCalloc(&ginMrHandle->ibDevNs, (size_t)cComm->nranks * NCCL_IB_MAX_DEVS_PER_NIC);
   localRegistration.status = ret;
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(localRegistration)), ret, fail);
   for (int r = 0; r < cComm->nranks; r++) {
@@ -750,8 +785,10 @@ reconcile:
   NCCLCHECKGOTO(cComm->allGather(cComm, localRkeys, ginMrHandle->rkeys,
                                  sizeof(uint32_t) * nSeg * NCCL_IB_MAX_DEVS_PER_NIC),
                 ret, fail);
+  NCCLCHECKGOTO(cComm->allGather(cComm, localIbDevNs, ginMrHandle->ibDevNs, sizeof(int) * NCCL_IB_MAX_DEVS_PER_NIC),
+                ret, fail);
 
-  free(registrations);
+  if (registrationsHeap) free(registrations);
   *mhandle = ginMrHandle;
   return ncclSuccess;
 
@@ -762,9 +799,10 @@ fail:
     }
     free(ginMrHandle->base_vas);
     free(ginMrHandle->rkeys);
+    free(ginMrHandle->ibDevNs);
     free(ginMrHandle);
   }
-  free(registrations);
+  if (registrationsHeap) free(registrations);
   return ret;
 }
 
@@ -786,6 +824,7 @@ ncclResult_t IbCastRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   }
   free(ginMrHandle->base_vas);
   free(ginMrHandle->rkeys);
+  free(ginMrHandle->ibDevNs);
   free(ginMrHandle);
   return ret;
 }
@@ -808,51 +847,98 @@ static ncclResult_t IbCastRmaIbProxyGetRecvComm(struct IbCastRmaIbProxyCtx* ginP
                                                 struct ncclIbRecvComm** commPtr) {
   *commPtr = (struct ncclIbRecvComm*)ginProxyCtx->fullRecvComm[rank];
   if (*commPtr == NULL) {
-    WARN("NET/IB-CAST/RMA: trying to send to non-connected peer %d", rank);
+    WARN("NET/IB-CAST/RMA: trying to receive from non-connected peer %d", rank);
     return ncclInvalidUsage;
   }
   return ncclSuccess;
 }
 
-static ncclResult_t IbCastRmaPollCq(struct ncclIbNetCommBase* base, struct ncclIbNetCommDevBase* devBase,
-                                   int devIndex, int* nCompleted) {
+static ncclResult_t IbCastRmaAccountCompletion(struct ncclIbNetCommBase* base, struct ncclIbRequest* wcReq,
+                                              int devIndex) {
+  if (wcReq->events[devIndex] <= 0) {
+    WARN("NET/IB-CAST/RMA: completion has no matching request event");
+    return ncclInternalError;
+  }
+  wcReq->events[devIndex]--;
+  if (wcReq->events[devIndex] == 0 && wcReq->rmaNwrs > 0) {
+    if (base->rmaWrsOutstanding < wcReq->rmaNwrs) {
+      WARN("NET/IB-CAST/RMA: work-request credit underflow");
+      return ncclInternalError;
+    }
+    base->rmaWrsOutstanding -= wcReq->rmaNwrs;
+    wcReq->rmaNwrs = 0;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t IbCastRmaPollCq(struct ncclIbNetCommBase* base, struct ncclIbNetCommDevBase* devBase, int devIndex,
+                                   int* nCompleted) {
   struct ibv_wc wc[4];
   NCCLCHECK(wrap_ibv_poll_cq(devBase->cq, 4, wc, nCompleted));
+  ncclResult_t batchRet = ncclSuccess;
   for (int i = 0; i < *nCompleted; i++) {
+    ncclResult_t oneRet = ncclSuccess;
     if (wc[i].status != IBV_WC_SUCCESS) {
-      WARN("NET/IB-CAST/RMA: completion failed with status=%d opcode=%d vendor_err=%u", wc[i].status, wc[i].opcode,
-           wc[i].vendor_err);
-      return ncclRemoteError;
+      char localGidString[INET6_ADDRSTRLEN] = "";
+      char remoteGidString[INET6_ADDRSTRLEN] = "";
+      const char *localGidStr = NULL, *remoteGidStr = NULL;
+      if (devBase->gidInfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
+        localGidStr = ibvGetGidStr(&devBase->gidInfo.localGid, localGidString, sizeof(localGidString));
+        remoteGidStr = ibvGetGidStr(&base->remDevs[devIndex].remoteGid, remoteGidString, sizeof(remoteGidString));
+      }
+      char line[SOCKET_NAME_MAXLEN + 1];
+      union ncclSocketAddress addr;
+      const char* typeStr = "Unknown";
+      struct ncclSocket* sock = &base->sock;
+      if (wc[i].wr_id < NET_IB_MAX_REQUESTS) {
+        struct ncclIbRequest* wcReq = base->reqs + wc[i].wr_id;
+        if (wcReq->type >= 0 && wcReq->type <= NCCL_NET_IB_REQ_FAILED) typeStr = IbCastReqTypeStr[wcReq->type];
+        if (wcReq->sock) sock = wcReq->sock;
+      }
+      ncclSocketGetAddr(sock, &addr);
+      char* hcaName = devBase->pd->context->device->name;
+      WARN("NET/IB-CAST/RMA: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u wr_id=%lu "
+           "(%s)%s%s%s%s hca %s",
+           ncclSocketToString(&addr, line), ibvWcStatusStr(wc[i].status), wc[i].status, ibvWcOpcodeStr(wc[i].opcode),
+           wc[i].opcode, wc[i].vendor_err, (unsigned long)wc[i].wr_id, typeStr, localGidStr ? " localGid " : "",
+           localGidString, remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
+      oneRet = ncclRemoteError;
     }
     if (wc[i].wr_id >= NET_IB_MAX_REQUESTS) {
       WARN("NET/IB-CAST/RMA: completion has invalid request id %lu", wc[i].wr_id);
-      return ncclInternalError;
+      if (oneRet == ncclSuccess) oneRet = ncclInternalError;
+    } else {
+      ncclResult_t acc = IbCastRmaAccountCompletion(base, base->reqs + wc[i].wr_id, devIndex);
+      if (oneRet == ncclSuccess) oneRet = acc;
     }
-    struct ncclIbRequest* wcReq = base->reqs + wc[i].wr_id;
-    if (wcReq->events[devIndex] <= 0) {
-      WARN("NET/IB-CAST/RMA: completion has no matching request event");
-      return ncclInternalError;
-    }
-    wcReq->events[devIndex]--;
-    if (wcReq->events[devIndex] == 0 && wcReq->rmaNwrs > 0) {
-      if (base->rmaWrsOutstanding < wcReq->rmaNwrs) {
-        WARN("NET/IB-CAST/RMA: work-request credit underflow");
-        return ncclInternalError;
-      }
-      base->rmaWrsOutstanding -= wcReq->rmaNwrs;
-      wcReq->rmaNwrs = 0;
-    }
+    if (batchRet == ncclSuccess) batchRet = oneRet;
   }
-  return ncclSuccess;
+  return batchRet;
 }
 
 static ncclResult_t IbCastRmaReserveWrs(struct ncclIbNetCommBase* base, struct ncclIbNetCommDevBase* devBase,
                                        int devIndex, struct ncclIbRequest* req, int nWrs) {
   int maxWrs = base->isSend ? NCCL_IB_RMA_MAX_SEND_WRS : NCCL_IB_RMA_MAX_FLUSH_WRS;
   if (nWrs < 0 || nWrs > maxWrs) return ncclInternalError;
+  struct timespec start;
+  const uint64_t kTimeoutNs = 2ull * NSEC_PER_SEC;
+  if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+    WARN("NET/IB-CAST/RMA: clock_gettime failed waiting for work-request credits");
+    return ncclRemoteError;
+  }
   while (!ncclRmaWrCreditsAvailable(base->rmaWrsOutstanding, nWrs, maxWrs)) {
     int nCompleted = 0;
     NCCLCHECK(IbCastRmaPollCq(base, devBase, devIndex, &nCompleted));
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+      WARN("NET/IB-CAST/RMA: clock_gettime failed waiting for work-request credits");
+      return ncclRemoteError;
+    }
+    if ((TIMESPEC_TO_NSEC(&now) - TIMESPEC_TO_NSEC(&start)) >= kTimeoutNs) {
+      WARN("NET/IB-CAST/RMA: timed out waiting for %d work-request credits (outstanding=%d max=%d)", nWrs,
+           base->rmaWrsOutstanding, maxWrs);
+      return ncclRemoteError;
+    }
     if (nCompleted == 0) sched_yield();
   }
   base->rmaWrsOutstanding += nWrs;
@@ -865,6 +951,64 @@ static void IbCastRmaReleaseWrs(struct ncclIbRequest* req) {
     req->base->rmaWrsOutstanding -= req->rmaNwrs;
     req->rmaNwrs = 0;
   }
+}
+
+// wrap_ibv_post_send returns an error even after a prefix of the chain is
+// accepted. Only the last WR is signaled, so NCCLCHECK-and-return would leak
+// the request slot and leave unsignaled WRs without a CQE owner.
+static ncclResult_t IbCastRmaPostWrs(struct ncclIbQp* qp, struct ncclIbRequest* req, struct ibv_send_wr* wr, int nWr,
+                                    int* posted) {
+  *posted = 0;
+  if (nWr <= 0) return ncclSuccess;
+  struct ibv_send_wr* bad_wr = nullptr;
+  ncclResult_t ret = wrap_ibv_post_send(qp->qp, wr, &bad_wr);
+  if (ret == ncclSuccess) {
+    *posted = nWr;
+    return ncclSuccess;
+  }
+  *posted = ncclRmaPostedWrCount(wr, nWr, bad_wr, offsetof(struct ibv_send_wr, next));
+  if (*posted == 0) {
+    IbCastRmaReleaseWrs(req);
+    return ret;
+  }
+  int unposted = nWr - *posted;
+  if (unposted > 0 && req->rmaNwrs >= unposted) {
+    req->base->rmaWrsOutstanding -= unposted;
+    req->rmaNwrs -= unposted;
+  }
+  WARN("NET/IB-CAST/RMA: ibv_post_send failed after %d/%d WRs; leaving request for CQ drain", *posted, nWr);
+  return ret;
+}
+
+// If nothing posted, free the slot and leave *request unset. If a prefix posted,
+// keep the request so Test() can drain. A rejected signaled tail cannot produce
+// a CQE; mark FAILED so Test() reports it instead of polling forever.
+static ncclResult_t IbCastRmaCompletePostedRequest(struct ncclIbRequest* req, int devIndex, ncclResult_t postRet,
+                                                  int posted, int nWr, void** request) {
+  if (posted > 0) IbCastAddEvent(req, devIndex);
+  if (postRet != ncclSuccess && posted == 0) {
+    (void)IbCastFreeRequest(req);
+    return postRet;
+  }
+  *request = req;
+  if (ncclRmaPrefixPostLostSignaledTail(posted, nWr)) {
+    req->type = NCCL_NET_IB_REQ_FAILED;
+  }
+  if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
+  return postRet;
+}
+
+static ncclResult_t IbCastRmaReservePostComplete(struct ncclIbNetCommBase* base, struct ncclIbNetCommDevBase* devBase,
+                                                int devIndex, struct ncclIbQp* qp, struct ncclIbRequest* req,
+                                                struct ibv_send_wr* wr, int nWr, void** request) {
+  ncclResult_t ret = IbCastRmaReserveWrs(base, devBase, devIndex, req, nWr);
+  if (ret != ncclSuccess) {
+    (void)IbCastFreeRequest(req);
+    return ret;
+  }
+  int posted = 0;
+  ret = IbCastRmaPostWrs(qp, req, wr, nWr, &posted);
+  return IbCastRmaCompletePostedRequest(req, devIndex, ret, posted, nWr, request);
 }
 
 ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -888,8 +1032,8 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
   struct ibv_send_wr wr[NCCL_RMA_MAX_DATA_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_DATA_WRS];
   int nWr = 0;
-  NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_WRITE, 0, qp, srcMrHandle,
-                                       ginProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size,
+  NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_WRITE, &comm->base, qp,
+                                       srcMrHandle, ginProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size,
                                        /*flushSge=*/NULL));
 
   struct ncclIbRequest* req;
@@ -906,25 +1050,8 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
     wr[i].wr_id = req - comm->base.reqs;
     wr[i].send_flags = ncclRmaWrIsSignaled(i, nWr) ? IBV_SEND_SIGNALED : 0;
   }
-  ncclResult_t ret = IbCastRmaReserveWrs(&comm->base, &comm->devs[qp->devIndex].base, qp->devIndex, req, nWr);
-  if (ret != ncclSuccess) {
-    (void)IbCastFreeRequest(req);
-    return ret;
-  }
-  if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
-
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    ret = wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr);
-    if (ret != ncclSuccess) {
-      IbCastRmaReleaseWrs(req);
-      (void)IbCastFreeRequest(req);
-      return ret;
-    }
-  }
-
-  *request = req;
-  return ncclSuccess;
+  return IbCastRmaReservePostComplete(&comm->base, &comm->devs[qp->devIndex].base, qp->devIndex, qp, req, &wr[0], nWr,
+                                      request);
 }
 
 ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
@@ -948,9 +1075,9 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
   struct ibv_send_wr wr[NCCL_RMA_MAX_DATA_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_DATA_WRS];
   int nWr = 0;
-  NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_READ, 0, qp, localMrHandle,
-                                       ginProxyCtx->rank, localOffset, remoteMrHandle, rank, remoteOffset, size,
-                                       /*flushSge=*/NULL));
+  NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_READ, &comm->base, qp,
+                                       localMrHandle, ginProxyCtx->rank, localOffset, remoteMrHandle, rank,
+                                       remoteOffset, size, /*flushSge=*/NULL));
 
   struct ncclIbRequest* req;
   NCCLCHECK(IbCastGetRequest(&comm->base, &req));
@@ -966,25 +1093,8 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
     wr[i].wr_id = req - comm->base.reqs;
     wr[i].send_flags = ncclRmaWrIsSignaled(i, nWr) ? IBV_SEND_SIGNALED : 0;
   }
-  ncclResult_t ret = IbCastRmaReserveWrs(&comm->base, &comm->devs[qp->devIndex].base, qp->devIndex, req, nWr);
-  if (ret != ncclSuccess) {
-    (void)IbCastFreeRequest(req);
-    return ret;
-  }
-  if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
-
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    ret = wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr);
-    if (ret != ncclSuccess) {
-      IbCastRmaReleaseWrs(req);
-      (void)IbCastFreeRequest(req);
-      return ret;
-    }
-  }
-
-  *request = req;
-  return ncclSuccess;
+  return IbCastRmaReservePostComplete(&comm->base, &comm->devs[qp->devIndex].base, qp->devIndex, qp, req, &wr[0], nWr,
+                                      request);
 }
 
 ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -1007,8 +1117,8 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   if ((size > 0 && (!srcMrHandle || !dstMrHandle || !IbCastRmaRangeOk(srcMrHandle, srcOff, size) ||
                     !IbCastRmaRangeOk(dstMrHandle, dstOff, size))) ||
       !signalMrHandle || !IbCastRmaRangeOk(signalMrHandle, signalOff, sizeof(uint64_t))) {
-    WARN("NET/IB-CAST/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)", srcOff, dstOff, size,
-         signalOff);
+    WARN("NET/IB-CAST/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)", srcOff, dstOff,
+         size, signalOff);
     return ncclInvalidArgument;
   }
   int sig = IbCastRmaSegOf(signalMrHandle, signalOff);
@@ -1029,10 +1139,17 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   memset(&sge, 0, sizeof(sge));
   int nPut = 0;
   if (size > 0) {
-    NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nPut, IBV_WR_RDMA_WRITE, 0, qp, srcMrHandle,
-                                         ginProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size,
+    NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nPut, IBV_WR_RDMA_WRITE, &comm->base, qp,
+                                         srcMrHandle, ginProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size,
                                          /*flushSge=*/NULL));
     for (int i = 0; i < nPut; i++) wr[i].send_flags = 0;
+  }
+
+  int signalDevSlot = IbCastRmaDevSlot(signalMrHandle, rank, comm->base.remDevs[qp->remDevIdx].ibv_dev_index);
+  if (signalDevSlot < 0) {
+    WARN("NET/IB-CAST/RMA: no registration slot for remote IB device %d",
+         comm->base.remDevs[qp->remDevIdx].ibv_dev_index);
+    return ncclInternalError;
   }
 
   struct ncclIbRequest* req;
@@ -1047,7 +1164,7 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   for (int i = 0; i < nPut; i++) wr[i].wr_id = req - comm->base.reqs;
   void* signalPtr = (void*)(signalMrHandle->base_vas[(size_t)rank * signalMrHandle->nSegments + sig] +
                             (signalOff - signalMrHandle->segOff[sig]));
-  uint32_t signalRkey = IbCastRmaRemoteRkey(signalMrHandle, rank, sig, qp->remDevIdx);
+  uint32_t signalRkey = IbCastRmaRemoteRkey(signalMrHandle, rank, sig, signalDevSlot);
 
   struct ibv_send_wr* sigWr = &wr[nPut];
   struct ibv_sge* sigSge = &sge[nPut];
@@ -1069,21 +1186,8 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
 
   if (nPut > 0) wr[nPut - 1].next = sigWr;
 
-  ncclResult_t ret = IbCastRmaReserveWrs(&comm->base, &comm->devs[devIndex].base, devIndex, req, nPut + 1);
-  if (ret != ncclSuccess) {
-    (void)IbCastFreeRequest(req);
-    return ret;
-  }
-  IbCastAddEvent(req, devIndex);
-  struct ibv_send_wr* bad_wr;
-  ret = wrap_ibv_post_send(qp->qp, nPut > 0 ? &wr[0] : sigWr, &bad_wr);
-  if (ret != ncclSuccess) {
-    IbCastRmaReleaseWrs(req);
-    (void)IbCastFreeRequest(req);
-    return ret;
-  }
-  *request = req;
-  return ncclSuccess;
+  return IbCastRmaReservePostComplete(&comm->base, &comm->devs[devIndex].base, devIndex, qp, req,
+                                      nPut > 0 ? &wr[0] : sigWr, nPut + 1, request);
 }
 
 ncclResult_t IbCastRmaIbProxyTest(void* collComm, void* request, int* done) {
@@ -1091,6 +1195,12 @@ ncclResult_t IbCastRmaIbProxyTest(void* collComm, void* request, int* done) {
   struct IbCastRmaIbProxyCtx* ginProxyCtx = (struct IbCastRmaIbProxyCtx*)req->ginProxyCtx;
   int rank = req->iput.rank;
   *done = 0;
+
+  if (req->type == NCCL_NET_IB_REQ_FAILED) {
+    *done = 1;
+    NCCLCHECK(IbCastFreeRequest(req));
+    return ncclRemoteError;
+  }
 
   ncclIbNetCommBase* commBase;
   ncclIbNetCommDevBase* devBase;
@@ -1127,7 +1237,7 @@ ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
   struct ibv_send_wr wr[NCCL_RMA_MAX_FLUSH_WRS];
   struct ibv_sge sge[NCCL_RMA_MAX_FLUSH_WRS];
   int nWr = 0;
-  NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_FLUSH_WRS, &nWr, IBV_WR_RDMA_READ, 0, qp,
+  NCCLCHECK(IbCastRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_FLUSH_WRS, &nWr, IBV_WR_RDMA_READ, &comm->base, qp,
                                        /*localH=*/NULL, /*localRank=*/0, /*localOff=*/0,
                                        /*remoteH=*/ginMrHandle, /*remoteRank=*/ginProxyCtx->rank, /*remoteOff=*/0,
                                        /*size=*/IbCastRmaMrBytes(ginMrHandle),
@@ -1143,28 +1253,12 @@ ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
     wr[i].wr_id = req - comm->base.reqs;
     wr[i].send_flags = ncclRmaWrIsSignaled(i, nWr) ? IBV_SEND_SIGNALED : 0;
   }
-  ncclResult_t ret = IbCastRmaReserveWrs(&comm->base, &comm->devs[qp->devIndex].base, qp->devIndex, req, nWr);
-  if (ret != ncclSuccess) {
-    (void)IbCastFreeRequest(req);
-    return ret;
-  }
-  if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
-
   TRACE(NCCL_NET, "NET/IB: %s: Posting %d-segment flush request (req=%p, comm=%p)", __func__, nWr, req, req->base);
   TIME_START(4);
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    ret = wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr);
-    if (ret != ncclSuccess) {
-      IbCastRmaReleaseWrs(req);
-      (void)IbCastFreeRequest(req);
-      return ret;
-    }
-  }
+  ncclResult_t ret = IbCastRmaReservePostComplete(&comm->base, &comm->devs[qp->devIndex].base, qp->devIndex, qp, req,
+                                                 &wr[0], nWr, request);
   TIME_STOP(4);
-
-  *request = req;
-  return ncclSuccess;
+  return ret;
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
