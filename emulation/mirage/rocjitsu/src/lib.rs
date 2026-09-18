@@ -796,10 +796,46 @@ enum SimConfig {
     /// option. Already on disk; mirage reads it and copies it into the
     /// session — byte for byte but for the reference
     /// [`pin_external_references`] pins — and never writes to it.
+    ///
+    /// Always absolute: [`absolute_supplied_config`] settles that at the
+    /// boundary, because everything downstream reads this path from
+    /// somewhere else — including the pin, which anchors the config's
+    /// siblings to its directory.
     Supplied(PathBuf),
     /// Config JSON synthesised from the profile's topology + agent,
     /// still to be written into a session's scratch directory.
     Synthesised(Vec<u8>),
+}
+
+/// A supplied config path, made absolute against the working directory
+/// mirage resolved the profile in.
+///
+/// This is the boundary where a profile option becomes a path this
+/// backend acts on, and it is the last moment the option's own spelling
+/// still means what its author meant. `mirage run --config` canonicalises
+/// what it is given, but that is the CLI's doing and not every profile
+/// arrives that way: one written by hand, by another tool, or by an
+/// older mirage carries whatever was typed. Left relative it would be
+/// re-read against whatever directory the next reader happens to be in —
+/// and the session's copy of it lives somewhere else entirely, so the
+/// references pinned to it would follow the copy rather than the
+/// original.
+///
+/// Absolute, not canonical: rocjitsu resolves a relative
+/// `dbt_guest.simulator_config` against the parent of the path it is
+/// handed, without following symlinks, so resolving them here would move
+/// the anchor a symlinked config's siblings hang from.
+fn absolute_supplied_config(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    match std::env::current_dir() {
+        Ok(working_directory) => working_directory.join(path),
+        // Nothing to make it absolute against. The path is still the one
+        // the profile asked for, and the existence check below is about
+        // to report it if it does not resolve.
+        Err(_) => path,
+    }
 }
 
 /// Resolve the rocjitsu `SimulationConfig` `def` asks for, writing
@@ -830,8 +866,10 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // explicit-config path is intended for direct, non-containerised
     // drop-in use.)
     if let Some(SimpleValue::String(path)) = def.options.get("config") {
-        let cfg = PathBuf::from(path);
+        let cfg = absolute_supplied_config(PathBuf::from(path));
         if !cfg.exists() {
+            // Named as the user spelled it, which is the spelling they
+            // can compare against what they wrote.
             return Err(MirageError::Other(format!(
                 "rocjitsu config not found: {path}"
             )));
@@ -1776,6 +1814,98 @@ mod tests {
             std::fs::read_dir(&user_dir).unwrap().count(),
             1,
             "nothing may be written beside the user's own config file"
+        );
+    }
+
+    /// Run `f` with the process working directory at `directory`.
+    ///
+    /// The working directory is process-wide, so callers hold
+    /// [`mirage_core::paths::test_env_lock`] for the same reason the
+    /// path override's callers do. Restoring it is a `Drop` so a failed
+    /// assertion cannot leave the rest of the binary somewhere else, and
+    /// the restore is deliberately silent: panicking while unwinding
+    /// another panic aborts the process and loses the real failure.
+    fn in_working_directory<R>(directory: &std::path::Path, f: impl FnOnce() -> R) -> R {
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+
+        let _restore = Restore(std::env::current_dir().expect("a working directory"));
+        std::env::set_current_dir(directory).expect("entering the fixture directory");
+        f()
+    }
+
+    /// A profile's `config` option can be relative, and it has to be
+    /// absolute before the session pins anything to it.
+    ///
+    /// `mirage run --config` canonicalises what it is handed, but that
+    /// is the CLI's doing: a saved profile reaches the backend spelled
+    /// however it was written. Left relative, the pin below produces a
+    /// relative sibling reference, and rocjitsu resolves that against
+    /// the parent of the config it is handed — the session directory —
+    /// where the sibling has never existed.
+    #[test]
+    fn a_relative_profile_config_still_finds_its_sibling() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // The shipped composition form: a guest config naming the host
+        // config beside it.
+        let configs = tmp.path().join("configs");
+        std::fs::create_dir_all(&configs).unwrap();
+        std::fs::write(
+            configs.join("guest.json"),
+            br#"{"dbt_guest": {"simulator_config": "gfx942_cdna3_kmd.json"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            configs.join("gfx942_cdna3_kmd.json"),
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90402}}}}"#,
+        )
+        .unwrap();
+
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String("configs/guest.json".to_string()),
+        );
+        let ctx = ctx_for(def, tmp.path(), "relative-config");
+        let preload = stand_in_interposer(tmp.path());
+
+        let injection =
+            in_working_directory(tmp.path(), || Rocjitsu.injection_def_with(&ctx, preload))
+                .expect("a relative config that exists must bring up");
+
+        let handed = session_config(&ctx.runtime_dir).unwrap();
+        let snapshot: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&handed).unwrap()).unwrap();
+        let reference = snapshot
+            .pointer(SIMULATOR_CONFIG_POINTER)
+            .and_then(serde_json::Value::as_str)
+            .expect("the snapshot keeps the external reference");
+
+        assert!(
+            std::path::Path::new(reference).is_absolute(),
+            "a reference that leaves the original's directory must be absolute: {reference}"
+        );
+
+        // And the property that matters, resolved the way
+        // `resolve_dbt_host_config_path` resolves it.
+        let parent = handed.parent().expect("the session copy has a directory");
+        let resolved = parent.join(reference);
+        assert!(
+            resolved.is_file(),
+            "rocjitsu resolves `{reference}` against {}, and must find the host config there",
+            parent.display()
+        );
+
+        assert!(
+            injection.emulated_isa.is_none(),
+            "the guest config names no device of its own"
         );
     }
 
