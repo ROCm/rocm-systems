@@ -4064,6 +4064,68 @@ TEST(WaitcheckTest, AcceptsCombinedLoadcntDscntBeforeFlatLoadUse) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+// Encodings from the standalone gfx1250 reproducer in issue #11843.
+TEST(WaitcheckTest, Gfx1250ImplicitUsesRespectRegisterWindows) {
+  struct Case {
+    const char *name;
+    std::vector<uint32_t> consumer;
+    bool hazard;
+    WaitcheckAccessKind access = WaitcheckAccessKind::Use;
+  };
+  const Case cases[] = {
+      {"windowed writelane", {0xbf860140, 0xd7610001, 0x02010800}, false},
+      {"same-register writelane", {0xd7610001, 0x02010800}, true, WaitcheckAccessKind::Def},
+      {"disjoint writelane", {0xd7610005, 0x02010800}, false},
+      {"real explicit read", {0x06040301}, true},                  // v_add_f32 v2, v1, v1
+      {"windowed explicit read", {0xbf860101, 0x7e040301}, false}, // v_mov_b32 v2, v1
+      {"windowed full write", {0xbf860140, 0x06020702}, false},
+      {"windowed partial write", {0xbf860140, 0x64020702}, false},
+      // An explicit low-bank source must survive remapping an implicit use of
+      // the same encoded VGPR through the destination's different bank.
+      {"low source aliases encoded destination", {0xbf860140, 0x64020701}, true},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.name);
+    // buffer_load_b32 v1, v28, s[0:3], null offen
+    std::vector<uint32_t> program{0xc405007c, 0x40800001, 0x0000001c};
+    program.insert(program.end(), test.consumer.begin(), test.consumer.end());
+    auto report = analyze_gfx1250_normal(program);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), test.hazard ? 1u : 0u) << diagnostic_summary(report);
+    if (test.hazard) {
+      EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+      EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 1, 1}));
+      EXPECT_EQ(report.diagnostics[0].access, test.access);
+      EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250ImplicitUsesRetainHighBankDependencies) {
+  for (uint32_t bank = 1; bank < 4; ++bank) {
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(bank);
+      SCOPED_TRACE(wait);
+      std::vector<uint32_t> program;
+      append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 0, 0, bank)));
+      // Load and preserve-read the same high-bank v1, with low-bank sources.
+      program.insert(program.end(), {0xc405007c, 0x40800001, 0x0000001c});
+      if (wait)
+        append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+      program.push_back(0x64020702);       // v_add_f16 v1, v2, v3
+      auto report = analyze_gfx1250_normal(program);
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), wait ? 0u : 1u) << diagnostic_summary(report);
+      if (!wait) {
+        EXPECT_EQ(report.diagnostics[0].reg,
+                  (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(1 + 256 * bank), 1}));
+        EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckTest, Gfx1250HighVgprModeSeparatesLowLoadFromHighStoreData) {
   std::vector<uint32_t> program;
   append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 0, 0, 0)));
