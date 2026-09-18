@@ -14,6 +14,8 @@ add_executable(
     test_environ_cache.cpp
     test_counters_writer.h
     test_counters_writer.cpp
+    test_output_registry.h
+    test_output_registry.cpp
     mocks.h
     mocks.cpp
     main.cpp

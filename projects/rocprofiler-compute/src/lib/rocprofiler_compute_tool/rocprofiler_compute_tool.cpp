@@ -5,6 +5,7 @@
 
 #include "counters_writer.h"
 #include "input_parameters.h"
+#include "output_registry.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
@@ -32,7 +33,8 @@ static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr
     std::make_shared<CsvCountersWriter>());
 static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
     *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
-static std::unique_ptr<tool_data_t>& g_tool_data = *new std::unique_ptr<tool_data_t>();
+static std::unique_ptr<tool_data_t>& g_tool_data       = *new std::unique_ptr<tool_data_t>();
+static OutputRegistry&               g_output_registry = *new OutputRegistry{};
 static std::atomic<bool>             g_tool_shutting_down{false};
 static std::atomic<bool>             g_hsa_intercept_done{false};
 
@@ -55,6 +57,7 @@ void test_knobs::reset_cfg()
 {
     g_cfg.reset();
     g_tool_data.reset();
+    g_output_registry.reset();
     g_tool_shutting_down.store(false, std::memory_order_release);
     g_hsa_intercept_done.store(false, std::memory_order_release);
 }
@@ -148,28 +151,7 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
 
 void generate_output(tool_data_t* tool_data)
 {
-    // Dispatches before the kernel to be filtered was registered may have been
-    // profiled. Remove any records whose kernel id does not match the
-    // target_kernel_ids
-    if (!tool_data->target_kernel_ids.empty())
-    {
-        tool_data->counter_records.erase(std::remove_if(tool_data->counter_records.begin(),
-                                                        tool_data->counter_records.end(),
-                                                        [tool_data](const counter_info_record_t& record)
-                                                        {
-                                                            return tool_data->target_kernel_ids.find(
-                                                                       record.kernel_id) ==
-                                                                   tool_data->target_kernel_ids.end();
-                                                        }),
-                                         tool_data->counter_records.end());
-    }
-    if (!tool_data->counter_records.empty() && !tool_data->output_filename.empty())
-    {
-        g_counters_writer->write_counters(tool_data);
-    }
-
-    if (tool_data->pc_sampling.enabled())
-        tool_data->pc_sampling.finalize();
+    g_output_registry.generate_all(*tool_data);
 }
 
 void tool_fini(void* user_data)
@@ -210,11 +192,11 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())
     {
-        const auto pc_mode = parse_pc_sampling_mode(std::string{pc_sampling_method});
-        tool_data->pc_sampling =
-            pc_sampling_feature_t{pc_mode,
-                                  generate_output_filename(output_path, "_code_obj_info.json"),
-                                  generate_output_directory(output_path, "src")};
+        const auto pc_mode     = parse_pc_sampling_mode(std::string{pc_sampling_method});
+        tool_data->pc_sampling = std::make_shared<pc_sampling_feature_t>(
+            pc_mode,
+            generate_output_filename(output_path, "_code_obj_info.json"),
+            generate_output_directory(output_path, "src"));
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
@@ -294,7 +276,11 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
     {
         g_tool_data         = create_tool_data(id);
         auto* tool_data_ptr = &g_tool_data;
-        g_cfg               = std::make_shared<rocprofiler_tool_configure_result_t>(
+
+        g_output_registry.register_writer(g_counters_writer);
+        g_output_registry.register_writer(g_tool_data->pc_sampling);
+
+        g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(
             rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                                 &tool_init,
                                                 &tool_fini,
