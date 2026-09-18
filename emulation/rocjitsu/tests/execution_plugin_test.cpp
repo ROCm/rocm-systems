@@ -2324,6 +2324,60 @@ TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming)
   }
 }
 
+// The group ANDs supports_async_instructions() across its members, so a plugin
+// that inherits the false default silently disables MMA offload for everything
+// loaded beside it. An instruction-mix run must not change the execution mode
+// it is there to describe -- least of all when paired with throughput, whose
+// own report then measures something other than what it would have measured
+// alone.
+TEST(InstructionMixPluginTest, CombinedGroupKeepsOffloadAndDropsSgprCallbacks) {
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_TRUE(group.add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  EXPECT_TRUE(group.supports_async_instructions());
+  EXPECT_FALSE(group.observes_sgpr_reads());
+
+  // Adding instruction-mix must not take either capability away.
+  ASSERT_TRUE(group.add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  EXPECT_TRUE(group.supports_async_instructions());
+  EXPECT_FALSE(group.observes_sgpr_reads());
+}
+
+// With helpers configured the WMMA instructions are actually offloaded, so they
+// arrive as issue notifications instead of before/after pairs. They still
+// executed, so they still have to appear in the mix -- opting in to async
+// without handling the issue hook would have dropped them from the counts
+// instead.
+TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
+  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(
+      f.plugin_group_->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  auto observer = std::make_unique<AsyncEventPlugin>();
+  auto *events = observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto code = independent_wmma_kernel();
+  f.run_kernel(code.data(), code.size(), 32, 32);
+  f.shutdown();
+
+  // Offload really happened: without the capability opt-in this is zero.
+  ASSERT_GT(events->issued, 0u);
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  for (const auto &record : records) {
+    // Same three wave instructions the synchronous path would have counted.
+    EXPECT_EQ(record.wave_instructions, 3u);
+    EXPECT_EQ(record.family_executions.at("matrix"), 2u);
+    EXPECT_EQ(record.family_mnemonics.at("matrix"), 1u);
+  }
+}
+
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
   PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
   PluginSinkConfig sink_config;

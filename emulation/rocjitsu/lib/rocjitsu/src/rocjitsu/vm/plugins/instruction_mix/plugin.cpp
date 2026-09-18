@@ -117,22 +117,36 @@ void InstructionMixPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   wf.set_plugin_state(slot_index(), std::make_unique<InstructionMixWavefrontState>());
 }
 
-void InstructionMixPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/,
-                                                            const Instruction &inst,
-                                                            amdgpu::Wavefront &wf) {
-  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
+void InstructionMixPlugin::count_instruction(InstructionMixWavefrontState &state,
+                                             const Instruction &inst, uint32_t dispatch_id) {
   const std::string_view mnemonic = inst.mnemonic();
-  auto iter = state->counts.find(mnemonic);
-  if (iter == state->counts.end()) {
+  auto iter = state.counts.find(mnemonic);
+  if (iter == state.counts.end()) {
     MnemonicStats entry;
     entry.encoding_id = inst.encoding_id();
     entry.opcode = inst.opcode();
     entry.encoding_bytes = static_cast<uint8_t>(std::max(inst.size(), 0));
     entry.family = classify(inst);
-    entry.first_dispatch_id = wf.dispatch_id();
-    iter = state->counts.emplace(std::string(mnemonic), entry).first;
+    entry.first_dispatch_id = dispatch_id;
+    iter = state.counts.emplace(std::string(mnemonic), entry).first;
   }
   ++iter->second.executions;
+}
+
+void InstructionMixPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/,
+                                                            const Instruction &inst,
+                                                            amdgpu::Wavefront &wf) {
+  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
+  count_instruction(*state, inst, wf.dispatch_id());
+}
+
+void InstructionMixPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
+                                                          amdgpu::Wavefront &wf) {
+  // An offloaded instruction replaces the before/after pair, so this is the
+  // only notification it produces. Count it identically: the mix describes what
+  // executed, not how the simulator chose to execute it.
+  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
+  count_instruction(*state, inst, wf.dispatch_id());
 }
 
 void InstructionMixPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {

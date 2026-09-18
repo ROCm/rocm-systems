@@ -80,25 +80,25 @@ struct InstructionMixWavefrontState final : WavefrontState {
 /// The plugin deliberately reports no architecture name. It observes decoded
 /// instructions, not the target that produced them; the harness that chose the
 /// config knows the architecture and attributes the report.
-///
-/// @note Single-XCD scope. Dispatch identity in the plugin callback API is the
-///       command processor's `next_dispatch_id_`, which every XCD's CP counts
-///       independently from 1, while one plugin group is shared by the whole
-///       SoC (vm/soc.cpp SoC::set_plugin_group). On a multi-XCD config two
-///       concurrent dispatches on different XCDs can therefore share an id and
-///       have their records combined. Mnemonic *coverage* -- the union of what
-///       executed, which is what this plugin exists to answer -- survives that,
-///       because merging is associative and the summary is the union either
-///       way; the per-dispatch attribution and `dispatches` count do not.
-///       Fixing it means making dispatch identity unique SoC-wide in the
-///       callback API, which the throughput and race plugins key on too. See
-///       https://github.com/ROCm/rocm-systems/issues/11774 for the follow-up.
 class InstructionMixPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Plugin configuration object as a JSON string. May be
   ///        null, in which case the defaults apply.
   explicit InstructionMixPlugin(const char *config_json = nullptr);
   ~InstructionMixPlugin() override;
+
+  /// This plugin reads neither scalar-register callback, and the group enables
+  /// their dispatch (and the physical-register owner lookup behind it) as soon
+  /// as any member asks for them. Opt out.
+  bool observes_sgpr_reads() const override { return false; }
+
+  /// Offloaded instructions still executed, so they still belong in the mix.
+  /// The group ANDs this capability across its members, so inheriting the
+  /// `false` default would disable MMA offload for every plugin in the group --
+  /// a report meant to describe a run would have changed how the run executed.
+  bool supports_async_instructions() const override { return true; }
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override;
 
   void onShutdown() override;
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -116,6 +116,13 @@ private:
     KernelDispatchInfo info;
     MnemonicMap counts;
   };
+
+  /// Record one execution of @p inst. Shared by the synchronous before-execute
+  /// hook and the async issue notification so an offloaded instruction is
+  /// counted exactly as a synchronously executed one is. Reads only
+  /// instruction metadata, which is all the issue contract permits.
+  static void count_instruction(InstructionMixWavefrontState &state, const Instruction &inst,
+                                uint32_t dispatch_id);
 
   static void merge(MnemonicMap &destination, const MnemonicMap &source);
   void emit_record(std::string_view record, const KernelDispatchInfo *info,

@@ -77,6 +77,14 @@ not active-lane operations — the same convention as the throughput plugin. Bot
 plugins classify through the shared `plugins/instruction_family.h`, so the two
 reports join on mnemonic and agree family for family.
 
+Offloaded instructions are counted too. The plugin opts in to async
+instructions and counts an issue notification exactly as it counts a
+synchronous execution, because the group ANDs that capability across its
+members: a plugin that stayed with the default would switch MMA offload off for
+every plugin loaded beside it, so a report meant to describe a run would have
+changed how the run executed. It also opts out of scalar-register callbacks,
+which it never reads.
+
 It emits one JSON object per line using the `rocjitsu.instruction_mix.v1`
 schema: one `"record":"dispatch"` object per completed dispatch and one
 `"record":"summary"` object at shutdown. Each carries `wave_instructions`,
@@ -99,17 +107,6 @@ final. When `incomplete_dispatches` is non-zero the summary is a subset:
 wavefronts that never halted keep their counts in wavefront-local state that
 the plugin cannot reach at shutdown, so absence no longer proves
 non-execution.
-
-The report covers one XCD's dispatch numbering. Dispatch ids come from each
-command processor's own counter, every XCD's CP starts at 1, and one plugin
-group is shared by the whole SoC, so on a multi-XCD config two concurrent
-dispatches can share an id and have their records combined. The summary — the
-union of executed mnemonics, which is what the plugin exists to answer — is
-unaffected, since merging is associative; the per-dispatch attribution and the
-`dispatches` count are not. Making dispatch identity unique across the SoC is a
-callback-API change that the throughput and race plugins key on too, so it is
-tracked separately as
-[#11774](https://github.com/ROCm/rocm-systems/issues/11774).
 
 Turning coverage into a *percentage* needs a denominator the plugin
 deliberately does not supply: it observes decoded instructions, not the target
