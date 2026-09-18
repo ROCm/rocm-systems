@@ -24,15 +24,18 @@
 #include "mstate.h"
 #include "mstream.h"
 #include "msys.h"
+#include "mthread-pool.h"
 #include "state.h"
 #include "util.h"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -57,6 +60,7 @@ using namespace hipFile;
 using std::shared_ptr;
 using ::testing::_;
 using ::testing::AnyNumber;
+using ::testing::ByMove;
 using ::testing::Combine;
 using ::testing::Eq;
 using ::testing::Return;
@@ -307,6 +311,107 @@ TEST_F(HipFileAsyncMonitor, addOp_without_completeOp_prints_error_on_AsyncMonito
                                            &buffer_offset, &bytes_transferred);
     monitor.addOp(std::move(op));
     EXPECT_CALL(msys, syslog);
+}
+
+namespace {
+std::atomic<int> g_test_io_fn_calls{0};
+void
+testAsyncIoFn(void *)
+{
+    g_test_io_fn_calls.fetch_add(1, std::memory_order_relaxed);
+}
+}
+
+TEST_F(HipFileAsyncOp, allocateSignalSlot_allocates_signal_memory_and_zeroes_it)
+{
+    uint64_t slot_storage = 0xdeadbeef;
+    EXPECT_CALL(mhip, hipExtMallocWithFlags(sizeof(uint64_t), _)).WillOnce(Return(&slot_storage));
+    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
+    ASSERT_EQ(allocateSignalSlot(), &slot_storage);
+}
+
+TEST_F(HipFileAsyncOp, asyncOp_destructor_frees_signal_slot)
+{
+    uint64_t slot_storage      = 0;
+    size_t   size              = 100;
+    hoff_t   file_offset       = 0;
+    hoff_t   buffer_offset     = 0;
+    ssize_t  bytes_transferred = 0;
+    auto     op     = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                                &buffer_offset, &bytes_transferred);
+    op->signal_slot = &slot_storage;
+    EXPECT_CALL(mhip, hipFree(&slot_storage));
+    op.reset();
+}
+
+TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
+{
+    StrictMock<MThreadPool> mpool;
+    auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
+    auto                    tg_raw = tg.get();
+    std::function<void()>   captured;
+    EXPECT_CALL(mpool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(tg))));
+    EXPECT_CALL(*tg_raw, wait());
+    AsyncMonitor monitor;
+
+    uint64_t slot_storage      = 0;
+    size_t   size              = 100;
+    hoff_t   file_offset       = 0;
+    hoff_t   buffer_offset     = 0;
+    ssize_t  bytes_transferred = 0;
+    auto     op     = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                                &buffer_offset, &bytes_transferred);
+    op->signal_slot = &slot_storage;
+    op->io_fn       = testAsyncIoFn;
+    g_test_io_fn_calls.store(0);
+
+    EXPECT_CALL(*tg_raw, run(_)).WillOnce([&captured](std::function<void()> work) {
+        captured = std::move(work);
+    });
+    monitor.submitIo(op.get());
+
+    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
+    captured();
+    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
+    ASSERT_EQ(op->offloads_done.load(), 1u);
+
+    op->signal_slot = nullptr;
+}
+
+TEST_F(HipFileAsyncOp, async_dispatch_delegates_to_submitIo)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    size_t                    size              = 100;
+    hoff_t                    file_offset       = 0;
+    hoff_t                    buffer_offset     = 0;
+    ssize_t                   bytes_transferred = 0;
+    auto op = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                        &buffer_offset, &bytes_transferred);
+    EXPECT_CALL(mmon, submitIo(op.get()));
+    async_dispatch(op.get());
+}
+
+TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    uint64_t                  slot_storage      = 0;
+    size_t                    size              = 100;
+    hoff_t                    file_offset       = 0;
+    hoff_t                    buffer_offset     = 0;
+    ssize_t                   bytes_transferred = 0;
+    auto op         = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                                &buffer_offset, &bytes_transferred);
+    op->signal_slot = &slot_storage;
+    op->io_fn       = testAsyncIoFn;
+    g_test_io_fn_calls.store(0);
+
+    EXPECT_CALL(mmon, submitIo(op.get())).WillOnce(Throw(std::runtime_error("no capacity")));
+    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
+    async_dispatch(op.get());
+    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
+    ASSERT_EQ(op->offloads_done.load(), 1u);
+
+    op->signal_slot = nullptr;
 }
 
 HIPFILE_WARN_NO_EXIT_DTOR_OFF
