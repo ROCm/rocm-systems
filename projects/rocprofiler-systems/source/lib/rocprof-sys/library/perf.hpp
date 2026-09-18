@@ -77,13 +77,13 @@ struct perf_event
     void set_ready_signal(int sig) const;
 
     /// Check if this perf_event was configured to collect a type of sample data
-    inline bool is_sampling(sample s) const
+    bool is_sampling(sample s) const
     {
         return (m_sample_type & static_cast<std::uint64_t>(s)) != 0u;
     }
 
     /// Get the configuration for this perf_event's read format
-    inline std::uint64_t get_read_format() const { return m_read_format; }
+    std::uint64_t get_read_format() const { return m_read_format; }
 
     /// A generic record type
     struct record
@@ -102,19 +102,16 @@ struct perf_event
 
         record_type get_type() const { return static_cast<record_type>(m_header->type); }
 
-        inline bool is_mmap() const { return get_type() == record_type::mmap; }
-        inline bool is_lost() const { return get_type() == record_type::lost; }
-        inline bool is_comm() const { return get_type() == record_type::comm; }
-        inline bool is_exit() const { return get_type() == record_type::exit; }
-        inline bool is_throttle() const { return get_type() == record_type::throttle; }
-        inline bool is_unthrottle() const
-        {
-            return get_type() == record_type::unthrottle;
-        }
-        inline bool is_fork() const { return get_type() == record_type::fork; }
-        inline bool is_read() const { return get_type() == record_type::read; }
-        inline bool is_sample() const { return get_type() == record_type::sample; }
-        inline bool is_mmap2() const { return get_type() == record_type::mmap2; }
+        bool is_mmap() const { return get_type() == record_type::mmap; }
+        bool is_lost() const { return get_type() == record_type::lost; }
+        bool is_comm() const { return get_type() == record_type::comm; }
+        bool is_exit() const { return get_type() == record_type::exit; }
+        bool is_throttle() const { return get_type() == record_type::throttle; }
+        bool is_unthrottle() const { return get_type() == record_type::unthrottle; }
+        bool is_fork() const { return get_type() == record_type::fork; }
+        bool is_read() const { return get_type() == record_type::read; }
+        bool is_sample() const { return get_type() == record_type::sample; }
+        bool is_mmap2() const { return get_type() == record_type::mmap2; }
 
         std::uint64_t                     get_ip() const;
         std::uint64_t                     get_pid() const;
