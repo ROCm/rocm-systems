@@ -87,6 +87,25 @@ The wire syntax and storage contract are detailed in the
 stacked labels need the one-level parser; the collector does not translate
 between those formats.
 
+## Analysis path
+
+Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
+full-outer-join each pass on `Correlation_ID` (plus `GUID` when both files
+have that column), consolidate matching operator calls, parse Function, then
+nest marker intervals per `Thread_Id`.
+
+The across-pass stitch key keeps `seqNr`, `tid`, and `ftid` and omits `ltid`,
+plus `function_ordinal`. `Correlation_ID` is the per-pass join key only.
+
+Those flags record `UnaccountedKernelError` when a kernel's `Correlation_ID`
+is not in the marker CSV, and report it after the call tree. Plain analyze
+without those flags does not join and does not report that error.
+
+Two markers on the same `Thread_Id` whose intervals overlap (neither nested
+nor adjacent) record `OverlappingMarkerRangeError`. Adjacent ranges
+(`A.end == B.start`) are siblings. Analysis also uses the launcher id and
+interval containment to attach worker ranges to the launcher's call.
+
 ## Build and runtime compatibility
 
 The shipped artifact is named torch_trace_collector.so. Its name is independent
@@ -115,3 +134,6 @@ and symbol behavior before extending the loader's supported set. Changes to
 the marker fields or encoding must be coordinated with the analysis consumer
 and both Python and native producers. The generic artifact and profile CSV
 layout remain independent of those future extensions.
+
+Analyze tests cover Function parse, join, consolidate, nest, and operator
+list/filter on the copied marker and counter CSVs.
