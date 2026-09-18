@@ -1055,13 +1055,13 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
-                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1] + roi_offset;
-                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2] + roi_offset;
+                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_offset;
+                bp.src_v_image = bp.src_y_image + mem.offset[2] + roi_offset;
                 break;
             case VA_FOURCC_422V:
                 bp.layout      = YUV_LAYOUT_YUV440;
-                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1];
-                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2];
+                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_uv_offset;
+                bp.src_v_image = bp.src_y_image + mem.offset[2] + roi_uv_offset;
                 break;
             case VA_FOURCC_YUY2:
                 bp.layout = YUV_LAYOUT_YUYV;
@@ -1134,13 +1134,13 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
-                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1] + roi_offset;
-                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2] + roi_offset;
+                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_offset;
+                bp.src_v_image = bp.src_y_image + mem.offset[2] + roi_offset;
                 break;
             case VA_FOURCC_422V:
                 bp.layout      = YUV_LAYOUT_YUV440;
-                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1];
-                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2];
+                bp.src_u_image = bp.src_y_image + mem.offset[1] + roi_uv_offset;
+                bp.src_v_image = bp.src_y_image + mem.offset[2]+ roi_uv_offset;
                 break;
             case VA_FOURCC_YUY2:
                 bp.layout = YUV_LAYOUT_YUYV;
