@@ -107,6 +107,14 @@ def main():
                 f"status {target.returncode}"
             )
 
+        os.environ.pop("ROCPROF_HIP_RUNTIME_API_TRACE", None)
+        os.environ["ROCPROF_OUTPUT_FILE_NAME"] = "recovered"
+        if rocattach.rocattach_attach(target.pid) != 0:
+            raise RuntimeError("same-configuration reattachment failed after rejection")
+        time.sleep(0.2)
+        if rocattach.rocattach_detach(target.pid) != 0:
+            raise RuntimeError("same-configuration detachment failed after rejection")
+
         target.send_signal(signal.SIGINT)
         if target.wait(timeout=TIMEOUT_SECONDS) != 0:
             raise RuntimeError(
