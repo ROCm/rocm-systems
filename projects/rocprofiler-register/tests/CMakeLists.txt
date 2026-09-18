@@ -565,11 +565,17 @@ add_test(
     COMMAND $<TARGET_FILE:test-amdhip-hsart-roctx>
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
+# Check that rocprofiler-sdk is not activated when ROCPROFILER_REGISTER_LIBRARY
+# is set without ROCP_TOOL_LIBRARIES also set.
 set_tests_properties(
     test-rocprofiler-register-library-base-path
     PROPERTIES
         ENVIRONMENT
         "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE_NAME:rocprofiler>;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.hsa-runtime.cpp. hsa_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        FAIL_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. rocp_ctor"
         LABELS
         "dlopen;secure")
 
@@ -583,5 +589,26 @@ set_tests_properties(
     PROPERTIES
         ENVIRONMENT
         "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE:rocprofiler>;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.hsa-runtime.cpp. hsa_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+        FAIL_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. rocp_ctor"
+        LABELS
+        "dlopen;secure")
+
+# Check that rocprofiler-sdk is activated when both
+# ROCPROFILER_REGISTER_LIBRARY and ROCP_TOOL_LIBRARIES are set.
+add_test(
+    NAME test-rocprofiler-register-library-with-tool-signal
+    COMMAND $<TARGET_FILE:test-amdhip-hsart-roctx>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set_tests_properties(
+    test-rocprofiler-register-library-with-tool-signal
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE_NAME:rocprofiler>;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.amdhip.cpp. hip_init\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
         LABELS
         "dlopen;secure")
