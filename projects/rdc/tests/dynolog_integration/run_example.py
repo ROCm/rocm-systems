@@ -25,9 +25,12 @@ a bonus smoke test. Gating:
   so a process that exits on its own (e.g. a crash after a healthy-looking
   sample) hard-fails even if some metrics were printed first.
 * Healthy (started, >=1 entity, >=1 metric, still running) -> pass.
-* Started, ran the full window, but collected nothing on a GPU box -> soft-pass
-  with a warning (usually all enabled fields are N/A for the arch); ``--strict``
-  turns this into a hard failure.
+* Never reported an entity count on a GPU box -> hard fail: RdcWrapper setup
+  neither finished nor threw within the window, which is a hang, not arch
+  variance.
+* Started, discovered entities, but collected no metric on a GPU box ->
+  soft-pass with a warning (usually all enabled fields are N/A for the arch);
+  ``--strict`` turns this into a hard failure.
 """
 
 from __future__ import annotations
@@ -112,16 +115,25 @@ def evaluate(
     metrics = _max_metrics_collected(log)
 
     # Healthy run: discovered entities and read at least one metric.
-    if entities and entities > 0 and metrics > 0:
+    if entities and metrics > 0:
         return (True, False, f"collected up to {metrics} metrics from {entities} entities")
 
-    # Ran the full window but incomplete. Without a GPU this is expected; on a
-    # GPU box it usually means every enabled field is N/A for the arch.
-    reason = (
-        "no GPU entities were discovered (Monitoring 0 entities)"
-        if not entities
-        else "no metrics were collected from any entity"
-    )
+    if entities is None:
+        # Never printed an entity count and never threw: RdcWrapper construction
+        # did not return. No arch explains that, so on a GPU box it is a hang.
+        reason = (
+            "example never reported an entity count -- RdcWrapper setup neither "
+            "completed nor failed within the run window (possible hang in "
+            "rdc_init / rdc_start_embedded / field-watch)"
+        )
+        if gpu_available:
+            return (False, False, reason)
+    elif entities == 0:
+        reason = "no GPU entities were discovered (Monitoring 0 entities)"
+    else:
+        # Usually every enabled field is N/A for this arch.
+        reason = "no metrics were collected from any entity"
+
     if not gpu_available:
         return (True, True, f"no GPU present; runtime validation skipped ({reason})")
     if strict:

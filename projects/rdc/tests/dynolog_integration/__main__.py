@@ -8,7 +8,7 @@ Usage from a workflow step::
 
     python3 -m dynolog_integration clone --ref <sha> --dest /tmp/dynolog
     python3 -m dynolog_integration build-wrapper --dynolog-dir /tmp/dynolog \
-        --rocm-dir /opt/rocm --grpc-dir /opt/grpc
+        --rocm-dir /opt/rocm
     python3 -m dynolog_integration run-example --binary <path> --duration 20
 
 Each subcommand simply forwards to the matching module's ``main``.

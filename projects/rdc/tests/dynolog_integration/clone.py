@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -23,7 +24,8 @@ from ._common import configure_logging, gh_error, run
 logger = logging.getLogger("dynolog.clone")
 
 # Force SSH->HTTPS on CI hosts without SSH keys, without mutating the runner's
-# persistent global git config (per-command ``-c`` entries only).
+# persistent global git config (per-command ``-c`` entries only). Only the
+# fetch resolves the remote URL, so only it needs these.
 _INSTEAD_OF = [
     "-c",
     "url.https://github.com/.insteadOf=git@github.com:",
@@ -42,10 +44,10 @@ def clone(*, repo: str, ref: str, dest: Path) -> Path:
         raise SystemExit(1)
     if dest.exists():
         logger.info("Removing existing dynolog dir: %s", dest)
-        run(["rm", "-rf", str(dest)])
+        shutil.rmtree(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    run(["git", *_INSTEAD_OF, "init", "--quiet", str(dest)])
+    run(["git", "init", "--quiet", str(dest)])
     run(["git", "remote", "add", "origin", repo], cwd=dest)
 
     # ``git fetch --depth 1 <ref>`` accepts a branch, tag, or (on GitHub) a full

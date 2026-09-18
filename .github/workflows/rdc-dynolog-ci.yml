@@ -1,22 +1,18 @@
-# --------------------------------------------------------------
 # dynolog <-> RDC Integration CI
-# --------------------------------------------------------------
-# Architecture:
-#   RdcWrapperExample (C++)
-#       -> dynolog RdcWrapper         (dynolog's in-process integration shim)
-#       -> librdc / librdc_bootstrap  (embedded RDC, built from projects/rdc)
-#       -> libamd_smi.so              -> /dev/kfd
 #
-# dynolog runs RDC embedded inside its telemetry daemon via the shim in
-# dynolog/src/gpumon/amd. The PRIMARY signal here is compiling + linking that
-# shim against a freshly-built RDC: it catches RDC API/ABI/build changes that
-# would break the downstream dynolog integration. Running the example on a GPU
-# is an additional runtime check that soft-passes when no GPU metrics exist.
+# dynolog embeds RDC in-process through the shim in dynolog/src/gpumon/amd (no
+# rdcd). Compiling and linking that shim against a freshly-built RDC is the
+# primary signal: it catches RDC API/ABI/build changes that would break the
+# downstream integration. Running the example on a GPU is an extra check that
+# soft-passes when no GPU metrics are available.
 #
-# The heavy lifting lives in Python helpers under
-# projects/rdc/tests/dynolog_integration/. Run any phase locally with:
-#     python3 -m dynolog_integration <subcommand>
-# --------------------------------------------------------------
+# Embedded mode needs librdc.so and its bootstrap/modules, but not rdcd, rdci or
+# librdc_client.so -- the only RDC components that link gRPC. So RDC is built
+# with BUILD_STANDALONE=OFF and this workflow never builds gRPC at all; RDC's
+# standalone/gRPC surface is rdc-ci.yml's job.
+#
+# The heavy lifting lives in projects/rdc/tests/dynolog_integration/, runnable
+# locally with `python3 -m dynolog_integration <subcommand>`. See its README.
 name: RDC dynolog Integration CI
 
 on:
@@ -56,8 +52,6 @@ env:
   DEBCONF_NONINTERACTIVE_SEEN: true
   BUILD_TYPE: RelWithDebInfo
   ROCM_DIR: /opt/rocm
-  GRPC_ROOT: /opt/grpc
-  GRPC_VERSION: "1.67.1"
   GPU_TARGETS: ${{ vars.GPU_TARGETS || 'gfx942' }}
   DYNOLOG_REPO: https://github.com/facebookincubator/dynolog.git
   # Automatic runs pin an immutable SHA so a re-tagged upstream cannot silently
@@ -76,7 +70,7 @@ jobs:
       # vars.RUNNER_TYPE must be set to a self-hosted AMD GPU runner label;
       # with it unset the job silently never schedules.
       - ${{ vars.RUNNER_TYPE }}
-    timeout-minutes: 120
+    timeout-minutes: 60
     container:
       image: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2' }}
       options: >-
@@ -86,9 +80,6 @@ jobs:
         --group-add video
 
     steps:
-      # --------------------------------------------------------
-      # Setup
-      # --------------------------------------------------------
       - name: Checkout Super-repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -99,30 +90,11 @@ jobs:
       - name: Build metadata
         run: echo "TODAY=$(date +%Y_%m_%d)" >> "$GITHUB_ENV"
 
-      - name: Locate RDC and AMDSMI projects
-        run: |
-          set -euo pipefail
-          RDC_DIR=$(find "$GITHUB_WORKSPACE" -path "*/projects/rdc/CMakeLists.txt" -exec dirname {} \; -quit)
-          AMDSMI_DIR=$(find "$GITHUB_WORKSPACE" -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \; -quit)
-          if [ -z "${RDC_DIR}" ]; then
-            echo "::error::Could not locate projects/rdc/CMakeLists.txt"
-            exit 1
-          fi
-          if [ -z "${AMDSMI_DIR}" ]; then
-            echo "::error::Could not locate projects/amdsmi/CMakeLists.txt"
-            exit 1
-          fi
-          echo "RDC_DIR=${RDC_DIR}" >> "$GITHUB_ENV"
-          echo "RDC_TESTS_DIR=${RDC_DIR}/tests" >> "$GITHUB_ENV"
-          echo "AMDSMI_DIR=${AMDSMI_DIR}" >> "$GITHUB_ENV"
-          echo "RDC project:    ${RDC_DIR}"
-          echo "AMDSMI project: ${AMDSMI_DIR}"
-
       - name: Install build tools
         run: |
           set -euo pipefail
           ok=0
-          for i in 1 2 3; do
+          for _ in 1 2 3; do
             if apt-get update; then ok=1; break; fi
             sleep 5
           done
@@ -130,33 +102,29 @@ jobs:
             echo "::error::apt-get update failed after 3 attempts"
             exit 1
           fi
-          # RDC build deps mirror rdc-ci.yml; ninja-build is added for
-          # dynolog's standalone RDC shim (glog is built from source below).
+          # RDC build deps mirror rdc-ci.yml, minus gRPC's autotools submodules.
+          # ninja-build is for the dynolog shim's CMake project; glog is not
+          # installable here and is built from source below.
           apt-get install -y --no-install-recommends \
-            autoconf automake build-essential ccache clang cmake curl git gzip \
-            hip-dev hip-runtime-amd hipcc hsa-rocr-dev jq \
+            build-essential ccache clang cmake curl git gzip \
+            hip-dev hip-runtime-amd hipcc hsa-rocr-dev \
             libcap-dev libc++-dev libdrm-dev libgflags-dev \
-            libgtest-dev libtool libmnl-dev libnl-3-dev libnl-genl-3-dev \
+            libmnl-dev libnl-3-dev libnl-genl-3-dev \
             ninja-build pkg-config python3 \
             rocm-core rocm-developer-tools rocm-device-libs rocm-smi-lib \
             rocprofiler-dev rocprofiler-plugins rocprofiler-register rocprofiler-sdk \
-            tar unzip wget zip zstd
+            tar zstd
 
       # Gate the CI helper logic (rocm_version_code / evaluate) before the long
       # build so regressions in the helpers are caught fast and never merge
       # unexercised.
       - name: Run helper unit tests
-        working-directory: ${{ env.RDC_TESTS_DIR }}
+        working-directory: projects/rdc/tests
         run: |
           set -euo pipefail
           python3 -m unittest \
             dynolog_integration.test_build \
             dynolog_integration.test_run_example -v
-
-      # git is only present after the apt install above (the ROCm dev image
-      # ships without it), so mark the checkout safe here rather than earlier.
-      - name: Mark workspace safe for git
-        run: git config --global --replace-all safe.directory "$GITHUB_WORKSPACE"
 
       # dynolog's shim links glog. The ROCm dev image cannot install
       # libgoogle-glog-dev (its libunwind-dev dependency is unavailable there),
@@ -177,37 +145,6 @@ jobs:
           cmake --install /tmp/glog/build
           ldconfig
 
-      # --------------------------------------------------------
-      # Phase 1 - Build gRPC (RDC's client/server transport)
-      # --------------------------------------------------------
-      - name: Fetch gRPC source
-        run: |
-          set -euo pipefail
-          git clone --branch "v${GRPC_VERSION}" --depth 1 \
-            https://github.com/grpc/grpc.git /tmp/grpc
-          git -C /tmp/grpc submodule update --init --depth 1 \
-            third_party/abseil-cpp \
-            third_party/boringssl-with-bazel \
-            third_party/cares/cares \
-            third_party/protobuf \
-            third_party/re2 \
-            third_party/zlib
-
-      - name: Build and install gRPC
-        run: |
-          set -euo pipefail
-          cmake -S /tmp/grpc -B /tmp/grpc/build \
-            -DgRPC_INSTALL=ON \
-            -DgRPC_BUILD_TESTS=OFF \
-            -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_INSTALL_PREFIX="${GRPC_ROOT}" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/grpc/build --parallel "$(nproc)"
-          cmake --install /tmp/grpc/build
-          echo "${GRPC_ROOT}/lib" > /etc/ld.so.conf.d/grpc.conf
-          ldconfig
-
       - name: Cache ccache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -217,11 +154,8 @@ jobs:
             ${{ runner.os }}-rdc-dynolog-ccache-${{ github.ref_name }}-
             ${{ runner.os }}-rdc-dynolog-ccache-
 
-      # --------------------------------------------------------
-      # Phase 2 - Build and install amd-smi (RDC dependency)
-      # --------------------------------------------------------
       - name: Build and install amd-smi
-        working-directory: ${{ env.AMDSMI_DIR }}
+        working-directory: projects/amdsmi
         run: |
           set -euo pipefail
           # RDC's metric fetcher links amdsmi_get_cpu_* (ESMI/CPU), so amd-smi
@@ -229,39 +163,38 @@ jobs:
           cmake -B build \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
-            -DCMAKE_INSTALL_PREFIX=${ROCM_DIR} \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DCMAKE_INSTALL_PREFIX="${ROCM_DIR}" \
             -DENABLE_ESMI_LIB=ON \
             -DBUILD_TESTS=OFF
           make -C build -j "$(nproc)"
           make -C build install
           ldconfig
 
-      # --------------------------------------------------------
-      # Phase 3 - Build and install RDC from the mono-repo
-      # --------------------------------------------------------
       - name: Build and install RDC
-        working-directory: ${{ env.RDC_DIR }}
+        working-directory: projects/rdc
         run: |
           set -euo pipefail
+          # BUILD_STANDALONE=OFF drops rdcd/rdci/librdc_client.so, the only RDC
+          # components that link gRPC. dynolog embeds RDC in-process and links
+          # the `rdc` target, whose interface is rdc_bootstrap/pthread/amd_smi/cap
+          # -- so nothing here needs gRPC, and librdc.so is unchanged either way.
           cmake -B build \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
-            -DGRPC_DESIRED_VERSION="${GRPC_VERSION}" \
-            -DGRPC_ROOT="${GRPC_ROOT}" \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DBUILD_STANDALONE=OFF \
             -DBUILD_RUNTIME=ON \
             -DBUILD_PROFILER=ON \
             -DBUILD_RVS=OFF \
             -DBUILD_TESTS=OFF \
             -DGPU_TARGETS="${GPU_TARGETS}" \
-            -DCMAKE_INSTALL_PREFIX=${ROCM_DIR}
+            -DCMAKE_INSTALL_PREFIX="${ROCM_DIR}"
           make -C build -j "$(nproc)"
           make -C build install
           ldconfig
-          echo "=== Verify RDC installation ==="
-          # Assert exactly the artifacts dynolog's shim links/needs, with clear
-          # errors instead of a failing glob under `set -euo pipefail`.
+          # librdc_rocp.so is dlopened at runtime, so find_package(rdc) would not
+          # catch it going missing. Assert the whole set the shim needs up front.
           missing=0
           for f in \
             "${ROCM_DIR}/lib/librdc.so" \
@@ -269,20 +202,12 @@ jobs:
             "${ROCM_DIR}/lib/rdc/librdc_rocp.so" \
             "${ROCM_DIR}/lib/cmake/rdc/rdc-config.cmake" \
             "${ROCM_DIR}/include/rdc/rdc.h"; do
-            if [ -e "$f" ]; then
-              echo "  present: $f"
-            else
-              echo "::error::missing expected RDC artifact: $f"
-              missing=1
-            fi
+            [ -e "$f" ] || { echo "::error::missing expected RDC artifact: $f"; missing=1; }
           done
-          [ "$missing" -eq 0 ] || exit 1
+          [ "$missing" -eq 0 ]
 
-      # --------------------------------------------------------
-      # Phase 4 - Build the dynolog RDC shim + example
-      # --------------------------------------------------------
       - name: Clone dynolog
-        working-directory: ${{ env.RDC_TESTS_DIR }}
+        working-directory: projects/rdc/tests
         run: |
           python3 -m dynolog_integration clone \
             --repo "${DYNOLOG_REPO}" \
@@ -290,37 +215,28 @@ jobs:
             --dest "${DYNOLOG_DIR}"
 
       - name: Build dynolog RDC wrapper and example
-        working-directory: ${{ env.RDC_TESTS_DIR }}
+        working-directory: projects/rdc/tests
         run: |
           python3 -m dynolog_integration build-wrapper \
             --dynolog-dir "${DYNOLOG_DIR}" \
-            --rocm-dir "${ROCM_DIR}" \
-            --grpc-dir "${GRPC_ROOT}"
+            --rocm-dir "${ROCM_DIR}"
 
-      # --------------------------------------------------------
-      # Phase 5 - Run the example on GPU and verify metrics
-      # --------------------------------------------------------
       - name: Run RdcWrapperExample
-        working-directory: ${{ env.RDC_TESTS_DIR }}
+        working-directory: projects/rdc/tests
         run: |
           python3 -m dynolog_integration run-example \
             --binary "${DYNOLOG_DIR}/dynolog/src/gpumon/amd/build/examples/RdcWrapperExample" \
             --rocm-dir "${ROCM_DIR}" \
             --duration "${EXAMPLE_RUN_SECONDS}" \
-            --ld-library-path "${ROCM_DIR}/lib:${ROCM_DIR}/lib/rdc:${ROCM_DIR}/lib/rdc/grpc/lib:${GRPC_ROOT}/lib" \
+            --ld-library-path "${ROCM_DIR}/lib:${ROCM_DIR}/lib/rdc" \
             --log-file /tmp/rdc-dynolog-example.log
 
-      # --------------------------------------------------------
-      # Cleanup & artifacts
-      # --------------------------------------------------------
       - name: Collect logs
         if: always()
         run: |
           set -euo pipefail
           mkdir -p /tmp/integration-logs
-          for src in /tmp/rdc-dynolog-example.log; do
-            [ -f "${src}" ] && cp "${src}" /tmp/integration-logs/ || true
-          done
+          cp -f /tmp/rdc-dynolog-example.log /tmp/integration-logs/ 2>/dev/null || true
           {
             echo "=== System ==="
             uname -a

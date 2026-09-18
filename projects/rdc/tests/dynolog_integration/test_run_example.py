@@ -48,6 +48,13 @@ Monitoring 8 entities (physical GPUs + partitions):
 entity 0: collected 0 metrics
 """
 
+# Started, then hung in RdcWrapper setup: no entity count, no fatal, no exit.
+_HUNG_LOG = """\
+Initializing RDC example, ROCM version: 70200
+Collecting 30 metrics:
+  metric RDC_FI_GPU_UTIL (id=500)
+"""
+
 
 class EvaluateTest(unittest.TestCase):
     def test_healthy_run_passes(self):
@@ -108,6 +115,19 @@ class EvaluateTest(unittest.TestCase):
 
     def test_no_metrics_soft_passes_without_gpu(self):
         ok, soft, _ = run_example.evaluate(_NO_METRICS_LOG, gpu_available=False, self_exited=False)
+        self.assertTrue(ok)
+        self.assertTrue(soft)
+
+    def test_hang_hard_fails_on_gpu(self):
+        # No entity count and no fatal means setup never returned; no GPU arch
+        # explains that, so it must not be excused as field availability.
+        ok, soft, reason = run_example.evaluate(_HUNG_LOG, gpu_available=True, self_exited=False)
+        self.assertFalse(ok)
+        self.assertFalse(soft)
+        self.assertIn("never reported an entity count", reason)
+
+    def test_hang_soft_passes_without_gpu(self):
+        ok, soft, _ = run_example.evaluate(_HUNG_LOG, gpu_available=False, self_exited=False)
         self.assertTrue(ok)
         self.assertTrue(soft)
 

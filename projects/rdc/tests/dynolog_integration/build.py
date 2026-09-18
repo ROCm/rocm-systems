@@ -41,7 +41,7 @@ _EXAMPLE_SUBPATH = Path("examples/RdcWrapperExample")
 # the full ROCm 7.0 metric set enabled so the example is still meaningful.
 _DEFAULT_ROCM_VERSION_CODE = 70000
 
-_VERSION_RE = re.compile(r"(\d+)")
+_VERSION_RE = re.compile(r"\d+")
 
 
 def rocm_version_code(rocm_dir: Path) -> int:
@@ -70,7 +70,7 @@ def rocm_version_code(rocm_dir: Path) -> int:
         )
         return _DEFAULT_ROCM_VERSION_CODE
 
-    major, minor, patch = (int(parts[i]) for i in range(3))
+    major, minor, patch = (int(p) for p in parts[:3])
     code = major * 10000 + minor * 100 + patch
     logger.info("Detected ROCm %s.%s.%s -> ROCM_VERSION=%d", major, minor, patch, code)
     return code
@@ -80,7 +80,6 @@ def build(
     *,
     dynolog_dir: Path,
     rocm_dir: Path,
-    grpc_dir: Path | None,
     rocm_version: int,
     build_dir: Path,
     build_type: str,
@@ -92,12 +91,9 @@ def build(
         gh_error(f"dynolog RDC shim not found at {shim_dir}")
         raise SystemExit(1)
 
-    # find_package(rdc/amd_smi) resolve under the ROCm prefix; RDC's exported
-    # target may reference the bundled gRPC, so include it on the prefix path.
-    prefix_paths = [str(rocm_dir)]
-    if grpc_dir is not None:
-        prefix_paths.append(str(grpc_dir))
-
+    # The shim links the `rdc` target only (embedded mode), whose interface is
+    # rdc_bootstrap/pthread/amd_smi/cap -- no gRPC -- so the ROCm prefix is the
+    # only one find_package(rdc/amd_smi) needs.
     run(
         [
             "cmake",
@@ -109,7 +105,7 @@ def build(
             "Ninja",
             f"-DROCM_VERSION={rocm_version}",
             f"-DCMAKE_BUILD_TYPE={build_type}",
-            f"-DCMAKE_PREFIX_PATH={';'.join(prefix_paths)}",
+            f"-DCMAKE_PREFIX_PATH={rocm_dir}",
         ]
     )
     run(["cmake", "--build", str(build_dir), "--parallel", str(jobs)])
@@ -123,16 +119,9 @@ def build(
 
 
 def main(argv: list[str] | None = None) -> int:
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dynolog-dir", required=True, type=Path)
     parser.add_argument("--rocm-dir", default=Path("/opt/rocm"), type=Path)
-    parser.add_argument(
-        "--grpc-dir",
-        default=None,
-        type=Path,
-        help="gRPC install prefix to add to CMAKE_PREFIX_PATH (e.g. /opt/grpc).",
-    )
     parser.add_argument(
         "--rocm-version",
         type=int,
@@ -153,7 +142,6 @@ def main(argv: list[str] | None = None) -> int:
     build(
         dynolog_dir=args.dynolog_dir,
         rocm_dir=args.rocm_dir,
-        grpc_dir=args.grpc_dir,
         rocm_version=rocm_version,
         build_dir=build_dir,
         build_type=args.build_type,

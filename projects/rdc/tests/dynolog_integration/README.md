@@ -44,29 +44,49 @@ cd projects/rdc/tests
 python3 -m dynolog_integration clone \
     --ref b301ce05b3b25e2f48e4525bfc52a0ba6fe77446 --dest /tmp/dynolog
 python3 -m dynolog_integration build-wrapper \
-    --dynolog-dir /tmp/dynolog --rocm-dir /opt/rocm --grpc-dir /opt/grpc
+    --dynolog-dir /tmp/dynolog --rocm-dir /opt/rocm
 python3 -m dynolog_integration run-example \
     --binary /tmp/dynolog/dynolog/src/gpumon/amd/build/examples/RdcWrapperExample \
     --rocm-dir /opt/rocm \
-    --ld-library-path /opt/rocm/lib:/opt/rocm/lib/rdc:/opt/rocm/lib/rdc/grpc/lib:/opt/grpc/lib
+    --ld-library-path /opt/rocm/lib:/opt/rocm/lib/rdc
 ```
+
+## No gRPC is needed
+
+gRPC is an RDC *standalone*-mode dependency: only `rdcd`, `rdci` and
+`librdc_client.so` link it, and `rdc_libs/CMakeLists.txt` installs
+`librdc_client.so` into the exported target set only under `BUILD_STANDALONE`.
+dynolog uses embedded mode and links the `rdc` target, whose exported interface
+is `rdc_bootstrap;pthread;amd_smi;cap`.
+
+So the workflow builds RDC with `-DBUILD_STANDALONE=OFF`: `librdc.so`,
+`librdc_bootstrap.so` and `librdc_rocp.so` are unchanged (nothing under
+`rdc_libs/` other than the `rdc_client` gate reads that option), and the
+generated `rdcTargets.cmake` contains no `gRPC::grpc++` reference at all. RDC's
+standalone/gRPC surface is `rdc-ci.yml`'s job, not this workflow's.
+
+Avoiding gRPC here also avoids pinning a second gRPC version: TheRock builds
+RDC against `THEROCK_GRPC_VERSION` (`third-party/grpc/`, currently 1.78.1,
+statically linked), which is also RDC's own `GRPC_DESIRED_VERSION` default. A
+hand-rolled gRPC in this workflow would drift from what actually ships.
 
 ## Prerequisites for the build
 
 The shim's standalone CMake requires an RDC SDK + `amd_smi` (normally under
-`/opt/rocm`), plus `glog`, `gflags`, and `libcap`. On a stock Ubuntu host:
+`/opt/rocm`), plus `glog` and `gflags`. On a stock Ubuntu host:
 
 ```bash
-apt-get install -y ninja-build cmake libgoogle-glog-dev libgflags-dev libcap-dev
+apt-get install -y ninja-build cmake libgoogle-glog-dev libgflags-dev
 ```
 
+`libcap` is additionally needed to *build RDC itself* (`find_library(LIB_CAP)`),
+and is pulled in transitively when linking the shim against `librdc.so`.
+
 > **CI note:** the ROCm dev container the workflow runs in
-> (`rocm/dev-ubuntu-22.04`) cannot install `libgoogle-glog-dev` there — its
-> `libunwind-dev` dependency is unavailable — so the workflow builds **glog
-> v0.6.0 from source** (`-DWITH_UNWIND=OFF`) and **gRPC 1.67.1** into
-> `/opt/grpc` instead. See the workflow's *Build and install glog* /
-> *Build and install gRPC* steps; point the shim build at the gRPC prefix with
-> `--grpc-dir /opt/grpc` (i.e. `-DCMAKE_PREFIX_PATH="/opt/rocm;/opt/grpc"`).
+> (`rocm/dev-ubuntu-22.04`) cannot install `libgoogle-glog-dev` — its
+> `libunwind-dev` dependency is unavailable there — so the workflow builds
+> **glog v0.6.0 from source** (`-DWITH_UNWIND=OFF`) into `/usr/local` instead.
+> See the workflow's *Build and install glog* step.
 
 ## Tests
 
@@ -90,12 +110,16 @@ settings (the same GPU runner convention the DME integration CI uses):
 | `vars.GPU_TARGETS` | No (default `gfx942`) | `GPU_TARGETS` for the RDC build; set to the runner's arch (e.g. `gfx90a`, `gfx950`) so profiler kernels load. |
 | `vars.RDC_DOCKER_IMAGE` | No (default `rocm/dev-ubuntu-22.04:7.2`) | ROCm build container image. |
 
-The runtime `RdcWrapperExample` step is intentionally lenient: it hard-fails only
-if the binary cannot start against the freshly-built RDC, and **soft-passes**
+The runtime `RdcWrapperExample` step is intentionally lenient: it **soft-passes**
 (with a `::warning::`) when a started example collects no metrics or throws on an
 unsupported field, since those depend on the runner's GPU arch rather than the
 RDC build/link surface. The build step is the primary gate. Pass `--strict` to
 `run-example` to gate on metric collection on a known-good runner.
+
+It still hard-fails on the cases no GPU arch explains: the binary not starting
+at all (runtime link/load break), a non-capability fatal from `RdcWrapper`, the
+process exiting on its own (the poll loop is meant to run until terminated), and
+setup never completing within the window (a hang).
 
 ## Keeping the dynolog pin current
 

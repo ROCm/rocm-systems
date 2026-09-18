@@ -20,25 +20,15 @@ def configure_logging(verbose: bool = False) -> None:
     logging.basicConfig(level=level, format=_LOG_FORMAT, stream=sys.stderr)
 
 
-def run(
-    cmd: list[str],
-    *,
-    cwd: Path | None = None,
-    check: bool = True,
-    capture: bool = False,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
+def run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Run a subprocess, logging the command for CI visibility.
 
-    Fail-fast by default (``check=True``). Use ``capture=True`` to capture
-    stdout/stderr as text; otherwise output streams to the parent process so
+    Fails fast on a non-zero exit. Output streams to the parent process so
     GitHub Actions log grouping works correctly.
     """
     logger = logging.getLogger("dynolog.run")
     logger.info("$ %s", " ".join(shlex.quote(c) for c in cmd))
-    return subprocess.run(
-        cmd, cwd=str(cwd) if cwd else None, check=check, text=True, capture_output=capture, env=env
-    )
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, check=True, text=True)
 
 
 def gh_error(message: str) -> None:
