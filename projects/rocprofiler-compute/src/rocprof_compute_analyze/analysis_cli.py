@@ -14,6 +14,7 @@ from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
+    CallTreeNode,
     filter_forest_by_backend,
     get_matrix_ops_type,
     process_ml_api_trace_output,
@@ -54,6 +55,46 @@ def parse_operator_patterns(args: argparse.Namespace, attr: str) -> list[str]:
     if not pattern_list:
         pattern_list = ["**"]
     return pattern_list
+
+
+def _collect_glob_matched_nodes(
+    forest: dict[str, list[CallTreeNode]],
+    patterns: list[str],
+    backend: str,
+) -> list[CallTreeNode]:
+    """Return nodes whose backend matches and whose path or name glob-matches."""
+    matched_nodes: list[CallTreeNode] = []
+
+    def walk(node: CallTreeNode, ancestors: list[str]) -> None:
+        path = "/".join(ancestors + [node.name])
+        if node.backend == backend and any(
+            parser.torch_operator_pattern_matches(pattern, path)
+            or parser.torch_operator_pattern_matches(pattern, node.name)
+            for pattern in patterns
+        ):
+            matched_nodes.append(node)
+        for child in node.children:
+            walk(child, ancestors + [node.name])
+
+    for roots in forest.values():
+        for root in roots:
+            walk(root, [])
+    return matched_nodes
+
+
+def _assign_kernel_ids_from_top(
+    node: CallTreeNode, name_to_id: dict[str, int]
+) -> set[int]:
+    """Set KernelStats.kernel_id on this node and descendants; return those ids."""
+    kernel_ids: set[int] = set()
+    for kernel_name, stats in node.kernels.items():
+        kernel_id = name_to_id.get(str(kernel_name).strip())
+        if kernel_id is not None:
+            stats.kernel_id = kernel_id
+            kernel_ids.add(kernel_id)
+    for child in node.children:
+        kernel_ids.update(_assign_kernel_ids_from_top(child, name_to_id))
+    return kernel_ids
 
 
 def _ml_api_operator_cli_requested(args: argparse.Namespace) -> bool:
@@ -296,9 +337,56 @@ class cli_analysis(OmniAnalyze_Base):
         """Set workload.filter_kernel_ids from the backend's operator filter.
 
         Operator matches are intersected with the -k/--kernel filter when set;
-        matched rows are stored in workload.matched_ml_api_trace_dfs[backend].
+        matched nodes are stored in workload.ml_api_glob_matches.
         """
-        return
+        cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
+        label = cli["label"]
+        pattern_list = parse_operator_patterns(args, cli["filter_attr"])
+        matched_nodes = _collect_glob_matched_nodes(
+            workload.ml_api_call_trees, pattern_list, backend
+        )
+        if not matched_nodes:
+            console_warning(
+                "ml api trace",
+                f"No {label} operators matched the pattern(s): {pattern_list}",
+            )
+            sys.exit(0)
+
+        kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
+        name_to_id: dict[str, int] = {
+            str(kernel_name).strip(): idx
+            for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
+        }
+        kernel_ids: set[int] = set()
+        for node in matched_nodes:
+            kernel_ids.update(_assign_kernel_ids_from_top(node, name_to_id))
+        selected_ids = sorted(kernel_ids)
+        workload.ml_api_glob_matches = matched_nodes
+
+        if workload.filter_kernel_ids:
+            existing_ids = set(workload.filter_kernel_ids)
+            selected_ids = [
+                kernel_id for kernel_id in selected_ids if kernel_id in existing_ids
+            ]
+
+        if selected_ids:
+            workload.filter_kernel_ids = selected_ids
+            console_log(
+                "ml api trace",
+                f"{label} operator filter selected {len(selected_ids)} kernel(s) "
+                "for metric analysis.",
+            )
+        elif workload.filter_kernel_ids:
+            console_error(
+                "ml api trace",
+                f"No {label}-operator kernels overlap with the -k filter "
+                f"{workload.filter_kernel_ids}. No kernels to analyze.",
+            )
+        else:
+            console_error(
+                "ml api trace",
+                "No kernels found for matched operators. No kernels to analyze.",
+            )
 
     def handle_operator(
         self, args: argparse.Namespace, workload: schema.Workload, backend: str
