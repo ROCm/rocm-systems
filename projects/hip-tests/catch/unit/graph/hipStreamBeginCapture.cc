@@ -2035,6 +2035,11 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStrea
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
   REQUIRE(graph == nullptr);
+
+  // The two expected failures above leave a sticky thread-local error that only a query clears.
+  // The generator runs this body again, and its first hipGetLastError() would report that error
+  // as a failure of the kernel launch preceding it.
+  (void)hipGetLastError();
 }
 
 /**
