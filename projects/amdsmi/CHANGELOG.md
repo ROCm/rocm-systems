@@ -71,6 +71,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed processor cleanup during AMD SMI shutdown**.  
+  - Releases AI-NIC processors and sockets in NIC-only sessions, clears processor tracking, and resets NIC context state so reinitialization does not retain stale handles.
+
+- **Fixed incremental builds leaving staged Python files out of date**.  
+  - Refreshes the staged package after source edits, preventing stale exports or implementations from causing import errors after an API rename.
+
 - **Fixed typed processor enumeration returning GPUs for unhandled processor types**.  
   - Types with no processors, including `AMD_APU`, now return an empty list. Out-of-range types are rejected. Use `amdsmi_is_gpu_apu()` on `AMD_GPU` handles to identify APUs ([#8476](https://github.com/ROCm/rocm-systems/issues/8476)).
   - Migration: callers that passed `UNKNOWN` as a wildcard now get zero handles instead of the GPU list, and must pass `AMD_GPU`.
