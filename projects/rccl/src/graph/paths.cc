@@ -1448,6 +1448,14 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
            comm->p2pnChannelsPerPeer > 1)
       comm->p2pnChannelsPerPeer /= 2;
+    if (rcclUseAinic()) {
+      // A single AINIC NIC is only saturated by two net-p2p channels per peer.
+      // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
+      bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
+      int nChannelsMax = atScale ? 1 : 2;
+      comm->p2pnChannelsPerPeer = std::max(
+        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+    }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
@@ -1512,6 +1520,35 @@ ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int*
       maxPath = std::max(maxPath, paths[j].type);
     }
   }
+  *max = maxPath;
+  return ncclSuccess;
+}
+
+// RCCL: worst case over the GPUs of the best path each of them has to a NIC of its own. A PXN
+// relay counts as one, since it reaches the NIC through the GPU that owns it, and a single relay
+// raises the result for the whole system, so a search bounded by it still reaches the relays.
+ncclResult_t ncclTopoGetGpuMaxLocalNetPath(struct ncclTopoSystem* system, int* max) {
+  int maxPath = PATH_LOC;
+  bool hasPxnRelay = false;
+
+  for (int i = 0; i < system->nodes[GPU].count; i++) {
+    struct ncclTopoLinkList* paths = system->nodes[GPU].nodes[i].paths[NET];
+    if (paths == NULL) continue;
+
+    int nearest = PATH_DIS;
+    for (int n = 0; n < system->nodes[NET].count; n++) {
+      nearest = std::min(nearest, paths[n].type);
+      if (paths[n].type == PATH_PXN) hasPxnRelay = true;
+    }
+
+    // A GPU that reaches no NIC constrains nothing, and would otherwise force PATH_DIS.
+    if (nearest == PATH_DIS) continue;
+
+    maxPath = std::max(maxPath, nearest);
+  }
+
+  if (hasPxnRelay) maxPath = std::max(maxPath, PATH_PXN);
+
   *max = maxPath;
   return ncclSuccess;
 }

@@ -54,7 +54,8 @@ RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
-RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
+constexpr int AinicMaxDirectAGScale = 8;
+RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", -1);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
@@ -743,13 +744,14 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
   static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
-  if (userDirectAllGatherInput != 0) {
+  if (userDirectAllGatherInput < 0) {
+    // DIRECT ALLGATHER disabled on AINIC by default on scale >8 nodes, and enabled otherwise.
+    if (rcclUseAinic() && (comm->nNodes > AinicMaxDirectAGScale)) {
+      INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC by default for %d+ nodes. ", AinicMaxDirectAGScale);
+      return false;
+    }
+  } else if (userDirectAllGatherInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
-    return false;
-  }
-
-  if (rcclUseAinic()) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC. ");
     return false;
   }
 
@@ -1190,10 +1192,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows.
+    // Match taskAppend's single-node and hierarchical CE gates for -A 1 reporting.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
-    if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+    const bool hierCeAvailable = !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype,
+                                                                     winRegType, sendWin, recvWin);
+    if ((ceAvailable || hierCeAvailable) && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }

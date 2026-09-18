@@ -44,6 +44,29 @@ public:
   uint32_t read_count = 0;
 };
 
+class MemoryAccessRecorder final : public ExecutionPlugin {
+public:
+  MemoryAccessRecorder() : ExecutionPlugin("memory_access_recorder") {}
+
+  bool observes_memory_routing() const override { return true; }
+
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
+    mnemonic = access.mnemonic;
+    active_lane_mask = access.active_lane_mask;
+    architectural_exec_lane_mask = access.architectural_exec_lane_mask;
+    valid_lane_mask = access.valid_lane_mask;
+    request_lane_mask = access.request_lane_mask;
+    addresses.assign(access.addresses.begin(), access.addresses.end());
+  }
+
+  std::string mnemonic;
+  uint64_t active_lane_mask = 0;
+  uint64_t architectural_exec_lane_mask = 0;
+  uint64_t valid_lane_mask = 0;
+  uint64_t request_lane_mask = 0;
+  std::vector<uint64_t> addresses;
+};
+
 class Gfx1250MemoryTestCu
     : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa> {
 public:
@@ -96,6 +119,104 @@ private:
   uint64_t saved_;
 };
 #endif
+
+TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
+  amdgpu::GpuMemory memory("gfx1250_transpose_memory");
+  amdgpu::L2Cache l2("gfx1250_transpose_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 64;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_transpose_cu", config, &memory, &l2);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<MemoryAccessRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  compute_unit->set_plugin_group(plugin_group);
+
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  constexpr uint64_t kArchitecturalExec = uint64_t{1} << 5;
+  constexpr uint64_t kBaseAddress = 0x4000;
+  wave->set_exec(kArchitecturalExec);
+  write_wave_sgpr(*compute_unit, *wave, 0, static_cast<uint32_t>(kBaseAddress));
+  write_wave_sgpr(*compute_unit, *wave, 1, static_cast<uint32_t>(kBaseAddress >> 32));
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    compute_unit->write_vgpr(wave->vgpr_alloc().base, lane, lane * 16);
+
+  const auto words =
+      cdna5::build_vglobal(cdna5::kGlobalLoadTr4B64Vglobal, {.saddr = 0, .vdst = 8, .vaddr = 0});
+  auto load = decode_gfx1250(words, "global_load_tr4_b64");
+  ASSERT_NE(load, nullptr);
+  compute_unit->execute_and_route(std::move(load), *wave);
+
+  constexpr uint64_t kWave32Mask = 0xFFFF'FFFFULL;
+  EXPECT_EQ(recorder_ptr->mnemonic, "global_load_tr4_b64");
+  EXPECT_EQ(recorder_ptr->active_lane_mask, kWave32Mask);
+  EXPECT_EQ(recorder_ptr->architectural_exec_lane_mask, kArchitecturalExec);
+  EXPECT_EQ(recorder_ptr->valid_lane_mask, kWave32Mask);
+  EXPECT_EQ(recorder_ptr->request_lane_mask, kWave32Mask);
+  ASSERT_EQ(recorder_ptr->addresses.size(), wave->wf_size());
+  EXPECT_EQ(recorder_ptr->addresses.front(), kBaseAddress);
+  EXPECT_EQ(recorder_ptr->addresses.back(), kBaseAddress + 31 * 16);
+}
+
+TEST(Gfx1250ExecutionTest, GlobalTransposePreservesZeroExecAndDestination) {
+  amdgpu::GpuMemory memory("gfx1250_zero_exec_transpose_memory");
+  amdgpu::L2Cache l2("gfx1250_zero_exec_transpose_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.target = ROCJITSU_CODE_TARGET_GFX1250;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 64;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit =
+      std::make_unique<Gfx1250MemoryTestCu>("gfx1250_zero_exec_transpose_cu", config, &memory, &l2);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<MemoryAccessRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  compute_unit->set_plugin_group(plugin_group);
+
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  constexpr uint64_t kBaseAddress = 0x4000;
+  constexpr uint32_t kDestination = 8;
+  constexpr uint32_t kSentinel = 0xA5A5'5A5Au;
+  wave->set_exec(0);
+  write_wave_sgpr(*compute_unit, *wave, 0, static_cast<uint32_t>(kBaseAddress));
+  write_wave_sgpr(*compute_unit, *wave, 1, static_cast<uint32_t>(kBaseAddress >> 32));
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+    compute_unit->write_vgpr(wave->vgpr_alloc().base, lane, lane * 16);
+    compute_unit->write_vgpr(wave->vgpr_alloc().base + kDestination, lane, kSentinel);
+    compute_unit->write_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane, kSentinel);
+  }
+
+  const auto words = cdna5::build_vglobal(cdna5::kGlobalLoadTr4B64Vglobal,
+                                          {.saddr = 0, .vdst = kDestination, .vaddr = 0});
+  auto load = decode_gfx1250(words, "global_load_tr4_b64");
+  ASSERT_NE(load, nullptr);
+  compute_unit->execute_and_route(std::move(load), *wave);
+
+  EXPECT_EQ(recorder_ptr->mnemonic, "global_load_tr4_b64");
+  EXPECT_EQ(recorder_ptr->active_lane_mask, 0u);
+  EXPECT_EQ(recorder_ptr->architectural_exec_lane_mask, 0u);
+  EXPECT_EQ(recorder_ptr->valid_lane_mask, 0u);
+  EXPECT_EQ(recorder_ptr->request_lane_mask, 0u);
+  for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+    EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination, lane), kSentinel);
+    EXPECT_EQ(compute_unit->read_vgpr(wave->vgpr_alloc().base + kDestination + 1, lane), kSentinel);
+  }
+}
 
 TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
   using amdgpu::fp_mode::effective_f16_omod;
@@ -3909,21 +4030,27 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   }
 }
 
-TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
+TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShifts) {
   struct SpecialSourceCase {
     std::string_view name;
     std::array<uint32_t, 2> words;
     PackedU64Pair expected;
   };
-  // LLVM's VSrc_b64 class and 64-bit special-register decoder define these
-  // selectors at this permanent revision:
-  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
-  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2215-L2259
+  // LLVM classifies this instruction as a single-SGPR-read operation: 32-bit
+  // scalar elements replicate one word, even when the operand names a pair.
+  // VCC and TTMP are scalar register classes in LLVM as well as ordinary SGPRs.
+  // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.h#L1707-L1717
+  // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp#L3695-L3712
+  // Each scalar source supplies shift 1 to both elements: (2 << 1) + 7 = 11,
+  // (3 << 1) + 11 = 17. The vector control supplies shifts (1, 2) instead.
   constexpr std::array kCases{
-      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 23u}},
-      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 23u}},
-      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 23u}},
+      SpecialSourceCase{"sgpr", {0xcc7e4004u, 0x1c401908u}, {11u, 17u}},
+      SpecialSourceCase{"ttmp", {0xcc7e4004u, 0x1c40d908u}, {11u, 17u}},
+      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 17u}},
+      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 17u}},
+      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 17u}},
       SpecialSourceCase{"scc", {0xcc7e4004u, 0x1c41fb08u}, {11u, 17u}},
+      SpecialSourceCase{"vgpr", {0xcc7e4004u, 0x1c421908u}, {11u, 23u}},
   };
 
   auto decoder =
@@ -3936,20 +4063,28 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
-    constexpr uint64_t kShiftPair = 0x0000000200000001ULL;
-    wf->set_exec_raw(kShiftPair);
-    wf->set_vcc_raw(kShiftPair);
-    wf->set_scratch_base(kShiftPair);
-    wf->write_scc(true);
-    write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
-    write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
-    write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
+    for (const uint32_t high_word : {2u, 0xffffffffu}) {
+      SCOPED_TRACE(high_word);
+      const uint64_t scalar_pair = (static_cast<uint64_t>(high_word) << 32) | 1u;
+      write_wave_sgpr(*cu, *wf, 12, 1u);
+      write_wave_sgpr(*cu, *wf, 13, high_word);
+      wf->set_ttmp(0, 1u);
+      wf->set_ttmp(1, high_word);
+      wf->set_exec_raw(scalar_pair);
+      wf->set_vcc_raw(scalar_pair);
+      wf->set_scratch_base(scalar_pair);
+      wf->write_scc(true);
+      write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
+      write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});
+      write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
+      write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
 
-    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
-    ASSERT_NE(decoded, nullptr);
-    ASSERT_NE(decoded->execute, nullptr);
-    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
-    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
+      ASSERT_NE(decoded, nullptr);
+      ASSERT_NE(decoded->execute, nullptr);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
+      EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+    }
   }
 }
 

@@ -67,7 +67,8 @@ static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
   reqs.barrierCount = kGinAllReduceLsaCtas;
   reqs.ginSignalCount = kGinAllReduceLsaCtas;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-  NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true));
+  NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true,
+                                       /*deviceCodeVersion=*/NCCL_VERSION_CODE));
   state->initialized = true;
 
   // Two words (arrived, sense) for ginIntraGpuCtaBarrier. ncclCudaCalloc is capture-safe
@@ -231,7 +232,9 @@ static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nNodes != 1) return false;
   if (comm->nRanks > kGinAllReduceMaxRanks) return false;
   if (comm->sharedRes == nullptr) return false;
-  if (comm->sharedRes->ginState.ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
+  if (ncclGetGinType(comm, &ginType) != ncclSuccess) return false;
+  if (ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
   // After cheaper ginType: ncclTeamLsa() can initialize the device runtime.
   if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
   return true;
