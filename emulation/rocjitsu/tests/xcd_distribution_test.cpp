@@ -34,12 +34,14 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -72,10 +74,12 @@ struct XcdDistributionFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
 
-  explicit XcdDistributionFixture(Threading threading = Threading::Single)
+  explicit XcdDistributionFixture(Threading threading = Threading::Single,
+                                  uint32_t dispatch_threads = 1)
       : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
+    soc->set_dispatch_threads(dispatch_threads);
     // load_config() resolves an unset num_threads to one partition per XCD, so
     // Single has to pin one worker rather than just leave the config alone.
     loaded.engine_config.num_threads =
@@ -117,7 +121,13 @@ uint32_t assigned_xcd_index(const SoC &soc, const amdgpu::CommandProcessor *cp) 
 // Records the interleaving of workgroup dispatch and completion across all XCDs.
 class WorkgroupOrderPlugin : public ExecutionPlugin {
 public:
-  WorkgroupOrderPlugin() : ExecutionPlugin("xcd-wg-order") {}
+  explicit WorkgroupOrderPlugin(std::function<void()> on_first_dispatch = {})
+      : ExecutionPlugin("xcd-wg-order"), on_first_dispatch_(std::move(on_first_dispatch)) {}
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t) override {
+    if (auto callback = std::exchange(on_first_dispatch_, {}))
+      callback();
+  }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
@@ -153,6 +163,7 @@ public:
   }
 
 private:
+  std::function<void()> on_first_dispatch_;
   uint64_t step_ = 0;
   std::map<uint32_t, uint64_t> first_dispatched_;
   std::map<uint32_t, uint64_t> last_completed_;
@@ -268,6 +279,110 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
     EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+}
+
+TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
+  for (Threading threading : {Threading::Single, Threading::ThreadPerXcd}) {
+    XcdDistributionFixture fx(threading);
+    auto *owner = fx.soc->xcd(3)->command_processor();
+    auto queue = test::make_fanout_queue(fx.memory, owner);
+    amdgpu::QueueCuSelection selected(std::in_place);
+    selected->push_back(fx.soc->xcd(0)->command_processor()->compute_units().front());
+    selected->push_back(fx.soc->xcd(7)->command_processor()->compute_units().front());
+    owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
+    selected->clear(); // The queue owns its selection independently of the caller.
+    queue->dispatch(kKdAddr, 10 * kWavefrontSize, kWavefrontSize);
+    queue->dispatch_with_barrier(kKdAddr, 6 * kWavefrontSize, kWavefrontSize);
+    fx.engine->run();
+    const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+    for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+      EXPECT_EQ(counts[xi], xi == 0 || xi == 7 ? 8u : 0u) << "xcd" << xi;
+  }
+}
+
+static void run_cu_mask_transition(Threading threading, bool explicit_barrier) {
+  XcdDistributionFixture fx(threading);
+  if (threading == Threading::ThreadPerXcd) {
+    ASSERT_GT(fx.loaded.engine_config.num_threads, 1u);
+  }
+
+  auto *owner = fx.soc->xcd(0)->command_processor();
+  auto queue = test::make_fanout_queue(fx.memory, owner);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                std::vector{owner->compute_units().front()});
+
+  // Change the mask and submit B when A begins on its owner's thread. A has
+  // more workgroups than its one enabled CU can hold, so it remains in flight.
+  // The plugin group serializes callbacks in both engine threading modes.
+  constexpr uint32_t kFirstWgs = 256;
+  constexpr uint32_t kSecondWgs = 6;
+  auto plugin = std::make_unique<WorkgroupOrderPlugin>([&] {
+    auto *target = fx.soc->xcd(7)->command_processor();
+    owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                  std::vector{target->compute_units().front()});
+    if (explicit_barrier) {
+      hsa_kernel_dispatch_packet_t barrier{};
+      barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+      queue->submit(barrier);
+      queue->dispatch(kKdAddr, kSecondWgs * kWavefrontSize, kWavefrontSize);
+    } else {
+      queue->dispatch_with_barrier(kKdAddr, kSecondWgs * kWavefrontSize, kWavefrontSize);
+    }
+  });
+  auto *order = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  queue->dispatch(kKdAddr, kFirstWgs * kWavefrontSize, kWavefrontSize);
+  fx.engine->run();
+
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    EXPECT_EQ(counts[xi], xi == 0 ? kFirstWgs : xi == 7 ? kSecondWgs : 0u) << "xcd" << xi;
+    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->accepted_entry_count_for_test(
+                  /*queue_id=*/1, /*process_id=*/0),
+              explicit_barrier ? 3u : 2u)
+        << "xcd" << xi << " must retain the queue history even when excluded by the CU mask";
+  }
+  const auto ids = order->dispatch_ids();
+  ASSERT_EQ(ids.size(), 2u);
+  ASSERT_NE(order->last_completed(ids[0]), UINT64_MAX);
+  ASSERT_NE(order->last_completed(ids[1]), UINT64_MAX);
+  EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
+      << "the newly enabled XCD started B while A was still running on the previously enabled XCD";
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierBitOrdering) {
+  run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/false);
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierBitOrderingThreaded) {
+  run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/false);
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierPacketOrdering) {
+  run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/true);
+}
+
+TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierPacketOrderingThreaded) {
+  run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/true);
+}
+
+TEST(XcdDistributionTest, EmptyCuMaskDefersFetchUntilQueueIsEnabled) {
+  XcdDistributionFixture fx;
+  auto *owner = fx.soc->xcd(0)->command_processor();
+  auto queue = test::make_fanout_queue(fx.memory, owner);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                amdgpu::QueueCuSelection(std::in_place));
+  queue->dispatch(kKdAddr, kWavefrontSize, kWavefrontSize);
+  (void)fx.engine->step();
+  auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 0u);
+  owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, std::nullopt);
+  fx.engine->run();
+  counts = fx.soc->dispatched_workgroups_per_xcd();
+  EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), 1u);
 }
 
 // The split must not depend on which XCD the queue landed on: rank is the XCD's
@@ -670,8 +785,8 @@ TEST(XcdDistributionTest, DispatchIdClassesStayDisjointAcrossTheWrap) {
 // peer's completion_signal, and drain_completions() fires only for the shard
 // that is not a peer. Defeating either alone still yields one decrement, so this
 // pins the property rather than either implementation of it.
-void run_fanout_completion_signal(Threading threading) {
-  XcdDistributionFixture fx(threading);
+void run_fanout_completion_signal(Threading threading, uint32_t dispatch_threads = 1) {
+  XcdDistributionFixture fx(threading, dispatch_threads);
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   // amd_signal_t::value lives 8 bytes into the signal object.
@@ -724,6 +839,11 @@ TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnceThreaded) {
   run_fanout_completion_signal(Threading::ThreadPerXcd);
 }
 
+TEST(XcdDistributionTest, SharedPoolFiresTheCompletionSignalExactlyOnceThreaded) {
+  // Eight XCD engines share three pool workers and join their batches independently.
+  run_fanout_completion_signal(Threading::ThreadPerXcd, /*dispatch_threads=*/4);
+}
+
 // The two ordering regressions above run on a single engine thread, where every
 // XCD is driven by one drain loop and two command processors never actually run
 // at the same time. That leaves the properties they check resting on an
@@ -764,8 +884,8 @@ TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcdsThreaded) {
             uint64_t{kTotalXcds} * kTotalXcds);
 }
 
-TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+void run_threaded_fanout_barrier(uint32_t dispatch_threads) {
+  XcdDistributionFixture fx(Threading::ThreadPerXcd, dispatch_threads);
   ASSERT_GT(fx.loaded.engine_config.num_threads, 1u) << "fixture did not actually go concurrent";
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
@@ -793,6 +913,15 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
   ASSERT_EQ(ids.size(), 2u) << "expected exactly two distinct dispatch ids";
   EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
       << "an XCD began the barrier'd dispatch while a peer still ran the previous one";
+}
+
+TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
+  run_threaded_fanout_barrier(/*dispatch_threads=*/1);
+}
+
+TEST(XcdDistributionTest, SharedPoolBarrierBitWaitsForEveryXcdsShareThreaded) {
+  // Exercise barrier ordering when peer XCDs execute and join shared-pool work concurrently.
+  run_threaded_fanout_barrier(/*dispatch_threads=*/4);
 }
 
 // One matched begin/end pair is owed per packet, not per share, and the pair

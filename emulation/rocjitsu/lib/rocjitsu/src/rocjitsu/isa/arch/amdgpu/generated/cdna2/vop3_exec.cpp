@@ -2194,8 +2194,9 @@ void VFmaLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VDivFixupLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
-      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto p, auto b, auto c) {
+    return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c);
+  });
   uint64_t exec = wf.exec();
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2839,8 +2840,9 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
-      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto p, auto b, auto c) {
+    return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c);
+  });
   uint64_t exec = wf.exec();
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
