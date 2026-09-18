@@ -544,6 +544,9 @@ util::Result execute_tensor_dma(const Inst &inst, Wavefront &wf, bool store_from
         .wavefront_id = wf.wf_id(),
         .process_id = wf.process_id(),
         .element_size_bytes = desc.value().elem_size,
+        .is_load = !store_from_lds,
+        .addresses = TensorDmaAddressView::deferred(observed_address_count, &desc.value(),
+                                                    &materialize_observed_addresses),
         .tile_dim0 = desc.value().tile_dims[0],
         .tile_dim1 = desc.value().gather ? desc.value().valid_indices : desc.value().tile_dims[1],
         .data_size = desc.value().data_size,
@@ -551,9 +554,6 @@ util::Result execute_tensor_dma(const Inst &inst, Wavefront &wf, bool store_from
             static_cast<int64_t>(desc.value().global_strides[0] * desc.value().elem_size),
         .tensor_dim1_stride =
             static_cast<int64_t>(desc.value().global_strides[1] * desc.value().elem_size),
-        .is_load = !store_from_lds,
-        .addresses = TensorDmaAddressView::deferred(observed_address_count, &desc.value(),
-                                                    &materialize_observed_addresses),
     };
     wf.cu().report_tensor_dma_memory_access(access);
   }

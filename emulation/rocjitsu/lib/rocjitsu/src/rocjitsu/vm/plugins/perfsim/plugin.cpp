@@ -1217,7 +1217,9 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {
-    impl_->reject(wf.dispatch_id(), "instruction encoding is not representable by FFM v13");
+    impl_->reject(wf.dispatch_id(),
+                  std::format("instruction encoding is not representable by FFM v{}",
+                              impl_->negotiated_api_version));
     return;
   }
   if (inst.mnemonic().starts_with("scratch_")) {

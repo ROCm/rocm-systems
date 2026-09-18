@@ -93,6 +93,31 @@ void write_tensor_dma_d0(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf, uin
                   static_cast<uint32_t>((global_addr >> 32) & 0x01ffffffu) | 0x80000000u);
 }
 
+TEST(TensorDmaMemoryAccessObservationTest, PreservesLegacyPositionalInitialization) {
+  const std::array<uint64_t, 2> addresses{0x1000, 0x1004};
+  const amdgpu::TensorDmaMemoryAccessObservation access{"tensor_load_to_lds",
+                                                        0x2000,
+                                                        1,
+                                                        2,
+                                                        3,
+                                                        4,
+                                                        5,
+                                                        6,
+                                                        4,
+                                                        false,
+                                                        std::span<const uint64_t>(addresses)};
+
+  EXPECT_FALSE(access.is_load);
+  std::array<uint64_t, 2> copied_addresses{};
+  ASSERT_TRUE(access.addresses.copy_to(copied_addresses));
+  EXPECT_EQ(copied_addresses, addresses);
+  EXPECT_EQ(access.tile_dim0, 0u);
+  EXPECT_EQ(access.tile_dim1, 0u);
+  EXPECT_EQ(access.data_size, 0u);
+  EXPECT_EQ(access.tensor_dim0_stride, 0);
+  EXPECT_EQ(access.tensor_dim1_stride, 0);
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaDescriptorReadPropagatesFailure) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

@@ -461,6 +461,34 @@ TEST_F(PerfsimPluginTest, AcceptsBackendSelectedCompatibleVersion) {
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
 }
 
+TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction) {
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v8_only", 1);
+  WaveFixture fixture;
+  const std::string config = plugin_config();
+  testing::internal::CaptureStderr();
+  {
+    PerfsimPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    const KernelDispatchInfo info = dispatch_info(9);
+    plugin.onAmdgpuDispatchPacketProcessed(info);
+    plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(wave);
+
+    const std::array<uint32_t, 5> words{};
+    SyntheticInstruction oversized("oversized", words);
+    plugin.onAmdgpuBeforeExecuteInstruction(0x2000, oversized, wave);
+    plugin.onAmdgpuWavefrontHalted(wave);
+    plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("instruction encoding is not representable by FFM v8"),
+            std::string::npos);
+  EXPECT_EQ(diagnostic.find("FFM v13"), std::string::npos);
+}
+
 TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaElementSize) {
   WaveFixture fixture;
   const std::string config = plugin_config();
