@@ -82,7 +82,7 @@ md5sum::update(Tp inp)
 namespace
 {
 
-using size_type = typename md5sum::size_type;
+using size_type = md5sum::size_type;
 
 // Constants for md5sumTransform routine.
 constexpr std::uint32_t S11 = 7;

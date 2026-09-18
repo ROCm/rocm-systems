@@ -288,7 +288,7 @@ stable_vector<Tp, ChunkSizeV, AlignN>::add_chunk()
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
+stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
 stable_vector<Tp, ChunkSizeV, AlignN>::last_chunk()
 {
     if(ROCPROFSYS_UNLIKELY(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV))
@@ -325,21 +325,21 @@ stable_vector<Tp, ChunkSizeV, AlignN>::push_back(Tp&& t)
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
+stable_vector<Tp, ChunkSizeV, AlignN>::reference
 stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type i)
 {
     return (*m_chunks[i / ChunkSizeV])[i % ChunkSizeV];
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
+stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
 stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type i) const
 {
     return const_cast<this_type&>(*this)[i];
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
+stable_vector<Tp, ChunkSizeV, AlignN>::reference
 stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i)
 {
     if(ROCPROFSYS_UNLIKELY(i >= size()))
@@ -353,7 +353,7 @@ stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i)
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
+stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
 stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i) const
 {
     return const_cast<this_type&>(*this).at(i);
