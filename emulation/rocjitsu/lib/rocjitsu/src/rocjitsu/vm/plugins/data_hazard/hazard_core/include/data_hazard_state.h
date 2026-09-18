@@ -9,8 +9,8 @@
 
 #include "hash_utils.h"
 #include "hazard_events.h"
-#include "spin_lock.h"
 #include "types.h"
+#include "util/spinlock.h"
 
 #include <array>
 #include <atomic>
@@ -92,12 +92,12 @@ struct EngineInstructionContext {
 };
 
 struct EngineWorkgroupState {
-  SpinLock mutex;
+  util::Spinlock mutex;
   std::vector<EngineLdsAccessRecord> lds_epoch;
 };
 
 struct EngineWaveState {
-  SpinLock mutex;
+  util::Spinlock mutex;
   WaveState core;
   /// Only two kinds of instruction are still worth a context: the one whose
   /// accesses are arriving now, and those a pending operation can still be

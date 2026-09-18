@@ -429,7 +429,7 @@ DataHazardEngine::wave_snapshot(const ExecutionKey &wave_key) const {
     wave = it->second;
   }
 
-  std::lock_guard<SpinLock> lock(wave->mutex);
+  std::lock_guard<util::Spinlock> lock(wave->mutex);
   return EngineWaveSnapshot{
       wave_key,
       wave->core,
@@ -449,7 +449,7 @@ std::vector<EngineWaveSnapshot> DataHazardEngine::wave_snapshots() const {
   std::vector<EngineWaveSnapshot> snapshots;
   snapshots.reserve(waves.size());
   for (const auto &[key, wave] : waves) {
-    std::lock_guard<SpinLock> lock(wave->mutex);
+    std::lock_guard<util::Spinlock> lock(wave->mutex);
     snapshots.push_back(EngineWaveSnapshot{
         key,
         wave->core,
@@ -477,7 +477,7 @@ void DataHazardEngine::on_workgroup_begin(EntityId dispatch_id, EntityId cluster
   auto workgroup =
       get_or_create_workgroup(EngineWorkgroupKey{dispatch_id, cluster_id, workgroup_id});
   if (workgroup) {
-    std::lock_guard<SpinLock> lock(workgroup->mutex);
+    std::lock_guard<util::Spinlock> lock(workgroup->mutex);
     workgroup->lds_epoch.clear();
   }
 }
@@ -502,7 +502,7 @@ void DataHazardEngine::on_wave_begin(const ExecutionKey &wave_key) {
   if (!wave)
     return;
 
-  std::lock_guard<SpinLock> lock(wave->mutex);
+  std::lock_guard<util::Spinlock> lock(wave->mutex);
   wave->workgroup = workgroup;
   wave->core.reset();
   wave->instruction_contexts.clear();
@@ -529,7 +529,7 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
   std::vector<EngineLdsAccessRecord> epoch_to_check;
   EngineWorkgroupKey epoch_key{};
   {
-    std::lock_guard<SpinLock> lock(wave->mutex);
+    std::lock_guard<util::Spinlock> lock(wave->mutex);
     track_instruction_context(*wave, instruction);
 
     const EngineInstructionContext ctx =
@@ -555,7 +555,7 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
     prune_retired_instructions(*wave);
 
     if (action.is_workgroup_barrier && wave->workgroup) {
-      std::lock_guard<SpinLock> wg_lock(wave->workgroup->mutex);
+      std::lock_guard<util::Spinlock> wg_lock(wave->workgroup->mutex);
       epoch_to_check = std::move(wave->workgroup->lds_epoch);
       wave->workgroup->lds_epoch.clear();
       epoch_key = EngineWorkgroupKey{ctx.dispatch_id, ctx.cluster_id, ctx.workgroup_id};
@@ -576,7 +576,7 @@ void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
   if (!wave)
     return;
 
-  std::unique_lock<SpinLock> lock(wave->mutex);
+  std::unique_lock<util::Spinlock> lock(wave->mutex);
   EngineInstructionContext ctx = get_instruction_context(*wave, event.instruction.instruction_id);
   if (ctx.instruction_id == 0 && event.instruction.instruction_id != 0)
     ctx = make_engine_instruction_context(event.instruction);
@@ -618,7 +618,7 @@ void DataHazardEngine::on_barrier(const BarrierEvent &barrier) {
   if (barrier.kind == BarrierKind::LocalMemoryAtomic ||
       barrier.kind == BarrierKind::LocalMemoryAtomicAsync) {
     for (const auto &wave : waves_for_barrier(barrier)) {
-      std::lock_guard<SpinLock> lock(wave->mutex);
+      std::lock_guard<util::Spinlock> lock(wave->mutex);
       hazard_core::clear_pending_ops(&wave->core, WaitCntType::LDS, 0);
       prune_retired_instructions(*wave);
     }
@@ -1309,7 +1309,7 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
     record.is_write = event.is_write;
     record.is_atomic = event.is_atomic;
     record.raw_isa = ctx.raw_isa;
-    std::lock_guard<SpinLock> lock(wave.workgroup->mutex);
+    std::lock_guard<util::Spinlock> lock(wave.workgroup->mutex);
     wave.workgroup->lds_epoch.push_back(record);
   }
 }
@@ -1415,7 +1415,7 @@ void DataHazardEngine::flush_workgroup_epoch(const EngineWorkgroupKey &key) {
 
   std::vector<EngineLdsAccessRecord> epoch;
   {
-    std::lock_guard<SpinLock> lock(workgroup->mutex);
+    std::lock_guard<util::Spinlock> lock(workgroup->mutex);
     epoch = std::move(workgroup->lds_epoch);
     workgroup->lds_epoch.clear();
   }

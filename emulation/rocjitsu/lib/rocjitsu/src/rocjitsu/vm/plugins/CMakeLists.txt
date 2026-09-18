@@ -42,7 +42,6 @@ set(RJ_HAZARD_CORE_PUBLIC_HEADERS
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/hash_utils.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/hazard_events.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/simulator_api.h
-    ${RJ_HAZARD_CORE_INCLUDE_DIR}/spin_lock.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/types.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/wait_suggestion.h
 )
@@ -63,6 +62,9 @@ target_include_directories(
     rocjitsu_plugin_data_hazard
     PUBLIC ${RJ_HAZARD_CORE_INCLUDE_DIR}
 )
+# The engine state uses util::Spinlock; util is header-only (INTERFACE) so this
+# only puts lib/util/include on the include path.
+target_link_libraries(rocjitsu_plugin_data_hazard PUBLIC util)
 # The plugin reads its own configuration object out of the resolved JSON.
 target_link_libraries(rocjitsu_plugin_data_hazard PRIVATE flatbuffers)
 add_dependencies(rocjitsu_plugin_data_hazard flatbuffers_schemas)
@@ -180,6 +182,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RJ_BUILD_DATA_HAZARD_CORE)
             $<BUILD_INTERFACE:${RJ_HAZARD_CORE_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard>
     )
+    target_link_libraries(rocjitsu_data_hazard_core PUBLIC util)
     target_compile_features(rocjitsu_data_hazard_core PUBLIC cxx_std_20)
     set_target_properties(
         rocjitsu_data_hazard_core
@@ -209,5 +212,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RJ_BUILD_DATA_HAZARD_CORE)
     install(
         FILES ${RJ_HAZARD_CORE_PUBLIC_HEADERS}
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard
+    )
+    # data_hazard_state.h includes "util/spinlock.h", so the header has to ship
+    # next to the engine headers for out-of-tree consumers to resolve it.
+    install(
+        FILES ${CMAKE_SOURCE_DIR}/lib/util/include/util/spinlock.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard/util
     )
 endif()
