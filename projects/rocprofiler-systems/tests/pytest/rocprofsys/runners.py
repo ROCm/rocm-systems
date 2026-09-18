@@ -80,15 +80,18 @@ class TestResult:
 
     @property
     def perfetto_file(self) -> Optional[Path]:
-        candidates = [
-            self.output_dir / "perfetto-trace.proto",
-            self.output_dir / "perfetto-trace-0.proto",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        protos = list(self.output_dir.glob("perfetto-trace*.proto"))
-        return protos[0] if protos else None
+        for ext in ("pftrace", "proto"):
+            candidates = [
+                self.output_dir / f"perfetto-trace.{ext}",
+                self.output_dir / f"perfetto-trace-0.{ext}",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+            traces = sorted(self.output_dir.glob(f"perfetto-trace*.{ext}"))
+            if traces:
+                return traces[0]
+        return None
 
     @property
     def rocpd_files(self) -> list[Path]:

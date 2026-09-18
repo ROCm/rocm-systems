@@ -3,12 +3,12 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
-#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator_internal.h"
@@ -22,7 +22,6 @@
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
-#include "rocjitsu/code/dbt/scoped_cfg_edges.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/kernel_scope.h"
@@ -31,6 +30,7 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/code/relocation_function_table.h"
+#include "rocjitsu/code/scoped_cfg_edges.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
@@ -2203,9 +2203,10 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     }
 
     util::StringDiagnostic decode_error;
-    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result =
-        BasicBlock::build(output, *decoder, host_arch_, decode_error.emitter(), block_leaders,
-                          ExternalEntryPolicy::ExplicitOnly);
+    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
+        output, *decoder, host_arch_,
+        {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
+        decode_error.emitter());
     if (block_result.failed()) {
       append_rewrite_discharge_error(
           result.diagnostics, "rewrite-discharge verification failed to decode final output: " +
@@ -2480,17 +2481,23 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   block_split_points.erase(std::ranges::unique(block_split_points).begin(),
                            block_split_points.end());
 
-  // Phase 2: build a CFG over .text, including recovered indirect targets as
-  // block leaders, then compute one source-reachable block set per descriptor
+  // Phase 2: use shared CFG construction with eager decoding. DBT already
+  // inspects whole text sections; discovering indirect targets during decoding
+  // would repeat large dataflow passes without reducing this workload. Keep
+  // function symbols and stored-pointer targets as split points, not external
+  // entries, so helper bodies retain the facts established by their callers.
+  // Then compute one source-reachable block set per descriptor
   // root. These sets are intentionally kernel-local: if two roots reach the same
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   util::StringDiagnostic decode_error;
-  auto block_result =
-      BasicBlock::build(obj, *decoder, guest_arch_, decode_error.emitter(), block_leaders,
-                        ExternalEntryPolicy::ExplicitOnly, block_split_points);
+  auto block_result = BasicBlock::build_cfg(obj, *decoder, guest_arch_,
+                                            {.decode_policy = BasicBlock::DecodePolicy::FullSection,
+                                             .entries = block_leaders,
+                                             .split_points = block_split_points},
+                                            decode_error.emitter());
   if (block_result.failed()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization, decode_error.message());
     return leave_unchanged();

@@ -506,7 +506,7 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // at any instant, so no lock cycle exists. Never blocks on the reader.
     if(kfd::signal_less_feature_enabled() && !kfd::signal_less_child_stale())
     {
-        // F1: hold drain_mu across the whole close/drain/close-window sequence, so
+        // Hold drain_mu across the whole close/drain/close-window sequence, so
         // finalization's concurrent drain either wins the mutex (and blocks us before
         // the runtime queue is freed) or observes rdid_valid==false and skips. The
         // state shared_ptr keeps QueueState (and drain_mu) alive across the erase.
@@ -849,10 +849,19 @@ enable_queue_intercept()
         // Keep interception active for HIP_GRAPH subscribers (drives kernel_dispatch_count).
         bool has_hip_graph_tracing = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH);
 
+        // Kernel replay drives its multi-pass loop from WriteInterceptor, so it needs the queue
+        // interceptor even when no other service is configured.
+        bool has_kernel_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
+
+        // HIP event tracing is currently only implemented for the queue interceptor path.
+        bool has_hip_event_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
+                                     itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
-           itr->dispatch_thread_trace || has_hip_graph_tracing)
+           itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
+           has_hip_event_tracing)
             return true;
     }
     return false;
@@ -864,7 +873,8 @@ context_needs_queue_interposition_tracing(const context::context* ctx)
     return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
 }
 
 void
@@ -890,6 +900,11 @@ queue_controller_fini()
 {
     // synchronize first
     queue_controller_sync();
+
+    // Stop the interposition monitor before any signal-pool teardown: retiring its
+    // stragglers releases pooled signals, so it must run while the pool is still alive
+    // (queue_fini below tears the pool down).
+    queue_interposition::stop_completion_monitor();
 
     // finalize queue data (e.g. clean up signal pool)
     if(enable_queue_intercept()) queue_fini();

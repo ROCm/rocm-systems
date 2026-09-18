@@ -156,7 +156,7 @@ rj_code_object_release(obj);
 rj_code_executable_destroy(exec);
 ```
 
-### Analysis (`analysis/`)
+### Analysis (`code/analysis/`)
 
 Register liveness and def-use chain analysis over GPU kernel CFGs.
 Shared by DBT (for temporary register allocation during instruction
