@@ -1300,8 +1300,10 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     }
   }
 
-  struct ncclIbRequest* req;
-  NCCLCHECK(IbCastGetRequest(&comm->base, &req));
+  struct ncclIbRequest* req = NULL;
+  ncclResult_t ret = ncclSuccess;
+  ncclResult_t iflushRet = ncclSuccess;
+  NCCLCHECKGOTO(IbCastGetRequest(&comm->base, &req), ret, iflushFail);
   req->type = NCCL_NET_IB_REQ_FLUSH;
   req->sock = &comm->base.sock;
 
@@ -1328,7 +1330,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.opcode = IBV_WR_RDMA_WRITE;
       writeWr.send_flags = 0;
       struct ibv_send_wr* badWriteWr;
-      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
       memset(&wr, 0, sizeof(wr));
       wr.wr_id = wrId;
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
@@ -1341,7 +1343,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
             wr.wr_id);
       TIME_START(4);
       struct ibv_send_wr* bad_wr;
-      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr));
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
       TIME_STOP(4);
     } else {
       struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
@@ -1380,11 +1382,23 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-read flush request (req=%p, comm=%p, wr_id=0x%lx)", __func__, nFlushWrs,
             req, req->base, wrId);
       TIME_START(4);
-      struct ibv_send_wr* bad_wr;
+      struct ibv_send_wr* bad_wr = NULL;
       INFO(NCCL_NET, "NET/IB: %s: posting flush dev=%d qpn=%u wr_id=0x%lx nWrs=%d",
            __func__, i, comm->devs[i].gpuFlush.qp.qp->qp_num, wrId, nFlushWrs);
-      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr));
+      iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
       TIME_STOP(4);
+      if (iflushRet != ncclSuccess) {
+        int posted = 0;
+        for (struct ibv_send_wr* w = &flushWrs[0]; w != NULL && w != bad_wr; w = w->next) posted++;
+        if (posted > 0) {
+          IbCastAddEvent(req, i);
+          req->type = NCCL_NET_IB_REQ_FAILED;
+          *request = req;
+          IbCastStatsFatalError(&comm->base.stats);
+          return ncclSuccess;
+        }
+        goto iflushFail;
+      }
     }
 
     IbCastAddEvent(req, i);
@@ -1394,6 +1408,19 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
 
   *request = req;
   return ncclSuccess;
+
+iflushFail:
+  IbCastStatsFatalError(&comm->base.stats);
+  if (req) {
+    if (IbCastRequestHasEvents(req)) {
+      req->type = NCCL_NET_IB_REQ_FAILED;
+      *request = req;
+      return ncclSuccess;
+    }
+    IbCastFreeRequest(req);
+  }
+  *request = NULL;
+  return (iflushRet != ncclSuccess) ? iflushRet : ret;
 }
 
 #define HCA_NAME(req, index) ((req)->devBases[(index)]->pd->context->device->name)
