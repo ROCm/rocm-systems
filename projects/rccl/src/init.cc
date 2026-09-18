@@ -623,8 +623,8 @@ static ncclResult_t commFree(ncclComm_t comm) {
   // dependent: it reproduces on a single node with any collective once a
   // profiler plugin is attached, and never without one.
   //
-  // This also has to precede commPoison(comm) further down, which scribbles
-  // over fields the thread reads.
+  // This also has to precede the free(comm->abortFlag) below, which the thread
+  // loads through pt->abortFlag on every wake.
   NCCLCHECK(ncclProfilerThreadDestroy(comm));
 
   struct ncclDestructor* dtor = comm->destructorHead;

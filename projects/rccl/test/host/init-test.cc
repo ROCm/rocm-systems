@@ -2087,32 +2087,7 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
-// ---------------------------------------------------------------------------
-// commFree teardown ORDER around the background profiler thread.
-//
-// This is a lifetime contract, not a preference. The thread started by
-// ncclProfilerThreadCreate polls, for every op still queued in pt->active:
-//
-//     op->workStarted[ch].data[slot].counter        (src/plugin/profiler.cc)
-//
-// comm->profiler.workStarted/workCompleted/workPhases are host-pinned
-// (ncclCudaHostCalloc) and are released by ncclDestructorFnCudaHostFree entries
-// that ncclCommPushCudaHostFree puts on comm->destructorHead -- i.e. by the
-// destructor loop inside commFree. If the thread is torn down AFTER that loop,
-// it keeps dereferencing an unmapped mapping and takes SIGSEGV
-// ("address not mapped to object"). commPoison(comm), also in commFree,
-// likewise overwrites fields the thread reads.
-//
-// That regression shipped once (the NCCL v2.31.2-1 sync), and it was invisible
-// to every existing test: it needs a real profiler plugin attached AND an op
-// that has not completed yet, so it only ever showed up as a GPU-run segfault.
-// Asserting the order here means the next sync that reshuffles commFree fails
-// in CI, on a CPU, with a message that says what broke -- instead of in
-// somebody's profiling run.
-//
-// The assertions are deliberately relative (LT), not absolute indices: steps may
-// legitimately be added between these three, but they may never swap.
-// ---------------------------------------------------------------------------
+// See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
 TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
   InstallCommAllocSuccess();
   ncclComm* comm = nullptr;
