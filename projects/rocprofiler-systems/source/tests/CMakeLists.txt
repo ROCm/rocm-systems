@@ -88,3 +88,75 @@ if(_ut_libs MATCHES "rocprofiler-systems-object-library")
         "rocprof-sys-unit-tests must NOT link rocprofiler-systems-object-library. "
     )
 endif()
+
+# ------------------------------------------------------------------------------#
+#
+# Host-ASAN payload
+#
+# ------------------------------------------------------------------------------#
+
+# tests/pytest/test_units.py marks these build_only, so the packaged test tree
+# skips rocprof-sys-unit-tests and none of its cases run in CI. The CPU-only
+# host-ASAN matrix consumes the installed binary together with
+# host_asan_tests.json, which pins the exact cases admitted on a runner that has
+# no GPU device nodes.
+if(ROCPROFSYS_INSTALL_HOST_ASAN_TESTS)
+    if(NOT ROCPROFSYS_INSTALL_TESTING)
+        message(
+            FATAL_ERROR
+            "ROCPROFSYS_INSTALL_HOST_ASAN_TESTS requires ROCPROFSYS_INSTALL_TESTING"
+        )
+    endif()
+
+    if(ROCPROFSYS_USE_SANITIZER AND ROCPROFSYS_SANITIZER_TYPE MATCHES "address")
+        # -fsanitize=address alone links the runtime statically into an
+        # executable, leaving no DT_NEEDED entry. The consumer verifies direct
+        # shared linkage before it trusts a result, so request it explicitly.
+        target_link_options(rocprof-sys-unit-tests PRIVATE -shared-libasan)
+
+        # The runtime is libclang_rt.asan.so under a per-target runtime
+        # directory and libclang_rt.asan-<arch>.so under the legacy layout.
+        unset(_asan_runtime_dir)
+        foreach(
+            _asan_lib
+            libclang_rt.asan.so
+            libclang_rt.asan-${CMAKE_SYSTEM_PROCESSOR}.so
+        )
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_asan_lib}
+                OUTPUT_VARIABLE _asan_runtime
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+            if(EXISTS "${_asan_runtime}")
+                get_filename_component(_asan_runtime_dir "${_asan_runtime}" DIRECTORY)
+                break()
+            endif()
+        endforeach()
+
+        if(NOT _asan_runtime_dir)
+            message(
+                FATAL_ERROR
+                "ROCPROFSYS_INSTALL_HOST_ASAN_TESTS requires the shared ASAN runtime, "
+                "which ${CMAKE_CXX_COMPILER} did not resolve"
+            )
+        endif()
+
+        set_target_properties(
+            rocprof-sys-unit-tests
+            PROPERTIES INSTALL_RPATH "${_asan_runtime_dir}"
+        )
+    endif()
+
+    install(
+        TARGETS rocprof-sys-unit-tests
+        RUNTIME
+            DESTINATION share/rocprofiler-systems/tests/host-asan
+            COMPONENT rocprofiler-systems-tests
+    )
+    install(
+        FILES ${CMAKE_CURRENT_LIST_DIR}/host_asan_tests.json
+        DESTINATION share/rocprofiler-systems/tests/host-asan
+        COMPONENT rocprofiler-systems-tests
+    )
+endif()
