@@ -345,6 +345,50 @@ stop_context(const context::context* ctx)
     }
 }
 
+rocprofiler_status_t
+configure_agent_collection(rocprofiler_context_id_t                 context_id,
+                           rocprofiler_buffer_id_t                  buffer_id,
+                           rocprofiler_agent_id_t                   agent_id,
+                           rocprofiler_device_counting_service_cb_t cb,
+                           void*                                    user_data)
+{
+    if(!is_spm_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+
+    auto& ctx = *ctx_p;
+
+    if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+
+    if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(!rocprofiler::buffer::get_buffer(buffer_id))
+    {
+        return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+    }
+
+    if(!ctx.device_spm)
+    {
+        ctx.device_spm = std::make_unique<rocprofiler::context::spm_device_counting_service>();
+    }
+
+    if(ctx.device_spm->conf_agents.emplace(agent_id.handle).second == false)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    ctx.device_spm->agent_data.emplace_back();
+    ctx.device_spm->agent_data.back().callback_data = rocprofiler_user_data_t{.ptr = user_data};
+    ctx.device_spm->agent_data.back().agent_id      = agent_id;
+    ctx.device_spm->agent_data.back().cb            = cb;
+    ctx.device_spm->agent_data.back().buffer        = buffer_id;
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 }  // namespace spm
 
 }  // namespace rocprofiler

@@ -1187,6 +1187,7 @@ finalize()
 
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
+        SPM::spm_device_counting_service_finalize();
         hsa::queue_controller_fini();
         thread_trace::finalize();
         ompt::finalize_ompt();
@@ -1588,6 +1589,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         // Process agent ctx's that were started prior to HSA init
         rocprofiler::counters::device_counting_service_hsa_registration();
+        rocprofiler::SPM::spm_device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);

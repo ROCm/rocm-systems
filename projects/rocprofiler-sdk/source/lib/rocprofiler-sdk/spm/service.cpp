@@ -305,4 +305,15 @@ rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t               
     else
         return ROCPROFILER_STATUS_ERROR;
 }
+
+rocprofiler_status_t
+rocprofiler_configure_spm_device_counting_service(rocprofiler_context_id_t context_id,
+                                                  rocprofiler_buffer_id_t  buffer_id,
+                                                  rocprofiler_agent_id_t   agent_id,
+                                                  rocprofiler_device_counting_service_cb_t cb,
+                                                  void* user_data)
+{
+    return rocprofiler::spm::configure_agent_collection(
+        context_id, buffer_id, agent_id, cb, user_data);
+}
 }
