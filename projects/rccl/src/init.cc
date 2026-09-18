@@ -66,6 +66,7 @@
 #include "git_version.h"
 #include "rccl_vars.h"
 #include "hip_rocm_version_info.h"
+#include "rccl_graph_gen.h"
 // #include <hsa/hsa_ext_amd.h>
 #ifdef USE_AMDSMI
 #include "amdsmi_wrap.h"
@@ -1854,22 +1855,22 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
     if (isGfx1151 || intraGraphGen) {
       /**
-      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
-      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
-      * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-      * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
-      * is required during Preset. Therefore, nChannels cannot be auto-calculated
-      * based on nNodes at this stage.
-      * Recommended: Set nChannels via environment variable (e.g., 6 channels for
-      * optimal 4-node load balancing). Missing channel data is backfilled
-      * by repairMissingChannels() during Postset.
-      *
-      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian
-      * cycles in graph K8 (8 GPU case) = 14 , and 56 is 14*4.
-      * */
+       * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+       * edge-balanced Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+       * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
+       * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+       * is required during Preset. Therefore, nChannels cannot be auto-calculated
+       * based on nNodes at this stage.
+       * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+       * optimal 4-node load balancing). Missing channel data is backfilled
+       * by repairMissingChannels() during Postset.
+       *
+       * In isGfx_110x_120x, defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian
+       * cycles in graph K8 (8 GPU case) = 14, and 56 is 14*4.
+       */
       int initChannels = (int)rcclParamInitChannels();
       int defaultNumChannels =
-        isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
+        isGfx1151 ? 6 /* 2 X (comm->nNodes - 1) */ : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
       int numChannels = initChannels > 0 ? initChannels : defaultNumChannels;
       ringGraph->minChannels = 1;
       ringGraph->maxChannels = std::min(MAXCHANNELS / 2, numChannels);
@@ -3259,11 +3260,11 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   maxP2pPeersEnv = ncclParamMaxP2pPeers();
   if (maxP2pPeersEnv != NCCL_CONFIG_UNDEF_INT) {
     if (maxP2pPeersEnv <= 0) {
-      INFO(NCCL_ENV, "NCCL_MAX_P2P_PEERS %d is too low, leaving it set at %d", maxP2pPeersEnv,
+      INFO(NCCL_ENV, "NCCL_P2P_MAX_PEERS %d is too low, leaving it set at %d", maxP2pPeersEnv,
            comm->config.maxP2pPeers);
     } else {
       if (comm->config.maxP2pPeers != NCCL_CONFIG_UNDEF_INT) {
-        INFO(NCCL_ENV, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=%d", maxP2pPeersEnv);
+        INFO(NCCL_ENV, "Comm config maxP2pPeers reset to NCCL_P2P_MAX_PEERS=%d", maxP2pPeersEnv);
       }
       comm->config.maxP2pPeers = maxP2pPeersEnv;
     }

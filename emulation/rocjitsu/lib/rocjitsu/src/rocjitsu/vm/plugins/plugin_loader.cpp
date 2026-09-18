@@ -15,6 +15,7 @@
 #include <array>
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,6 +46,32 @@ bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
     if (std::string_view(keys[i].AsKey()) == key)
       return true;
   return false;
+}
+
+bool parse_require_all_plugins(const flexbuffers::Reference &root) {
+  if (!map_has_key(root, "require_all_plugins"))
+    return false;
+
+  auto value = root.AsMap()["require_all_plugins"];
+  if (!value.IsBool())
+    throw std::invalid_argument("top-level 'require_all_plugins' must be a boolean");
+  return value.AsBool();
+}
+
+size_t configured_plugin_count(const flexbuffers::Reference &root, bool require_all_plugins) {
+  if (!root.IsMap())
+    return 0;
+  if (!map_has_key(root, "plugins"))
+    return 0;
+
+  auto plugins = root.AsMap()["plugins"];
+  if (!plugins.IsMap()) {
+    if (require_all_plugins)
+      throw std::invalid_argument(
+          "top-level 'plugins' must be an object when 'require_all_plugins' is true");
+    return 0;
+  }
+  return plugins.AsMap().size();
 }
 
 std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
@@ -237,8 +264,15 @@ PluginLoader::configure_plugin_group(const std::string &config_json,
   if (map_has_key(root, "profiled"))
     util::Logger::warn("hook profiling was removed; ignoring top-level 'profiled' config");
 
+  const bool require_all_plugins = parse_require_all_plugins(root);
+  const size_t requested_plugins = configured_plugin_count(root, require_all_plugins);
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
-  load_from_config(config_json, *group, plugin_dir);
+  const int loaded_plugins = load_from_config(config_json, *group, plugin_dir);
+  if (require_all_plugins && static_cast<size_t>(loaded_plugins) != requested_plugins) {
+    throw std::runtime_error("required plugin loading failed: loaded " +
+                             std::to_string(loaded_plugins) + " of " +
+                             std::to_string(requested_plugins) + " configured plugins");
+  }
   return group;
 }
 

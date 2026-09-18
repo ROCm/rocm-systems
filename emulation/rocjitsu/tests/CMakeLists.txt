@@ -27,6 +27,9 @@ set(RJ_OBJECT_LIBS
     rocjitsu_dbt_config
     rocjitsu_pci
 )
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    list(APPEND RJ_OBJECT_LIBS rocjitsu_plugin_perfsim)
+endif()
 
 if(RJ_INSTALL_TESTS)
     set(RJ_INSTALL_TEST_DIR "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests")
@@ -411,6 +414,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_loader_fixture(good)
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
+
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        add_library(
+            rocjitsu_perfsim_fake_backend
+            MODULE
+            perfsim_fake_backend.cpp
+        )
+        set_target_properties(
+            rocjitsu_perfsim_fake_backend
+            PROPERTIES
+                CXX_VISIBILITY_PRESET hidden
+                C_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        rj_configure_target(rocjitsu_perfsim_fake_backend TEST)
+    endif()
 endif()
 
 add_executable(
@@ -434,6 +453,9 @@ add_executable(
     lds_test.cpp
     l2_cache_test.cpp
     instruction_cache_test.cpp
+    async_mma_policy_test.cpp
+    matrix_coexecution_test.cpp
+    matrix_coexecution_lifetime_test.cpp
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
@@ -463,6 +485,7 @@ add_executable(
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
+    dbi/dbi_mask_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -562,6 +585,9 @@ add_executable(
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
 )
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
+endif()
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
@@ -627,6 +653,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        target_compile_definitions(
+            rocjitsu_tests
+            PRIVATE
+                PERFSIM_FAKE_BACKEND_PATH="$<TARGET_FILE:rocjitsu_perfsim_fake_backend>"
+                PERFSIM_PLUGIN_DIR="${PROJECT_BINARY_DIR}"
+        )
+        add_dependencies(
+            rocjitsu_tests
+            rocjitsu_perfsim_fake_backend
+            rocjitsu_plugin_perfsim_so
+        )
+    endif()
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
@@ -678,6 +717,7 @@ add_executable(
     rocjitsu_analysis_tests
     analysis/decoder_window_test.cpp
     analysis/free_registers_test.cpp
+    analysis/reachable_cfg_test.cpp
     code/amdgpu_code_object_test.cpp
     code/kernel_descriptor_scan_test.cpp
     code/kernel_scope_test.cpp
@@ -723,8 +763,29 @@ target_link_libraries(
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
 
-# Exercise the Linux-only model ISA contract in a decoder-only final link.
+# Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Isolate allocator fault injection from the simulator test executable.
+    add_executable(
+        cache_allocation_failure_test
+        cache_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        cache_allocation_failure_test
+        PRIVATE simdojo_headers GTest::gtest_main
+    )
+    target_compile_options(
+        cache_allocation_failure_test
+        PRIVATE -fno-builtin-calloc
+    )
+    target_link_options(
+        cache_allocation_failure_test
+        PRIVATE "LINKER:--wrap=calloc"
+    )
+    rj_configure_target(cache_allocation_failure_test WARNINGS)
+    rj_add_gtest_tests(cache_allocation_failure_test)
+
+    # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
     target_include_directories(
         rocjitsu_model_only_test
@@ -1860,7 +1921,17 @@ if(HSA_RUNTIME64)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
-    foreach(_hsa_test IN ITEMS InitSucceeded GpuAgentFound)
+    set(_rj_hsa_tests InitSucceeded GpuAgentFound)
+    # The prebuilt ROCr runtime owns the direct queue's write-pointer release
+    # and read-pointer acquire. TSan cannot observe those uninstrumented
+    # operations, so it reports unordered packet and result accesses here.
+    # Keep the public API regression in regular and ASan/UBSan builds; the
+    # instrumented Gfx1250SdmaTest.ConcurrentPublicationAcross32BitBoundary
+    # regression validates the simulator's acquire edge under TSan.
+    if(NOT RJ_ENABLE_TSAN)
+        list(APPEND _rj_hsa_tests SdmaPublishesCompletePackets)
+    endif()
+    foreach(_hsa_test IN LISTS _rj_hsa_tests)
         rj_add_test(
             NAME "HsaTest.${_hsa_test}"
             COMMAND

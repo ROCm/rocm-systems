@@ -13,6 +13,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -41,38 +42,6 @@ enum MemPipelineTag : uint8_t {
   SCALAR_MEM = 1,
   GLOBAL_MEM = 2,
   LOCAL_MEM = 3,
-};
-
-/// @brief Atomic read-modify-write operation type.
-enum class AtomicOp : uint8_t {
-  NONE = 0,       ///< Not an atomic operation.
-  SWAP,           ///< Exchange.
-  CONDXCHG32,     ///< Two conditional dword exchanges, controlled by each source sign bit.
-  CMPSWAP,        ///< Compare-and-swap (data[0] = src, data[1] = cmp).
-  MSKOR,          ///< Masked OR (data[0] = mask, data[1] = src).
-  ADD,            ///< Atomic add.
-  SUB,            ///< Atomic subtract (mem - data).
-  SUB_CLAMP,      ///< Unsigned subtraction, clamped to zero on underflow.
-  COND_SUB,       ///< Unsigned subtraction, retaining memory on underflow.
-  RSUB,           ///< Atomic reverse subtract (data - mem).
-  SMIN,           ///< Signed minimum.
-  UMIN,           ///< Unsigned minimum.
-  SMAX,           ///< Signed maximum.
-  UMAX,           ///< Unsigned maximum.
-  AND,            ///< Bitwise AND.
-  OR,             ///< Bitwise OR.
-  XOR,            ///< Bitwise XOR.
-  INC,            ///< Increment (wrapping).
-  DEC,            ///< Decrement (wrapping).
-  FCMPSWAP,       ///< Floating comparison, with replacement followed by comparison.
-  FADD,           ///< Floating-point add.
-  PK_ADD_F16,     ///< Two independent packed IEEE half additions.
-  PK_ADD_BF16,    ///< Two independent packed BFloat16 additions.
-  FMIN,           ///< Floating-point minimum.
-  FMAX,           ///< Floating-point maximum.
-  APPEND,         ///< LDS append counter.
-  CONSUME,        ///< LDS consume counter.
-  BARRIER_ARRIVE, ///< LDS barrier-arrive state update.
 };
 
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).

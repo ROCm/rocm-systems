@@ -56,7 +56,7 @@ namespace RcclUnitTesting
   namespace
   {
     // Matched by suite, not by test: one sweep's sample, so exact test names leave siblings exposed.
-    char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather"};
+    char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather", "P2pChannelScaling"};
   }
 
   TestBed::TestBed() :

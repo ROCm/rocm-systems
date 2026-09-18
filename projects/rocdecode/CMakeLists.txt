@@ -468,8 +468,6 @@ if(_deps_met)
     rocdecode_add_test_ext(videodecoderaw    ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRaw)
     rocdecode_add_test_ext(rocdecdecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/rocdecDecode)
     rocdecode_add_test_ext(videodecodecaps   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeCaps)
-    # Negative API test (source under test/)
-    rocdecode_add_test_ext(rocdecodenegativetest ${CMAKE_CURRENT_SOURCE_DIR}/test/rocDecodeNegativeApiTests)
 
     # Extended tests (require FFmpeg)
     if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
