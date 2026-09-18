@@ -71,7 +71,7 @@ install(
         DESTINATION
             ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/tracer/apps
         COMPONENT tests)
-target_link_libraries(copy_on_engine hsa-runtime64::hsa-runtime64 Threads::Threads dl
+target_link_libraries(copy_on_engine PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl
                       stdc++fs)
 
 # Compile MatrixTranspose App with ROCTX
@@ -90,7 +90,7 @@ if(ROCTX_LIBRARY)
                    "${PROJECT_BINARY_DIR}/tests-v2/featuretests/tracer/apps")
     target_link_options(tracer_matrix_transpose PRIVATE "-Wl,--build-id=md5")
     target_include_directories(tracer_matrix_transpose PRIVATE ${ROCM_PATH})
-    target_link_libraries(tracer_matrix_transpose ${ROCTX_LIBRARY})
+    target_link_libraries(tracer_matrix_transpose PRIVATE ${ROCTX_LIBRARY})
     install(
         TARGETS tracer_matrix_transpose
         RUNTIME
