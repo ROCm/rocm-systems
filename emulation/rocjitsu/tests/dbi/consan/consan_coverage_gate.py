@@ -487,6 +487,10 @@ def parse_coverage_evidence(log_text: str) -> CoverageEvidence:
         if marker < 0:
             continue
         record = line[marker + len(PREFIX) :]
+        # This human-facing sampling advice is not a key=value audit record.
+        # Ignore only its exact prefix; malformed coverage records still fail.
+        if record.startswith("coverage hint: "):
+            continue
         if record.startswith(COVERAGE_KIND + " "):
             coverage.append(
                 _parse_coverage(record[len(COVERAGE_KIND) + 1 :], line_number)
