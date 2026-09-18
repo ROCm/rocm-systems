@@ -1355,7 +1355,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     bool indirect_src, bool indirect_dst,
     const std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal,
-    core::Signal* body_signal) {
+    core::Signal* body_signal,
+    const size_t* dst_size_list) {
 
   const size_t num_entries = indices.size();
   if (num_entries == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1363,11 +1364,26 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   const bool is_swap = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
   const bool is_indirect = (indirect_src || indirect_dst);
 
+  // B-side size for an entry (asymmetric swap). Defaults to the A side, i.e.
+  // size_list[d], which keeps symmetric swaps and non-swap ops unchanged.
+  auto b_size = [&](uint32_t d) -> size_t {
+    return (is_swap && dst_size_list != nullptr) ? dst_size_list[d] : size_list[d];
+  };
+
   if (is_indirect && !indirect_copy_supported_)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   if (is_swap && !swap_supported_ && !is_gfx125plus_)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // The swap packet carries a single count; reject asymmetric entries so the
+  // caller decomposes them (symmetric swap + linear tail copy).
+  if (is_swap && dst_size_list != nullptr && !NativeAsymmetricSwapSupported()) {
+    for (size_t i = 0; i < num_entries; ++i) {
+      if (dst_size_list[indices[i]] != size_list[indices[i]])
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
 
   const size_t max_copy_size = is_swap
       ? SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kMaxSize_
@@ -1383,7 +1399,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     uint32_t total_chunks = 0;
     uint64_t total_bytes = 0;
     for (size_t i = 0; i < num_entries; ++i) {
-      const size_t entry_size = size_list[indices[i]];
+      const uint32_t d = indices[i];
+      // For an asymmetric swap the chunk count is driven by the larger side;
+      // size_list is the A side, dst_size_list is the B side.
+      const size_t entry_size = is_swap ? std::max(size_list[d], b_size(d)) : size_list[d];
       if (is_indirect && entry_size > max_copy_size)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       chunks[i] = is_indirect ? 1
@@ -1444,7 +1463,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
       } else if (is_swap) {
         BuildWaitSignalSwapCommand(command_addr, chunks[i],
             dst_list[d], const_cast<void*>(src_list[d]),
-            size_list[d], size_list[d],
+            size_list[d], b_size(d),
             wait_signal, signal_signal);
       } else {
         BuildWaitSignalCopyCommand(command_addr, chunks[i],

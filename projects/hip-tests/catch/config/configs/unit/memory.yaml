@@ -888,6 +888,9 @@ memory:
   Unit_hipMemcpyBatchAsync_H2D_Functional:
     <<: *level_2
     tags: [transfer, P1]
+  Unit_hipMemcpyBatchAsync_HD_Swap:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess:
     <<: *level_2
     tags: [transfer]
@@ -919,6 +922,21 @@ memory:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_swap_cp: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback: *level_2
+  Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_SizesDst_Constraint_Negative: *level_2
+  Unit_hipExtMemcpyBatchAsync_PreferCU_D2D: *level_2
+  Unit_hipExtMemcpyBatchAsync_HD_Swap_Asymmetric: *level_2
+  Unit_hipExtMemcpyBatchAsync_IndirectSrc: *level_2
+  Unit_hipExtMemcpyBatchAsync_IndirectDst: *level_2
+  Unit_hipExtMemcpyBatchAsync_IndirectSrcDst: *level_2
+  Unit_hipMemcpyBatchAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemsetD2D8_BasicFunctional:
