@@ -438,8 +438,12 @@ from your ROCm instance.
 
 #### Manually install the Python library
 
-Multiple ROCm installations may cause `amd-smi` failures.
-Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
+Only one copy of `amdsmi` can own the system interpreter's `site-packages`, so
+with several ROCm instances installed, whichever wrote there last answers
+`import amdsmi` for all of them. `ROCM_PATH` compounds it: the CLI prefers
+`$ROCM_PATH/share/amd_smi` over the modules beside its own executable, so with
+that variable pointing at another instance, one instance's `amd-smi` runs
+another's modules and library.
 
 Starting with ROCm 7.14, the `amd-smi-lib` rpm/deb package no longer
 runs `pip install` during postinst — it installs the `amdsmi` Python package directly into the system
@@ -460,12 +464,17 @@ install needs to be uninstalled manually.
 
 2. Install the AMD SMI Python library. Pick **one** of these paths:
 
-   - **System package** — install or reinstall `amd-smi-lib` from your target
-     ROCm instance. The package installs the wrapper into the system Python's
+   - **Classic system package** — install or reinstall `amd-smi-lib` from your
+     target ROCm instance. The package installs the wrapper into the system Python's
      `site-packages`, so `import amdsmi` resolves it directly. `sudo` is
      usually required. This is the only delivery that claims a system-wide
      `import amdsmi`, which also makes it the one that collides across
      instances.
+   - **ROCm Core SDK package** — each version installs into its own
+     `/opt/rocm/core-<major>.<minor>` prefix and registers nothing with any
+     interpreter, so the instances cannot collide over `site-packages`. Choose
+     between them per shell with `PYTHONPATH`, as described in
+     {ref}`Make the Python module importable <install_python_module>`.
    - **Tarball** — keeps each version self-contained in its own tree and
      installs nothing system-wide, which is the cleanest way to keep instances
      from colliding. See {ref}`Install from a tarball <install_tarball>`.
