@@ -226,6 +226,16 @@ private:
   static __host__   __forceinline__ GDAProvider get_provider() { return provider; }
   static __device__ __forceinline__ GDAProvider get_provider() { return constmem.gda_provider; }
 
+  [[noreturn]] static __host__ __forceinline__ void invalid_provider() {
+    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+  }
+
+  [[noreturn]] static __device__ __forceinline__ void invalid_provider() {
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+
   /*
    * @brief Convert from QueuePairMux::OpCode to the equivalent Provider::OpCode
    */
@@ -272,8 +282,7 @@ __device__ __forceinline__ void QueuePairMux::post_wqe_rma(
                                 laddr, lkey, raddr, rkey, size, wf_info, options);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -298,8 +307,7 @@ __device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(
                                        laddr, lkey, raddr, rkey, size, options);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -325,8 +333,7 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
                                 raddr, rkey, swap_add, compare, wf_info, options);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -352,8 +359,7 @@ __device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe
                                        raddr, rkey, swap_add, compare, options);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -372,8 +378,7 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
     return qp.mlx5.quiet_single();
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -393,8 +398,7 @@ QueuePairMux::get_laddr_info(const void *addr, bool inlined) const {
     return qp.mlx5.get_laddr_info(addr, inlined);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -414,8 +418,7 @@ std::tuple<uintptr_t, uint32_t> QueuePairMux::get_raddr_info(const void *addr) c
     return qp.mlx5.get_raddr_info(addr);
 #endif
   default:
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
+    invalid_provider();
   }
 }
 
@@ -466,13 +469,7 @@ __host__ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size
       return QueuePairMLX5::can_inline<provider_op<Op, QueuePairMLX5>()>(size);
 #endif
     default:
-#ifdef __HIP_DEVICE_COMPILE__
-      assert(false /* invalid GDAProvider */);
-      __builtin_unreachable();
-#else
-      static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-      LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
-#endif
+      invalid_provider();
     }
   }
 }
@@ -493,13 +490,7 @@ __host__ __device__ __forceinline__ T QueuePairMux::to_provider_endianness(T val
     return QueuePairMLX5::to_provider_endianness<T>(val);
 #endif
   default:
-#ifdef __HIP_DEVICE_COMPILE__
-    assert(false /* invalid GDAProvider */);
-    __builtin_unreachable();
-#else
-    static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
-#endif
+    invalid_provider();
   }
 }
 
