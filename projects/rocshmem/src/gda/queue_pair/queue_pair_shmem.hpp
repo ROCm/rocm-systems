@@ -117,7 +117,7 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
@@ -148,7 +148,7 @@ public:
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
   __device__ void get_nbi(void *dest, const void *source, size_t nelems,
@@ -185,7 +185,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
@@ -215,7 +215,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
@@ -248,7 +248,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
   __device__ void atomic_add(void *dest, uint64_t value,
@@ -275,7 +275,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
@@ -306,7 +306,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    *
    * @return An atomic value.
    */
@@ -342,7 +342,7 @@ public:
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
-   * @tparam Options Options to use when posting these WQEs.
+   * @tparam PostOptions Options to use when posting these WQEs.
    *
    *
    * @return An atomic value.
