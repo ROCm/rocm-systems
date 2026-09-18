@@ -939,10 +939,12 @@ std::vector<uint32_t> expected_vgpr_spill_words(uint16_t base, uint16_t count, b
   if (!restore) {
     const auto wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
     const auto wait_lds = instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA4);
-    if (!wait || !wait_lds)
+    const auto wait_valu = build_s_wait_alu_va_vdst0(ROCJITSU_CODE_ARCH_RDNA4);
+    if (!wait || !wait_lds || !wait_valu)
       return {};
     words.push_back(*wait);
     words.push_back(*wait_lds);
+    words.push_back(*wait_valu);
   }
   for (uint16_t i = 0; i < count; ++i) {
     const auto instruction =

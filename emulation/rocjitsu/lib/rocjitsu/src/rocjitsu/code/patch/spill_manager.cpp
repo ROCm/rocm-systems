@@ -219,10 +219,15 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
   // the restore will write the stale pre-definition value over it. This is
   // especially important when consecutive displaced DS loads use wait-count
   // values greater than zero in their original continuation.
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 3u);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 5u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
   sequence.save_words.push_back(*wait_load);
   sequence.save_words.push_back(*wait_lds);
+  // Memory waits do not retire pending WMMA/VALU register results. In
+  // particular, an LDS probe immediately after WMMA may borrow its live
+  // accumulator: saving it too early and restoring it loses the new result.
+  if (const auto wait_valu = build_s_wait_alu_va_vdst0(arch))
+    sequence.save_words.push_back(*wait_valu);
   // CDNA4 ISA section 7.6, Table 38: matrix results read by VMEM need
   // up to 20 software wait states. VM/LGKM wait counters do not track MFMA.
   // A spill may borrow a just-written accumulator VGPR, so cover the maximum
@@ -514,10 +519,13 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
   sequence.dynamic_frame_base_sgpr = frame_base_sgpr;
   sequence.dynamic_frame_bytes = static_cast<uint32_t>(frame_bytes);
   sequence.slot_offsets.reserve(vgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 9u);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 10u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 3u);
   sequence.save_words.push_back(*wait_load);
   sequence.save_words.push_back(*wait_lds);
+  // As with fixed slots, wait for pending VALU results before saving victims.
+  if (const auto wait_valu = build_s_wait_alu_va_vdst0(arch))
+    sequence.save_words.push_back(*wait_valu);
   sequence.save_words.push_back(*capture_scc);
   sequence.save_words.push_back(build_s_mov_b32(saved_frame_base_sgpr, frame_base_sgpr, arch));
   sequence.save_words.push_back(build_s_mov_b32(frame_base_sgpr, stack_top_sgpr, arch));
@@ -652,6 +660,9 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   fill_words.reserve(static_cast<size_t>(vgpr_count) * 3u);
   sequence.save_words.push_back(*wait_load);
   sequence.save_words.push_back(*wait_lds);
+  // As with fixed slots, wait for pending VALU results before saving victims.
+  if (const auto wait_valu = build_s_wait_alu_va_vdst0(arch))
+    sequence.save_words.push_back(*wait_valu);
   sequence.save_words.push_back(*wait_scalar_load);
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
