@@ -16,6 +16,8 @@ test_categories:
       - "ParamTests.*"
       - "ParameterApiTests.*"
       - "ParameterApiTypedTests*"
+      - "CollConfigTests.*"
+      - "CollConfigTypedTests*"
       - "EnvPluginTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
