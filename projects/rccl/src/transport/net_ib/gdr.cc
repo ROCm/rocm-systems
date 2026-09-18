@@ -51,12 +51,35 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
-// Returns ncclSuccess if any of the peermem modules are loaded.
+// Returns ncclSuccess if a peermem module is loaded, or a runtime probe on
+// device 0 confirms GPU registration works without one (e.g. HMM-capable
+// kernels, bnxt_re). Global, not per-device -- see gin.cc's ncclIbDmaBufSupport(0)
+// for the same convention.
 ncclResult_t ncclIbGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (!ncclIbGdrModuleLoaded) return ncclSystemError;
-  return ncclSuccess;
+  if (ncclIbGdrModuleLoaded) return ncclSuccess;
+
+  static std::once_flag probeOnce;
+  static bool probeResult = false;
+  std::call_once(probeOnce, []() {
+    void* gpuBuf = nullptr;
+    if (hipMalloc(&gpuBuf, 4096) != hipSuccess) return;
+
+    struct ibv_pd* pd;
+    if (wrap_ibv_alloc_pd(&pd, ncclIbDevs[0].context) != ncclSuccess) {
+      (void)hipFree(gpuBuf);
+      return;
+    }
+
+    struct ibv_mr* mr = wrap_direct_ibv_reg_mr(
+      pd, gpuBuf, 4096, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+    probeResult = (mr != nullptr);
+    if (mr) (void)wrap_ibv_dereg_mr(mr);
+    (void)wrap_ibv_dealloc_pd(pd);
+    (void)hipFree(gpuBuf);
+  });
+  return probeResult ? ncclSuccess : ncclSystemError;
 }
 
 static int ncclIbPeerMemModuleLoaded = 0; // 1 = true, 0 = false
