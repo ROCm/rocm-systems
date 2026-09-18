@@ -176,7 +176,7 @@ jobs:
   therock-test-linux-single-node:
     name: "Test single-node"
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' }}
+    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
@@ -187,7 +187,7 @@ jobs:
 
   therock-test-pytorch-distributed:
     name: "Test PyTorch distributed (scheduled)"
-    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
     secrets:
@@ -203,7 +203,7 @@ jobs:
 
   therock-test-jax-collective:
     name: "Test JAX collective (scheduled)"
-    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
     secrets:
@@ -218,7 +218,7 @@ jobs:
 
   therock-test-rocprof:
     name: "Test rocprofv3 smoke"
-    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' }}
+    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-rocprof.yml
     secrets:
@@ -233,7 +233,7 @@ jobs:
 
   therock-test-madengine:
     name: "Test MADEngine workloads (scheduled)"
-    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_selection != 'accl-profiler' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     permissions:
       contents: read
@@ -252,7 +252,7 @@ jobs:
 
   therock-test-accl-profiler:
     name: "Test ACCL profiler decomposition (scheduled)"
-    if: ${{ (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     permissions:
       contents: read
