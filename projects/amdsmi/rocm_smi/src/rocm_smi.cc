@@ -1452,6 +1452,13 @@ static void parse_transposed_power_profile_line(
   uint32_t count = 0;
   uint32_t idx = 0;
   bool have_idx = false;
+  // Mask of the most recently parsed profile name. The driver formats each name
+  // left-justified in a 14-char field followed by the marker ("%-14s%s" with
+  // "* "/" "), so a name shorter than 14 chars pushes the '*' into its own
+  // whitespace-delimited token (e.g. "COMPUTE       * "). Remember the profile
+  // so a trailing standalone '*' can be attributed to it. INVALID means the last
+  // name had no rsmi mask (e.g. WINDOW_3D) or none has been seen yet.
+  rsmi_power_profile_preset_masks_t last_mask = RSMI_PWR_PROF_PRST_INVALID;
 
   while (fs >> tok) {
     const bool all_digits =
@@ -1466,13 +1473,24 @@ static void parse_transposed_power_profile_line(
       continue;
     }
 
-    // Token is a profile name, possibly carrying the '*' current marker.
+    // A standalone '*' marks the profile just parsed as current -- it is not a
+    // profile of its own, so attribute it and do not count it.
+    if (tok.find_first_not_of('*') == std::string::npos) {
+      if (last_mask != RSMI_PWR_PROF_PRST_INVALID && p->current == RSMI_PWR_PROF_PRST_INVALID) {
+        p->current = last_mask;
+      }
+      continue;
+    }
+
+    // Token is a profile name, possibly carrying an adjacent '*' current marker
+    // (the driver prints "NAME* " when the name fills the 14-char field).
     const bool is_curr = tok.find('*') != std::string::npos;
     const size_t end = tok.find_first_of("* :");
     const std::string name = (end == std::string::npos) ? tok : tok.substr(0, end);
     ++count;
 
     const rsmi_power_profile_preset_masks_t mask = power_prof_name_to_mask(name);
+    last_mask = mask;
     if (mask != RSMI_PWR_PROF_PRST_INVALID) {
       p->available_profiles |= mask;
       if (ind_map != nullptr && have_idx) {
@@ -1497,9 +1515,11 @@ namespace amd::smi {
 // Handles both driver layouts: the classic one (text header on the first line,
 // one profile per line with the '*' current marker on the profile's own line)
 // and the transposed SMU 13.0.x one (every profile and the '*' on the first
-// line, e.g. gfx1102). When no profile is marked current, p->current is left at
-// RSMI_PWR_PROF_PRST_INVALID ("current unknown") and the parsed profiles are
-// still returned -- the function never aborts.
+// line, e.g. gfx1102). The driver always flags exactly one profile current, so
+// a correctly parsed table populates p->current. It is left at
+// RSMI_PWR_PROF_PRST_INVALID ("current unknown") only when the active profile
+// has no rsmi preset (e.g. WINDOW_3D) or the table carries no marker at all;
+// either way the parsed profiles are still returned and the call never aborts.
 rsmi_status_t ParsePowerProfileMode(
     const std::vector<std::string>& lines, rsmi_power_profile_status_t* p,
     std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
