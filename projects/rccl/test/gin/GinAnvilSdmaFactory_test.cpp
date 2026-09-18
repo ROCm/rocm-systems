@@ -4,7 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Suite F: gin_anvil_sdma_factory unit tests (validation, mocks, optional HW path).
+// Suite F: SDMA factory unit tests (real HSA/KFD queue setup, HW-dependent).
+// Exercises gin_anvil_sdma_probe/create/destroy against real SDMA hardware.
+// Calls the factory C API directly — does not go through the RCCL GIN plugin
+// layer (see Suite G for plugin vtable tests).
+// Validation tests (null args, bad ranks) run on any machine; queue creation
+// tests skip via GTEST_SKIP when probe() fails (no GPU or SDMA unavailable).
 
 #include "gin/gin_anvil_sdma_factory.h"
 
@@ -15,6 +20,14 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+// Stubs: gin_anvil_sdma_factory.cc uses WARN() which references these.
+// Self-contained test — no librccl.so link — so provide no-op fallbacks.
+#include "debug.h"
+int ncclDebugLevel = 0;
+uint64_t ncclDebugMask = 0;
+thread_local int ncclDebugNoWarn = 0;
+void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 
 namespace {
 
@@ -56,7 +69,7 @@ int mockAllgatherFillDevices(void*, void* buf, size_t bytes_per_rank) {
   const int nRanks = static_cast<int>(bytes_per_rank / sizeof(int));
   auto* devs = static_cast<int*>(buf);
   for (int i = 0; i < nRanks; ++i) {
-    if (devs[i] < 0) devs[i] = 0;
+    if (devs[i] < 0) devs[i] = i;
   }
   return 0;
 }
@@ -106,7 +119,9 @@ TEST_F(GinAnvilSdmaFactoryTest, Probe_ReturnsZeroOrOne) {
 // F2: null / invalid output and rank arguments.
 TEST_F(GinAnvilSdmaFactoryTest, Create_NullOutParams) {
   CreateOut out{};
-  EXPECT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, nullptr), -1);
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, nullptr, 1,
+                                  nullptr, &out.gpu_handles, &out.sdma_dirty),
+            -1);
   EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out.handle,
                                   nullptr, &out.sdma_dirty),
             -1);
@@ -225,22 +240,20 @@ TEST_F(GinAnvilSdmaFactoryTest, Getters_NullHandle) {
   EXPECT_EQ(gin_anvil_sdma_get_channel_stride(nullptr), 0);
 }
 
-// F10: multi-rank mock allgather (exercises connect loop when SDMA available).
-TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankMock) {
+// F10: multi-channel loopback (exercises channel stride + multi-queue setup).
+// Multi-rank (cross-device) SDMA queue creation requires peer access setup
+// that only works within RCCL's full init path; tested via alltoall_perf -D3.
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   if (gin_anvil_sdma_probe() <= 0) {
     GTEST_SKIP() << "Anvil SDMA probe failed";
   }
-  int ndev = 0;
-  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
-  if (ndev < 1) {
-    GTEST_SKIP() << "No HIP devices";
-  }
 
-  const int nRanks = ndev >= 2 ? 2 : 1;
   CreateOut out{};
-  ASSERT_EQ(tryCreate(nRanks, 0, 0, mockAllgatherFillDevices, nullptr, 2, &out), 0);
-  EXPECT_EQ(gin_anvil_sdma_get_n_ranks(out.handle), nRanks);
-  EXPECT_EQ(gin_anvil_sdma_get_num_channels(out.handle), 2);
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 4, &out), 0);
+  EXPECT_EQ(gin_anvil_sdma_get_n_ranks(out.handle), 1);
+  EXPECT_EQ(gin_anvil_sdma_get_num_channels(out.handle), 4);
+  EXPECT_GE(gin_anvil_sdma_get_channel_stride(out.handle), 0);
+  EXPECT_LE(gin_anvil_sdma_get_channel_stride(out.handle), 1);
   destroyOut(&out);
 }
 

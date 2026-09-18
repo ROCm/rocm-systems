@@ -870,15 +870,6 @@ list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
-# Compile anvil.cpp from rocshmem source tree into librccl.so (host-only).
-# src/gin/log.hpp shim shadows rocshmem's log.hpp via include path ordering,
-# redirecting LOG_* macros to RCCL native logging (WARN/INFO/TRACE).
-if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
-  target_sources(rccl PRIVATE "${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp")
-  set_source_files_properties("${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp" PROPERTIES
-    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src/gin;${ROCSHMEM_SOURCE_DIR}/src/sdma;${ROCSHMEM_SOURCE_DIR}/src;${ROCSHMEM_SOURCE_DIR}/include;${ROCM_PATH}/include")
-endif()
-
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
 add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks rma_header_symlinks)
@@ -976,6 +967,16 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     else()
       target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
     endif()
+
+    # Compile anvil.cpp from rocshmem source tree into librccl.so (host-only).
+    # src/gin/log.hpp shim shadows rocshmem's log.hpp via include path ordering,
+    # redirecting LOG_* macros to RCCL native logging (WARN/INFO/TRACE).
+    if(ENABLE_ROCSHMEM_GIN)
+      target_sources(rccl PRIVATE "${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp")
+      set_source_files_properties("${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp" PROPERTIES
+        INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/gin;${ROCSHMEM_SOURCE_DIR}/src/sdma;${ROCSHMEM_SOURCE_DIR}/src;${ROCSHMEM_SOURCE_DIR}/include;${ROCM_PATH}/include")
+    endif()
+
   endif()
 endif()
 

@@ -95,7 +95,7 @@ function(add_rocshmem_targets)
         if(rocshmem_static_FOUND)
             set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
             set(ROCSHMEM_LIBRARY     "${ROCSHMEM_LIBRARY}"      PARENT_SCOPE)
-            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   PARENT_SCOPE)
+            set(ROCSHMEM_SOURCE_DIR  "${ROCSHMEM_SOURCE_DIR}"   CACHE INTERNAL "rocSHMEM source directory")
             return()
         endif()
     endif()
@@ -148,6 +148,8 @@ function(add_rocshmem_targets)
         add_custom_target(rocshmem_static ALL DEPENDS rocshmem_ext)
     endif()
 
-    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" PARENT_SCOPE)
+    # CACHE INTERNAL (not PARENT_SCOPE): SOURCE_DIR is consumed by the
+    # top-level CMakeLists.txt install rules, outside add_subdirectory(src).
+    set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" CACHE INTERNAL "rocSHMEM source directory")
 
 endfunction()

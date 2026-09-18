@@ -130,11 +130,16 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
   if (hipExtMallocWithFlags(reinterpret_cast<void**>(&dirty), sizeof(uint64_t),
                             hipDeviceMallocFinegrained) != hipSuccess) {
-    hipFree(row);
+    (void)hipFree(row);
     delete impl;
     return -1;
   }
-  (void)hipMemset(dirty, 0, sizeof(uint64_t));
+  if (hipMemset(dirty, 0, sizeof(uint64_t)) != hipSuccess) {
+    (void)hipFree(row);
+    (void)hipFree(dirty);
+    delete impl;
+    return -1;
+  }
   impl->deviceHandles_d = row;
   impl->sdmaDirty_d = dirty;
 
@@ -147,8 +152,8 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle);
-  if (impl->deviceHandles_d) hipFree(impl->deviceHandles_d);
-  if (impl->sdmaDirty_d) hipFree(impl->sdmaDirty_d);
+  if (impl->deviceHandles_d) (void)hipFree(impl->deviceHandles_d);
+  if (impl->sdmaDirty_d) (void)hipFree(impl->sdmaDirty_d);
   delete impl;
 }
 

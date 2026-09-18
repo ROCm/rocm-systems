@@ -25,6 +25,8 @@
 #ifndef LIBRARY_SRC_GDA_ENUMS_HPP_
 #define LIBRARY_SRC_GDA_ENUMS_HPP_
 
+#include <cstdint>
+
 namespace rocshmem {
 namespace gda {
   enum provider {

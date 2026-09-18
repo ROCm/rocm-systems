@@ -236,9 +236,13 @@ set -a
 source "${workdir}/.ci-out/rccl.env"
 set +a
 echo "==> [6/7] run SDMA factory unit tests"
-sdma_factory_test="${workdir}/projects/rccl/build/test/rccl-UnitTestsGinAnvilSdmaFactory"
+sdma_factory_test="${rccl_build}/test/rccl-UnitTestsGinAnvilSdmaFactory"
 if [[ -x "${sdma_factory_test}" ]]; then
-  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+  _sysdeps_lib=""
+  for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
+    [[ -d "${_sp}" ]] && _sysdeps_lib="${_sp}"
+  done
+  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib${_sysdeps_lib:+:${_sysdeps_lib}}:${LD_LIBRARY_PATH:-}"
   "${sdma_factory_test}" --gtest_output="xml:${logs_dir}/sdma-factory-test.xml" \
     || echo "WARNING: SDMA factory unit tests failed (non-gating)" >&2
 else
