@@ -487,12 +487,97 @@ def _load_marker_trace_dataframe(marker_path: Path) -> pd.DataFrame:
     return marker_df[kept_columns].copy()
 
 
+_DISPATCH_KEEP_COLUMNS = (
+    "Kernel_Name",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Correlation_ID",
+    "Dispatch_ID",
+    "GUID",
+)
+
+
+def _collapse_counter_dispatches(counter_df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse long counter rows to one row per GPU dispatch."""
+    required_columns = (
+        "Correlation_ID",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+    )
+    missing_columns = [
+        column for column in required_columns if column not in counter_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            "analysis",
+            f"Counter CSV is missing required columns {missing_columns}",
+        )
+    if "Dispatch_ID" in counter_df.columns:
+        group_keys = ["Dispatch_ID"]
+        if "GUID" in counter_df.columns:
+            group_keys.append("GUID")
+    else:
+        group_keys = ["Kernel_Name", "Start_Timestamp", "End_Timestamp"]
+    keep_columns = [
+        column for column in _DISPATCH_KEEP_COLUMNS if column in counter_df.columns
+    ]
+    for group_key in group_keys:
+        if group_key not in keep_columns:
+            keep_columns.append(group_key)
+    collapsed = (
+        counter_df[keep_columns]
+        .groupby(group_keys, sort=False, dropna=False)
+        .first()
+        .reset_index()
+    )
+    return collapsed.rename(
+        columns={
+            "Start_Timestamp": "Kernel_Start_Timestamp",
+            "End_Timestamp": "Kernel_End_Timestamp",
+        }
+    )
+
+
+def _join_keys_for_marker_and_dispatch(
+    marker_df: pd.DataFrame,
+    dispatch_df: pd.DataFrame,
+) -> list[str]:
+    """Correlation_ID, plus GUID when both frames have that column."""
+    join_keys = ["Correlation_ID"]
+    if "GUID" in marker_df.columns and "GUID" in dispatch_df.columns:
+        join_keys.append("GUID")
+    return join_keys
+
+
+def _outer_join_dispatches_and_markers(
+    dispatch_df: pd.DataFrame,
+    marker_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Full-outer-join unique dispatches with one pass of marker rows."""
+    marker_ordered = marker_df.copy()
+    marker_ordered["_marker_order"] = range(len(marker_ordered))
+    return pd.merge(
+        dispatch_df,
+        marker_ordered,
+        on=_join_keys_for_marker_and_dispatch(marker_df, dispatch_df),
+        how="outer",
+    )
+
+
+def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
+    """Load one counter CSV, collapse dispatches, and outer-join markers."""
+    counter_df = _rename_correlation_id_column(pd.read_csv(pair.counter_path))
+    dispatch_df = _collapse_counter_dispatches(counter_df)
+    return _outer_join_dispatches_and_markers(dispatch_df, pair.marker_df)
+
+
 @demarcate
 def process_ml_api_trace_output(
     workload: schema.Workload,
     workload_dir: str,
 ) -> None:
-    """Load marker CSV and sibling counter path pairs onto the workload."""
+    """Load marker/counter pairs and full-outer-join each pass onto the workload."""
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
     if not csv_pairs:
@@ -511,6 +596,8 @@ def process_ml_api_trace_output(
         )
         for marker_path, counter_path in csv_pairs
     ]
+    for pair in workload.ml_api_trace_pairs:
+        pair.joined_df = _join_pass_marker_and_counter(pair)
 
 
 def validate_workload(path: str) -> None:
