@@ -7,13 +7,13 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/profiler-hub-*.yml'
+      - '.github/workflows/profiler-hub-formatting.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/graphs/**'
   pull_request:
     paths:
-      - '.github/workflows/profiler-hub-*.yml'
+      - '.github/workflows/profiler-hub-formatting.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/graphs/**'
