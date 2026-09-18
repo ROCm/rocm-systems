@@ -59,6 +59,10 @@ if(NOT WIN32)
   else()
     set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
   endif()
+else()
+  # MSVC supplies optimization and NDEBUG per configuration; these are the
+  # defines the sample sources need.
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -117,11 +121,7 @@ if(HIP_FOUND AND rocdecode_FOUND AND (WIN32 OR rocprofiler-register_FOUND))
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodecaps.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    if(NOT WIN32)
-        target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
-    else()
-        target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    endif()
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")

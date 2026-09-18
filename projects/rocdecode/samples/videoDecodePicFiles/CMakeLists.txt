@@ -63,6 +63,10 @@ if(NOT WIN32)
     # -fPIC     -- Generate position-independent code if possible
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
   endif()
+else()
+  # MSVC supplies optimization and NDEBUG per configuration; these are the
+  # defines the sample sources need.
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -130,9 +134,6 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     if(rocprofiler-register_FOUND)
         set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
     endif()
-    if(WIN32)
-        add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    endif()
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodepicfiles.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     if(rocdecode-host_FOUND)
@@ -140,6 +141,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
       list(APPEND SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/ffmpegvideodecode/ffmpeg_video_dec.cpp)
     endif()
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
     if(rocdecode-host_FOUND)
       # rocdecode-host
       include_directories(${rocdecode-host_INCLUDE_DIR})
