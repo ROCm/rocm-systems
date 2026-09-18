@@ -481,10 +481,9 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
   return ncclSuccess;
 }
 
-// ncclRmaProxyEnabled is no longer faked here: rma-test.cc compiles src/rma/rma.cc
-// into this binary, so the real predicate is linked in and a fake would be a
-// duplicate. Tests drive its terms (ncclDevrIsOneLsaTeam, numRmaCtx,
-// globalRmaProxySupport, NCCL_RMA_DISABLE) instead of its answer.
+// ncclRmaProxyEnabled is no longer faked here: the real predicate is linked into
+// this binary, so a fake would be a duplicate. Tests drive its terms instead of
+// its answer.
 
 // Reached only once GIN is activated, which the GIN gate rejects for every
 // comm this binary builds.

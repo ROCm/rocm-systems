@@ -11,6 +11,19 @@
 
 #include "rma_fakes.h"
 
+// Anchor each seam to its production declaration so a signature change becomes
+// a compile error rather than a silent std::function coercion.
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_rmaCircularBufEmpty, ncclRmaProxyCircularBufEmpty);
+ASSERT_HOOK_MATCHES_PROD(g_rmaDestroyDesc,      ncclRmaProxyDestroyDesc);
+ASSERT_HOOK_MATCHES_PROD(g_rmaProxyPutLaunch,   ncclRmaProxyPutLaunch);
+ASSERT_HOOK_MATCHES_PROD(g_rmaCePutLaunch,      ncclRmaCePutLaunch);
+ASSERT_HOOK_MATCHES_PROD(g_rmaProxyWaitLaunch,  ncclRmaProxyWaitLaunch);
+ASSERT_HOOK_MATCHES_PROD(g_rmaCeWaitLaunch,     ncclRmaCeWaitLaunch);
+
+#undef ASSERT_HOOK_MATCHES_PROD
+
 // ---------------------------------------------------------------------------
 // Hook defaults
 // ---------------------------------------------------------------------------
