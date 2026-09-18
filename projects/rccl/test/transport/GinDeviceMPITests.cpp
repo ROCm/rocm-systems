@@ -159,7 +159,7 @@ std::string vaSignalTestSkipReason() {
 }
 
 // BarrierFence_* exercises Anvil SDMA queue ordering and proxy per-context state.
-// TYPE=5 (rocSHMEM GDA) runs the rest of this file but skips these cases.
+// rocSHMEM GDA (NCCL_GIN_TYPE=6) runs the rest of this file but skips these cases.
 std::string barrierFenceBackendSkipReason() {
   int t = requestedGinType();
   if (t == NCCL_NET_DEVICE_GIN_PROXY || t == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
@@ -1625,8 +1625,8 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   int rank = -1;
   ncclCommUserRank(comm, &rank);
 
-  // Larger than the default SDMA threshold so TYPE=6 exercises a real SDMA
-  // copy rather than the small-transfer IPC fallback.
+  // Larger than the default SDMA threshold so Anvil SDMA (NCCL_GIN_TYPE=7)
+  // exercises a real SDMA copy rather than the small-transfer IPC fallback.
   constexpr size_t kBytes = 4096;
   void* dSrc = nullptr;
   void* dDst = nullptr;
