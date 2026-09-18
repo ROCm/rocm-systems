@@ -13,7 +13,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
-#include <queue>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -25,23 +24,11 @@ class Lds;
 
 /// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
-/// @details Models the memory access pipeline as two FIFO queues:
-/// - issued_: instructions that need initiate_access() called
-/// - returned_: instructions whose memory response has arrived, awaiting
-///   register writeback via complete_access().
-///
-/// In functional mode, L1/L2/HBM accesses are synchronous and produce an
-/// immediate response, so instructions move from issued_ to returned_
-/// in a single tick() and then complete on the next tick().
+/// @details Functional memory accesses complete synchronously during issue:
+/// initiate the access, perform architectural writeback, then release ownership.
 class MemoryPipeline {
 public:
   explicit MemoryPipeline(WaitCounterType type) : counter_type_(type) {}
-  virtual ~MemoryPipeline() = default;
-
-  struct PipelineEntry {
-    Instruction *inst;
-    Wavefront *wf;
-  };
 
 protected:
   /// @brief Issue a memory instruction through its concrete pipeline.
@@ -71,11 +58,6 @@ protected:
   }
 
 public:
-  /// @brief Advance the pipeline by one cycle (no-op in functional mode).
-  void tick() {}
-
-  bool empty() const { return true; }
-
   WaitCounterType counter_type() const { return counter_type_; }
 
 protected:
@@ -85,8 +67,6 @@ protected:
   }
 
   WaitCounterType counter_type_;
-  std::queue<PipelineEntry> issued_;
-  std::queue<PipelineEntry> returned_;
 };
 
 /// @brief Scalar memory pipeline for SMEM instructions.

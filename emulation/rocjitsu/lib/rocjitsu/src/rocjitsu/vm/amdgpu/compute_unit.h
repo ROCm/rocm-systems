@@ -991,9 +991,6 @@ protected:
     inst_cache_debug_epoch_seen_ = epoch;
   }
 
-  /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
-  void tick_pipelines();
-
   /// @brief Route a memory instruction into the appropriate pipeline.
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.

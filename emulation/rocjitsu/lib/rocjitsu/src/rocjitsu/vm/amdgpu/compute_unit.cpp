@@ -648,12 +648,6 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes)
   return true;
 }
 
-void ComputeUnitCore::tick_pipelines() {
-  scalar_mem_pipeline_.tick();
-  global_mem_pipeline_.tick();
-  local_mem_pipeline_.tick();
-}
-
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   std::unique_ptr<Instruction> owned_inst(inst);
   plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
