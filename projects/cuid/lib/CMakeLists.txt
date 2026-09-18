@@ -95,7 +95,7 @@ endif()
 # Include dir is PUBLIC + BUILD_INTERFACE so in-tree targets that link
 # amdcuid_static and include rocm/sha2/sha256.h directly can find it;
 # shared/sha256 headers are never installed, and sha256.h is not part of the installed public API.
-target_link_libraries(amdcuid_static PRIVATE rocm-sha256)
+target_link_libraries(amdcuid_static PRIVATE rocm-sha256-objects)
 target_include_directories(amdcuid_static PUBLIC $<BUILD_INTERFACE:${CUID_ROCM_SHA256_DIR}/include>)
 
 # The only external dependency left is the platform CSPRNG.

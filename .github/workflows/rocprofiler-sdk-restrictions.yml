@@ -26,7 +26,6 @@ on:
       - '!projects/rocprofiler-sdk/.github/workflows/pull_*.yml'
       - '!projects/rocprofiler-sdk/.github/workflows/linting.yml'
       - '!projects/rocprofiler-sdk/.github/workflows/markdown_lint.yml'
-      - 'shared/sha256/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
