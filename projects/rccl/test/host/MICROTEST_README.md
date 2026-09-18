@@ -600,10 +600,10 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
-`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
-librccl**. It compiles just the tests + fakes + the hipified unit-under-test
-sources.
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]`,
+`rccl-UnitTestsMicroEnqueue[-devlinker]` and `rccl-UnitTestsMicroSymKernels` —
+**without configuring/building all of librccl**. It compiles just the tests +
+fakes + the hipified unit-under-test sources.
 
 Three of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
@@ -636,6 +636,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-HostUnitTests
 ```
 

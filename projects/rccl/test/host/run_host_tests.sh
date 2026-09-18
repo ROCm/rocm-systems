@@ -161,6 +161,9 @@ do_host_tests() {
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
   )
+  # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
+  # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
+  local -a optional_binaries=("rccl-UnitTestsMicroSymKernels")
 
   : > "$LOG_FILE"   # truncate; each binary appends below
   local rc=0 entry exe name xml profdir
@@ -169,6 +172,10 @@ do_host_tests() {
     xml="${entry#*:}"
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
+      if printf '%s\n' "${optional_binaries[@]}" | grep -qx "$name"; then
+        echo "SKIP: $name not built (optional)" | tee -a "$LOG_FILE"
+        continue
+      fi
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
       rc=1
       continue

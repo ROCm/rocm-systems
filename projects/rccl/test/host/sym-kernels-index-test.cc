@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -179,6 +180,15 @@ TEST(SymKernelIndexValidCasesTest, CoversEveryGeneratedKernel) {
   EXPECT_EQ(static_cast<int>(ValidCases().size()), ncclSymkKernelCount);
 }
 
+// The row count alone would not catch a duplicate row silently displacing a distinct kernel's coverage.
+TEST(SymKernelIndexValidCasesTest, EveryRowMapsToADistinctIndex) {
+  std::set<int> indices;
+  for (const ExpectedKernelCase& c : ValidCases()) {
+    indices.insert(ncclSymkGetKernelIndex(c.id, c.red, c.ty));
+  }
+  EXPECT_EQ(static_cast<int>(indices.size()), ncclSymkKernelCount);
+}
+
 // AllGather's case returns before ever inspecting red/ty; garbage values here prove that, not just a lucky match.
 TEST(SymKernelIndexNonReductionTest, AllGatherLL_IgnoresRedAndType_ReturnsAllGatherLLKernel) {
   int index = ncclSymkGetKernelIndex(ncclSymkKernelId_AllGather_LL, 12345, (ncclDataType_t)9999);
@@ -228,8 +238,9 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
        ncclFloat32},
       // Outer switch(id) default: the sentinel past the last real enumerator.
       {"UnimplementedId_Count", ncclSymkKernelId_Count, ncclDevSum, ncclFloat32},
-      // Outer switch(id) default: an unspecified (not undefined, per C++17) enum-conversion value.
-      {"UnimplementedId_NegativeCast", (ncclSymkKernelId)-1, ncclDevSum, ncclFloat32},
+      // Outer switch(id) default: an in-range value that is not an enumerator. Casting -1 would fall
+      // outside the enum's [0,31] value range, which is undefined per C++17, not unspecified.
+      {"UnimplementedId_InRangeNonEnumerator", (ncclSymkKernelId)31, ncclDevSum, ncclFloat32},
 
       // Inner switch(red) default: a real ncclDevRedOp_t this id has no case for.
       {"AllReduce_AGxLL_R_UnknownRed_Prod", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevProd, ncclFloat32},

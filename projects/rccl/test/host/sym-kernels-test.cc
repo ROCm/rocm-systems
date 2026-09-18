@@ -235,8 +235,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(0));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
-  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
-  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
+  EXPECT_EQ(kmask, 0u);
 }
 
 TEST_F(SymKernelMaskTest, HasLsaMultimemTrue_STMCKernelSurvives) {
@@ -253,6 +252,12 @@ TEST_F(SymKernelMaskTest, HasLsaMultimemFalse_STMCKernelCleared) {
 TEST_F(SymKernelMaskTest, HasLDMC_ValidRedAndType_Survives) {
   comm_->symkState.hasLsaMultimem = true;
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat16, /*nElts=*/1024);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
+}
+
+TEST_F(SymKernelMaskTest, HasLDMC_F16Type_MinMaxRed_Survives) {
+  comm_->symkState.hasLsaMultimem = true;
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat16, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
 
@@ -309,6 +314,18 @@ TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCle
   size_t nElts = NEltsForBytes((size_t(2) << 30) / comm_->nRanks);
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, nElts);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
+}
+
+// ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----
+
+// Dropping "&& ty != ncclFloat64" here would wrongly implement this pair; nothing else here would catch it.
+TEST_F(SymKernelMicrotest, SymkImplemented_AllReduceFloat64_NotImplemented) {
+  EXPECT_FALSE(ncclSymkImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat64));
+}
+
+TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
+  comm_->isAllDirectNvlink = true;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
 }
 
 }  // namespace
