@@ -1371,7 +1371,8 @@ Queue::Queue(
     // to appear after signal construction.
     // Queues adopted from rocattach are already ROCr InterceptQueues. Their packet
     // stream is reachable only through rocattach's shim, even when inline queue
-    // interposition is otherwise available for SDK-created queues.
+    // interposition is otherwise available for SDK-created queues. Inline-interposition
+    // callers pass a no-op setter, so this does not install a competing interceptor.
     set_write_interceptor(WriteInterceptor, this);
 }
 

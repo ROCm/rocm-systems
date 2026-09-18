@@ -39,6 +39,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -49,7 +50,8 @@ namespace context
 {
 using external_cid_cb_t = uint64_t (*)(rocprofiler_callback_tracing_kind_t, uint32_t, uint64_t);
 
-constexpr auto null_user_data = rocprofiler_user_data_t{.value = 0};
+constexpr auto null_user_data     = rocprofiler_user_data_t{.value = 0};
+constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
 
 struct callback_tracing_service
 {

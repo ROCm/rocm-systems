@@ -2899,8 +2899,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     ROCPROFILER_CALL(rocprofiler_create_context(&code_obj_ctx), "failed to create context");
 
     const auto defer_context_start_for_attachment =
-        (rocprofiler_is_current_client_attachment() != 0 ||
-         tool::get_env("ROCPROFILER_REGISTER_TOOL_ATTACHED", false));
+        (rocprofiler_is_current_client_attachment() != 0);
     auto start_context = [defer_context_start_for_attachment](rocprofiler_context_id_t ctx_id,
                                                               std::string_view         msg) {
         using benchmark = tool::config::benchmark;
