@@ -1899,7 +1899,17 @@ if(HSA_RUNTIME64)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
-    foreach(_hsa_test IN ITEMS InitSucceeded GpuAgentFound)
+    set(_rj_hsa_tests InitSucceeded GpuAgentFound)
+    # The prebuilt ROCr runtime owns the direct queue's write-pointer release
+    # and read-pointer acquire. TSan cannot observe those uninstrumented
+    # operations, so it reports unordered packet and result accesses here.
+    # Keep the public API regression in regular and ASan/UBSan builds; the
+    # instrumented Gfx1250SdmaTest.ConcurrentPublicationAcross32BitBoundary
+    # regression validates the simulator's acquire edge under TSan.
+    if(NOT RJ_ENABLE_TSAN)
+        list(APPEND _rj_hsa_tests SdmaPublishesCompletePackets)
+    endif()
+    foreach(_hsa_test IN LISTS _rj_hsa_tests)
         rj_add_test(
             NAME "HsaTest.${_hsa_test}"
             COMMAND
