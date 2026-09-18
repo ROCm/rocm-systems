@@ -913,6 +913,15 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   for (int c = 0; c < MAXCHANNELS; c++) channelCounts[c] = 0;
 #endif
 
+  int const planCollCount = nPlanColls;
+
+#ifdef ENABLE_WARP_SPEED
+  // The plan queue is populated below, so evaluate the exact budgeted prefix
+  // now with the same plan-wide predicate used at launch.
+  bool warpSpeedPlan = rcclWarpSpeedSupported(
+    comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
+#endif
+
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
     struct ncclWorkList* workNode = ncclIntruQueueHead(&planner->collWorkQueue);
@@ -920,8 +929,33 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     size_t elementSize = ncclTypeSize(task->datatype);
 
     int kind = 2 * task->isCollnet + task->isNvls;
+#ifdef ENABLE_WARP_SPEED
+    // WarpSpeed loads one batch chain from the lead channel per physical block.
+    // Multi-collective plans must reuse the same channel range so every channel
+    // queues all colls (AG#1 then AG#2 via nextJump), not sequential channel slices.
+    // Pack each coll from its own trafficBytes across the full channel set. The
+    // plan-wide trafficBytes[kind] sum would keep each coll on nChannels/K even
+    // after resetting channelId to 0 (Argus/Alex on ROCM-29990 / PR 10799).
+    bool const warpSpeedReuseChannels = warpSpeedPlan && planCollCount > 1;
+    if (warpSpeedReuseChannels) {
+      int const nPackChannels = nMaxChannels[kind] > 0 ? nMaxChannels[kind] : 1;
+      size_t const taskTraffic = std::max(MinTrafficPerChannel, task->trafficBytes);
+      trafficPerChannel =
+          std::max<size_t>(MinTrafficPerChannel, divUp(taskTraffic / nPackChannels, 16) * 16);
+      if ((planCollCount - nPlanColls) > 0) {
+        channelId = 0;
+        currentTraffic = 0;
+      }
+    }
+#endif
     if (kind != kindPrev) {
-      trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+#ifdef ENABLE_WARP_SPEED
+      if (!warpSpeedReuseChannels)
+#endif
+      {
+        trafficPerChannel =
+            std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+      }
       kindPrev = kind;
       channelId = 0;
       currentTraffic = 0;
