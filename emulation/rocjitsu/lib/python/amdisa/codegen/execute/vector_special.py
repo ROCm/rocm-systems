@@ -1953,8 +1953,8 @@ def gen_vector_cvt_scale(
     # multi-region instruction helpers, then make region acquisition require
     # successful preflight instead of returning validity-bearing views.
     L.append(
-        f'    if (!regs.owns_vgpr_range(src_base, {src_word_count}u) || '
-        f'!regs.owns_vgpr_range(dst_base, {dst_word_count}u))'
+        f'    if (!regs.validate_vgpr_access(src_base, {src_word_count}u) || '
+        f'!regs.validate_vgpr_access(dst_base, {dst_word_count}u))'
     )
     L.append('      continue;')
     scale_src = src[2] if stochastic else src[1]

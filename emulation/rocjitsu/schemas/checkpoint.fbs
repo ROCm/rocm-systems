@@ -50,6 +50,7 @@ table WavefrontState {
   ordinary_vgpr_count: uint32; // Ordinary v0-based prefix.
   accvgpr_count: uint32; // Accumulator acc0-based window.
   has_vgpr_allocation: bool;
+  trap_handler_enabled: bool; // GFX9 SGPR reserve; false for older checkpoints.
 }
 
 /// Serialized state of a compute unit.

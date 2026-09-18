@@ -262,7 +262,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
               builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
               w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
               w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
-              w->wf_size(), w->num_vgprs(), w->num_ordinary_vgprs(), w->num_accvgprs(), true);
+              w->wf_size(), w->num_vgprs(), w->num_ordinary_vgprs(), w->num_accvgprs(), true,
+              w->trap_handler_enabled());
           wf_offsets.push_back(wfs);
         }
 
@@ -434,13 +435,15 @@ LoadedConfig restore_checkpoint(const std::string &path) {
                 cu->vgpr_allocation_block_size() > amdgpu::ACC_VGPR_OFFSET
                     ? cu->vgpr_allocation_block_size() - amdgpu::ACC_VGPR_OFFSET
                     : 0;
-            vgprs = {total, ordinary, accvgpr_capacity};
+            vgprs = {total, ordinary,
+                     cu->arch() == ROCJITSU_CODE_ARCH_CDNA1 ? accvgpr_capacity : total - ordinary};
           }
 
           const uint32_t wave_size =
               wf_state->kernel_wave_size() == 0 ? cu->wf_size() : wf_state->kernel_wave_size();
-          auto *wf = cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(),
-                                        num_sgprs, vgprs, wave_size);
+          auto *wf =
+              cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(), num_sgprs,
+                                 vgprs, wave_size, wf_state->trap_handler_enabled());
           if (!wf)
             throw std::runtime_error("Failed to restore wavefront into its recorded slot");
 

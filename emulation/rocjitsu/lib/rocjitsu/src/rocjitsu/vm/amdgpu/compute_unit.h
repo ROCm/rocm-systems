@@ -161,21 +161,22 @@ public:
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs,
-                         uint32_t wave_size = 0);
+                         uint32_t wave_size = 0, bool trap_handler = false);
 
   /// @brief Activate a wave with an explicit ordinary/accumulator VGPR split.
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, WaveVgprAllocation vgprs,
-                         uint32_t wave_size = 0);
+                         uint32_t wave_size = 0, bool trap_handler = false);
 
   /// @brief Activate a specific idle wavefront slot.
   /// @details Used by checkpoint restoration when hardware slot identity is
   /// execution state. Returns nullptr when the requested slot is invalid or busy.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                            uint32_t num_vgprs, uint32_t wave_size = 0);
+                            uint32_t num_vgprs, uint32_t wave_size = 0, bool trap_handler = false);
 
   /// @brief Activate a specific slot with an explicit VGPR allocation split.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                            WaveVgprAllocation vgprs, uint32_t wave_size = 0);
+                            WaveVgprAllocation vgprs, uint32_t wave_size = 0,
+                            bool trap_handler = false);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -211,7 +212,8 @@ public:
   /// @param lds_bytes LDS bytes required by the workgroup.
   /// @returns true if the CU has enough free slots, registers, and LDS.
   bool can_accept_workgroup(uint32_t num_wfs, uint32_t num_sgprs, uint32_t num_vgprs,
-                            uint32_t wave_size, uint32_t lds_bytes = 0) const;
+                            uint32_t wave_size, uint32_t lds_bytes = 0,
+                            bool trap_handler = false) const;
 
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool execute_quantum() = 0;
@@ -657,7 +659,7 @@ public:
   /// @brief Test whether a wavefront may access a physical VGPR range.
   /// @details Enforces both the fixed simulator storage block and the
   /// descriptor-derived ordinary-VGPR extent. Access beyond the descriptor
-  /// allocation is invalid hardware behavior and terminates the simulation.
+  /// allocation returns false without reporting or changing simulation state.
   [[nodiscard]] bool owns_vgpr_range(const Wavefront &wf, uint32_t physical_base,
                                      uint32_t physical_count) const {
     if (&wf.raw_cu() != this || wf.vgpr_alloc().count == 0 || physical_count == 0)
@@ -675,7 +677,6 @@ public:
                                  physical_count <= wf.num_ordinary_vgprs() - relative_base;
       if (owns_ordinary)
         return owns_storage;
-      report_vgpr_allocation_violation(wf, relative_base, physical_count, false);
       return false;
     }
 
@@ -685,13 +686,27 @@ public:
           acc_base < wf.num_accvgprs() && physical_count <= wf.num_accvgprs() - acc_base;
       if (owns_accumulator)
         return owns_storage;
-      report_vgpr_allocation_violation(wf, acc_base, physical_count, true);
       return false;
     }
 
     if (owns_storage)
       return owns_storage;
 
+    return false;
+  }
+
+  /// @brief Validate an executed access, reporting descriptor-bound violations.
+  /// Ownership queries and notification paths must use owns_vgpr_range instead.
+  [[nodiscard]] bool validate_vgpr_access(const Wavefront &wf, uint32_t physical_base,
+                                          uint32_t physical_count) const {
+    if (owns_vgpr_range(wf, physical_base, physical_count))
+      return true;
+    if (physical_count != 0 && physical_base >= wf.vgpr_alloc().base) {
+      const uint32_t relative = physical_base - wf.vgpr_alloc().base;
+      const bool accumulator = relative >= ACC_VGPR_OFFSET;
+      report_vgpr_allocation_violation(wf, accumulator ? relative - ACC_VGPR_OFFSET : relative,
+                                       physical_count, accumulator);
+    }
     return false;
   }
 
@@ -1020,7 +1035,7 @@ protected:
 
   /// @brief Reserve/release physical SIMD register-file capacity for a wave slot.
   bool reserve_physical_registers(uint32_t wf_id, uint32_t num_sgprs, uint32_t num_vgprs,
-                                  uint32_t wave_size);
+                                  uint32_t wave_size, bool trap_handler = false);
   void release_physical_registers(uint32_t wf_id);
 
   using RawVgprVisitor = void (*)(const void *, std::span<const uint32_t>);
@@ -1120,7 +1135,8 @@ protected:
   [[nodiscard]] bool place_physical_registers(std::vector<SimdRegisterUsage> &usage,
                                               uint32_t num_sgprs, uint32_t num_vgprs,
                                               uint32_t wave_size,
-                                              WaveRegisterReservation *reservation) const;
+                                              WaveRegisterReservation *reservation,
+                                              bool trap_handler = false) const;
   /// @brief Hold the wave-state lock, then notify the CP once it is released.
   /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
   /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running

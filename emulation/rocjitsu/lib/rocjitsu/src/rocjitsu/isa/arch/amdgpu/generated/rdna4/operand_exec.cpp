@@ -166,7 +166,7 @@ void Operand::write_lane_chunk_exec(amdgpu::Wavefront &wf, uint32_t lane_base, u
       vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
   uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
   uint32_t reg = wf.vgpr_alloc().base + voff;
-  if (!amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1))
+  if (!amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).validate_vgpr_access(wf, reg, 1))
     return;
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
   uint8_t *dst = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).raw_vgpr_data(reg);

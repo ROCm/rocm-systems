@@ -142,7 +142,8 @@ TEST(ConfigLoaderTest, OrdinaryVgprLimitDoesNotRejectAccVgprBank) {
   ASSERT_NE(vm, nullptr);
   auto *cu = vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/16, /*num_vgprs=*/8);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*num_sgprs=*/16,
+                               amdgpu::WaveVgprAllocation{16, 8, 8});
   ASSERT_NE(wave, nullptr);
 
   const uint32_t acc0 = wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
@@ -1859,6 +1860,23 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
   EXPECT_EQ(restored.soc()->exec_mode(), simdojo::ExecMode::CLOCKED);
   EXPECT_TRUE(restored.soc()->xcd(0)->command_processor()->packed_tid());
+}
+
+TEST(CheckpointTest, PreservesTrapHandlerSgprReserve) {
+  auto loaded = config::load_config_from_string(register_allocation_test_config("cdna3", 512, 32),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  for (uint32_t i = 0; i < 24; ++i)
+    ASSERT_NE(cu->dispatch_wf(i, 0x1000, 104, 8, 64, true), nullptr);
+  test::ScopedTempFile checkpoint("rocjitsu-trap-register-reserve-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_EQ(restored_cu->num_wfs(), 24u);
+  EXPECT_FALSE(restored_cu->can_accept_workgroup(1, 104, 8, 64, 0, true));
+  for (uint32_t i = 0; i < 24; ++i)
+    EXPECT_TRUE(restored_cu->wf(i)->trap_handler_enabled());
 }
 
 TEST(CheckpointTest, PreservesStrictVgprAllocationAndPhysicalOccupancy) {

@@ -396,6 +396,83 @@ uint64_t write_test_kernel(amdgpu::GpuMemory *memory, uint64_t addr,
   return addr;
 }
 
+TEST(PhysicalRegisterResourceTest, ExplicitAccumulatorAllocationMustMatchUnifiedCharge) {
+  for (std::string_view arch : {"cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, 4, 64, 104, 512);
+    auto *cu = f.cu();
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 8);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_accvgprs(), 0u);
+    EXPECT_FALSE(cu->owns_vgpr_range(*wave, wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 1));
+    EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
+    wave->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+    wave = cu->dispatch_wf_at(0, 0, 0x1000, 16, 8);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_accvgprs(), 0u);
+    wave->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+    for (amdgpu::WaveVgprAllocation invalid :
+         {amdgpu::WaveVgprAllocation{8, 8, 1}, {8, 4, 0}, {8, 9, 0}, {8, 4, UINT32_MAX}})
+      EXPECT_EQ(cu->dispatch_wf(0, 0x1000, 16, invalid), nullptr);
+    wave = cu->dispatch_wf(0, 0x1000, 16, amdgpu::WaveVgprAllocation{8, 4, 4});
+    ASSERT_NE(wave, nullptr);
+    EXPECT_TRUE(cu->owns_vgpr_range(*wave, wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 4));
+    EXPECT_FALSE(cu->owns_vgpr_range(*wave, wave->vgpr_alloc().base + 4, 1));
+  }
+}
+
+TEST(PhysicalRegisterResourceTest, OwnershipQueriesDoNotReportExecutedAccesses) {
+  VmFixture f("rdna4", 1, 4, 64, 128, 256);
+  auto *cu = f.cu();
+  auto *wave = cu->dispatch_wf(0, 0x1000, 16, 8, 32);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t invalid = wave->vgpr_alloc().base + 8;
+  auto regs = amdgpu::RegisterAccess(*wave);
+  EXPECT_FALSE(cu->owns_vgpr_range(*wave, invalid, 1));
+  EXPECT_FALSE(regs.owns_vgpr_range(invalid, 1));
+  EXPECT_EQ(cu->vgpr_owner(invalid), wave);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
+  regs.write_vgpr(invalid, 0, 123);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 1u);
+}
+
+TEST(PhysicalRegisterResourceTest, Rdna4Wave64VgprPressureAndReclamation) {
+  VmFixture f("rdna4", 1, 32, 64, 128, 256);
+  auto *cu = f.cu();
+  EXPECT_TRUE(cu->can_accept_workgroup(4, 128, 256, 64));
+  EXPECT_FALSE(cu->can_accept_workgroup(5, 128, 256, 64));
+  std::vector<amdgpu::Wavefront *> waves;
+  for (uint32_t i = 0; i < 4; ++i) {
+    auto *wave = cu->dispatch_wf(i, 0x1000, 128, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    waves.push_back(wave);
+  }
+  EXPECT_EQ(cu->dispatch_wf(4, 0x1000, 128, 256, 64), nullptr);
+  waves.front()->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_NE(cu->dispatch_wf(4, 0x1000, 128, 256, 64), nullptr);
+}
+
+TEST(PhysicalRegisterResourceTest, TrapHandlerSgprReserveLimitsResidency) {
+  for (bool trap : {false, true}) {
+    SCOPED_TRACE(trap);
+    VmFixture f("cdna3", 1, 32, 64, 104, 512);
+    auto *cu = f.cu();
+    const uint32_t limit = trap ? 24 : 28;
+    EXPECT_TRUE(cu->can_accept_workgroup(limit, 104, 8, 64, 0, trap));
+    EXPECT_FALSE(cu->can_accept_workgroup(limit + 1, 104, 8, 64, 0, trap));
+    amdgpu::Wavefront *first = nullptr;
+    for (uint32_t i = 0; i < limit; ++i) {
+      auto *wave = cu->dispatch_wf(i, 0x1000, 104, 8, 64, trap);
+      ASSERT_NE(wave, nullptr);
+      if (!first)
+        first = wave;
+    }
+    EXPECT_EQ(cu->dispatch_wf(limit, 0x1000, 104, 8, 64, trap), nullptr);
+    first->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+    EXPECT_NE(cu->dispatch_wf(limit, 0x1000, 104, 8, 64, trap), nullptr);
+  }
+}
+
 TEST(PhysicalRegisterResourceTest, Rdna4VgprPressureLimitsResidencyAndReclaimsCapacity) {
   VmFixture f("rdna4", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
               /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
@@ -4458,6 +4535,81 @@ TEST(AqlDispatchTest, ExecutedVgprOutsideDescriptorAllocationFails) {
   EXPECT_EQ(status.code, 1);
   EXPECT_NE(status.message.find("VGPR access exceeds descriptor allocation"), std::string::npos);
   EXPECT_EQ(f.cu()->register_allocation_violation_count(), 1u);
+}
+
+TEST(AqlDispatchTest, True16DescriptorBoundary) {
+  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4"}) {
+    for (bool invalid : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(invalid);
+      VmFixture f(arch, 1, 4, 64, 128, 256);
+      const uint32_t code[] = {enc::v_mov_b16(invalid ? 8 : 128 + 7, enc::INLINE_CONST(1)),
+                               enc::S_ENDPGM};
+      const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 8);
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.dispatch(kernel, 32, 32);
+      const auto status = f.engine->run();
+      EXPECT_EQ(status.code, invalid ? 1 : 0) << status.message;
+      EXPECT_EQ(f.cu()->register_allocation_violation_count(), invalid ? 1u : 0u);
+    }
+  }
+}
+
+TEST(AqlDispatchTest, RejectsUnsupportedRegisterAllocationModes) {
+  using namespace rocr::llvm::amdhsa;
+  for (std::string_view arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4", "cdna5"}) {
+    for (bool enabled : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(enabled);
+      VmFixture f(arch, 1, 4, 64, 128, 256);
+      const uint32_t code[] = {enc::sopp(2, 0xffff)};
+      const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 32);
+      if (enabled) {
+        const auto offset = arch == "rdna4" ? offsetof(kernel_descriptor_t, compute_pgm_rsrc2)
+                                            : offsetof(kernel_descriptor_t, compute_pgm_rsrc3);
+        const uint32_t bit = arch == "rdna4" ? 1u << 6 : arch == "cdna5" ? 1u << 17 : 1u;
+        f.mem()->write32(kernel + offset, f.mem()->read32(kernel + offset) | bit);
+      }
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.dispatch(kernel, 32, 32);
+      if (enabled) {
+        try {
+          f.engine->step();
+          FAIL() << "unsupported allocation accepted";
+        } catch (const std::runtime_error &error) {
+          EXPECT_NE(std::string(error.what()).find("VGPR allocation is not supported"),
+                    std::string::npos);
+        }
+        EXPECT_EQ(f.cu()->num_wfs(), 0u);
+      } else {
+        EXPECT_NO_THROW(f.engine->step());
+        EXPECT_GT(f.cu()->num_wfs(), 0u);
+      }
+    }
+  }
+}
+
+TEST(AqlDispatchTest, TrapHandlerDescriptorChangesSgprAdmission) {
+  using namespace rocr::llvm::amdhsa;
+  for (bool trap : {false, true}) {
+    SCOPED_TRACE(trap);
+    VmFixture f("cdna3", 1, 32, 64, 104, 512);
+    const uint32_t code[] = {enc::sopp(2, 0xffff)};
+    const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 8);
+    if (trap) {
+      const auto addr = kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc2);
+      f.mem()->write32(addr, f.mem()->read32(addr) | COMPUTE_PGM_RSRC2_ENABLE_TRAP_HANDLER);
+    }
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, 25 * 64, 25 * 64);
+    if (trap) {
+      EXPECT_THROW(f.engine->step(), std::runtime_error);
+      EXPECT_EQ(f.cu()->num_wfs(), 0u);
+    } else {
+      EXPECT_NO_THROW(f.engine->step());
+      EXPECT_EQ(f.cu()->num_wfs(), 25u);
+    }
+  }
 }
 
 TEST(AqlDispatchTest, True16HighHalfUsesUnderlyingVgprAllocation) {

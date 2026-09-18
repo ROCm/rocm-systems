@@ -151,7 +151,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   uint32_t stride = is_atomic ? d.elem_size : d.num_elems * d.elem_size;
   // Number of destination VGPRs: total bytes / 4, rounded up.
   const uint32_t vgpr_count = vector_destination_vgpr_count(d);
-  if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
+  if (!cu.validate_vgpr_access(wf, d.dst_reg_base, vgpr_count))
     return MemoryAccessCompletion::Complete;
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
@@ -717,8 +717,8 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
     auto &cu = wf.raw_cu();
     const uint32_t primary_count = vector_destination_vgpr_count(d);
     const uint32_t secondary_count = std::max(1u, (d.elem_size + 3u) / 4u);
-    if (!cu.owns_vgpr_range(wf, d.dst_reg_base, primary_count) ||
-        !cu.owns_vgpr_range(wf, d.ds2_dst_reg_base, secondary_count))
+    if (!cu.validate_vgpr_access(wf, d.dst_reg_base, primary_count) ||
+        !cu.validate_vgpr_access(wf, d.ds2_dst_reg_base, secondary_count))
       return MemoryAccessCompletion::Complete;
   }
   MemoryAccessCompletion completion = vector_complete(d, wf, wf.raw_cu(), std::move(complete));
