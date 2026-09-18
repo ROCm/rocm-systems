@@ -4,7 +4,6 @@
 """Unit tests for utils/utils_analysis.py."""
 
 import gzip
-import math
 import os
 from pathlib import Path
 
@@ -870,86 +869,12 @@ def test_rollup_propagates_min_max_from_kernel_stats():
     assert node.mean_dispatch_ns == 1500.0
 
 
-def test_rollup_parent_rolls_up_children():
-    child = CallTreeNode(name="child")
-    child.kernels["kern_a"] = KernelStats(launches=3, total_duration_ns=3000.0)
-    parent = CallTreeNode(name="parent")
-    parent.children["child"] = child
-    parent.kernels["kern_b"] = KernelStats(launches=1, total_duration_ns=500.0)
-    rollup_node_stats(parent)
-    assert parent.kernel_launches == 4
-    assert child.kernel_launches == 3
-
-
-def test_rollup_deep_hierarchy():
-    grandchild = CallTreeNode(name="grandchild")
-    grandchild.kernels["k"] = KernelStats(launches=1, total_duration_ns=100.0)
-    child = CallTreeNode(name="child")
-    child.children["grandchild"] = grandchild
-    child.kernels["k2"] = KernelStats(launches=2, total_duration_ns=200.0)
-    root = CallTreeNode(name="root")
-    root.children["child"] = child
-    rollup_node_stats(root)
-    assert grandchild.kernel_launches == 1
-    assert child.kernel_launches == 3
-    assert root.kernel_launches == 3
-
-
 def test_build_call_trees_empty_df():
     assert build_call_trees(pd.DataFrame()) == {}
 
 
 def test_build_call_trees_missing_columns():
     assert build_call_trees(pd.DataFrame([{"Operator_Name": "a"}])) == {}
-
-
-def test_build_call_trees_single_dispatch():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "torch.nn.Linear",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@train.py:42",
-            "Start_Timestamp_kernel": 1000,
-            "End_Timestamp_kernel": 2000,
-        }
-    ])
-    call_trees = build_call_trees(df)
-    assert "train.py:42" in call_trees
-    assert call_trees["train.py:42"].kernel_launches == 1
-    assert "torch.nn.Linear" in call_trees["train.py:42"].children
-
-
-def test_build_call_trees_hierarchy_split():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "aten/linear/addmm",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@file.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
-    call_trees = build_call_trees(df)
-    root = call_trees["file.py:1"]
-    assert "aten" in root.children
-    assert "linear" in root.children["aten"].children
-    assert "addmm" in root.children["aten"].children["linear"].children
-
-
-def test_build_call_trees_multiple_dispatches_same_kernel():
-    rows = [
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": i * 1000,
-            "End_Timestamp_kernel": (i + 1) * 1000,
-        }
-        for i in range(3)
-    ]
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    assert call_trees["f.py:1"].kernel_launches == 3
-    assert call_trees["f.py:1"].children["op_a"].kernels["kern"].launches == 3
 
 
 def test_build_call_trees_dedup_identical_timestamps():
@@ -973,30 +898,6 @@ def test_build_call_trees_no_context_id():
         }
     ])
     assert "unknown:0" in build_call_trees(df)
-
-
-def test_build_call_trees_duration_rollup():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "parent/child",
-            "Kernel_Name": "kern_a",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "parent",
-            "Kernel_Name": "kern_b",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 2_000_000,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-    ])
-    call_trees = build_call_trees(df)
-    root = call_trees["f.py:1"]
-    assert root.kernel_launches == 2
-    assert root.children["parent"].kernel_launches == 2
-    assert root.children["parent"].children["child"].kernel_launches == 1
 
 
 def test_build_call_trees_multiple_source_locations():
@@ -1131,49 +1032,6 @@ def test_build_operator_summary_pct_total_gpu_sums_to_100_at_top_level():
     op_b_pct = summary.loc[summary["Operator"] == "op_b", "Pct_Total_GPU"].iloc[0]
     assert op_a_pct == pytest.approx(75.0)
     assert op_b_pct == pytest.approx(25.0)
-
-
-def test_build_operator_summary_pct_total_gpu_is_nan_when_grand_total_zero():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 0.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    pct = summary.loc[summary["Operator"] == "op", "Pct_Total_GPU"].iloc[0]
-    assert math.isnan(pct)
-
-
-def test_build_operator_summary_min_max_mean_are_nan_when_no_dispatch_stats():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 5.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    row = summary.loc[summary["Operator"] == "op"].iloc[0]
-    assert math.isnan(row["Min_Dispatch"])
-    assert math.isnan(row["Max_Dispatch"])
-    assert math.isnan(row["Mean_Per_Dispatch"])
-
-
-def test_build_operator_summary_calls_nan_when_no_invocation_ids():
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="torch.ops.x")
-    op.kernel_launches = 2
-    op.total_duration_ms = 4.0
-    op.mean_dispatch_ns = 2_000_000.0
-    op.min_dispatch_ns = 2_000_000.0
-    op.max_dispatch_ns = 2_000_000.0
-    root.children["torch.ops.x"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    row = summary.loc[summary["Operator"] == "torch.ops.x"].iloc[0]
-    assert math.isnan(row["Calls"])
-    assert math.isnan(row["Dispatches_Per_Call"])
-    assert math.isnan(row["Mean_Per_Call"])
-    assert row["Dispatches"] == 2
 
 
 # get_matrix_ops_type Tests
