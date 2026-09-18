@@ -1041,7 +1041,7 @@ TEST(Cdna4GprIdxTest, MfmaIndexesArchitecturalVgprsButNotAccvgprs) {
 
   auto cu = amdgpu::ComputeUnitCore::create("cdna4_mfma_gpr_idx", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, amdgpu::WaveVgprAllocation{256, 128, 128});
   ASSERT_NE(wf, nullptr);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
