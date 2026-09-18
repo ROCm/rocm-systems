@@ -169,16 +169,25 @@ def render_slurm_script(
     ld_paths = [str(lib_dir)]
     if sysdeps_dir.is_dir():
         ld_paths.append(str(sysdeps_dir.resolve()))
-    if os.environ.get("LD_LIBRARY_PATH"):
-        ld_paths.append(os.environ["LD_LIBRARY_PATH"])
 
-    path_entries = [str(paths.root / "bin")]
-    if os.environ.get("PATH"):
-        path_entries.append(os.environ["PATH"])
+    # The GitHub runner and the Ruby compute nodes use different Linux
+    # distributions. In particular, setup-python adds a Python toolcache to
+    # PATH and LD_LIBRARY_PATH that requires a newer glibc than the compute
+    # nodes provide. Keep the runner environment for this Python driver, but
+    # give the Slurm payload a node-local PATH and only the fetched artifact
+    # libraries it needs.
+    path_entries = [
+        str(paths.root / "bin"),
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
 
     lines = [
         "#!/usr/bin/env bash",
         "set -uo pipefail",
+        "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV || true",
         _shell_export("PATH", ":".join(path_entries)),
         _shell_export("LD_LIBRARY_PATH", ":".join(ld_paths)),
         _shell_export("ROCM_PATH", str(paths.root)),
@@ -212,16 +221,27 @@ def render_slurm_script(
         "test \"$(sha256sum \"$ACCL_RCCL_LIB\" | awk '\"'\"'{print $1}'\"'\"')\" = \"$ACCL_EXPECT_RCCL_SHA256\"",
         "test \"$(sha256sum \"$ACCL_PLUGIN\" | awk '\"'\"'{print $1}'\"'\"')\" = \"$ACCL_EXPECT_PLUGIN_SHA256\"",
         "readelf -Ws \"$ACCL_PLUGIN\" | grep -q '\"'\"' ncclProfiler_v5$'\"'\"'",
-        "if command -v rocm_agent_enumerator >/dev/null 2>&1; then",
-        "  archs=$(rocm_agent_enumerator | sort -u | paste -sd, -)",
-        "elif [ -x \"$ROCM_PATH/bin/rocm_agent_enumerator\" ]; then",
-        "  archs=$(\"$ROCM_PATH/bin/rocm_agent_enumerator\" | sort -u | paste -sd, -)",
-        "else",
+        # Prefer the native rocminfo executable. rocm_agent_enumerator is a
+        # Python script, so use an explicit node-local interpreter only as a
+        # fallback instead of its /usr/bin/env shebang.
+        "if [ -x \"$ROCM_PATH/bin/rocminfo\" ]; then",
         (
-            "  archs=$(rocminfo 2>/dev/null | sed -n "
-            "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9]*\\).*/\\1/p'\"'\"' "
+            "  archs=$(\"$ROCM_PATH/bin/rocminfo\" 2>/dev/null | sed -n "
+            "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
             "| sort -u | paste -sd, -)"
         ),
+        "elif [ -x /usr/bin/python3 ] && [ -f \"$ROCM_PATH/bin/rocm_agent_enumerator\" ]; then",
+        "  archs=$(/usr/bin/python3 \"$ROCM_PATH/bin/rocm_agent_enumerator\" | sort -u | paste -sd, -)",
+        "elif [ -x /usr/local/bin/python3 ] && [ -f \"$ROCM_PATH/bin/rocm_agent_enumerator\" ]; then",
+        "  archs=$(/usr/local/bin/python3 \"$ROCM_PATH/bin/rocm_agent_enumerator\" | sort -u | paste -sd, -)",
+        "elif command -v rocminfo >/dev/null 2>&1; then",
+        (
+            "  archs=$(rocminfo 2>/dev/null | sed -n "
+            "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
+            "| sort -u | paste -sd, -)"
+        ),
+        "else",
+        "  archs=",
         "fi",
         "case \",$archs,\" in *,gfx950,*) ;; *) echo \"unexpected GPU architecture(s): $archs\" >&2; exit 1 ;; esac",
         (
