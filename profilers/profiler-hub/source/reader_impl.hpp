@@ -111,6 +111,12 @@ private:
     [[nodiscard]] std::unordered_map<size_t, size_t> get_track_event_counts(
         const std::vector<data_storage::schema_v3::track_info_result>& tracks);
 
+    // Appends optiq-parity category tracks (kernel-dispatch/memory-allocate/
+    // memory-copy, per agent+queue and per host-stream) to m_track_info_list,
+    // continuing synthetic ids from `next_synthetic_id`. Called from
+    // get_all_tracks().
+    void add_category_tracks(size_t& next_synthetic_id);
+
     // Resolve event metadata from event-specific table by db_id and type.
     // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
     [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
