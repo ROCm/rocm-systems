@@ -35,8 +35,6 @@ ctest -R video_decodeRaw-HEVC -VV
 cmake .. -DENABLE_EXTENDED_TESTS=ON
 make test ARGS="-VV"
 
-# Build all samples without running tests (quick compilation check)
-./build_samples.sh
 ```
 
 Tests use a **build-and-test pattern**: CTest configures and builds each sample from its installed location (`${ROCM_PATH}/share/rocdecode/samples/<name>`) into a temp directory, then runs the built binary against test media at `${ROCM_PATH}/share/rocdecode/video/`. The library **must be installed** before tests will work.
@@ -58,6 +56,8 @@ HIP, libva, libdrm_amdgpu, pthreads. Optional: FFmpeg (>= 4.0.4) for samples, ex
 - `video_decodeRaw-{HEVC,AVC,AV1,VP9}` — raw elementary bitstream decode
 - `rocdec_Decode-HEVC` — low-level C API decode (rocdecDecode sample)
 - `rocDecode_Negative_API_Tests` — invalid parameter tests for all public API functions
+- `video_decodeCaps` — query hardware decoder capabilities (videoDecodeCaps sample)
+
 
 **Extended tests (require FFmpeg + `ENABLE_EXTENDED_TESTS=ON`):**
 - `video_decode-{HEVC,AVC,AV1,VP9}` — container-based decode via FFmpeg demuxer
@@ -124,7 +124,7 @@ Input (video file)
 - Opaque handles (`typedef void *rocDecDecoderHandle`, `typedef void *RocdecVideoParser`)
 - Error codes via `rocDecStatus` enum (`ROCDEC_SUCCESS`, `ROCDEC_INVALID_PARAMETER`, `ROCDEC_NOT_SUPPORTED`, etc.)
 - Internal C++ uses PascalCase classes, trailing underscore for members (`va_display_`), snake_case locals
-- Callback-driven parser: register `pfn_sequence_callback`, `pfn_decode_picture`, `pfn_display_picture`, `pfn_get_sei_message` handlers
+- Callback-driven parser: register `pfn_sequence_callback`, `pfn_decode_picture`, `pfn_display_picture`, `pfn_get_sei_msg` handlers
 
 ### Logging
 
@@ -137,7 +137,7 @@ Input (video file)
 - MIT license header block required on all C/C++ and CMake files
 - Compiler: `amdclang++` from ROCm toolchain
 - Release: `-O3 -DNDEBUG -fPIC`; Debug: `-O0 -gdwarf-4` (Valgrind compatible)
-- No `.clang-format` or linter config — no auto-formatting enforced
+- No project-local `.clang-format`; formatting is enforced repo-wide via the monorepo root `.pre-commit-config.yaml` (clang-format, gersemi for CMake, black for Python, plus whitespace/EOF fixers). rocDecode is not excluded from these hooks.
 
 ## Validation after code changes
 
