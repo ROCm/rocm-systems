@@ -126,6 +126,17 @@ TEST(InstructionBuilder, BuildScalarDestinationDependencyWaits) {
   EXPECT_FALSE(build_s_wait_alu_va_vcc0(ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildVectorDestinationDependencyWait) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const auto wait = build_s_wait_alu_va_vdst0(arch);
+    ASSERT_TRUE(wait);
+    // Only va_vdst waits; all other dependency counters stay at their maximum.
+    EXPECT_EQ(*wait, 0xbf880f9fu);
+  }
+  EXPECT_FALSE(build_s_wait_alu_va_vdst0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_wait_alu_va_vdst0(ROCJITSU_CODE_ARCH_RDNA3));
+}
+
 TEST(InstructionBuilder, BuildImmediateSetreg) {
   const auto hwreg = build_hwreg_imm(/*reg_id=*/26u, /*offset=*/0u, /*size_bits=*/2u);
   ASSERT_TRUE(hwreg);

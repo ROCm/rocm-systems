@@ -1012,6 +1012,39 @@ function(rj_add_consan_device_conformance_cases)
             "Rdna3ScalarVglobal|rdna3_scalar_vglobal|ConSanDeviceRdna3ScalarVglobalTest|atomics"
         )
     endif()
+    # Hardware scheduling regression: SuperCollider borrows a pending WMMA
+    # accumulator under full VGPR pressure. The emulator does not model this
+    # matrix-to-VMEM latency hazard.
+    if(_device_TARGET STREQUAL "gfx1201" AND NOT _device_CONFIG)
+        foreach(_spill_mode IN ITEMS Baseline SuperCollider)
+            set(_spill_environment)
+            string(TOLOWER "${_spill_mode}" _spill_label)
+            if(_spill_mode STREQUAL "SuperCollider")
+                set(
+                    _spill_environment
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=supercollider"
+                    "RJ_CONSAN_POLICY=strict"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_LOG=1"
+                )
+            endif()
+            rj_add_consan_hip_case(
+                NAME "${_device_PREFIX}.${_spill_mode}RdnaWmmaSpill.Correct"
+                TARGET hip_consan_device_rdna_wmma_spill_gfx1201_test
+                FILTER "ConSanDeviceRdnaWmmaSpillTest.Correct"
+                ${_resource_lock_args}
+                TIMEOUT 60
+                ENVIRONMENT ${_spill_environment}
+                LABELS ${_labels} ${_spill_label} clean
+            )
+            if(_spill_mode STREQUAL "SuperCollider")
+                list(APPEND _instrumented_tests
+                    "${_device_PREFIX}.${_spill_mode}RdnaWmmaSpill.Correct"
+                )
+            endif()
+        endforeach()
+    endif()
     foreach(_workload IN LISTS _device_workloads)
         string(REPLACE "|" ";" _workload_fields "${_workload}")
         list(GET _workload_fields 0 _workload_name)
@@ -1658,6 +1691,7 @@ function(rj_add_consan_device_fixture_targets target)
         list(
             APPEND _device_workload_sources
             "rdna_fp8_staged_matmul|rdna_fp8_staged_matmul_test.hip"
+            "rdna_wmma_spill|rdna_wmma_spill_test.hip"
         )
     endif()
     if(target STREQUAL "gfx1100" OR target STREQUAL "gfx1201")
