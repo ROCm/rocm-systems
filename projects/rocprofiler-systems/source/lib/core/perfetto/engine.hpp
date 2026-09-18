@@ -9,9 +9,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
+#include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -69,7 +68,7 @@ public:
     basic_cached_perfetto_engine& operator=(basic_cached_perfetto_engine&&)      = delete;
 
     void init_sdk();
-    void start(trace_sink& sink);
+    void start(const std::shared_ptr<trace_sink_interface>& sink);
     void stop();
 
     [[nodiscard]] bool is_running() const noexcept;
@@ -89,11 +88,11 @@ private:
     static void        collect_thunk(void* engine, int pid, const void* data,
                                      std::size_t size) noexcept;
 
-    engine_config                                     m_cfg{};
-    Backend                                           m_backend{};
-    bool                                              m_running{ false };
-    std::optional<std::reference_wrapper<trace_sink>> m_active_sink{};
-    session_ptr                                       m_session{};
+    engine_config                       m_cfg{};
+    Backend                             m_backend{};
+    bool                                m_running{ false };
+    std::weak_ptr<trace_sink_interface> m_active_sink;
+    session_ptr                         m_session{};
 
     std::mutex                                 m_collector_mutex{};
     std::unordered_map<int, std::vector<char>> m_collected_bytes{};

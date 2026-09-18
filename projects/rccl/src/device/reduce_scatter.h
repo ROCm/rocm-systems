@@ -89,57 +89,63 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     }
   }
 #ifdef ENABLE_WARP_SPEED
-    int warp = threadIdx.x / WARP_SIZE;
-    ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;
+  int warp = threadIdx.x / WARP_SIZE;
+  ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;
 #else
-    ncclRing* ring = &ncclShmem.channel.ring;
+  ncclRing* ring = &ncclShmem.channel.ring;
 #endif
-    int const* ringRanks = ring->userRanks;
-    const int nranks = ncclShmem.comm.nRanks;
-    size_t count;
-    size_t gridOffset;
-    size_t channelCount;
-    size_t chunkCount;
+  int const* ringRanks = ring->userRanks;
+  const int nranks = ncclShmem.comm.nRanks;
+  size_t count;
+  size_t gridOffset;
+  size_t channelCount;
+  size_t chunkCount;
 #ifdef ENABLE_WARP_SPEED
-    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &count, &gridOffset, &channelCount,
-                    &chunkCount);
+  ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &count, &gridOffset, &channelCount,
+                  &chunkCount);
 #else
-    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &gridOffset, &channelCount, &chunkCount);
+  ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &gridOffset, &channelCount, &chunkCount);
 #endif
-    size_t offset;
-    size_t dataOffset;
-    uint32_t nelem;
-    int rankDest;
+  size_t offset;
+  size_t dataOffset;
+  uint32_t nelem;
+  int rankDest;
 
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims(tid, nthreads, &ring->prev,
-                                                                                 &ring->next, work->sendbuff,
-                                                                                 work->recvbuff, work->redOpArg, 0,
-                                                                                 work->connIndex, work->connIndex);
+  Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims(tid, nthreads, &ring->prev, &ring->next,
+                                                                               work->sendbuff, work->recvbuff,
+                                                                               work->redOpArg, 0, work->connIndex,
+                                                                               work->connIndex);
 
-    for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
-      nelem = min(chunkCount, channelCount - elemOffset);
+  for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
+    nelem = min(chunkCount, channelCount - elemOffset);
 
-      dataOffset = gridOffset + elemOffset;
+    dataOffset = gridOffset + elemOffset;
         /////////////// begin ReduceScatter steps ///////////////
         // step 0: push data to next GPU
-      rankDest = ringRanks[nranks - 1];
-      offset = dataOffset + rankDest * count;
-      prims.send(offset, nelem);
+    sqtt_marker_enter("REDUCE_SCATTER_RING_SEND");
+    rankDest = ringRanks[nranks - 1];
+    offset = dataOffset + rankDest * count;
+    prims.send(offset, nelem);
+    sqtt_marker_exit("REDUCE_SCATTER_RING_SEND");
         // k-2 steps: reduce and copy to next GPU
-      for (int j = 2; j < nranks; ++j) {
-        rankDest = ringRanks[nranks - j];
-        offset = dataOffset + rankDest * count;
-        prims.recvReduceSend(offset, nelem);
-      }
+    sqtt_marker_enter("REDUCE_SCATTER_RING_RECV_REDUCE_SEND");
+    for (int j = 2; j < nranks; ++j) {
+      rankDest = ringRanks[nranks - j];
+      offset = dataOffset + rankDest * count;
+      prims.recvReduceSend(offset, nelem);
+    }
+    sqtt_marker_exit("REDUCE_SCATTER_RING_RECV_REDUCE_SEND");
 
         // step k-1: reduce this buffer and data, which will produce the final result
-      rankDest = ringRanks[0];
-      offset = dataOffset + rankDest * count;
-      prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
-    }
+    sqtt_marker_enter("REDUCE_SCATTER_RING_RECV_REDUCE_COPY");
+    rankDest = ringRanks[0];
+    offset = dataOffset + rankDest * count;
+    prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
+    sqtt_marker_exit("REDUCE_SCATTER_RING_RECV_REDUCE_COPY");
+  }
 }
 } // namespace
 
@@ -195,66 +201,153 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
     using Proto = ProtoSimple<1, 1>;
     const int nranks = ncclShmem.comm.nRanks;
     const int rank = ncclShmem.comm.rank;
+    const int nNodes = ncclShmem.comm.nNodes;
+    const int node = ncclShmem.comm.node;
+    const int localRanks = nranks / nNodes;
     size_t count, channelOffset, channelCount, chunkCount;
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &channelOffset, &channelCount,
                     &chunkCount);
 
     static constexpr int nworkers = NCCL_PAT_NWORKERS;
+    static constexpr int nScatterWorkers = NCCL_MAX_NTHREADS - NCCL_PAT_NWORKERS - WARP_SIZE;
     struct ncclPatShmem* shmem = (struct ncclPatShmem*)ncclScratchForWarp(0);
     // uint64_t pollCount = 0; unused variable - compiler warning
     __syncthreads(); // Don't start using shared mem until everyone arrives
-    for (int i = tid; i < NCCL_SHMEM_PAT_STEPS; i += nthreads) shmem->patSteps[i].flags = 0;
+    for (int i = tid; i < NCCL_SHMEM_PAT_STEPS; i += nthreads) {
+      shmem->patSteps[i].flags = 0;
+      shmem->patSteps[i].step = -1;
+    }
     if (tid == 0) shmem->localAccSize = 0;
-    if (tid == nworkers) shmem->parallelFactor = 0;
+    if (tid == 0) shmem->parallelFactor = 0;
     __syncthreads();
 
-    if (tid == nworkers) { // Algo computation thread
-      PatRSAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
-                                channelOffset + channelCount, count, chunkCount, rank, nranks);
-      int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
-      (void)parallelFactor;// unused variable - compiler warning
-      int step = 0;
-      while (1) {
-        struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
-        int* poll = &ps->flags;
-        while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
-          // pollCount++;// unused variable - compiler warning // Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
+    if (work->isOneRPN) {
+      if (tid == nworkers) { // Algo computation thread
+        PatRSAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
+                                  channelOffset + channelCount, count, chunkCount, rank, nranks);
+        int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
+        (void)parallelFactor; // unused variable - compiler warning
+        int step = 0;
+        while (1) {
+          struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
+          int* poll = &ps->flags;
+          // Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
+          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
+          }
+          patAlgo.getNextOp(ps);
+          int last = ps->last;
+          step++;
+          if (last == 2) break;
         }
-        patAlgo.getNextOp(ps);
-        int last = ps->last;
-        step++;
-        if (last == 2) break;
+      } else if (tid < nworkers) { // Worker threads
+        T* inputBuf = (T*)work->sendbuff;
+        T* outputBuf = (T*)work->recvbuff;
+        int parallelFactor = 0;
+        volatile int* pfPtr = &shmem->parallelFactor;
+        while (parallelFactor == 0) parallelFactor = *pfPtr;
+
+        int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
+        int group = tid / groupSize;
+        int nGroups = nworkers / groupSize;
+        int tidInGroup = tid - group * groupSize;
+        // We don't use recvPeers/sendPeers so let's pass shmem structs instead
+        Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims(
+          tidInGroup, groupSize, (int*)shmem->recvDims, (int*)shmem->sendDims, inputBuf, outputBuf, work->redOpArg,
+          group, 0, 0, nullptr, nullptr, 0, primsModePatRs);
+
+        int step = group;
+        while (1) {
+          struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
+          int* poll = &ps->flags;
+          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) { // Wait for compute thread
+          }
+          int last = ps->last;
+          prims.patReduce(ps, shmem);
+          if (tidInGroup == 0)
+            __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
+                               __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
+          if (last) break;
+          step += nGroups;
+        }
       }
-    } else if (tid < nworkers) { // Worker threads
-      T* inputBuf = (T*)work->sendbuff;
-      T* outputBuf = (T*)work->recvbuff;
-      int parallelFactor = 0;
-      volatile int* pfPtr = &shmem->parallelFactor;
-      while (parallelFactor == 0) parallelFactor = *pfPtr;
-
-      int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
-      int group = tid / groupSize;
-      int nGroups = nworkers / groupSize;
-      int tidInGroup = tid - group * groupSize;
-      // We don't use recvPeers/sendPeers so let's pass shmem structs instead
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims(
-        tidInGroup, groupSize, (int*)shmem->recvDims, (int*)shmem->sendDims, inputBuf, outputBuf, work->redOpArg, group,
-        0, 0, nullptr, nullptr, 0, primsModePatRs);
-
-      int step = group;
-      while (1) {
-        struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
-        int* poll = &ps->flags;
-        while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) {
-          // pollCount++; // unused variable - compiler warning // Wait for compute thread
+    } else {
+      // Multi-rank-per-node PAT: the local reduce-scatter is done through NVLS and
+      // feeds the inter-node PAT rings driven by one rank per node.
+      if (tid == NCCL_MAX_NTHREADS - 1) {
+        // Algo computation thread. Multi-RPN PAT-RS stages one NVLS FIFO slot per parallel PAT wave.
+        size_t patCount = count * localRanks;
+        PatRSAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
+                                  channelOffset + channelCount, patCount, chunkCount, node, nNodes);
+        shmem->parallelFactor = patAlgo.getParallelFactor();
+        int step = 0;
+        while (1) {
+          struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
+          int* schedulerStep = &ps->step;
+          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != -1) {
+          }
+          patAlgo.getNextOp(ps);
+          __hip_atomic_store(schedulerStep, step, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+          int last = ps->last;
+          step++;
+          if (last == 2) break;
         }
-        int last = ps->last;
-        prims.patReduce(ps, shmem);
-        if (tidInGroup == 0)
-          __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
-                             __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
-        if (last) break;
-        step += nGroups;
+      } else if (tid < nworkers) {
+        // Inter-node PAT workers. Their local input comes from the NVLS reduce-scatter group.
+        T* inputBuf = (T*)work->sendbuff;
+        T* outputBuf = (T*)work->recvbuff;
+        int parallelFactor = 0;
+        volatile int* pfPtr = &shmem->parallelFactor;
+        while (parallelFactor == 0) parallelFactor = *pfPtr;
+
+        int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
+        int group = tid / groupSize;
+        int nGroups = nworkers / groupSize;
+        int tidInGroup = tid - group * groupSize;
+        Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0> prims(tidInGroup, groupSize, (int*)shmem->recvDims,
+                                                                 (int*)shmem->sendDims, inputBuf, outputBuf,
+                                                                 work->redOpArg, group, 0, 0, nullptr, nullptr, 0,
+                                                                 primsModePatRs);
+
+        int step = group;
+        while (1) {
+          struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
+          int* schedulerStep = &ps->step;
+          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) {
+          }
+          int last = ps->last;
+          prims.template patReduce<true>(ps, shmem);
+          if (tidInGroup == 0)
+            __hip_atomic_store(schedulerStep, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+          if (last) break;
+          step += nGroups;
+        }
+      } else if (tid < nworkers + nScatterWorkers) {
+        // Local NVLS reduce-scatter workers. Peer l follows the NVLS-dense
+        // local order; buffer offsets are remapped to user rank order in patScatter.
+        // add_unroll.sh expands two-argument ProtoSimple<> to <..., USE_ACC, COLL_UNROLL>,
+        // which is what upstream spells as ProtoSimple<1, 1, COLL_UNROLL>.
+        using NvlsProto = ProtoSimple<1, 1>;
+        T* inputBuf = (T*)work->sendbuff;
+        struct ncclNvls* nvls = &ncclShmem.channel.nvls;
+        int scatterTid = tid - nworkers;
+        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, NvlsProto, 0> prims(
+          scatterTid, nScatterWorkers, nullptr, nvls->up, inputBuf, nullptr, work->redOpArg,
+          /*group=*/1, /*connIndexRecv=*/1, /*connIndexSend=*/1);
+
+        int parallelFactor = 0;
+        volatile int* pfPtr = &shmem->parallelFactor;
+        while (parallelFactor == 0) parallelFactor = *pfPtr;
+        int step = 0;
+        while (1) {
+          struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
+          int* schedulerStep = &ps->step;
+          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) {
+          }
+          int last = ps->last;
+          prims.patScatter(ps, shmem, step, parallelFactor, localRanks, count);
+          if (last == 2) break;
+          step++;
+        }
       }
     }
   }
@@ -303,7 +396,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           ssize_t railOneEnd = railOneBeg + countPerRank;
           ssize_t railOneOffset = (railAllBeg + railAllOffset) - railOneBeg;
           int delta = min(railAllEnd, railOneEnd) - (railAllBeg + railAllOffset);
-          int rank = ncclShmem.comm.collNetDenseToUserRank[node * nRails + rail];
+          int rank = ncclShmem.comm.denseToUserRank[node * nRails + rail];
           ssize_t userOneBeg = rank * countPerRank + railOneOffset;
           if (nDsts != 0) {
             reduceCopy<ncclCollUnroll(), USE_ACC, RedOp, T,
@@ -514,7 +607,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
           ssize_t railOneEnd = railOneBeg + countPerRank;
           ssize_t railOneOffset = (railAllBeg + railAllOffset) - railOneBeg;
           int delta = min(railAllEnd, railOneEnd) - (railAllBeg + railAllOffset);
-          int rank = ncclShmem.comm.collNetDenseToUserRank[node * nRails + rail];
+          int rank = ncclShmem.comm.denseToUserRank[node * nRails + rail];
           ssize_t userOneBeg = rank * countPerRank + railOneOffset;
           if (nDsts != 0) {
             reduceCopy<ncclCollUnroll(), USE_ACC, RedOp, T,

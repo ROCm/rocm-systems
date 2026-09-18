@@ -91,7 +91,7 @@ void Operand::read_lane_chunk_exec(const amdgpu::Wavefront &wf, uint32_t lane_ba
     uint64_t lane_mask =
         count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
     auto region =
-        amdgpu::RegisterAccess(wf.cu()).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
+        amdgpu::RegisterAccess(wf).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
     std::copy_n(region.lanes().begin() + lane_base, count, out);
     return;
   }
@@ -115,6 +115,8 @@ void Operand::write_lane_chunk_exec(amdgpu::Wavefront &wf, uint32_t lane_base, u
       vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
   uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
   uint32_t reg = wf.vgpr_alloc().base + voff;
+  if (!amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1))
+    return;
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
   uint8_t *dst = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
   if ((mask & full_mask) == full_mask) {
@@ -154,7 +156,7 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
-    return amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + voff, lane);
+    return amdgpu::RegisterAccess(wf).read_vgpr(wf.vgpr_alloc().base + voff, lane);
   }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
@@ -184,7 +186,7 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
     amdgpu::VgprMsbRole role =
         vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
+    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
   throw std::logic_error("write_lane called on non-VGPR operand type");
@@ -203,7 +205,7 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    return amdgpu::RegisterAccess(wf.cu()).read_vgpr64(idx, lane);
+    return amdgpu::RegisterAccess(wf).read_vgpr64(idx, lane);
   }
   if (literal32_widening_)
     return widened_literal32_value();
@@ -226,7 +228,7 @@ void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t v
         vgpr_msb_role() == amdgpu::VgprMsbRole::None ? amdgpu::VgprMsbRole::Dst : vgpr_msb_role();
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    amdgpu::RegisterAccess(wf.cu()).write_vgpr64(idx, lane, val);
+    amdgpu::RegisterAccess(wf).write_vgpr64(idx, lane, val);
     return;
   }
   throw std::logic_error("write_lane64 called on non-VGPR operand type");

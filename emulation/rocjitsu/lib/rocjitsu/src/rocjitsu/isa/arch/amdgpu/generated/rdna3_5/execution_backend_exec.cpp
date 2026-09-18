@@ -1268,12 +1268,6 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<BufferStoreD16HiFormatXMubuf>,
     &execute_with_backend<BufferGl0InvMubuf>,
     &execute_with_backend<BufferGl1InvMubuf>,
-    &execute_with_backend<BufferLoadLdsU8Mubuf>,
-    &execute_with_backend<BufferLoadLdsI8Mubuf>,
-    &execute_with_backend<BufferLoadLdsU16Mubuf>,
-    &execute_with_backend<BufferLoadLdsI16Mubuf>,
-    &execute_with_backend<BufferLoadLdsB32Mubuf>,
-    &execute_with_backend<BufferLoadLdsFormatXMubuf>,
     &execute_with_backend<BufferAtomicSwapB32Mubuf>,
     &execute_with_backend<BufferAtomicCmpswapB32Mubuf>,
     &execute_with_backend<BufferAtomicAddU32Mubuf>,
@@ -1458,6 +1452,9 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<FlatAtomicMinF32Flat>,
     &execute_with_backend<FlatAtomicMaxF32Flat>,
     &execute_with_backend<FlatAtomicAddF32Flat>,
+    &execute_with_backend<GlobalLoadAddtidB32Flat>,
+    &execute_with_backend<GlobalStoreAddtidB32Flat>,
+    &execute_with_backend<GlobalAtomicCsubU32Flat>,
 }};
 
 } // namespace

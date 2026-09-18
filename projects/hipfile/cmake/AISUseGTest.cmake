@@ -36,6 +36,10 @@ if(AIS_GTEST_TRY_SYSTEM)
 endif()
 
 if(NOT GTest_FOUND)
+    # CMAKE_CXX_CLANG_TIDY runs on all CMake targets after it is set, including those
+    # fetched via FetchContent. clang-tidy should not run on 3rd party code at all.
+    set(_ais_saved_cxx_clang_tidy "${CMAKE_CXX_CLANG_TIDY}")
+    unset(CMAKE_CXX_CLANG_TIDY)
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
       googletest
@@ -46,6 +50,8 @@ if(NOT GTest_FOUND)
     )
     FetchContent_MakeAvailable(googletest)
 # lint_cmake: +readability/wonkycase
+    set(CMAKE_CXX_CLANG_TIDY "${_ais_saved_cxx_clang_tidy}")
+    unset(_ais_saved_cxx_clang_tidy)
 endif()
 
 if(googletest_SOURCE_DIR)

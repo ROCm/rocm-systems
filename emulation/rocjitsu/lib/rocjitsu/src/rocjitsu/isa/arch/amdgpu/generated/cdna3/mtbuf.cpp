@@ -34,14 +34,16 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -67,14 +69,16 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -100,14 +104,16 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -133,14 +139,16 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -166,14 +174,16 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -199,14 +209,16 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -232,14 +244,16 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -265,14 +279,16 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -298,14 +314,16 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -331,14 +349,16 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -365,14 +385,16 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -399,14 +421,16 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &gpumem;
+  num_src_ = 4;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -433,14 +457,16 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -467,14 +493,16 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -501,14 +529,16 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -535,14 +565,16 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
-      soffset(32, OperandType::OPR_SSRC_NOLIT,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+      soffset(32, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   src_operands_[3] = &soffset;
+  dst_operands_[0] = &gpumem;
   num_src_ = 4;
-  num_dst_ = 0;
+  num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 

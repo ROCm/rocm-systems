@@ -84,7 +84,7 @@ void
 update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 {
     //
-    //      https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+    //      https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html
     //
     //
     // ROCR_VISIBLE_DEVICES
@@ -248,13 +248,13 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
             }
             else if(secondary_visible && hip_visible && *secondary_visible != *hip_visible)
             {
-                ROCP_CI_LOG(WARNING) << fmt::format("Conflicting visibility of agent-{} between "
-                                                    "{} and {}. Assuming {} supersedes {}",
-                                                    agent_info.node_id,
-                                                    env_primary,
-                                                    env_secondary,
-                                                    env_primary,
-                                                    env_secondary);
+                ROCP_WARNING << fmt::format("Conflicting visibility of agent-{} between "
+                                            "{} and {}. Assuming {} supersedes {}",
+                                            agent_info.node_id,
+                                            env_primary,
+                                            env_secondary,
+                                            env_primary,
+                                            env_secondary);
             }
             return env_primary;
         };
@@ -567,7 +567,7 @@ get_agents()
     pointers.reserve(agents.size());
     for(auto& agent : agents)
     {
-        pointers.emplace_back(agent.get());
+        pointers.emplace_back(&agent->public_info);
     }
     return pointers;
 }
@@ -579,6 +579,14 @@ get_agent(rocprofiler_agent_id_t id)
     {
         if(itr && itr->id.handle == id.handle) return itr;
     }
+    return nullptr;
+}
+
+const platform::agent_info*
+get_agent_info(rocprofiler_agent_id_t id)
+{
+    for(const auto& itr : get_agent_topology())
+        if(itr && itr->public_info.id.handle == id.handle) return itr.get();
     return nullptr;
 }
 

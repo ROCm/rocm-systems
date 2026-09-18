@@ -7,7 +7,9 @@
 
 #include "connect_cast.h"
 #include "common_cast.h"
+#include "p2p_cast.h"
 #include "p2p_resiliency_cast.h"
+#include "net_telemetry.h"
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -436,6 +438,11 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   } else {
     qpInitAttr.sq_sig_all &= (~(1 << 19));
   }
+  if (createQpAttrs->isP2p) {
+    qpInitAttr.sq_sig_all |= (1 << 25);
+  } else {
+    qpInitAttr.sq_sig_all &= (~(1 << 25));
+  }
 
   if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
     bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
@@ -469,6 +476,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->pd = devBase->pd;
   out->ibDevN = devBase->ibDevN;
   out->useIonic = IbCastAinicRoce;
+  out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
@@ -479,6 +487,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
 }
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
+  qp->telQpStats = NULL;
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -804,6 +813,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
+    qpCreateAttrs.isP2p = comm->base.isP2p;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -953,7 +963,11 @@ ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** se
   // For single-subnet or IB deployments, all GIDs are zero → dev stays unchanged.
   if (ncclParamIbCastSubnetAwareRouting()) NCCLCHECK(IbCastFindDevBySubnet(handle->listenGids, 2, dev, &dev));
 
-  if (IbCastAinicRoce && sendDevComm) {
+  // The channel id only reaches the transport on the AINIC path; elsewhere the
+  // fifth connect() arg carries the device handle, not the context, so all
+  // channels share bucket 0 and telemetry reports num_channels as unknown.
+  bool telChannelIdKnown = (IbCastAinicRoce && sendDevComm);
+  if (telChannelIdKnown) {
     channelId = ((ncclNet_ctxt_t*)sendDevComm)->chId;
   }
 
@@ -1031,6 +1045,7 @@ ib_recv_dev_list:
   comm->base.vProps = mergedDev->vProps;
   // Read isP2p from handle
   isP2p = handle->isP2p;
+  comm->base.isP2p = isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
 
@@ -1075,6 +1090,33 @@ ib_recv_dev_list:
 
   // Create QPs on the sender side
   NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId), ret, fail);
+
+  comm->telChId = channelId;
+  comm->telChStats = NULL;
+
+  // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
+  // the untracked value the hooks expect.
+  if (rcclTelemetryOn()) {
+    for (int i = 0; i < comm->base.vProps.ndevs; i++) {
+      int ibDevN = comm->base.vProps.devs[i];
+      int numQpsForDev = 0;
+      for (int q = 0; q < comm->base.nqps; q++)
+        if (comm->base.qps[q].devIndex == i) numQpsForDev++;
+      int numSlots = 0;
+      int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
+      if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
+      int slotOffset = 0;
+      for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
+        if (comm->base.qps[q].devIndex != i) continue;
+        // QPs past the granted slots keep telQpStats == NULL (untracked).
+        int telSlot = startSlot + slotOffset++;
+        rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
+        comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
+      }
+    }
+    // Request completions are charged to the comm's first device.
+    comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
+  }
 
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     ncclIbSendCommDev* commDev = comm->devs + i;
@@ -1348,6 +1390,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.channelId = channelId;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
+    qpCreateAttrs.isP2p = rComm->base.isP2p;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1546,7 +1589,9 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   bool useDmaBuf = false;
   *recvComm = NULL;
 
-  if (IbCastAinicRoce && recvDevComm) {
+  // See IbCastConnect(): the channel id only reaches the transport on AINIC.
+  bool telChannelIdKnown = (IbCastAinicRoce && recvDevComm);
+  if (telChannelIdKnown) {
     channelId = ((ncclNet_ctxt_t*)recvDevComm)->chId;
   }
 
@@ -1634,10 +1679,12 @@ ib_recv:
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
 
+  rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
-       remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(), rComm->base.recvMatchingScheme);
+       remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(),
+       rComm->base.recvMatchingScheme);
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
   if (remMeta.isRMA) {
     rComm->base.nqps = 1;
@@ -1752,6 +1799,32 @@ ib_recv:
     NCCLCHECKGOTO(IbCastReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
   }
 
+  rComm->telChId = channelId;
+  rComm->telChStats = NULL;
+
+  // See IbCastConnect(): telemetry-only work, skipped when telemetry is off.
+  if (rcclTelemetryOn()) {
+    for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
+      int telIbDevN = rComm->base.vProps.devs[i];
+      int numQpsForDev = 0;
+      for (int q = 0; q < rComm->base.nqps; q++)
+        if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
+      int numSlots = 0;
+      int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
+      if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(telIbDevN);
+      int slotOffset = 0;
+      for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
+        if (rComm->base.qps[q].devIndex != i) continue;
+        // QPs past the granted slots keep telQpStats == NULL (untracked).
+        int telSlot = startSlot + slotOffset++;
+        // isDataQp is always false on receiver QPs; classify by CTS role.
+        rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommIsCtsQp(rComm, q));
+        rComm->base.qps[q].telQpStats = rcclTelemetryResolveQp(telIbDevN, channelId, telSlot);
+      }
+    }
+    rComm->telChStats = rcclTelemetryResolveChannel(rComm->base.vProps.devs[0], channelId);
+  }
+
   // Store the remote CTS FIFO info provided by the remote peer
   rComm->remCtsFifo.addr = remMeta.addr;
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
@@ -1791,9 +1864,37 @@ ib_recv:
         // RCCL: allocate the GDR flush buffer directly via HIP (never cuMem/VMM)
         // so hsa_amd_portable_export_dmabuf can export it. cuMem/VMM allocations
         // fail to export through the HSA portable exporter on some ROCm/NIC stacks.
-        CUDACHECKGOTO(hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), gpuFlushFlags),
-                      ret, fail);
-        CUDACHECKGOTO(hipMemset(rCommDev->gpuFlush.gpuFlushGpuMem, 0, sizeof(int)), ret, fail);
+        // Use a non-blocking proxy stream so initialization does not make the
+        // legacy stream depend on a ThreadLocal graph-capturing stream.
+        hipError_t hipFlushSt =
+          hipExtMallocWithFlags((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), gpuFlushFlags);
+        if (hipFlushSt != hipSuccess) {
+          ret = rcclCudaErrorHandler(hipFlushSt);
+          goto fail;
+        }
+        cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
+        bool capModeExchanged = false;
+        cudaStream_t zeroStream = nullptr;
+        hipFlushSt = cudaThreadExchangeStreamCaptureMode(&capMode);
+        if (hipFlushSt == hipSuccess) {
+          capModeExchanged = true;
+          hipFlushSt = cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking);
+        }
+        if (hipFlushSt == hipSuccess)
+          hipFlushSt = cudaMemsetAsync(rCommDev->gpuFlush.gpuFlushGpuMem, 0, sizeof(int), zeroStream);
+        if (hipFlushSt == hipSuccess) hipFlushSt = cudaStreamSynchronize(zeroStream);
+        if (zeroStream != nullptr) {
+          cudaError_t destroySt = cudaStreamDestroy(zeroStream);
+          if (hipFlushSt == hipSuccess) hipFlushSt = destroySt;
+        }
+        if (capModeExchanged) {
+          cudaError_t restoreSt = cudaThreadExchangeStreamCaptureMode(&capMode);
+          if (hipFlushSt == hipSuccess) hipFlushSt = restoreSt;
+        }
+        if (hipFlushSt != hipSuccess) {
+          ret = rcclCudaErrorHandler(hipFlushSt);
+          goto fail;
+        }
 
         if (useDmaBuf) {
           uint64_t exportOffset = 0;
@@ -1888,6 +1989,8 @@ fail:
 ncclResult_t IbCastCloseSend(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm) {
+    if (comm->base.vProps.ndevs > 0)
+      rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     for (int q = 0; q < comm->base.nqps; q++)
@@ -1919,6 +2022,8 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
 ncclResult_t IbCastCloseRecv(void* recvComm) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm) {
+    if (comm->base.vProps.ndevs > 0)
+      rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     for (int q = 0; q < comm->base.nqps; q++)

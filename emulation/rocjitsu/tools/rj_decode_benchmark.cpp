@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <array>
 #include <charconv>
@@ -47,7 +48,7 @@ struct DecodeCorpus {
 
 struct Options {
   std::string input;
-  std::optional<rj_code_arch_t> arch;
+  std::optional<rj_code_target_id_t> target;
   std::size_t iterations = 1;
   std::size_t invalid_limit = kDefaultInvalidLimit;
 };
@@ -62,35 +63,23 @@ struct Measurement {
 void print_usage(std::ostream &os) {
   os << "Usage: rj_decode_benchmark INPUT [--target TARGET] [--iterations N] "
         "[--invalid-limit N]\n"
-        "Targets: gfx942, gfx950, gfx1200, gfx1201, gfx1250\n";
+        "Targets: gfx942, gfx950, gfx1200, gfx1201, gfx1250, gfx1251\n";
 }
 
-[[nodiscard]] std::optional<rj_code_arch_t> parse_target(std::string_view value) {
+[[nodiscard]] std::optional<rj_code_target_id_t> parse_target(std::string_view value) {
   if (value == "gfx942")
-    return ROCJITSU_CODE_ARCH_CDNA3;
+    return ROCJITSU_CODE_TARGET_GFX942;
   if (value == "gfx950")
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  if (value == "gfx1200" || value == "gfx1201")
-    return ROCJITSU_CODE_ARCH_RDNA4;
+    return ROCJITSU_CODE_TARGET_GFX950;
+  if (value == "gfx1200")
+    return ROCJITSU_CODE_TARGET_GFX1200;
+  if (value == "gfx1201")
+    return ROCJITSU_CODE_TARGET_GFX1201;
   if (value == "gfx1250")
-    return ROCJITSU_CODE_ARCH_CDNA5;
+    return ROCJITSU_CODE_TARGET_GFX1250;
+  if (value == "gfx1251")
+    return ROCJITSU_CODE_TARGET_GFX1251;
   return std::nullopt;
-}
-
-[[nodiscard]] std::optional<rj_code_arch_t> arch_for_target(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_CDNA5;
-  default:
-    return std::nullopt;
-  }
 }
 
 [[nodiscard]] bool parse_size(std::string_view text, std::size_t &value) {
@@ -107,8 +96,8 @@ void print_usage(std::ostream &os) {
       return std::nullopt;
     }
     if (arg == "--target" && index + 1 < argc) {
-      options.arch = parse_target(argv[++index]);
-      if (!options.arch) {
+      options.target = parse_target(argv[++index]);
+      if (!options.target) {
         std::cerr << "Unsupported target: " << argv[index] << '\n';
         return std::nullopt;
       }
@@ -270,13 +259,18 @@ int main(int argc, char **argv) {
       std::cerr << "Failed to parse input code object\n";
       return 2;
     }
-    const std::optional<rj_code_arch_t> arch =
-        options->arch ? options->arch : arch_for_target(object.target_id());
-    if (!arch) {
+    const rj_code_target_id_t object_target = object.target_id();
+    if (options->target && object_target != ROCJITSU_CODE_TARGET_INVALID &&
+        *options->target != object_target) {
+      std::cerr << "Selected target does not match code-object target metadata\n";
+      return 2;
+    }
+    const rj_code_target_id_t target = options->target.value_or(object_target);
+    if (target == ROCJITSU_CODE_TARGET_INVALID) {
       std::cerr << "Cannot infer decoder target; pass --target\n";
       return 2;
     }
-    std::unique_ptr<Decoder> decoder = Decoder::create(*arch);
+    std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target);
     if (!decoder) {
       std::cerr << "No decoder is available for the selected target\n";
       return 2;

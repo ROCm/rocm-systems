@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -568,7 +569,7 @@ void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1219,7 +1220,7 @@ void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::COND_SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1247,6 +1248,9 @@ void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1274,6 +1278,9 @@ void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1301,6 +1308,9 @@ void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1330,6 +1340,9 @@ void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1356,7 +1369,7 @@ void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1383,7 +1396,7 @@ void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1411,6 +1424,9 @@ void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1440,6 +1456,9 @@ void BufferAtomicMaxNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);

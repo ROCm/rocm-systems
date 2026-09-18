@@ -101,6 +101,14 @@
 /* enum: USER_DEFINED pattern must be accompanied with a USER_PATTERN field */
 #define PMA_PRBS_PATTERN_USER_DEFINED 0xd
 
+/* IFOE_COMPUTE_TRAY_TYPE enum: Enum used to identify the compute tray type. */
+/* enum: Compute tray type Helios-P */
+#define IFOE_COMPUTE_TRAY_TYPE_HELIOS_P 0x0
+/* enum: Compute tray type Helios-R */
+#define IFOE_COMPUTE_TRAY_TYPE_HELIOS_R 0x1
+/* enum: Compute tray type Titan */
+#define IFOE_COMPUTE_TRAY_TYPE_TITAN 0x2
+
 /* AN_TYPE structuredef: Auto-negotiation types defined in IEEE802.3 */
 #define AN_TYPE_LEN 4
 #define AN_TYPE_TYPE_OFST 0

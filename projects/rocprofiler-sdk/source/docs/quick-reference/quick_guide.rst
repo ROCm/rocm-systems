@@ -112,6 +112,18 @@ Thread trace
 
 **Documentation:** :ref:`using-thread-trace`
 
+Kernel replay (beta)
+--------------------
+
+Collect several ``--pmc`` groups in one application run by replaying each dispatch (device memory
+is snapshotted and restored between passes):
+
+.. code-block:: bash
+
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- ./your_app
+
+**Documentation:** :ref:`using-kernel-replay-rocprofv3`
+
 Process attachment
 ------------------
 

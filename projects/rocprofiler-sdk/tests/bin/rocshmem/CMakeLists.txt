@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(

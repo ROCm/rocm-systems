@@ -4,8 +4,8 @@
 /// @file semantic/gfx1250_b0_to_a0.cpp
 /// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 translation.
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
@@ -250,7 +250,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
   const InstDefUse def_use(inst);
-  return def_use.uses | def_use.defs;
+  return (def_use.uses | def_use.defs).ordinary_only();
 }
 
 /// @brief Whether an ordinary SGPR window satisfies one scratch request.

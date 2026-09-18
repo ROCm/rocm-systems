@@ -27,7 +27,12 @@ virtualMemoryManagement:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
+  Unit_hipMemGetHandleForAddressRange_DeviceMemory_PcieFlag:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_VM: *level_2
+  Unit_hipMemGetHandleForAddressRange_VM_PcieFlag: *level_2
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_2
     # Does not play well with ASAN
@@ -46,6 +51,7 @@ virtualMemoryManagement:
     disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_MultipleThreads: *level_2
   Unit_hipMemGetHandleForAddressRange_DifferentOffsets: *level_2
+  Unit_hipMemGetHandleForAddressRange_NoLeakOnRelease: *level_2
   Unit_hipMemExportToShareableHandle_Positive_Basic: *level_2
   Unit_hipMemExportToShareableHandle_Negative_Parameters: *level_2
   Unit_hipMemExportToShareableHandle_Capture: *level_2
