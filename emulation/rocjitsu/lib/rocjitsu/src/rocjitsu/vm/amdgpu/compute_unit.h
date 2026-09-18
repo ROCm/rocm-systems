@@ -689,9 +689,6 @@ public:
       return false;
     }
 
-    if (owns_storage)
-      return owns_storage;
-
     return false;
   }
 
