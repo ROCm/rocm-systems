@@ -1107,6 +1107,33 @@
         "NCCL_NET": "ib-cast"
       }
     },
+    "net_ib_transfer_cast_by_order_no_cts": {
+      "extends": "net_ib_transfer_cast",
+      "description": "ib-cast data path with software BY_ORDER matching and CTS offload forced off (the no-offload BY_ORDER arm). QP scheduler left off so TX fan-out stays at base nqps.",
+      "env_variables": {
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0"
+      }
+    },
+    "net_ib_multirecv_cast_by_order_no_cts": {
+      "extends": "net_ib_multirecv_cast",
+      "description": "ib-cast irecv batching under software BY_ORDER with CTS offload off — completion matching by posted WR identity rather than CTS slot.",
+      "env_variables": {
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0"
+      }
+    },
+    "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts": {
+      "extends": "net_ib_stress_multi_qp_nosplit_cast",
+      "description": "ib-cast multi-QP (QPS=4, splitData=0) send/recv under software BY_ORDER with CTS offload off. Exercises FIFO-order matching across QPs without WRR reducing the sender QP count.",
+      "env_variables": {
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0"
+      }
+    },
     "unit_tests_fixtures": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixtures",
@@ -3699,6 +3726,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Data Transfer (ib-cast, BY_ORDER, CTS offload off)",
+      "description": "ib-cast SimpleSendRecv / multiple sizes / large / outstanding transfers with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0",
+      "config": "net_ib_transfer_cast_by_order_no_cts",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Coverage Env (ib-cast)",
       "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=ib-cast)",
       "config": "net_ib_coverage_env_cast",
@@ -3708,6 +3741,12 @@
       "name": "NET IB - MultiRecv (ib-cast)",
       "description": "InfiniBand multi-recv path via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_multirecv_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - MultiRecv (ib-cast, BY_ORDER, CTS offload off)",
+      "description": "ib-cast MultiRecv under software BY_ORDER with CTS offload disabled",
+      "config": "net_ib_multirecv_cast_by_order_no_cts",
       "enabled": true
     },
     {
@@ -3744,6 +3783,12 @@
       "name": "NET IB - Stress Multi-QP NoSplit (ib-cast)",
       "description": "InfiniBand multi-QP no-split stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_multi_qp_nosplit_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP NoSplit (ib-cast, BY_ORDER, CTS offload off)",
+      "description": "ib-cast multi-QP no-split stress with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0",
+      "config": "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts",
       "enabled": true
     },
     {
