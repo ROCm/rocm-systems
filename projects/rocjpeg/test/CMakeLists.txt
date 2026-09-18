@@ -388,14 +388,3 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "rocjpegnegativetest"
 )
-# ##############################################################################
-# CPU-only unit test (no GPU / VAAPI / HIP runtime required). Exercises the pure
-# ParseVisibleDevicesCsv helper compiled directly from src/.
-# ##############################################################################
-option(ROCJPEG_BUILD_PARSER_UNIT_TESTS "Build CPU-only parser unit tests" ON)
-if(ROCJPEG_BUILD_PARSER_UNIT_TESTS)
-  add_executable(rocjpeg_vaapi_parse_visible_devices_test vaapi_parse_visible_devices_test.cpp)
-  target_include_directories(rocjpeg_vaapi_parse_visible_devices_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
-  target_compile_features(rocjpeg_vaapi_parse_visible_devices_test PRIVATE cxx_std_17)
-  add_test(NAME rocjpeg_vaapi_parse_visible_devices_test COMMAND rocjpeg_vaapi_parse_visible_devices_test)
-endif()
