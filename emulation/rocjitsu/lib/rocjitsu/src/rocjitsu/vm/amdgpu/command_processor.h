@@ -86,8 +86,9 @@ struct HwQueue {
   bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
-  /// A command-processor pass observed this queue while its debugger gate was closed.
-  /// Cleared on resume after scheduling one pass to process the deferred work.
+  /// Queue work was deferred while either the runtime or debugger gate was
+  /// closed. SDMA work is bounded by the published doorbell.
+  /// Cleared after both gates reopen and a pass is scheduled for the deferred work.
   bool debug_work_deferred = false;
   uint64_t queue_desc_va = 0;
   uint64_t exception_status_va = 0;
@@ -718,6 +719,11 @@ private:
 
   /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
   uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
+
+  /// @brief Acquire-load one doorbell, preserving transient mapping failures.
+  /// @returns Complete on success, Unavailable for mappings that may recover,
+  ///          or Faulted for a missing/malformed address or permanent fault.
+  CopyOutcome read_doorbell(const HwQueue &queue, uint64_t &value) const;
 
   /// @brief Read a uint32 from GPU virtual address space via GpuMemory translation.
   uint32_t read_gpu_u32(uint64_t va, uint32_t vmid) const;

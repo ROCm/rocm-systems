@@ -784,6 +784,9 @@ public:
               return false;
             }
           }
+          // A GPU-aligned address may map to unaligned host backing.
+          if (reinterpret_cast<uintptr_t>(target) % size != 0)
+            return false;
           value = size == sizeof(uint64_t)
                       ? std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(target))
                             .load(std::memory_order_acquire)

@@ -28,7 +28,6 @@ target_link_libraries(
         rocprofiler-systems-core-library
         rocprofiler-systems-profiler-hub
         rocprofiler-systems-logger
-        rocprofiler-systems-ghc-filesystem
         rocprofiler-systems-headers
         rocprofiler-systems-rocm
         rocprofiler-systems-json

@@ -32,12 +32,6 @@
 
 namespace fs = std::filesystem;
 
-#ifdef _WIN32
-static constexpr char kPathSep = ';';
-#else
-static constexpr char kPathSep = ':';
-#endif
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -149,12 +143,6 @@ struct TmpRootArchive {
     return proc;
   }
 };
-
-static void set_proc_search_path(hrr::test::SpawnProc& proc) {
-  const char* cur_path = getenv("PATH");
-  proc.setEnv("PATH",
-              std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
-}
 
 static std::pair<int, std::string> run_hrr_playback(const fs::path& archive,
                                                     const std::string& args) {

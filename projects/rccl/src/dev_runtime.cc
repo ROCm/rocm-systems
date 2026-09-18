@@ -897,6 +897,16 @@ fail_mem:
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   if (mem != nullptr) {
     struct ncclDevrState* devr = &comm->devrState;
+    // Idempotent: a window pair or the finalize drain may already have destroyed
+    // this mem. Establish membership before touching it, not after. The unlink
+    // below walks the list unguarded, so a second call on a freed mem would
+    // otherwise repeat every deregister, unmap, cuMemRelease and free in this
+    // function and then run off the end of the list.
+    {
+      struct ncclDevrMemory* cursor = devr->memHead;
+      while (cursor != nullptr && cursor != mem) cursor = cursor->next;
+      if (cursor != mem) return;
+    }
     if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
       for (int segment = 0; segment < mem->numGinSegments; segment++) {
         ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);

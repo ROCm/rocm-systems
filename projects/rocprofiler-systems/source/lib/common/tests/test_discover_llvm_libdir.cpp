@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/environment.hpp"
-#include "filesystem.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -42,13 +42,13 @@ protected:
     {
         if(dir.empty()) return;
         std::error_code ec;
-        test_common::fs::remove_all(dir, ec);
+        std::filesystem::remove_all(dir, ec);
     }
 
     void create_directory(const std::string& path)
     {
         std::error_code ec;
-        test_common::fs::create_directories(path, ec);
+        std::filesystem::create_directories(path, ec);
     }
 
     void create_libomptarget(const std::string& dir)
@@ -326,7 +326,7 @@ TEST_F(DiscoverLlvmLibdirTest, PathWithSpaces)
     const std::string llvm_lib  = rocm_path + "/llvm/lib";
 
     std::error_code ec;
-    test_common::fs::create_directories(llvm_lib, ec);
+    std::filesystem::create_directories(llvm_lib, ec);
 
     const std::string lib_path = llvm_lib + "/libomptarget.so";
     std::ofstream     ofs(lib_path);
