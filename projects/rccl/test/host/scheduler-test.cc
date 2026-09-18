@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <csignal>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -63,6 +62,7 @@ class ScheduleBcastTasksToPlan_Scene {
     comm->channels[0].ring.rankToIndex = rankToIndex.get();
     ncclMemoryStackConstruct(&comm->memScoped);
   }
+  ~ScheduleBcastTasksToPlan_Scene() { ncclMemoryStackDestruct(&comm->memScoped); }
   std::unique_ptr<ncclComm> comm;
   std::unique_ptr<ncclKernelPlan> plan;
   std::unique_ptr<ncclKernelPlanner::Peer[]> peers;
@@ -144,6 +144,7 @@ class SymmetricTaskScheduler_Scene {
     comm->nRanks = 1;
     comm->rank = 0;
   }
+  ~SymmetricTaskScheduler_Scene() { free(plan->kernelSymArgs); }  // production's own calloc, plan doesn't own it
   std::unique_ptr<ncclComm> comm;
   std::unique_ptr<ncclKernelPlan> plan;
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> symTaskQueue{};
@@ -591,11 +592,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_MaxItemBoundary_StopsWithout
   int calls = 0;
   ScopedHook budgetHook(g_testBudget, [&](struct ncclKernelPlanBudget*, int, ssize_t) {
     ++calls;
-    if (calls > maxitem) {
-      std::fprintf(stderr, "budget queried more than maxitem times\n");
-      std::fflush(stderr);
-      std::abort();
-    }
+    EXPECT_LE(calls, maxitem) << "budget queried more than maxitem times";  // regression fails this test, not the binary
     return true;
   });
 
@@ -1283,6 +1280,19 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksOneBootstrapNonNull_Skips
   EXPECT_EQ(remainTasksHead, &task);
 }
 
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusBootstrapAllGatherFails_PropagatesError) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nRanks = 2;
+  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSystemError);
+  EXPECT_EQ(bootstrapHook.calls, 1);
+}
+
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysTrue_GoesToSymmetricBucket) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 3;
@@ -1488,10 +1498,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_BasicScalarFieldsWiring) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.opHost = ncclAvg;
   task.opDev.op = ncclDevSum;  // symkOp == ncclDevSumPostDiv, distinct from the raw opDev.op
   task.count = 777;
@@ -1499,7 +1506,6 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_BasicScalarFieldsWi
   task.minCTAs = 2;
   task.maxCTAs = 8;
   task.CTAPolicy = 3;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
 
   struct ncclTuningInput_t captured {};
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1561,11 +1567,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_AggregatesAcrossBat
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskDefault_WhenEffAlgMaskZero) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
 
   uint64_t capturedMask = 0;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1580,14 +1582,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskDefault_W
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskOverridden_WhenSymkMaskBitsNonZero) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   // A single sym-range bit, not the whole mask, so the overridden value differs from the pre-override default.
   const uint64_t kOneSymBit = 1ull << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
   task.algMask = kOneSymBit;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
 
   uint64_t capturedMask = 0;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1666,11 +1664,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRegBuff_WiredFromTheirOwnFakes) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
 
   ScopedHook collNetHook(g_getCollNetSupport, [](struct ncclComm*, struct ncclTaskColl*, int* out) {
     *out = 7;
@@ -1697,11 +1691,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRe
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetCollNetSupportFails_PropagatesErrorBeforeRegBuffOrTuning) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
 
   ScopedHook collNetHook(g_getCollNetSupport,
                          [](struct ncclComm*, struct ncclTaskColl*, int*) { return ncclInternalError; });
@@ -1720,11 +1710,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetCollNetSupportFails_Propagat
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetRegBuffFails_PropagatesErrorBeforeTuning) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
 
   ScopedHook regBuffHook(g_getRegBuff,
                          [](struct ncclComm*, struct ncclTaskColl*, int*) { return ncclInternalError; });
@@ -1738,13 +1724,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetRegBuffFails_PropagatesError
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_TrueWhenBuffersAlign) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.sendbuff = reinterpret_cast<void*>(0x1030);  // matches SymBatchAligned16B_SingleTaskNoWindowsAligned
   task.recvbuff = reinterpret_cast<void*>(0x1020);  // offset diff 0x10: divisible by 16
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
 
   bool capturedAligned = false;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1759,13 +1741,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_TrueW
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_FalseWhenBuffersMisalign) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.sendbuff = reinterpret_cast<void*>(0x1028);  // matches SymBatchAligned16B_SingleTaskNoWindowsMisaligned
   task.recvbuff = reinterpret_cast<void*>(0x1020);  // offset diff 8: not divisible by 16
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
 
   bool capturedAligned = true;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1780,13 +1758,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_False
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_AllConditionsTrue_ReturnsInvalidArgumentWithWarn) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;  // only sym bits: satisfies both mask conditions at once
   task.forceAlgSelection = 1;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the 5th condition needs kernelId==Count, but the canonical default now fails loudly.
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
@@ -1803,12 +1777,8 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_AllConditionsTr
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_EffAlgMaskZero_SkipsAndFallsBack) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   // task.algMask left at 0 (default): effAlgMask == 0, so the hard-error branch's 2nd condition is false.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the canonical g_tuningCompute default now fails loudly instead of leaving kernelId==Count.
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
@@ -1823,14 +1793,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_EffAlgMaskZero_
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_HasGeneralBitsInMask_SkipsAndFallsBack) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   // Has sym bits (would satisfy condition 3) but also general bits, so condition 4 ((mask&GENERAL)==0) is false.
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
   task.forceAlgSelection = 1;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the canonical g_tuningCompute default now fails loudly instead of leaving kernelId==Count.
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
@@ -1843,13 +1809,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_HasGeneralBitsI
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_ForceAlgSelectionFalse_SkipsAndFallsBack) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;
   // task.forceAlgSelection left at 0 (default): the 5th condition is false.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the canonical g_tuningCompute default now fails loudly instead of leaving kernelId==Count.
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
@@ -1861,13 +1823,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_ForceAlgSelecti
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_KernelIdFound_SkipsAndProceedsSafely) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;  // every other condition true
   task.forceAlgSelection = 1;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
@@ -1876,12 +1834,8 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_KernelIdFound_S
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskNonZeroAndKernelFound_LogsInfo) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
@@ -1896,12 +1850,8 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskNon
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskZero_DoesNotLogEvenWithKernelFound) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   // task.algMask left at 0: effAlgMask == 0, so the INFO condition's first operand is false.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
@@ -1917,12 +1867,8 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskZer
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount_DoesNotLogEvenWithEffAlgMask) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: kernelId must stay Count, but the canonical default now fails loudly instead.
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
@@ -1941,11 +1887,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
 // task->winRegType is always ncclSymSendRegRecvReg here (the classification loop's wantSym gate is its only writer).
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_BecauseWinRegTypeIsAlwaysRegRecvReg) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });  // every bit set: isolates the regType operand
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   ScopedHook initOnceHook(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
@@ -1957,11 +1899,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_Becaus
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_SetsFieldsAndEnqueues) {
   MakeSymmetricTaskList_Scene scene;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(3, 5));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
@@ -1979,14 +1917,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_ConvertSymTaskDevOpWiring) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 4;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclFloat16;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene, ncclFuncBroadcast, ncclFloat16);
   task.opHost = ncclAvg;
   task.opDev.op = ncclDevSum;
   task.opDev.scalarArg = kPoison;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
@@ -2133,6 +2067,60 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_StopsAtIsSy
   ASSERT_NE(first->next->next, nullptr);
   EXPECT_EQ(first->next->next, &taskThird);
   EXPECT_EQ(first->next->next->next, nullptr);
+}
+
+// Known bug reproduction, not correct-behavior coverage: the fallback loop at symmetric_sched.cc:259-270 never
+// sets remainTasksTail->next = nullptr, so the remainder list's tail keeps its stale classification-time ->next.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_KnownBug_FallbackTailNextNotNulled_AliasesNextBatchHead) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  // Room for exactly 2 works per batch, not 3: same split as ...ArgsSizeBudgetExhausted_SplitsIntoTwoBatches.
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 2, false));
+
+  // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
+  ncclTaskColl taskFirst{};
+  taskFirst.func = ncclFuncBroadcast;
+  taskFirst.datatype = ncclInt8;
+  ncclTaskColl taskSecond{};
+  taskSecond.func = ncclFuncBroadcast;
+  taskSecond.datatype = ncclInt8;
+  taskSecond.next = &taskFirst;
+  ncclTaskColl taskThird{};
+  taskThird.func = ncclFuncBroadcast;
+  taskThird.datatype = ncclInt8;
+  taskThird.next = &taskSecond;
+
+  int tuningCalls = 0;
+  ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    ++tuningCalls;
+    // Batch 1 (taskFirst+taskSecond) leaves *result untouched (kernelId stays Count: falls back). Batch 2
+    // (taskThird) reports a real kernel, so it takes the success path instead.
+    if (tuningCalls == 2) {
+      result->symKernelId = ncclSymkKernelId_AllGather_LL;
+      result->nChannels = 1;
+      result->nWarps = 1;
+    }
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &taskThird, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(tuningHook.calls, 2);
+
+  // The remainder list looks right at a glance: taskFirst -> taskSecond.
+  EXPECT_EQ(remainTasksHead, &taskFirst);
+  ASSERT_NE(taskFirst.next, nullptr);
+  EXPECT_EQ(taskFirst.next, &taskSecond);
+
+  // The bug: taskSecond is the remainder list's tail, so taskSecond.next should be nullptr. It is instead
+  // still the stale classification-time pointer to taskThird, aliasing a node also live in collSymTaskQueue.
+  EXPECT_EQ(taskSecond.next, &taskThird);
+
+  // taskThird is genuinely enqueued by batch 2's success path, not merely dangling off taskSecond.
+  ncclTaskColl* queued = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
+  ASSERT_NE(queued, nullptr);
+  EXPECT_EQ(queued, &taskThird);
+  EXPECT_EQ(taskThird.next, nullptr);  // ncclIntruQueueEnqueue correctly nulled this end
 }
 
 // ncclSymmetricTaskScheduler setup + work-counting loop (symmetric_sched.cc:299-352); packing's own fields unasserted.

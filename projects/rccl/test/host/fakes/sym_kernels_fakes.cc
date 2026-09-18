@@ -80,7 +80,8 @@ ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* tas
   return g_symkMakeDevWork(comm, task, outDevWork);
 }
 
-// Sized to the real kernel count (not a 1-element placeholder) so an out-of-range index is caught, not silently OOB.
+// Sized to fit every enum value g_symkGetKernelIndex could return (not a 1-element placeholder), so a test
+// hooking it to a nonzero index still reads in bounds; real GENERATE_SYM_KERNELS builds size these differently.
 void* ncclSymkKernelList[ncclSymkKernelId_Count] = {nullptr};
 void* ncclSymkKernelListProfile[ncclSymkKernelId_Count] = {nullptr};
 int ncclSymkKernelMaxDynamicSmem[ncclSymkKernelId_Count] = {0};

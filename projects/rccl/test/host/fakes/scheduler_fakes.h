@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fail-loud stub floor for externals allgatherv_sched.cc/symmetric_sched.cc reach that nothing else fakes yet.
+// Controllable seams for externals allgatherv_sched.cc/symmetric_sched.cc reach that nothing else fakes yet.
 
 #ifndef RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
 #define RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
@@ -24,7 +24,7 @@ enum ncclDevWorkType : uint8_t;
 
 // enqueue.cc's ncclTestBudget (real seam: tests drive the batch-size stopping condition directly).
 extern std::function<bool(struct ncclKernelPlanBudget*, int, ssize_t)> g_testBudget;
-extern int g_testBudgetCalls;  // UNDRIVEN
+extern int g_testBudgetCalls;
 
 // enqueue.cc's ncclGetAlgoInfo: default fills in tcoll's protocol/channel/warp fields with usable values.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>

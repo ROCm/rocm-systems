@@ -20,7 +20,7 @@
 // is an explicit, counted, overridable seam rather than a fixed stub result.
 extern ncclSymRegType_t g_symRegType;
 extern ncclResult_t g_getSymRegTypeResult;
-extern int g_getSymRegTypeCalls;
+extern int g_getSymRegTypeCalls;  // UNDRIVEN
 extern std::function<ncclResult_t(struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t*)>
     g_getSymRegType;
 
