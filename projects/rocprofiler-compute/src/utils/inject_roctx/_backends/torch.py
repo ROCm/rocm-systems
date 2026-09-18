@@ -16,10 +16,9 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-
 from utils.inject_roctx import core
-from utils.inject_roctx.marker_format import cap_args, encode_args
 from utils.inject_roctx._backends import torch_trace_collector
+from utils.inject_roctx.marker_format import cap_args, encode_args
 from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
@@ -190,6 +189,7 @@ def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any
     Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
     cuda.Stream).
     """
+
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
         location = core.resolve_user_caller_location()
         _push_scope(name, location, backend=backend)
@@ -760,6 +760,12 @@ EXTRA_STRUCTURAL_WRAPS = (
     ("torch.nn.functional", "log_softmax", "torch.nn.functional.log_softmax"),
     ("torch.nn.functional", "softmax", "torch.nn.functional.softmax"),
     ("torch.nn.functional", "relu", "torch.nn.functional.relu"),
+    ("torch", "randn", "torch.randn"),
+    ("torch", "rand", "torch.rand"),
+    ("torch", "zeros", "torch.zeros"),
+    ("torch", "ones", "torch.ones"),
+    ("torch", "empty", "torch.empty"),
+    ("torch", "tensor", "torch.tensor"),
 )
 
 
@@ -976,6 +982,57 @@ def install_extra_structural_wrappers() -> None:
         )
 
 
+def _wrap_nn_module_method(method_name: str) -> bool:
+    """Replace nn.Module.method_name with a ROCTX-wrapped version."""
+    nn = _STATE.nn
+    if nn is None:
+        return False
+    original = getattr(nn.Module, method_name, None)
+    if original is None or not callable(original):
+        return False
+    if getattr(original, "_roctx_wrapped", False):
+        return True
+
+    def wrapped(self: object, *args: Any, **kwargs: Any) -> object:
+        class_name = self.__class__.__name__
+        location = core.resolve_user_caller_location()
+        _push_scope(
+            f"nn.Module.{class_name}.{method_name}",
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs),
+        )
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            _pop_scope()
+
+    wrapped._roctx_wrapped = True
+    try:
+        setattr(nn.Module, method_name, wrapped)
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch nn.Module.{method_name}: {exc}",
+        )
+        return False
+    return getattr(nn.Module, method_name) is wrapped
+
+
+def inject_roctx_into_module_methods() -> None:
+    """Wrap nn.Module __init__, cuda, to, and cpu."""
+    wrapped_methods = []
+    for method_name in ("__init__", "cuda", "to", "cpu"):
+        if _wrap_nn_module_method(method_name):
+            wrapped_methods.append(method_name)
+    if wrapped_methods:
+        console_log(
+            "ml api trace",
+            "Wrapped nn.Module methods with ROCTX markers: "
+            + ", ".join(wrapped_methods),
+        )
+
+
 def inject_roctx_into_model() -> None:
     """Wrap nn.Module.__call__ (not forward(), so hooks are covered)."""
     nn = _STATE.nn
@@ -1126,6 +1183,7 @@ class TorchBackend:
         install_tensor_method_wrappers()
         install_extra_structural_wrappers()
         inject_roctx_into_model()
+        inject_roctx_into_module_methods()
 
 
 register(TorchBackend())
