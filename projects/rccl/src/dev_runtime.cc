@@ -882,10 +882,10 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     }
   }
 
-  // Link before GIN/RMA registration. Plugins such as Anvil SDMA resolve the
-  // user VA through ncclDevrGetLsaSelfAddr, which only searches memHead (and
-  // the LSA flat range). Registering after ncclDevCommCreate is legal, so the
-  // in-flight mem must already be on the list. Unlink on the failure path.
+  // Add to the list of mems before GIN/RMA registration. Plugins such as Anvil SDMA resolve the
+  // user VA through ncclDevrGetLsaSelfAddr, which only searches memHead (and the LSA flat range).
+  // Registering after ncclDevCommCreate is legal, so the registered mem must be on the list before
+  // GIN assignment. Unlink on the failure path.
   mem->next = devr->memHead;
   devr->memHead = mem;
 

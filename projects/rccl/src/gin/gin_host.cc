@@ -547,9 +547,6 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm,
     struct ncclGinBackendState* backend = &ginState->backends[backendIdx];
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
-      // ncclGinRegister returns at the first failing index, and the multi-segment
-      // DMABUF bail leaves every slot null. deregMrSym implementations deref the
-      // handle without a null check.
       if (ginHostWins[slot] == nullptr) continue;
       NCCLCHECK(backend->ncclGin->deregMrSym(backend->ginComms[commIdx], ginHostWins[slot]));
     }
