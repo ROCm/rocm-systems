@@ -184,12 +184,16 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
 #define HIP_UPDATE_ERROR_STATE(ret)                                                                \
   hip::tls.last_command_error_ = ret;                                                              \
   if (amd::Device::IsGPUInError()) {                                                               \
-    hipError_t hip_error = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
+    cl_int cl_gpu_error = amd::Device::GetGPUError();                                              \
+    hipError_t hip_error = ConvertCLErrorIntoHIPError(cl_gpu_error);                               \
     hip::tls.last_error_ = hip_error;                                                              \
     hip::tls.last_command_error_ = hip_error;                                                      \
-    /* Consume-once: after surfacing a recoverable GPU error (e.g. scratch OOM), */               \
-    /* clear the latch so the context recovers instead of returning it forever.  */               \
-    amd::Device::ClearRecoverableGPUError();                                                       \
+    /* Consume-once: after surfacing a recoverable GPU error (e.g. scratch OOM),  */              \
+    /* clear the latch so the context recovers instead of returning it forever.   */              \
+    /* Scoped to the faulting device so an unrelated GPU's stream cannot swallow  */              \
+    /* the error and leave the victim waiting on it. Pass the value we surfaced   */              \
+    /* so a newer fault landing in between is not discarded.                      */              \
+    amd::Device::ClearRecoverableGPUError(hip::getCurrentDevice()->deviceId(), cl_gpu_error);      \
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \

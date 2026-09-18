@@ -340,6 +340,7 @@ Memory* Device::p2p_stage_ = nullptr;
 
 std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
 std::atomic<bool> Device::gpu_error_recoverable_{false};
+std::atomic<int> Device::gpu_error_device_{-1};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);

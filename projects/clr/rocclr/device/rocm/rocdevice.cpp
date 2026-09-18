@@ -4517,8 +4517,9 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
           vgpu->MarkQueueFaulted();
         }
       }
-      amd::Device::gpu_error_recoverable_.store(true, std::memory_order_relaxed);
-      amd::Device::gpu_error_.store(CL_OUT_OF_HOST_MEMORY, std::memory_order_release);
+      // Tag the fault with the faulting device so only that device's calls
+      // surface and consume it; publishes the flag last (release ordering).
+      amd::Device::MarkRecoverableGPUError(CL_OUT_OF_HOST_MEMORY, dev->index());
     } else {
       amd::Device::gpu_error_.store(ConvertHSAErrorIntoCLError(status), std::memory_order_relaxed);
     }

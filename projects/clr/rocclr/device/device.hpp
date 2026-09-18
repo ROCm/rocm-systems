@@ -1785,6 +1785,10 @@ class Device : public RuntimeObject {
   //!< True when gpu_error_ carries a recoverable fault (e.g. transient scratch
   //!< OOM) that must be surfaced once and then cleared, rather than latched.
   static std::atomic<bool> gpu_error_recoverable_;
+  //!< Index of the device that raised the recoverable fault, or -1 if none. The
+  //!< error is only surfaced to, and consumed by, calls on that device so a
+  //!< fault on one GPU cannot be swallowed by an unrelated GPU's stream.
+  static std::atomic<int> gpu_error_device_;
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -2446,14 +2450,34 @@ class Device : public RuntimeObject {
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
-  //! If the latched GPU error is a recoverable fault (e.g. transient scratch
-  //! OOM), consume it exactly once: clear the recoverable flag and the error
-  //! latch so the process is not permanently bricked. No-op otherwise.
-  static void ClearRecoverableGPUError() {
-    if (gpu_error_recoverable_.load(std::memory_order_relaxed)) {
-      gpu_error_recoverable_.store(false, std::memory_order_relaxed);
-      gpu_error_.store(CL_SUCCESS, std::memory_order_relaxed);
+  //! Record a recoverable GPU fault (e.g. transient scratch OOM) raised by
+  //! device \p dev_index. Publish the flag last with release ordering so a
+  //! consumer that observes gpu_error_ is guaranteed to also observe the flag.
+  static void MarkRecoverableGPUError(cl_int error, int dev_index) {
+    gpu_error_device_.store(dev_index, std::memory_order_relaxed);
+    gpu_error_.store(error, std::memory_order_relaxed);
+    gpu_error_recoverable_.store(true, std::memory_order_release);
+  }
+
+  //! Consume a recoverable GPU error exactly once, on behalf of device
+  //! \p dev_index, so the context recovers instead of latching the failure
+  //! forever. No-op when the latched error belongs to a different device, when
+  //! it is not recoverable, or when another thread consumed it first.
+  static void ClearRecoverableGPUError(int dev_index, cl_int surfaced) {
+    if (!gpu_error_recoverable_.load(std::memory_order_acquire)) return;
+    // Only the device that faulted may consume its own error.
+    if (gpu_error_device_.load(std::memory_order_relaxed) != dev_index) return;
+    bool expected = true;
+    // Single consumer wins; a concurrent consumer must not double-clear.
+    if (!gpu_error_recoverable_.compare_exchange_strong(expected, false,
+                                                        std::memory_order_acq_rel)) {
+      return;
     }
+    gpu_error_device_.store(-1, std::memory_order_relaxed);
+    // Only clear if the latch still holds the value we surfaced, so a newer
+    // fault that landed in the meantime is not silently discarded.
+    cl_int observed = surfaced;
+    gpu_error_.compare_exchange_strong(observed, CL_SUCCESS, std::memory_order_acq_rel);
   }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
