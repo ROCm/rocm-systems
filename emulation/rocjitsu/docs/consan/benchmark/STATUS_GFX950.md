@@ -5,11 +5,25 @@ run and its selected evidence checkpoints, including instrumentation, loading,
 binding, and warm-up; **Run** is the absolute second-run latency followed
 by its ratio to the matching uninstrumented second run.
 
+Final checkpoint: 2026-09-18 01:56 UTC. **32 instrumented mode cells accepted,
+one failed, six unmeasured.** Ten rows completed all three modes; synthetic
+decode completed Default Mode and SuperCollider, with high skipped at the
+user's request. The host-time limit prevented a current-hook rerun of Aorta
+top-1 MoE. TokenSpeed BF16 MoE failed the static gate (`applicable=false`,
+`static_complete=false`, no applicable code objects); its later modes were
+not reached. No failures were debugged or retried in the final window.
+
+Medium-M GEMM's final native Run was **17.84% faster** than its baseline;
+interpret that row's ratios with this drift caveat. Other completed rows'
+native Run drift ranged from -6.58% to +2.25%. Accepted cells passed numerical
+correctness and static instrumentation gates, not an exhaustive race-detection
+guarantee. See [GFX950.md](GFX950.md) for versions and campaign details.
+
 | Workload | Uninstrumented Startup | Uninstrumented Run | Default Mode Startup | Default Mode Run | Default Mode (high) Startup | Default Mode (high) Run | SuperCollider Startup | SuperCollider Run | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | PyTorch synthetic dense prefill (32-token prompt) | 3.12 s | 0.0028 s (1×) | 234 s | 0.00573 s (2.05×) | 235 s | 0.0737 s (26.3×) | 167 s | 0.00344 s (1.23×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-dense-prefill--native-validation.log>) |
-| PyTorch synthetic dense decode (one continuous-batch tick) | 2.77 s | 0.00295 s (1×) | 249 s | 0.00796 s (2.7×) | running | running | pending | pending | [default-high--audit-on: running](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-synthetic-decode--default-high--audit-on.log>) |
-| PyTorch synthetic four-expert top-1 MoE prefill (16-token prompt) | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
+| PyTorch synthetic dense decode (one continuous-batch tick) | 2.77 s | 0.00295 s (1×) | 249 s | 0.00796 s (2.7×) | skipped | skipped | 188 s | 0.00289 s (0.981×) | [native-validation: accepted; high skipped](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-synthetic-decode--native-validation.log>) |
+| PyTorch synthetic four-expert top-1 MoE prefill (16-token prompt) | not run | not run | not run | not run | not run | not run | not run | not run | host-time limit; current-hook rerun not reached |
 | Gluon verified shared-memory round trip (1024 elements) | 0.471 s | 0.0000865 s (1×) | 0.476 s | 0.000102 s (1.17×) | 0.477 s | 0.000106 s (1.23×) | 0.477 s | 0.000104 s (1.2×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/gluon-shared-roundtrip--native-validation.log>) |
 | hipBLASLt/Tensile verified FP16 GEMM (512×512×512) | 0.000011 s | 0.00000986 s (1×) | 5.61 s | 0.000399 s (40.5×) | 5.59 s | 0.00693 s (703×) | 3.47 s | 0.000016 s (1.63×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/hipblaslt-tensile-gemm--native-validation.log>) |
 | TokenSpeed Gluon BF16 GEMM medium-M (128×4096×4096) | 0.095 s | 0.000527 s (1×) | 26.5 s | 0.00464 s (8.8×) | 27.2 s | 0.0862 s (163×) | 23 s | 0.000829 s (1.57×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-bf16-gemm-mediumm--native-validation.log>) |
@@ -19,4 +33,4 @@ by its ratio to the matching uninstrumented second run.
 | TokenSpeed Qwen3-0.6B prefill | 2.72 s | 0.0182 s (1×) | 265 s | 0.044 s (2.41×) | 266 s | 0.703 s (38.6×) | 192 s | 0.0196 s (1.07×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-qwen-prefill--native-validation.log>) |
 | TokenSpeed Qwen3-0.6B real cached decode | 0.0265 s | 0.0179 s (1×) | 267 s | 0.043 s (2.4×) | 266 s | 0.621 s (34.7×) | 187 s | 0.0191 s (1.06×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-qwen-decode--native-validation.log>) |
 | TokenSpeed Triton FP8 block-scaled GEMM | 0.0785 s | 0.000356 s (1×) | 26.2 s | 0.000373 s (1.05×) | 26.3 s | 0.000358 s (1.01×) | 22.3 s | 0.000395 s (1.11×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-fp8-blockscale-gemm--native-validation.log>) |
-| TokenSpeed Gluon BF16 MoE | 0.0818 s | 0.000374 s (1×) | failed | failed | pending | pending | pending | pending | [default--audit-on: failed](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-bf16-moe--default--audit-on.log>) |
+| TokenSpeed Gluon BF16 MoE | 0.0818 s | 0.000374 s (1×) | failed | failed | not run | not run | not run | not run | [default--audit-on: failed; later modes not reached](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-bf16-moe--default--audit-on.log>) |
