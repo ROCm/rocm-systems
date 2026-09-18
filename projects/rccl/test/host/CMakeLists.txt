@@ -663,9 +663,14 @@ message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
 # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
 # Compile-only (STATIC_LIBRARY) avoids link failures from amdsmi symbols.
+# CMAKE_REQUIRED_LIBRARIES is set to hip::device so the compile probes can
+# find HIP headers via the imported target's include dirs. Without this,
+# amdclang++ does not inject the HIP include path the way hipcc did.
+# Mirrors the pattern in projects/rccl/CMakeLists.txt:445.
 include(CheckCXXSourceCompiles)
 unset(AMDSMI_FABRIC_API CACHE)
 unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
+set(CMAKE_REQUIRED_LIBRARIES hip::device)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 check_cxx_source_compiles("
   #include <amd_smi/amdsmi.h>
@@ -718,6 +723,7 @@ check_cxx_source_compiles("
   }
 " HIP_FABRIC_HANDLE_TYPE)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+unset(CMAKE_REQUIRED_LIBRARIES)
 if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
   set(HIP_FABRIC_API ON)
   message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
