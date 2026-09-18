@@ -875,7 +875,12 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
   EXPECT_EQ(batches[0][1].dst, PeerData(3));
 
   // Both peers signal in the same round, so each takes its own staging slot --
-  // sharing one would make the second overwrite the first.
+  // sharing one would make the second overwrite the first. Pinned on the staging
+  // writes themselves as well as on the copies that read them back.
+  ASSERT_EQ(log_[0].kind, Submission::kMemOps);
+  ASSERT_EQ(log_[0].memOps.size(), 2u);
+  EXPECT_EQ(log_[0].memOps[0].address, &ceCtx->signalOpSeqsDev[0]);
+  EXPECT_EQ(log_[0].memOps[1].address, &ceCtx->signalOpSeqsDev[1]);
   ASSERT_EQ(batches[1].size(), 2u);
   EXPECT_EQ(batches[1][0].src, &ceCtx->signalOpSeqsDev[0]);
   EXPECT_EQ(batches[1][1].src, &ceCtx->signalOpSeqsDev[1]);
@@ -908,6 +913,11 @@ TEST_F(RmaCeNonPersistTest, NonPersist_SignallingTask_StagesSequenceBeforeCopyin
 
   ASSERT_EQ(log_.size(), 3u);
   EXPECT_EQ(log_[0].kind, Submission::kMemOps);
+  // The staging op is a write to this peer's staging slot -- not a wait, and not
+  // some other slot; the signal copy below reads exactly this address.
+  ASSERT_EQ(log_[0].memOps.size(), 1u);
+  EXPECT_EQ(log_[0].memOps[0].operation, hipStreamMemOpWriteValue64);
+  EXPECT_EQ(log_[0].memOps[0].address, &Ctx(0)->signalOpSeqsDev[0]);
   EXPECT_EQ(log_[1].kind, Submission::kBatch);   // data
   EXPECT_EQ(log_[2].kind, Submission::kBatch);   // signal
   ASSERT_EQ(log_[2].ops.size(), 1u);
@@ -1109,6 +1119,7 @@ TEST_F(RmaCePersistTest, Persist_OneDataTask_CopiesTaskBufferToResolvedPeer) {
   EXPECT_EQ(batches[0][0].dst, reinterpret_cast<char*>(PeerData(2)) + 8);
   EXPECT_EQ(batches[0][0].size, 64u);
   EXPECT_TRUE(batches[1].empty());         // nothing signalled
+  EXPECT_EQ(PoolFreeList().size(), 1u);    // the task is returned, not leaked
 }
 
 // Under graph capture the sender waits for the receiver's ack and clears it
@@ -1316,6 +1327,7 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_NonPersistent_WaitsOncePerPeerInOneBatch)
   EXPECT_EQ(log_[0].memOps[0].flags, unsigned(hipStreamWaitValueGte));
   EXPECT_EQ(log_[0].memOps[1].address, &ceCtx->signalsDev[SignalSlot(0, 3)]);
   EXPECT_EQ(log_[0].memOps[1].value, 5u);
+  EXPECT_EQ(PoolFreeList().size(), 1u);   // the wait task is returned, not leaked
 }
 
 // The peer's signal counter only ever rises, so each wait threshold is the running
@@ -1353,7 +1365,9 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_Persistent_RunsOneWaitResetAckCyclePerSig
     EXPECT_EQ(memops.memOps[0].address, &ceCtx->graphSignalsDev[SignalSlot(0, 2)]);
     EXPECT_EQ(memops.memOps[0].value, 1u);
     EXPECT_EQ(memops.memOps[1].operation, hipStreamMemOpWriteValue64);
-    EXPECT_EQ(memops.memOps[1].value, 0u);   // reset, so the next replay waits again
+    // Reset targets the slot just waited on, so the next replay waits again.
+    EXPECT_EQ(memops.memOps[1].address, &ceCtx->graphSignalsDev[SignalSlot(0, 2)]);
+    EXPECT_EQ(memops.memOps[1].value, 0u);
     EXPECT_EQ(log_[cycle * 2 + 1].kind, Submission::kBatch);
   }
 }
@@ -1422,22 +1436,33 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PerPeerSignalIndex_WaitsOnTheIndexedSlots
 
 // Same for the persistent wait arm: the graph signal it waits on and the ack it
 // writes back are both located by (signalIdx, rank).
-TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentNonZeroSignalIndex_UsesTheIndexedSlots) {
-  constexpr int kSigIdx = 1;
-  constexpr int kPeer = 2;
+// Two peers on different signal indices, so the per-peer subscript varies: with
+// one peer every read of signalIdxs[i] is signalIdxs[0] and a wrong index is
+// invisible. Peer 1 expects one signal, peer 3 expects two, so the second peer
+// also runs two cycles.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentPerPeerSignalIndex_UsesTheIndexedSlots) {
   plan_->persistent = true;
-  PushWaitTask({kPeer}, {1}, /*signalIdxs=*/{kSigIdx});
+  PushWaitTask({1, 3}, {1, 2}, /*signalIdxs=*/{0, 1});
   ncclRmaCeCtx* ceCtx = Ctx(0);
 
   ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
-  ASSERT_EQ(log_.size(), 2u);
-  ASSERT_EQ(log_[0].memOps.size(), 2u);
-  EXPECT_EQ(log_[0].memOps[0].address, &ceCtx->graphSignalsDev[SignalSlot(kSigIdx, kPeer)]);
-
-  const char* expectedAck = SelfSlotIn(kPeer, ceCtx->graphAckOffset, kSigIdx);
-  ASSERT_EQ(log_[1].ops.size(), 1u);
-  EXPECT_EQ(log_[1].ops[0].dst, expectedAck);
+  // Three (wait, reset) + ack cycles: one for peer 1, two for peer 3.
+  ASSERT_EQ(log_.size(), 6u);
+  struct Expect { int peer; int sigIdx; };
+  const Expect expected[3] = {{1, 0}, {3, 1}, {3, 1}};
+  for (int c = 0; c < 3; c++) {
+    const Submission& memops = log_[c * 2];
+    ASSERT_EQ(memops.kind, Submission::kMemOps) << "cycle " << c;
+    ASSERT_EQ(memops.memOps.size(), 2u) << "cycle " << c;
+    EXPECT_EQ(memops.memOps[0].address,
+              &ceCtx->graphSignalsDev[SignalSlot(expected[c].sigIdx, expected[c].peer)])
+        << "cycle " << c;
+    ASSERT_EQ(log_[c * 2 + 1].ops.size(), 1u) << "cycle " << c;
+    EXPECT_EQ(log_[c * 2 + 1].ops[0].dst,
+              SelfSlotIn(expected[c].peer, ceCtx->graphAckOffset, expected[c].sigIdx))
+        << "cycle " << c;
+  }
 }
 
 // The wait path accepts exactly one WaitSignal task. A task of any other kind is
