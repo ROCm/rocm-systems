@@ -218,7 +218,7 @@ namespace QueuePairOption {
                   Options...
                  >::PostOpt;
   };
-}
+}  // namespace QueuePairOption
 
 /*
  * @brief Type alias helper for WQE posting options.
