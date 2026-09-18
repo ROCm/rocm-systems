@@ -72,6 +72,10 @@ if(NOT WIN32)
   else()
     set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
   endif()
+else()
+  # MSVC supplies optimization and NDEBUG per configuration; these are the
+  # defines the sample sources need.
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -141,9 +145,6 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     if(rocprofiler-register_FOUND)
         set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
     endif()
-    if(WIN32)
-        add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    endif()
 
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR}
@@ -207,9 +208,8 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     endif()
 
     add_executable(${PROJECT_NAME} ${SOURCES})
-    if(NOT WIN32)
-        target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
-    else()
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
+    if(WIN32)
         add_dependencies(${PROJECT_NAME} hip_kernels)
         target_link_libraries(${PROJECT_NAME} ${KERNEL_OBJS})
     endif()
