@@ -44,8 +44,9 @@ import sys
 
 import pytest
 
-# Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
-_PASS_KEYS = ("replay_pass", "n")
+# The per-pass index field. Only this spelling is accepted: a missing or renamed field must fail
+# loudly rather than fall back to a second candidate, which would let every record report pass 0.
+_PASS_KEY = "replay_pass"
 
 # Launch dims of the kernel-replay app's three kernels (grid_size = grid blocks x block threads):
 #   vecAdd<<<1024,1024>>>, saxpy<<<512,512>>>, vecScale<<<256,256>>>.
@@ -118,12 +119,12 @@ def _counter_records(sdk):
 
 
 def _pass_index(record):
-    for key in _PASS_KEYS:
-        if key in record and record[key] is not None:
-            return int(record[key])
-    raise AssertionError(
-        f"no replay-pass field {_PASS_KEYS} in counter record keys={list(record.keys())}"
-    )
+    value = record.get(_PASS_KEY)
+    if value is None:
+        raise AssertionError(
+            f"no {_PASS_KEY!r} field in counter record keys={list(record.keys())}"
+        )
+    return int(value)
 
 
 def _dispatch_info(record):
@@ -198,9 +199,12 @@ def _records_by_dispatch(sdk):
                 "passes": {},
             },
         )
-        entry["passes"][_pass_index(rec)] = _aggregated_named_counters(
-            rec, counter_id_to_name
+        pass_index = _pass_index(rec)
+        assert pass_index not in entry["passes"], (
+            f"dispatch {did} reports replay_pass {pass_index} more than once; keying passes in a "
+            "dict would hide the duplicate by overwriting the earlier record"
         )
+        entry["passes"][pass_index] = _aggregated_named_counters(rec, counter_id_to_name)
     assert table, "no counter records found"
     return table
 
