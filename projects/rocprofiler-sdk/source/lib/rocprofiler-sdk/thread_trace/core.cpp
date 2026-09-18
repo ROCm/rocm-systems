@@ -490,8 +490,6 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     }
     // TODO: Get external
 
-    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
-
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
     auto it = agents.find(queue.get_agent().get_rocp_agent()->id);
@@ -500,6 +498,14 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
+
+    // stop_context clears `enabled`, then drains, then disables serialization, and the context
+    // stays active for all of it. Dispatches submitted during that drain window still need the
+    // barrier packets that carry the serialized -> unserialized transition, so keep asserting
+    // this context's serialization and skip only the trace injection. Reporting serialize=false
+    // here would let new work bypass the barriers while in-flight serialized ATT packets are
+    // still draining. The counters and SPM disabled paths make the same guarantee.
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, parameters.bSerialize};
 
     // Kernel-replay localized context control: a replay pass may disable this ATT context for the
     // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
@@ -540,7 +546,7 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
         if(!pkt) continue;
 
         std::shared_lock<std::shared_mutex> lk(agents_map_mut);
-        auto it = agents.find(pkt->GetAgent());
+        auto                                it = agents.find(pkt->GetAgent());
         if(it == agents.end() || it->second == nullptr) continue;
 
         post_move_data.fetch_sub(1);
@@ -586,16 +592,23 @@ DispatchThreadTracer::start_context()
     // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
     // directly (see hsa/queue.cpp). Scope serialization to the agents configured on this
     // context. An empty set still means every agent.
+    // Serialization must be enabled before the tracer accepts dispatches. context::start_context
+    // publishes this context into the active set before calling us, so write_hook can already be
+    // running: setting `enabled` first opens a window in which pre_kernel_call injects ATT packets
+    // with is_serialized=true while the profiler serializer is still disabled, and
+    // profiler_serializer::kernel_dispatch then skips the ready/block barriers for them.
     const auto serialization_agents = configured_agents();
-    enabled.store(true, std::memory_order_release);
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
+    enabled.store(true, std::memory_order_release);
 }
 
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
-    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
-    // registered so packets already in the queues can drain through the serializer transition.
+    // Stop injecting ATT packets before transitioning serialization. The context stays in the
+    // active set for the drain below, and signal_completion_hook routes by packet provenance
+    // rather than activeness, so packets already in the queues still retire through the
+    // serializer transition.
     if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
     hsa::queue_controller_sync();
