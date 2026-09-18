@@ -3201,8 +3201,7 @@ TEST_F(P2pCanConnectMicrotest, CrossHostPeers_ShortCircuitsBeforeDeviceCheck)
                              ADD_FAILURE() << "device access queried for a cross-host peer";
                              return hipErrorInvalidValue;
                          });
-    EXPECT_EQ(p2pTransport.canConnect(new int, &comm_, nullptr, &info1_, &info2_),
-              ncclSuccess);
+    EXPECT_EQ(Call(), 1);
 }
 
 TEST_F(P2pCanConnectMicrotest, BusIdUnresolved_ReportsEligibleOnHip)
@@ -3330,7 +3329,8 @@ TEST_F(P2pCanConnectMicrotestIsolated, IntermediateRankWithMemcpy_ReturnsCannotC
                             if (inter) *inter = 3;  // != -1
                             return ncclSuccess;
                         });
-        ncclComm comm{};
+        auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+        ncclComm& comm = *commStorage;
         std::array<ncclPeerInfo, 2> myInfo{};
         comm.rank = 0;
         comm.peerInfo = myInfo.data();
@@ -4508,7 +4508,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipSuccess;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     void* devMem = nullptr;
     auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
                                           &ipcDesc, &devMem);
@@ -4527,7 +4528,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     void* devMem = nullptr;
     auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
                                           &ipcDesc, &devMem);
@@ -4583,7 +4585,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return ncclSuccess;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     // peerInfo[peer].cudaDev is read for the tracking call.
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
@@ -4652,7 +4655,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return ncclSuccess;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4686,7 +4690,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4718,7 +4723,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4748,7 +4754,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4779,7 +4786,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4819,7 +4827,8 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipSuccess;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4878,7 +4887,8 @@ TEST_P(P2pImportMapStageFails, CuMem_MappingStageRefuses_Propagates)
             return ncclSuccess;
         });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -4933,7 +4943,8 @@ TEST_F(P2pShareableBufferMicrotest,
            hipMemAllocationHandleType, ncclMemType_t, int, int,
            void*) -> ncclResult_t { return ncclSystemError; });
 
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     std::array<ncclPeerInfo, 4> peerInfo{};
     comm.peerInfo = peerInfo.data();
     void* devMem = nullptr;
@@ -5543,7 +5554,8 @@ TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_GraphRegisterFails_PropagatesAn
 // registration's impInfo payload to the record's proxy connector.
 TEST_F(P2pRegisterFamilyMicrotest, Deregister_ShipsDeregisterMessageWithImpInfoPayload)
 {
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     ncclProxyConnector proxyConn{};
     ncclIpcRegInfo regInfo{};
     regInfo.peerRank                = 3;
@@ -5578,7 +5590,8 @@ TEST_F(P2pRegisterFamilyMicrotest, Deregister_ShipsDeregisterMessageWithImpInfoP
 // propagated rather than swallowed.
 TEST_F(P2pRegisterFamilyMicrotest, Deregister_ProxyMessageFails_Propagates)
 {
-    ncclComm comm{};
+    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
+    ncclComm& comm = *commStorage;
     ncclProxyConnector proxyConn{};
     ncclIpcRegInfo regInfo{};
     regInfo.peerRank     = 3;

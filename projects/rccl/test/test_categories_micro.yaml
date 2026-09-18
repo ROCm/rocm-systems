@@ -28,6 +28,7 @@ test_categories:
       - "P2pProxyLifecycleMicrotest.*"
       - "P2pProxyCeMicrotestIsolated.*"
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
+      - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasMicrotest.*"
