@@ -247,7 +247,7 @@ ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) {
   mem->numGinSegments = 1;
   NCCLCHECK(ncclCalloc(&mem->ginSegmentInfos, 1));
   mem->ginSegmentInfos[0].segmentSize = mem->size;
-  mem->ginSegmentInfos[0].memType = CU_MEM_LOCATION_TYPE_DEVICE;
+  mem->ginSegmentInfos[0].memType = hipMemLocationTypeDevice;
   return ncclSuccess;
 }
 
