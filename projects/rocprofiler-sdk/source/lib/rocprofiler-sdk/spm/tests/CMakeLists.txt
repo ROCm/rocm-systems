@@ -15,6 +15,7 @@ set(_ROCPROFILER_SHARE_DIR
     "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
 set(ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES core.cpp spm_memory_pool_test.cpp
+                                             local_context.cpp
                                              queue_hooks_test.cpp)
 
 add_executable(spm-counter-test)
@@ -36,6 +37,7 @@ rocprofiler_add_unit_test(
     TARGET spm-counter-test
     SOURCES ${ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES}
     TIMEOUT 60
+    LABELS "unittests;spm"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
         "ROCPROFILER_SPM_BETA_ENABLED=True"

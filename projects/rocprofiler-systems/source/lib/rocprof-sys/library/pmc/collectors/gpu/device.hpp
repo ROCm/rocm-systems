@@ -8,9 +8,9 @@
 
 #include <concepts>
 #include <cstdint>
+#include <fmt/format.h>
 #include <memory>
 #include <optional>
-#include <spdlog/fmt/fmt.h>
 #include <stdexcept>
 #include <string>
 

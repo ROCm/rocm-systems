@@ -25,6 +25,7 @@ void LibcPassthrough::resolve() {
   ioctl = util::lookup_symbol<decltype(ioctl)>(handle, "ioctl");
   mmap = util::lookup_symbol<decltype(mmap)>(handle, "mmap");
   munmap = util::lookup_symbol<decltype(munmap)>(handle, "munmap");
+  mremap = util::lookup_symbol<decltype(mremap)>(handle, "mremap");
   mprotect = util::lookup_symbol<decltype(mprotect)>(handle, "mprotect");
   madvise = util::lookup_symbol<decltype(madvise)>(handle, "madvise");
   memfd_create = util::lookup_symbol<decltype(memfd_create)>(handle, "memfd_create");

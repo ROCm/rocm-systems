@@ -62,7 +62,7 @@ target_link_libraries(
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp core.cpp code_object_loader.cpp
-    device_counting.cpp firmware_restrictions_test.cpp)
+    device_counting.cpp firmware_restrictions_test.cpp local_context.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-tests)
@@ -99,7 +99,7 @@ rocprofiler_add_unit_test(
         "rocprofiler_device_counting_pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
-        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
+        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*|\\[  SKIPPED \\]"
     )
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
