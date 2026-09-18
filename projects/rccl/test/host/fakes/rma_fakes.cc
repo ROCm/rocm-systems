@@ -106,7 +106,6 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
 // Reset
 // ---------------------------------------------------------------------------
 
-// Fail-loud: the memops a unit puts on a stream are what its tests observe.
 static ncclResult_t DefaultCuStreamBatchMemOp(hipStream_t, unsigned int,
                                               hipStreamBatchMemOpParams*) {
   FailLoudUnfaked("rma_fakes", "ncclCuStreamBatchMemOp");

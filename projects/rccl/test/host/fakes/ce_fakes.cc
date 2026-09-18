@@ -80,8 +80,6 @@ static ncclResult_t DefaultCeInitBatchOpsParams(struct ncclCeBatchOpsParams* par
 #endif
   return ncclSuccess;
 }
-// Fail-loud: what a unit submits is the thing tests observe, so an undriven
-// call must not silently succeed.
 static ncclResult_t DefaultCeLaunchBatchOps(struct ncclComm*, struct ncclCeBatchOpsParams*,
                                             hipStream_t, struct ncclCeCollArgs*) {
   FailLoudUnfaked("ce_fakes", "ncclCeLaunchBatchOps");

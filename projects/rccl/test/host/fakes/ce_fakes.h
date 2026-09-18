@@ -34,8 +34,7 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncc
     g_ceScratchAvailable;
 extern std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks;
 
-// ce_coll.h's batch-ops API. Init allocates the op arrays as production does;
-// Launch fails loudly until a fixture drives it.
+// ce_coll.h's batch-ops API. Init allocates the op arrays as production does.
 extern std::function<ncclResult_t(struct ncclCeBatchOpsParams* /*params*/, int /*capacity*/)>
     g_ceInitBatchOpsParams;
 extern std::function<ncclResult_t(struct ncclComm* /*comm*/,
