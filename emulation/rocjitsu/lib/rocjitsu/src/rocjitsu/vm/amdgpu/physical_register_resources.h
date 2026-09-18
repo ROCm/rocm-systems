@@ -123,11 +123,13 @@ physical_register_properties(rj_code_arch_t arch) {
 
 /// @brief Physical SGPR units consumed by one wave, or zero when SGPRs do not
 /// constrain occupancy for this architecture.
-[[nodiscard]] constexpr uint32_t physical_sgpr_units(rj_code_arch_t arch, uint32_t count) {
+[[nodiscard]] constexpr uint32_t physical_sgpr_units(rj_code_arch_t arch, uint32_t count,
+                                                     bool trap_handler = false) {
   const auto properties = physical_register_properties(arch);
   if (!properties.sgpr_occupancy_limited)
     return 0;
-  return round_up_registers(count, properties.sgpr_alloc_granule);
+  // GFX9 reserves 16 trap-temporary SGPRs in addition to the rounded allocation.
+  return round_up_registers(count, properties.sgpr_alloc_granule) + (trap_handler ? 16u : 0u);
 }
 
 } // namespace rocjitsu::amdgpu

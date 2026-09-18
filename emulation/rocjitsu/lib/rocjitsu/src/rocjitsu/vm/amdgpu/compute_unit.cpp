@@ -220,18 +220,16 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                                        uint32_t num_vgprs, uint32_t wave_size) {
+                                        uint32_t num_vgprs, uint32_t wave_size, bool trap_handler) {
   const uint32_t ordinary_vgprs =
       std::min(num_vgprs, isa_properties(arch()).max_addressable_vgprs_per_wf);
-  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
-                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
-                                        : 0;
-  return dispatch_wf(wg_id, pc, num_sgprs,
-                     WaveVgprAllocation{num_vgprs, ordinary_vgprs, accvgpr_capacity}, wave_size);
+  return dispatch_wf(wg_id, pc, num_sgprs, WaveVgprAllocation{num_vgprs, ordinary_vgprs, 0},
+                     wave_size, trap_handler);
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
-                                        WaveVgprAllocation vgprs, uint32_t wave_size) {
+                                        WaveVgprAllocation vgprs, uint32_t wave_size,
+                                        bool trap_handler) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
@@ -251,24 +249,22 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
-  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, vgprs, wave_size);
+  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, vgprs, wave_size,
+                        trap_handler);
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, uint32_t num_vgprs,
-                                           uint32_t wave_size) {
+                                           uint32_t wave_size, bool trap_handler) {
   const uint32_t ordinary_vgprs =
       std::min(num_vgprs, isa_properties(arch()).max_addressable_vgprs_per_wf);
-  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
-                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
-                                        : 0;
   return dispatch_wf_at(wf_id, wg_id, pc, num_sgprs,
-                        WaveVgprAllocation{num_vgprs, ordinary_vgprs, accvgpr_capacity}, wave_size);
+                        WaveVgprAllocation{num_vgprs, ordinary_vgprs, 0}, wave_size, trap_handler);
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, WaveVgprAllocation vgprs,
-                                           uint32_t wave_size) {
+                                           uint32_t wave_size, bool trap_handler) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
     return nullptr;
@@ -287,6 +283,15 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
       vgprs.accumulator > accvgpr_capacity)
     return nullptr;
 
+  const bool unified = arch() == ROCJITSU_CODE_ARCH_CDNA2 || arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
+                       arch() == ROCJITSU_CODE_ARCH_CDNA4;
+  // Subtraction avoids overflow for malformed explicit allocation shapes.
+  if (vgprs.ordinary > vgprs.total ||
+      (unified && vgprs.accumulator != vgprs.total - vgprs.ordinary) ||
+      (!unified && (vgprs.ordinary != vgprs.total ||
+                    (arch() != ROCJITSU_CODE_ARCH_CDNA1 && vgprs.accumulator != 0))))
+    return nullptr;
+
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
@@ -296,7 +301,8 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
-  if (!reserve_physical_registers(wf_id, num_sgprs, vgprs.total, dispatched_wave_size)) {
+  if (!reserve_physical_registers(wf_id, num_sgprs, vgprs.total, dispatched_wave_size,
+                                  trap_handler)) {
     free_vgprs(static_cast<uint32_t>(vgpr_base));
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -313,6 +319,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
   wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), vgprs.total};
   wf->num_sgprs_ = num_sgprs;
+  wf->trap_handler_enabled_ = trap_handler;
   wf->num_vgprs_ = vgprs.total;
   wf->num_ordinary_vgprs_ = vgprs.ordinary;
   wf->num_accvgprs_ = vgprs.accumulator;
@@ -654,14 +661,15 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
 bool ComputeUnitCore::place_physical_registers(std::vector<SimdRegisterUsage> &usage,
                                                uint32_t num_sgprs, uint32_t num_vgprs,
                                                uint32_t wave_size,
-                                               WaveRegisterReservation *reservation) const {
+                                               WaveRegisterReservation *reservation,
+                                               bool trap_handler) const {
   if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || num_vgprs == 0 ||
       num_vgprs > vgpr_allocation_block_size())
     return false;
 
   const uint32_t effective_wave_size = wave_size == 0 ? wf_size_ : wave_size;
   const uint32_t vgpr_units = physical_vgpr_units(arch(), num_vgprs, effective_wave_size);
-  const uint32_t sgpr_units = physical_sgpr_units(arch(), num_sgprs);
+  const uint32_t sgpr_units = physical_sgpr_units(arch(), num_sgprs, trap_handler);
   if (vgpr_units == 0 || vgpr_units > physical_registers_.vgprs_per_simd ||
       (physical_registers_.sgpr_occupancy_limited &&
        (sgpr_units == 0 || sgpr_units > physical_registers_.sgprs_per_simd)))
@@ -696,12 +704,13 @@ bool ComputeUnitCore::place_physical_registers(std::vector<SimdRegisterUsage> &u
 }
 
 bool ComputeUnitCore::reserve_physical_registers(uint32_t wf_id, uint32_t num_sgprs,
-                                                 uint32_t num_vgprs, uint32_t wave_size) {
+                                                 uint32_t num_vgprs, uint32_t wave_size,
+                                                 bool trap_handler) {
   if (wf_id >= wave_register_reservations_.size() ||
       wave_register_reservations_[wf_id].simd != UINT32_MAX)
     return false;
   return place_physical_registers(simd_register_usage_, num_sgprs, num_vgprs, wave_size,
-                                  &wave_register_reservations_[wf_id]);
+                                  &wave_register_reservations_[wf_id], trap_handler);
 }
 
 void ComputeUnitCore::release_physical_registers(uint32_t wf_id) {
@@ -720,7 +729,8 @@ void ComputeUnitCore::release_physical_registers(uint32_t wf_id) {
 }
 
 bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t num_sgprs, uint32_t num_vgprs,
-                                           uint32_t wave_size, uint32_t lds_bytes) const {
+                                           uint32_t wave_size, uint32_t lds_bytes,
+                                           bool trap_handler) const {
   // Count free wavefront slots.
   uint32_t free_slots = 0;
   for (const auto &w : wfs_)
@@ -734,7 +744,8 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t num_sgprs,
 
   auto prospective_usage = simd_register_usage_;
   for (uint32_t wave = 0; wave < num_wfs; ++wave) {
-    if (!place_physical_registers(prospective_usage, num_sgprs, num_vgprs, wave_size, nullptr)) {
+    if (!place_physical_registers(prospective_usage, num_sgprs, num_vgprs, wave_size, nullptr,
+                                  trap_handler)) {
       util::Logger::vm("CU ", this->name(),
                        " can_accept_wg: REJECT physical register capacity for waves=", num_wfs,
                        " sgprs/wave=", num_sgprs, " vgprs/wave=", num_vgprs);

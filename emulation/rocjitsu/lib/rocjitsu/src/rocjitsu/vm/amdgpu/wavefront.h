@@ -105,6 +105,8 @@ public:
 
   /// @brief Return the number of allocated scalar registers.
   /// @returns Per-dispatch SGPR allocation count.
+  bool trap_handler_enabled() const { return trap_handler_enabled_; }
+
   uint32_t num_sgprs() const { return num_sgprs_; }
 
   /// @brief Return the number of allocated vector registers.
@@ -871,6 +873,7 @@ public:
     cluster_rank_ = 0;
     cluster_size_ = 1;
     num_sgprs_ = 0;
+    trap_handler_enabled_ = false;
     num_vgprs_ = 0;
     num_ordinary_vgprs_ = 0;
     num_accvgprs_ = 0;
@@ -959,6 +962,7 @@ protected:
   uint32_t default_wf_size_ = 0;    ///< ISA default wavefront width.
   uint32_t max_wf_size_ = 0;        ///< Maximum wavefront width supported by the ISA.
   uint32_t num_sgprs_ = 0;          ///< Allocated scalar registers (set at dispatch).
+  bool trap_handler_enabled_ = false;
   uint32_t num_vgprs_ = 0;          ///< Total/unified vector allocation (set at dispatch).
   uint32_t num_ordinary_vgprs_ = 0; ///< Descriptor-owned ordinary VGPR prefix.
   uint32_t num_accvgprs_ = 0;       ///< Descriptor-owned AccVGPR window.

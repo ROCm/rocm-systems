@@ -124,6 +124,7 @@ struct DispatchEntry {
   uint64_t code_load_bias = 0;
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
+  bool trap_handler_enabled = false;
   uint32_t vgprs_per_wf = 256;
   /// Descriptor-derived ordinary/accumulator split. `vgprs_per_wf` remains
   /// the unified count used for physical occupancy.

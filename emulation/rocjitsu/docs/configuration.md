@@ -92,13 +92,20 @@ capacities during workgroup admission. Register counts decoded from the kernel
 descriptor consume those resources with the architecture's allocation
 granularity, and the resources are returned when a wavefront halts. Dispatches
 that cannot reside on the modeled hardware are not admitted while capacity is
-unavailable.
+unavailable. On GFX9, enabling the descriptor's trap handler also reserves
+16 SGPRs per wave after rounding the ordinary SGPR allocation.
+
+Dynamic VGPR allocation on RDNA4/gfx1250 and nonzero shared-VGPR allocation
+on GFX10/GFX11 are rejected at dispatch because these allocation modes are
+not yet modeled.
 
 Executed ordinary-VGPR accesses must also stay within the prefix allocated by
 the kernel descriptor. An access beyond that prefix terminates the simulation;
 the larger simulator backing store does not make such a kernel valid. AccVGPRs
-occupy their separate architecture-defined bank and are not treated as an
-ordinary-VGPR overflow.
+use their descriptor-derived window on CDNA2–4, sharing the unified
+allocation charged for occupancy. Direct CU dispatch APIs grant no AccVGPR
+access unless the caller supplies an explicit allocation split. Ownership
+queries are side-effect-free; executed invalid accesses report the violation.
 
 ### Simulation threading
 

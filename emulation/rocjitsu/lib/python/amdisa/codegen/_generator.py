@@ -14999,7 +14999,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                               : vgpr_msb_role();
                       uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
                       uint32_t reg = wf.vgpr_alloc().base + voff;
-                      if (!raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1))
+                      if (!raw_compute_unit(wf.cu()).validate_vgpr_access(wf, reg, 1))
                         return;
                       uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
                       uint8_t *dst = raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
@@ -15071,7 +15071,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                           : vgpr_msb_role();
                   uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
                   uint32_t reg = wf.vgpr_alloc().base + voff;
-                  if (!raw_compute_unit(wf.cu()).owns_vgpr_range(wf, reg, 1))
+                  if (!raw_compute_unit(wf.cu()).validate_vgpr_access(wf, reg, 1))
                     return;
                   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
                   uint8_t *dst = raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
