@@ -515,11 +515,9 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
 
   {
   const int lsaTeamRank = devr->lsaSelf;
-  auto lsaAllgatherInts = [&](int* buf) -> int {
-    return (bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, buf,
-                                        sizeof(int)) == ncclSuccess)
-               ? 0
-               : -1;
+  auto lsaAllgatherInts = [&](int* buf) -> ncclResult_t {
+    return bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, buf,
+                                       sizeof(int));
   };
   auto lsaBarrier = [&](int tag) -> ncclResult_t {
     return bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, tag);
@@ -527,9 +525,9 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
 
   std::fill_n(gathered, lsaTeamSize, -1);
   gathered[lsaTeamRank] = setupState;
-  if (lsaAllgatherInts(gathered) != 0) {
+  ret = lsaAllgatherInts(gathered);
+  if (ret != ncclSuccess) {
     WARN("GIN anvil-sdma: conn-check setup allgather failed (rank %d)", rank);
-    ret = ncclSystemError;
     goto cleanup;
   }
   {
@@ -582,7 +580,6 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
 
   {
     std::lock_guard<std::mutex> lock(pluginMutex);
-    if (ginAnvilConnCheckedComms.count(comm) != 0) goto cleanup;
     if (!ginAnvilConnCheckedComms.insert(comm).second) goto cleanup;
     markedComm = true;
   }
@@ -641,10 +638,10 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
     if (localFail) localMissing = lsaTeamSize;
     std::fill_n(gathered, lsaTeamSize, -1);
     gathered[lsaTeamRank] = localMissing;
-    if (lsaAllgatherInts(gathered) != 0) {
+    ret = lsaAllgatherInts(gathered);
+    if (ret != ncclSuccess) {
       WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
            ginAnvilConnCheckStepName(kConnCheckAllgather), rank, attempt + 1, MAX_ATTEMPTS);
-      ret = ncclSystemError;
       goto cleanup;
     }
     if (localFail) {
