@@ -57,6 +57,16 @@ class Gfx115xFactory : public Gfx11Factory {
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };
 
+// Gfx11.7 factory class
+class Gfx117xFactory : public Gfx11Factory {
+ public:
+  explicit Gfx117xFactory(const AgentInfo* agent_info);
+  virtual ~Gfx117xFactory();
+
+ protected:
+  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+};
+
 }  // namespace aql_profile
 
 #endif  // _GFX11_FACTORY_H_

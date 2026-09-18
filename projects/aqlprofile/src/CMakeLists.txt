@@ -19,6 +19,7 @@ set ( LIB_SRC
   ${LIB_DIR}/core/gfx10_factory.cpp
   ${LIB_DIR}/core/gfx11_factory.cpp
   ${LIB_DIR}/core/gfx115x_factory.cpp
+  ${LIB_DIR}/core/gfx117x_factory.cpp
   ${LIB_DIR}/core/gfx12_factory.cpp
   ${LIB_DIR}/core/gfx1250_factory.cpp
   ${LIB_DIR}/core/vega20_reg_init.cpp

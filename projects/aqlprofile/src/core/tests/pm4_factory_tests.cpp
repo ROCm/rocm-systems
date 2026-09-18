@@ -42,3 +42,31 @@ TEST(Pm4FactoryTest, GetAgentInfoInvalidHandleReturnsNull) {
     const AgentInfo* info = GetAgentInfo(invalidHandle);
     EXPECT_EQ(info, nullptr);
 }
+
+// Test: gfx117X resolves to the dedicated factory id rather than falling back
+// to the generic GFX11 id.
+TEST(Pm4FactoryTest, GetGpuIdGfx117x) {
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1170"), GFX117X_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1171"), GFX117X_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1172"), GFX117X_GPU_ID);
+}
+
+// Test: the gfxip table is matched by ordered prefix, so adding "gfx117" must
+// not shadow the neighbouring entries matched by shorter or longer prefixes.
+TEST(Pm4FactoryTest, GetGpuIdPrefixOrderingIsPreserved) {
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1100"), GFX11_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1151"), GFX115X_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1200"), GFX12_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx1250"), MI450_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx942"), MI300_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfx950"), MI350_GPU_ID);
+    EXPECT_EQ(Pm4Factory::GetGpuId("gfxJunk"), INVAL_GPU_ID);
+}
+
+// Test: the enumerator sits between GFX11 and GFX12, which the relational
+// comparisons used for PM4 dispatch and data collection rely on.
+TEST(Pm4FactoryTest, Gfx117xGpuIdOrdering) {
+    EXPECT_GT(GFX117X_GPU_ID, GFX11_GPU_ID);
+    EXPECT_LT(GFX117X_GPU_ID, GFX12_GPU_ID);
+    EXPECT_GT(GFX117X_GPU_ID, MI350_GPU_ID);
+}
