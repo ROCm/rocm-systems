@@ -45,6 +45,11 @@ ASSERT_HOOK_MATCHES_PROD(g_proxyClientBatchQueryFdBlocking, ncclProxyClientBatch
 ASSERT_HOOK_MATCHES_PROD(g_strongStreamAcquire,       ncclStrongStreamAcquire);
 // ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
 ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
+ASSERT_HOOK_MATCHES_PROD(g_regLocalIsValid,           ncclRegLocalIsValid);
+ASSERT_HOOK_MATCHES_PROD(g_commGraphRegister,         ncclCommGraphRegister);
+ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
+ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
+ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
