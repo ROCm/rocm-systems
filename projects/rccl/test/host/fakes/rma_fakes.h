@@ -23,6 +23,8 @@
 
 #include <functional>
 
+#include <hip/hip_runtime_api.h>
+
 #include "nccl.h"
 
 struct ncclComm;
@@ -61,6 +63,13 @@ extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* 
 extern std::function<ncclResult_t(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                   hipStream_t stream)>
     g_rmaCeWaitLaunch;
+
+// ncclCuStreamBatchMemOp: rma_proxy_launch.cc's batch-memop wrapper, declared in
+// rocmwrap.h. It is how the CE path puts its wait/write operations on a stream,
+// so a test asserting what a unit enqueued drives this. Fail-loud by default.
+extern std::function<ncclResult_t(hipStream_t /*stream*/, unsigned int /*numOps*/,
+                                  hipStreamBatchMemOpParams* /*batchParams*/)>
+    g_cuStreamBatchMemOp;
 
 // Restore every hook in this file to its default. Call from fixture TearDown().
 void ResetRmaFakes();

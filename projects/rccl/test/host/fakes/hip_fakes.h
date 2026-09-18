@@ -180,13 +180,6 @@ extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
 
-// src/rma/rma_proxy_launch.cc's batch-memop wrapper, declared in rocmwrap.h.
-// Not a hip* symbol, but no other fakes file owns it. Fail-loud by default: an
-// undriven call aborts.
-extern std::function<ncclResult_t(hipStream_t /*stream*/, unsigned int /*numOps*/,
-                                  hipStreamBatchMemOpParams* /*batchParams*/)>
-    g_cuStreamBatchMemOp;
-
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
