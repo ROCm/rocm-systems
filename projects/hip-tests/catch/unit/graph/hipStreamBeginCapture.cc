@@ -1699,6 +1699,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
   }
 }
 
+// hipStreamGetCaptureInfo_v2 wraps cuStreamGetCaptureInfo_v2, which CUDA 13 removed.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION < 13000)
 /**
  * Test Description
  * ------------------------
@@ -1728,6 +1730,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyOriginStreamDuringCaptu
   HIP_CHECK(hipStreamDestroy(captureStream));
   HIP_CHECK_ERROR(hipGraphDestroy(captureGraph), hipErrorInvalidValue);
 }
+#endif
 
 /**
  * Test Description
