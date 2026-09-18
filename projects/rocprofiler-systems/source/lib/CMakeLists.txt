@@ -7,7 +7,10 @@
 #
 # rocprofiler-systems-dl: contains minimal symbols and dlopen's rocprofiler-systems
 #
-# rocprofiler-systems-user: contains symbols for user API
+# rocprofiler-systems-common-api: shared public API headers (rocprofsys_category_t,
+# rocprofsys_annotation_t)
+#
+# rocprofiler-systems-causal-api: minimal library backing ROCPROFSYS_CAUSAL_*
 #
 # ----------------------------------------------------------------------------- #
 
@@ -75,7 +78,8 @@ add_subdirectory(logger)
 #
 # ------------------------------------------------------------------------------#
 
+add_subdirectory(rocprof-sys-common-api)
+add_subdirectory(rocprof-sys-causal-api)
 add_subdirectory(rocprof-sys)
 add_subdirectory(rocprof-sys-dl)
 add_subdirectory(rocprof-sys-rt)
-add_subdirectory(rocprof-sys-user)

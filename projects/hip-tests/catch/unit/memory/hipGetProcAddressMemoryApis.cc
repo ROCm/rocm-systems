@@ -6102,6 +6102,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
     HIP_CHECK(hipMalloc(&srcDevPtr, Nbytes));
     REQUIRE(srcDevPtr != nullptr);
     fillDeviceArray(srcDevPtr, N, value);
+    // srcDevPtr is filled by a kernel on srcDevice's null stream, but the copy below is
+    // on a user stream created on the peer device. hipMemcpyPeerAsync is not serialized
+    // against pending work on srcDevice, so the fill could still be running when the copy
+    // reads srcDevPtr. Synchronize the fill first.
+    HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipSetDevice(peerDeviceId));
 

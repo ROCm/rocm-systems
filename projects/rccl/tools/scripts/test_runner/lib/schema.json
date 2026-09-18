@@ -194,9 +194,9 @@
           "description": "Number of nodes across which ranks are distributed"
         },
         "num_gpus": {
-          "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. The string \"auto\" (also the default when omitted) resolves to the detected GPUs per node.",
+          "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. The string \"auto\" (also the default when omitted) resolves to the detected GPUs per node. Zero declares a test that needs no GPU, such as a CPU-only build smoke. The executor uses this value for multi-node placement and, when num_ranks is \"auto\", to derive the rank count as num_gpus * num_nodes -- so a zero here means a test must state num_ranks itself, and it is rejected outright for multi-node runs, where it would place no ranks at all.",
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
+            { "type": "integer", "minimum": 0 },
             { "type": "string", "enum": ["auto"] }
           ]
         },

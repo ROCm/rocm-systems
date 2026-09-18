@@ -1,7 +1,7 @@
 #
 # Integration test applications
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-bin LANGUAGES C CXX)
 
@@ -35,6 +35,7 @@ add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
 add_subdirectory(hip-memcpy)
 add_subdirectory(openmp)
+add_subdirectory(signal-handler)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 
@@ -46,6 +47,7 @@ add_subdirectory(hip-in-libraries)
 add_subdirectory(scratch-memory)
 add_subdirectory(hsa-queue-dependency)
 add_subdirectory(hip-graph)
+add_subdirectory(hip-graph-forkjoin)
 add_subdirectory(hip-graph-attribution)
 add_subdirectory(roctx-pause-resume)
 add_subdirectory(att-marker-trace)
@@ -74,5 +76,7 @@ add_subdirectory(hip-host)
 add_subdirectory(module-loading-test)
 add_subdirectory(late-start-tracing)
 add_subdirectory(thread-trace)
+add_subdirectory(hip-events)
 add_subdirectory(hip-graph-bubbles)
 add_subdirectory(rocpd-api-test)
+add_subdirectory(kernel-replay)

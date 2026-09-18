@@ -121,6 +121,19 @@ struct testColl {
   // does not wire it or the library lacks the symbol (older librccl).
   testResult_t (*getCollImplInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
       const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels);
+  // Optional device-side (in-kernel wall_clock64) timing hook. Non-null only for
+  // collectives that implement it (AllToAll, AllGather). Driven by BenchTime via
+  // --device_timing (0=off, 1=augment, 2=device-time-only):
+  //   - outDeltaSec == nullptr (mode 1): prints an extra device-only
+  //     latency/busbw line alongside the normal graph/hipEvent numbers (report,
+  //     not replace).
+  //   - outDeltaSec != nullptr (mode 2): stores the measured per-iteration
+  //     device latency (seconds, max across ranks) in *outDeltaSec; BenchTime
+  //     then reports that as THE metric, having skipped the graph/hipEvent
+  //     timed loop.
+  // Other collectives leave it nullptr via aggregate initialization, so no other
+  // struct needs to change.
+  testResult_t (*deviceTime)(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -225,6 +238,11 @@ struct threadArgs {
   void** recvRegHandles;
   void** biasRegHandles;
 #endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+  // Mode-1 device-timing augment line (#[a2a-devtime]); buffered here and
+  // flushed after writeBenchmarkLineTerminator so it does not split the row.
+  char devtimeAugmentLine[512];
+#endif
 };
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
@@ -237,6 +255,11 @@ struct testThread {
 
 // Provided by common.cu
 extern void Barrier(struct threadArgs* args);
+extern testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t* comms);
+// Inter-thread/process reduce: average 0=bcast(r0),1=avg,2=min,3=max,4=sum.
+// Serializes MPI to the last thread (MPI is MPI_THREAD_SINGLE) and writes the
+// combined value back to every thread. Instantiated for double / long long.
+template<typename T> void Allreduce(struct threadArgs* args, T* value, int average);
 extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* typeName, ncclRedOp_t op,  const char* opName, int root);
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op);
@@ -333,6 +356,17 @@ typedef enum { ncclCoarse        = 0,
                nccl_NUM_MTYPES   = 4 } ncclMemoryType_t;
 extern const char *test_memorytypes[nccl_NUM_MTYPES];
 extern int deviceCtaCount; // number of CTAs for device implementation
+extern int deviceImpl;     // selected -D device implementation (0 = host); lets per-collective
+                           // device-timing hooks pick the matching timed kernel.
+// In-kernel device timing (AllToAll -D 3/4): --device_timing 0=off, 1=augment, 2=device-only.
+extern int deviceTimingMode;
+extern int devtimeLoop;       // --devtime_loop (default 10)
+extern int devtimeSkip;       // --devtime_skip (default 10)
+extern int devtimeLoopMid;    // --devtime_loop_mid: loop at per-peer >= 8 MiB (0=disabled)
+extern int devtimeLoopLarge;  // --devtime_loop_large: loop at per-peer >= 64 MiB (0=disabled)
+extern int devtimeSkipMid;    // --devtime_skip_mid (-1: min(base skip, 2))
+extern int devtimeSkipLarge;  // --devtime_skip_large (-1: min(base skip, 1))
+extern int devtimeCheck;      // --devtime_check: validate timed-kernel output
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
