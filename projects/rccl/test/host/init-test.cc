@@ -3525,6 +3525,34 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_ZeroInitChannelsIsTreatedAsUnse
   EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
 }
 
+TEST_F(InitMicrotest, InitTransportsRank_Gfx110xP2pDisabledUses56RingChannels) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1100");
+  SetParams({{"P2P_DISABLE", 1}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(56, ring.nChannels);
+  EXPECT_EQ(56, ring.maxChannels);
+  EXPECT_EQ(56, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx120xP2pDisabledHonorsExplicitChannelCount) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1201");
+  SetParams({{"P2P_DISABLE", 1}, {"RCCL_INIT_CHANNELS", 12}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(12, ring.nChannels);
+  EXPECT_EQ(12, ring.maxChannels);
+  EXPECT_EQ(12, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1151_KeepsTheComputedRingChannelCount) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();  // gcn stays empty, so IsArchMatch is false
