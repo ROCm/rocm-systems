@@ -65,10 +65,10 @@ PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, 
 }
 
 PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  // GFX12+ single-SGPR-read operands read the first SGPR and replicate it.
-  // VGPRs and 64-bit special registers such as VCC and EXEC remain pairs.
+  // Packed 32-bit scalar inputs replicate one word, including special
+  // scalar registers. Only VGPR inputs supply two independent words.
   const auto reg = operand.to_register_ref();
-  if (reg && reg->cls == RegClass::SGPR) {
+  if (!reg || reg->cls != RegClass::VGPR) {
     const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
     return {value, value};
   }
