@@ -45,7 +45,7 @@ set(_PROFILER_HUB_SOURCE_DIR "")
 
 # Pass the min version into find_package so an old install is skipped, not loaded.
 # Not REQUIRED: we fall back to git. ~/.cmake/packages can still pick another tree.
-find_package(profiler-hub ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION})
+find_package(profiler-hub ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION} QUIET)
 
 if(profiler-hub_FOUND)
     message(
