@@ -195,13 +195,26 @@ The opt-out exists for investigation but is intentionally not advertised as a
 normal benchmark path. Prior measurements found its cost negligible, so status
 tables do not carry separate audit-on/off columns.
 
+A workload with no applicable LDS or synchronization sites is **not
+applicable**, not an accepted instrumentation measurement. The runner records
+this outcome only when every code-object inventory completed with zero sites,
+without expert limits or incomplete objects, and every exact-name allowlisted
+kernel was loaded and dispatched. Missing dispatch evidence, missing audit
+records, and incomplete instrumentation still fail closed. Each mode is run and
+checked independently, including the numerical oracle. These cells retain raw
+observations and provenance in checkpoints, but show `N/A (no applicable sites)`
+in the table and have no sanitizer latency or overhead-ratio summary. This
+distinction matters for small MoE shapes that select register-only wave GEMVs.
+
 ## Artifacts and result checkpointing
 
 Never treat terminal output as the only record. The output directory contains a
 log and fingerprinted JSON checkpoint for every inventory, native, and mode
 cell, the trace-derived allowlist, and a final `summary.json`. A checkpoint is
 written only after the process exits successfully, its oracle passes, and (for
-an instrumented audited cell) coverage is accepted. Keep partial logs for
+an instrumented audited cell) coverage is accepted or inapplicability is proven
+as described above. Inapplicable checkpoints explicitly retain
+`coverage.accepted=false` and `coverage.applicable=false`. Keep partial logs for
 timeouts and failures.
 
 Each checkpoint retains the RocJITsu commit and dirty state as provenance.

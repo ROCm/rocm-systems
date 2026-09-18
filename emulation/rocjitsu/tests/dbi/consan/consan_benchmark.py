@@ -11,6 +11,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import statistics
 import subprocess
 import sys
@@ -448,13 +449,56 @@ def _parse_payload(output: str) -> dict[str, Any]:
     return payload
 
 
-def _coverage_summary(output: str) -> dict[str, Any]:
+def _coverage_summary(
+    output: str, kernel_allowlist: tuple[str, ...] = ()
+) -> dict[str, Any]:
     try:
         evidence = parse_coverage_evidence(output)
     except CoverageParseError as error:
         raise BenchmarkError(f"site audit evidence is invalid: {error}") from error
     verdict = evidence.verdict
     applicable = tuple(record for record in evidence.coverage if record.applicable)
+    # Zero sites is not an instrumentation pass. It can nevertheless be a
+    # completed, inapplicable benchmark when every trace-selected kernel ran
+    # and its static inventory completed without limits or failures. Requiring
+    # the exact allowlist also prevents a missing hook/selection from becoming
+    # an apparently successful N/A cell.
+    if (
+        kernel_allowlist
+        and not verdict.applicable
+        and verdict.applicable_code_objects == 0
+        and verdict.incomplete_code_objects == 0
+        and all(
+            record.analysis_complete
+            and not record.expert_limit
+            and not any(record.counts.values())
+            for record in evidence.coverage
+        )
+    ):
+        entries = re.findall(
+            r"^\[rocjitsu-dbi-hooks\] ConSan kernel allowlist entry name=(.+) "
+            r"loaded=true instrumented=false dispatches=([1-9][0-9]*) "
+            r"visible_records=0 status=loaded-not-instrumented$",
+            output,
+            re.MULTILINE,
+        )
+        names = [name for name, _ in entries]
+        entry_count = sum(
+            line.startswith("[rocjitsu-dbi-hooks] ConSan kernel allowlist entry ")
+            for line in output.splitlines()
+        )
+        if (
+            len(names) == len(set(names)) == entry_count == len(kernel_allowlist)
+            and set(names) == set(kernel_allowlist)
+        ):
+            return {
+                "accepted": False,
+                "applicable": False,
+                "reason": "no applicable LDS or synchronization sites",
+                "applicable_code_objects": 0,
+                "inventoried_code_objects": len(evidence.coverage),
+                "dispatched_kernels": sorted(names),
+            }
     reasons: list[str] = []
     if not verdict.applicable:
         reasons.append("verdict applicable=false")
@@ -668,7 +712,12 @@ def _run_one_impl(
         "log": str(log_path),
     }
     if mode is not None and audit_sites:
-        result["coverage"] = _coverage_summary(output)
+        allowlist = (
+            tuple(kernel_allowlist_file.read_text(encoding="utf-8").splitlines())
+            if kernel_allowlist_file is not None
+            else ()
+        )
+        result["coverage"] = _coverage_summary(output, allowlist)
     _atomic_write(
         checkpoint_path,
         json.dumps(
@@ -682,8 +731,13 @@ def _run_one_impl(
         )
         + "\n",
     )
-    print(f"pass {workload.id} {label} wall_ms={wall_ms:.1f}", flush=True)
-    _cell_progress(args, workload, label, mode, "accepted", result)
+    state = (
+        "not-applicable"
+        if result.get("coverage", {}).get("applicable") is False
+        else "accepted"
+    )
+    print(f"{state} {workload.id} {label} wall_ms={wall_ms:.1f}", flush=True)
+    _cell_progress(args, workload, label, mode, state, result)
     return result
 
 
@@ -831,6 +885,10 @@ def _runtime_ms(run: dict[str, Any], index: int) -> float:
 def _summarize_mode(
     run: dict[str, Any], native_runtime: tuple[float, float]
 ) -> dict[str, Any]:
+    if run.get("coverage", {}).get("applicable") is False:
+        # Keep raw observations in the cell artifact, never present no-op
+        # execution as a sanitizer performance measurement or overhead ratio.
+        return {"applicable": False, "coverage": run["coverage"]}
     runtime_ms = tuple(_runtime_ms(run, index) for index in range(2))
     instrumentation_ms = _instrumentation_ms(run, "total")
     result: dict[str, Any] = {
@@ -906,9 +964,10 @@ def _summarize_workload(
     for mode in PROFILE_IDS:
         run = modes[mode]
         mode_result = _summarize_mode(run, native_runtime)
-        mode_result["latency_ms"] = [
-            _metric(run, workload.primary_metric, run_index) for run_index in range(2)
-        ]
+        if mode_result.get("applicable") is not False:
+            mode_result["latency_ms"] = [
+                _metric(run, workload.primary_metric, run_index) for run_index in range(2)
+            ]
         result["modes"][mode] = mode_result
     return result
 
@@ -972,6 +1031,8 @@ def _render_status(summary: dict[str, Any]) -> str:
             if result is None:
                 state = workload.get("cell_states", {}).get(mode, "pending")
                 cells.extend((state, state))
+            elif result.get("applicable") is False:
+                cells.extend(("N/A (no applicable sites)", "N/A (no applicable sites)"))
             else:
                 cells.extend(
                     (

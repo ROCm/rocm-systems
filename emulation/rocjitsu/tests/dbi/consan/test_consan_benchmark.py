@@ -541,6 +541,76 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertTrue(summary["accepted"])
         self.assertFalse(summary["dynamic_complete"])
 
+    def test_zero_site_workload_is_inapplicable_only_with_dispatch_proof(self) -> None:
+        empty = coverage(**{
+            f"{kind}_{field}": "0"
+            for kind in benchmark.SITE_KINDS
+            for field in ("discovered", "supported", "selected", "patched")
+        })
+        empty_verdict = verdict(
+            applicable="false", analysis_complete="false", static_complete="false",
+            applicable_code_objects="0", access="0/0", barrier="0/0",
+            atomic="0/0", fence="0/0",
+        )
+        name = "void kernel<int, float>(int)"
+        entry = (
+            f"[rocjitsu-dbi-hooks] ConSan kernel allowlist entry name={name} "
+            "loaded=true instrumented=false dispatches=2 visible_records=0 "
+            "status=loaded-not-instrumented"
+        )
+        output = log(empty, empty_verdict, entry)
+        result = benchmark._coverage_summary(output, (name,))
+        self.assertFalse(result["accepted"])
+        self.assertFalse(result["applicable"])
+        self.assertEqual(result["dispatched_kernels"], [name])
+        self.assertEqual(result["inventoried_code_objects"], 1)
+        for bad_output, allowlist in (
+            (output, ()),
+            (output, (name, "missing")),
+            (output, ("different",)),
+            (log(empty, empty_verdict), (name,)),
+            (output.replace("dispatches=2", "dispatches=0"), (name,)),
+            (output.replace("loaded=true", "loaded=false"), (name,)),
+            (output.replace("instrumented=false", "instrumented=true"), (name,)),
+            (output.replace("expert_limit=false", "expert_limit=true"), (name,)),
+            (output.replace("analysis_complete=true", "analysis_complete=false"), (name,)),
+            (log(output, entry), (name,)),
+            (log(output, "[rocjitsu-dbi-hooks] ConSan kernel allowlist entry malformed"), (name,)),
+        ):
+            with self.subTest(output=bad_output, allowlist=allowlist):
+                with self.assertRaises(benchmark.BenchmarkError):
+                    benchmark._coverage_summary(bad_output, allowlist)
+
+    def test_applicable_sites_cannot_be_reclassified_as_inapplicable(self) -> None:
+        # Even dispatch proof must not hide a real static instrumentation gap.
+        output = log(
+            coverage(analysis_complete="false", access_patched="19",
+                     access_placement_or_lowering_failed="1"),
+            verdict(analysis_complete="false", static_complete="false",
+                    incomplete_code_objects="1", access="19/20"),
+            "[rocjitsu-dbi-hooks] ConSan kernel allowlist entry name=kernel "
+            "loaded=true instrumented=false dispatches=2 visible_records=0 "
+            "status=loaded-not-instrumented",
+        )
+        with self.assertRaises(benchmark.BenchmarkError):
+            benchmark._coverage_summary(output, ("kernel",))
+
+    def test_inapplicable_summary_and_status_do_not_claim_performance(self) -> None:
+        result = benchmark._summarize_mode(
+            {"coverage": {"accepted": False, "applicable": False}}, (1.0, 1.0)
+        )
+        self.assertNotIn("run_ratio", result)
+        self.assertNotIn("startup_ms", result)
+        status = benchmark._render_status({
+            "target": "gfx950",
+            "workloads": [{
+                "description": "no LDS", "native_runtime_ms": [1.0, 1.0],
+                "modes": {mode: result for mode in PROFILE_IDS},
+            }],
+        })
+        self.assertEqual(status.count("N/A (no applicable sites)"), 6)
+        self.assertEqual(status.count("×"), 1)  # Native baseline only.
+
     def test_coverage_summary_rejects_incomplete_static_instrumentation(self) -> None:
         with self.assertRaisesRegex(
             benchmark.BenchmarkError, "static analysis incomplete"
