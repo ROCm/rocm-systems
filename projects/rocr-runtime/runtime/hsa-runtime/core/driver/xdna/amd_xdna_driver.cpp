@@ -330,6 +330,8 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
 struct BOHandle {
   /// @brief Mapped address.
   void* vaddr = nullptr;
+  /// @brief Device address - can be 0.
+  uint64_t dev_addr = 0;
   /// @brief Handle returned by xdna, or AMDXDNA_INVALID_BO_HANDLE when this holds no BO.
   uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
   /// @brief Size in bytes.
@@ -449,6 +451,9 @@ static hsa_status_t DestroyBOHandle(int fd, const void* heap_base, BOHandle& bo_
     return ioctl_err;
   }
   bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+  // Cleared with the handle: a closed BO's address is stale, and leaving it set would let
+  // DeviceBuffer::dev_addr() hand a freed, hardware-plausible address to a dispatch.
+  bo_handle.dev_addr = 0;
 
   return unmap_err;
 }
@@ -704,10 +709,13 @@ static bool ValidDescriptor(const AieKernelDescriptor* desc) {
 struct DeviceBuffer {
   /// @brief The BO backing this allocation, owned here and closed by @ref FreeDeviceBuffers.
   BOHandle bo;
-  /// @brief Aligned pointer into @ref bo's mapping, which is what is written and dispatched.
-  void* ptr = nullptr;
-  /// @brief Device address the NPU sees for @ref ptr.
-  uint64_t dev_addr = 0;
+  /// @brief Byte offset of the aligned window from the BO's base.
+  size_t offset = 0;
+
+  /// @brief Host pointer to the aligned window, which is what is written.
+  void* ptr() const { return static_cast<uint8_t*>(bo.vaddr) + offset; }
+  /// @brief Address the NPU sees for @ref ptr, which is what is dispatched.
+  uint64_t dev_addr() const { return bo.dev_addr + offset; }
 };
 
 /// @brief Creates a device BO carved from the driver's device heap.
@@ -725,12 +733,9 @@ struct DeviceBuffer {
 /// @param[in] fd driver file descriptor
 /// @param[in] heap_base device heap mapping base, for the failure-path release
 /// @param[in] size bytes to allocate
-/// @param[out] bo the BO; left empty unless the call succeeds
-/// @param[out] dev_addr device address of @p bo's base
-static hsa_status_t CreateDevBO(int fd, const void* heap_base, size_t size, BOHandle* bo,
-                                uint64_t* dev_addr) {
+/// @param[out] bo BO information; left empty unless the call succeeds
+static hsa_status_t CreateDevBO(int fd, const void* heap_base, size_t size, BOHandle* bo) {
   *bo = BOHandle{};
-  *dev_addr = 0;
   // The heap is a fixed reservation and this path bypasses MemoryRegion's accounting, so the
   // bound it would have applied is applied here instead.
   if (size == 0 || size > XdnaDriver::GetDevHeapByteSize()) {
@@ -760,10 +765,10 @@ static hsa_status_t CreateDevBO(int fd, const void* heap_base, size_t size, BOHa
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   tmp.vaddr = reinterpret_cast<void*>(info.vaddr);
+  tmp.dev_addr = info.xdna_addr;
 
   tmp_guard.Dismiss();
   *bo = tmp;
-  *dev_addr = info.xdna_addr;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -788,14 +793,13 @@ static hsa_status_t AllocAlignedDeviceBuffer(int fd, const void* heap_base, size
   }
 
   BOHandle bo;
-  uint64_t dev_addr = 0;
-  const hsa_status_t err = CreateDevBO(fd, heap_base, size + align, &bo, &dev_addr);
+  const hsa_status_t err = CreateDevBO(fd, heap_base, size + align, &bo);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
 
-  const uint64_t aligned_dev_addr = AlignUp(dev_addr, align);
-  const size_t offset = static_cast<size_t>(aligned_dev_addr - dev_addr);
+  const uint64_t aligned_dev_addr = AlignUp(bo.dev_addr, align);
+  const size_t offset = static_cast<size_t>(aligned_dev_addr - bo.dev_addr);
   if (offset + size > bo.size) {
     // Only reachable if the allocator handed back less than was asked for.
     DestroyBOHandle(fd, heap_base, bo);
@@ -803,8 +807,7 @@ static hsa_status_t AllocAlignedDeviceBuffer(int fd, const void* heap_base, size
   }
 
   out->bo = bo;
-  out->ptr = static_cast<uint8_t*>(bo.vaddr) + offset;
-  out->dev_addr = aligned_dev_addr;
+  out->offset = offset;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1863,7 +1866,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
 
   // Always from pristine: PatchShimDma48 adds to what is already there, so patching over a
   // previous result would accumulate.
-  std::memcpy(ctrl.ptr, desc->ctrl_code.data(), desc->ctrl_code.size());
+  std::memcpy(ctrl.ptr(), desc->ctrl_code.data(), desc->ctrl_code.size());
 
   // The PDI's device address. A BO's device address is fixed for its lifetime, so resolve it on
   // the first dispatch and cache it on the descriptor rather than paying an ioctl per dispatch.
@@ -1884,7 +1887,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // fold, but it still goes into the fresh copy rather than the pristine one.
   const uint32_t pdi_addr_lo = static_cast<uint32_t>(pdi_dev_addr & 0xFFFFFFFFu);
   const uint32_t pdi_addr_hi = static_cast<uint32_t>(pdi_dev_addr >> 32);
-  auto* pdi_site = static_cast<uint8_t*>(ctrl.ptr) + desc->pdi_patch_offset;
+  auto* pdi_site = static_cast<uint8_t*>(ctrl.ptr()) + desc->pdi_patch_offset;
   std::memcpy(pdi_site, &pdi_addr_lo, sizeof(pdi_addr_lo));
   std::memcpy(pdi_site + sizeof(pdi_addr_lo), &pdi_addr_hi, sizeof(pdi_addr_hi));
 
@@ -1892,11 +1895,11 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   for (size_t arg = 0; arg < desc->arg_sites.size(); ++arg) {
     for (const aie_elf::PatchSite& site : desc->arg_sites[arg]) {
       aie_elf::PatchShimDma48(
-          reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl.ptr) + site.offset),
+          reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl.ptr()) + site.offset),
           kernarg_address[arg] + site.addend);
     }
   }
-  FlushCpuCache(ctrl.ptr, 0, desc->ctrl_code.size());
+  FlushCpuCache(ctrl.ptr(), 0, desc->ctrl_code.size());
 
   bo_handles->push_back(ctrl.bo.handle);
   // The PDI is reached only through the address written into the control code above, so the
@@ -1918,7 +1921,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // The payload starts after the CU mask, which is data[0]; that puts it at byte offset 8 in a
   // page-aligned command BO, so the 64-bit fields below are aligned.
   auto* npu = reinterpret_cast<ert_npu_preempt_data*>(&cmd->data[1]);
-  npu->instruction_buffer = ctrl.dev_addr;
+  npu->instruction_buffer = ctrl.dev_addr();
   npu->instruction_buffer_size = static_cast<uint32_t>(desc->ctrl_code.size());
   // The save and restore buffers and the property count are left zero. This design has no
   // preemption sections, and aie2p firmware accepts null preemption buffers.
