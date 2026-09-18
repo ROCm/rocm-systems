@@ -268,10 +268,11 @@ table TopologyDef {
 // ---------------------------------------------------------------------------
 
 /// Preferred host execution allocation. D includes the submitting caller;
-/// cost across G GPUs is E + G * (D - 1).
+/// cost across G GPUs is E + G * (D - 1) + H.
 table ExecutionThreadChoice {
   num_threads: uint32 = 1;
   cpu_dispatch_threads: uint32 = 1;
+  async_helper_threads: uint32;
 }
 
 /// Top-level simulation configuration.
@@ -289,12 +290,16 @@ table SimulationConfig {
   // not a modeled GPU resource: changing the width must preserve the observable
   // result of race-free workloads.
   cpu_dispatch_threads: uint32 = 1;
-  // Total engine + retained dispatch-worker budget.
-  // 0/omitted uses min(process CPU affinity, 32). Nonzero overrides that default.
+  // Total engine + retained dispatch-worker + shared async-helper budget.
+  // 0/omitted uses affinity, keeping engine/dispatch cost at most 32.
+  // Preset helpers are additive, up to 48 total. Nonzero overrides the budget.
   cpu_thread_budget: uint32;
   // Ordered preferred allocations. Select the largest fitting effective cost.
   // Omission falls back to serial execution; explicit knobs still apply.
   thread_allocations: [ExecutionThreadChoice];
+  // Shared async helpers across this VM. -1 selects the table; zero disables.
+  // Append after thread_allocations to preserve existing checkpoint field IDs.
+  async_helper_threads: int32 = -1;
 }
 
 root_type SimulationConfig;

@@ -5503,7 +5503,7 @@ def test_cdna5_variant_execution_callback_inventory(
         '\n}', 1
     )[0]
     assert 'const auto reg = operand.to_register_ref();' in u32_read_helper
-    assert 'if (reg && reg->cls == RegClass::SGPR)' in u32_read_helper
+    assert 'if (!reg || reg->cls != RegClass::VGPR)' in u32_read_helper
     assert 'read_lane(operand, lane)' in u32_read_helper
     assert 'read_lane_pair32(operand, lane)' in u32_read_helper
 

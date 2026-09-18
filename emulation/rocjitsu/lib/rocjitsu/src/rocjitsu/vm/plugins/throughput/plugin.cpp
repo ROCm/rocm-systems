@@ -72,6 +72,12 @@ double nanoseconds_to_seconds(uint64_t nanoseconds) {
   return static_cast<double>(nanoseconds) / 1.0e9;
 }
 
+InstructionFamily count_instruction(ThroughputWavefrontState &state, const Instruction &inst) {
+  const InstructionFamily family = ThroughputPlugin::classify(inst);
+  ++state.counts[family_index(family)];
+  return family;
+}
+
 } // namespace
 
 ThroughputPlugin::ThroughputPlugin(const char * /*config_json*/) : ExecutionPlugin("throughput") {}
@@ -160,13 +166,19 @@ void ThroughputPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                         amdgpu::Wavefront &wf) {
   auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
-  const InstructionFamily family = classify(inst);
-  ++state->counts[family_index(family)];
+  const InstructionFamily family = count_instruction(*state, inst);
   state->active_family = family;
   // Start after classification and accounting so their profiler cost is not
   // charged to the simulated instruction.
   state->instruction_begin = Clock::now();
   state->instruction_active = true;
+}
+
+void ThroughputPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
+                                                      amdgpu::Wavefront &wf) {
+  auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
+  const size_t family = family_index(count_instruction(*state, inst));
+  ++state->untimed_instructions[family];
 }
 
 void ThroughputPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/,
@@ -185,6 +197,7 @@ void ThroughputPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   auto &dispatch = dispatches_[wf.dispatch_id()];
   add(dispatch.counts, state->counts);
   add(dispatch.execution_nanoseconds, state->execution_nanoseconds);
+  add(dispatch.untimed_instructions, state->untimed_instructions);
 }
 
 void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
@@ -195,10 +208,12 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
 
   DispatchState &state = iter->second;
   const double wall_seconds = state.begun ? seconds_between(state.begin, end) : 0.0;
-  emit_record("dispatch", &state.info, state.counts, state.execution_nanoseconds, wall_seconds);
+  emit_record("dispatch", &state.info, state.counts, state.execution_nanoseconds,
+              state.untimed_instructions, wall_seconds);
 
   add(aggregate_counts_, state.counts);
   add(aggregate_execution_nanoseconds_, state.execution_nanoseconds);
+  add(aggregate_untimed_instructions_, state.untimed_instructions);
   dispatch_seconds_sum_ += wall_seconds;
   ++completed_dispatches_;
   if (!have_active_window_) {
@@ -216,13 +231,14 @@ void ThroughputPlugin::onShutdown() {
     return;
   summary_emitted_ = true;
   const double wall_seconds = have_active_window_ ? seconds_between(first_begin_, last_end_) : 0.0;
-  emit_record("summary", nullptr, aggregate_counts_, aggregate_execution_nanoseconds_, wall_seconds,
-              dispatch_seconds_sum_);
+  emit_record("summary", nullptr, aggregate_counts_, aggregate_execution_nanoseconds_,
+              aggregate_untimed_instructions_, wall_seconds, dispatch_seconds_sum_);
 }
 
 void ThroughputPlugin::emit_record(std::string_view record, const KernelDispatchInfo *info,
                                    const InstructionCounts &counts,
                                    const InstructionNanoseconds &execution_nanoseconds,
+                                   const UntimedInstructions &untimed_instructions,
                                    double wall_seconds, double dispatch_seconds_sum) {
   const uint64_t instruction_count = total(counts);
   std::string output =
@@ -248,11 +264,15 @@ void ThroughputPlugin::emit_record(std::string_view record, const KernelDispatch
     if (i != 0)
       output += ',';
     const double execution_seconds = nanoseconds_to_seconds(execution_nanoseconds[i]);
-    output +=
-        std::format("\"{}\":{{\"instructions\":{},\"execution_seconds\":{:.9g},"
-                    "\"execution_mips\":{:.9g},\"dispatch_mips\":{:.9g}}}",
-                    family_name(static_cast<InstructionFamily>(i)), counts[i], execution_seconds,
-                    mips(counts[i], execution_seconds), mips(counts[i], wall_seconds));
+    const bool complete = untimed_instructions[i] == 0;
+    output += std::format(
+        "\"{}\":{{\"instructions\":{},\"untimed_instructions\":{},"
+        "\"execution_timing_valid\":{},\"execution_seconds\":{},"
+        "\"execution_mips\":{},\"dispatch_mips\":{:.9g}}}",
+        family_name(static_cast<InstructionFamily>(i)), counts[i], untimed_instructions[i],
+        complete, complete ? std::format("{:.9g}", execution_seconds) : "null",
+        complete ? std::format("{:.9g}", mips(counts[i], execution_seconds)) : "null",
+        mips(counts[i], wall_seconds));
   }
   output += "}}\n";
   sink().write(output);

@@ -22,9 +22,11 @@ enum class ExternalEntryPolicy : uint8_t {
   /// This preserves conservative recovery when callers do not have a complete
   /// list of entries for all functions sharing one .text section.
   InferPredecessorless,
-  /// Treat only section entry and caller-supplied leaders as external entries.
+  /// Treat only caller-supplied leaders as external entries, including the first block
+  /// only when it appears in that list.
   /// Callers may use this when their supplied leader list contains every
-  /// externally reachable entry; other predecessorless blocks remain unreachable.
+  /// externally reachable entry; other predecessorless blocks remain unreachable
+  /// unless separately supplied as non-external analysis roots.
   ExplicitOnly,
 };
 
@@ -188,11 +190,18 @@ struct PcAddressBuilder {
 /// @param extra_split_points Offsets that must start a block without being treated as external
 ///        entries. Function-entry symbols and stored-pointer targets belong here: they are real
 ///        boundaries, but most of them are ordinary helpers their callers reach by a decoded edge.
+/// @param analysis_root_offsets Additional decoded block roots for dataflow reachability.
+///        These split blocks and enable cross-block discovery in independent decode-seed
+///        closures. Unlike external entries, they do not inject unconstrained SGPRs or
+///        an initial lane/banking state, and do not weaken existing predecessor facts.
+///        Offsets without a decoded instruction are ignored. Pure split points do not
+///        enable reachability. Empty preserves the existing external-entry policy.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders = {},
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
     std::vector<PcAddressBuilder> *pc_builders = nullptr,
-    std::span<const uint64_t> extra_split_points = {});
+    std::span<const uint64_t> extra_split_points = {},
+    std::span<const uint64_t> analysis_root_offsets = {});
 
 } // namespace rocjitsu
