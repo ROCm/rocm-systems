@@ -14,11 +14,22 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # p2p.cc
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      # ras/client.cc
       - "RasClientMicrotest.*"
+      # rma/rma_proxy_launch.cc
+      - "RmaProxyBatchMemOpTest.*"
+      - "RmaProxyDescriptorTest.*"
+      - "RmaProxyLaunchTest.*"
+      - "RmaProxyQueueTest.*"
+      - "RmaProxyParamsTest.*"
+      - "RmaProxyReclaimTest.*"
+      # rma/rma_proxy_progress.cc
       - "RmaProxyProgressTest.*"
+      # rma/rma_ce.cc
       - "RmaCeLaunchTest.*"
       - "RmaCeInitTest.*"
       - "RmaCeFinalizeTest.*"
@@ -26,6 +37,7 @@ test_categories:
       - "RmaCeNonPersistTest.*"
       - "RmaCePersistTest.*"
       - "RmaCeWaitLaunchTest.*"
+      # rma/rma.cc
       - "RmaWaitSignalTest.*"
       - "RmaPutTest.*"
       - "RmaLaunchTest.*"
@@ -33,9 +45,12 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # group.cc
       - "GroupEndInternalTest.*"
+      # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
+      # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
       - "Compute*"

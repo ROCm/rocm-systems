@@ -46,6 +46,7 @@ unset(_rccl_src_root)
 
 set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
+  rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
   rma-test.cc                          # RMA launch dispatch + plan scheduling coverage
   rma-ce-test.cc                       # RMA CE init/finalize + put/wait launch coverage
@@ -150,6 +151,7 @@ if(BUILD_TESTS)
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
+    RMA_PROXY_LAUNCH_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
@@ -842,6 +844,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
+  RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   RMA_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_tmp.cc"
   RMA_CE_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_ce.cc"
