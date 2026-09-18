@@ -23,14 +23,28 @@ by its ratio to the matching uninstrumented second run.
 
 ## Completion run (September 18, 2026)
 
-Only the three incomplete rows are being rerun: synthetic decode, synthetic
-MoE prefill, and TokenSpeed BF16 MoE. The previous artifact directory is not
-present on this host; fresh native references will therefore accompany each
-row so its ratios use matching inputs and software. Completed rows above are
-preserved. Rebuilding ConSan alone does not invalidate them for this run, per
-the accepted campaign policy.
+Only the three previously incomplete rows were rerun: synthetic decode,
+synthetic MoE prefill, and TokenSpeed BF16 MoE. All their cells are now complete;
+all ten previously complete rows are preserved. The previous artifact directory
+is absent on this host, so each rerun uses fresh, matching native references.
+The venv uses TheRock `10.2.0a20260918` and matching PyTorch, with the original
+pinned TokenSpeed/Aorta sources. The ConSan hook binary was unchanged.
 
-Preparation complete: PyTorch matches the existing TheRock
-`10.2.0a20260918` venv; TokenSpeed/Aorta use the original pinned sources.
-The selected rows run serially, with cell transitions committed below.
-New artifacts live under `/home/benjacob/work/consan-benchmark-gfx950-20260918/`.
+TokenSpeed BF16 MoE is **N/A in all three modes**: every selected kernel loaded
+and dispatched, all static inventories completed with zero applicable sites,
+and all numerical checks passed. Its small shape selects register-only wave
+GEMVs. These outcomes are not sanitizer performance measurements.
+
+Final native Run drift was **−1.02%** for synthetic decode, **+9.46%** for
+synthetic MoE, and **−0.72%** for TokenSpeed MoE. Synthetic MoE's initial native
+Run samples were **2.95–3.55 s**, with a final sample of **3.56 s**. Its Default
+Mode and SuperCollider ratios fall within that variation; the SuperCollider
+ratio below 1× is **not evidence of a speedup**. High mode's measured costs
+(17.9 s for decode and 43.2 s for synthetic MoE) remain reported as observed.
+
+The [completion run notes](GFX950.md#september-18-completion-run) explain the
+classification fix, provenance, and timing limitations. New artifacts are under
+`/home/benjacob/work/consan-benchmark-gfx950-20260918/`. The
+[completion audit](</home/benjacob/work/consan-benchmark-prerequisites-20260918/completion-audit.json>)
+verified all 21 new checkpoints against their logs, recomputed the table values,
+and confirmed that the completed historical rows and hook hash were unchanged.
