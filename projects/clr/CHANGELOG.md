@@ -2,14 +2,6 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10.2.0 for ROCm 10.2.0
-
-### Added
-* An optional `HIP_FORCE_API_VERSION` macro can be used to select an older version of the HIP APIs. For example, `HIP_FORCE_API_VERSION=600` selects the HIP 6.0 APIs. This macro must be defined before including `hip_runtime_api.h`.
-
-### Changed
-* `hipMemAdvise` is now an alias for `hipMemAdvise_v2`. To use the previous version of `hipMemAdvise`, define `HIP_FORCE_API_VERSION` as a non-zero value less than 800.
-
 ## HIP 10.1.0 for ROCm 10.1.0
 
 ### Added
