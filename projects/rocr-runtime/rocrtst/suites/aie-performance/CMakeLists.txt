@@ -271,44 +271,66 @@ if(AIE_FULL_ELF_SUPPORTED)
 endif()
 
 # ---------------------------------------------------------------------------
+# hsaco packaging
+#
+# Both HSA benchmarks dispatch by kernel object, so each needs an hsaco rather than the raw
+# artifacts. aie_hsaco.py names sections by architecture, which is what the loader matches against
+# the agent; NPU_TARGET is the aiecc spelling of the same thing. PDI+insts works on either
+# architecture, so this mapping is not gated on full-ELF support.
+# ---------------------------------------------------------------------------
+if(NPU_TARGET STREQUAL "npu2")
+  set(AIE_ARCH "aie2p")
+else()
+  set(AIE_ARCH "aie2")
+endif()
+set(AIE_HSACO_PY "${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py")
+
+# ---------------------------------------------------------------------------
 # HSA PDI/insts benchmark
 # ---------------------------------------------------------------------------
+
+# vsadd's kernarg buffer is 2 pointers + 2 sizes; the design uses a single NPU column.
+set(PDI_HSACO_KERNEL_NAME "vsadd")
+set(PDI_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd.hsaco")
+add_custom_command(
+  OUTPUT "${PDI_HSACO}"
+  COMMAND "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
+          --hsaco "${PDI_HSACO}" --arch "${AIE_ARCH}"
+          --kernel "${PDI_HSACO_KERNEL_NAME}:${INSTS_BIN}:${DESIGN_PDI}:32:1"
+  # Depend on the target, not its outputs: two custom commands racing aiecc in one build
+  # directory produce concurrent runs that clobber each other's intermediates.
+  DEPENDS aie_kernel_artifacts "${AIE_HSACO_PY}"
+  COMMENT "Packaging the vsadd PDI+insts artifacts into an hsaco for the benchmark"
+  VERBATIM)
+add_custom_target(vsadd_pdi_hsaco_bench DEPENDS "${PDI_HSACO}")
 
 add_executable(vector-scalar-add-hsa vector_scalar_add_hsa.cpp)
 target_compile_features(vector-scalar-add-hsa PRIVATE cxx_std_20)
 target_compile_definitions(vector-scalar-add-hsa PRIVATE
-  DEFAULT_PDI_PATH=${DESIGN_PDI}
-  DEFAULT_INSTS_PATH=${INSTS_BIN}
+  DEFAULT_HSACO_PATH=${PDI_HSACO}
+  DEFAULT_HSACO_KERNEL_NAME="${PDI_HSACO_KERNEL_NAME}"
 )
 target_link_libraries(vector-scalar-add-hsa PRIVATE
   benchmark::benchmark_main
   hsa-runtime64::hsa-runtime64
 )
-add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts)
+add_dependencies(vector-scalar-add-hsa vsadd_pdi_hsaco_bench)
 
 # ---------------------------------------------------------------------------
 # HSA full-ELF benchmark
 # ---------------------------------------------------------------------------
 
 if(AIE_FULL_ELF_SUPPORTED)
-  # The application dispatches by kernel object now, so it needs an hsaco rather than a bare ELF.
-  # Packaged by the same converter the aie suite uses; DEPENDS names the target, not its outputs,
-  # so the generator cannot run aiecc twice concurrently in one directory.
-  # The converter names sections by architecture, which is what the loader matches against the
-  # agent; NPU_TARGET is the aiecc spelling of the same thing.
-  if(NPU_TARGET STREQUAL "npu2")
-    set(AIE_ARCH "aie2p")
-  else()
-    set(AIE_ARCH "aie2")
-  endif()
+  # The application dispatches by kernel object, so it needs an hsaco rather than a bare ELF.
   set(ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
   add_custom_command(
-    OUTPUT ${ELF_HSACO}
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py
-            --hsaco ${ELF_HSACO} --arch ${AIE_ARCH}
-            --kernel elf:${FULL_ELF}:0:1
-    DEPENDS aie_full_elf ${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py
-    COMMENT "Packaging the full ELF into an hsaco for the benchmark")
+    OUTPUT "${ELF_HSACO}"
+    COMMAND "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
+            --hsaco "${ELF_HSACO}" --arch "${AIE_ARCH}"
+            --kernel "elf:${FULL_ELF}:0:1"
+    DEPENDS aie_full_elf "${AIE_HSACO_PY}"
+    COMMENT "Packaging the full ELF into an hsaco for the benchmark"
+    VERBATIM)
   add_custom_target(vsadd_elf_hsaco_bench DEPENDS ${ELF_HSACO})
 
   add_executable(vector-scalar-add-hsa-elf vector_scalar_add_hsa_elf.cpp)
