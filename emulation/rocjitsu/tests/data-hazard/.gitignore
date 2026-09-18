@@ -1,0 +1,9 @@
+# The mutation harness copies its results into the directory it is run from,
+# which is usually this one.
+mutation_report.json
+mutation_report.csv
+mutation_report.md
+benchmark_report.json
+flamegraph.svg
+data_hazard_report_*.json
+__pycache__/

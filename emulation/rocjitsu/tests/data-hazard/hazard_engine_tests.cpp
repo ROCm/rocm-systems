@@ -1,0 +1,3719 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include <gtest/gtest.h>
+
+#include "data_hazard_engine.h"
+
+#include <array>
+#include <limits>
+#include <set>
+#include <stdexcept>
+
+using namespace hazard_core;
+
+namespace {
+
+using hazard_core::EntityId;
+using hazard_core::WaitCntType;
+
+class FakeFormatter final : public SimulatorInstructionFormatter {
+public:
+  std::string format_instruction(const InstructionDescriptor &instruction) const override {
+    return "fake_inst_" + std::to_string(instruction.instruction_id);
+  }
+
+  /// Overrides one combination only, so the tests below see the shared wording
+  /// everywhere else.
+  std::string format_wait_suggestion(WaitCntType kind, HazardAccessKind access,
+                                     hazard_core::HazardResourceLabel resource) const override {
+    if (kind == WaitCntType::VMEM && access == HazardAccessKind::Read &&
+        resource == hazard_core::HazardResourceLabel::Register)
+      return "fake wait vector-load";
+    return "";
+  }
+};
+
+InstructionDescriptor make_instruction(EntityId id, uint64_t pc) {
+  InstructionDescriptor instruction;
+  instruction.instruction_id = id;
+  instruction.pc = pc;
+  instruction.execution.dispatch_id = 1;
+  instruction.execution.cluster_id = 0;
+  instruction.execution.workgroup_id = 0;
+  instruction.execution.wave_id = 0;
+  return instruction;
+}
+
+DataHazardEngine &reset_generic_engine(FakeFormatter &formatter) {
+  auto &engine = data_hazard_engine();
+  engine.reset();
+  engine.set_instruction_formatter(&formatter);
+  engine.set_warning_sink(nullptr);
+  engine.on_dispatch_begin(1);
+  return engine;
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, DetectsRawHazardFromGenericEvents) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].suggestion, "fake wait vector-load");
+}
+
+TEST(GenericDataHazardEngineTest, PendingVgprWriteDoesNotHazardUnrelatedAccRead) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 0;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent acc_read;
+  acc_read.instruction = read.instruction;
+  acc_read.resource_kind = ResourceKind::AccumVectorRegister;
+  acc_read.register_kind = RegisterKind::AccumVector;
+  acc_read.resource_index = 0;
+  acc_read.size_bytes = 4;
+  acc_read.is_read = true;
+  engine.on_resource_access(acc_read);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, DetectsVectorRawInsideMultiDwordReadRange) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 5;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 8;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.resource_index, 5u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v5"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, DoesNotInferVectorWriteWaitFromPriorMemoryRead) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load_without_semantics;
+  load_without_semantics.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(load_without_semantics);
+
+  ResourceAccessEvent memory_read;
+  memory_read.instruction = load_without_semantics.instruction;
+  memory_read.resource_kind = ResourceKind::GlobalMemory;
+  memory_read.address = 0x2000;
+  memory_read.size_bytes = 4;
+  memory_read.is_read = true;
+  engine.on_resource_access(memory_read);
+
+  ResourceAccessEvent vector_write;
+  vector_write.instruction = load_without_semantics.instruction;
+  vector_write.resource_kind = ResourceKind::VectorRegister;
+  vector_write.register_kind = RegisterKind::Vector;
+  vector_write.resource_index = 6;
+  vector_write.size_bytes = 4;
+  vector_write.is_write = true;
+  engine.on_resource_access(vector_write);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 6;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, ResourceLevelVectorWriteWaitDetectsRawHazard) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 6;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  load_write.hazards.write_wait = WaitCntType::VMEM;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 6;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::VMEM);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, ResourceEventsCanCarryInstructionContextWithoutInstructionEvent) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionDescriptor load = make_instruction(1, 0x100);
+  load.raw_isa[0] = 0xABCD;
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 6;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  load_write.hazards.write_wait = WaitCntType::VMEM;
+  engine.on_resource_access(load_write);
+
+  InstructionDescriptor read = make_instruction(2, 0x104);
+  read.raw_isa[0] = 0x1234;
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 6;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.instruction.pc, 0x104u);
+  EXPECT_EQ(warnings[0].finding.instruction.raw_isa[0], 0x1234u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x100u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0xABCDu);
+}
+
+TEST(GenericDataHazardEngineTest, ResourceLevelVectorReadWaitDetectsWarHazard) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent store;
+  store.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(store);
+
+  ResourceAccessEvent source_read;
+  source_read.instruction = store.instruction;
+  source_read.resource_kind = ResourceKind::VectorRegister;
+  source_read.register_kind = RegisterKind::Vector;
+  source_read.resource_index = 7;
+  source_read.size_bytes = 4;
+  source_read.is_read = true;
+  source_read.hazards.read_wait = WaitCntType::STORE;
+  engine.on_resource_access(source_read);
+
+  InstructionEvent overwrite;
+  overwrite.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(overwrite);
+
+  ResourceAccessEvent vector_write;
+  vector_write.instruction = overwrite.instruction;
+  vector_write.resource_kind = ResourceKind::VectorRegister;
+  vector_write.register_kind = RegisterKind::Vector;
+  vector_write.resource_index = 7;
+  vector_write.size_bytes = 4;
+  vector_write.is_write = true;
+  engine.on_resource_access(vector_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAR);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::STORE);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, ReportsVectorAndScalarWawForSameInstructionAndRegisterIndex) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent vector_load;
+  vector_load.instruction = make_instruction(1, 0x100);
+  vector_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(vector_load);
+
+  ResourceAccessEvent pending_vgpr_write;
+  pending_vgpr_write.instruction = vector_load.instruction;
+  pending_vgpr_write.resource_kind = ResourceKind::VectorRegister;
+  pending_vgpr_write.register_kind = RegisterKind::Vector;
+  pending_vgpr_write.resource_index = 7;
+  pending_vgpr_write.size_bytes = 4;
+  pending_vgpr_write.is_write = true;
+  engine.on_resource_access(pending_vgpr_write);
+
+  InstructionEvent scalar_load;
+  scalar_load.instruction = make_instruction(2, 0x104);
+  scalar_load.hazards.scalar_write_wait = WaitCntType::SMEM;
+  engine.on_instruction(scalar_load);
+
+  ResourceAccessEvent pending_sgpr_write;
+  pending_sgpr_write.instruction = scalar_load.instruction;
+  pending_sgpr_write.resource_kind = ResourceKind::ScalarRegister;
+  pending_sgpr_write.register_kind = RegisterKind::Scalar;
+  pending_sgpr_write.resource_index = 7;
+  pending_sgpr_write.size_bytes = 4;
+  pending_sgpr_write.is_write = true;
+  engine.on_resource_access(pending_sgpr_write);
+
+  InstructionEvent overwrite;
+  overwrite.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(overwrite);
+
+  ResourceAccessEvent vgpr_overwrite;
+  vgpr_overwrite.instruction = overwrite.instruction;
+  vgpr_overwrite.resource_kind = ResourceKind::VectorRegister;
+  vgpr_overwrite.register_kind = RegisterKind::Vector;
+  vgpr_overwrite.resource_index = 7;
+  vgpr_overwrite.size_bytes = 4;
+  vgpr_overwrite.is_write = true;
+  engine.on_resource_access(vgpr_overwrite);
+
+  ResourceAccessEvent sgpr_overwrite;
+  sgpr_overwrite.instruction = overwrite.instruction;
+  sgpr_overwrite.resource_kind = ResourceKind::ScalarRegister;
+  sgpr_overwrite.register_kind = RegisterKind::Scalar;
+  sgpr_overwrite.resource_index = 7;
+  sgpr_overwrite.size_bytes = 4;
+  sgpr_overwrite.is_write = true;
+  engine.on_resource_access(sgpr_overwrite);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+
+  uint32_t vector_waw_count = 0;
+  uint32_t scalar_waw_count = 0;
+  for (const auto &warning : warnings) {
+    if (warning.finding.kind != HazardKind::WAW || warning.finding.resource_index != 7u)
+      continue;
+    if (warning.finding.resource_kind == ResourceKind::VectorRegister)
+      ++vector_waw_count;
+    if (warning.finding.resource_kind == ResourceKind::ScalarRegister)
+      ++scalar_waw_count;
+  }
+
+  EXPECT_EQ(vector_waw_count, 1u);
+  EXPECT_EQ(scalar_waw_count, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, MergesStagedInstructionSemanticsWithExistingIdentity) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent decoded_instruction;
+  decoded_instruction.instruction = make_instruction(1, 0x100);
+  decoded_instruction.instruction.raw_isa[0] = 0xDEADBEEF;
+  engine.on_instruction(decoded_instruction);
+
+  InstructionEvent memory_route_update;
+  memory_route_update.instruction = make_instruction(1, 0);
+  memory_route_update.hazards.vector_write_wait = WaitCntType::VMEM;
+  memory_route_update.hazards.vector_write_also_waits_lds = true;
+  engine.on_instruction(memory_route_update);
+
+  ResourceAccessEvent vector_dest;
+  vector_dest.instruction = memory_route_update.instruction;
+  vector_dest.resource_kind = ResourceKind::VectorRegister;
+  vector_dest.register_kind = RegisterKind::Vector;
+  vector_dest.resource_index = 6;
+  vector_dest.size_bytes = 4;
+  vector_dest.is_write = true;
+  engine.on_resource_access(vector_dest);
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(snapshot->core.pending_vgpr_writes.count(6), 1u);
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes.at(6).pc, 0x100u);
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes_ds.count(6), 1u);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 6;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x100u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0xDEADBEEF);
+}
+
+TEST(GenericDataHazardEngineTest, SupportsOperandAccessesBeforeRouteSemanticUpdate) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent first_load;
+  first_load.instruction = make_instruction(1, 0x100);
+  first_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(first_load);
+
+  ResourceAccessEvent first_dest;
+  first_dest.instruction = first_load.instruction;
+  first_dest.resource_kind = ResourceKind::VectorRegister;
+  first_dest.register_kind = RegisterKind::Vector;
+  first_dest.resource_index = 4;
+  first_dest.size_bytes = 4;
+  first_dest.is_write = true;
+  engine.on_resource_access(first_dest);
+
+  InstructionEvent routed_load_identity;
+  routed_load_identity.instruction = make_instruction(2, 0x104);
+  routed_load_identity.instruction.raw_isa[0] = 0xFEEDFACE;
+  engine.on_instruction(routed_load_identity);
+
+  ResourceAccessEvent early_source_read;
+  early_source_read.instruction = routed_load_identity.instruction;
+  early_source_read.resource_kind = ResourceKind::VectorRegister;
+  early_source_read.register_kind = RegisterKind::Vector;
+  early_source_read.resource_index = 4;
+  early_source_read.size_bytes = 4;
+  early_source_read.is_read = true;
+  engine.on_resource_access(early_source_read);
+
+  ResourceAccessEvent early_dest_write;
+  early_dest_write.instruction = routed_load_identity.instruction;
+  early_dest_write.resource_kind = ResourceKind::VectorRegister;
+  early_dest_write.register_kind = RegisterKind::Vector;
+  early_dest_write.resource_index = 6;
+  early_dest_write.size_bytes = 4;
+  early_dest_write.is_write = true;
+  engine.on_resource_access(early_dest_write);
+
+  auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes.count(6), 0u);
+
+  InstructionEvent route_semantics;
+  route_semantics.instruction = make_instruction(2, 0);
+  route_semantics.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(route_semantics);
+
+  ResourceAccessEvent routed_dest_write = early_dest_write;
+  engine.on_resource_access(routed_dest_write);
+
+  snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(snapshot->core.pending_vgpr_writes.count(6), 1u);
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes.at(6).pc, 0x104u);
+
+  InstructionEvent later_read;
+  later_read.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(later_read);
+
+  ResourceAccessEvent later_read_access;
+  later_read_access.instruction = later_read.instruction;
+  later_read_access.resource_kind = ResourceKind::VectorRegister;
+  later_read_access.register_kind = RegisterKind::Vector;
+  later_read_access.resource_index = 6;
+  later_read_access.size_bytes = 4;
+  later_read_access.is_read = true;
+  engine.on_resource_access(later_read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.instruction_id, 2u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.pc, 0x104u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.raw_isa[0], 0xFEEDFACE);
+}
+
+TEST(GenericDataHazardEngineTest, RocjitsuStyleRouteReplayDoesNotDuplicateDestinationHazards) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent first_load;
+  first_load.instruction = make_instruction(1, 0x100);
+  first_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(first_load);
+
+  ResourceAccessEvent first_dest;
+  first_dest.instruction = first_load.instruction;
+  first_dest.resource_kind = ResourceKind::VectorRegister;
+  first_dest.register_kind = RegisterKind::Vector;
+  first_dest.resource_index = 8;
+  first_dest.size_bytes = 4;
+  first_dest.is_write = true;
+  engine.on_resource_access(first_dest);
+
+  InstructionEvent routed_load_identity;
+  routed_load_identity.instruction = make_instruction(2, 0x104);
+  routed_load_identity.instruction.raw_isa[0] = 0xFEEDFACE;
+  engine.on_instruction(routed_load_identity);
+
+  ResourceAccessEvent early_dest_write;
+  early_dest_write.instruction = routed_load_identity.instruction;
+  early_dest_write.resource_kind = ResourceKind::VectorRegister;
+  early_dest_write.register_kind = RegisterKind::Vector;
+  early_dest_write.resource_index = 8;
+  early_dest_write.size_bytes = 4;
+  early_dest_write.is_write = true;
+  engine.on_resource_access(early_dest_write);
+
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+
+  InstructionEvent route_semantics;
+  route_semantics.instruction = make_instruction(2, 0);
+  route_semantics.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(route_semantics);
+
+  ResourceAccessEvent routed_dest_write = early_dest_write;
+  engine.on_resource_access(routed_dest_write);
+
+  warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+
+  engine.on_resource_access(routed_dest_write);
+
+  warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+
+  auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(snapshot->core.pending_vgpr_writes.count(8), 1u);
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes.at(8).instruction_id, 2u);
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes.at(8).pc, 0x104u);
+
+  InstructionEvent later_read;
+  later_read.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(later_read);
+
+  ResourceAccessEvent later_read_access;
+  later_read_access.instruction = later_read.instruction;
+  later_read_access.resource_kind = ResourceKind::VectorRegister;
+  later_read_access.register_kind = RegisterKind::Vector;
+  later_read_access.resource_index = 8;
+  later_read_access.size_bytes = 4;
+  later_read_access.is_read = true;
+  engine.on_resource_access(later_read_access);
+
+  warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[1].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[1].finding.source_instruction.instruction_id, 2u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.pc, 0x104u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.raw_isa[0], 0xFEEDFACE);
+}
+
+TEST(GenericDataHazardEngineTest, SemanticUpdateDoesNotReplayExistingWaitAction) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(2, 0x104);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(wait);
+
+  InstructionEvent second_load;
+  second_load.instruction = make_instruction(3, 0x108);
+  second_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(second_load);
+
+  ResourceAccessEvent second_write;
+  second_write.instruction = second_load.instruction;
+  second_write.resource_kind = ResourceKind::VectorRegister;
+  second_write.register_kind = RegisterKind::Vector;
+  second_write.resource_index = 4;
+  second_write.size_bytes = 4;
+  second_write.is_write = true;
+  engine.on_resource_access(second_write);
+
+  InstructionEvent semantic_only_wait_update;
+  semantic_only_wait_update.instruction = make_instruction(2, 0);
+  semantic_only_wait_update.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(semantic_only_wait_update);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 3u);
+}
+
+TEST(GenericDataHazardEngineTest, WaitActionClearsPendingRawHazard) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(2, 0x104);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(wait);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, PartialWaitLeavesEveryDestinationOfAWideLoadPending) {
+  // global_load_dwordx4 v[4:7] takes one LOADcnt slot, so s_wait_loadcnt 1 does
+  // not retire any of it and reading v4 is still a RAW hazard.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 16;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(2, 0x104);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 1});
+  engine.on_instruction(wait);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, WaitDropsTheContextsOfTheInstructionsItDrains) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  for (EntityId id = 2; id <= 4; ++id) {
+    InstructionEvent arithmetic;
+    arithmetic.instruction = make_instruction(id, 0x100 + id * 4);
+    engine.on_instruction(arithmetic);
+  }
+
+  auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->instruction_context_count, 4u);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(5, 0x120);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(wait);
+
+  snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->instruction_context_count, 1u)
+      << "the wait leaves nothing in flight, so only its own context is still needed";
+}
+
+TEST(GenericDataHazardEngineTest, LoadLeftPendingByAWaitKeepsTheContextItIsReportedFrom) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent drained_load;
+  drained_load.instruction = make_instruction(1, 0x100);
+  drained_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(drained_load);
+
+  ResourceAccessEvent drained_write;
+  drained_write.instruction = drained_load.instruction;
+  drained_write.resource_kind = ResourceKind::VectorRegister;
+  drained_write.register_kind = RegisterKind::Vector;
+  drained_write.resource_index = 4;
+  drained_write.size_bytes = 4;
+  drained_write.is_write = true;
+  engine.on_resource_access(drained_write);
+
+  InstructionEvent pending_load;
+  pending_load.instruction = make_instruction(2, 0x104);
+  pending_load.instruction.raw_isa[0] = 0xFEEDFACE;
+  pending_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(pending_load);
+
+  ResourceAccessEvent pending_write;
+  pending_write.instruction = pending_load.instruction;
+  pending_write.resource_kind = ResourceKind::VectorRegister;
+  pending_write.register_kind = RegisterKind::Vector;
+  pending_write.resource_index = 8;
+  pending_write.size_bytes = 4;
+  pending_write.is_write = true;
+  engine.on_resource_access(pending_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 1});
+  engine.on_instruction(wait);
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->instruction_context_count, 2u)
+      << "the newer load is still in flight and the wait is the current instruction";
+
+  InstructionEvent read;
+  read.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 8;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x104u);
+  EXPECT_EQ(warnings[0].source_raw_isa[0], 0xFEEDFACEu);
+}
+
+TEST(GenericDataHazardEngineTest, ContextsStayBoundedThroughALongStretchWithoutWaits) {
+  // A loop body that never waits still ends up on this path, so the contexts a
+  // wave holds have to follow what is in flight rather than how far it has run.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.instruction.raw_isa[0] = 0xDEADBEEF;
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  const EntityId last_arithmetic = 4 * kInstructionContextSlack;
+  for (EntityId id = 2; id <= last_arithmetic; ++id) {
+    InstructionEvent arithmetic;
+    arithmetic.instruction = make_instruction(id, 0x100 + id * 4);
+    engine.on_instruction(arithmetic);
+  }
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_LE(snapshot->instruction_context_count, kInstructionContextSlack + 2)
+      << "contexts of instructions that left nothing pending must not accumulate";
+
+  InstructionEvent read;
+  read.instruction = make_instruction(last_arithmetic + 1, 0x100 + (last_arithmetic + 1) * 4);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x100u);
+  EXPECT_EQ(warnings[0].source_raw_isa[0], 0xDEADBEEFu)
+      << "the load is still pending, so pruning must not have taken its identity";
+}
+
+TEST(GenericDataHazardEngineTest, DeepPendingQueueStillPrunesOnlyOncePerSlack) {
+  // Stores leave a pending operation behind without a raw ISA entry, so a wave
+  // deep in stores keeps far more contexts than that map knows about. Pruning
+  // has to measure growth against what the last prune left, or a wave in this
+  // shape asks for a prune per instruction and walks its whole pending queue
+  // each time.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  constexpr EntityId kStores = 2 * kInstructionContextSlack;
+  for (EntityId id = 1; id <= kStores; ++id) {
+    InstructionEvent store;
+    store.instruction = make_instruction(id, 0x100 + id * 4);
+    store.hazards.memory_op_wait = WaitCntType::STORE;
+    engine.on_instruction(store);
+  }
+
+  constexpr EntityId kArithmetic = kInstructionContextSlack / 2;
+  for (EntityId id = kStores + 1; id <= kStores + kArithmetic; ++id) {
+    InstructionEvent arithmetic;
+    arithmetic.instruction = make_instruction(id, 0x100 + id * 4);
+    engine.on_instruction(arithmetic);
+  }
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_GT(snapshot->instruction_context_count, kStores + 1)
+      << "retired contexts within a slack of the last prune must be left alone, "
+         "otherwise every instruction pays for a walk of the pending queue";
+  EXPECT_LE(snapshot->instruction_context_count, kStores + kInstructionContextSlack + 1)
+      << "the stores in flight raise the bound, they do not remove it";
+}
+
+namespace {
+
+/// The kernel shape behind the gfx9 scratch spill: a global load into v4, two
+/// scratch stores, then s_waitcnt vmcnt(N) and a read of v4. @p store_counter
+/// is the counter the stores are outstanding on, which is what separates gfx9
+/// from gfx10 and later.
+void run_load_stores_wait_read(DataHazardEngine &engine, WaitCntType store_counter,
+                               uint32_t keep_count) {
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  for (EntityId id : {2u, 3u}) {
+    InstructionEvent store;
+    store.instruction = make_instruction(id, 0x100 + 4 * id);
+    store.hazards.memory_op_wait = store_counter;
+    engine.on_instruction(store);
+  }
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(4, 0x120);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, keep_count});
+  engine.on_instruction(wait);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(5, 0x124);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, VmcntCountsStoresSharingItsCounterWhenRetiringALoad) {
+  // gfx9: one vmcnt holds the load and both stores, so vmcnt(2) retires the
+  // load and reading its destination is safe.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  run_load_stores_wait_read(engine, WaitCntType::VMEM, 2);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, VmcntStillReportsRawWhenTooFewOperationsPrecedeTheLoad) {
+  // The same wait keeping one more operation than the counter holds leaves the
+  // load in flight, so the read of its destination is a hazard.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  run_load_stores_wait_read(engine, WaitCntType::VMEM, 3);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, VmcntIgnoresStoresCountedOnTheirOwnCounter) {
+  // gfx10 and gfx11 count stores on vscnt, so the same vmcnt(2) sees only the
+  // load, keeps it outstanding, and the read is a hazard.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  run_load_stores_wait_read(engine, WaitCntType::STORE, 2);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, CounterWaitClearsPendingEvenWithoutWaitInstructionFlag) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(2, 0x104);
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(wait);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, IdleWaitClearsAllPendingDomainsWithoutExplicitCounters) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent vmem_load;
+  vmem_load.instruction = make_instruction(1, 0x100);
+  vmem_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(vmem_load);
+
+  ResourceAccessEvent vector_write;
+  vector_write.instruction = vmem_load.instruction;
+  vector_write.resource_kind = ResourceKind::VectorRegister;
+  vector_write.register_kind = RegisterKind::Vector;
+  vector_write.resource_index = 4;
+  vector_write.size_bytes = 4;
+  vector_write.is_write = true;
+  engine.on_resource_access(vector_write);
+
+  InstructionEvent async_vector_read;
+  async_vector_read.instruction = make_instruction(2, 0x104);
+  async_vector_read.hazards.vector_read_wait = WaitCntType::STORE;
+  engine.on_instruction(async_vector_read);
+
+  ResourceAccessEvent vector_read;
+  vector_read.instruction = async_vector_read.instruction;
+  vector_read.resource_kind = ResourceKind::VectorRegister;
+  vector_read.register_kind = RegisterKind::Vector;
+  vector_read.resource_index = 7;
+  vector_read.size_bytes = 4;
+  vector_read.is_read = true;
+  engine.on_resource_access(vector_read);
+
+  InstructionEvent smem_load;
+  smem_load.instruction = make_instruction(3, 0x108);
+  smem_load.hazards.scalar_write_wait = WaitCntType::SMEM;
+  engine.on_instruction(smem_load);
+
+  ResourceAccessEvent scalar_write;
+  scalar_write.instruction = smem_load.instruction;
+  scalar_write.resource_kind = ResourceKind::ScalarRegister;
+  scalar_write.register_kind = RegisterKind::Scalar;
+  scalar_write.resource_index = 2;
+  scalar_write.size_bytes = 4;
+  scalar_write.is_write = true;
+  engine.on_resource_access(scalar_write);
+
+  InstructionEvent lds_write_inst;
+  lds_write_inst.instruction = make_instruction(4, 0x10c);
+  lds_write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(lds_write_inst);
+
+  ResourceAccessEvent lds_write;
+  lds_write.instruction = lds_write_inst.instruction;
+  lds_write.resource_kind = ResourceKind::LocalMemory;
+  lds_write.address = 0x80;
+  lds_write.size_bytes = 4;
+  lds_write.is_write = true;
+  engine.on_resource_access(lds_write);
+
+  InstructionEvent tensor_write_inst;
+  tensor_write_inst.instruction = make_instruction(5, 0x110);
+  tensor_write_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_write_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_write_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x100;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  InstructionEvent idle_wait;
+  idle_wait.instruction = make_instruction(6, 0x114);
+  idle_wait.wait_action.waits_for_idle = true;
+  engine.on_instruction(idle_wait);
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_TRUE(snapshot->core.pending_vgpr_writes.empty());
+  EXPECT_TRUE(snapshot->core.pending_vgpr_reads.empty());
+  EXPECT_TRUE(snapshot->core.pending_sgpr_writes.empty());
+  EXPECT_TRUE(snapshot->core.lds_fifo.empty());
+  EXPECT_TRUE(snapshot->core.tensor_lds_fifo.empty());
+  EXPECT_TRUE(snapshot->core.vmem_load_fifo.empty());
+  EXPECT_TRUE(snapshot->core.vmem_store_fifo.empty());
+  EXPECT_TRUE(snapshot->core.smem_load_fifo.empty());
+}
+
+// A ds_store (DScnt) and a later tensor_load_to_lds (TENSORcnt) that write the
+// same LDS retire on different counters. With no s_wait_dscnt between them the
+// store can land after the DMA and clobber the tensor data — a WAW. This mirrors
+// the tensor_lds shader's mut0 (the s_wait_dscnt before the tensor DMA removed).
+TEST(GenericDataHazardEngineTest, DetectsWawFromDsStoreOverwrittenByTensorLoad) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  // ds_store to LDS 0x80, outstanding on DScnt.
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  // tensor_load_to_lds writing the same LDS 0x80, outstanding on TENSORcnt, with
+  // no intervening s_wait_dscnt to order the store ahead of it.
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(2, 0x104);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x80;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+  EXPECT_NE(warnings[0].message.find("WAW hazard: LDS address 0x80"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this LDS address");
+}
+
+// With the s_wait_dscnt in place the store drains before the tensor DMA runs, so
+// there is no WAW. This is the baseline the mut0 mutation removes the wait from.
+TEST(GenericDataHazardEngineTest, DsStoreDrainedByDscntDoesNotWawWithTensorLoad) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  // s_wait_dscnt 0 drains the DScnt queue: the store is no longer pending.
+  InstructionEvent dscnt_wait;
+  dscnt_wait.instruction = make_instruction(2, 0x104);
+  dscnt_wait.wait_action.is_wait_instruction = true;
+  dscnt_wait.wait_action.counters.push_back({WaitCntType::LDS, 0});
+  engine.on_instruction(dscnt_wait);
+
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(3, 0x108);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x80;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+// A tensor load that writes LDS the pending store never touched is not a WAW:
+// the write path must discriminate by address, not fire on any pending store.
+TEST(GenericDataHazardEngineTest, NonOverlappingDsStoreAndTensorLoadDoNotWaw) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent ds_store_inst;
+  ds_store_inst.instruction = make_instruction(1, 0x100);
+  ds_store_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_store_inst);
+
+  ResourceAccessEvent ds_store;
+  ds_store.instruction = ds_store_inst.instruction;
+  ds_store.resource_kind = ResourceKind::LocalMemory;
+  ds_store.address = 0x80;
+  ds_store.size_bytes = 4;
+  ds_store.is_write = true;
+  engine.on_resource_access(ds_store);
+
+  InstructionEvent tensor_inst;
+  tensor_inst.instruction = make_instruction(2, 0x104);
+  tensor_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x100; // Disjoint from the store at 0x80.
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, DetectsPureDsVectorDestinationWithDscntSuggestion) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent ds_read;
+  ds_read.instruction = make_instruction(1, 0x100);
+  ds_read.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_read);
+
+  ResourceAccessEvent ds_dest;
+  ds_dest.instruction = ds_read.instruction;
+  ds_dest.resource_kind = ResourceKind::VectorRegister;
+  ds_dest.register_kind = RegisterKind::Vector;
+  ds_dest.resource_index = 5;
+  ds_dest.size_bytes = 4;
+  ds_dest.is_write = true;
+  engine.on_resource_access(ds_dest);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 5;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v5"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before reading this register");
+}
+
+TEST(GenericDataHazardEngineTest, TracksFlatVectorDestinationOnBothCounters) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent flat_load;
+  flat_load.instruction = make_instruction(1, 0x100);
+  flat_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  flat_load.hazards.vector_write_also_waits_lds = true;
+  engine.on_instruction(flat_load);
+
+  ResourceAccessEvent flat_dest;
+  flat_dest.instruction = flat_load.instruction;
+  flat_dest.resource_kind = ResourceKind::VectorRegister;
+  flat_dest.register_kind = RegisterKind::Vector;
+  flat_dest.resource_index = 10;
+  flat_dest.size_bytes = 4;
+  flat_dest.is_write = true;
+  engine.on_resource_access(flat_dest);
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes.count(10), 1u);
+  EXPECT_EQ(snapshot->core.pending_vgpr_writes_ds.count(10), 1u);
+  EXPECT_TRUE(snapshot->core.pending_vgpr_writes_ds.at(10).is_flat_ds);
+}
+
+TEST(GenericDataHazardEngineTest, ReportsFlatVectorRawWithCombinedWaitSuggestion) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent flat_load;
+  flat_load.instruction = make_instruction(1, 0x100);
+  flat_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  flat_load.hazards.vector_write_also_waits_lds = true;
+  engine.on_instruction(flat_load);
+
+  ResourceAccessEvent flat_dest;
+  flat_dest.instruction = flat_load.instruction;
+  flat_dest.resource_kind = ResourceKind::VectorRegister;
+  flat_dest.register_kind = RegisterKind::Vector;
+  flat_dest.resource_index = 10;
+  flat_dest.size_bytes = 4;
+  flat_dest.is_write = true;
+  engine.on_resource_access(flat_dest);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 10;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v10"), std::string::npos);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_loadcnt_dscnt 0 before reading this register (flat "
+                                    "load uses both LOADcnt and DScnt)");
+}
+
+TEST(GenericDataHazardEngineTest, FlatVectorDscntSideAloneDoesNotReportWaw) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent flat_load;
+  flat_load.instruction = make_instruction(1, 0x100);
+  flat_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  flat_load.hazards.vector_write_also_waits_lds = true;
+  engine.on_instruction(flat_load);
+
+  ResourceAccessEvent flat_dest;
+  flat_dest.instruction = flat_load.instruction;
+  flat_dest.resource_kind = ResourceKind::VectorRegister;
+  flat_dest.register_kind = RegisterKind::Vector;
+  flat_dest.resource_index = 10;
+  flat_dest.size_bytes = 4;
+  flat_dest.is_write = true;
+  engine.on_resource_access(flat_dest);
+
+  InstructionEvent loadcnt_wait;
+  loadcnt_wait.instruction = make_instruction(2, 0x104);
+  loadcnt_wait.wait_action.is_wait_instruction = true;
+  loadcnt_wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(loadcnt_wait);
+
+  InstructionEvent overwrite;
+  overwrite.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(overwrite);
+
+  ResourceAccessEvent overwrite_dest;
+  overwrite_dest.instruction = overwrite.instruction;
+  overwrite_dest.resource_kind = ResourceKind::VectorRegister;
+  overwrite_dest.register_kind = RegisterKind::Vector;
+  overwrite_dest.resource_index = 10;
+  overwrite_dest.size_bytes = 4;
+  overwrite_dest.is_write = true;
+  engine.on_resource_access(overwrite_dest);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, DetectsVgprWawFromDsWriteAfterVmemWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent vmem_load;
+  vmem_load.instruction = make_instruction(1, 0x100);
+  vmem_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(vmem_load);
+
+  ResourceAccessEvent vmem_dest;
+  vmem_dest.instruction = vmem_load.instruction;
+  vmem_dest.resource_kind = ResourceKind::VectorRegister;
+  vmem_dest.register_kind = RegisterKind::Vector;
+  vmem_dest.resource_index = 12;
+  vmem_dest.size_bytes = 4;
+  vmem_dest.is_write = true;
+  engine.on_resource_access(vmem_dest);
+
+  InstructionEvent ds_read;
+  ds_read.instruction = make_instruction(2, 0x104);
+  ds_read.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_read);
+
+  ResourceAccessEvent ds_dest;
+  ds_dest.instruction = ds_read.instruction;
+  ds_dest.resource_kind = ResourceKind::VectorRegister;
+  ds_dest.register_kind = RegisterKind::Vector;
+  ds_dest.resource_index = 12;
+  ds_dest.size_bytes = 4;
+  ds_dest.is_write = true;
+  engine.on_resource_access(ds_dest);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAW hazard: VGPR v12"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::VMEM);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_loadcnt 0 before writing this register");
+}
+
+TEST(GenericDataHazardEngineTest, DetectsVgprWawBetweenPureDsVectorDestinations) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent first_ds_read;
+  first_ds_read.instruction = make_instruction(1, 0x100);
+  first_ds_read.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(first_ds_read);
+
+  ResourceAccessEvent first_dest;
+  first_dest.instruction = first_ds_read.instruction;
+  first_dest.resource_kind = ResourceKind::VectorRegister;
+  first_dest.register_kind = RegisterKind::Vector;
+  first_dest.resource_index = 13;
+  first_dest.size_bytes = 4;
+  first_dest.is_write = true;
+  engine.on_resource_access(first_dest);
+
+  InstructionEvent second_ds_read;
+  second_ds_read.instruction = make_instruction(2, 0x104);
+  second_ds_read.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(second_ds_read);
+
+  ResourceAccessEvent second_dest;
+  second_dest.instruction = second_ds_read.instruction;
+  second_dest.resource_kind = ResourceKind::VectorRegister;
+  second_dest.register_kind = RegisterKind::Vector;
+  second_dest.resource_index = 13;
+  second_dest.size_bytes = 4;
+  second_dest.is_write = true;
+  engine.on_resource_access(second_dest);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAW hazard: VGPR v13"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this register");
+}
+
+TEST(GenericDataHazardEngineTest, DetectsLdsRawHazardWithLdsSuggestion) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x104);
+  read_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: LDS address 0x80"), std::string::npos);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before reading this LDS address");
+}
+
+TEST(GenericDataHazardEngineTest, DetectsLdsWarHazardWithLdsAddressSuggestion) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(2, 0x104);
+  write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAR hazard: LDS address 0x80"), std::string::npos);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_dscnt 0 before writing this LDS address");
+}
+
+TEST(GenericDataHazardEngineTest, DetectsVgprWawHazardWithWriteSuggestion) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent first_load;
+  first_load.instruction = make_instruction(1, 0x100);
+  first_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(first_load);
+
+  ResourceAccessEvent first_write;
+  first_write.instruction = first_load.instruction;
+  first_write.resource_kind = ResourceKind::VectorRegister;
+  first_write.register_kind = RegisterKind::Vector;
+  first_write.resource_index = 7;
+  first_write.size_bytes = 4;
+  first_write.is_write = true;
+  engine.on_resource_access(first_write);
+
+  InstructionEvent second_load;
+  second_load.instruction = make_instruction(2, 0x104);
+  second_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(second_load);
+
+  ResourceAccessEvent second_write;
+  second_write.instruction = second_load.instruction;
+  second_write.resource_kind = ResourceKind::VectorRegister;
+  second_write.register_kind = RegisterKind::Vector;
+  second_write.resource_index = 7;
+  second_write.size_bytes = 4;
+  second_write.is_write = true;
+  engine.on_resource_access(second_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAW hazard: VGPR v7"), std::string::npos);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_loadcnt 0 before writing this register");
+}
+
+TEST(GenericDataHazardEngineTest, DetectsSgprWawHazardWithWriteSuggestion) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent smem_load;
+  smem_load.instruction = make_instruction(1, 0x100);
+  smem_load.hazards.scalar_write_wait = WaitCntType::SMEM;
+  engine.on_instruction(smem_load);
+
+  ResourceAccessEvent first_write;
+  first_write.instruction = smem_load.instruction;
+  first_write.resource_kind = ResourceKind::ScalarRegister;
+  first_write.register_kind = RegisterKind::Scalar;
+  first_write.resource_index = 12;
+  first_write.size_bytes = 4;
+  first_write.is_write = true;
+  engine.on_resource_access(first_write);
+
+  InstructionEvent scalar_alu;
+  scalar_alu.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(scalar_alu);
+
+  ResourceAccessEvent second_write;
+  second_write.instruction = scalar_alu.instruction;
+  second_write.resource_kind = ResourceKind::ScalarRegister;
+  second_write.register_kind = RegisterKind::Scalar;
+  second_write.resource_index = 12;
+  second_write.size_bytes = 4;
+  second_write.is_write = true;
+  engine.on_resource_access(second_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAW);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::ScalarRegister);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::SMEM);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_kmcnt 0 before writing this register");
+}
+
+namespace {
+
+// s_load_b256 s[4:11] with the s_wait_kmcnt removed, then a narrow read of s10
+// followed by a wide read of s[10:11]. Taken from the add_buffer mutant that
+// exposed the two cases below.
+DataHazardEngine &wide_scalar_load_pending(FakeFormatter &formatter) {
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+
+  InstructionEvent smem_load;
+  smem_load.instruction = make_instruction(1, 0x100);
+  smem_load.hazards.scalar_write_wait = WaitCntType::SMEM;
+  engine.on_instruction(smem_load);
+
+  ResourceAccessEvent load_dst;
+  load_dst.instruction = smem_load.instruction;
+  load_dst.resource_kind = ResourceKind::ScalarRegister;
+  load_dst.register_kind = RegisterKind::Scalar;
+  load_dst.resource_index = 4;
+  load_dst.size_bytes = 32;
+  load_dst.is_write = true;
+  engine.on_resource_access(load_dst);
+  return engine;
+}
+
+void read_scalars(DataHazardEngine &engine, EntityId instruction_id, uint64_t pc,
+                  uint32_t first_sgpr, uint32_t size_bytes) {
+  InstructionEvent consumer;
+  consumer.instruction = make_instruction(instruction_id, pc);
+  engine.on_instruction(consumer);
+
+  ResourceAccessEvent read;
+  read.instruction = consumer.instruction;
+  read.resource_kind = ResourceKind::ScalarRegister;
+  read.register_kind = RegisterKind::Scalar;
+  read.resource_index = first_sgpr;
+  read.size_bytes = size_bytes;
+  read.is_read = true;
+  engine.on_resource_access(read);
+}
+
+} // namespace
+
+// A wide operand whose leading register was already reported for an earlier
+// consumer must still report the registers that were not: only s10 has been
+// named so far, so the read of s[10:11] still owes a warning for s11.
+TEST(GenericDataHazardEngineTest, WideScalarReadReportsRegistersLeftOverFromAnEarlierConsumer) {
+  FakeFormatter formatter;
+  auto &engine = wide_scalar_load_pending(formatter);
+
+  read_scalars(engine, 2, 0x104, /*first_sgpr=*/10, /*size_bytes=*/4);
+  read_scalars(engine, 3, 0x108, /*first_sgpr=*/10, /*size_bytes=*/8);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_NE(warnings[0].message.find("SGPR s10"), std::string::npos);
+  EXPECT_NE(warnings[1].message.find("SGPR s11"), std::string::npos);
+}
+
+// Frontends differ in whether they hand a 64-bit operand over as one access or
+// as one per register. The reported hazards must not depend on that.
+TEST(GenericDataHazardEngineTest, ScalarHazardsDoNotDependOnOperandDeliveryGranularity) {
+  // The engine is a singleton, so each sequence has to be snapshotted before
+  // the next one resets it.
+  auto messages = [](const DataHazardEngine &engine) {
+    std::vector<std::string> out;
+    for (const auto &w : engine.warning_snapshot())
+      out.push_back(w.message);
+    return out;
+  };
+
+  FakeFormatter wide_formatter;
+  auto &wide = wide_scalar_load_pending(wide_formatter);
+  read_scalars(wide, 2, 0x104, 10, 4);
+  read_scalars(wide, 3, 0x108, 10, 8);
+  const std::vector<std::string> wide_messages = messages(wide);
+
+  FakeFormatter split_formatter;
+  auto &split = wide_scalar_load_pending(split_formatter);
+  read_scalars(split, 2, 0x104, 10, 4);
+  // Same instruction, delivered as two single-register accesses.
+  read_scalars(split, 3, 0x108, 10, 4);
+  read_scalars(split, 3, 0x108, 11, 4);
+  const std::vector<std::string> split_messages = messages(split);
+
+  EXPECT_EQ(wide_messages, split_messages);
+  ASSERT_EQ(wide_messages.size(), 2u);
+  EXPECT_NE(wide_messages[1].find("SGPR s11"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, DetectsVgprWarOnlyForExplicitAsyncReadSemantics) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent async_read;
+  async_read.instruction = make_instruction(1, 0x100);
+  async_read.hazards.vector_read_wait = WaitCntType::STORE;
+  engine.on_instruction(async_read);
+
+  ResourceAccessEvent source_read;
+  source_read.instruction = async_read.instruction;
+  source_read.resource_kind = ResourceKind::VectorRegister;
+  source_read.register_kind = RegisterKind::Vector;
+  source_read.resource_index = 9;
+  source_read.size_bytes = 4;
+  source_read.is_read = true;
+  engine.on_resource_access(source_read);
+
+  InstructionEvent overwrite;
+  overwrite.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(overwrite);
+
+  ResourceAccessEvent vector_write;
+  vector_write.instruction = overwrite.instruction;
+  vector_write.resource_kind = ResourceKind::VectorRegister;
+  vector_write.register_kind = RegisterKind::Vector;
+  vector_write.resource_index = 9;
+  vector_write.size_bytes = 4;
+  vector_write.is_write = true;
+  engine.on_resource_access(vector_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAR hazard: VGPR v9"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::STORE);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_storecnt 0 before writing this register");
+}
+
+TEST(GenericDataHazardEngineTest, UsesPendingWaitTypeForExplicitVectorReadWar) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent async_read;
+  async_read.instruction = make_instruction(1, 0x100);
+  async_read.hazards.vector_read_wait = WaitCntType::VMEM;
+  engine.on_instruction(async_read);
+
+  ResourceAccessEvent source_read;
+  source_read.instruction = async_read.instruction;
+  source_read.resource_kind = ResourceKind::VectorRegister;
+  source_read.register_kind = RegisterKind::Vector;
+  source_read.resource_index = 11;
+  source_read.size_bytes = 4;
+  source_read.is_read = true;
+  engine.on_resource_access(source_read);
+
+  InstructionEvent overwrite;
+  overwrite.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(overwrite);
+
+  ResourceAccessEvent vector_write;
+  vector_write.instruction = overwrite.instruction;
+  vector_write.resource_kind = ResourceKind::VectorRegister;
+  vector_write.register_kind = RegisterKind::Vector;
+  vector_write.resource_index = 11;
+  vector_write.size_bytes = 4;
+  vector_write.is_write = true;
+  engine.on_resource_access(vector_write);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("WAR hazard: VGPR v11"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::VMEM);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_loadcnt 0 before writing this register");
+}
+
+TEST(GenericDataHazardEngineTest, DetectsCrossWorkgroupGlobalRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 1, 0};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.instruction.execution = writer_wave;
+  write_inst.instruction.raw_isa[0] = 0xABCDEF01;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::GlobalMemory;
+  write_access.address = 0x1000;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x200);
+  read_inst.instruction.execution = reader_wave;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::GlobalMemory;
+  read_access.address = 0x1000;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x1000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].suggestion,
+            "Use atomic operations or add proper synchronization between workgroups");
+  EXPECT_TRUE(warnings[0].has_source);
+  EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0xABCDEF01);
+  EXPECT_EQ(warnings[0].source_raw_isa[0], 0xABCDEF01);
+}
+
+// Later readers must not displace every earlier one: whichever workgroup writes
+// next still races with a read from a different workgroup, including the
+// workgroup that read most recently.
+TEST(GenericDataHazardEngineTest, GlobalWarSurvivesReadsFromOtherWorkgroups) {
+  constexpr EntityId kReadingWorkgroups = 3;
+
+  for (EntityId writing_workgroup = 0; writing_workgroup < kReadingWorkgroups;
+       ++writing_workgroup) {
+    FakeFormatter formatter;
+    auto &engine = reset_generic_engine(formatter);
+    for (EntityId workgroup = 0; workgroup < kReadingWorkgroups; ++workgroup) {
+      engine.on_workgroup_begin(1, 0, workgroup);
+      engine.on_wave_begin(ExecutionKey{1, 0, workgroup, 0});
+    }
+
+    auto access = [&](EntityId instruction_id, EntityId workgroup, bool is_write) {
+      InstructionEvent instruction;
+      instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
+      instruction.instruction.execution = ExecutionKey{1, 0, workgroup, 0};
+      engine.on_instruction(instruction);
+
+      ResourceAccessEvent event;
+      event.instruction = instruction.instruction;
+      event.resource_kind = ResourceKind::GlobalMemory;
+      event.address = 0x1000;
+      event.size_bytes = 4;
+      event.is_read = !is_write;
+      event.is_write = is_write;
+      engine.on_resource_access(event);
+    };
+
+    for (EntityId workgroup = 0; workgroup < kReadingWorkgroups; ++workgroup)
+      access(1 + workgroup, workgroup, /*is_write=*/false);
+    ASSERT_TRUE(engine.warning_snapshot().empty()) << "concurrent reads do not conflict";
+
+    access(100, writing_workgroup, /*is_write=*/true);
+
+    const auto warnings = engine.warning_snapshot();
+    ASSERT_EQ(warnings.size(), 1u)
+        << "a write by workgroup " << writing_workgroup << " races with the other reads";
+    EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+    EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x1000"),
+              std::string::npos);
+    EXPECT_NE(warnings[0].finding.source_instruction.execution.workgroup_id, writing_workgroup)
+        << "the conflicting read must come from another workgroup";
+  }
+}
+
+TEST(GenericDataHazardEngineTest, GlobalRaceSourceInstructionUsesConflictingExecutionKey) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_dispatch_begin(2);
+  engine.on_workgroup_begin(2, 3, 4);
+  engine.on_workgroup_begin(2, 7, 8);
+
+  ExecutionKey writer_wave{2, 3, 4, 6};
+  ExecutionKey reader_wave{2, 7, 8, 10};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(11, 0x110);
+  write_inst.instruction.execution = writer_wave;
+  write_inst.instruction.raw_isa[0] = 0x11111111;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::GlobalMemory;
+  write_access.address = 0x2000;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(12, 0x220);
+  read_inst.instruction.execution = reader_wave;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::GlobalMemory;
+  read_access.address = 0x2000;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  const auto &source_execution = warnings[0].finding.source_instruction.execution;
+  EXPECT_EQ(source_execution.dispatch_id, 2u);
+  EXPECT_EQ(source_execution.cluster_id, 3u);
+  EXPECT_EQ(source_execution.workgroup_id, 4u);
+  EXPECT_EQ(source_execution.wave_id, 6u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 11u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0x11111111u);
+}
+
+TEST(GenericDataHazardEngineTest, GlobalShadowIsDispatchScoped) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey dispatch_one_writer{1, 0, 0, 0};
+  ExecutionKey dispatch_one_reader{1, 0, 1, 1};
+  engine.on_wave_begin(dispatch_one_writer);
+  engine.on_wave_begin(dispatch_one_reader);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.instruction.execution = dispatch_one_writer;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::GlobalMemory;
+  write_access.address = 0x3000;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  engine.on_dispatch_begin(2);
+  engine.on_workgroup_begin(2, 0, 0);
+  ExecutionKey dispatch_two_reader{2, 0, 0, 0};
+  engine.on_wave_begin(dispatch_two_reader);
+
+  InstructionEvent dispatch_two_read_inst;
+  dispatch_two_read_inst.instruction = make_instruction(2, 0x200);
+  dispatch_two_read_inst.instruction.execution = dispatch_two_reader;
+  engine.on_instruction(dispatch_two_read_inst);
+
+  ResourceAccessEvent dispatch_two_read;
+  dispatch_two_read.instruction = dispatch_two_read_inst.instruction;
+  dispatch_two_read.resource_kind = ResourceKind::GlobalMemory;
+  dispatch_two_read.address = 0x3000;
+  dispatch_two_read.size_bytes = 4;
+  dispatch_two_read.is_read = true;
+  engine.on_resource_access(dispatch_two_read);
+
+  ASSERT_TRUE(engine.warning_snapshot().empty())
+      << "dispatch 2 must not race with dispatch 1 shadow state";
+
+  InstructionEvent dispatch_one_read_inst;
+  dispatch_one_read_inst.instruction = make_instruction(3, 0x300);
+  dispatch_one_read_inst.instruction.execution = dispatch_one_reader;
+  engine.on_instruction(dispatch_one_read_inst);
+
+  ResourceAccessEvent dispatch_one_read;
+  dispatch_one_read.instruction = dispatch_one_read_inst.instruction;
+  dispatch_one_read.resource_kind = ResourceKind::GlobalMemory;
+  dispatch_one_read.address = 0x3000;
+  dispatch_one_read.size_bytes = 4;
+  dispatch_one_read.is_read = true;
+  engine.on_resource_access(dispatch_one_read);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.dispatch_id, 1u);
+}
+
+namespace {
+
+/// Runs *first* then *second* as global accesses from two distinct workgroups
+/// of one dispatch and returns the warnings raised.
+struct SubDwordAccess {
+  uint64_t address;
+  uint32_t size_bytes;
+  bool is_write;
+};
+
+std::vector<EngineWarning> run_cross_workgroup_global_accesses(DataHazardEngine &engine,
+                                                               const SubDwordAccess &first,
+                                                               const SubDwordAccess &second) {
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey first_wave{1, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  EntityId next_id = 1;
+  for (const auto &[access, wave] :
+       {std::pair{first, first_wave}, std::pair{second, second_wave}}) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(next_id, 0x100 * next_id);
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = access.address;
+    event.size_bytes = access.size_bytes;
+    event.is_write = access.is_write;
+    event.is_read = !access.is_write;
+    engine.on_resource_access(event);
+    ++next_id;
+  }
+  return engine.warning_snapshot();
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, DisjointSubDwordAccessesInOneGranuleDoNotRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // Both bytes live in the 4-byte granule at 0x3000, but the byte ranges are
+  // disjoint, so the workgroups never touch the same memory.
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3000, 1, true}, {0x3001, 1, true});
+
+  EXPECT_TRUE(warnings.empty())
+      << "byte 0x3000 and byte 0x3001 do not overlap, so this is not a race";
+}
+
+TEST(GenericDataHazardEngineTest, OverlappingSubDwordWritesRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3000, 1, true}, {0x3000, 1, true});
+
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+}
+
+TEST(GenericDataHazardEngineTest, PartiallyOverlappingSubDwordWritesRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // Bytes 0-1 against bytes 1-2: they share byte 0x3001.
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3000, 2, true}, {0x3001, 2, true});
+
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+}
+
+TEST(GenericDataHazardEngineTest, DisjointSubDwordWriteAfterReadDoesNotRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3002, 1, false}, {0x3003, 1, true});
+
+  EXPECT_TRUE(warnings.empty()) << "a write only races a read that covers the same byte";
+}
+
+TEST(GenericDataHazardEngineTest, SubDwordAccessMasksApplyPerGranuleOfASpanningAccess) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // 0x3002..0x3005 covers the top half of granule 0x3000 and the bottom half of
+  // granule 0x3004, so each granule needs its own mask rather than the first.
+  const auto disjoint =
+      run_cross_workgroup_global_accesses(engine, {0x3002, 4, true}, {0x3001, 1, true});
+  EXPECT_TRUE(disjoint.empty()) << "byte 0x3001 lies below the spanning write";
+
+  auto &overlap_engine = reset_generic_engine(formatter);
+  const auto overlap =
+      run_cross_workgroup_global_accesses(overlap_engine, {0x3002, 4, true}, {0x3005, 1, true});
+  ASSERT_EQ(overlap.size(), 1u);
+  EXPECT_EQ(overlap[0].finding.kind, HazardKind::GlobalMemoryRace);
+}
+
+TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNotOverlap) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // Workgroup 1 writes a byte that workgroup 0 never touched, so it takes a
+  // slot of its own. Retaining workgroup 0 is what lets workgroup 2 still see
+  // the byte it truly conflicts over.
+  const std::array<SubDwordAccess, 3> writes{SubDwordAccess{0x3000, 1, true},
+                                             SubDwordAccess{0x3001, 1, true},
+                                             SubDwordAccess{0x3000, 1, true}};
+
+  for (EntityId workgroup = 0; workgroup < writes.size(); ++workgroup) {
+    engine.on_workgroup_begin(1, 0, workgroup);
+    ExecutionKey wave{1, 0, workgroup, 0};
+    engine.on_wave_begin(wave);
+
+    InstructionEvent inst;
+    inst.instruction = make_instruction(workgroup + 1, 0x100 * (workgroup + 1));
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = writes[workgroup].address;
+    event.size_bytes = writes[workgroup].size_bytes;
+    event.is_write = true;
+    engine.on_resource_access(event);
+
+    if (workgroup == 1) {
+      EXPECT_TRUE(engine.warning_snapshot().empty()) << "byte 0x3001 overlaps nothing";
+    }
+  }
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u) << "workgroup 2 overwrites the byte workgroup 0 wrote";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
+}
+
+namespace {
+
+/// One global access from a specific workgroup of dispatch 1.
+struct GlobalAccessStep {
+  EntityId workgroup;
+  uint64_t address;
+  uint32_t size_bytes;
+  bool is_read;
+  bool is_write;
+  bool is_atomic;
+};
+
+GlobalAccessStep read_byte(EntityId workgroup, uint64_t address) {
+  return GlobalAccessStep{workgroup, address, 1, true, false, false};
+}
+GlobalAccessStep write_byte(EntityId workgroup, uint64_t address) {
+  return GlobalAccessStep{workgroup, address, 1, false, true, false};
+}
+GlobalAccessStep atomic_byte(EntityId workgroup, uint64_t address) {
+  return GlobalAccessStep{workgroup, address, 1, true, true, true};
+}
+
+/// Replays a sequence of global accesses, each from its own workgroup and wave
+/// of dispatch 1, and returns the warnings raised. Distinct workgroups are what
+/// let the accesses conflict; a workgroup may appear more than once to issue a
+/// later access of its own.
+std::vector<EngineWarning> run_global_access_sequence(DataHazardEngine &engine,
+                                                      const std::vector<GlobalAccessStep> &steps) {
+  std::set<EntityId> started;
+  EntityId next_id = 1;
+  for (const auto &step : steps) {
+    if (started.insert(step.workgroup).second) {
+      engine.on_workgroup_begin(1, 0, step.workgroup);
+      engine.on_wave_begin(ExecutionKey{1, 0, step.workgroup, 0});
+    }
+
+    InstructionEvent inst;
+    inst.instruction = make_instruction(next_id, 0x100 * next_id);
+    inst.instruction.execution = ExecutionKey{1, 0, step.workgroup, 0};
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = step.address;
+    event.size_bytes = step.size_bytes;
+    event.is_read = step.is_read;
+    event.is_write = step.is_write;
+    event.is_atomic = step.is_atomic;
+    engine.on_resource_access(event);
+    ++next_id;
+  }
+  return engine.warning_snapshot();
+}
+
+} // namespace
+
+// Copilot's granule-eviction scenario for writers: three workgroups write the
+// disjoint bytes 0, 1 and 2 of the granule at 0x3000, so none of them race and
+// nothing flags the granule. A later read of byte 1 still races the write only
+// workgroup 1 made there -- unless recording the third write evicted it. Two
+// slots per granule cannot retain all three disjoint writers, so the race is
+// missed until the slot history grows.
+TEST(GenericDataHazardEngineTest, DisjointWritersSurviveUntilALaterReaderCanRaceThem) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {write_byte(0, 0x3000), write_byte(1, 0x3001),
+                                          write_byte(2, 0x3002), read_byte(3, 0x3001)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 3's read of byte 0x3001 races the write workgroup 1 made to it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u)
+      << "the write it races with is the one a two-wide history drops";
+}
+
+// The same eviction exposes the reader history. Reads never race reads, so four
+// workgroups reading disjoint bytes flag nothing, and a write to byte 1 must
+// still find the read the history evicted. One reader per byte fits once the
+// array holds four.
+TEST(GenericDataHazardEngineTest, DisjointReadersSurviveUntilALaterWriterCanRaceThem) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {read_byte(0, 0x3000), read_byte(1, 0x3001), read_byte(2, 0x3002),
+               read_byte(3, 0x3003), write_byte(4, 0x3001)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 4's write to byte 0x3001 races the read workgroup 1 made to it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u);
+}
+
+// Completeness for readers needs two foreign readers retained per byte, not two
+// per granule. When a workgroup writes a byte it also read, the race is with the
+// *other* workgroup that read that byte, never its own read. With all four bytes
+// read by two workgroups each, only eight reader slots keep every partner a
+// later write can hit -- four is not enough.
+TEST(GenericDataHazardEngineTest, EveryByteKeepsBothForeignReadersAgainstALaterWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {read_byte(0, 0x3000), read_byte(1, 0x3000), // byte 0
+                                          read_byte(2, 0x3001), read_byte(3, 0x3001), // byte 1
+                                          read_byte(4, 0x3002), read_byte(5, 0x3002), // byte 2
+                                          read_byte(6, 0x3003), read_byte(7, 0x3003), // byte 3
+                                          write_byte(0, 0x3000)}); // workgroup 0 rewrites byte 0
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 0 writing byte 0x3000 races workgroup 1's read of the same byte";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u)
+      << "workgroup 0 does not race its own read; the partner reader must survive";
+}
+
+// Atomics share the readers' exposure: two atomics never race, so they never
+// flag the granule themselves. Three atomics to disjoint bytes must all be
+// retained so a later ordinary read of an evicted byte still races its atomic.
+TEST(GenericDataHazardEngineTest, DisjointAtomicsSurviveUntilAnOrdinaryAccessCanRaceThem) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {atomic_byte(0, 0x3000), atomic_byte(1, 0x3001),
+                                          atomic_byte(2, 0x3002), read_byte(3, 0x3001)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 3's ordinary read of byte 0x3001 races workgroup 1's atomic there";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u);
+}
+
+// A workgroup that wrote part of what it later reads is ordered against itself
+// over those bytes only. The rest of the read is still exposed, and dropping it
+// leaves a write from another workgroup with nothing to conflict with.
+TEST(GenericDataHazardEngineTest, ReadRetainsTheBytesItsOwnWorkgroupDidNotWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey first_wave{1, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  auto access = [&](EntityId instruction_id, const ExecutionKey &wave, const SubDwordAccess &spec) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(instruction_id, 0x100 * instruction_id);
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = spec.address;
+    event.size_bytes = spec.size_bytes;
+    event.is_write = spec.is_write;
+    event.is_read = !spec.is_write;
+    engine.on_resource_access(event);
+  };
+
+  access(1, first_wave, {0x3000, 1, true});
+  access(2, first_wave, {0x3000, 2, false});
+  ASSERT_TRUE(engine.warning_snapshot().empty()) << "a workgroup does not race with itself";
+
+  access(3, second_wave, {0x3001, 1, true});
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u) << "workgroup 0 read byte 0x3001 but never wrote it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 2u)
+      << "the read is what the write races with";
+}
+
+// The eight slots are enough only when the four bytes share them evenly. The
+// previous tests balance the load two-per-byte; these load one byte heavily to
+// pin down that retention is partitioned *per byte*, not counted against the
+// whole granule. Under a flat history a flood of readers on one byte spends the
+// slots and evicts another byte's only reader, so the WAR race a later write to
+// that byte should raise is missed. Per-byte retention keeps each byte's
+// partners no matter how busy its neighbours are.
+
+// Byte 0 is read by seven workgroups; bytes 1, 2 and 3 get one reader each. A
+// flat eight-slot history fills slots 0-6 with byte 0, drops byte 1's reader
+// into slot 7, then overwrites that last slot for bytes 2 and 3 -- so byte 1's
+// reader is gone and the write to byte 1 finds nothing.
+TEST(GenericDataHazardEngineTest, AFloodOfReadersOnOneByteDoesNotEvictByte1sReader) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {read_byte(0, 0x3000), read_byte(1, 0x3000), read_byte(2, 0x3000),
+               read_byte(3, 0x3000), read_byte(4, 0x3000), read_byte(5, 0x3000),
+               read_byte(6, 0x3000),     // seven distinct workgroups read byte 0
+               read_byte(7, 0x3001),     // byte 1's only reader
+               read_byte(8, 0x3002),     // byte 2's only reader
+               read_byte(9, 0x3003),     // byte 3's only reader
+               write_byte(10, 0x3001)}); // races byte 1's reader
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's write to byte 0x3001 races workgroup 7's read of it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 7u)
+      << "byte 1's reader must survive byte 0's flood of readers";
+}
+
+// The same flood, probing a different victim. Byte 2's reader lands in the
+// churned last slot too and is overwritten by byte 3's, so a flat history misses
+// the write to byte 2 as well. Two victims from one eviction pattern guard
+// against a fix that only rescues a single byte.
+TEST(GenericDataHazardEngineTest, AFloodOfReadersOnOneByteDoesNotEvictByte2sReader) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {read_byte(0, 0x3000), read_byte(1, 0x3000), read_byte(2, 0x3000),
+               read_byte(3, 0x3000), read_byte(4, 0x3000), read_byte(5, 0x3000),
+               read_byte(6, 0x3000),     // seven distinct workgroups read byte 0
+               read_byte(7, 0x3001),     // byte 1
+               read_byte(8, 0x3002),     // byte 2's only reader
+               read_byte(9, 0x3003),     // byte 3
+               write_byte(10, 0x3002)}); // races byte 2's reader
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's write to byte 0x3002 races workgroup 8's read of it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 8u)
+      << "byte 2's reader must survive byte 0's flood of readers";
+}
+
+// Atomics are the other silent accumulator: two atomics never race, so a flood
+// of them on one byte flags nothing while it consumes the shared history, and a
+// later ordinary read of an evicted byte misses the RAW race with the atomic
+// that byte still holds.
+TEST(GenericDataHazardEngineTest, AFloodOfAtomicsOnOneByteDoesNotEvictByte1sAtomic) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {atomic_byte(0, 0x3000), atomic_byte(1, 0x3000), atomic_byte(2, 0x3000),
+               atomic_byte(3, 0x3000), atomic_byte(4, 0x3000), atomic_byte(5, 0x3000),
+               atomic_byte(6, 0x3000),  // seven distinct workgroups' atomics on byte 0
+               atomic_byte(7, 0x3001),  // byte 1's only atomic
+               atomic_byte(8, 0x3002),  // byte 2
+               atomic_byte(9, 0x3003),  // byte 3
+               read_byte(10, 0x3001)}); // races byte 1's atomic
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's read of byte 0x3001 races workgroup 7's atomic there";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 7u)
+      << "byte 1's atomic must survive byte 0's flood of atomics";
+}
+
+// The atomic flood, probing byte 2, mirrors the reader case's second victim.
+TEST(GenericDataHazardEngineTest, AFloodOfAtomicsOnOneByteDoesNotEvictByte2sAtomic) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {atomic_byte(0, 0x3000), atomic_byte(1, 0x3000), atomic_byte(2, 0x3000),
+               atomic_byte(3, 0x3000), atomic_byte(4, 0x3000), atomic_byte(5, 0x3000),
+               atomic_byte(6, 0x3000),  // seven distinct workgroups' atomics on byte 0
+               atomic_byte(7, 0x3001),  // byte 1
+               atomic_byte(8, 0x3002),  // byte 2's only atomic
+               atomic_byte(9, 0x3003),  // byte 3
+               read_byte(10, 0x3002)}); // races byte 2's atomic
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's read of byte 0x3002 races workgroup 8's atomic there";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 8u)
+      << "byte 2's atomic must survive byte 0's flood of atomics";
+}
+
+// Within one byte the retention must still hold two *distinct* foreign
+// workgroups. Three workgroups read byte 0; when the third arrives the byte's
+// bucket is full and one is evicted, but a fourth workgroup writing that byte
+// must still find a retained reader that is not itself. This guards the eviction
+// policy: overwriting must drop one partner, never collapse the byte to a single
+// workgroup that a later same-workgroup access would fail to race.
+TEST(GenericDataHazardEngineTest, AByteReadByThreeWorkgroupsStillRacesAFourthsWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {read_byte(0, 0x3000), read_byte(1, 0x3000),
+                                          read_byte(2, 0x3000), write_byte(0, 0x3000)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 0's write to byte 0x3000 races a foreign reader that byte still holds";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_NE(warnings[0].finding.source_instruction.execution.workgroup_id, 0u)
+      << "the race must be with another workgroup's read, never workgroup 0's own";
+}
+
+namespace {
+
+/// What one global access does to the location. An atomic reads and writes it
+/// under a single lock, which is how the frontend reports every atomic.
+struct GlobalAccessKind {
+  bool is_read;
+  bool is_write;
+  bool is_atomic;
+  const char *name;
+};
+
+constexpr GlobalAccessKind kOrdinaryRead{true, false, false, "ordinary read"};
+constexpr GlobalAccessKind kOrdinaryWrite{false, true, false, "ordinary write"};
+constexpr GlobalAccessKind kAtomic{true, true, true, "atomic"};
+
+/// Runs *first* then *second* against one address from two distinct workgroups
+/// of one dispatch and returns the warnings raised.
+std::vector<EngineWarning> run_cross_workgroup_global_pair(DataHazardEngine &engine,
+                                                           const GlobalAccessKind &first,
+                                                           const GlobalAccessKind &second) {
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey first_wave{1, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  EntityId next_id = 1;
+  for (const auto &[access, wave] :
+       {std::pair{first, first_wave}, std::pair{second, second_wave}}) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(next_id, 0x100 * next_id);
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = 0x4000;
+    event.size_bytes = 4;
+    event.is_read = access.is_read;
+    event.is_write = access.is_write;
+    event.is_atomic = access.is_atomic;
+    engine.on_resource_access(event);
+    ++next_id;
+  }
+  return engine.warning_snapshot();
+}
+
+} // namespace
+
+// Two workgroups touching one address either race or they do not; which of them
+// the simulator happened to run first cannot decide it.
+TEST(GenericDataHazardEngineTest, GlobalRaceVerdictIsTheSameInEitherAccessOrder) {
+  FakeFormatter formatter;
+  const std::array<GlobalAccessKind, 3> kinds{kOrdinaryRead, kOrdinaryWrite, kAtomic};
+
+  for (const auto &first : kinds) {
+    for (const auto &second : kinds) {
+      const size_t forward =
+          run_cross_workgroup_global_pair(reset_generic_engine(formatter), first, second).size();
+      const size_t reverse =
+          run_cross_workgroup_global_pair(reset_generic_engine(formatter), second, first).size();
+      EXPECT_EQ(forward, reverse) << first.name << " then " << second.name
+                                  << " is judged differently from " << second.name << " then "
+                                  << first.name;
+    }
+  }
+}
+
+// An atomic orders itself only against other atomics, so an ordinary access to
+// the same location is unsynchronized whichever side of the atomic it lands on.
+TEST(GenericDataHazardEngineTest, OrdinaryGlobalAccessRacesWithAnAtomicFromAnotherWorkgroup) {
+  FakeFormatter formatter;
+
+  const auto after_atomic =
+      run_cross_workgroup_global_pair(reset_generic_engine(formatter), kAtomic, kOrdinaryRead);
+  ASSERT_EQ(after_atomic.size(), 1u) << "the read must see the atomic that wrote before it";
+  EXPECT_EQ(after_atomic[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(after_atomic[0].message.find("Global memory RAW data race at address 0x4000"),
+            std::string::npos);
+
+  const auto before_atomic =
+      run_cross_workgroup_global_pair(reset_generic_engine(formatter), kOrdinaryRead, kAtomic);
+  ASSERT_EQ(before_atomic.size(), 1u) << "the atomic must see the read it overwrites";
+  EXPECT_EQ(before_atomic[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(before_atomic[0].message.find("Global memory WAR data race at address 0x4000"),
+            std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, AtomicsFromDifferentWorkgroupsDoNotRaceWithEachOther) {
+  FakeFormatter formatter;
+  EXPECT_TRUE(
+      run_cross_workgroup_global_pair(reset_generic_engine(formatter), kAtomic, kAtomic).empty())
+      << "atomics to one address are ordered by the hardware, not by the program";
+}
+
+// The atomic history is kept apart from the ordinary history so that an atomic
+// cannot stand in for the ordinary access its own workgroup made earlier.
+TEST(GenericDataHazardEngineTest, AtomicDoesNotHideTheOrdinaryWriteOfItsOwnWorkgroup) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 1, 0});
+
+  auto access = [&](EntityId instruction_id, EntityId workgroup, const GlobalAccessKind &kind) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(instruction_id, 0x100 * instruction_id);
+    inst.instruction.execution = ExecutionKey{1, 0, workgroup, 0};
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = 0x5000;
+    event.size_bytes = 4;
+    event.is_read = kind.is_read;
+    event.is_write = kind.is_write;
+    event.is_atomic = kind.is_atomic;
+    engine.on_resource_access(event);
+  };
+
+  access(1, 0, kOrdinaryWrite);
+  access(2, 0, kAtomic);
+  ASSERT_TRUE(engine.warning_snapshot().empty()) << "one workgroup never races with itself";
+
+  access(3, 1, kAtomic);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u) << "the atomic still races the ordinary write of workgroup 0";
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, RejectsInvalidGlobalAccessSizes) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent inst;
+  inst.instruction = make_instruction(1, 0x100);
+  inst.instruction.execution = wave;
+  engine.on_instruction(inst);
+
+  ResourceAccessEvent access;
+  access.instruction = inst.instruction;
+  access.resource_kind = ResourceKind::GlobalMemory;
+  access.address = 0x1000;
+  access.is_read = true;
+
+  std::vector<std::string> diagnostics;
+  engine.set_diagnostic_handler(
+      [&](const std::string &message) { diagnostics.push_back(message); });
+
+  access.size_bytes = 0;
+  EXPECT_NO_THROW(engine.on_resource_access(access));
+
+  access.size_bytes = hazard_core::MAX_ACCESS_SIZE_BYTES + 1;
+  EXPECT_NO_THROW(engine.on_resource_access(access));
+
+  EXPECT_EQ(engine.rejected_event_count(), 2u);
+  EXPECT_EQ(diagnostics.size(), 2u);
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+  engine.set_diagnostic_handler(nullptr);
+}
+
+TEST(GenericDataHazardEngineTest, RejectsOutOfRangeLocalMemoryAddress) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent inst;
+  inst.instruction = make_instruction(1, 0x100);
+  inst.hazards.local_write_wait = WaitCntType::LDS;
+  inst.instruction.execution = wave;
+  engine.on_instruction(inst);
+
+  ResourceAccessEvent access;
+  access.instruction = inst.instruction;
+  access.resource_kind = ResourceKind::LocalMemory;
+  access.address = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1;
+  access.size_bytes = 4;
+  access.is_write = true;
+
+  EXPECT_NO_THROW(engine.on_resource_access(access));
+  EXPECT_EQ(engine.rejected_event_count(), 1u);
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, HandlesGlobalAccessNearUint64MaxWithoutOverflowingLoop) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 1, 0};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.instruction.execution = writer_wave;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::GlobalMemory;
+  write_access.address = std::numeric_limits<uint64_t>::max() - 1;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x200);
+  read_inst.instruction.execution = reader_wave;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::GlobalMemory;
+  read_access.address = std::numeric_limits<uint64_t>::max() - 1;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.address, std::numeric_limits<uint64_t>::max() - 3);
+}
+
+TEST(GenericDataHazardEngineTest, TracksVmemGuardedLocalWriteWithLoadcnt) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent direct_to_lds;
+  direct_to_lds.instruction = make_instruction(1, 0x100);
+  direct_to_lds.hazards.local_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(direct_to_lds);
+
+  ResourceAccessEvent local_write;
+  local_write.instruction = direct_to_lds.instruction;
+  local_write.resource_kind = ResourceKind::LocalMemory;
+  local_write.address = 0x180;
+  local_write.size_bytes = 4;
+  local_write.is_write = true;
+  engine.on_resource_access(local_write);
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  ASSERT_EQ(snapshot->core.lds_fifo.size(), 1u);
+  EXPECT_EQ(snapshot->core.lds_fifo.front().second.wait_type, WaitCntType::VMEM);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x180;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::LocalMemory);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::VMEM);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_loadcnt 0 before reading this LDS address");
+}
+
+TEST(GenericDataHazardEngineTest, LoadcntClearsVmemGuardedLocalWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent direct_to_lds;
+  direct_to_lds.instruction = make_instruction(1, 0x100);
+  direct_to_lds.hazards.local_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(direct_to_lds);
+
+  ResourceAccessEvent local_write;
+  local_write.instruction = direct_to_lds.instruction;
+  local_write.resource_kind = ResourceKind::LocalMemory;
+  local_write.address = 0x180;
+  local_write.size_bytes = 4;
+  local_write.is_write = true;
+  engine.on_resource_access(local_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(2, 0x104);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(wait);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(3, 0x108);
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x180;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, TracksTensorLocalWriteWithTensorWait) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent tensor_write_inst;
+  tensor_write_inst.instruction = make_instruction(1, 0x100);
+  tensor_write_inst.hazards.local_write_wait = WaitCntType::TENSOR;
+  engine.on_instruction(tensor_write_inst);
+
+  ResourceAccessEvent tensor_write;
+  tensor_write.instruction = tensor_write_inst.instruction;
+  tensor_write.resource_kind = ResourceKind::LocalMemory;
+  tensor_write.address = 0x180;
+  tensor_write.size_bytes = 4;
+  tensor_write.is_write = true;
+  engine.on_resource_access(tensor_write);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x104);
+  read_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x180;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::TENSOR);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_tensorcnt 0 before reading this LDS address");
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::TENSOR, 0});
+  engine.on_instruction(wait);
+
+  InstructionEvent second_read_inst;
+  second_read_inst.instruction = make_instruction(4, 0x10c);
+  second_read_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(second_read_inst);
+
+  read_access.instruction = second_read_inst.instruction;
+  engine.on_resource_access(read_access);
+
+  warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+}
+
+// DScnt counts one slot per DS instruction wherever that instruction left its
+// state, so s_wait_dscnt 1 retires the older of an LDS write and a DS load
+// rather than keeping one of each.
+TEST(GenericDataHazardEngineTest, DsWaitRetiresTheOldestOperationAcrossItsQueues) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent lds_write_inst;
+  lds_write_inst.instruction = make_instruction(1, 0x100);
+  lds_write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(lds_write_inst);
+
+  ResourceAccessEvent lds_write;
+  lds_write.instruction = lds_write_inst.instruction;
+  lds_write.resource_kind = ResourceKind::LocalMemory;
+  lds_write.address = 0x180;
+  lds_write.size_bytes = 4;
+  lds_write.is_write = true;
+  engine.on_resource_access(lds_write);
+
+  InstructionEvent ds_load_inst;
+  ds_load_inst.instruction = make_instruction(2, 0x104);
+  ds_load_inst.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_load_inst);
+
+  ResourceAccessEvent ds_load;
+  ds_load.instruction = ds_load_inst.instruction;
+  ds_load.resource_kind = ResourceKind::VectorRegister;
+  ds_load.register_kind = RegisterKind::Vector;
+  ds_load.resource_index = 4;
+  ds_load.size_bytes = 4;
+  ds_load.is_write = true;
+  engine.on_resource_access(ds_load);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::LDS, 1});
+  engine.on_instruction(wait);
+
+  InstructionEvent lds_read_inst;
+  lds_read_inst.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(lds_read_inst);
+
+  ResourceAccessEvent lds_read;
+  lds_read.instruction = lds_read_inst.instruction;
+  lds_read.resource_kind = ResourceKind::LocalMemory;
+  lds_read.address = 0x180;
+  lds_read.size_bytes = 4;
+  lds_read.is_read = true;
+  engine.on_resource_access(lds_read);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+
+  // The load the wait kept is still in flight, and reading its destination is
+  // still a hazard.
+  InstructionEvent reg_read_inst;
+  reg_read_inst.instruction = make_instruction(5, 0x110);
+  engine.on_instruction(reg_read_inst);
+
+  ResourceAccessEvent reg_read;
+  reg_read.instruction = reg_read_inst.instruction;
+  reg_read.resource_kind = ResourceKind::VectorRegister;
+  reg_read.register_kind = RegisterKind::Vector;
+  reg_read.resource_index = 4;
+  reg_read.size_bytes = 4;
+  reg_read.is_read = true;
+  engine.on_resource_access(reg_read);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+// lgkmcnt is one counter over scalar memory and LDS, so lgkmcnt(1) after a
+// scalar load and a later LDS write retires the load and keeps the write.
+TEST(GenericDataHazardEngineTest, LegacyLgkmWaitRetiresScalarAndLdsAsOneSequence) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent scalar_load_inst;
+  scalar_load_inst.instruction = make_instruction(1, 0x100);
+  scalar_load_inst.hazards.scalar_write_wait = WaitCntType::SMEM;
+  engine.on_instruction(scalar_load_inst);
+
+  ResourceAccessEvent scalar_write;
+  scalar_write.instruction = scalar_load_inst.instruction;
+  scalar_write.resource_kind = ResourceKind::ScalarRegister;
+  scalar_write.register_kind = RegisterKind::Scalar;
+  scalar_write.resource_index = 8;
+  scalar_write.size_bytes = 4;
+  scalar_write.is_write = true;
+  engine.on_resource_access(scalar_write);
+
+  InstructionEvent lds_write_inst;
+  lds_write_inst.instruction = make_instruction(2, 0x104);
+  lds_write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(lds_write_inst);
+
+  ResourceAccessEvent lds_write;
+  lds_write.instruction = lds_write_inst.instruction;
+  lds_write.resource_kind = ResourceKind::LocalMemory;
+  lds_write.address = 0x180;
+  lds_write.size_bytes = 4;
+  lds_write.is_write = true;
+  engine.on_resource_access(lds_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::LGKM, 1});
+  engine.on_instruction(wait);
+
+  InstructionEvent scalar_read_inst;
+  scalar_read_inst.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(scalar_read_inst);
+
+  ResourceAccessEvent scalar_read;
+  scalar_read.instruction = scalar_read_inst.instruction;
+  scalar_read.resource_kind = ResourceKind::ScalarRegister;
+  scalar_read.register_kind = RegisterKind::Scalar;
+  scalar_read.resource_index = 8;
+  scalar_read.size_bytes = 4;
+  scalar_read.is_read = true;
+  engine.on_resource_access(scalar_read);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+
+  InstructionEvent lds_read_inst;
+  lds_read_inst.instruction = make_instruction(5, 0x110);
+  engine.on_instruction(lds_read_inst);
+
+  ResourceAccessEvent lds_read;
+  lds_read.instruction = lds_read_inst.instruction;
+  lds_read.resource_kind = ResourceKind::LocalMemory;
+  lds_read.address = 0x180;
+  lds_read.size_bytes = 4;
+  lds_read.is_read = true;
+  engine.on_resource_access(lds_read);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+}
+
+// A tensor store reads its LDS source until TENSORcnt drains, so overwriting
+// that LDS before the wait is a WAR hazard on data still in flight.
+TEST(GenericDataHazardEngineTest, TensorGuardedLocalReadHoldsOffALaterWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent tensor_store_inst;
+  tensor_store_inst.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(tensor_store_inst);
+
+  ResourceAccessEvent tensor_read;
+  tensor_read.instruction = tensor_store_inst.instruction;
+  tensor_read.resource_kind = ResourceKind::LocalMemory;
+  tensor_read.address = 0x180;
+  tensor_read.size_bytes = 4;
+  tensor_read.is_read = true;
+  tensor_read.hazards.read_wait = WaitCntType::TENSOR;
+  engine.on_resource_access(tensor_read);
+
+  // DScnt is not the counter this read is outstanding on, and draining it
+  // leaves the transfer in flight.
+  InstructionEvent ds_wait;
+  ds_wait.instruction = make_instruction(2, 0x104);
+  ds_wait.wait_action.is_wait_instruction = true;
+  ds_wait.wait_action.counters.push_back({WaitCntType::LDS, 0});
+  engine.on_instruction(ds_wait);
+
+  InstructionEvent overwrite_inst;
+  overwrite_inst.instruction = make_instruction(3, 0x108);
+  overwrite_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(overwrite_inst);
+
+  ResourceAccessEvent overwrite;
+  overwrite.instruction = overwrite_inst.instruction;
+  overwrite.resource_kind = ResourceKind::LocalMemory;
+  overwrite.address = 0x180;
+  overwrite.size_bytes = 4;
+  overwrite.is_write = true;
+  engine.on_resource_access(overwrite);
+
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAR);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::TENSOR);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_tensorcnt 0 before writing this LDS address");
+
+  InstructionEvent tensor_wait;
+  tensor_wait.instruction = make_instruction(4, 0x10c);
+  tensor_wait.wait_action.is_wait_instruction = true;
+  tensor_wait.wait_action.counters.push_back({WaitCntType::TENSOR, 0});
+  engine.on_instruction(tensor_wait);
+
+  InstructionEvent second_overwrite_inst;
+  second_overwrite_inst.instruction = make_instruction(5, 0x110);
+  second_overwrite_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(second_overwrite_inst);
+
+  overwrite.instruction = second_overwrite_inst.instruction;
+  engine.on_resource_access(overwrite);
+
+  warnings = engine.warning_snapshot();
+  EXPECT_EQ(warnings.size(), 1u);
+}
+
+TEST(GenericDataHazardEngineTest, DoesNotMixLdsRaceEpochsAcrossDispatches) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(2, 0, 0);
+
+  ExecutionKey dispatch_one_wave{1, 0, 0, 0};
+  ExecutionKey dispatch_two_wave{2, 0, 0, 1};
+  engine.on_wave_begin(dispatch_one_wave);
+  engine.on_wave_begin(dispatch_two_wave);
+
+  InstructionEvent dispatch_one_write;
+  dispatch_one_write.instruction = make_instruction(1, 0x100);
+  dispatch_one_write.instruction.execution = dispatch_one_wave;
+  engine.on_instruction(dispatch_one_write);
+
+  ResourceAccessEvent lds_write;
+  lds_write.instruction = dispatch_one_write.instruction;
+  lds_write.resource_kind = ResourceKind::LocalMemory;
+  lds_write.address = 0x80;
+  lds_write.size_bytes = 4;
+  lds_write.is_write = true;
+  engine.on_resource_access(lds_write);
+
+  InstructionEvent dispatch_two_read;
+  dispatch_two_read.instruction = make_instruction(2, 0x200);
+  dispatch_two_read.instruction.execution = dispatch_two_wave;
+  engine.on_instruction(dispatch_two_read);
+
+  ResourceAccessEvent lds_read;
+  lds_read.instruction = dispatch_two_read.instruction;
+  lds_read.resource_kind = ResourceKind::LocalMemory;
+  lds_read.address = 0x80;
+  lds_read.size_bytes = 4;
+  lds_read.is_read = true;
+  engine.on_resource_access(lds_read);
+
+  engine.on_workgroup_end(1, 0, 0);
+  engine.on_workgroup_end(2, 0, 0);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, WorkgroupBarrierFlushesOnlyMatchingDispatchEpoch) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(2, 0, 0);
+
+  ExecutionKey dispatch_one_wave_a{1, 0, 0, 0};
+  ExecutionKey dispatch_one_wave_b{1, 0, 0, 1};
+  ExecutionKey dispatch_two_wave_a{2, 0, 0, 0};
+  ExecutionKey dispatch_two_wave_b{2, 0, 0, 1};
+  engine.on_wave_begin(dispatch_one_wave_a);
+  engine.on_wave_begin(dispatch_one_wave_b);
+  engine.on_wave_begin(dispatch_two_wave_a);
+  engine.on_wave_begin(dispatch_two_wave_b);
+
+  auto record_lds_access = [&](EntityId instruction_id, const ExecutionKey &wave, bool is_write) {
+    InstructionEvent instruction;
+    instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
+    instruction.instruction.execution = wave;
+    engine.on_instruction(instruction);
+
+    ResourceAccessEvent access;
+    access.instruction = instruction.instruction;
+    access.resource_kind = ResourceKind::LocalMemory;
+    access.address = 0x100;
+    access.size_bytes = 4;
+    access.is_read = !is_write;
+    access.is_write = is_write;
+    engine.on_resource_access(access);
+  };
+
+  record_lds_access(1, dispatch_one_wave_a, true);
+  record_lds_access(2, dispatch_one_wave_b, false);
+  record_lds_access(3, dispatch_two_wave_a, true);
+  record_lds_access(4, dispatch_two_wave_b, false);
+
+  BarrierEvent barrier;
+  barrier.wave = dispatch_one_wave_a;
+  barrier.kind = BarrierKind::Workgroup;
+  engine.on_barrier(barrier);
+
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
+
+  engine.on_workgroup_end(2, 0, 0);
+
+  warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[1].finding.instruction.execution.dispatch_id, 2u);
+}
+
+TEST(GenericDataHazardEngineTest, DispatchlessWorkgroupBarrierFlushesAllMatchingDispatchEpochs) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_dispatch_begin(2);
+  engine.on_workgroup_begin(2, 0, 0);
+
+  ExecutionKey dispatch_one_wave_a{1, 0, 0, 0};
+  ExecutionKey dispatch_one_wave_b{1, 0, 0, 1};
+  ExecutionKey dispatch_two_wave_a{2, 0, 0, 0};
+  ExecutionKey dispatch_two_wave_b{2, 0, 0, 1};
+  engine.on_wave_begin(dispatch_one_wave_a);
+  engine.on_wave_begin(dispatch_one_wave_b);
+  engine.on_wave_begin(dispatch_two_wave_a);
+  engine.on_wave_begin(dispatch_two_wave_b);
+
+  auto record_lds_access = [&](EntityId instruction_id, const ExecutionKey &wave, bool is_write) {
+    InstructionEvent instruction;
+    instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
+    instruction.instruction.execution = wave;
+    engine.on_instruction(instruction);
+
+    ResourceAccessEvent access;
+    access.instruction = instruction.instruction;
+    access.resource_kind = ResourceKind::LocalMemory;
+    access.address = 0x100;
+    access.size_bytes = 4;
+    access.is_read = !is_write;
+    access.is_write = is_write;
+    engine.on_resource_access(access);
+  };
+
+  record_lds_access(1, dispatch_one_wave_a, true);
+  record_lds_access(2, dispatch_one_wave_b, false);
+  record_lds_access(3, dispatch_two_wave_a, true);
+  record_lds_access(4, dispatch_two_wave_b, false);
+
+  BarrierEvent barrier;
+  barrier.wave.cluster_id = 0;
+  barrier.wave.workgroup_id = 0;
+  barrier.wave.wave_id = 0;
+  barrier.kind = BarrierKind::Workgroup;
+  engine.on_barrier(barrier);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  std::set<EntityId> dispatch_ids;
+  dispatch_ids.insert(warnings[0].finding.instruction.execution.dispatch_id);
+  dispatch_ids.insert(warnings[1].finding.instruction.execution.dispatch_id);
+  EXPECT_EQ(dispatch_ids, (std::set<EntityId>{1, 2}));
+}
+
+TEST(GenericDataHazardEngineTest, DispatchlessLocalMemoryAtomicBarrierClearsAllMatchingWaves) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_dispatch_begin(2);
+  engine.on_workgroup_begin(2, 0, 0);
+
+  ExecutionKey dispatch_one_wave{1, 0, 0, 0};
+  ExecutionKey dispatch_two_wave{2, 0, 0, 0};
+  engine.on_wave_begin(dispatch_one_wave);
+  engine.on_wave_begin(dispatch_two_wave);
+
+  auto record_lds_write = [&](EntityId instruction_id, const ExecutionKey &wave) {
+    InstructionEvent instruction;
+    instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
+    instruction.instruction.execution = wave;
+    instruction.hazards.local_write_wait = WaitCntType::LDS;
+    engine.on_instruction(instruction);
+
+    ResourceAccessEvent access;
+    access.instruction = instruction.instruction;
+    access.resource_kind = ResourceKind::LocalMemory;
+    access.address = 0x100;
+    access.size_bytes = 4;
+    access.is_write = true;
+    engine.on_resource_access(access);
+  };
+
+  record_lds_write(1, dispatch_one_wave);
+  record_lds_write(2, dispatch_two_wave);
+
+  ASSERT_EQ(engine.wave_snapshot(dispatch_one_wave)->core.lds_fifo.size(), 1u);
+  ASSERT_EQ(engine.wave_snapshot(dispatch_two_wave)->core.lds_fifo.size(), 1u);
+
+  BarrierEvent barrier;
+  barrier.wave.cluster_id = 0;
+  barrier.wave.workgroup_id = 0;
+  barrier.wave.wave_id = 0;
+  barrier.kind = BarrierKind::LocalMemoryAtomic;
+  engine.on_barrier(barrier);
+
+  EXPECT_EQ(engine.wave_snapshot(dispatch_one_wave)->core.lds_fifo.size(), 0u);
+  EXPECT_EQ(engine.wave_snapshot(dispatch_two_wave)->core.lds_fifo.size(), 0u);
+}
+
+TEST(GenericDataHazardEngineTest, DispatchBeginDoesNotResetOtherDispatchState) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  ExecutionKey dispatch_one_wave{1, 0, 0, 0};
+  engine.on_wave_begin(dispatch_one_wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.instruction.execution = dispatch_one_wave;
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  engine.on_dispatch_begin(2);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  read.instruction.execution = dispatch_one_wave;
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, DispatchEndFlushesAndErasesOnlyMatchingDispatch) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_dispatch_begin(2);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(2, 0, 0);
+
+  auto record_lds_access = [&](EntityId instruction_id, const ExecutionKey &wave, bool is_write) {
+    engine.on_wave_begin(wave);
+
+    InstructionEvent instruction;
+    instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
+    instruction.instruction.execution = wave;
+    engine.on_instruction(instruction);
+
+    ResourceAccessEvent access;
+    access.instruction = instruction.instruction;
+    access.resource_kind = ResourceKind::LocalMemory;
+    access.address = 0x100;
+    access.size_bytes = 4;
+    access.is_read = !is_write;
+    access.is_write = is_write;
+    engine.on_resource_access(access);
+  };
+
+  record_lds_access(1, ExecutionKey{1, 0, 0, 0}, true);
+  record_lds_access(2, ExecutionKey{1, 0, 0, 1}, false);
+  record_lds_access(3, ExecutionKey{2, 0, 0, 0}, true);
+  record_lds_access(4, ExecutionKey{2, 0, 0, 1}, false);
+
+  ASSERT_EQ(engine.wave_count(), 4u);
+
+  engine.on_dispatch_end(1);
+
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
+  EXPECT_EQ(engine.wave_count(), 2u);
+
+  engine.on_dispatch_end(2);
+
+  warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[1].finding.instruction.execution.dispatch_id, 2u);
+  EXPECT_EQ(engine.wave_count(), 0u);
+}
+
+TEST(GenericDataHazardEngineTest, ShutdownFlushesOutstandingWorkgroupEpochs) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(1, 0x100);
+  write_inst.instruction.execution = writer_wave;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(2, 0x104);
+  read_inst.instruction.execution = reader_wave;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  ASSERT_TRUE(engine.warning_snapshot().empty());
+
+  engine.on_shutdown();
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, LdsRaceIdentifiesTheWritingInstruction) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const std::array<uint32_t, 4> write_isa{0xd8000000u, 0x00000100u, 0u, 0u};
+  const std::array<uint32_t, 4> read_isa{0xd9000000u, 0x00000200u, 0u, 0u};
+
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(7, 0x300);
+  write_inst.instruction.execution = writer_wave;
+  write_inst.instruction.raw_isa = write_isa;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(9, 0x340);
+  read_inst.instruction.execution = reader_wave;
+  read_inst.instruction.raw_isa = read_isa;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  engine.on_workgroup_end(1, 0, 0);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  const auto &warning = warnings[0];
+  ASSERT_EQ(warning.finding.kind, HazardKind::LocalMemoryRace);
+
+  EXPECT_EQ(warning.finding.instruction.instruction_id, 9u);
+  EXPECT_EQ(warning.finding.instruction.pc, 0x340u);
+  EXPECT_EQ(warning.finding.instruction.execution.wave_id, 1u);
+  EXPECT_EQ(warning.finding.instruction.raw_isa, read_isa);
+
+  // Both halves of the race have to be identifiable from the report structure,
+  // not only from the message text.
+  ASSERT_TRUE(warning.finding.has_source_instruction);
+  EXPECT_EQ(warning.finding.source_instruction.instruction_id, 7u);
+  EXPECT_EQ(warning.finding.source_instruction.pc, 0x300u);
+  EXPECT_EQ(warning.finding.source_instruction.raw_isa, write_isa);
+  EXPECT_EQ(warning.finding.source_instruction.execution.dispatch_id, 1u);
+  EXPECT_EQ(warning.finding.source_instruction.execution.cluster_id, 0u);
+  EXPECT_EQ(warning.finding.source_instruction.execution.workgroup_id, 0u);
+  EXPECT_EQ(warning.finding.source_instruction.execution.wave_id, 0u);
+
+  // The FFM adapter copies the producer only when this flag is set.
+  EXPECT_TRUE(warning.has_source);
+  EXPECT_EQ(warning.source_pc, 0x300u);
+  EXPECT_EQ(warning.source_raw_isa, write_isa);
+}
+
+namespace {
+
+/// Race one LDS address between two waves, then close the epoch with a
+/// workgroup barrier. Instruction ids are per-execution, PCs are the static
+/// identity of the pair, so the two vary independently here.
+void race_one_epoch(DataHazardEngine &engine, EntityId write_id, uint64_t write_pc,
+                    EntityId read_id, uint64_t read_pc) {
+  const ExecutionKey writer_wave{1, 0, 0, 0};
+  const ExecutionKey reader_wave{1, 0, 0, 1};
+
+  auto access = [&](EntityId id, uint64_t pc, const ExecutionKey &wave, bool is_write) {
+    InstructionEvent instruction;
+    instruction.instruction = make_instruction(id, pc);
+    instruction.instruction.execution = wave;
+    engine.on_instruction(instruction);
+
+    ResourceAccessEvent event;
+    event.instruction = instruction.instruction;
+    event.resource_kind = ResourceKind::LocalMemory;
+    event.address = 0x80;
+    event.size_bytes = 4;
+    event.is_read = !is_write;
+    event.is_write = is_write;
+    engine.on_resource_access(event);
+  };
+
+  access(write_id, write_pc, writer_wave, true);
+  access(read_id, read_pc, reader_wave, false);
+
+  BarrierEvent barrier;
+  barrier.wave = writer_wave;
+  barrier.kind = BarrierKind::Workgroup;
+  engine.on_barrier(barrier);
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, RepeatedExecutionsOfOneLdsRaceReportOnce) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 1});
+
+  race_one_epoch(engine, 1, 0x300, 2, 0x340);
+  race_one_epoch(engine, 3, 0x300, 4, 0x340);
+
+  EXPECT_EQ(engine.warning_snapshot().size(), 1u);
+}
+
+TEST(GenericDataHazardEngineTest, SecondLdsRaceBetweenTheSameWavesIsStillReported) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 1});
+
+  race_one_epoch(engine, 1, 0x300, 2, 0x340);
+  // A different pair of instructions racing the same address in a later epoch
+  // is a second defect, not a repeat of the first.
+  race_one_epoch(engine, 3, 0x400, 4, 0x440);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x300u);
+  EXPECT_EQ(warnings[0].finding.instruction.pc, 0x340u);
+  EXPECT_EQ(warnings[1].finding.source_instruction.pc, 0x400u);
+  EXPECT_EQ(warnings[1].finding.instruction.pc, 0x440u);
+}

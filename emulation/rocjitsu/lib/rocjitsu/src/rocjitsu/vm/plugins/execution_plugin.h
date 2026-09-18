@@ -27,6 +27,17 @@
 
 namespace rocjitsu {
 
+/// How much of a workgroup a resolved barrier synchronized, passed to
+/// onAmdgpuBarrierResolved so plugins can tell a full-workgroup barrier from a
+/// partial one
+enum class AmdgpuBarrierScope {
+  Workgroup,
+  Named,
+  Cluster,
+  LocalMemoryAtomic,
+  LocalMemoryAtomicAsync,
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
@@ -248,9 +259,13 @@ public:
   /// Memory completion and runtime initialization remain unobserved storage operations.
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
-  /// Called with the waves synchronized by a completed barrier domain.
+  /// Called with the waves synchronized by a completed barrier domain. @p scope
+  /// says how much of the workgroup the barrier synchronized: a named barrier
+  /// resolves for only its member subset, while Workgroup and Cluster barriers
+  /// resolve for every wave of each participating workgroup.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
-  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
+                                       AmdgpuBarrierScope /*scope*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that
