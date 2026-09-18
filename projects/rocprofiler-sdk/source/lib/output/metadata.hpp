@@ -44,6 +44,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/pc_sampling.hpp>
 
 #include <fmt/format.h>
 
@@ -172,6 +173,13 @@ struct metadata
     synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
     node_info                                node_data                  = {};
     std::vector<std::string>                 command_line               = {};
+
+    // Memoizes opcode->instruction-type classification for stochastic PC sampling
+    // verification. rocprofv3 currently delivers all PC sampling buffer callbacks on a
+    // single dedicated thread (one buffer shared across all GPU agents), so one cache here
+    // is sufficient. If that ever changes to one buffer per device/agent, each buffer's
+    // dedicated callback thread would need its own cache instead of sharing this one.
+    rocprofiler::sdk::pc_sampling::verification_cache pc_sampling_verification_cache = {};
 
     // PMC event ids start at this number
     uint64_t pmc_event_offset = 1;
