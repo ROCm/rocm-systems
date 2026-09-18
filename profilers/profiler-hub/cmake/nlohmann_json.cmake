@@ -5,14 +5,15 @@ include_guard(DIRECTORY)
 
 set(NLOHMANN_JSON_VERSION "3.11.3" CACHE STRING "Minimum nlohmann_json version")
 
-# Fetching is Off by default: a missing or old package errors out.
+# Fetching is On by default: this branch runs only under
+# -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF.
 if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
     find_package(nlohmann_json ${NLOHMANN_JSON_VERSION})
 
     if(NOT nlohmann_json_FOUND)
         message(
             FATAL_ERROR
-            "profiler-hub requires nlohmann_json ${NLOHMANN_JSON_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+            "profiler-hub requires nlohmann_json ${NLOHMANN_JSON_VERSION} or newer on CMAKE_PREFIX_PATH. Drop -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF to download it instead."
         )
     endif()
 

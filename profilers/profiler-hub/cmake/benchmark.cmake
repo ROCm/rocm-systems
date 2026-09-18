@@ -5,14 +5,15 @@ include_guard(DIRECTORY)
 
 set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Minimum Google Benchmark version")
 
-# Fetching is Off by default: a missing or old package errors out.
+# Fetching is On by default: this branch runs only under
+# -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF.
 if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
     find_package(benchmark ${BENCHMARK_VERSION})
 
     if(NOT benchmark_FOUND)
         message(
             FATAL_ERROR
-            "profiler-hub requires Google Benchmark ${BENCHMARK_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_BUILD_BENCHMARKS=OFF to skip the benchmarks, or with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+            "profiler-hub requires Google Benchmark ${BENCHMARK_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_BUILD_BENCHMARKS=OFF to skip the benchmarks, or drop -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF to download it instead."
         )
     endif()
 

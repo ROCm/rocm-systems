@@ -24,7 +24,7 @@ option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(
     PROFILER_HUB_FETCH_DEPENDENCIES
     "Download missing or unsuitable dependencies at configure time"
-    OFF
+    ON
 )
 
 if(PROFILER_HUB_BUILD_TESTS)

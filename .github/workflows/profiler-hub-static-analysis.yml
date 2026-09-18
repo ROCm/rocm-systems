@@ -7,7 +7,7 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/profiler-hub-*.yml'
+      - '.github/workflows/profiler-hub-static-analysis.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'
@@ -16,7 +16,7 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/profiler-hub-*.yml'
+      - '.github/workflows/profiler-hub-static-analysis.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'
@@ -40,7 +40,6 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
-            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       # No gtest/gmock/benchmark: this job configures with tests and benchmarks
@@ -66,8 +65,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DPROFILER_HUB_BUILD_TESTS=OFF \
-            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
-            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
 
       - name: Build
         working-directory: profilers/profiler-hub

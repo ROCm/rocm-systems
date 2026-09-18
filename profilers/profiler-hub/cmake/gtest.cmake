@@ -5,14 +5,15 @@ include_guard(DIRECTORY)
 
 set(GTEST_VERSION "1.14.0" CACHE STRING "Minimum Google Test version")
 
-# Fetching is Off by default: a missing or old package errors out.
+# Fetching is On by default: this branch runs only under
+# -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF.
 if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
     find_package(GTest ${GTEST_VERSION})
 
     if(NOT GTest_FOUND)
         message(
             FATAL_ERROR
-            "profiler-hub requires GoogleTest ${GTEST_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_BUILD_TESTS=OFF to skip the unit tests, or with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+            "profiler-hub requires GoogleTest ${GTEST_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_BUILD_TESTS=OFF to skip the unit tests, or drop -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF to download it instead."
         )
     endif()
 

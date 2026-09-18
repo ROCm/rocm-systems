@@ -7,14 +7,14 @@ on:
     branches:
       - develop
     paths:
-      - '.github/workflows/profiler-hub-*.yml'
+      - '.github/workflows/profiler-hub-coverage.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'
       - '!profilers/profiler-hub/README.md'
   pull_request:
     paths:
-      - '.github/workflows/profiler-hub-*.yml'
+      - '.github/workflows/profiler-hub-coverage.yml'
       - 'profilers/profiler-hub/**'
       - '!profilers/profiler-hub/build/**'
       - '!profilers/profiler-hub/docs/**'
@@ -41,7 +41,6 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
-            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       - name: Install dependencies
@@ -63,8 +62,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DPROFILER_HUB_ENABLE_COVERAGE=ON \
             -DPROFILER_HUB_BUILD_TESTS=ON \
-            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
-            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
 
       - name: Build
         working-directory: profilers/profiler-hub

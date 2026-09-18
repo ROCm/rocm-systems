@@ -5,14 +5,15 @@ include_guard(DIRECTORY)
 
 set(FMT_VERSION "11.1.3" CACHE STRING "Minimum fmt version")
 
-# Fetching is Off by default: a missing or old package errors out.
+# Fetching is On by default: this branch runs only under
+# -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF.
 if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
     find_package(fmt ${FMT_VERSION})
 
     if(NOT fmt_FOUND)
         message(
             FATAL_ERROR
-            "profiler-hub requires fmt ${FMT_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+            "profiler-hub requires fmt ${FMT_VERSION} or newer on CMAKE_PREFIX_PATH. Drop -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF to download it instead."
         )
     endif()
 
