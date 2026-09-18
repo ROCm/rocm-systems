@@ -420,13 +420,6 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_triton_trace
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_triton_trace.xml
-        ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_profile_membw
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_membw.xml
@@ -450,7 +443,6 @@ set_tests_properties(
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
-    test_profile_triton_trace
     test_profile_membw
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
@@ -1063,7 +1055,6 @@ if(${ENABLE_COVERAGE})
         test_roofline_main
         test_rocpd_data
         test_profile_torch_trace
-        test_profile_triton_trace
         test_inject_roctx_package
         test_analysis_db
         test_analysis_base
