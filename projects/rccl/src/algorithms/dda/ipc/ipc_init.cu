@@ -184,6 +184,22 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     localReady = false;
   }
 
+  // exchangeMemPtrs() exports this rank's IPC handle *before* it reaches its own
+  // bootstrapAllGather, so a rank whose export fails returns without ever
+  // entering that all-gather and strands every peer inside it. No readiness
+  // check placed after exchangeMemPtrs() can catch that, because the peers are
+  // already blocked by then. Export once here instead, while a readiness
+  // exchange still lies ahead, so the failure can be agreed on like any other.
+  // The export is idempotent and cheap, so doing it twice costs nothing.
+  if (localReady) {
+    cudaIpcMemHandle_t probeHandle;
+    cudaError_t he = cudaIpcGetMemHandle(&probeHandle, scratch);
+    if (he != cudaSuccess) {
+      WARN("ncclDdaIpcCommInit: cudaIpcGetMemHandle failed (%s)", cudaGetErrorString(he));
+      localReady = false;
+    }
+  }
+
   // First collective. Past this point every rank must be in lockstep.
   if (!ddaIpcAllRanksReady(comm, localReady)) {
     delete handler;
@@ -191,12 +207,14 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  ncclResult_t res = handler->exchangeMemPtrs();
-  if (res != ncclSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+  // Its own all-gather has completed for everyone by the time this returns, but
+  // the cudaIpcOpenMemHandle() loop after that all-gather is rank-local and can
+  // still fail on a single rank. Record it rather than returning: the second
+  // readiness check below is what every other rank is heading for, and a rank
+  // that slipped out here would strand them in it.
+  if (handler->exchangeMemPtrs() != ncclSuccess) {
     WARN("ncclDdaIpcCommInit: exchangeMemPtrs failed");
-    return ncclSuccess;
+    localReady = false;
   }
 
   // Peer table is sized for kDdaNranks (the max) but only comm->nRanks entries
@@ -297,13 +315,28 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(nActiveRanks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
+    WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
+    localReady = false;
+  }
+
+  // Nothing collective follows, so a rank bailing out here would not hang comm
+  // init -- but it would leave this rank with DDA IPC off while its peers have
+  // it on, and they would then diverge at the first collective instead. The
+  // enable/disable decision has to be unanimous, so agree one last time.
+  //
+  // (A failure *inside* mallocAndInit, before its own internal exchange, can
+  // still strand peers in that exchange; that is internal to IpcGpuBarrier and
+  // predates this path.)
+  if (!ddaIpcAllRanksReady(comm, localReady)) {
+    barrierPair.first.reset();
     delete barrierState;
-    free(comm->ddaPeerPtrsHost);
-    comm->ddaPeerPtrsHost = nullptr;
+    if (comm->ddaPeerPtrsHost != nullptr) {
+      free(comm->ddaPeerPtrsHost);
+      comm->ddaPeerPtrsHost = nullptr;
+    }
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
     return ncclSuccess;
   }
 
