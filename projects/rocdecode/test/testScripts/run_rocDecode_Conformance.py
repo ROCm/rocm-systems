@@ -37,8 +37,10 @@ __status__ = "Shipping"
 def run_and_log(cmd, logFilePath):
     # Portable replacement for '| tee -a': stream the output line by line so
     # progress stays visible during long runs, while appending it to the log.
+    # cmd is an argument list launched without a shell, so paths holding spaces
+    # or shell metacharacters reach the sample unmangled.
     with open(logFilePath, 'a') as logf:
-        p = Popen(cmd, shell=True, stdout=PIPE, stderr=STDOUT, text=True)
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, text=True)
         for line in p.stdout:
             print(line, end='')
             logf.write(line)
@@ -133,7 +135,10 @@ if streamListSize != md5ListSize:
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
     md5FilePath = md5FileDir + md5FileList[i]
-    cmd = run_rocDecode_app +' -i ' + streamFilePath + ' ' + bsReaderOption + ' -md5_check ' + md5FilePath + ' -d ' + str(gpuDeviceID)
+    cmd = [run_rocDecode_app, '-i', streamFilePath]
+    if bsReaderOption:
+        cmd.append(bsReaderOption)
+    cmd += ['-md5_check', md5FilePath, '-d', str(gpuDeviceID)]
     logFilePath = resultsPath + '/rocDecode_output.log'
     run_and_log(cmd, logFilePath)
     print("======================================================================================\n")

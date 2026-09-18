@@ -43,8 +43,10 @@ def shell(cmd):
 def run_and_log(cmd, logFilePath):
     # Portable replacement for '| tee -a': stream the output line by line so
     # progress stays visible during long runs, while appending it to the log.
+    # cmd is an argument list launched without a shell, so paths holding spaces
+    # or shell metacharacters reach the sample unmangled.
     with open(logFilePath, 'a') as logf:
-        p = Popen(cmd, shell=True, stdout=PIPE, stderr=STDOUT, text=True)
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, text=True)
         for line in p.stdout:
             print(line, end='')
             logf.write(line)
@@ -190,7 +192,9 @@ if sampleMode == 0:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        cmd = run_rocDecode_app + ' -i ' + str(current_file) + ' -d ' + str(gpuDeviceID) + ' -f ' + str(maxNumFrames) + ' ' + str(bsReaderOption)
+        cmd = [run_rocDecode_app, '-i', str(current_file), '-d', str(gpuDeviceID), '-f', str(maxNumFrames)]
+        if bsReaderOption:
+            cmd.append(bsReaderOption)
         logFilePath = resultsPath+'/rocDecode_output.log'
         run_and_log(cmd, logFilePath)
         print("\n\n")
@@ -230,7 +234,7 @@ elif sampleMode == 1:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
 
-        cmd = run_rocDecode_app+' -i '+str(current_file)+' -t '+str(numThreads)+' -f '+str(maxNumFrames)
+        cmd = [run_rocDecode_app, '-i', str(current_file), '-t', str(numThreads), '-f', str(maxNumFrames)]
         logFilePath = resultsPath+'/rocDecode_output.log'
         run_and_log(cmd, logFilePath)
         print("\n\n")
