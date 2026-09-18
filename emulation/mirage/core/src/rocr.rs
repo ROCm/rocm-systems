@@ -406,20 +406,15 @@ fn expand_origin(directory: &str, origin: &str) -> String {
 /// platform's own name — so a runtime in one of those is the one a
 /// workload on such a host loads while this probe reads the base copy.
 ///
-/// Neither family is searched for by name: the legacy names are
-/// per-architecture and per-CPU and a list of them would be a second
-/// thing to keep in step with glibc. Any immediate subdirectory holding
-/// a ROCr is treated as an alternative instead, which needs no list and
-/// costs one directory read.
+/// Any immediate subdirectory holding a ROCr is an alternative. Legacy
+/// *combinations* need one more rule: glibc builds a bounded power set
+/// from the capability names for this architecture. Those component
+/// names are fixed by glibc's ABI, so mirage follows every existing
+/// permutation of them, without walking any other directory.
 ///
-/// What it is *not* is a recursive search. glibc does not look below
-/// those directories, and walking every tree under `<dir>` both invents
+/// What it is *not* is a recursive filesystem search. That would invent
 /// candidates the loader cannot select and, on an ordinary ROCm install,
-/// buries the real runtime under asset trees like `hipblaslt/library`.
-/// The remaining gap is the legacy *combinations* — `<dir>/haswell/tls`
-/// and friends, nested one level deeper — which no ROCm packaging ships
-/// and which stay a documented false verdict rather than an unbounded
-/// walk.
+/// bury the real runtime under asset trees like `hipblaslt/library`.
 fn alternative_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
     let listing = match std::fs::read_dir(directory) {
         Ok(listing) => listing,
@@ -444,6 +439,79 @@ fn alternative_runtime_exists(directory: &Path, require_trusted_paths: bool) -> 
         if found {
             return Some(true);
         }
+    }
+    legacy_combination_runtime_exists(directory, require_trusted_paths)
+}
+
+/// The component names glibc can combine in its legacy hwcap search.
+///
+/// This mechanism disappeared in glibc 2.37, so the list is the final
+/// ABI for each architecture rather than a table that grows with modern
+/// `glibc-hwcaps`. On an architecture not listed here, silence is safer
+/// than claiming the base runtime is the one the loader selects.
+fn legacy_hwcap_components() -> Option<&'static [&'static str]> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Synthetic TLS, AT_PLATFORM values, and HWCAP_IMPORTANT names.
+        Some(&["tls", "x86_64", "haswell", "xeon_phi", "avx512_1"])
+    }
+    #[cfg(target_arch = "x86")]
+    {
+        Some(&["tls", "i586", "i686", "sse2"])
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        Some(&["tls", "aarch64", "atomics"])
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64")))]
+    {
+        None
+    }
+}
+
+/// Whether a bounded legacy hwcap combination holds a ROCr.
+///
+/// glibc 2.36 and earlier form a power set from the architecture's
+/// components. Following only those names catches nested candidates such
+/// as `haswell/tls` without mistaking `hipblaslt/library` for a loader
+/// path. Permutations deliberately over-approximate glibc's preferred
+/// ordering: an extra `Unknown` is safe, while missing an order can emit
+/// a false `Unsupported`.
+fn legacy_combination_runtime_exists(
+    directory: &Path,
+    require_trusted_paths: bool,
+) -> Option<bool> {
+    let components = legacy_hwcap_components()?;
+    let mut frontier = vec![(directory.to_path_buf(), 0_u32)];
+    for _ in 0..components.len() {
+        let mut next = Vec::new();
+        for (parent, used) in frontier {
+            for (index, component) in components.iter().enumerate() {
+                let bit = 1_u32 << index;
+                if used & bit != 0 {
+                    continue;
+                }
+                let mut path = parent.join(component);
+                match path.metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(_) => return None,
+                    Ok(metadata) if !metadata.is_dir() => continue,
+                    Ok(_) => {}
+                }
+                if require_trusted_paths {
+                    path = trusted_system_directory(&path)?;
+                }
+                let runtime = path.join(ROCR_SONAME);
+                if runtime.is_file() {
+                    if require_trusted_paths {
+                        trusted_system_file(&runtime)?;
+                    }
+                    return Some(true);
+                }
+                next.push((path, used | bit));
+            }
+        }
+        frontier = next;
     }
     Some(false)
 }
@@ -1097,10 +1165,24 @@ mod tests {
             "a pre-2.37 glibc searches <dir>/tls, so the selected runtime is ambiguous"
         );
         std::fs::remove_dir_all(&legacy).unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        for combination in [["tls", "haswell"], ["haswell", "tls"]] {
+            let nested = tmp.path().join(combination[0]).join(combination[1]);
+            std::fs::create_dir_all(&nested).unwrap();
+            std::os::unix::fs::symlink(&runtime, nested.join(ROCR_SONAME)).unwrap();
+            assert_eq!(
+                direct_runpath_runtime(&workload, &workload_image, false),
+                None,
+                "the bounded legacy combination {combination:?} must be treated as ambiguous"
+            );
+            std::fs::remove_dir_all(tmp.path().join(combination[0])).unwrap();
+        }
+
         assert_eq!(
             direct_runpath_runtime(&workload, &workload_image, false),
             Some(runtime.canonicalize().unwrap()),
-            "and the verdict comes back once the alternative is gone"
+            "and the verdict comes back once every loader alternative is gone"
         );
 
         // A `RUNPATH` entry that does not exist is not a reason to stop
