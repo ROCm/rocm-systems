@@ -48,6 +48,7 @@ set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
   rma-test.cc                          # RMA launch dispatch + plan scheduling coverage
+  rma-ce-test.cc                       # RMA CE init/finalize + put/wait launch coverage
   ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
   group-test.cc
   devcomm-test.cc
@@ -65,7 +66,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
   fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
-  fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
+  fakes/ce_fakes.cc                    # src/ce_coll.cc availability + batch-ops seams
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
   fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
   fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
@@ -153,6 +154,8 @@ if(BUILD_TESTS)
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     RMA_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_tmp.cc"
+    # rma_ce.cc has no basename collision, so it keeps its own name.
+    RMA_CE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
@@ -841,6 +844,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   RMA_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_tmp.cc"
+  RMA_CE_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_ce.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
