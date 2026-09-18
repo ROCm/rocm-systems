@@ -838,8 +838,8 @@ def _summarize_mode(
         "runtime_ratio": [
             runtime_ms[index] / native_runtime[index] for index in range(2)
         ],
-        # Startup is the complete cold-path latency, not merely the portion
-        # that happens to fall inside the hook's instrumentation clock.
+        # Include both instrumentation and the measured first operation.
+        # Direct device timers omit host-only setup; document that limitation.
         "startup_ms": instrumentation_ms + runtime_ms[0],
         "instrumentation_ms": instrumentation_ms,
         "run_ms": runtime_ms[1],
@@ -928,10 +928,11 @@ def _render_status(summary: dict[str, Any]) -> str:
     lines = [
         f"# ConSan `{summary['target']}` benchmark status",
         "",
-        "For each mode, **Startup** is the total latency through the first synchronized",
-        "run and its selected evidence checkpoints, including instrumentation, loading,",
-        "binding, and warm-up; **Run** is the absolute second-run latency followed",
-        "by its ratio to the matching uninstrumented second run.",
+        "For each mode, **Startup** sums instrumentation and the measured first run;",
+        "**Run** is the absolute second-run latency followed by its ratio to the",
+        "matching uninstrumented second run. PyTorch/Gluon use synchronized host",
+        "timing. hipBLASLt uses GPU event timing, so its Startup excludes host client",
+        "setup and is not an end-to-end cold-start measurement.",
         "",
         "| Workload | Uninstrumented Startup | Uninstrumented Run | "
         + " | ".join(
