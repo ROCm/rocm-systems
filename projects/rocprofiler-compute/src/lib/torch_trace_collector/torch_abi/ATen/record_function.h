@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include "torch_abi.h"
+#include <torch_abi.h>
 
 #include <array>
 #include <cstddef>

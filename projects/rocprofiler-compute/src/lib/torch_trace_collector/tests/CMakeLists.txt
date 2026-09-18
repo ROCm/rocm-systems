@@ -11,28 +11,7 @@ if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     get_filename_component(_rocm_path "$ENV{ROCM_PATH}" ABSOLUTE)
     get_filename_component(_torch_prefix "${_rocm_path}/../torch" ABSOLUTE)
 
-    set(_torch_version_headers
-        "${_torch_prefix}/include/torch/headeronly/version.h"
-        "${_torch_prefix}/include/torch/csrc/api/include/torch/version.h"
-    )
-    set(_torch_version "")
-    foreach(_header IN LISTS _torch_version_headers)
-        if(NOT EXISTS "${_header}")
-            continue()
-        endif()
-        file(STRINGS "${_header}" _major_line REGEX "define[ \t]+TORCH_VERSION_MAJOR")
-        file(STRINGS "${_header}" _minor_line REGEX "define[ \t]+TORCH_VERSION_MINOR")
-        if(_major_line AND _minor_line)
-            string(REGEX REPLACE "[^0-9]" "" _torch_major "${_major_line}")
-            string(REGEX REPLACE "[^0-9]" "" _torch_minor "${_minor_line}")
-            set(_torch_version "${_torch_major}.${_torch_minor}")
-            break()
-        endif()
-    endforeach()
-
-    # Matches kSupportedTorchVersions in torch_abi.h. Checking the stub numbers
-    # against a version they do not describe would only produce noise.
-    if(_torch_version MATCHES "^2\\.(13|14)$")
+    if(EXISTS "${_torch_prefix}/include/ATen/ATen.h")
         set(_torch_lib_dir "${_torch_prefix}/lib")
         set(_torch_include_dirs
             "${_torch_prefix}/include"
@@ -53,20 +32,14 @@ if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
             endif()
             list(APPEND _torch_libraries "${TORCH_${_lib}_LIBRARY}")
         endforeach()
-    elseif(_torch_version)
-        message(
-            STATUS
-            "PyTorch ${_torch_version} is not described by torch_abi.h; "
-            "building test-torch-trace-collector without the libtorch tests"
-        )
     endif()
 endif()
 
 if(NOT _torch_include_dirs)
     message(
         STATUS
-        "No supported PyTorch install found; test-torch-trace-collector will "
-        "build without its libtorch tests"
+        "No PyTorch install found; test-torch-trace-collector will build "
+        "without its libtorch tests"
     )
 endif()
 
