@@ -699,8 +699,7 @@ public:
   size_t id() { return id_; }
 
  private:
-  /// @brief Loads an AIE code object. Defined only on Linux (SRC_XDNA); the sole
-  /// caller is likewise gated, so this is never referenced on other platforms.
+  /// @brief Loads an AIE code object.
   ///
   /// @param agent AIE agent to load the code object for.
   /// @param data Pointer to the code object data.

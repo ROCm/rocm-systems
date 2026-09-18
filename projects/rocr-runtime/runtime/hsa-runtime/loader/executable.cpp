@@ -728,7 +728,7 @@ bool VariableSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void *value) {
 bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
   switch (symbol_info) {
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
-      // Handle is only valid once the executable is frozen; 0 before, matching GPU.
+      // Handle is only valid once the executable is frozen.
       // address is the descriptor pointer, passed to SymbolImpl at construction.
       *static_cast<uint64_t*>(value) = frozen ? address : 0;
       return true;
