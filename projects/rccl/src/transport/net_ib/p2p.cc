@@ -1102,9 +1102,23 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-read flush request (req=%p, comm=%p, wr_id=%ld)", __func__, nFlushWrs,
             req, req->base, wr.wr_id);
       TIME_START(4);
-      struct ibv_send_wr* bad_wr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr), iflushRet, iflushFail);
+      struct ibv_send_wr* bad_wr = NULL;
+      iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
       TIME_STOP(4);
+      if (iflushRet != ncclSuccess) {
+        // Prefix posts do not call ncclIbAddEvent. Count accepted WRs so we keep
+        // the request when a signaled tail is lost, matching isendFail.
+        int posted = 0;
+        for (struct ibv_send_wr* w = &flushWrs[0]; w != NULL && w != bad_wr; w = w->next) posted++;
+        if (posted > 0) {
+          ncclIbAddEvent(req, i);
+          req->type = NCCL_NET_IB_REQ_FAILED;
+          *request = req;
+          ncclIbStatsFatalError(&comm->base.stats);
+          return ncclSuccess;
+        }
+        goto iflushFail;
+      }
       ncclIbAddEvent(req, i);
     }
   }
@@ -1132,7 +1146,8 @@ iflushFail:
   } else {
     *request = NULL;
   }
-  return ret;
+  // NCCLCHECKGOTO stored the post error in iflushRet; ret is still success.
+  return (iflushRet != ncclSuccess) ? iflushRet : ret;
 }
 
 #define HCA_NAME(req, index) ((req)->devBases[(index)]->pd->context->device->name)
