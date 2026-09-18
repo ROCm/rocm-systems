@@ -317,10 +317,10 @@ def is_roofline_shown(
 
 def list_ml_operators(
     workload_path: str,
-    call_trees: dict[str, CallTreeNode],
+    call_trees: dict[str, list[CallTreeNode]],
     framework_label: str = "PyTorch",
 ) -> None:
-    """Display operators as a unified call tree grouped by source location.
+    """Display operators as a unified call tree nested per Thread_Id.
 
     ``framework_label`` sets the heading text (for example "PyTorch" or
     "Triton").
@@ -454,22 +454,16 @@ def print_wrapped_kernel_line(
             print(f"{continuation}{chunk}")
 
 
-def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
-    """Print the unified call tree grouped by source location."""
-    sorted_locations = sorted(
-        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
-    )
-    for i, (location, root) in enumerate(sorted_locations):
+def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
+    """Print operator call trees nested per Thread_Id."""
+    for i, (thread_id, roots) in enumerate(call_trees.items()):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        stats = format_node_stats(root)
-        print(f"\n{location} {stats}")
-        for child in sorted(
-            root.children,
-            key=lambda c: c.total_duration_ms,
-            reverse=True,
+        print(f"\nThread_Id {thread_id}")
+        for root in sorted(
+            roots, key=lambda node: node.total_duration_ms, reverse=True
         ):
-            print_operator_node(child)
+            print_operator_node(root)
 
 
 def show_operator_summary(summary_df: pd.DataFrame) -> None:

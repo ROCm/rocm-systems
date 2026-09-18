@@ -22,14 +22,11 @@ from utils.tty import (
     has_time_data,
     print_operator_node,
     show_all,
-    show_call_tree,
     show_operator_summary,
 )
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
-    build_call_trees,
-    build_operator_summary,
 )
 from utils.utils_common import is_gfx115x, is_gfx1250
 
@@ -48,11 +45,6 @@ _OPERATOR_SUMMARY_COLUMNS = [
     "Min_Dispatch",
     "Max_Dispatch",
 ]
-
-
-def build_summary_from_dataframe(rows):
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    return build_operator_summary(call_trees)
 
 
 def make_args(**overrides) -> argparse.Namespace:
@@ -749,18 +741,6 @@ def test_format_node_stats_renders_na_when_dispatch_stats_missing():
     assert "dispatch_max: N/A" in rendered
 
 
-def test_show_call_tree_sorted_by_duration(capsys):
-    root_a = CallTreeNode(name="a.py:1")
-    root_a.total_duration_ms = 10.0
-    root_a.kernel_launches = 1
-    root_b = CallTreeNode(name="b.py:1")
-    root_b.total_duration_ms = 20.0
-    root_b.kernel_launches = 2
-    show_call_tree({"a.py:1": root_a, "b.py:1": root_b})
-    output = capsys.readouterr().out
-    assert output.index("b.py:1") < output.index("a.py:1")
-
-
 def test_print_operator_node_branching_shows_stats(capsys):
     node = CallTreeNode(name="branch")
     node.kernel_launches = 2
@@ -821,23 +801,6 @@ def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
     show_operator_summary(pd.DataFrame(columns=_OPERATOR_SUMMARY_COLUMNS))
     output = capsys.readouterr().out
     assert "no operators with recorded dispatches" in output
-
-
-def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
-    summary = build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 2_000_000,
-        }
-    ])
-    show_operator_summary(summary)
-    output = capsys.readouterr().out
-    assert "ms" in output or "us" in output
-    assert "Operator" in output
-    assert "Total" in output
 
 
 # ---------------------------------------------------------------------------
