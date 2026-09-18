@@ -773,7 +773,6 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     }
   }
 
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   const uint8_t route_tag = inst->data()->tag();
   // After the aperture rewrite, before the pipeline takes the instruction:
   // this is the one point at which the space, the counter, and the addresses
@@ -838,7 +837,7 @@ DecodedMemorySpace decoded_memory_space(std::string_view mnemonic, uint8_t decod
 
 } // namespace
 
-void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefront &wf,
+void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &wf,
                                            uint8_t route_tag, uint8_t decoded_route_tag,
                                            bool normalized_to_local,
                                            std::span<const uint64_t> pre_routing_addresses,
@@ -916,7 +915,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, const Wavefr
     break;
   }
 
-  plugin_group_->onAmdgpuMemoryAccessRouted(access);
+  plugin_group_->onAmdgpuMemoryAccessRouted(access, inst, wf);
 }
 
 void ComputeUnitCore::update_wf_states() {
