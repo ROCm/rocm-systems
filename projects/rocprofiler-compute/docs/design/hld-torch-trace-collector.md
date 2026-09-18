@@ -5,38 +5,37 @@
 `--torch-trace` attributes GPU kernel counters to PyTorch operators.
 
 - Profile mode does not name the operator that launched the GPU work.
-- `--torch-trace` emits ROCTX ranges around operators. Analyze joins those
-  ranges to kernel counters (`--list-torch-operators`, `--torch-operator`).
+- `--torch-trace` emits one-level ROCTX ranges around operators. Profile copies
+  the marker CSVs unchanged. Analyze joins those ranges to kernel counters
+  (`--list-torch-operators`, `--torch-operator`).
 - This HLD is the C++ `RecordFunction` collector that `--torch-trace` loads
-  into the workload.
+  into the workload, plus the analyze path that reconstructs the call tree.
 
 Surrounding pieces:
 
-- Python wraps replace a Python API so each call pushes a named frame onto
-  the per-thread stack and pops it on return. The frame includes a source
-  location. Wraps run only on the Python thread. The wrap set does not
-  change when the collector loads. With the collector, wrap frames share
-  the collector stack; without it they go to the Python ROCTX path.
+- Python wraps replace a Python API so each call pushes one named ROCTX range
+  and pops it on return. The range includes a source location. Wraps run only
+  on the Python thread.
 - `TorchDispatchMode` can emit ATen ranges on the Python thread only.
   Autograd workers run backward in C++ and never enter that context.
-- RecordFunction runs on every thread that executes an op and sees the
-  sequence numbers used to join backward ops to their forward calls.
+- RecordFunction runs on every thread that executes an op. Each callback
+  pushes one range. Location is `n/a`; `seqNr`, PyTorch `tid`, and `ftid`
+  are on the wire.
 
-Each thread holds a stack of frames (operator name and source context). On
-each push the collector formats the full stack into one ROCTX range. The
-profiler records those ranges for analyze.
-
-**In scope:** operator ranges for PyTorch eager and autograd on every thread;
-structural Python frames in the same hierarchy; Inductor kernels launched
-through the static launcher; analyze join on the existing marker CSV.
+**In scope:** one-level operator ranges for PyTorch eager and autograd on every
+thread; structural Python frames as their own ranges; Inductor kernels launched
+through the static launcher; analyze full-outer-join / consolidate / parse /
+nest on the copied marker CSVs.
 
 **Out of scope:** non-Python workloads; PyTorch versions other than 2.13 and
 2.14.
 
 **Assumptions:**
 
-- Autograd copies PyTorch per-thread debug info onto the worker task.
-- Sequence number is the join key between a forward op and its backward op.
+- Open parent ranges on the same OS thread nest in time. Analyze reconstructs
+  that nest; the Function string is not a stacked path.
+- `seqNr` is stored on RecordFunction ranges. Analyze does not stitch or nest
+  on `seqNr`.
 
 ---
 
@@ -46,8 +45,11 @@ through the static launcher; analyze join on the existing marker CSV.
   which operator produced a kernel.
 - Python instrumentation is thread-local. `TorchDispatchMode` and structural
   wraps (`nn.Module`, `Tensor.backward`) run only on the Python thread.
-  Autograd workers never see them, so backward kernels are unmarked or lack
-  the forward operator chain.
+  Autograd workers never see them, so backward kernels would be unmarked
+  without a C++ hook.
+- A stacked Function string (`marker1/.../markerN`) cannot represent
+  independently opened ranges. Profile emits one level per range; analyze
+  must rebuild the tree.
 
 ---
 
@@ -55,14 +57,18 @@ through the static launcher; analyze join on the existing marker CSV.
 
 What the system shall do:
 
-- Nested ROCTX ranges around ATen operators on every thread that runs them,
+- One-level ROCTX ranges around ATen operators on every thread that runs them,
   including autograd workers.
-- A backward operator range includes the matching forward operator chain when
-  PyTorch provides a sequence number.
-- Python structural frames (`nn.Module`, `Tensor.backward`) appear in the
-  same range as nested ATen ops.
-- Marker strings remain compatible with existing analyze: split `Function`
-  on `:#`; optional `|backend` moved to a `Backend` column.
+- Python structural frames (`nn.Module`, `Tensor.backward`, and the rest of the
+  wrap surface) as their own ranges with a user `file:line` when a user frame
+  exists.
+- Marker strings of the form
+  `{encoded_name}:{location}|seqNr=|tid=|ftid=|scope=|args=[|backend]`.
+  `encode_marker_name` percent-encodes only `/` and `%` in the name token.
+- Profile copies marker CSVs unchanged. Analyze parses Function after
+  consolidating passes.
+- `Backend` is the trailing `|torch` / `|triton` on Function, or `user` when
+  that suffix is absent (user-defined ROCTX ranges).
 - A workload PyTorch version with no matching collector module fails with a
   list of supported versions.
 
@@ -75,17 +81,17 @@ Non-functional:
 
 ## Design
 
-Two producers share one per-thread stack. Each ROCTX range is the full stack.
+Two producers each push one-level ROCTX ranges. Analyze reconstructs the tree.
 
 ```mermaid
 flowchart LR
   profile["profile --torch-trace"] --> wraps["Python wraps"]
   profile --> collector["versioned collector module"]
-  wraps --> stack["per-thread stack"]
-  collector --> stack
-  stack --> roctx["ROCTX ranges"]
+  wraps --> roctx["one-level ROCTX ranges"]
+  collector --> roctx
   roctx --> csv["marker CSV + counters"]
-  csv --> analyze["analyze operator tree"]
+  csv --> copy["profile copies CSVs unchanged"]
+  copy --> analyze["analyze join / consolidate / parse / nest"]
 ```
 
 ### Decision 1: Where to hook ATen
@@ -98,30 +104,39 @@ flowchart LR
 
 - RecordFunction is a C++ hook. The collector is a module loaded into the
   workload interpreter.
-- Python wraps push frames for entry points ATen does not name.
+- Python wraps push ranges for entry points ATen does not name.
 - When the collector is loaded, ATen ops use the callback only
   (`TorchDispatchMode` is off).
 - If the module fails to install, profile falls back to
   `TorchDispatchMode` and warns.
 - An unsupported PyTorch version is an error, not a fallback.
-- This collector needs two wraps: module forward
-  (`nn.Module.{Class}.forward`) and `Tensor.backward`.
-- The rest of the wrap surface is leftover from the Python tracer
-  (see the LLD).
 
-### Decision 2: How backward joins forward
+### Decision 2: How the call tree is built
 
-**Snapshot store keyed by `(seqNr, thread id)` : Join while the forward stack still exists using a Process-wide map
+**One-level ranges; analyze nests by `Thread_Id` timestamps (chosen).** Not a
+process-wide snapshot store, and not a seqNr splice of a worker leaf onto the
+forward nest.
 
-- A snapshot is the entire stack at a forward op with a sequence number.
-- The forward thread pushes it under `(seqNr, thread id)` in a
-  process-wide snapshot store.
-- The backward thread reads (pops) the matching entry using the sequence
-  number and the forward thread id PyTorch provides, and pushes frames it
-  does not already have.
-- Autograd does not copy this stack through debug info.
-- Name matching is not used: several ops can share a name; seqNr is the
-  ATen correlation id.
+| Option | Pros | Cons |
+| --- | --- | --- |
+| Snapshot / overlay at profile time | Worker range already has the forward chain | Extra process-wide map; stacked Function names |
+| SeqNr splice in analyze | No snapshot store | Stitch key would depend on `seqNr`; worker and forward are different `Thread_Id`s |
+| **One-level ranges + timestamp nest (chosen)** | **Wire matches open ROCTX ranges; nest is per OS thread** | Worker roots have no Python `file:line` |
+
+- Profile copies marker CSVs unchanged.
+- `--list-*-operators` / `--*-operator` full-outer-join each pass on
+  `Correlation_ID` (plus `GUID` when both files have that column), consolidate
+  matching operator calls, parse Function, then nest marker intervals per
+  `Thread_Id`.
+- The across-pass stitch key is Function with `|seqNr=`, `|tid=`, and `|ftid=`
+  stripped, plus `function_ordinal`. `Correlation_ID` is the per-pass join key
+  only.
+- Those flags fail after join with `UnaccountedKernelError` when a kernel's
+  `Correlation_ID` is not in the marker CSV. Plain analyze without those flags
+  does not join and does not raise that error.
+- Two markers on the same `Thread_Id` whose intervals overlap (neither nested
+  nor adjacent) fail nest with `OverlappingMarkerRangeError`.
+- Adjacent ranges (`A.end == B.start`) are siblings.
 
 ### Decision 3: How the C++ callback is shipped
 
@@ -144,7 +159,8 @@ Details: `lld-torch-trace-collector.md`.
 
 ## Validation, security and debuggability
 
-- Profile/analyze tests for `--torch-trace` output and operator listing.
+- Profile tests for `--torch-trace` marker and counter CSVs.
+- Analyze tests for parse, join, consolidate, nest, and operator list/filter.
 
 ---
 
@@ -153,6 +169,5 @@ Details: `lld-torch-trace-collector.md`.
 | Item | Notes |
 | --- | --- |
 | Inductor static launcher | Those kernels launch without Triton's Python entry point now, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
-| Offline correlation | Encode `seqNr` and PyTorch thread ids in the ROCTX string, larger payload to `roctxRangePushA`. Analyze splices the worker leaf to the matching forward nest (main thread, same `seqNr`). No snapshot store. We may still need overlay to append `Tensor.backward` wrap range (also a main-thread write; no `seqNr`).|
 | Further Torch versions | Each new version needs a built artifact and a CMake version gate. |
 | DispatchMode fallback | Unsupported version is fatal; install failures fall back. Whether fallback should remain is not settled. |

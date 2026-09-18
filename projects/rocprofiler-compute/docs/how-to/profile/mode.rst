@@ -982,71 +982,31 @@ Output
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``ml_api_trace`` prefix. These correlate PyTorch operators
-with GPU kernels and performance counters. When you run analyze (e.g. with
-``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
-**retained** in the workload directory and are not deleted.
+the ``ml_api_trace`` prefix. Profile copies those marker CSVs unchanged.
+Analyze parses Function after consolidating passes.
 
-``ml_api_trace/`` directory
-The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
-operator/kernel data. The columns include:
+Each Function cell is one ROCTX range:
 
-   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
-   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
+``{encoded_name}:{location}|seqNr=...|tid=...|ftid=...|scope=...|args=...[|backend]``
 
-The consolidated CSV is generated automatically on the first analysis run that
-requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
-subsequent runs.
+``encode_marker_name`` percent-encodes only ``/`` and ``%`` in the name token.
+``Backend`` is the trailing ``|torch`` or ``|triton`` on Function, or ``user``
+when that suffix is absent (user-defined ROCTX ranges).
 
-Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
+The across-pass stitch key is Function with ``|seqNr=``, ``|tid=``, and
+``|ftid=`` stripped, plus ``function_ordinal``. ``Correlation_ID`` is the
+per-pass join key of a marker range to kernel dispatches.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 16 14 42 22 12 14 14 14 14
+``--list-*-operators`` and ``--*-operator`` full-outer-join each pass's marker
+and counter pair. They fail after that join with ``UnaccountedKernelError``
+when a kernel's ``Correlation_ID`` is not in the marker CSV. Plain analyze
+without those flags does not join markers and does not raise that error.
 
-   * - Operator_Name
-     - Context_Id
-     - Kernel_Name
-     - Counter_Name
-     - Counter_Value
-     - Start_Timestamp_function
-     - End_Timestamp_function
-     - Start_Timestamp_kernel
-     - End_Timestamp_kernel
+Two markers on the same ``Thread_Id`` whose intervals overlap (neither nested
+nor adjacent) fail nest with ``OverlappingMarkerRangeError``.
 
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_BUSY
-     - 23004
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_IDLE
-     - 0
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_STALL
-     - 6715
-     - 6789281060081123
-     - 6789281079930585
-     - 6789281079932564
-     - 6789281079934204
+Analyze does not write ``ml_api_trace/consolidated.csv``. The source marker and
+counter files are retained in the workload directory.
 
 Performance counter data file
 -----------------------------
@@ -1092,26 +1052,24 @@ This means the install requirement above was not met.
 Hierarchical operator names
 ----------------------------
 
-PyTorch operators are captured with full module hierarchy when available (e.g.,
-``nn.Module`` and ``torch.nn.functional`` wrappers), so you see where each
-operator occurs in your PyTorch application:
+Profile emits one-level ROCTX ranges (one Function cell per open range), with
+``file:line`` on Python wraps when a user frame exists. Analyze nests those
+ranges per ``Thread_Id`` and prints the reconstructed path with ``/``. That
+path is not a filesystem path.
 
 .. code-block:: text
 
-   nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
+   nn.Module.Net.forward/nn.Module.Conv2d.forward/aten::convolution
    nn.Module.MyModel.forward/nn.Module.Linear.forward
-   torch.nn.functional.relu
+   aten::relu
 
-The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
-the full operator hierarchy.
-
-This hierarchical information enables:
+This nested path enables:
 
 * **Context preservation**: See exactly which model layer triggered each kernel.
 * **Debugging**: Identify performance issues in specific model components.
 * **Optimization**: Focus tuning efforts on bottleneck operators.
 
-Example with hierarchical naming:
+Example:
 
 .. code-block:: python
 
@@ -1122,14 +1080,14 @@ Example with hierarchical naming:
            self.decoder = nn.Linear(1024, 512)
 
        def forward(self, x):
-           x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
-           x = self.decoder(x)  # Same hierarchy; both appear in consolidated.csv under Operator_Name
+           x = self.encoder(x)  # MyModel.forward nests Linear.forward
+           x = self.decoder(x)  # Second Linear.forward sibling under MyModel.forward
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts shell-style glob patterns (e.g. ``*conv2d``,
-``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
+(``--torch-operator``) accepts shell-style glob patterns on the reconstructed
+path (e.g. ``*relu*``, ``*/aten::addmm``). To select all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
 Combining Torch operator with other options
@@ -1191,10 +1149,10 @@ frameworks in a single run:
 
    $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
 
-Each captured marker records its originating framework in the ``Backend`` column
-of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
-independently. To enable all supported backends at once, use
-:ref:`--ml-api-trace <ml-api-trace>`.
+Each captured marker records its originating framework as the trailing
+``|torch`` or ``|triton`` on Function (``user`` when that suffix is absent), so
+each framework can be analyzed independently. To enable all supported backends
+at once, use :ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
 ``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
@@ -1217,7 +1175,8 @@ single option.
    $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
 
 The output is identical to enabling each framework's trace flag individually.
-Captured kernels are attributed in the ``Backend`` column and analyzed with the
+Captured kernels are attributed from the trailing ``|torch`` / ``|triton`` on
+Function (``user`` when that suffix is absent) and analyzed with the
 corresponding per-framework operator options (see :doc:`../analyze/cli`).
 
 .. _profile-vllm-workloads:
