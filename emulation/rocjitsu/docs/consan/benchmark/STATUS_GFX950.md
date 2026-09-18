@@ -5,20 +5,6 @@ run and its selected evidence checkpoints, including instrumentation, loading,
 binding, and warm-up; **Run** is the absolute second-run latency followed
 by its ratio to the matching uninstrumented second run.
 
-Final checkpoint: 2026-09-18 01:56 UTC. **32 instrumented mode cells accepted,
-one failed, six unmeasured.** Ten rows completed all three modes; synthetic
-decode completed Default Mode and SuperCollider, with high marked "not run" at the
-user's request. The host-time limit prevented a current-hook rerun of Aorta
-top-1 MoE. TokenSpeed BF16 MoE failed the static gate (`applicable=false`,
-`static_complete=false`, no applicable code objects); its later modes were
-not reached. No failures were debugged or retried in the final window.
-
-Medium-M GEMM's final native Run was **17.84% faster** than its baseline;
-interpret that row's ratios with this drift caveat. Other completed rows'
-native Run drift ranged from -6.58% to +2.25%. Accepted cells passed numerical
-correctness and static instrumentation gates, not an exhaustive race-detection
-guarantee. See [GFX950.md](GFX950.md) for versions and campaign details.
-
 | Workload | Uninstrumented Startup | Uninstrumented Run | Default Mode Startup | Default Mode Run | Default Mode (high) Startup | Default Mode (high) Run | SuperCollider Startup | SuperCollider Run | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | PyTorch synthetic dense prefill (32-token prompt) | 3.12 s | 0.0028 s (1×) | 234 s | 0.00573 s (2.05×) | 235 s | 0.0737 s (26.3×) | 167 s | 0.00344 s (1.23×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-dense-prefill--native-validation.log>) |
