@@ -6898,8 +6898,9 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *  and fb_sharing 1; it does not query an inter-device link.
  *
  *  @note For distinct GPUs, the current baremetal backend resolves PCIe or xGMI.
- *  It maps a recognized link type to ::AMDSMI_LINK_STATUS_ENABLED and UNKNOWN to
- *  ::AMDSMI_LINK_STATUS_DISABLED; INACTIVE and ERROR are not produced by this backend.
+ *  Every successful call, including a self pair, reports ::AMDSMI_LINK_STATUS_ENABLED.
+ *  The UNKNOWN-to-DISABLED mapping is defensive; the current backend does not return
+ *  an unknown link type on success. INACTIVE and ERROR are not produced by this backend.
  *  IFoE reporting on MI4XX is not yet implemented.
  *
  *  @note On baremetal, link_status is retained for host API parity, not live link

@@ -4343,8 +4343,10 @@ def amdsmi_get_link_topology(
 
     Note:
         On baremetal, a self pair reports INTERNAL/ENABLED, zero weight and
-        hops, and ``fb_sharing=1``. ``link_status`` is retained for host API
-        parity, not live link health or the topology CLI's P2P accessibility status.
+        hops, and ``fb_sharing=1``. Every successful call on the current baremetal
+        backend reports ENABLED; UNKNOWN-to-DISABLED is only a defensive mapping.
+        ``link_status`` is retained for host API parity, not live link health
+        or the topology CLI's P2P accessibility status.
         ``fb_sharing`` is best-effort: it reports 0 both when P2P framebuffer
         access is unavailable and when the underlying P2P query could not be
         completed. The two cases are indistinguishable.
