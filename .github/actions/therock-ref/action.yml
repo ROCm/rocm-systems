@@ -22,9 +22,14 @@ runs:
       id: read
       shell: bash
       run: |
-        python -c "
+        PYTHON=python3
+        command -v python3 >/dev/null 2>&1 || PYTHON=python
+        "$PYTHON" -c "
         import json
-        with open('${GITHUB_ACTION_PATH}/../../therock_ref.json') as f:
+        import os
+
+        config_path = os.path.join(os.environ['GITHUB_ACTION_PATH'], '..', '..', 'therock_ref.json')
+        with open(config_path) as f:
             config = json.load(f)
         print(f'ref={config[\"ref\"]}')
         print(f'commit_date={config[\"commit_date\"]}')
