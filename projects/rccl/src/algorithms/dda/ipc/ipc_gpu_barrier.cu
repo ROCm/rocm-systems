@@ -19,8 +19,9 @@
 namespace dda::common {
 
 __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
-  : nBlocks_(nBlocks), flags_(static_cast<FlagType*>(flagsBuf)) {
+  : flags_(static_cast<FlagType*>(flagsBuf)) {
   assert(nRanks == NRANKS);
+  (void)nBlocks;
 }
 
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
@@ -42,8 +43,9 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 
 __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
                                       const std::array<DeviceMailbox, NRANKS>& allMailboxes)
-  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes) {
+  : selfRank_(selfRank), allMailboxes_(allMailboxes) {
   assert(nRanks == NRANKS);
+  (void)nBlocks;
 }
 
 /* static */ __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(

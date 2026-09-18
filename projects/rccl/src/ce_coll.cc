@@ -2190,7 +2190,6 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   uint8_t* outShard = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes; // kernel writes reduced shard here
   uint32_t* signalBuffer = ceColl->signalBuffer;
   void* peerSig = nullptr;
-  void* peerSignalAddr = nullptr;
   bool fastPath = false;
   size_t mySlotOffset = 0;
   uint8_t* myRecvSlot = nullptr;

@@ -6,6 +6,13 @@
 
 #include "sym_kernels.h"
 
+// Clang reports -Wpass-failed=transform-warning on these kernels when a
+// requested pragma unroll cannot be applied after inlining (runtime trip
+// counts / early exits). That is an optimizer note, not a source defect.
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wpass-failed"
+#endif
+
 // Symmetric kernel profiler support: write GPU timestamps to host-pinned
 // profiler counter arrays so the CPU proxy thread can fire KernelCh events.
 __device__ __forceinline__ unsigned long long int ncclSymkGlobaltimer() {

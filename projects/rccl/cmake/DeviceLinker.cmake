@@ -461,10 +461,9 @@ add_custom_command(
 # ===========================================================================
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
 
-set(DL_HOST_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_HOST_COMPRESS "--offload-compress")
-endif()
+# --offload-compress is unused with --offload-host-only (the gpubinary was
+# already compressed at bundle time via DL_BUNDLER_COMPRESS). Passing it here
+# produces -Wunused-command-line-argument.
 
 # Gather include flags for host compile (same paths as device)
 set(_host_inc_flags "")
@@ -494,7 +493,6 @@ add_custom_command(
     ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_HOST_COMPRESS}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
   DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp

@@ -25,7 +25,9 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
 
 #endif
 
+#ifndef CUPFN
 #define CUPFN(symbol) pfn_##symbol
+#endif
 
 // Emit an actionable hint for a subset of well-known CUDA driver errors.
 static inline void printCudaDriverErrorHint(CUresult err) {
@@ -49,6 +51,7 @@ static inline void printCudaDriverErrorHint(CUresult err) {
 }
 
 // Check CUDA PFN driver calls
+#ifndef CUCHECK
 #define CUCHECK(cmd) \
   do { \
     CUresult err = pfn_##cmd; \
@@ -60,12 +63,14 @@ static inline void printCudaDriverErrorHint(CUresult err) {
       return ncclUnhandledCudaError; \
     } \
   } while (false)
+#endif
 
 #define CUCALL(cmd) \
   do { \
     pfn_##cmd; \
   } while (false)
 
+#ifndef CUCHECKGOTO
 #define CUCHECKGOTO(cmd, res, label) \
   do { \
     CUresult err = pfn_##cmd; \
@@ -78,8 +83,10 @@ static inline void printCudaDriverErrorHint(CUresult err) {
       goto label; \
     } \
   } while (false)
+#endif
 
 // Report failure but clear error and continue
+#ifndef CUCHECKIGNORE
 #define CUCHECKIGNORE(cmd) \
   do { \
     CUresult err = pfn_##cmd; \
@@ -89,7 +96,9 @@ static inline void printCudaDriverErrorHint(CUresult err) {
       INFO(NCCL_ALL, "%s:%d Cuda failure %d '%s'", __FILE__, __LINE__, err, errStr); \
     } \
   } while (false)
+#endif
 
+#ifndef CUCHECKTHREAD
 #define CUCHECKTHREAD(cmd, args) \
   do { \
     CUresult err = pfn_##cmd; \
@@ -99,6 +108,7 @@ static inline void printCudaDriverErrorHint(CUresult err) {
       return args; \
     } \
   } while (0)
+#endif
 
 #define DECLARE_CUDA_PFN_EXTERN(symbol, version) extern PFN_##symbol##_v##version pfn_##symbol
 

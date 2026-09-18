@@ -1149,8 +1149,13 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
+  # Host-only TUs (ENABLE_DEVICE_LINKER uses --offload-host-only) ignore
+  # --offload-compress and warn -Wunused-command-line-argument. Compression
+  # for the device-linker path is applied in DeviceLinker.cmake instead.
+  if(NOT ENABLE_DEVICE_LINKER)
+    target_compile_options(rccl PRIVATE --offload-compress)
+  endif()
+  target_link_libraries(rccl PRIVATE --offload-compress)
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")

@@ -23,7 +23,7 @@
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
 // Largest message eligible for the unregistered forced CE AllReduce path.
-#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
+#define NCCL_CE_AR_MAX_MSG_BYTES ((size_t)(256ull * 1024 * 1024))
 
 // Total payload capacity of one reusable CE AllReduce staging slot. Messages
 // larger than this are pipelined; sizing each slot to NCCL_CE_AR_MAX_MSG_BYTES

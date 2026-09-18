@@ -92,6 +92,9 @@ extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t s
 // support DMA-BUF.
 typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size, int* dmabuf, uint64_t* offset);
 
+#ifdef CUPFN
+#undef CUPFN
+#endif
 #ifdef __HIP_PLATFORM_AMD__
 #define CUPFN(symbol) symbol
 #else
@@ -126,6 +129,9 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
   } while (false)
 
 // Check CUDA PFN driver calls
+#ifdef CUCHECK
+#undef CUCHECK
+#endif
 #define CUCHECK(cmd) \
   do { \
     hipError_t err = cmd; \
@@ -136,6 +142,9 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     } \
   } while (false)
 
+#ifdef CUCHECKGOTO
+#undef CUCHECKGOTO
+#endif
 #define CUCHECKGOTO(cmd, res, label) \
   do { \
     hipError_t err = cmd; \
@@ -148,6 +157,9 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
   } while (false)
 
 // Report failure but clear error and continue
+#ifdef CUCHECKIGNORE
+#undef CUCHECKIGNORE
+#endif
 #define CUCHECKIGNORE(cmd) \
   do { \
     hipError_t err = cmd; \
@@ -156,6 +168,9 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     } \
   } while (false)
 
+#ifdef CUCHECKTHREAD
+#undef CUCHECKTHREAD
+#endif
 #define CUCHECKTHREAD(cmd, args) \
   do { \
     hsa_status_t err = pfn_##cmd; \

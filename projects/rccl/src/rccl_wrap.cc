@@ -899,8 +899,6 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = 0;
 
-  const size_t msgBytes = count * ncclTypeSize(datatype);
-
 #if defined(ENABLE_ROCSHMEM_GIN)
   // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
   // ncclAllReduce_impl (group depth 0 + eligibility). Graph-capture-safe: init

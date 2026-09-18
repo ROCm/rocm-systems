@@ -43,15 +43,6 @@ constexpr uint32_t kernelMask_RS = 1 << ncclSymkKernelId_ReduceScatter_LD | 1 <<
                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC;
 
-constexpr uint32_t kernelMask_LSA =
-  1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R |
-  1 << ncclSymkKernelId_AllReduce_RSxLD_AGxST | 1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
-  1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST | 1 << ncclSymkKernelId_AllGather_LL |
-  1 << ncclSymkKernelId_AllGather_LLMC | 1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
-  1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
-  1 << ncclSymkKernelId_ReduceScatter_LL | 1 << ncclSymkKernelId_ReduceScatter_LD |
-  1 << ncclSymkKernelId_ReduceScatter_LDMC | 1 << ncclSymkKernelId_ReduceScatter_TmaLD;
-
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;

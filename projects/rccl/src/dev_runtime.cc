@@ -457,8 +457,8 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
     NCCLCHECKGOTO(symMemoryExportSegmentHandle(comm, msg, mem->memHandles[segment], segmentSizes[segment]), ret, fail);
-    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %lld", devr->lsaSelf,
-         segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
+    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %p", devr->lsaSelf,
+         segment, msg->type, numSegments, msg->segmentSize, (void*)msg->memHandle);
   }
 
   NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages,
@@ -1646,7 +1646,9 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   struct ncclDevrWindow* win = nullptr;
   struct ncclWindow_vidmem* winHost = nullptr;
   size_t ginSignalShadowsOffset = 0;
+#ifdef ENABLE_ROCSHMEM_GIN
   size_t ginAnvilNetSignalsOffset = 0;
+#endif
   int nGinContextsTotal = 0;
   void* outDevCommPreserve = nullptr;
   struct ncclDevComm outDevCommTmp;
@@ -1833,7 +1835,9 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     bufSizeTotal = alignUp(bufSizeTotal, 128);
     ginSignalShadowsOffset = bufSizeTotal;
     bufSizeTotal += nGinContexts * ginSignalTotal * sizeof(uint64_t); // include signal shadows
+#ifdef ENABLE_ROCSHMEM_GIN
     ginAnvilNetSignalsOffset = bufSizeTotal;
+#endif
     if (devr->ginEnabled && ginSignalTotal > 0) {
       // 2.31 moved ginCommCount into per-backend state; round up to the widest
       // active backend so every backend's signal shadows stay in range.

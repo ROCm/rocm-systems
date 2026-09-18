@@ -94,13 +94,14 @@ public:
   }
 
 private:
-  int nBlocks_{-1};
   int selfRank_{-1};
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags)
-    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {}
+    : selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {
+    (void)nBlocks;
+  }
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;

@@ -38,7 +38,9 @@ static ncclResult_t ncclNetSocketGetPciPath(char* devName, char** pciPath) {
   return ncclSuccess;
 }
 
+#ifdef NCCL_ENABLE_NET_PROFILING
 static ncclProfilerCallback_t ncclProfilerFunction;
+#endif
 
 // With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
 // rather than once for all communicators. However, the internal plugin implementation
@@ -55,7 +57,9 @@ ncclResult_t ncclNetSocketInit(void** ctx, uint64_t commId, ncclNetCommConfig_t*
     netRefCount++;
     return ncclSuccess;
   }
+#ifdef NCCL_ENABLE_NET_PROFILING
   ncclProfilerFunction = profFunction;
+#endif
   if (ncclNetIfs == -1) {
     char names[MAX_IF_NAME_SIZE * MAX_IFS];
     union ncclSocketAddress addrs[MAX_IFS];
