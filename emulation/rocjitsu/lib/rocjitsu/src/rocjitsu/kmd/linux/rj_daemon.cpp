@@ -66,6 +66,14 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
 
   size_t inline_size = 0;
   switch (canonical_ioctl_request(command)) {
+  case AMDKFD_IOC_SET_CU_MASK: {
+    const kfd_ioctl_set_cu_mask_args *args =
+        static_cast<const kfd_ioctl_set_cu_mask_args *>(buffer);
+    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 || args->cu_mask_ptr == 0)
+      return false;
+    inline_size = (std::min(args->num_cu_mask, 1024u) / 32) * sizeof(uint32_t);
+    break;
+  }
   case AMDKFD_IOC_WAIT_EVENTS: {
     const auto *args = static_cast<const kfd_ioctl_wait_events_args *>(buffer);
     if (!checked_product(args->num_events, sizeof(kfd_event_data), &inline_size))

@@ -1238,7 +1238,7 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
           "name": "ArgCheck",
@@ -1284,6 +1284,21 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaFabricEligibilityTest",
+          "description": "DDA fabric eligibility tests (gfx1250)",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
+        },
+        {
+          "name": "DdaFabricMaxBlocksTest",
+          "description": "DDA fabric max blocks tests (gfx1250)",
+          "test_filter": "DdaFabricMaxBlocksTest.*"
+        },
+        {
+          "name": "DdaFabricScratchSizingTest",
+          "description": "DDA fabric scratch sizing tests (gfx1250)",
+          "test_filter": "DdaFabricScratchSizingTest.*"
         },
         {
           "name": "CeAlltoAllEligibilityTest",
@@ -2534,7 +2549,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
