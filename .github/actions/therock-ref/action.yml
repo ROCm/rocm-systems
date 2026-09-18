@@ -22,7 +22,7 @@ runs:
       id: read
       shell: bash
       run: |
-        python3 -c "
+        python -c "
         import json
         with open('${GITHUB_ACTION_PATH}/../../therock_ref.json') as f:
             config = json.load(f)
