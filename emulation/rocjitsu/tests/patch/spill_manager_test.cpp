@@ -982,8 +982,9 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
     ASSERT_TRUE(wait_load && wait_store);
     EXPECT_EQ(sequence->save_words.front(), *wait_load);
     EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(arch));
-    if (!rdna3)
+    if (!rdna3) {
       EXPECT_EQ(sequence->save_words[2], *build_s_wait_alu_va_vdst0(arch));
+    }
     EXPECT_EQ(sequence->save_words[rdna3 ? 2u : 3u],
               *instrumentation::build_s_wait_scalar_load0(arch));
     EXPECT_EQ(sequence->save_words[save_tail], *wait_store);
