@@ -25,14 +25,15 @@ import CompareRunsView from './components/views/CompareRunsView';
 import FailuresView from './components/views/FailuresView';
 import PluginComparisonView from './components/views/PluginComparisonView';
 import { isLoadCancelled, loadDashboardDataFiles } from './data/dashboardData';
+import { summarizeDashboardDataError } from './data/dashboardDataError';
+import { resolvePublishedDataUrls } from './data/publishedDataUrls';
 import { selectFailures, selectOverview } from './data/selectors';
 import { useDashboardState } from './hooks/useDashboardState';
 import { visuallyHiddenStyles } from './theme/styles';
 import { createDashboardTheme } from './theme/theme';
 import { formatFullDate, shortSha } from './utils/formatters';
 
-const dataMetadataUrl = new URL(`${import.meta.env.BASE_URL}data/metadata.json`, document.baseURI).href;
-const dataIndexUrl = new URL(`${import.meta.env.BASE_URL}data/index.json`, document.baseURI).href;
+const { metadataUrl: dataMetadataUrl, indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
 
 function LoadingDataState({ progress }) {
   const determinate = progress.total > 0;
@@ -171,6 +172,7 @@ function DashboardHero({ data = null }) {
 function Dashboard({ data, dataError = null, onRetry = null }) {
   const state = useDashboardState(data);
   const hasData = data.runs.length > 0;
+  const dataErrorMessage = dataError ? summarizeDashboardDataError(dataError) : null;
   // Overview derives the whole history, so it stays uncomputed while another tab owns the view.
   const overview = useMemo(
     () => (state.tab === 'overview'
@@ -218,8 +220,10 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
               sx={{ mb: 1.75 }}
             >
               <Typography fontWeight={700}>No available test data</Typography>
-              {dataError.message !== 'No available test data' && (
-                <Typography variant="body2" sx={{ mt: 0.5 }}>{dataError.message}</Typography>
+              {dataErrorMessage !== 'No available test data' && (
+                <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-line' }}>
+                  {dataErrorMessage}
+                </Typography>
               )}
               <Typography variant="body2" sx={{ mt: 1 }}>Dashboard values will remain empty until benchmark data is published to the site.</Typography>
             </Alert>

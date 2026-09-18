@@ -1,10 +1,11 @@
 # Website build and test
 
 The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website`. It is a standalone
-React + Vite source package. Real benchmark data belongs on the deployment branch;
-dummy data is retained only as test fixtures. Building and
-testing the website requires no Rocjitsu native build, ROCm installation, GPU, or
-benchmark service.
+React + Vite source package. Real benchmark data belongs on the
+`gh-pages-rocjitsu` branch under `rocjitsu-dashboard/data/`; dummy data is retained only
+as test fixtures.
+Building and testing the website requires no Rocjitsu native build, ROCm
+installation, GPU, or benchmark service.
 
 ## Prerequisites
 
@@ -41,7 +42,8 @@ Individual commands, all run from `website/`:
 
 | Command | Purpose |
 | --- | --- |
-| `npm run build` | Build the static site into `dist/` |
+| `npm run build` | Build the static site into `dist/`, loading data from `./data/` |
+| `npm run build:pages` | Build into `dist/`, loading `rocjitsu-dashboard/data/` from `gh-pages-rocjitsu` |
 | `npm run dev:fixtures` | Serve the app with dummy fixture JSON at `/data/` |
 | `npm run dev:data -- <data-directory>` | Serve the app with a local data directory at `/data/` |
 | `npm run preview:data -- <data-directory>` | Preview `dist/` with a local data directory at `/data/` |
@@ -92,48 +94,42 @@ with `npm run preview -- --mode fixtures --host 127.0.0.1 --port 4174` after a f
 build (`npm run build -- --mode fixtures`). Set `PLAYWRIGHT_REUSE_EXISTING_SERVER=1`
 to reuse that server for tests; CI ignores this option.
 
-## Deployment branch handoff
+## Production build modes
 
 `npm run build` produces only application files in `dist/`. The default build disables
-Vite's public-directory copying; dummy fixtures cannot enter `dist/` through it.
-The intended release flow is:
+Vite's public-directory copying; dummy fixtures cannot enter `dist/` through it. This
+mode expects a `data/` directory beside the deployed application.
 
-1. Build the website from the source branch.
-2. Validate the complete staged benchmark directory with
-   `npm run validate:data -- /absolute/path/to/pages-checkout/data`.
-3. Copy the contents of `dist/` to the site root in a separate deployment-branch checkout.
-4. Publish real benchmark JSON separately under that site's `data/` directory, following
-   [the data contract](website-data-contract.md).
-5. Commit and push the deployment branch through the release process used for GitHub Pages.
+`npm run build:pages` is an alternative build mode for a GitHub Pages host. It derives
+the repository from `GITHUB_REPOSITORY` and fetches data over HTTPS from
+`rocjitsu-dashboard/data/` on that repository's `gh-pages-rocjitsu` branch. Publish
+validated JSON independently under that directory. It contains `metadata.json`,
+`index.json`, `test-catalogs/`, and `runs/`; a data-only update does not require
+rebuilding the application.
 
-Do not deploy if validation fails. The browser uses the same validator and fails
+This source package does not provide a deployment workflow. The hosting owner chooses
+the build mode and publishes the contents of `dist/` through its existing release
+process.
+
+```bash
+npm run validate:data -- /absolute/path/to/staged/data
+```
+
+Do not publish if validation fails. The browser uses the same validator and fails
 closed if invalid data bypasses this gate; it does not display a partial run history.
 Validation follows `index.json`, so it only checks the runs listed there and the
 catalogs those runs reference. Stage the directory with its updated index before
 validating; see [the data contract](website-data-contract.md) for what stays unchecked.
 
-For example, from `emulation/rocjitsu/website`, after checking out the deployment
-branch in a separate directory, set the destination to that checkout's site root:
+To preview a build against the published data branch instead of a local directory:
 
 ```bash
-npm ci
-npm run build
-# Replace this path with the actual deployment checkout's site root.
-pages_site_dir=/absolute/path/to/pages-checkout
-rsync -a dist/ "$pages_site_dir/"
+GITHUB_REPOSITORY=ROCm/rocm-systems npm run build:pages
+npm run preview -- --host 127.0.0.1
 ```
 
-The trailing slash copies the contents of `dist/`. This copy preserves existing
-benchmark `data/` and deployment-branch configuration. It does not remove old hashed
-assets; any later cleanup should target obsolete application assets while preserving
-`data/` and repository metadata. Never copy `.test-data/`, `.test-dist/`, `tests/`, or the entire source
-package to the deployment branch. This guide prepares the files; no deployment branch
-or publishing workflow is created by the migration.
-
-The deployed site root contains `index.html`, `assets/`, and independently published
-`data/metadata.json`, `data/index.json`, `data/test-catalogs/`, and `data/runs/`.
-Serve it over HTTP; the app fetches the data at runtime. Relative asset and data URLs
-allow hosting under a URL subdirectory.
+`VITE_DASHBOARD_DATA_BASE_URL` overrides the data location in any mode, for example
+to point a build at a staging host.
 
 Dependencies, generated fixture data, production/test build output, coverage, and Playwright reports/results
 are ignored by Git. Keep the source, lockfile, tests, and test fixtures under version

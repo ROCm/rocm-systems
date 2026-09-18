@@ -63,7 +63,12 @@ async function fetchJsonResource(url, {
       throw new Error(`Unable to load ${resourceType} ${url} (${response.status} ${response.statusText})`);
     }
     const contentType = response.headers?.get?.('content-type');
-    if (contentType && !contentType.toLowerCase().includes('json')) {
+    const normalizedContentType = contentType?.toLowerCase();
+    if (
+      normalizedContentType
+      && !normalizedContentType.includes('json')
+      && !normalizedContentType.startsWith('text/plain')
+    ) {
       if (resourceType === 'dashboard metadata' || resourceType === 'dashboard data index') {
         throw new Error('No available test data');
       }

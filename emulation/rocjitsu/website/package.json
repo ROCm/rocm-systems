@@ -12,6 +12,7 @@
     "dev:data": "node scripts/dev-with-data.mjs",
     "preview:data": "node scripts/dev-with-data.mjs --preview",
     "build": "vite build",
+    "build:pages": "vite build --mode pages",
     "preview": "vite preview",
     "lint": "eslint .",
     "validate:data": "node scripts/validate-dashboard-data.mjs",

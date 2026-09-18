@@ -225,6 +225,23 @@ test('treats an HTML fallback for the data index as missing test data', async ()
   expect(parseHtml).not.toHaveBeenCalled();
 });
 
+test('accepts JSON served as text/plain by a raw file host', async () => {
+  const { fetchImpl } = createFetchDouble({
+    behavior: (url) => {
+      const body = dataset.bodies.get(url);
+      if (!body) return null;
+      return Promise.resolve({
+        ...jsonResponse(body),
+        headers: { get: () => 'text/plain; charset=utf-8' },
+      });
+    },
+  });
+
+  const { data } = await loadSynthetic(fetchImpl);
+
+  expect(data.runs).toHaveLength(dataset.runCount);
+});
+
 test('matches the result an unbounded loader produces', async () => {
   const { fetchImpl } = createFetchDouble();
 

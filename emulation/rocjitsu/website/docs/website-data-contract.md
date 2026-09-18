@@ -11,9 +11,12 @@ Schema version 1 uses plain JSON, immutable test catalogs, and one run file per 
 | `data/test-catalogs/<catalog-id>.json` | An immutable test-definition snapshot and target applicability | The planned test set changes |
 | `data/runs/<run-id>.json` | One plugin execution across every catalog target | A run is first published |
 
-These files are published separately under `data/` on the deployment branch,
-alongside the application files copied from `dist/`. The production build contains
-no benchmark JSON. Test fixtures are dummy records and must not be published.
+The paths above are relative to the data directory, which the application locates
+according to its build mode. A plain build reads `data/` next to the deployed
+application; the `pages` build reads `rocjitsu-dashboard/data/` from the
+`gh-pages-rocjitsu` branch of `rocm-systems`. Either way the build contains no
+benchmark JSON and fetches it at runtime. This package does not define how the
+application is deployed. Test fixtures are dummy records and must not be published.
 
 Upload a new catalog before any run that references it. Upload run files before publishing the updated index. Existing catalogs and runs are immutable.
 

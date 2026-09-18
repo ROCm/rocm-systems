@@ -4,13 +4,13 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/website/**"
-      - ".github/workflows/rocjitsu-website.yml"
+      - ".github/workflows/rocjitsu-website-test.yml"
   push:
     branches:
       - develop
     paths:
       - "emulation/rocjitsu/website/**"
-      - ".github/workflows/rocjitsu-website.yml"
+      - ".github/workflows/rocjitsu-website-test.yml"
   workflow_dispatch:
 
 permissions:
