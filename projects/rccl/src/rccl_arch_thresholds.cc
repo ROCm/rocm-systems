@@ -255,8 +255,8 @@ const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
  */
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 10}, {"gfx1030", 0},
-    {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
+    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 11}, {"gfx1030", 0},
+    {"gfx1100", 10}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
