@@ -590,6 +590,7 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
     EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(false));
     EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
     EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
+    EXPECT_CALL(*mstream, canUseStreamWaitValue).Times(AnyNumber()).WillRepeatedly(Return(false));
 
     auto op_data = malloc(sizeof(AsyncOpFallback));
     // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
@@ -631,6 +632,7 @@ TEST_P(FallbackAsyncIO, multipleChunksAreQueued)
     EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, canUseStreamWaitValue).Times(AnyNumber()).WillRepeatedly(Return(false));
 
     auto op_data = malloc(sizeof(AsyncOpFallback));
     // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
@@ -662,6 +664,51 @@ TEST_P(FallbackAsyncIO, multipleChunksAreQueued)
     std::this_thread::sleep_for(500ms);
 }
 
+TEST_P(FallbackAsyncIO, multipleChunksWithWaitValueQueueDispatchAndWait)
+{
+    size                  = 1_MiB;
+    size_t   chunk_size   = 256_KiB;
+    int      chunk_count  = 4;
+    uint64_t slot_storage = 0;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).Times(AnyNumber()).WillRepeatedly(Return(0));
+    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<hipStream_t>(0xBADBADBB)));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, canUseStreamWaitValue).Times(AnyNumber()).WillRepeatedly(Return(true));
+
+    auto op_data = malloc(sizeof(AsyncOpFallback));
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
+    ASSERT_NE(op_data, nullptr);
+    auto bounce_buffer = make_shared_void(chunk_size);
+    EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data));
+    EXPECT_CALL(*mstream, asyncBufferHostPtr).WillOnce(Return(bounce_buffer.get()));
+    EXPECT_CALL(*mstream, asyncBufferDevPtr).WillOnce(Return(reinterpret_cast<void *>(0xDEBBBBBB)));
+    EXPECT_CALL(*mstream, asyncBufferSize).Times(2).WillRepeatedly(Return(chunk_size));
+    EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(op_data), _))
+        .WillOnce(Return(reinterpret_cast<void *>(0xDE000000)));
+    EXPECT_CALL(mhip, hipHostFree(Eq(op_data))).WillOnce([](void *ptr) { free(ptr); });
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(Return(1024));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags(sizeof(uint64_t), _)).WillOnce(Return(&slot_storage));
+    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
+    EXPECT_CALL(mhip, hipFree(&slot_storage));
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_dispatch), _)).Times(chunk_count);
+    EXPECT_CALL(mhip, hipStreamWaitValue64(_, Eq(&slot_storage), _, hipStreamWaitValueGte, _))
+        .Times(chunk_count);
+    EXPECT_CALL(mhip, hipLaunchKernel).Times(chunk_count);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_advance), _)).Times(chunk_count);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+
+    Fallback().async_io(io_type, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_written,
+                        mstream);
+    async_io_cleanup(op_data);
+    std::this_thread::sleep_for(500ms);
+}
+
 TEST_P(FallbackAsyncIO, failoverEnqueuesGateAndPreservesOutput)
 {
     auto failover      = std::make_shared<AsyncFailoverState>();
@@ -675,6 +722,7 @@ TEST_P(FallbackAsyncIO, failoverEnqueuesGateAndPreservesOutput)
     EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, canUseStreamWaitValue).Times(AnyNumber()).WillRepeatedly(Return(false));
 
     auto op_data = malloc(sizeof(AsyncOpFallback));
     // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
@@ -716,6 +764,7 @@ TEST_P(FallbackAsyncIO, failoverPartialEnqueueRethrows)
     EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
     EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, canUseStreamWaitValue).Times(AnyNumber()).WillRepeatedly(Return(false));
 
     auto op_data = malloc(sizeof(AsyncOpFallback));
     // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup

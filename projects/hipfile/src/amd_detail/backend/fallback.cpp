@@ -228,10 +228,29 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
     auto  op_dev_ptr     = op->devPtr();
     void *kernel_args[1] = {&op_dev_ptr};
 
+    if (stream->canUseStreamWaitValue()) {
+        op->io_fn       = async_io_cpu_copy;
+        op->signal_slot = allocateSignalSlot();
+    }
+
     try {
         int max_threads_per_block = Context<Hip>::get()->hipDeviceGetAttribute(
             hipDeviceAttributeMaxThreadsPerBlock, buffer->getGpuId());
         auto stream_lock = stream->getLock();
+
+        uint64_t wait_target      = 0;
+        auto     enqueue_cpu_copy = [&]() {
+            if (op->signal_slot) {
+                ++wait_target;
+                Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_dispatch, op.get());
+                Context<Hip>::get()->hipStreamWaitValue64(op->stream->getHipStream(), op->signal_slot,
+                                                              wait_target, hipStreamWaitValueGte, ~uint64_t{0});
+            }
+            else {
+                Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
+                                                           op.get());
+            }
+        };
 
         // Arm-or-skip the fallback based on the primary's outcome before any of the
         // fallback work runs.
@@ -248,8 +267,7 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
         for (size_t i{}; i < chunk_count; ++i) {
             switch (op->io_type) {
                 case IoType::Read:
-                    Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
-                                                           op.get());
+                    enqueue_cpu_copy();
                     Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel),
                                                          dim3(1),
                                                          dim3(static_cast<uint32_t>(max_threads_per_block)),
@@ -260,8 +278,7 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
                                                          dim3(1),
                                                          dim3(static_cast<uint32_t>(max_threads_per_block)),
                                                          kernel_args, 0, op->stream->getHipStream());
-                    Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
-                                                           op.get());
+                    enqueue_cpu_copy();
                     break;
                 default:
                     throw std::runtime_error("Invalid IO type");
