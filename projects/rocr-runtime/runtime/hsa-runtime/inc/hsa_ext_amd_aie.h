@@ -102,12 +102,12 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   /**
    * Opaque kernel object handle obtained from HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT.
    *
-   * Selects the dispatch shape -- PDI plus instruction sequence, or full ELF -- from the
-   * loaded code object. The application does not choose, and cannot tell which it got.
+   * Selects the dispatch type, PDI plus instruction sequence, or full ELF, from the
+   * loaded code object.
    *
-   * The packets submitted by one doorbell ring fix the dispatch shape for the batch, and a
-   * packet of the other shape in the same batch is rejected. A later batch on the same queue
-   * may use the other shape, at the cost of a hardware context rebuild.
+   * The packets submitted by one doorbell ring fix the dispatch type for the batch, and a
+   * packet of the other type in the same batch is rejected. A later batch on the same queue
+   * may use the other type, at the cost of a hardware context rebuild.
    */
   uint32_t kernel_object_low;
   uint32_t kernel_object_high;
@@ -137,10 +137,6 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
    *
    * A size of 0 for a kernarg means no cacheline is flushed for that argument; the argument is
    * still resolved and kept resident for the duration of the dispatch.
-   *
-   * Both dispatch shapes take their arguments from here; what the runtime does with them --
-   * hand the addresses to the hardware, or patch them into a copy of the kernel's control
-   * code -- follows from the kernel object and is not the application's concern.
    */
   void* kernarg_address;
 
