@@ -76,6 +76,9 @@ set_fini_status(int);
 bool
 is_attachment_session_active();
 
+// True only on the thread currently executing an attachment client's initialize
+// callback. The state is intentionally not inherited by worker threads created
+// from that callback.
 bool
 is_initializing_attachment_client();
 
