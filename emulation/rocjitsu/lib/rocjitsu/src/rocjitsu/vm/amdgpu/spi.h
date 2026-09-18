@@ -142,6 +142,23 @@ public:
     }
     return any_runnable;
   }
+
+  /// @brief Check whether any CU in this SE has active wavefronts.
+  bool has_active_cus() const {
+    for (auto *cu : cus_)
+      if (cu->has_active_wfs())
+        return true;
+    return false;
+  }
+
+  /// @brief Append this SPI's active CUs to a command-processor work batch.
+  void append_active_cus(std::vector<ComputeUnitCore *> &active) const {
+    for (auto *cu : cus_) {
+      if (cu->has_active_wfs())
+        active.push_back(cu);
+    }
+  }
+
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
     for (auto &q : pipe_queues_)
@@ -176,6 +193,8 @@ public:
     for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
       size_t idx = (next_cu_ + attempt) % cus_.size();
       auto *cu = cus_[idx];
+      if (!entry.allows_cu(cu))
+        continue;
       const size_t wgp_index = cu_to_wgp_[idx];
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
@@ -208,6 +227,9 @@ public:
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
 
+      if (!entry.allows_cu(wgp.cu0) || !entry.allows_cu(wgp.cu1))
+        continue;
+
       // A WGP allocation cannot overlap CU-mode residents or cluster-pinned
       // CU-local LDS state. Existing WGP-mode workgroups may share the pool.
       if (wgp.active_workgroups == 0 &&
@@ -230,7 +252,8 @@ public:
         continue;
 
       const uint32_t lds_base = wgp.next_lds_alloc;
-      wgp.lds.zero_range(lds_base, aligned);
+      // Like CU-local LDS, paired-WGP LDS retains its physical contents on reuse.
+      wgp.lds.materialize_range(lds_base, aligned);
       wgp.next_lds_alloc += aligned;
       ++wgp.active_workgroups;
       resident_wgp_workgroups_[wg_key(entry.dispatch_id, global_wg_id)] = WgpReservation{wgp_index};

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.27)
 project(clr)
 
 ##########
@@ -19,12 +19,11 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     if (AMD_COMPUTE_WIN)
         # shared prebuilt libs are release, allows hip to be debug
-        add_compile_options(/MT)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
         add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
         add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     else()
-        add_compile_options("$<$<CONFIG:Debug>:/MTd>")
-        add_compile_options("$<$<NOT:$<CONFIG:Debug>>:/MT>")
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -49,6 +48,8 @@ option(USE_NEW_HOSTCALL_IMPL
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
 
 #############
 # Build steps

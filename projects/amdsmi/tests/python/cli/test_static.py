@@ -4,6 +4,8 @@
 
 """CLI leaf test: static command (incl. mem-carveout / node GTT display)."""
 
+import csv
+import io
 import json
 
 from cli.base import TestCliBase
@@ -19,6 +21,34 @@ class TestStatic(TestCliBase):
             "static", "Static Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
         self.RunCmds(cmds)
+        return
+
+    def test_asic_revision_id_keys(self):
+        """The revision ids must reach JSON and CSV, not only the human output."""
+        self.common.print_func_name("")
+        keys = ("chip_rev_id", "external_rev_id")
+
+        cmd = "amd-smi static --asic --json"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        payload = json.loads(data)
+        gpus = payload["gpu_data"] if isinstance(payload, dict) else payload
+        self.assertTrue(gpus, f"no GPU entries in '{cmd}'")
+        for gpu in gpus:
+            for key in keys:
+                self.assertIn(key, gpu["asic"])
+        json_values = {key: [gpu["asic"][key] for gpu in gpus] for key in keys}
+
+        cmd = "amd-smi static --asic --csv"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        # vendor_name carries a comma on some backends, so honour the quoting.
+        reader = csv.DictReader(io.StringIO(data))
+        rows = [row for row in reader]
+        # Compare the values, not just the header, so a dropped field is caught.
+        for key in keys:
+            self.assertIn(key, reader.fieldnames)
+            self.assertEqual([row[key] for row in rows], json_values[key])
         return
 
     def test_mem_carveout_gtt(self):

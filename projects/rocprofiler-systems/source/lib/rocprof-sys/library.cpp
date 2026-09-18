@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <array>
 #include <cstdint>
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
@@ -20,7 +21,11 @@
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/constraint.hpp"
+#include "core/config/trace_period_config.hpp"
+#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/steady.hpp"
+#include "core/control/session.hpp"
+#include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -34,15 +39,19 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/mpip.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
+#include "library/components/ucx_gotcha.hpp"
 #include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -50,7 +59,6 @@
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/roctx_client.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -83,8 +91,11 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <pthread.h>
 #include <sstream>
 #include <stdexcept>
@@ -112,6 +123,13 @@ std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
+
+std::shared_ptr<control::session>&
+get_control_session()
+{
+    static auto s_instance = std::make_shared<control::session>();
+    return s_instance;
+}
 
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
@@ -267,15 +285,16 @@ struct fini_bundle
     template <typename... Args>
     void start(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        ((tim::operation::start<Tp>{}(std::get<Tp>(m_data),
+                                      std::forward<Args>(_args)...)),
+         ...);
     }
 
     template <typename... Args>
     void stop(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        ((tim::operation::stop<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...)),
+         ...);
     }
 
     std::string as_string(bool _print_prefix = true) const
@@ -419,6 +438,51 @@ invoke_external_resume_callbacks()
         _fn();
 }
 
+using trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
+using posix_trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::posix>;
+using trace_config_t =
+    rocprofsys::config::trace_config<rocprofsys::config::default_trace_config_externals>;
+
+// Constructs a time_window<Clock>, which self-registers with the session
+// (and its initial action is reflected) as soon as it's constructed. Does
+// NOT start the worker thread - that must happen after State::Active, since
+// the worker captures its delay/duration reference point (t0) at start()
+// time, and starting any earlier lets init-time overhead eat into the
+// window.
+template <typename Clock>
+std::unique_ptr<rocprofsys::control::triggers::time_window<Clock>>
+make_time_window(
+    std::shared_ptr<rocprofsys::control::session> session, Clock& clock,
+    rocprofsys::control::triggers::time_window_specs specs,
+    rocprofsys::control::scope event_scope = rocprofsys::control::scope::global)
+{
+    using window_t = rocprofsys::control::triggers::time_window<Clock>;
+    return std::make_unique<window_t>(std::move(session), clock, specs, event_scope);
+}
+
+rocprofsys::control::clocks::steady               g_trace_window_clock;
+rocprofsys::control::clocks::steady               g_sampling_dur_window_clock;
+std::optional<rocprofsys::control::clocks::posix> g_posix_window_clock;
+std::unique_ptr<trace_window_t>                   g_trace_window;
+std::unique_ptr<posix_trace_window_t>             g_posix_trace_window;
+std::unique_ptr<trace_window_t>                   g_sampling_dur_window;
+
+void
+stop_time_windows()
+{
+    const auto stop_and_reset = [](auto& window) {
+        if(window)
+        {
+            window->stop();
+        }
+        window.reset();
+    };
+    stop_and_reset(g_sampling_dur_window);
+    stop_and_reset(g_trace_window);
+    stop_and_reset(g_posix_trace_window);
+}
 }  // namespace
 
 extern "C" void
@@ -670,45 +734,105 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        auto trace_controller = rocprofiler_sdk::get_trace_controller();
-        if(trace_controller)
-        {
-            auto pause_callback = [](void) {
-                LOG_DEBUG("Pause callback...");
-                rocprofiler_sdk::pause();
-                sampling::pause();
-                component::mpi_gotcha::pause();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
-                component::vaapi_gotcha::pause();
-                ::rocprofsys::pthread_gotcha::pause();
-                component::numa_gotcha::pause();
-                rocprofsys::kokkosp::pause();
-                process_sampler::pause();
-                invoke_external_pause_callbacks();
-            };
-            auto resume_callback = [](void) {
-                LOG_DEBUG("Resume callback...");
-                rocprofiler_sdk::resume();
-                sampling::resume();
-                component::mpi_gotcha::resume();
-                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
-                component::vaapi_gotcha::resume();
-                ::rocprofsys::pthread_gotcha::resume();
-                component::numa_gotcha::resume();
-                rocprofsys::kokkosp::resume();
-                process_sampler::resume();
-                invoke_external_resume_callbacks();
-            };
-            trace_controller->register_region_pause_resume_callbacks(resume_callback,
-                                                                     pause_callback);
+        rocprofiler_sdk::set_session(get_control_session());
 
-            trace_controller->force_initial_pause();
+        {
+            using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+            using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
+
+            // clang-format off
+            auto subscribers = std::to_array<control::subscriber>({
+                { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm", .scopes = { control::scope::global } },
+                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling",
+                  .scopes = { control::scope::global, control::scope::sampling } },
+                { .on_pause = &component::pause_mpip, .on_resume = &component::resume_mpip, .name = "mpi", .scopes = { control::scope::global } },
+                { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx", .scopes = { control::scope::global } },
+                { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem", .scopes = { control::scope::global } },
+                { .on_pause = &component::vaapi_gotcha::pause, .on_resume = &component::vaapi_gotcha::resume, .name = "vaapi", .scopes = { control::scope::global } },
+                { .on_pause = &::rocprofsys::pthread_gotcha::pause, .on_resume = &::rocprofsys::pthread_gotcha::resume, .name = "pthread", .scopes = { control::scope::global } },
+                { .on_pause = &component::numa_gotcha::pause, .on_resume = &component::numa_gotcha::resume, .name = "numa", .scopes = { control::scope::global } },
+                { .on_pause = &rocprofsys::kokkosp::pause, .on_resume = &rocprofsys::kokkosp::resume, .name = "kokkos", .scopes = { control::scope::global } },
+                { .on_pause = &process_sampler::pause, .on_resume = &process_sampler::resume, .name = "process_sampler", .scopes = { control::scope::global } },
+                { .on_pause = &invoke_external_pause_callbacks, .on_resume = &invoke_external_resume_callbacks, .name = "external", .scopes = { control::scope::global } },
+            });
+            // clang-format on
+            for(auto& sub : subscribers)
+            {
+                get_control_session()->subscribe(std::move(sub));
+            }
+
+            // Every subscriber above must be registered before any trigger
+            // constructed below: a trigger's registration broadcasts a
+            // pause/resume transition immediately, so a subscriber added
+            // afterward would miss it.
+            if(auto trace_specs = trace_config_t::get_trace_specs(); !trace_specs.empty())
+            {
+                const auto& spec  = trace_specs.front();
+                const auto  delay = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::duration<double>{ spec.delay });
+                const auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::duration<double>{ spec.duration });
+
+                // Safety-net subscriber for category-traited recording paths
+                // (timemory storage, perfetto trace_events from callbacks not
+                // covered by a subsystem pause subscriber).
+                get_control_session()->subscribe(
+                    { .on_pause =
+                          []() {
+                              categories::disable_categories(
+                                  config::get_enabled_categories());
+                          },
+                      .on_resume =
+                          []() {
+                              categories::enable_categories(
+                                  config::get_enabled_categories());
+                          },
+                      .name   = "trace_categories",
+                      .scopes = { control::scope::global } });
+
+                if(trace_config_t::get_trace_period_clock_id() ==
+                   CLOCK_PROCESS_CPUTIME_ID)
+                {
+                    g_posix_window_clock.emplace(CLOCK_PROCESS_CPUTIME_ID);
+                    g_posix_trace_window =
+                        make_time_window(get_control_session(), *g_posix_window_clock,
+                                         { .delay = delay, .duration = dur });
+                }
+                else
+                {
+                    g_trace_window =
+                        make_time_window(get_control_session(), g_trace_window_clock,
+                                         { .delay = delay, .duration = dur });
+                }
+            }
+
+            if(const auto samp_dur = config::get_sampling_duration(); samp_dur > 0.0)
+            {
+                g_sampling_dur_window = make_time_window(
+                    get_control_session(), g_sampling_dur_window_clock,
+                    { .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::duration<double>{ samp_dur }) },
+                    control::scope::sampling);
+            }
+
+            rocprofiler_sdk::create_roctx_client();
         }
 
         state::process::set(
             state::process::Active);  // set to active as very last operation
+
+        if(g_trace_window)
+        {
+            g_trace_window->start();
+        }
+        if(g_posix_trace_window)
+        {
+            g_posix_trace_window->start();
+        }
+        if(g_sampling_dur_window)
+        {
+            g_sampling_dur_window->start();
+        }
     } };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -894,8 +1018,10 @@ rocprofsys_reset_preload_hidden(void)
             if(itr.find("librocprof-sys") != std::string::npos) continue;
             _modified_preload += fmt::format(":{}", itr);
         }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+        if(!_modified_preload.empty() && _modified_preload.starts_with(':'))
+        {
             _modified_preload = _modified_preload.substr(1);
+        }
 
         rocprofsys::set_env("LD_PRELOAD", _modified_preload, 1);
     }
@@ -936,6 +1062,9 @@ rocprofsys_finalize_hidden(void)
 
         // Flush buffered traces in case of child process
 
+        LOG_DEBUG("Shutting down control session...");
+        get_control_session()->shutdown();
+
         LOG_DEBUG("Shutting down ROCm...");
         rocprofiler_sdk::shutdown();
 
@@ -951,6 +1080,8 @@ rocprofsys_finalize_hidden(void)
     }
 
     LOG_INFO("Finalizing rocprof-sys...");
+
+    stop_time_windows();
 
     sampling::block_samples();
 
@@ -1047,6 +1178,38 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Shutting down background sampler...");
         process_sampler::shutdown();
+    }
+
+    LOG_DEBUG("Shutting down control session...");
+    get_control_session()->shutdown();
+
+    // -----------------------------------------------------------------------
+    // Causal-profiling shutdown must happen BEFORE rocprofiler_sdk::shutdown().
+    //
+    // Why: rocprofiler_sdk uses a PTL (Portable Threading Library) thread pool
+    //   whose workers call pthread_cond_wait while waiting for async work.  That
+    //   call is intercepted by blocking_gotcha, which injects causal delay credits
+    //   after every blocking operation.  When the SDK tries to drain its buffers
+    //   and join its workers, the workers are stuck inside the blocking_gotcha
+    //   wrapper; because blocking_gotcha::shutdown() has not yet been called, the
+    //   wrapper keeps accumulating and applying delays and the workers never return
+    //   — a deadlock that prevents the process from shutting down cleanly.
+    //
+    // Fix 1 – disable blocking_gotcha BEFORE the SDK shutdown so that any
+    //   future pthread_cond_wait calls (or in-flight ones completing their
+    //   postblock step) bypass the delay logic and return immediately.
+    //
+    // Fix 2 – write the causal output files BEFORE the SDK shutdown.  This
+    //   ensures output is on disk even if SDK shutdown takes longer than expected.
+    //
+    // -----------------------------------------------------------------------
+    if(get_use_causal())
+    {
+        LOG_DEBUG("Disabling causal blocking interceptors before SDK shutdown...");
+        causal::component::causal_gotcha::shutdown();
+
+        LOG_DEBUG("Writing causal output before SDK shutdown...");
+        causal::finish_experimenting();
     }
 
     LOG_DEBUG("Shutting down ROCm...");
@@ -1151,9 +1314,7 @@ rocprofsys_finalize_hidden(void)
 
     if(get_use_causal())
     {
-        LOG_DEBUG("Finishing the causal experiments...");
-        causal::finish_experimenting();
-
+        LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
         _output_registry.register_file(fmt::format("{}.json", _base),
                                        output_format::causal_json);

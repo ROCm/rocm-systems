@@ -1284,7 +1284,9 @@ struct_amdsmi_asic_info_t._fields_ = [
     ('PADDING_1', ctypes.c_ubyte * 4),
     ('flags', ctypes.c_uint64),
     ('physical_acc_id', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32 * 17),
+    ('chip_rev_id', ctypes.c_uint32),
+    ('external_rev_id', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 15),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t
