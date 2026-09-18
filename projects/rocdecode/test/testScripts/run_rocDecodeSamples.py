@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 from datetime import datetime
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, STDOUT
 import argparse
 import os
 import shutil
@@ -38,6 +38,18 @@ def shell(cmd):
     p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
     output = p.communicate()[0][0:-1]
     return output
+
+
+def run_and_log(cmd, logFilePath):
+    # Portable replacement for '| tee -a': stream the output line by line so
+    # progress stays visible during long runs, while appending it to the log.
+    with open(logFilePath, 'a') as logf:
+        p = Popen(cmd, shell=True, stdout=PIPE, stderr=STDOUT, text=True)
+        for line in p.stdout:
+            print(line, end='')
+            logf.write(line)
+        p.wait()
+    return p.returncode
 
 
 def write_formatted(output, f):
@@ -81,7 +93,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--rocDecode_directory',   type=str, default='',
                     help='The rocDecode Directory - required')
 parser.add_argument('--videodecode_exe',   type=str, default='',
-                    help='Video decode sample app exe - optional')
+                    help='Video decode sample app exe - optional. If omitted, the sample is looked up under <rocDecode_directory>/samples/<sample>/build (on Windows, the Release config). Pass this explicitly to run a Debug build or an exe from another location.')
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
@@ -153,7 +165,8 @@ os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
 else:
-    print("\nERROR: rocDecode Executable Not Found\n")
+    print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
+    print("Build the sample first, or pass --videodecode_exe to point at it.\n")
     exit()
 
 if os.path.exists(filesDir) and not os.path.isfile(filesDir):
@@ -179,15 +192,7 @@ if sampleMode == 0:
 
         cmd = run_rocDecode_app + ' -i ' + str(current_file) + ' -d ' + str(gpuDeviceID) + ' -f ' + str(maxNumFrames) + ' ' + str(bsReaderOption)
         logFilePath = resultsPath+'/rocDecode_output.log'
-        process = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, text=True)
-        stdout, stderr = process.communicate()
-        print(stdout)
-        if stderr:
-            print(stderr, file=sys.stderr)
-        with open(logFilePath, 'a') as logf:
-            logf.write(stdout)
-            if stderr:
-                logf.write(stderr)
+        run_and_log(cmd, logFilePath)
         print("\n\n")
 
     if checkDecStatus == 0:
@@ -227,15 +232,7 @@ elif sampleMode == 1:
 
         cmd = run_rocDecode_app+' -i '+str(current_file)+' -t '+str(numThreads)+' -f '+str(maxNumFrames)
         logFilePath = resultsPath+'/rocDecode_output.log'
-        process = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, text=True)
-        stdout, stderr = process.communicate()
-        print(stdout)
-        if stderr:
-            print(stderr, file=sys.stderr)
-        with open(logFilePath, 'a') as logf:
-            logf.write(stdout)
-            if stderr:
-                logf.write(stderr)
+        run_and_log(cmd, logFilePath)
         print("\n\n")
 
     if checkDecStatus == 0:
@@ -293,11 +290,13 @@ if checkDecStatus == 0:
         board_info = shell('inxi -c0 -M')
         lib_tree = shell('ldd '+run_rocDecode_app)
     else:
+        # wmic is removed from Windows 11 24H2 onwards; use CIM cmdlets instead
+        ps = 'powershell -NoProfile -Command '
         sys_info = shell('systeminfo')
-        cpu_info = shell('wmic cpu get Name')
-        gpu_info = shell('wmic path win32_VideoController get Name')
-        memory_info = shell('wmic ComputerSystem get TotalPhysicalMemory')
-        board_info = shell('wmic baseboard get product,manufacturer')
+        cpu_info = shell(ps + '"Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name"')
+        gpu_info = shell(ps + '"Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"')
+        memory_info = shell(ps + '"(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"')
+        board_info = shell(ps + '"Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer,Product | Format-List"')
         lib_tree = b'N/A (use dumpbin /dependents on Windows)'
     lib_tree = strip_libtree_addresses(lib_tree)
 
