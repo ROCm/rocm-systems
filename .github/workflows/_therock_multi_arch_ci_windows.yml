@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   call:
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18T07:13:59Z
     with:
       build_config: ${{ inputs.build_config }}
       test_labels: ${{ inputs.test_labels }}
@@ -43,7 +43,7 @@ jobs:
       external_repo_config: ${{ inputs.external_repo_config }}
       changed_projects: ${{ inputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: 01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18
+      ref: 01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18T07:13:59Z
     permissions:
       contents: read
       id-token: write

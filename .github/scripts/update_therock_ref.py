@@ -11,17 +11,18 @@ are the only remaining hardcoded TheRock commit pins in this repo; every
 other workflow reads the ref dynamically via .github/actions/therock-ref.
 
 Usage:
-    python .github/scripts/update_therock_ref.py <new_sha> [--commit-date YYYY-MM-DD] [--dry-run]
+    python .github/scripts/update_therock_ref.py <new_sha> [--dry-run]
 """
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
-from datetime import date, datetime, timezone
+import tempfile
+from datetime import date
 from pathlib import Path
-
-import requests
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = REPO_ROOT / ".github" / "therock_ref.json"
@@ -31,26 +32,31 @@ WRAPPER_PATHS = [
     REPO_ROOT / ".github" / "workflows" / "_therock_multi_arch_ci_windows.yml",
 ]
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+THEROCK_URL = "https://github.com/ROCm/TheRock.git"
 
 
-def fetch_commit_date(sha: str, token: str | None = None) -> str:
-    headers = {"Accept": "application/vnd.github+json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    resp = requests.get(
-        f"https://api.github.com/repos/ROCm/TheRock/commits/{sha}",
-        headers=headers,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    commit_date = resp.json()["commit"]["committer"]["date"]
-    return datetime.fromisoformat(commit_date.replace("Z", "+00:00")).strftime(
-        "%Y-%m-%d"
-    )
+def fetch_commit_date(sha: str) -> str:
+    """Returns sha's committer timestamp (UTC, e.g. 2026-09-18T07:13:59Z) via git."""
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["git", "init", "-q", tmp], check=True)
+        subprocess.run(
+            ["git", "fetch", "-q", "--depth=1", THEROCK_URL, sha],
+            check=True,
+            cwd=tmp,
+        )
+        result = subprocess.run(
+            ["git", "show", "-s", "--date=format-local:%Y-%m-%dT%H:%M:%SZ", "--format=%cd", "FETCH_HEAD"],
+            check=True,
+            cwd=tmp,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "TZ": "UTC"},
+        )
+    return result.stdout.strip()
 
 
 def substitute_sha(text: str, old_sha: str, new_sha: str, new_date: str) -> tuple[str, int]:
-    pattern = re.compile(rf"{re.escape(old_sha)}( # \d{{4}}-\d{{2}}-\d{{2}})?")
+    pattern = re.compile(rf"{re.escape(old_sha)}( # \S+)?")
     new_text, count = pattern.subn(f"{new_sha} # {new_date}", text)
     return new_text, count
 
@@ -67,10 +73,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("new_sha", help="New ROCm/TheRock commit SHA (40 hex chars)")
     parser.add_argument(
-        "--commit-date",
-        help="Date of new_sha (YYYY-MM-DD). Fetched from the GitHub API if omitted.",
-    )
-    parser.add_argument(
         "--dry-run", action="store_true", help="Print changes without writing files."
     )
     args = parser.parse_args()
@@ -79,7 +81,7 @@ def main() -> int:
     if not SHA_RE.match(new_sha):
         parser.error(f"new_sha must be 40 hex characters, got: {args.new_sha!r}")
 
-    new_commit_date = args.commit_date or fetch_commit_date(new_sha)
+    new_commit_date = fetch_commit_date(new_sha)
 
     old_config = json.loads(CONFIG_PATH.read_text())
     old_sha = old_config["ref"]
