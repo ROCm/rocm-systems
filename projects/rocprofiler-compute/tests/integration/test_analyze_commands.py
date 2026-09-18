@@ -297,6 +297,26 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.filter_block
+def test_filter_block_alias_bogus(binary_handler_analyze_rocprof_compute, capsys):
+    for dir in indirs:
+        workload_dir = integration_common.setup_workload_dir(dir)
+        try:
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_dir,
+                "--block",
+                "bogusxyz_alias",
+            ])
+            captured = capsys.readouterr()
+            error_output = captured.err + captured.out
+            assert code != 0
+            assert "Invalid --block value 'bogusxyz_alias'" in error_output
+        finally:
+            common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.serial
 def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:

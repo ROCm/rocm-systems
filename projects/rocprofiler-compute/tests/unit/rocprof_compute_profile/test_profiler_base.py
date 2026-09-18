@@ -683,8 +683,10 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
 
 
 # ---------------------------------------------------------------------------
-# pre_processing(): memory-bandwidth configuration persistence
+# pre_processing(): Configuration persistence
 # ---------------------------------------------------------------------------
+
+
 def test_pre_processing_persists_membw_analysis_config(
     tmp_path: Path,
 ) -> None:
