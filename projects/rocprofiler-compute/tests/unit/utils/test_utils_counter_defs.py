@@ -3,7 +3,45 @@
 
 """Unit tests for utils/utils_counter_defs.py."""
 
-from utils.utils_counter_defs import extract_counters_and_variables
+import pytest
+
+from utils.utils_counter_defs import (
+    extract_counters_and_variables,
+    get_build_in_vars,
+)
+
+# =============================================================================
+# Tests for utils.utils_counter_defs.get_build_in_vars
+# =============================================================================
+
+
+class TestGetBuildInVars:
+    """Tests for utils.utils_counter_defs.get_build_in_vars."""
+
+    def test_gfx1250_uses_explicit_gui_active_sum_per_xcd(self):
+        build_in_vars = get_build_in_vars("GFX1250_SERIES")
+
+        assert (
+            build_in_vars["GRBM_GUI_ACTIVE_PER_XCD"] == "GRBM_GUI_ACTIVE_sum / $num_xcd"
+        )
+
+    def test_gfx1250_only_overrides_gui_active_per_xcd(self):
+        gfx1250_vars = get_build_in_vars("GFX1250_SERIES")
+        mi_vars = get_build_in_vars("MI300")
+
+        del gfx1250_vars["GRBM_GUI_ACTIVE_PER_XCD"]
+        del mi_vars["GRBM_GUI_ACTIVE_PER_XCD"]
+
+        assert gfx1250_vars == mi_vars
+
+    @pytest.mark.parametrize("gpu_series", ["MI300", "RDNA3"])
+    def test_other_series_keep_raw_gui_active_per_xcd(self, gpu_series):
+        build_in_vars = get_build_in_vars(gpu_series)
+
+        assert (
+            build_in_vars["GRBM_GUI_ACTIVE_PER_XCD"] == "(GRBM_GUI_ACTIVE / $num_xcd)"
+        )
+
 
 # =============================================================================
 # Tests for utils.utils_counter_defs.extract_counters_and_variables
@@ -25,6 +63,21 @@ class TestExtractCountersAndVariables:
         text = "$numActiveCUs"
         hw, vars_ = extract_counters_and_variables(text, "MI200")
         assert "GRBM_GUI_ACTIVE" in hw
+        assert "numActiveCUs" in vars_
+        assert "GRBM_GUI_ACTIVE_PER_XCD" in vars_
+
+    def test_gfx1250_requests_only_explicit_gui_active_sum(self):
+        hw, vars_ = extract_counters_and_variables("SQ_WAVES", "GFX1250_SERIES")
+
+        assert "GRBM_GUI_ACTIVE_sum" in hw
+        assert "GRBM_GUI_ACTIVE" not in hw
+        assert "GRBM_GUI_ACTIVE_PER_XCD" in vars_
+
+    def test_gfx1250_resolves_num_active_cus_to_gui_active_sum(self):
+        hw, vars_ = extract_counters_and_variables("$numActiveCUs", "GFX1250_SERIES")
+
+        assert "GRBM_GUI_ACTIVE_sum" in hw
+        assert "GRBM_GUI_ACTIVE" not in hw
         assert "numActiveCUs" in vars_
         assert "GRBM_GUI_ACTIVE_PER_XCD" in vars_
 
