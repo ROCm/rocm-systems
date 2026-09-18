@@ -85,7 +85,7 @@ set(PKG_VERSION_NUM_COMMIT 0)
 project(
     ${AMD_SMI_LIBS_TARGET}
     DESCRIPTION "AMD System Management libraries"
-    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/amdsmi"
+    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
 )
 
 set(CMAKE_CXX_STANDARD 17)
@@ -471,6 +471,8 @@ install(
     PATTERN "*.txt"
     PATTERN "build*" EXCLUDE
     PATTERN ".cache*" EXCLUDE
+    # Includes impl headers that are build-only, so it cannot compile against an install tree.
+    PATTERN "amd_smi_cper.cc" EXCLUDE
 )
 
 # Make for goamdsmi_shim library

@@ -2334,7 +2334,9 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   }
 }
 
-constexpr bool wmma_f32_f32_native_width_supported(uint32_t n, uint32_t width) {
+/// Return whether an f32-accumulating matrix output row divides into complete
+/// native SIMD chunks.
+constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
   return width > 1 && n % width == 0;
 }
 
@@ -2356,7 +2358,7 @@ void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    if (util::force_scalar() || !wmma_f32_f32_native_width_supported(N, W)) {
+    if (util::force_scalar() || !mma_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                     const_acc, c_modifier);
       return;
@@ -4285,7 +4287,7 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || W <= 1 || N % W != 0 ||
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
                amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
@@ -4359,40 +4361,34 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
   }
 }
 
-/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
-/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
-/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
-/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
-/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
-/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
-/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
-/// stage every result on the stack and publish only after all operand reads,
-/// preserving destructive-overlap semantics without a heap-backed Result
-/// vector. VGPR access is batched through observed register-access regions
-/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
-/// back to the generic exec_f32 when:
+/// Fast path for the f16-input f32 MFMA shapes. The original target,
+/// v_mfma_f32_16x16x32_f16, accounts for 488k invocations and about 4B
+/// internal MACs per OPT-125M fp16 eager forward. Compile-time M/N/K/B let the
+/// compiler fully unroll the inner matmul into straight-line native SIMD FMAs;
+/// a runtime-dimension loop is materially slower on this hot path. The path
+/// snapshots packed f16 inputs through observed register-access regions,
+/// bulk-converts them into dense f32 buffers, and publishes staged results only
+/// after every operand read. It falls back to the generic exec_f32 when:
 ///   - <experimental/simd> is unavailable
-///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
+///   - host native_simd<float> has no usable width for the output columns
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
-  static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -4432,7 +4428,7 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
-      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
@@ -4469,25 +4465,24 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
 
 /// Fast path for the bf16-input MFMA shapes (v_mfma_f32_*_bf16). Identical to
 /// the f16 specialization except the bulk input convert is the bf16 zero-extend
-/// (no F16C needed). Falls back to the generic exec_f32 without AVX-512 / under
-/// force-scalar / with cbsz|blgp.
+/// (no F16C needed). Falls back to the generic exec_f32 without usable host
+/// SIMD, under force-scalar, or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                              uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
-  static_assert(N % 16 == 0, "specialized bf16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
                const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -4525,7 +4520,7 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
-      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;

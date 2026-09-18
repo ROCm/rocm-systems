@@ -3,6 +3,7 @@
 *.obj
 *.d
 *.prehip
+.hipify/
 
 # Built example binaries
 01_communicators/01_multiple_devices_single_process/multiple_devices_single_process
@@ -12,3 +13,6 @@
 03_collectives/01_allreduce/allreduce
 04_user_buffer_registration/01_allreduce/allreduce_ub
 05_symmetric_memory/01_allreduce/allreduce_sm
+06_device_api/01_allreduce_lsa/c/allreduce_lsa
+06_device_api/02_alltoall_gin/c/alltoall_gin
+06_device_api/03_alltoall_hybrid/c/alltoall_hybrid

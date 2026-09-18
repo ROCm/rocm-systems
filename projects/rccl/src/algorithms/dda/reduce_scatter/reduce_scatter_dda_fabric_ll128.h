@@ -70,8 +70,7 @@ __launch_bounds__(1024)
   // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
   const int flatBlockId = blockIdx.x;
   const int total = gridDim.x;
-  __shared__ uint32_t s_flag;
-  const uint32_t flag = ddaLLEpochBegin(epochDev, flatBlockId, s_flag);
+  const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   // 16 lanes cooperate on one 128B line; grid-stride over line-groups.
@@ -129,7 +128,7 @@ __launch_bounds__(1024)
     }
   }
 
-  ddaLLEpochEnd(epochDev, flatBlockId, total, epochLen, flag);
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
 }
 
 } // namespace dda::common

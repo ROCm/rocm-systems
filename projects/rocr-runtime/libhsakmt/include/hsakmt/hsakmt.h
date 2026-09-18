@@ -32,8 +32,14 @@
 extern "C" {
 #endif
 
-/* Forward declaration for debug trap ioctl arguments */
+/* Forward declarations for the KFD ioctl arguments the entry points below take
+ * by pointer. linux/kfd_ioctl.h defines them and the dev package excludes it,
+ * so without these a consumer's C compiler invents a type scoped to the
+ * prototype and the pointer it passes is a different one.
+ */
 struct kfd_ioctl_dbg_trap_args;
+struct kfd_runtime_info;
+struct kfd_dbg_device_info_entry;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
