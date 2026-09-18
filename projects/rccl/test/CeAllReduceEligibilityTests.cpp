@@ -359,6 +359,49 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isol
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
 }
 
+// FORCE + unregistered still uses ceUsable's 256 MiB cap. Messages between the
+// staging buffer and that cap must not select CE; ce_coll refuses them.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingTakesKernel_Isolated)
+{
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ForceUnregisteredOverStagingTakesKernel_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 8;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                const size_t staging = ncclCeAllReduceStagingBufBytes(mock.comm.nRanks);
+                ASSERT_GT(staging, 0u);
+                size_t count = (staging / sizeof(float)) + static_cast<size_t>(mock.comm.nRanks);
+                while (count * sizeof(float) <= staging) count += static_cast<size_t>(mock.comm.nRanks);
+                ASSERT_EQ(count % static_cast<size_t>(mock.comm.nRanks), 0u);
+                ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES));
+
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000), count, ncclFloat32,
+                    ncclProd, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_NE(decision.algo, RCCL_CE_REGISTERED)
+                    << "ceStagedUnregistered must not select CE above the staging buffer";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
 // ---------------------------------------------------------------------------
 // rcclCeAr2ShotMax / ncclCeInit staging-buffer growth.
 //
