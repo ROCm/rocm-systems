@@ -20,6 +20,15 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Added
+
+- New public C ABI (`c_interface/profiler_hub.h`, `c_interface/profiler_hub_types.h`):
+  `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
+  `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
+  and stub declarations for a planned async task API (`ph_future_get`/`ph_future_wait`/
+  `ph_future_cancel`/`ph_future_free`, not yet implemented).
+- `reader_types.hpp`: `track_info_t` now carries `id`, `event_count`, and `agent_id`.
+
 ### Changed
 
 - **Breaking:** public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp`
@@ -28,6 +37,9 @@ downstream consumer of the library.
   `#include <profiler-hub/cpp/storage.hpp>`). Groups the public C++ API
   headers under their own subdirectory, mirroring the language-scoped
   layout other public interfaces (e.g. a future C ABI) will use.
+- `reader_types.hpp`: `counter_timeline_event_t::value` is now `double` (was `size_t`).
+- `reader_types.hpp`: `timeline_event_t::display_name`/`category` are now
+  `std::string_view` (were `std::string`).
 
 ## [0.2.0] - 2026-09-02
 
