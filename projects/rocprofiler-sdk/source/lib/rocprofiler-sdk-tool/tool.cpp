@@ -4978,4 +4978,71 @@ rocprofv3_main(int argc, char** argv, char** envp)
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
 }
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
+
+namespace
+{
+// The OpenMP runtime binds the first ompt_start_tool it finds and does not consider any other
+// library already loaded, so declining the role means invoking the next implementation here.
+// Returning null only sends the runtime on to its own OMP_TOOL_LIBRARIES search.
+ompt_start_tool_result_t*
+start_next_ompt_tool(unsigned int omp_version, const char* runtime_version)
+{
+    using ompt_start_tool_t = ompt_start_tool_result_t* (*) (unsigned int, const char*);
+
+    auto* _next = reinterpret_cast<ompt_start_tool_t>(::dlsym(RTLD_NEXT, "ompt_start_tool"));
+    if(_next == nullptr || _next == reinterpret_cast<ompt_start_tool_t>(&ompt_start_tool))
+        return nullptr;
+
+    ROCP_INFO << "rocprofv3 is handing the OMPT tool role to the next ompt_start_tool";
+    return _next(omp_version, runtime_version);
+}
+}  // namespace
+
+ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    initialize_logging();
+
+    ROCP_INFO << fmt::format(
+        "ompt_start_tool(omp_version={}, runtime_version=\"{}\") was invoked in rocprofv3 tool",
+        omp_version,
+        runtime_version);
+
+    // Take the OMPT tool role only when this invocation collects OMPT, so that a user's own OMPT
+    // tool can have it while rocprofv3 continues tracing everything else. Exactly one OMPT tool
+    // wins, and which one follows from the command line rather than from a separate control.
+    if(!tool::get_config().ompt_trace)
+    {
+        ROCP_INFO << "rocprofv3 is not collecting OMPT; deferring the OMPT tool role";
+        return start_next_ompt_tool(omp_version, runtime_version);
+    }
+
+    // The OpenMP runtime discovers tools while holding its initialization lock. Configuring
+    // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
+    // the OpenMP runtime and re-enter that lock on the same thread. A status of 0 is "not
+    // started" and -1 is "in progress"; both defer instead of configuring.
+    if(int _status = 0;
+       rocprofiler_is_initialized(&_status) != ROCPROFILER_STATUS_SUCCESS || _status <= 0)
+    {
+        ROCP_WARNING << "rocprofv3 is not collecting OMPT because the OpenMP runtime initialized "
+                        "before rocprofiler-sdk, and is handing the OMPT tool role to the next "
+                        "tool. Initialize rocprofiler-sdk before the first OpenMP call to collect "
+                        "OMPT with rocprofv3.";
+        return start_next_ompt_tool(omp_version, runtime_version);
+    }
+
+    initialize_rocprofv3();
+
+    // rocprofiler-sdk returns null when no registered client subscribes to OMPT. Chain that
+    // decline like the two above rather than passing the null on to the runtime.
+    if(auto* _result = rocprofiler_ompt_start_tool(omp_version, runtime_version);
+       _result != nullptr)
+        return _result;
+
+    ROCP_INFO << "rocprofiler-sdk declined the OMPT tool role; deferring it";
+    return start_next_ompt_tool(omp_version, runtime_version);
+}
 }
