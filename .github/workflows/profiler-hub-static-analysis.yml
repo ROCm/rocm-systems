@@ -40,7 +40,6 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
-            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       # No gtest/gmock/benchmark: this job configures with tests and benchmarks

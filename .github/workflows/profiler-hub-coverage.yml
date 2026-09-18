@@ -41,7 +41,6 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
-            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       - name: Install dependencies

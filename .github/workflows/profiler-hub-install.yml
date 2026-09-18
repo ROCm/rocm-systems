@@ -46,7 +46,6 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
-            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       # No cmake package: jammy's is 3.22, below the project's 3.25 floor, and it
