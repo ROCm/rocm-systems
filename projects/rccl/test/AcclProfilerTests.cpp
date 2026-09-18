@@ -401,8 +401,8 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             gethostname(hostname, sizeof(hostname) - 1);
             char path[1024];
             snprintf(path, sizeof(path),
-                "/tmp/accl_test_lifecycle/accl_profiler_rank0_%s_pid%d_0xbeef.jsonl",
-                hostname, (int)getpid());
+                "%s/accl_profiler_rank0_%s_pid%d_0xbeef.jsonl",
+                ProfilerDirRoot(dir).c_str(), hostname, (int)getpid());
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
