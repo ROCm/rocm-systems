@@ -26,13 +26,6 @@ the row that matches your situation and follow its link.
 | {ref}`Tarball <install_tarball>` | After you add `bin/` to `PATH` | After you add it to `sys.path` | You have no root access, need versions side by side, or are on an air-gapped host |
 | {ref}`PyPI wheel <install_pypi>` | Not included | Ready to use | You only script against the Python API and do not want ROCm on the host |
 
-Set your choice below and the instructions on this page narrow to match. The
-page address updates as you choose, so you can link someone the exact procedure
-you followed.
-
-:::{install-selector}
-:::
-
 :::{note}
 Whichever method you pick, the machine you query still needs the `amdgpu` kernel
 driver. See {ref}`Driver requirements <install_amdgpu_driver>`.
@@ -122,10 +115,6 @@ sudo python3 -m pip install more_itertools
 (install_rocm)=
 ## Install the ROCm Core SDK
 
-:::{install-section}
-:method: rocm
-:::
-
 **Use this when** you want ROCm on the machine anyway. This is the default path
 and the one most users should take.
 
@@ -137,10 +126,6 @@ environment.
 
 (install_without_rocm)=
 ## Install AMD SMI standalone on Linux
-
-:::{install-section}
-:method: standalone
-:::
 
 **Use this when** you want AMD SMI managed by your package manager, but not the
 rest of the ROCm libraries and tools.
@@ -164,24 +149,23 @@ dependencies it needs, and nothing else.
    For example, to install the latest ROCm AMD SMI release for supported GPU
    architectures:
 
-   ::::{install-when}
-   :distro: debian
+   :::::{tab-set}
+   ::::{tab-item} Debian-based distros
    ```bash
    sudo apt install amdrocm-amdsmi
    ```
    ::::
-   ::::{install-when}
-   :distro: rhel
+   ::::{tab-item} RHEL-based distros
    ```bash
    sudo dnf install amdrocm-amdsmi
    ```
    ::::
-   ::::{install-when}
-   :distro: sles
+   ::::{tab-item} SLES
    ```bash
    sudo zypper install amdrocm-amdsmi
    ```
    ::::
+   :::::
 
 3. Prepend the `amd-smi` binary to your PATH, it is not on PATH by default.
    Replace `<major>` and `<minor>` with the appropriate ROCm version.
@@ -201,10 +185,6 @@ dependencies it needs, and nothing else.
 
 (install_nightly)=
 ## Install a nightly build
-
-:::{install-section}
-:method: nightly
-:::
 
 **Use this when** you need a fix that has not shipped in a release yet, or you
 are validating against an unreleased ROCm.
@@ -238,10 +218,6 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
 
 (install_tarball)=
 ## Install from a tarball
-
-:::{install-section}
-:method: tarball
-:::
 
 **Use this when** you cannot use a package manager: no root access, multiple
 versions side by side, or an air-gapped host.
@@ -325,10 +301,6 @@ coexistence rules.
 
 (install_pypi)=
 ## Install the Python bindings from PyPI
-
-:::{install-section}
-:method: pypi
-:::
 
 **Use this when** you only need the Python API, for example to script against
 GPU telemetry on a host where you do not want a ROCm installation.
