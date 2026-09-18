@@ -465,7 +465,7 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
         stats = format_node_stats(root)
         print(f"\n{location} {stats}")
         for child in sorted(
-            root.children.values(),
+            root.children,
             key=lambda c: c.total_duration_ms,
             reverse=True,
         ):
@@ -573,9 +573,7 @@ def print_operator_node(
         new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
 
     # Process child nodes
-    children = sorted(
-        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
-    )
+    children = sorted(node.children, key=lambda c: c.total_duration_ms, reverse=True)
     for i, child in enumerate(children):
         # A child is last if it's the final child AND there are no kernels after it
         child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
