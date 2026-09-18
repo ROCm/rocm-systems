@@ -42,6 +42,38 @@ endif()
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
+    # If an explicit executable list was provided (e.g. from TheRock via
+    # -DROCPROFILER_PYTHON_EXECUTABLES), pre-seed Python3_EXECUTABLE for this version
+    # before calling find_package. This is necessary for Python versions that CMake's
+    # FindPython3 does not auto-discover (e.g. Python 3.14+ on manylinux where an older
+    # CMake has no knowledge of the new install path).
+    if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
+        string(REGEX MATCH "^[0-9]+\\.[0-9]+" _rocprofiler_requested_major_minor
+                     "${_VERSION}")
+        foreach(_rocprofiler_candidate_exe IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
+            execute_process(
+                COMMAND
+                    "${_rocprofiler_candidate_exe}" -c
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                OUTPUT_VARIABLE _rocprofiler_candidate_ver
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _rocprofiler_candidate_result
+                ERROR_QUIET)
+            if(_rocprofiler_candidate_result EQUAL 0
+               AND "${_rocprofiler_candidate_ver}" STREQUAL
+                   "${_rocprofiler_requested_major_minor}")
+                set(Python3_EXECUTABLE
+                    "${_rocprofiler_candidate_exe}"
+                    CACHE FILEPATH "" FORCE)
+                break()
+            endif()
+        endforeach()
+        unset(_rocprofiler_candidate_exe)
+        unset(_rocprofiler_candidate_ver)
+        unset(_rocprofiler_candidate_result)
+        unset(_rocprofiler_requested_major_minor)
+    endif()
+
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
         find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
                      COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
@@ -74,6 +106,27 @@ function(get_default_python_versions _VAR)
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
         endif()
     endforeach()
+
+    # If find package doesn't find the version, but PYTHON_EXECUTABLES is passed in, add
+    # it to version list
+    if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
+        foreach(_EXE IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
+            execute_process(
+                COMMAND
+                    "${_EXE}" -c
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                OUTPUT_VARIABLE _EXE_VER
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _EXE_RESULT
+                ERROR_QUIET)
+            if(_EXE_RESULT EQUAL 0 AND NOT "${_EXE_VER}" IN_LIST _PYTHON_FOUND_VERSIONS)
+                list(APPEND _PYTHON_FOUND_VERSIONS "${_EXE_VER}")
+            endif()
+        endforeach()
+        unset(_EXE)
+        unset(_EXE_VER)
+        unset(_EXE_RESULT)
+    endif()
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
