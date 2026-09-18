@@ -29,9 +29,11 @@
 #include <rccl/rccl.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <thread>
 #include <vector>
 
 #include <sys/mman.h>
@@ -416,55 +418,81 @@ bool allDevicesSupportDdaInit(int numDevices, char* unsupportedArchOut, size_t o
     return true;
 }
 
+// Rank 0's preconditions and unique-ID generation, split out so that the
+// DDA_INIT_CHILD_* macros' early returns stay inside it: whatever code this
+// returns, the single caller below is then guaranteed to publish a terminal
+// state for the other ranks. A path that returned without publishing would
+// leave them waiting on a state that never arrives.
+int ddaInitRank0Prepare(int rank, int nranks, DdaInitShared* shared)
+{
+    int numDevices = 0;
+    DDA_INIT_CHILD_HC(hipGetDeviceCount(&numDevices));
+    if (numDevices < nranks)
+    {
+        printf("Requires %d GPUs (detected %d).\n", nranks, numDevices);
+        return kDdaInitChildSkip;
+    }
+
+    char unsupportedArch[256] = {0};
+    if (!allDevicesSupportDdaInit(nranks, unsupportedArch, sizeof(unsupportedArch)))
+    {
+        printf("Unsupported GPU architecture '%s' for DDA IPC (requires gfx942 or gfx950).\n", unsupportedArch);
+        return kDdaInitChildSkip;
+    }
+
+    // ncclDdaIpcCommInit() requires direct GPU-to-GPU P2P across the whole
+    // clique; without it the resources stay null regardless of the gate.
+    for (int i = 0; i < nranks; i++)
+    {
+        for (int j = i + 1; j < nranks; j++)
+        {
+            int canAccess = 0;
+            DDA_INIT_CHILD_HC(hipDeviceCanAccessPeer(&canAccess, i, j));
+            if (!canAccess)
+            {
+                printf("No direct P2P between GPU %d and %d; DDA IPC would not engage.\n", i, j);
+                return kDdaInitChildSkip;
+            }
+        }
+    }
+
+    DDA_INIT_CHILD_NC(ncclGetUniqueId(&shared->id));
+    return kDdaInitChildOk;
+}
+
 // Runs entirely inside a forked child: the first HIP/RCCL call happens here.
 int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
 {
     if (rank == 0)
     {
-        int numDevices = 0;
-        DDA_INIT_CHILD_HC(hipGetDeviceCount(&numDevices));
-        if (numDevices < nranks)
+        const int prep = ddaInitRank0Prepare(rank, nranks, shared);
+        // Publish on every path, including the HIP/RCCL error ones: the other
+        // ranks are already waiting and only rank 0 can release them.
+        shared->state.store(prep == kDdaInitChildOk ? DdaInitState::Ready : DdaInitState::Skip,
+                            std::memory_order_release);
+        if (prep != kDdaInitChildOk)
         {
-            printf("Requires %d GPUs (detected %d).\n", nranks, numDevices);
-            shared->state.store(DdaInitState::Skip, std::memory_order_release);
-            return kDdaInitChildSkip;
+            return prep;
         }
-
-        char unsupportedArch[256] = {0};
-        if (!allDevicesSupportDdaInit(nranks, unsupportedArch, sizeof(unsupportedArch)))
-        {
-            printf("Unsupported GPU architecture '%s' for DDA IPC (requires gfx942 or gfx950).\n",
-                   unsupportedArch);
-            shared->state.store(DdaInitState::Skip, std::memory_order_release);
-            return kDdaInitChildSkip;
-        }
-
-        // ncclDdaIpcCommInit() requires direct GPU-to-GPU P2P across the whole
-        // clique; without it the resources stay null regardless of the gate.
-        for (int i = 0; i < nranks; i++)
-        {
-            for (int j = i + 1; j < nranks; j++)
-            {
-                int canAccess = 0;
-                DDA_INIT_CHILD_HC(hipDeviceCanAccessPeer(&canAccess, i, j));
-                if (!canAccess)
-                {
-                    printf("No direct P2P between GPU %d and %d; DDA IPC would not engage.\n", i, j);
-                    shared->state.store(DdaInitState::Skip, std::memory_order_release);
-                    return kDdaInitChildSkip;
-                }
-            }
-        }
-
-        DDA_INIT_CHILD_NC(ncclGetUniqueId(&shared->id));
-        shared->state.store(DdaInitState::Ready, std::memory_order_release);
     }
     else
     {
-        DdaInitState st;
+        // Bounded wait rather than an unbounded spin. Rank 0 always publishes,
+        // so the deadline should never be reached; it is here so that a future
+        // path that somehow does not publish costs a failed test rather than a
+        // wedged run (the runner kills the re-exec'd child by pid, not the
+        // process group, so a spinner would outlive the suite timeout).
+        constexpr int kWaitSeconds = 120;
+        DdaInitState  st           = DdaInitState::NotReady;
+        const auto    deadline     = std::chrono::steady_clock::now() + std::chrono::seconds(kWaitSeconds);
         while ((st = shared->state.load(std::memory_order_acquire)) == DdaInitState::NotReady)
         {
-            /* spin until rank 0 publishes the id or reports a skip */
+            if (std::chrono::steady_clock::now() > deadline)
+            {
+                printf("[rank %d] rank 0 published no state within %d s; giving up.\n", rank, kWaitSeconds);
+                return kDdaInitChildFail;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         if (st == DdaInitState::Skip)
         {
