@@ -18,10 +18,30 @@
 #include "p2p_resiliency_recovery_ainic.h"
 #include "connect_cast.h"
 
+// Destroying a QP drops every outstanding WR on that device. Refund the matching
+// RMA credits and fail in-flight requests so Test() does not wait for CQEs that
+// the recreated QP will never produce.
+static void IbCastRmaAbandonDeviceRequests(struct ncclIbNetCommBase* base, int devIndex) {
+  if (!base->isRma) return;
+  for (int i = 0; i < NET_IB_MAX_REQUESTS; i++) {
+    struct ncclIbRequest* req = &base->reqs[i];
+    if (req->type == NCCL_NET_IB_REQ_UNUSED) continue;
+    if (req->events[devIndex] <= 0) continue;
+    req->events[devIndex] = 0;
+    if (req->rmaNwrs > 0) {
+      if (base->rmaWrsOutstanding >= req->rmaNwrs) base->rmaWrsOutstanding -= req->rmaNwrs;
+      else base->rmaWrsOutstanding = 0;
+      req->rmaNwrs = 0;
+    }
+    req->type = NCCL_NET_IB_REQ_FAILED;
+  }
+}
+
 /* Phase A: destroy+recreate QPs, recording new QPNs for exchange. */
 ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext* recoveryContext) {
   uint nqps = recoveryContext->resCtx->baseComm->nqps;
   recoveryContext->nLocalQpns = 0;
+  IbCastRmaAbandonDeviceRequests(recoveryContext->resCtx->baseComm, recoveryContext->devIndex);
 
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     ncclIbQp* localQp = &recoveryContext->resCtx->baseComm->qps[qpIndex];
