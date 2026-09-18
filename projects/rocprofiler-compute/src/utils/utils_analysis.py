@@ -19,7 +19,12 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.ml_api_trace_errors import PassMarkerMismatchError, UnaccountedKernelError
+from utils.ml_api_trace_errors import (
+    MissingSourceLocationError,
+    OverlappingMarkerRangeError,
+    PassMarkerMismatchError,
+    UnaccountedKernelError,
+)
 from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
@@ -358,21 +363,55 @@ def nest_marker_intervals(
         return forest
     for thread_id, group in trace_df.groupby("Thread_Id", sort=False):
         roots: list[CallTreeNode] = []
-        open_ranges: list[tuple[CallTreeNode, float]] = []
+        open_ranges: list[tuple[CallTreeNode, float, float]] = []
+        thread_key = str(thread_id)
         for row in group.itertuples(index=False):
             start = float(row.Start_Timestamp)
             end = float(row.End_Timestamp)
-            while open_ranges and open_ranges[-1][1] <= start:
+            while open_ranges and open_ranges[-1][2] <= start:
                 open_ranges.pop()
+            if open_ranges and end > open_ranges[-1][2]:
+                parent_node, parent_start, parent_end = open_ranges[-1]
+                console_error(
+                    "analysis",
+                    str(
+                        OverlappingMarkerRangeError(
+                            thread_id=thread_key,
+                            first_name=parent_node.name,
+                            first_start=parent_start,
+                            first_end=parent_end,
+                            second_name=str(row.Operator_Name),
+                            second_start=start,
+                            second_end=end,
+                        )
+                    ),
+                )
+            backend_value = getattr(row, "Backend", None)
+            if backend_value in KNOWN_ML_API_BACKENDS:
+                row_file = _optional_marker_file_name(getattr(row, "File_Name", ""))
+                ancestor_has_file = any(
+                    ancestor.file_name for ancestor, _start, _end in open_ranges
+                )
+                if row_file is None and not ancestor_has_file:
+                    console_error(
+                        "analysis",
+                        str(
+                            MissingSourceLocationError(
+                                operator_name=str(row.Operator_Name),
+                                thread_id=thread_key,
+                                start_timestamp=start,
+                            )
+                        ),
+                    )
             node = _call_tree_node_from_marker_row(row)
-            if open_ranges and end <= open_ranges[-1][1]:
+            if open_ranges:
                 open_ranges[-1][0].children.append(node)
             else:
                 roots.append(node)
-            open_ranges.append((node, end))
+            open_ranges.append((node, start, end))
         for root in roots:
             rollup_node_stats(root)
-        forest[str(thread_id)] = roots
+        forest[thread_key] = roots
     return forest
 
 
