@@ -32,8 +32,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 template<atomic::memory_scope scope>
 class Notifier {
 

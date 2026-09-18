@@ -36,8 +36,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 /**
  * @brief The bit pattern written to memory by each thread.
  */

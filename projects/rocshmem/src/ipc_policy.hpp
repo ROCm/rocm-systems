@@ -41,8 +41,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 class Backend;
 class Context;
 

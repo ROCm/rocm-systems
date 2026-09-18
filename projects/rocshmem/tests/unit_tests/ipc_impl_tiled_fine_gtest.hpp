@@ -43,8 +43,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 const int WARP_SIZE = 64;
 
 const int THREAD_TRANSFER_GRANULARITY = 8;  // DWORDX2

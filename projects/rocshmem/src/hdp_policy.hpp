@@ -34,8 +34,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 class HdpHostSideFlushRocmPolicy {
  public:
   HdpHostSideFlushRocmPolicy() { set_hdp_flush_ptr(); }

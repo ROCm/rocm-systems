@@ -37,8 +37,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 #if defined(USE_SDMA)
 class SdmaImpl {
  public:

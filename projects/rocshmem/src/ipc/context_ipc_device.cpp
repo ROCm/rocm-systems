@@ -35,8 +35,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;  // readability alias for rocshmem::detail::atomic
-
 __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
   IPCBackend *backend{static_cast<IPCBackend *>(b)};

@@ -181,6 +181,9 @@ __device__ __forceinline__ void threadfence() {
 
 } // namespace atomic
 } // namespace detail
+
+namespace atomic = detail::atomic;
+
 } // namespace rocshmem
 
 #endif  // LIBRARY_SRC_ATOMIC_HPP_

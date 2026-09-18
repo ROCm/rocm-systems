@@ -31,8 +31,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 #define MLX5_LOCK_USE_S_SLEEP  1
 #define MLX5_LOCK_USE_S_WAKEUP (0 && MLX5_LOCK_USE_S_SLEEP)
 // sleep for up to 64 * MLX5_LOCK_S_SLEEP_DELAY clock cycles

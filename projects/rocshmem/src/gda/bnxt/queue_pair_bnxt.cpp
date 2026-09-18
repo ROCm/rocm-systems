@@ -27,8 +27,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 __device__ static inline struct bnxt_re_msns* bnxt_re_pull_psn_buff(struct bnxt_device_sq *sq) {
   return (struct bnxt_re_msns*)(((char *) sq->msntbl) + ((sq->msn) << sq->psn_sz_log2));
 }

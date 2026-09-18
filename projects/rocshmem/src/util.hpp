@@ -42,8 +42,6 @@
 
 namespace rocshmem {
 
-namespace atomic = detail::atomic;
-
 #define LIKELY(X)   __builtin_expect(X, 1)
 #define UNLIKELY(X) __builtin_expect(X, 0)
 
