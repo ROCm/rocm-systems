@@ -362,7 +362,8 @@ TEST(metrics, counter_info_v1_size_field)
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
-    auto agents = rocprofiler::agent::get_agents();
+    size_t checked_counters = 0;
+    auto   agents           = rocprofiler::agent::get_agents();
     for(const auto* agent : agents)
     {
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
@@ -380,6 +381,9 @@ TEST(metrics, counter_info_v1_size_field)
                 return ROCPROFILER_STATUS_SUCCESS;
             },
             static_cast<void*>(&gpu_counters));
+        // Agent enumeration includes GPUs without counter support (e.g. an integrated GPU).
+        if(status == ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED) continue;
+
         ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS)
             << "Failed to iterate counters for agent " << agent->id.handle;
 
@@ -407,6 +411,9 @@ TEST(metrics, counter_info_v1_size_field)
             EXPECT_LT(info.size, sizeof(rocprofiler_counter_info_v1_t))
                 << "size field must be less than sizeof(rocprofiler_counter_info_v1_t) for counter "
                 << (info.name ? info.name : "<null>") << " (handle=" << counter.handle << ")";
+            ++checked_counters;
         }
     }
+
+    ASSERT_GT(checked_counters, 0) << "No supported GPU counters available for size checks";
 }

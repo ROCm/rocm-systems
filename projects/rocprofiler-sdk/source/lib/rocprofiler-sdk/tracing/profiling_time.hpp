@@ -77,13 +77,16 @@ adjust_profiling_time(std::string_view _label,
                       profiling_time   _value,
                       profiling_time&& _bounds)
 {
-    static auto sysclock_period = hsa::get_hsa_timestamp_period();
-    static auto normalize_env   = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
-    static auto strict_ts_env   = common::get_env(
+    static auto normalize_env = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
+    static auto strict_ts_env = common::get_env(
         "ROCPROFILER_CI_STRICT_TIMESTAMPS", (ROCPROFILER_CI_STRICT_TIMESTAMPS > 0) ? true : false);
 
     // normalize
-    if(ROCPROFILER_UNLIKELY(normalize_env)) _value *= sysclock_period;
+    if(ROCPROFILER_UNLIKELY(normalize_env))
+    {
+        static auto sysclock_period = hsa::get_hsa_timestamp_period();
+        _value *= sysclock_period;
+    }
 
     if(strict_ts_env)
     {
@@ -134,13 +137,25 @@ adjust_profiling_time(std::string_view _label,
         std::swap(_value.start, _value.end);
     }
 
-    // below are hacks for clock skew issues:
-    //
-    // the timestamp of this handler will always be after when the profiling time ended
-    if(_bounds.end < _value.end) _value -= (_value.end - _bounds.end);
-
-    // the timestamp of the enqueue will always be before when the profiling time started
-    if(_value.start < _bounds.start) _value += (_bounds.start - _value.start);
+    // Preserve the measured duration when shifting a skewed interval into the CPU bounds.
+    // If it cannot fit, use both bounds: shifting the start forward after correcting the end
+    // would otherwise place completion after the CPU handler (and correlation retirement).
+    const auto duration = _value.end - _value.start;
+    if(duration > _bounds.end - _bounds.start)
+    {
+        _value.start = _bounds.start;
+        _value.end   = _bounds.end;
+    }
+    else if(_value.end > _bounds.end)
+    {
+        _value.end   = _bounds.end;
+        _value.start = _value.end - duration;
+    }
+    else if(_value.start < _bounds.start)
+    {
+        _value.start = _bounds.start;
+        _value.end   = _value.start + duration;
+    }
 
     return _value;
 }

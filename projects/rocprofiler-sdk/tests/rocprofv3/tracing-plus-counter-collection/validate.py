@@ -105,17 +105,22 @@ def test_validate_counter_collection_plus_tracing_dispatch_data(json_data):
         )
 
 
-def test_perfetto_data(pftrace_data, json_data):
+def test_perfetto_data(pftrace_data, json_data, zero_counters_in_auto_mode):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,
-        ("hip", "hsa", "marker", "kernel", "memory_copy", "counter_collection"),
+        ("hip", "hsa", "marker", "kernel", "memory_copy"),
     )
+    if zero_counters_in_auto_mode:
+        pytest.skip(
+            "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO; no counter slices expected"
+        )
+    rocprofv3.test_perfetto_data(pftrace_data, json_data, ("counter_collection",))
 
 
-def test_perfetto_counter_samples(pftrace_reader, json_data):
+def test_perfetto_counter_samples(pftrace_reader, json_data, zero_counters_in_auto_mode):
     samples = pftrace_reader.query_tp("""
         SELECT counter_track.name AS track_name, counter.ts, counter.value
         FROM counter
@@ -144,6 +149,10 @@ def test_perfetto_counter_samples(pftrace_reader, json_data):
     actual_tracks = set(samples["track_name"])
     assert expected_tracks == actual_tracks
     maxima = samples.groupby("track_name")["value"].max()
+    if zero_counters_in_auto_mode:
+        pytest.skip(
+            "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO; nonzero samples not required"
+        )
     assert all(maxima[track] > 0 for track in expected_tracks)
 
 
