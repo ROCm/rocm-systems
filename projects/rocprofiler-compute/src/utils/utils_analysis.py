@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from utils import csv_compression, schema
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -208,6 +209,93 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
 def decode_marker_name(name: str) -> str:
     """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
     return name.replace("%2F", "/").replace("%25", "%")
+
+
+def _split_name_and_location(first_token: str) -> tuple[str, str, object]:
+    """Split `{name}:{location}` from the right into name, file, and line."""
+    if first_token.endswith(":n/a"):
+        return first_token[: -len(":n/a")], "", ""
+    parts = first_token.rsplit(":", 2)
+    if len(parts) == 3:
+        operator_name, file_part, line_part = parts
+        if file_part and line_part.isdigit():
+            return operator_name, Path(file_part).name, int(line_part)
+    return first_token, "", ""
+
+
+def parse_marker_function(function_value: object) -> dict[str, Any]:
+    """Parse one Function cell into operator, location, backend, and wire keys."""
+    if function_value is None or (
+        isinstance(function_value, float) and pd.isna(function_value)
+    ):
+        raw = ""
+    else:
+        raw = str(function_value)
+    tokens = raw.split("|") if raw else [""]
+    first_token = tokens[0]
+    if ":#" in first_token or "@" in first_token:
+        console_error(
+            "analysis",
+            f"Stacked marker wire is not supported: {raw}",
+        )
+    operator_name, file_name, line_number = _split_name_and_location(first_token)
+    parsed_keys = {
+        "seqNr": "n/a",
+        "tid": "n/a",
+        "ftid": "n/a",
+        "scope": "n/a",
+        "args": "n/a",
+    }
+    backend = "user"
+    for token in tokens[1:]:
+        if token in KNOWN_ML_API_BACKENDS:
+            backend = token
+            continue
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        if key == "args":
+            parsed_keys["args"] = value.replace("%7C", "|")
+        elif key in parsed_keys:
+            parsed_keys[key] = value
+    t_tid = "" if parsed_keys["tid"] in ("", "n/a") else parsed_keys["tid"]
+    f_tid = "" if parsed_keys["ftid"] in ("", "n/a") else parsed_keys["ftid"]
+    return {
+        "Operator_Name": decode_marker_name(operator_name),
+        "File_Name": file_name,
+        "Line_Number": line_number,
+        "Backend": backend,
+        "seqNr": parsed_keys["seqNr"],
+        "T_Tid": t_tid,
+        "F_Tid": f_tid,
+        "scope": parsed_keys["scope"],
+        "args": parsed_keys["args"],
+    }
+
+
+_PARSED_FUNCTION_COLUMNS = (
+    "Operator_Name",
+    "File_Name",
+    "Line_Number",
+    "Backend",
+    "seqNr",
+    "T_Tid",
+    "F_Tid",
+    "scope",
+    "args",
+)
+
+
+def _apply_parsed_function_columns(trace_df: pd.DataFrame) -> pd.DataFrame:
+    """Add parse_marker_function columns, keeping Function and Thread_Id."""
+    if trace_df.empty:
+        parsed = trace_df.copy()
+        for column in _PARSED_FUNCTION_COLUMNS:
+            parsed[column] = pd.Series(dtype=object)
+        return parsed
+    parsed_rows = trace_df["Function"].map(parse_marker_function)
+    parsed_df = pd.DataFrame(list(parsed_rows), index=trace_df.index)
+    return pd.concat([trace_df, parsed_df], axis=1)
 
 
 def build_call_trees(
@@ -803,9 +891,11 @@ def process_ml_api_trace_output(
         pair.joined_df = _add_stitch_key_and_ordinal(
             _group_kernels_onto_markers(marker_rows)
         )
-    workload.ml_api_trace_df = _collapse_matching_markers_across_passes([
-        pair.joined_df for pair in workload.ml_api_trace_pairs
-    ])
+    workload.ml_api_trace_df = _apply_parsed_function_columns(
+        _collapse_matching_markers_across_passes([
+            pair.joined_df for pair in workload.ml_api_trace_pairs
+        ])
+    )
 
 
 def validate_workload(path: str) -> None:
