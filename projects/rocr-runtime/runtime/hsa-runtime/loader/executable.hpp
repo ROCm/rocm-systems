@@ -324,7 +324,6 @@ class AieKernelSymbol final : public SymbolImpl {
                    _symbol_name, HSA_SYMBOL_LINKAGE_PROGRAM,
                    true,  // is_definition
                    _descriptor_ptr),
-        descriptor_ptr(_descriptor_ptr),
         kernarg_size(_kernarg_size) {}
 
   bool GetInfo(hsa_symbol_info32_t symbol_info, void* value) override;
@@ -332,8 +331,6 @@ class AieKernelSymbol final : public SymbolImpl {
   /// @brief Marks the kernel_object handle as visible (called at executable freeze).
   void SetFrozen() { frozen = true; }
 
-  /// @brief Host pointer to the kernel's AieKernelDescriptor.
-  uint64_t descriptor_ptr;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
   /// @brief KERNEL_OBJECT returns 0 until set at freeze (GPU-parity contract).
@@ -708,11 +705,9 @@ public:
   /// @param agent AIE agent to load the code object for.
   /// @param data Pointer to the code object data.
   /// @param size Size of the code object data.
-  /// @param uri URI of the code object for debugging.
   /// @param loaded_code_object Output loaded code object handle.
   /// @return HSA_STATUS_SUCCESS on success, error code otherwise.
   hsa_status_t LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
-                                 const std::string& uri,
                                  hsa_loaded_code_object_t* loaded_code_object);
 
   ExecutableImpl(const ExecutableImpl &e);

@@ -99,8 +99,6 @@ struct AieKernelDescriptor {
   uint32_t version;
   /// @brief Payload kind this descriptor was built from.
   AieKernelKind kind;
-  /// @brief Reserved; must be 0.
-  uint32_t reserved0;
   /// @brief Host virtual address of the instruction blob's XDNA BO (mmap'd to
   /// device); used directly as the device instruction address at submit.
   void* insts_bo_va;
@@ -109,22 +107,21 @@ struct AieKernelDescriptor {
   /// @brief XDNA BO handle of the instruction blob, resolved once at load. The
   /// blob is immutable, so the handle is stable for the object's lifetime.
   uint32_t insts_bo_handle;
-  /// @brief XDNA BO handle of the PDI blob, resolved once at load; unused when
-  /// @ref pdi_size is 0 (no PDI).
+  /// @brief XDNA BO handle of the PDI blob, resolved once at load; 0 if no PDI.
   uint32_t pdi_bo_handle;
-  /// @brief PDI blob size in bytes; 0 if no PDI.
-  uint64_t pdi_size;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
   /// @brief Number of NPU columns the kernel uses.
+  ///
+  /// Carried for the partition geometry a payload declares; no dispatch path reads it yet. The
+  /// AIE queue is created with a hardcoded single core tile, so there is nothing to check it
+  /// against today.
   uint32_t num_cols;
-  /// @brief Pristine control code, in host memory. FullElf only; null for PdiInsts.
+  /// @brief Pristine control code, in host memory. FullElf only; empty for PdiInsts.
   ///
   /// The NPU never fetches this -- it is only ever a memcpy source for the per-dispatch
   /// buffer the driver allocates -- so it needs neither device memory nor alignment.
-  void* ctrl_code;
-  /// @brief Size of @ref ctrl_code in bytes; 0 for PdiInsts.
-  uint64_t ctrl_code_size;
+  std::vector<uint8_t> ctrl_code;
   /// @brief Byte offset in the control code taking the PDI's device address. FullElf only.
   ///
   /// The loader leaves the site holding whatever the ELF shipped: only the driver can turn a BO

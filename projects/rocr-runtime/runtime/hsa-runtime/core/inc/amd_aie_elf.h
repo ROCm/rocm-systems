@@ -52,9 +52,8 @@ struct Kernel {
   std::vector<uint8_t> ctrl_code;
   /// @brief Byte offset in @ref ctrl_code where the PDI's device address is patched in at load
   /// time, once the PDI has been placed in device memory.
+  /// Zero when the kernel has no patch site; Parse() rejects a real site at offset 0.
   uint64_t pdi_patch_offset = 0;
-  /// @brief Whether @ref pdi_patch_offset is valid.
-  bool has_pdi_patch = false;
   /// @brief Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;
 

@@ -729,7 +729,8 @@ bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
   switch (symbol_info) {
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
       // Handle is only valid once the executable is frozen; 0 before, matching GPU.
-      *static_cast<uint64_t*>(value) = frozen ? descriptor_ptr : 0;
+      // address is the descriptor pointer, passed to SymbolImpl at construction.
+      *static_cast<uint64_t*>(value) = frozen ? address : 0;
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE:
       *static_cast<uint32_t*>(value) = kernarg_size;
@@ -829,10 +830,6 @@ void AieLoadedCodeObjectImpl::Destroy() {
     owner->context()->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, b.first, b.second);
   }
   device_buffers.clear();
-  // FullElf descriptors own a host allocation (ctrl_code) that SegmentFree above does not touch.
-  for (auto& d : descriptors) {
-    delete[] static_cast<uint8_t*>(d->ctrl_code);
-  }
   descriptors.clear();
 }
 
@@ -1419,7 +1416,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
         AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
                                       code_object_size)) {
       return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
-                               code_object_size, uri, loaded_code_object);
+                               code_object_size, loaded_code_object);
     }
   }
 #endif
@@ -1598,7 +1595,6 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 // Linux-only: see the gated call site in LoadCodeObject.
 #if defined(__linux__)
 hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
-                                               const std::string& uri,
                                                hsa_loaded_code_object_t* loaded_code_object) {
   auto aie_code = AMD::AieCode::Create(data, size);
   if (!aie_code) {
@@ -1706,11 +1702,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     auto desc = std::make_unique<AMD::AieKernelDescriptor>();
     desc->version = AMD::kAieKernelDescriptorVersion;
     desc->kind = ki->kind;
-    desc->reserved0 = 0;
     desc->kernarg_size = ki->kernarg_size;
     desc->num_cols = ki->num_cols;
-    desc->ctrl_code = nullptr;
-    desc->ctrl_code_size = 0;
     desc->pdi_patch_offset = 0;
 
     if (ki->kind == AMD::AieKernelKind::PdiInsts) {
@@ -1743,7 +1736,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
         return s;
       }
-      desc->pdi_size = ki->pdi_size;
     } else {
       // FullElf: ki->insts_data/insts_size locate the nested full ELF, not a device-ready
       // instruction blob, so this kernel has no insts BO.
@@ -1751,7 +1743,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       desc->insts_size = 0;
       desc->insts_bo_handle = 0;
       desc->pdi_bo_handle = 0;
-      desc->pdi_size = 0;
 
       auto it = parsed_elfs.find(ki->insts_data);
       if (it == parsed_elfs.end()) {
@@ -1772,7 +1763,11 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
                       kernel_name.c_str());
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
-      const AMD::aie_elf::Kernel& kernel = kernel_it->second;
+      // Non-const: this entry's buffers are moved into the descriptor below, so it is consumed
+      // here. The entry is erased after the move rather than left hollow, which makes the
+      // single-consumption invariant enforce itself: a second hsaco entry resolving to the same
+      // ELF kernel fails the lookup above instead of silently getting an empty control code.
+      AMD::aie_elf::Kernel& kernel = kernel_it->second;
 
       // The ELF is authoritative on the kernarg layout. A hsaco carrying a nonzero size that
       // disagrees with the ELF is a converter bug the loader can't reconcile; a zero size just
@@ -1793,29 +1788,22 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       desc->kernarg_size = elf_kernarg_size;
 
       // A kernel with no PDI patch site has no PDI to patch; nothing downstream can dispatch it.
-      if (!kernel.has_pdi_patch) {
+      // Parse() rejects a patch offset of 0, so a zero offset means the site is absent.
+      if (kernel.pdi_patch_offset == 0) {
         log_warning_n(10, "AIE: kernel '%s' has no PDI patch site in its control code.\n",
                       kernel_name.c_str());
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
 
-      // The control code is only ever a memcpy source for a per-dispatch buffer (Task 6), so
-      // it stays in ordinary host memory rather than a device segment.
-      auto* ctrl_code_host = new uint8_t[kernel.ctrl_code.size()];
-      std::memcpy(ctrl_code_host, kernel.ctrl_code.data(), kernel.ctrl_code.size());
-
       // Unlike the control code, the PDI is fetched by the NPU, so it needs device memory.
       void* pdi_dev = nullptr;
       if (auto s = place_blob(kernel.pdi.data(), kernel.pdi.size(), &pdi_dev);
           s != HSA_STATUS_SUCCESS) {
-        delete[] ctrl_code_host;
         return s;
       }
       if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
-        delete[] ctrl_code_host;
         return s;
       }
-      desc->pdi_size = kernel.pdi.size();
 
       // The control code's PDI site keeps whatever the ELF shipped. Turning a BO handle into the
       // address the NPU fetches from is the driver's to do, so it patches each dispatch's copy --
@@ -1823,9 +1811,12 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       // Parse() already validated the offset is non-zero, 4-byte aligned and within range.
       desc->pdi_patch_offset = kernel.pdi_patch_offset;
 
-      desc->ctrl_code = ctrl_code_host;
-      desc->ctrl_code_size = kernel.ctrl_code.size();
-      desc->arg_sites = kernel.arg_sites;
+      // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
+      // ordinary host memory rather than a device segment. Moved, not copied: the parsed kernel
+      // is looked up once and is dead after this.
+      desc->ctrl_code = std::move(kernel.ctrl_code);
+      desc->arg_sites = std::move(kernel.arg_sites);
+      it->second.erase(kernel_it);
     }
 
     uint64_t desc_ptr = reinterpret_cast<uint64_t>(desc.get());

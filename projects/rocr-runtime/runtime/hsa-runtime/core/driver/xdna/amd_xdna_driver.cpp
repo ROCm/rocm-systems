@@ -397,40 +397,6 @@ static hsa_status_t GetBODevAddr(int fd, uint32_t bo_handle, uint64_t* dev_addr)
   return HSA_STATUS_SUCCESS;
 }
 
-/// @brief Resolves @p ptr to its BO handle, the device address the NPU sees for it, and how many
-/// bytes of the allocation follow it.
-///
-/// @param[in] fd driver file descriptor
-/// @param[in] ptr virtual address to resolve
-/// @param[in] agent agent that owns the memory pool the allocation came from
-/// @param[out] bo_handle BO handle backing @p ptr
-/// @param[out] dev_addr device address of @p ptr, or 0 if the allocation has none. A buffer
-/// shared with the host has none, which also means the NPU cannot fetch from it directly.
-/// @param[out] bytes_from_ptr bytes between @p ptr and the end of its allocation.
-static hsa_status_t ResolveDeviceBuffer(int fd, void* ptr, const core::Agent& agent,
-                                        uint32_t* bo_handle, uint64_t* dev_addr,
-                                        size_t* bytes_from_ptr) {
-  void* base = nullptr;
-  size_t alloc_size = 0;
-  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  err = GetBODevAddr(fd, *bo_handle, dev_addr);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  // ResolveBOHandle reports the allocation; the packet may point part-way into it.
-  const size_t offset = static_cast<uint8_t*>(ptr) - static_cast<uint8_t*>(base);
-  if (offset > alloc_size) {
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  }
-  *bytes_from_ptr = alloc_size - offset;
-  if (*dev_addr != 0) *dev_addr += offset;
-  return HSA_STATUS_SUCCESS;
-}
 
 
 /// @brief Returns true if @p vaddr lies within the device heap mapping at @p heap_base.
@@ -734,128 +700,124 @@ static bool ValidDescriptor(const AieKernelDescriptor* desc) {
   return desc != nullptr && desc->version == kAieKernelDescriptorVersion;
 }
 
-/// @brief Returns the descriptor @p pkt names if it is valid and of @p expected kind, else nullptr.
-///
-/// @ref PacketMode already classified the batch from this handle, but nothing between there and a
-/// command builder re-reads it, so each builder re-checks rather than dereferencing on trust.
-///
-/// @param[in] pkt packet to read the kernel object from
-/// @param[in] expected kind the calling builder can dispatch
-/// @param[in] kind_name name of @p expected, for the diagnostic
-static const AieKernelDescriptor* DescriptorOfKind(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
-                                                   AieKernelKind expected, const char* kind_name) {
-  const AieKernelDescriptor* desc = PacketDescriptor(pkt);
-  if (!ValidDescriptor(desc) || desc->kind != expected) {
-    log_warning_n(10, "AIE: the packet does not name a %s kernel.\n", kind_name);
-    return nullptr;
-  }
-  return desc;
-}
-
-/// @brief Returns the dispatch kind @p pkt is asking for, from its kernel descriptor.
-///
-/// The two kinds need incompatible hardware contexts - PDI + instruction sequence needs CU
-/// configuration, full-ELF must not have any - and a hardware context's CU configuration cannot
-/// be changed once set. That rules out switching a live context, not a queue: one batch is one
-/// kind, and between batches the queue is drained, so the context can be torn down and rebuilt
-/// then.
-///
-/// @param[in] pkt packet to classify
-/// @return the descriptor's kind, or @c Undecided when the handle does not name one
-static AieKernelKind PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
-  const auto* desc = PacketDescriptor(pkt);
-  return ValidDescriptor(desc) ? desc->kind : AieKernelKind::Undecided;
-}
-
 /// @brief A device buffer allocated for one dispatch, freed when the batch completes.
 struct DeviceBuffer {
-  /// @brief Allocation base, which is what must be freed.
-  void* base = nullptr;
-  /// @brief Aligned pointer into @ref base, which is what is written and dispatched.
+  /// @brief The BO backing this allocation, owned here and closed by @ref FreeDeviceBuffers.
+  BOHandle bo;
+  /// @brief Aligned pointer into @ref bo's mapping, which is what is written and dispatched.
   void* ptr = nullptr;
   /// @brief Device address the NPU sees for @ref ptr.
   uint64_t dev_addr = 0;
-  /// @brief BO handle of the allocation.
-  uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
 };
+
+/// @brief Creates a device BO carved from the driver's device heap.
+///
+/// Deliberately not @ref core::Runtime::AllocateMemory: a control-code buffer lives for one batch
+/// and is never handed to the application, so nothing outside the driver has to resolve it through
+/// the runtime's allocation map. Keeping it internal drops that map's insert/lookup/erase -- three
+/// lock acquisitions per dispatch -- and one ioctl, because a single GET_BO_INFO already returns
+/// both the host VA to copy through and the device address the NPU fetches from, where going out
+/// through the runtime loses the address and has to ask for it again.
+///
+/// A dev-heap BO's VA is carved from the mapping @ref XdnaDriver::InitDeviceHeap already made, so
+/// there is no mmap here and @ref DestroyBOHandle leaves that mapping intact.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] heap_base device heap mapping base, for the failure-path release
+/// @param[in] size bytes to allocate
+/// @param[out] bo the BO; left empty unless the call succeeds
+/// @param[out] dev_addr device address of @p bo's base
+static hsa_status_t CreateDevBO(int fd, const void* heap_base, size_t size, BOHandle* bo,
+                                uint64_t* dev_addr) {
+  *bo = BOHandle{};
+  *dev_addr = 0;
+  // The heap is a fixed reservation and this path bypasses MemoryRegion's accounting, so the
+  // bound it would have applied is applied here instead.
+  if (size == 0 || size > XdnaDriver::GetDevHeapByteSize()) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  amdxdna_drm_create_bo create_bo_args = {};
+  create_bo_args.type = AMDXDNA_BO_DEV;
+  create_bo_args.size = size;
+  hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_bo_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  BOHandle tmp;
+  tmp.handle = create_bo_args.handle;
+  tmp.size = size;
+  MAKE_NAMED_SCOPE_GUARD(tmp_guard, [&] { DestroyBOHandle(fd, heap_base, tmp); });
+
+  amdxdna_drm_get_bo_info info;
+  err = GetBOInfo(fd, tmp.handle, &info);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+  if (info.vaddr == 0 || info.xdna_addr == AMDXDNA_INVALID_ADDR) {
+    log_warning_n(10, "AIE: the device heap gave no address the NPU can fetch from.\n");
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  tmp.vaddr = reinterpret_cast<void*>(info.vaddr);
+
+  tmp_guard.Dismiss();
+  *bo = tmp;
+  *dev_addr = info.xdna_addr;
+  return HSA_STATUS_SUCCESS;
+}
 
 /// @brief Allocates @p size bytes of device memory whose device address is @p align aligned.
 ///
-/// @ref XdnaDriver::AllocateMemory takes no alignment, so this over-allocates by @p align and
-/// rounds up. The rounding is computed on the *device* address rather than the host one, so the
-/// result is aligned whatever relationship the two happen to have.
+/// @ref CreateDevBO takes no alignment, so this over-allocates by @p align and rounds up. The
+/// rounding is computed on the *device* address rather than the host one, so the result is aligned
+/// whatever relationship the two happen to have. The driver is observed to pad allocations well
+/// past @p align, but that is an implementation detail and the alignment is a measured hardware
+/// requirement, so it is enforced here rather than assumed.
 ///
 /// @param[in] fd driver file descriptor
-/// @param[in] agent agent owning the device pool
+/// @param[in] heap_base device heap mapping base
 /// @param[in] size bytes needed
 /// @param[in] align required alignment of the device address
 /// @param[out] out the allocation; left empty unless the call succeeds
-static hsa_status_t AllocAlignedDeviceBuffer(int fd, const core::Agent& agent, size_t size,
+static hsa_status_t AllocAlignedDeviceBuffer(int fd, const void* heap_base, size_t size,
                                              size_t align, DeviceBuffer* out) {
   *out = DeviceBuffer{};
   if (size == 0 || align == 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  const MemoryRegion* dev_region = nullptr;
-  for (const auto& region : agent.regions()) {
-    const auto* candidate = static_cast<const MemoryRegion*>(region.get());
-    if (candidate->IsDeviceSVM()) {
-      dev_region = candidate;
-      break;
-    }
-  }
-  if (dev_region == nullptr) {
-    log_warning_n(10, "AIE: the agent has no device memory to allocate control code from.\n");
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-
-  void* base = nullptr;
-  hsa_status_t err = core::Runtime::runtime_singleton_->AllocateMemory(
-      dev_region, size + align, core::MemoryRegion::AllocateNoFlags, &base);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-  MAKE_NAMED_SCOPE_GUARD(base_guard, [&] { core::Runtime::runtime_singleton_->FreeMemory(base); });
-
-  uint32_t bo_handle = AMDXDNA_INVALID_BO_HANDLE;
+  BOHandle bo;
   uint64_t dev_addr = 0;
-  size_t bytes_from_base = 0;
-  err = ResolveDeviceBuffer(fd, base, agent, &bo_handle, &dev_addr, &bytes_from_base);
+  const hsa_status_t err = CreateDevBO(fd, heap_base, size + align, &bo, &dev_addr);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
-  }
-  if (dev_addr == 0) {
-    log_warning_n(10, "AIE: the agent's device memory has no address the NPU can fetch from.\n");
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
   const uint64_t aligned_dev_addr = AlignUp(dev_addr, align);
   const size_t offset = static_cast<size_t>(aligned_dev_addr - dev_addr);
-  if (offset + size > bytes_from_base) {
+  if (offset + size > bo.size) {
     // Only reachable if the allocator handed back less than was asked for.
+    DestroyBOHandle(fd, heap_base, bo);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  base_guard.Dismiss();
-  out->base = base;
-  out->ptr = static_cast<uint8_t*>(base) + offset;
+  out->bo = bo;
+  out->ptr = static_cast<uint8_t*>(bo.vaddr) + offset;
   out->dev_addr = aligned_dev_addr;
-  out->handle = bo_handle;
   return HSA_STATUS_SUCCESS;
 }
 
 /// @brief Frees every buffer in @p buffers and empties it.
 ///
 /// @param[in,out] buffers per-dispatch buffers to release
-static void FreeDeviceBuffers(std::vector<DeviceBuffer>* buffers) {
+static void FreeDeviceBuffers(int fd, const void* heap_base, std::vector<DeviceBuffer>* buffers) {
   for (auto& buffer : *buffers) {
-    if (buffer.base != nullptr) {
-      const hsa_status_t err = core::Runtime::runtime_singleton_->FreeMemory(buffer.base);
-      assert(err == HSA_STATUS_SUCCESS && "Failed to free a per-dispatch control-code buffer.");
-      if (err != HSA_STATUS_SUCCESS) {
-        log_warning_n(10, "AIE: failed to free a per-dispatch control-code buffer.\n");
-      }
+    if (!buffer.bo.IsValid()) continue;
+    const hsa_status_t err = DestroyBOHandle(fd, heap_base, buffer.bo);
+    assert(err == HSA_STATUS_SUCCESS && "Failed to free a per-dispatch control-code buffer.");
+    if (err != HSA_STATUS_SUCCESS) {
+      log_warning_n(10, "AIE: failed to free a per-dispatch control-code buffer.\n");
     }
   }
   buffers->clear();
@@ -1771,6 +1733,8 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
 /// @p reconfigure if the packet introduced a PDI the hardware context does not know about yet.
 ///
 /// @param[in] pkt packet to build the command from
+/// @param[in] desc the packet's kernel descriptor. The caller has already checked it is non-null,
+/// version-valid and of this builder's kind, so it is dereferenced on trust here.
 /// @param[in] agent agent that owns the queue
 /// @param[in,out] kmq_metadata KMQ metadata supplying the command BO pool and the PDI cache
 /// @param[in,out] bo_handles list the packet's BOs are appended to
@@ -1779,14 +1743,10 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
 /// @param[out] arg_cnt number of argument dwords the driver will see, which determines how many of
 /// these commands fit in one chain.
 static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
-                                         const core::Agent& agent, KmqMetadata* kmq_metadata,
+                                         const AieKernelDescriptor* desc, const core::Agent& agent,
+                                         KmqMetadata* kmq_metadata,
                                          std::vector<uint32_t>* bo_handles, bool* reconfigure,
                                          BOHandle* cmd_bo, uint32_t* arg_cnt) {
-  const AieKernelDescriptor* desc =
-      DescriptorOfKind(pkt, AieKernelKind::PdiInsts, "PDI + instruction sequence");
-  if (desc == nullptr) {
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
   // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
   // context will be reconfigured.
   auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(desc->pdi_bo_handle);
@@ -1850,12 +1810,16 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
 /// both run with whichever was patched last. Pooling these buffers is a measurement-gated
 /// follow-up, deliberately not done here.
 ///
-/// The PDI's device address is already in the pristine copy: the loader writes it once, so there
-/// is nothing per-dispatch to resolve or patch. The PDI BO is still listed so the driver keeps it
-/// resident for the dispatch.
+/// The PDI's device address is patched into this dispatch's copy here, not by the loader: only the
+/// driver can turn a BO handle into an address the NPU fetches from. The address itself is fixed
+/// for the BO's lifetime, so it is resolved once and cached on the descriptor. The PDI BO is also
+/// listed so the driver keeps it resident for the dispatch.
 ///
 /// @param[in] fd driver file descriptor
+/// @param[in] heap_base device heap mapping base, for the control-code allocation
 /// @param[in] pkt packet to build the command from
+/// @param[in] desc the packet's kernel descriptor. The caller has already checked it is non-null,
+/// version-valid and of this builder's kind, so it is dereferenced on trust here.
 /// @param[in] agent agent that owns the queue
 /// @param[in,out] kmq_metadata KMQ metadata supplying the command BO pool
 /// @param[in,out] bo_handles list the packet's BOs are appended to
@@ -1863,15 +1827,13 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
 /// appended to; the caller frees them once the batch is done with them
 /// @param[out] cmd_bo the command BO, drawn from @p kmq_metadata's command BO pool.
 /// @param[out] arg_cnt number of argument dwords the driver will see.
-static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
-                                        const core::Agent& agent, KmqMetadata* kmq_metadata,
+static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
+                                        const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
+                                        const AieKernelDescriptor* desc, const core::Agent& agent,
+                                        KmqMetadata* kmq_metadata,
                                         std::vector<uint32_t>* bo_handles,
                                         std::vector<DeviceBuffer>* ctrl_buffers, BOHandle* cmd_bo,
                                         uint32_t* arg_cnt) {
-  const AieKernelDescriptor* desc = DescriptorOfKind(pkt, AieKernelKind::FullElf, "full-ELF");
-  if (desc == nullptr) {
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
   // The arguments are patched into the control code rather than handed to the hardware, so
   // nothing downstream would notice a short list: the dispatch would run against whatever the
   // ELF's placeholder happened to be.
@@ -1891,8 +1853,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // Measured on aie2p: the dispatch only completes when the control code's device address is
   // 16 KiB aligned, which is what CTRL_CODE_DEV_ADDR_ALIGNMENT asks of the allocation.
   DeviceBuffer ctrl;
-  err = AllocAlignedDeviceBuffer(fd, agent, desc->ctrl_code_size, CTRL_CODE_DEV_ADDR_ALIGNMENT,
-                                 &ctrl);
+  err = AllocAlignedDeviceBuffer(fd, heap_base, desc->ctrl_code.size(),
+                                 CTRL_CODE_DEV_ADDR_ALIGNMENT, &ctrl);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
@@ -1901,7 +1863,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
 
   // Always from pristine: PatchShimDma48 adds to what is already there, so patching over a
   // previous result would accumulate.
-  std::memcpy(ctrl.ptr, desc->ctrl_code, desc->ctrl_code_size);
+  std::memcpy(ctrl.ptr, desc->ctrl_code.data(), desc->ctrl_code.size());
 
   // The PDI's device address. A BO's device address is fixed for its lifetime, so resolve it on
   // the first dispatch and cache it on the descriptor rather than paying an ioctl per dispatch.
@@ -1934,9 +1896,9 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
           kernarg_address[arg] + site.addend);
     }
   }
-  FlushCpuCache(ctrl.ptr, 0, desc->ctrl_code_size);
+  FlushCpuCache(ctrl.ptr, 0, desc->ctrl_code.size());
 
-  bo_handles->push_back(ctrl.handle);
+  bo_handles->push_back(ctrl.bo.handle);
   // The PDI is reached only through the address written into the control code above, so the
   // command still has to list it for the driver to keep it resident. Unconditional: the loader
   // refuses a full-ELF kernel whose control code has no PDI patch site, and the resolve above
@@ -1957,7 +1919,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // page-aligned command BO, so the 64-bit fields below are aligned.
   auto* npu = reinterpret_cast<ert_npu_preempt_data*>(&cmd->data[1]);
   npu->instruction_buffer = ctrl.dev_addr;
-  npu->instruction_buffer_size = static_cast<uint32_t>(desc->ctrl_code_size);
+  npu->instruction_buffer_size = static_cast<uint32_t>(desc->ctrl_code.size());
   // The save and restore buffers and the property count are left zero. This design has no
   // preemption sections, and aie2p firmware accepts null preemption buffers.
   //
@@ -2145,7 +2107,14 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // it walks them. Grouping dispatches by mode is the caller's job: a mixed batch is rejected
   // rather than split. The queue itself is not pinned to that mode - a later batch may pick the
   // other one, and the rebuild below switches the context to it.
-  const AieKernelKind mode = PacketMode(&queue[first_pkt_idx & mask]);
+  // The two kinds need incompatible hardware contexts -- PDI + instruction sequence needs CU
+  // configuration, full-ELF must not have any -- and a hardware context's CU configuration cannot
+  // be changed once set. That rules out switching a live context, not a queue: one batch is one
+  // kind, and between batches the queue is drained, so the context can be torn down and rebuilt
+  // then.
+  const AieKernelDescriptor* first_desc = PacketDescriptor(&queue[first_pkt_idx & mask]);
+  const AieKernelKind mode =
+      ValidDescriptor(first_desc) ? first_desc->kind : AieKernelKind::Undecided;
   // A packet with no kernel object names no dispatch shape at all. Refused here rather than left
   // to the homogeneity check below, which would pass a whole batch of them through to a command
   // builder and a hardware context rebuild for a kind that does not exist.
@@ -2165,7 +2134,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   if (mode == AieKernelKind::FullElf) {
     ctrl_buffers.reserve(num_pkts);
   }
-  MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(&ctrl_buffers); });
+  MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(fd_, dev_heap_vaddr, &ctrl_buffers); });
 
   // BO handles listed per packet: the instruction sequence (PDI + insts) or the control code and
   // the PDI (full ELF), plus one per kernarg. So 2 + num_kernargs is the per-packet worst case,
@@ -2205,7 +2174,10 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
-    if (PacketMode(pkt) != mode) {
+    // Resolved once here and handed to the builder, which dereferences it on trust: nothing
+    // between the two can change what the handle names.
+    const AieKernelDescriptor* desc = PacketDescriptor(pkt);
+    if (!ValidDescriptor(desc) || desc->kind != mode) {
       log_warning_n(10,
                     "AIE batch cannot mix full-ELF and PDI dispatches; submit each mode as its "
                     "own batch.\n");
@@ -2215,9 +2187,9 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     BOHandle cmd_bo_handle;
     uint32_t arg_cnt = 0;
     const hsa_status_t err = (mode == AieKernelKind::FullElf)
-        ? BuildFullElfCommand(fd_, pkt, agent, kmq_metadata, &bo_handles, &ctrl_buffers,
-                              &cmd_bo_handle, &arg_cnt)
-        : BuildPdiInstsCommand(pkt, agent, kmq_metadata, &bo_handles, &reconfigure_queue,
+        ? BuildFullElfCommand(fd_, dev_heap_vaddr, pkt, desc, agent, kmq_metadata, &bo_handles,
+                              &ctrl_buffers, &cmd_bo_handle, &arg_cnt)
+        : BuildPdiInstsCommand(pkt, desc, agent, kmq_metadata, &bo_handles, &reconfigure_queue,
                                &cmd_bo_handle, &arg_cnt);
     if (err != HSA_STATUS_SUCCESS) return err;
 

@@ -35,6 +35,10 @@ struct AieKernelInfo {
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size = 0;
   /// @brief Number of NPU columns the kernel uses.
+  ///
+  /// Carried from the on-disk entry even though nothing consumes it yet: it is the partition
+  /// geometry a payload declares, which is what decides whether two payloads may share a hardware
+  /// context. Dropping it here would mean re-parsing the section to get it back.
   uint32_t num_cols = 0;
   /// @brief Payload kind; see @ref AieKernelKind.
   AieKernelKind kind = AieKernelKind::PdiInsts;
@@ -67,10 +71,6 @@ class AieCode {
 
   /// @brief Parsed ELF view over the caller's buffer; owns the base/size (data()/size()).
   std::unique_ptr<amd::elf::Image> elf_;
-  /// @brief Start of the arch section in the ELF buffer.
-  const uint8_t* section_base_ = nullptr;
-  /// @brief Size of the arch section in bytes.
-  uint64_t section_size_ = 0;
   /// @brief Architecture.
   std::string arch_section_name_;
   /// @brief Parsed kernels keyed by name.

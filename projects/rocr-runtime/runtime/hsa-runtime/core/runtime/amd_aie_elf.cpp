@@ -318,7 +318,6 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::stri
         return fail("section extends past end of file");
       }
       k.pdi_patch_offset = group_pdi_site.at(grp_index).offset;
-      k.has_pdi_patch = true;
       // The runtime writes a 64-bit address here, so it has to lie wholly inside the control code.
       if (k.pdi_patch_offset + sizeof(uint64_t) > k.ctrl_code.size() ||
           k.pdi_patch_offset % sizeof(uint32_t) != 0) {

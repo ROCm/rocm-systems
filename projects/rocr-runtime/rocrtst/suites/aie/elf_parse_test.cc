@@ -118,7 +118,6 @@ TEST(AieElfParse, ParsesVectorScalarAdd) {
   const auto& k = kernels.begin()->second;
   EXPECT_EQ(k.ctrl_code.size(), 316u);   // .ctrltext.0, measured on this branch
   EXPECT_EQ(k.pdi.size(), 2992u);        // .pdi.1
-  EXPECT_TRUE(k.has_pdi_patch);
   EXPECT_NE(k.pdi_patch_offset, 0u);
   EXPECT_GT(k.num_args(), 0u);
 }

@@ -76,24 +76,25 @@ bool AieCode::Parse() {
   amd::elf::Section* sec = FindArchSection(elf_.get(), &arch_section_name_);
   if (!sec) return false;
 
-  section_size_ = sec->size();
-  section_base_ = reinterpret_cast<const uint8_t*>(elf_->data()) + sec->offset();
+  const uint64_t section_size = sec->size();
+  const uint8_t* const section_base =
+      reinterpret_cast<const uint8_t*>(elf_->data()) + sec->offset();
 
-  const auto* hdr = reinterpret_cast<const aie_section_header*>(section_base_);
+  const auto* hdr = reinterpret_cast<const aie_section_header*>(section_base);
   if (hdr->version_major != kAieSectionVersionMajor) return false;
   if (hdr->header_size + static_cast<uint64_t>(hdr->kernel_count) * hdr->kernel_entry_size >
-      section_size_) {
+      section_size) {
     return false;
   }
   if (hdr->kernel_entry_size < sizeof(aie_kernel_entry)) return false;
 
   auto in_section = [&](uint64_t off, uint64_t len) {
-    return len == 0 ? off <= section_size_ : (off < section_size_ && off + len <= section_size_);
+    return len == 0 ? off <= section_size : (off < section_size && off + len <= section_size);
   };
 
   for (uint32_t i = 0; i < hdr->kernel_count; ++i) {
     const auto* e = reinterpret_cast<const aie_kernel_entry*>(
-        section_base_ + hdr->header_size + static_cast<uint64_t>(i) * hdr->kernel_entry_size);
+        section_base + hdr->header_size + static_cast<uint64_t>(i) * hdr->kernel_entry_size);
 
     if (e->insts_size == 0) return false;
     // For PdiInsts, instructions are 32-bit words and the driver submits
@@ -106,16 +107,16 @@ bool AieCode::Parse() {
     if (e->pdi_size == 0 && e->pdi_offset != 0) return false;  // PDI absent iff both are 0
 
     const uint64_t name_abs = static_cast<uint64_t>(hdr->string_table_offset) + e->name_offset;
-    if (name_abs >= section_size_) return false;
-    const char* nm = reinterpret_cast<const char*>(section_base_ + name_abs);
-    const uint64_t max_len = section_size_ - name_abs;
+    if (name_abs >= section_size) return false;
+    const char* nm = reinterpret_cast<const char*>(section_base + name_abs);
+    const uint64_t max_len = section_size - name_abs;
     if (::strnlen(nm, max_len) == max_len) return false;  // unterminated
 
     AieKernelInfo info;
     info.name = nm;
-    info.insts_data = section_base_ + e->insts_offset;
+    info.insts_data = section_base + e->insts_offset;
     info.insts_size = e->insts_size;
-    info.pdi_data = e->pdi_size ? section_base_ + e->pdi_offset : nullptr;
+    info.pdi_data = e->pdi_size ? section_base + e->pdi_offset : nullptr;
     info.pdi_size = e->pdi_size;
     info.kernarg_size = e->kernarg_size;
     info.num_cols = e->num_cols;
