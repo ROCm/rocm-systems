@@ -178,6 +178,21 @@ without terminating the target process. Environment changes from a failed
 attachment request are rolled back so the retained configuration can be used
 again.
 
+Injected environment lifetime
+-----------------------------
+
+A successful attachment writes the forwarded ``ROCPROF_*`` and
+``ROCPROFILER_*`` variables into the target process environment. The current
+implementation does not restore overwritten values on detach, so those values
+remain visible to the application and are inherited by processes it
+subsequently creates. Failed attachment requests restore the values they
+overwrote.
+
+The writes are performed from the attachment background thread. Application
+threads reading the process environment concurrently can therefore observe the
+transition from the previous values to the injected values. Tools and
+applications must not rely on an atomic environment snapshot during attach.
+
 Use ``rocprofiler-register``, ``rocprofiler-sdk``, and
 ``rocprofiler-sdk-attach`` packages from the same ROCm release. Attachment uses
 private cross-library entry points that are versioned together.
