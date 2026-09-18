@@ -1,4 +1,5 @@
 import {
+  Alert,
   Box,
   Chip,
   Stack,
@@ -110,16 +111,13 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           `Test catalog · ${escapeHtml(run.catalogId ?? 'unknown')}`,
           ...usable.map((point) => {
             const series = history.series.find((candidate) => candidate.target === point.seriesName);
-            const estimated = series?.estimated?.[point.dataIndex];
             const duration = point.duration / durationScale;
             const perfChange = Number.isFinite(series?.baseline) && series.baseline !== 0
               ? ((duration - series.baseline) / series.baseline) * 100
               : null;
             return `${point.marker}${escapeHtml(point.seriesName)}&nbsp;&nbsp;<strong>${formatCompactDuration(duration)}</strong>`
               + `${Number.isFinite(perfChange) ? ` · Time change ${formatPercent(perfChange)}` : ''}`
-              + `${Number.isFinite(series?.baseline) ? ` · Base time ${formatCompactDuration(series.baseline)}` : ''}`
-              + `${series?.baselineEstimated ? ' · Estimated normalized baseline' : ''}`
-              + `${estimated ? ' · Estimated normalized workload' : ''}`;
+              + `${Number.isFinite(series?.baseline) ? ` · Base time ${formatCompactDuration(series.baseline)}` : ''}`;
           }),
         ].join('<br/>');
       },
@@ -210,9 +208,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           symbol: 'none',
           label: {
             show: true,
-            formatter: series.baselineEstimated
-              ? `— (${formatCompactDuration(baselineValue)} est.) —`
-              : `— (${formatCompactDuration(baselineValue)}) —`,
+            formatter: `— (${formatCompactDuration(baselineValue)}) —`,
             position: 'insideEndTop',
           },
           lineStyle: { color: theme.palette.text.disabled, type: 'dashed', width: 1.25 },
@@ -277,7 +273,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
         <Stack direction="row" sx={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: { xs: 2, sm: 2.5 } }}>
           <Box>
             <Typography variant="overline" sx={{ color: 'text.secondary' }}>
-              {history.normalized ? 'Normalized range change' : 'Range change'}
+              Range change
             </Typography>
             <Stack
               data-testid="performance-range-change"
@@ -301,7 +297,7 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           </Box>
           <Box sx={{ borderLeft: 1, borderColor: 'divider', pl: 2 }}>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {history.normalized ? 'Latest measured selected total' : 'Latest selected total'}
+              Latest selected total
             </Typography>
             <Typography sx={{ fontSize: 20, lineHeight: 1.15, fontWeight: 750, letterSpacing: '-.025em', mt: 0.35 }}>
               {formatDuration(history.currentDuration)}
@@ -335,6 +331,17 @@ export default function DurationHistory({ history, range, onRangeChange }) {
         <Box data-testid="performance-trend-chart" sx={{ mx: -0.75, flex: 1, minHeight: 278 }}>
           <Chart option={option} height="100%" ariaLabel={`Performance trend for ${range}`} />
         </Box>
+      )}
+      {history.normalized && (
+        <Alert
+          data-testid="performance-trend-normalization-note"
+          severity="info"
+          variant="outlined"
+          sx={{ mt: 1, py: 0, '& .MuiAlert-message': { py: 0.5 } }}
+        >
+          Results in this trend are normalized to the latest test catalog; values for tests
+          absent from older catalogs are estimated.
+        </Alert>
       )}
     </SectionCard>
   );

@@ -8,6 +8,11 @@ test('performance trend fills the row beside largest changes', async ({ page }) 
   const changes = page.getByTestId('largest-changes');
   const chartWrapper = page.getByTestId('performance-trend-chart');
   const chart = trend.getByRole('img', { name: 'Performance trend for ALL' });
+  await expect(trend.getByText('Range change', { exact: true })).toBeVisible();
+  await expect(trend.getByText('Latest selected total', { exact: true })).toBeVisible();
+  await expect(trend.getByTestId('performance-trend-normalization-note')).toContainText(
+    'Results in this trend are normalized to the latest test catalog',
+  );
   const boxes = await Promise.all([
     trend.boundingBox(),
     changes.boundingBox(),
@@ -30,6 +35,7 @@ test('performance trend fills the row beside largest changes', async ({ page }) 
           connectNulls: series.connectNulls,
           smooth: series.smooth,
           latestMarkers: series.markPoint?.data?.length ?? 0,
+          baselineLabel: series.markLine?.label?.formatter,
         })),
     };
   });
@@ -38,6 +44,7 @@ test('performance trend fills the row beside largest changes', async ({ page }) 
   expect(markers.series.every((series) => series.connectNulls === true)).toBe(true);
   expect(markers.series.every((series) => Number(series.smooth) > 0)).toBe(true);
   expect(markers.series.every((series) => series.latestMarkers === 1)).toBe(true);
+  expect(markers.series.every((series) => !series.baselineLabel?.includes('est.'))).toBe(true);
 });
 
 test('failures count stays fully inside the navigation bar', async ({ page }) => {

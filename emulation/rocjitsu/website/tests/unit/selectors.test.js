@@ -200,9 +200,7 @@ test('catalog changes break Aggregate and normalize Overview history to the late
   expect(latestCatalogIndex).toBeGreaterThan(firstV1Index);
   expect(overview.history.normalized).toBe(true);
   expect(overview.history.series[0].data[oldCatalogIndex]).toBeTypeOf('number');
-  expect(overview.history.series[0].estimated[oldCatalogIndex]).toBe(true);
   expect(overview.history.series[0].data[oldCatalogIndex]).toBeCloseTo(1259.645, 3);
-  expect(overview.history.series[0].estimated[latestCatalogIndex]).toBe(false);
   expect(aggregateBreak).toBeGreaterThan(0);
   expect(aggregate.runs[aggregateBreak].catalogId).not.toBe(
     aggregate.runs[aggregateBreak - 1].catalogId,
@@ -247,8 +245,6 @@ test('1D baseline keeps catalog-imputed estimation across the previous day', () 
     .reduce((total, test) => total + test.durationSeconds, 0);
 
   expect(history.normalized).toBe(true);
-  expect(history.series[0].baselineEstimated).toBe(true);
-  expect(history.series[0].estimated.every((flag) => flag === false)).toBe(true);
   expect(history.series[0].baseline).toBeGreaterThan(measuredPrevious);
   expect(history.durationDelta).toBeTypeOf('number');
 });

@@ -342,8 +342,9 @@ test sets, so history is normalized to one workload before any total is computed
 - The canonical workload is the set of tests the latest commit run covers for each
   selected target and suite.
 - A run published under a different catalog ID that lacks a canonical test contributes
-  that test's most recent completed duration from history. Such a point is marked as
-  estimated in its tooltip, and the range change is then labelled as normalized.
+  that test's most recent completed duration from history. When this occurs, the
+  Performance Trend displays a note explaining that its results are normalized to the
+  latest test catalog and that values absent from older catalogs are estimated.
 - If a canonical test is present but not completed, or is missing with no earlier
   completed duration to draw on, the run contributes no value and the chart shows a gap
   instead of a smaller total.

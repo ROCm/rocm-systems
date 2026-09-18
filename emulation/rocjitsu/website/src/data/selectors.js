@@ -186,31 +186,31 @@ function normalizedDurationForRun(
   canonicalCatalogId,
   anchors,
 ) {
-  if (!run || canonicalTestIds.size === 0) return { value: null, estimatedTests: [] };
+  if (!run || canonicalTestIds.size === 0) return { value: null, estimated: false };
   const tests = new Map(selectedTestsForTarget(run, target, suites)
     .map((test) => [test.logicalTestId, test]));
-  const estimatedTests = [];
+  let estimated = false;
   let total = 0;
 
   for (const logicalTestId of canonicalTestIds) {
     const test = tests.get(logicalTestId);
     if (test) {
       if (test.status !== 'completed' || !Number.isFinite(test.durationSeconds)) {
-        return { value: null, estimatedTests: [] };
+        return { value: null, estimated: false };
       }
       total += test.durationSeconds;
       continue;
     }
 
     const anchor = run.catalogId !== canonicalCatalogId ? anchors.get(logicalTestId) : null;
-    if (!Number.isFinite(anchor)) return { value: null, estimatedTests: [] };
+    if (!Number.isFinite(anchor)) return { value: null, estimated: false };
     total += anchor;
-    estimatedTests.push(logicalTestId);
+    estimated = true;
   }
 
   return {
     value: Number(total.toFixed(3)),
-    estimatedTests,
+    estimated,
   };
 }
 
@@ -329,6 +329,7 @@ export function selectOverview(data, filters, range = 'ALL') {
     ? candidateHistoryBaseline
     : null;
   const displayedDuration = sumDurations(historyCandidate.tests.filter((test) => testMatches(test, filters)));
+  let historyNormalized = false;
   const normalizedSeries = filters.targets.map((target, index) => {
     const canonicalTestIds = historyWorkload(candidate, target, filters.suites);
     const anchors = latestCompletedResultAnchors(data.runs, target, filters.suites, canonicalTestIds);
@@ -350,8 +351,10 @@ export function selectOverview(data, filters, range = 'ALL') {
         candidate?.catalogId,
         anchors,
       )
-      : { value: null, estimatedTests: [] };
+      : { value: null, estimated: false };
     const previousValue = previousNormalized.value;
+    historyNormalized ||= previousNormalized.estimated
+      || projected.some(({ estimated }) => estimated);
     return {
       target,
       color: targetColor(target, index),
@@ -359,8 +362,6 @@ export function selectOverview(data, filters, range = 'ALL') {
       baseline: isIntraday && Number.isFinite(previousValue)
         ? previousValue
         : baselineIsCandidate ? null : firstValue,
-      baselineEstimated: isIntraday && previousNormalized.estimatedTests.length > 0,
-      estimated: projected.map(({ estimatedTests }) => estimatedTests.length > 0),
     };
   });
   const normalizedDurationAt = (index) => {
@@ -421,9 +422,7 @@ export function selectOverview(data, filters, range = 'ALL') {
       ? ((normalizedCandidateDuration - normalizedBaselineDuration) / normalizedBaselineDuration) * 100
       : null,
     summary: `${representedRuns} commit${representedRuns === 1 ? '' : 's'} shown`,
-    normalized: normalizedSeries.some((series) => (
-      series.estimated.some(Boolean) || series.baselineEstimated
-    )),
+    normalized: historyNormalized,
     insufficientData,
     series: normalizedSeries,
   };
