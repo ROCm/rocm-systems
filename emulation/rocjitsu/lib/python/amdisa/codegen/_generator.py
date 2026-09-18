@@ -7801,7 +7801,8 @@ class CodeGenerator:
         ordered_async_store = 'amdgpu::MemoryCompletionClass::ASYNC_STORE'
         unordered = 'amdgpu::MemoryCompletionClass::UNORDERED'
 
-        if kind.startswith('flat_'):
+        is_flat = kind.startswith('flat_')
+        if is_flat:
             kind = kind.replace('flat_', 'vmem_', 1)
 
         if kind == 'local':
@@ -7829,6 +7830,16 @@ class CodeGenerator:
                 completion = f'({is_load_expr} ? {ordered_vmem} : {unordered})'
         else:
             raise AssertionError(f'unhandled memory issue kind: {kind}')
+
+        if (
+            is_flat
+            and completion != unordered
+            and not self.isa_spec.profile.generic_flat_counters_complete_in_order
+        ):
+            if 'seg' in inst_fields:
+                return f'(inst_.seg == 0 ? {unordered} : {completion})'
+            if sem.name.startswith('FLAT_'):
+                return unordered
         return completion
 
     def _additional_wait_counter_type(
@@ -7867,9 +7878,12 @@ class CodeGenerator:
         counter = self._additional_wait_counter_type(sem, sem_class, inst_fields)
         if counter is None:
             return None
-        obligation = self._memory_counter_obligation(
-            counter, 'amdgpu::MemoryCompletionClass::LDS'
+        completion = (
+            'amdgpu::MemoryCompletionClass::LDS'
+            if self.isa_spec.profile.generic_flat_counters_complete_in_order
+            else 'amdgpu::MemoryCompletionClass::UNORDERED'
         )
+        obligation = self._memory_counter_obligation(counter, completion)
         if 'seg' in inst_fields:
             return (
                 f'(inst_.seg == 0 ? {obligation} : '

@@ -1479,6 +1479,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def generic_flat_counters_complete_in_order(self) -> bool:
+        """Whether nonzero waits prove progress for generic FLAT operations."""
+        return True
+
+    @property
     def vmem_writes_use_expcnt(self) -> bool:
         """Whether vector-memory writes also contribute to EXPCNT."""
         return False
@@ -1670,6 +1675,12 @@ class CdnaProfile(_AmdgpuProfileBase):
     @property
     def vmem_stores_complete_in_order(self) -> bool:
         return True
+
+    @property
+    def generic_flat_counters_complete_in_order(self) -> bool:
+        # CDNA1-4 can report early completion for generic FLAT operations on
+        # both VMCNT and LGKMCNT. Fixed GLOBAL/SCRATCH segments remain ordered.
+        return False
 
     @property
     def vmem_writes_use_expcnt(self) -> bool:

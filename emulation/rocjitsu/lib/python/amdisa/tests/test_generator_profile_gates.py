@@ -7202,6 +7202,7 @@ def test_generic_flat_issue_names_both_counter_obligations():
     assert 'amdgpu::WaitCounterType::DSCNT' in flat_info
     assert 'amdgpu::MemoryCompletionClass::VMEM' in flat_info
     assert 'amdgpu::MemoryCompletionClass::LDS' in flat_info
+    assert 'amdgpu::MemoryCompletionClass::UNORDERED' not in flat_info
 
     codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
     global_load = InstructionSemantics(
@@ -7211,6 +7212,35 @@ def test_generic_flat_issue_names_both_counter_obligations():
 
     assert 'amdgpu::WaitCounterType::DSCNT' not in global_info
     assert 'amdgpu::MemoryCompletionClass::VMEM' in global_info
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'profile'),
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+    ],
+)
+def test_cdna_generic_flat_requires_zero_wait_for_both_counters(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    load = InstructionSemantics(
+        'FLAT_LOAD_DWORD', 'flat_load', elem_size=4, num_elems=1
+    )
+
+    flat_info = codegen._memory_issue_initializer(load, {'seg'})
+
+    assert (
+        'inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED : '
+        'amdgpu::MemoryCompletionClass::VMEM' in flat_info
+    )
+    assert (
+        'amdgpu::WaitCounterType::LGKMCNT, '
+        'amdgpu::MemoryCompletionClass::UNORDERED' in flat_info
+    )
+    assert 'amdgpu::MemoryCompletionClass::LDS' not in flat_info
 
 
 def test_decoded_issue_metadata_handles_exec_and_returning_atomics():

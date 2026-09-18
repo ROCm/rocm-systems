@@ -4434,20 +4434,22 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
   const auto generic_obligations = generic_issue->counter_obligations();
   ASSERT_EQ(generic_obligations.size(), 2u);
   EXPECT_EQ(generic_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
-  EXPECT_EQ(generic_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+  EXPECT_EQ(generic_obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
   EXPECT_EQ(generic_obligations[1].wait_counter_type(), WaitCounterType::LGKMCNT);
-  EXPECT_EQ(generic_obligations[1].completion_class(), MemoryCompletionClass::LDS);
+  EXPECT_EQ(generic_obligations[1].completion_class(), MemoryCompletionClass::UNORDERED);
 
-  const auto global_words =
-      cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 2, .addr = 0, .saddr = 0x7F, .vdst = 1});
-  std::unique_ptr<Instruction> global(decode_valid(*decoder, global_words.data()));
-  ASSERT_NE(global, nullptr);
-  const auto *global_issue = global->amdgpu_memory_issue_info();
-  ASSERT_NE(global_issue, nullptr);
-  const auto global_obligations = global_issue->counter_obligations();
-  ASSERT_EQ(global_obligations.size(), 1u);
-  EXPECT_EQ(global_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
-  EXPECT_EQ(global_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+  for (const uint8_t fixed_segment : {uint8_t{1}, uint8_t{2}}) {
+    const auto fixed_words = cdna4::build_flat(
+        cdna4::kFlatLoadDwordFlat, {.seg = fixed_segment, .addr = 0, .saddr = 0x7F, .vdst = 1});
+    std::unique_ptr<Instruction> fixed(decode_valid(*decoder, fixed_words.data()));
+    ASSERT_NE(fixed, nullptr);
+    const auto *fixed_issue = fixed->amdgpu_memory_issue_info();
+    ASSERT_NE(fixed_issue, nullptr);
+    const auto fixed_obligations = fixed_issue->counter_obligations();
+    ASSERT_EQ(fixed_obligations.size(), 1u);
+    EXPECT_EQ(fixed_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
+    EXPECT_EQ(fixed_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+  }
 }
 
 TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
