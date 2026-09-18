@@ -93,8 +93,7 @@ struct static_vector
     friend constexpr void swap(this_type& lhs, this_type& rhs) { lhs.swap(rhs); }
 
 private:
-    constexpr void   update_size(size_t);
-    constexpr size_t reserve_slot();
+    constexpr void update_size(size_t);
 
 private:
     count_type        m_size = count_type{ 0 };
@@ -192,7 +191,14 @@ template <typename... Args>
 constexpr Tp&
 static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... args)
 {
-    const auto idx = reserve_slot();
+    const auto idx = static_cast<size_t>(m_size);
+    if(idx >= N) [[unlikely]]
+    {
+        throw std::out_of_range{ std::string{
+                                     "static_vector::emplace_back - reached capacity " } +
+                                 std::to_string(N) };
+    }
+    update_size(idx + 1);
 
     if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(args))...>::value)
     {
@@ -216,43 +222,6 @@ static_vector<Tp, N, AtomicSizeV>::update_size(size_t count)
     else
     {
         m_size = count;
-    }
-}
-
-template <typename Tp, size_t N, bool AtomicSizeV>
-constexpr size_t
-static_vector<Tp, N, AtomicSizeV>::reserve_slot()
-{
-    // For AtomicSizeV, concurrent emplace_back()/push_back() calls on the same
-    // instance must claim distinct indices atomically: read-then-store would let two
-    // threads both pass the bounds check for the same idx and race on m_data[idx].
-    if constexpr(AtomicSizeV)
-    {
-        size_t idx = m_size.load(std::memory_order_relaxed);
-        do
-        {
-            if(idx >= N) [[unlikely]]
-            {
-                throw std::out_of_range{
-                    std::string{ "static_vector::emplace_back - reached capacity " } +
-                    std::to_string(N)
-                };
-            }
-        } while(!m_size.compare_exchange_weak(idx, idx + 1, std::memory_order_relaxed));
-        return idx;
-    }
-    else
-    {
-        const auto idx = m_size;
-        if(idx >= N) [[unlikely]]
-        {
-            throw std::out_of_range{
-                std::string{ "static_vector::emplace_back - reached capacity " } +
-                std::to_string(N)
-            };
-        }
-        m_size = idx + 1;
-        return idx;
     }
 }
 }  // namespace rocprofsys::container
