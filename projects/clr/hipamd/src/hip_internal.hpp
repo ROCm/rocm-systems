@@ -104,10 +104,16 @@ const char* ihipGetErrorName(hipError_t hip_error);
 } // namespace hip
 
 #if defined(__GNUC__) || defined(__clang__)
-extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
+#define HIP_PUBLIC_API extern "C" __attribute__((visibility("default")))
+#define HIP_INTERNAL_EXPORTED_API extern "C" __attribute__((visibility("default")))
 #else
-extern "C" void __hipOnError(const void *err_info);
+// MSVC could have use __declspec(dllexport), but we'll see a redeclaration
+// warning. Let's just rely on the .def file under MSVC.
+#define HIP_PUBLIC_API extern "C"
+#define HIP_INTERNAL_EXPORTED_API extern "C"
 #endif
+
+HIP_PUBLIC_API void __hipOnError(const void *err_info);
 
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
@@ -263,34 +269,23 @@ extern "C" void __hipOnError(const void *err_info);
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
 
-// Helper: invalidate all capturing streams on the current device and return an error.
-// Invalidation is device-scoped, not thread-scoped or mode-scoped. A sync API invalidates
-// all captures on the same device, regardless of which thread they belong to or what
-// capture mode they use.
-#define INVALIDATE_DEVICE_CAPTURING_AND_RETURN(err)                                                \
-  {                                                                                                \
-    int _devId = hip::ihipGetDevice();                                                             \
-    bool _found = false;                                                                           \
-    {                                                                                              \
-      amd::ScopedLock lock(g_streamSetLock);                                                      \
-      for (auto* _s : g_allCapturingStreams) {                                                    \
-        if (_s->DeviceId() == _devId) {                                                           \
-          _s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
-          _found = true;                                                                           \
-        }                                                                                          \
-      }                                                                                            \
+// Helper: invalidate all capturing streams and return an error code.
+#define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
+  if (!g_allCapturingStreams.empty()) {                                                            \
+    for (auto stream : g_allCapturingStreams) {                                                    \
+      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
     }                                                                                              \
-    if (_found) return err;                                                                        \
+    return err;                                                                                    \
   }
 
 // Device sync is not supported during capture.
 #define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
-  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
+  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
 
 // Sync APIs (hipMemset, hipMemcpy, etc.) cannot be called when stream capture is active
 // for any capture mode (Global, ThreadLocal, or Relaxed).
 #define CHECK_STREAM_CAPTURING()                                                                   \
-  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
+  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \

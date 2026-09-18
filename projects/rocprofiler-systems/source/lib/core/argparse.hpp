@@ -56,7 +56,8 @@ struct output_format_selection
  * Unlisted formats resolve to false so the returned selection fully defines the
  * active outputs, which is required because ROCPROFSYS_TRACE and ROCPROFSYS_PROFILE
  * otherwise derive their defaults from each other.
- * @param tokens proto | rocpd | json | text | txt (txt aliases text)
+ * @param tokens pftrace | rocpd | json | text | txt (proto aliases pftrace, txt aliases
+ * text)
  */
 [[nodiscard]] output_format_selection
 resolve_output_format(const strset_t& tokens);

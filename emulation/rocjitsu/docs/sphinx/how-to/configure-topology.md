@@ -60,13 +60,29 @@ keep all XCDs on one engine partition.
 
 The host-thread width used to execute accepted CU work in functional mode. A
 nonzero value is applied per SoC and shared by all command processors in that
-SoC. The default, `1`, keeps dispatch serial. Setting the field explicitly to
-`0` creates one automatic host-wide budget from the available hardware threads,
-caps it at 32, and divides it as evenly as possible across the SoCs. After
-either selection, each SoC's effective width is capped at the largest number of
-CUs owned by any one command processor in that SoC. This control does not
-change XCD partitioning, queue ownership, or XCD fan-out. Clocked mode always
-uses an effective value of `1`.
+SoC. Omission or `0` selects a preferred allocation from `thread_allocations`;
+`1` forces serial dispatch. The effective width is capped by per-CP CU capacity.
+Clocked mode always uses a width of one.
+
+### `async_helper_threads`
+
+Shared MMA helpers across the VM's CUs. Omission or -1 selects from the target
+table; zero disables helpers. Explicit values range from 0 to 128. The gfx950
+and gfx1250 single-GPU tables enable helpers within the shared thread budget;
+other shipped targets and multi-GPU defaults keep H=0. See
+[asynchronous MMA execution](../../async-instructions.md).
+
+### Execution budget and preferred allocations
+
+`cpu_thread_budget` is a ceiling for engines, retained dispatch workers and shared MMA helpers:
+E + sum(D - 1) + H. Its default is process affinity capped at 32.
+A positive value overrides the ceiling. The selector picks the largest fitting
+entry in `thread_allocations`; it leaves unused budget between granules.
+Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
+without a table uses serial defaults for unspecified knobs.
+
+Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
+without starting a VM. Mirage embeds the native tables in its RocJITsu backend.
 
 ### `exec_mode`
 
