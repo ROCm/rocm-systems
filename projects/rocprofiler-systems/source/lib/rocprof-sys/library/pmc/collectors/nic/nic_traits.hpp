@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
