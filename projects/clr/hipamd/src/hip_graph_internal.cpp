@@ -1629,7 +1629,7 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
         }
       }
       parentGraph->FreeAllMemory(launch_stream);
-      parentGraph->memalloc_nodes_ = 0;
+      parentGraph->ResetMemAllocNodeCount();
       if (!AMD_DIRECT_DISPATCH) {
         launch_stream->finish();
       }
@@ -3120,7 +3120,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
         }
       }
       parentGraph->FreeAllMemory(launch_stream);
-      parentGraph->memalloc_nodes_ = 0;
+      parentGraph->ResetMemAllocNodeCount();
       if (!AMD_DIRECT_DISPATCH) {
         // The MemoryPool::FreeAllMemory queues a memory unmap command that for !AMD_DIRECT_DISPATCH
         // runs asynchonously. Make sure that freeAllMemory is complete before creating new commands

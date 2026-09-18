@@ -892,7 +892,7 @@ class Graph {
     g_devices[0]->devices()[0]->virtualFree(ptr);
   }
 
-  void FreeMemory(void* dev_ptr, hip::Stream* stream) const {
+  bool FreeMemory(void* dev_ptr, hip::Stream* stream) const {
     size_t offset = 0;
     auto memory = getMemoryObjectForCurrentDevice(dev_ptr, offset);
     if (memory != nullptr) {
@@ -901,8 +901,11 @@ class Graph {
       bool kSkipEvent = !AMD_DIRECT_DISPATCH;
       if (!g_devices[device_id]->FreeMemory(memory, stream, nullptr, kSkipEvent)) {
         LogError("Memory didn't belong to any pool!");
+        return false;
       }
+      return true;
     }
+    return false;
   }
 
   bool ProbeMemory(void* dev_ptr) const {
@@ -920,12 +923,33 @@ class Graph {
 
   void SetGraphInstantiated(bool graphInstantiate) { graphInstantiated_ = graphInstantiate; }
 
-  //! returns count of unreleased memalloc nodes
-  uint32_t GetMemAllocNodeCount() const { return memalloc_nodes_; }
+  //! returns count of unreleased memalloc nodes, including nested graphs on the non-VMM path
+  uint32_t GetMemAllocNodeCount() const {
+    uint32_t count = memalloc_nodes_;
+    if (!HIP_MEM_POOL_USE_VM) {
+      for (auto* node : vertices_) {
+        if (node->GetType() == hipGraphNodeTypeGraph) {
+          count += node->GetChildGraph()->GetMemAllocNodeCount();
+        }
+      }
+    }
+    return count;
+  }
   //! Increments the graph memory alloc node count
   void IncrementMemAllocNodeCount() { memalloc_nodes_++; }
   //! Decrements the graph memory alloc node count
   void DecrementMemAllocNodeCount() { memalloc_nodes_ -= (memalloc_nodes_ > 0); }
+  //! Resets the graph memory alloc node count after AutoFreeOnLaunch
+  void ResetMemAllocNodeCount() {
+    memalloc_nodes_ = 0;
+    if (!HIP_MEM_POOL_USE_VM) {
+      for (auto* node : vertices_) {
+        if (node->GetType() == hipGraphNodeTypeGraph) {
+          node->GetChildGraph()->ResetMemAllocNodeCount();
+        }
+      }
+    }
+  }
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
@@ -3262,7 +3286,15 @@ class GraphMemAllocNode final : public GraphNode {
   virtual hipError_t CreateCommand(hip::Stream* stream) final {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
-      auto ptr = Execute(stream_);
+      // Node creation preallocates the non-VMM buffer. Account it as live only
+      // when the executable graph runs and has reacquired it after any auto-free.
+      if (Execute(stream_) == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+      auto graph = GetParentGraph();
+      if (graph != nullptr) {
+        graph->IncrementMemAllocNodeCount();
+      }
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -3322,9 +3354,16 @@ class GraphMemAllocNode final : public GraphNode {
       // free memory on creation because it doesn't have any execution point yet. Thus
       // the code below makes sure memory won't be recreated on the first execution of the graph
       if ((node_params_.dptr == nullptr) || !graph->ProbeMemory(node_params_.dptr)) {
+        auto graph_dptr = node_params_.dptr;
         auto dptr = graph->AllocateMemory(node_params_.bytesize, stream, node_params_.dptr);
-        if ((node_params_.dptr != nullptr) && (node_params_.dptr != dptr)) {
-          LogPrintfError("Ptr mismatch in graph mem alloc %p != %p", node_params_.dptr, dptr);
+        if ((graph_dptr != nullptr) && (graph_dptr != dptr)) {
+          LogPrintfError("Ptr mismatch in graph mem alloc %p != %p", graph_dptr, dptr);
+          // Non-VMM graph consumers retain graph_dptr in their captured parameters.
+          // Return the replacement allocation to the pool and surface launch failure.
+          if (dptr != nullptr && !graph->FreeMemory(dptr, stream)) {
+            LogError("Failed to release mismatched graph allocation");
+          }
+          return nullptr;
         }
         node_params_.dptr = dptr;
       }
@@ -3400,7 +3439,12 @@ class GraphMemFreeNode : public GraphNode {
   virtual hipError_t CreateCommand(hip::Stream* stream) final {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
-      Execute(stream_);
+      auto graph = GetParentGraph();
+      // Retire logical state only when the pool accepted the busy-to-free transition.
+      // Capture-time Execute() is intentionally outside this launch accounting.
+      if (graph != nullptr && Execute(stream_)) {
+        graph->DecrementMemAllocNodeCount();
+      }
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -3417,11 +3461,12 @@ class GraphMemFreeNode : public GraphNode {
     return error;
   }
 
-  void Execute(hip::Stream* stream) {
+  bool Execute(hip::Stream* stream) {
     auto graph = GetParentGraph();
     if (graph != nullptr) {
-      graph->FreeMemory(device_ptr_, stream);
+      return graph->FreeMemory(device_ptr_, stream);
     }
+    return false;
   }
 
   void GetParams(void** params) const { *params = device_ptr_; }
