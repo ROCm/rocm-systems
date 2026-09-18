@@ -629,10 +629,7 @@ def upgrade_setuptools(cfg: "RunnerConfig") -> None:
     # On PEP 668 systems the pip upgrade is refused outright, and the distro
     # may preinstall neither pip nor setuptools (Debian 12/13), which the
     # wheel build needs for `pip wheel` and setuptools.build_meta. Use apt.
-    if is_externally_managed():
-        if cfg.package_manager != "apt":
-            print("System Python is externally managed; skipping pip upgrade")
-            return
+    if is_externally_managed() and cfg.package_manager == "apt":
         print("System Python is externally managed; installing setuptools/wheel via apt")
         if cfg.refresh_apt:
             run_command(
