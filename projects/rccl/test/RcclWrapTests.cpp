@@ -1515,6 +1515,8 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, initialized, below threshold --> enabled
         {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, above the 8-node half ceiling, still under the 16-node 128MB cap
+        {"Enabled_16Nodes_AboveHalf", 16, true,  HALF + 1,   true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
         {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
     };
@@ -2633,6 +2635,55 @@ TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
+}
+
+// ---------------------------------------------------------------------------
+// rcclAlltoAllShouldTakeDdaPath: AlltoAll has no symmetric kernel, so DDA used
+// to early-return on gfx1250 even when NCCL_CTA_POLICY_ZERO would take CE.
+// When ceAlltoAllAllowed is true, DDA must yield. Default (CE not allowed)
+// AlltoAll DDA on gfx1250 is unchanged. The window/CTA/graph probe itself is
+// CeAlltoAllEligibilityTest; these cases only lock the helper's boolean.
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeNotAllowed_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
+    // CeMPI_AlltoAll.FourRanks: 4 ranks * 65536 float32 * 4 B = 1 MiB (< 4 MiB cap).
+    size_t totalBytes = 4ull * 65536 * sizeof(float);
+    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeAllowed_YieldsToCe)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
+    size_t totalBytes = 4ull * 65536 * sizeof(float);
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_TwoRankLlSize_CeAllowed_YieldsToCe)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
+    // CeMPI_AlltoAll.TwoRanks: 2 * 4096 * 4 B = 32 KiB, DDA LL lane.
+    size_t totalBytes = 2ull * 4096 * sizeof(float);
+    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_AboveThreshold_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
+    size_t totalBytes = kDdaAlltoAllGfx1250ThresholdBytes + 1;
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/true);
+    size_t totalBytes = 1024ull * 1024;
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
 }
 
 // gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
