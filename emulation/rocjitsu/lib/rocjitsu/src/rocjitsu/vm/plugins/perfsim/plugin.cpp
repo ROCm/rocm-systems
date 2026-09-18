@@ -5,7 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/plugins/perfsim/observer_abi_v8.h"
+#include "rocjitsu/vm/plugins/perfsim/observer_abi_v13.h"
 #include "util/dynamic_loader.h"
 
 #include "flatbuffers/idl.h"
@@ -40,11 +40,14 @@
 namespace rocjitsu::plugins::perfsim {
 namespace {
 
-using namespace observer_abi_v8;
+using namespace observer_abi_v13;
 
 constexpr size_t kDefaultMaxStagedBytes = 256 * 1024 * 1024;
-static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 8,
-              "the Perfsim adapter constructs FFM API v8 payloads");
+constexpr uint32_t kOldestCompatibleApiVersion = 8;
+static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 13,
+              "the Perfsim adapter constructs FFM API v13 payload supersets");
+static_assert(kOldestCompatibleApiVersion >= FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION);
+static_assert(kOldestCompatibleApiVersion <= FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
 
 class InstanceClaim {
 public:
@@ -285,6 +288,11 @@ struct TdmEvent {
   std::unique_ptr<uint64_t[]> addresses;
   uint32_t num_addresses = 0;
   uint32_t data_size_bytes = 0;
+  uint32_t tile_dim0 = 0;
+  uint32_t tile_dim1 = 0;
+  uint32_t data_size = 0;
+  int64_t tensor_dim0_stride = 0;
+  int64_t tensor_dim1_stride = 0;
   bool is_read = false;
   bool is_write = false;
 };
@@ -346,6 +354,7 @@ struct PerfsimWavefrontState final : WavefrontState {
 
 struct DispatchState {
   FfmDispatchMetadata metadata{};
+  std::string dispatch_name;
   bool metadata_seen = false;
   bool begun = false;
   bool ended = false;
@@ -375,7 +384,7 @@ FfmDispatchMetadata make_dispatch_metadata(const KernelDispatchInfo &info) {
   FfmDispatchMetadata metadata{};
   metadata.dispatch_info.dispatch_id = info.dispatch_id;
   metadata.vgpr_count = info.vgprs_per_wf;
-  // The v8 FFM contract reports the fixed MI400 SGPR file width here, not the
+  // The FFM contract reports the fixed MI400 SGPR file width here, not the
   // kernel's allocated SGPR count.
   metadata.sgpr_count = 128;
   metadata.lds_size_bytes = info.lds_size_bytes;
@@ -402,20 +411,32 @@ struct PerfsimPlugin::Impl {
           std::format("Perfsim backend '{}' is missing ffm_observer_plugin_get_api: {}",
                       config.library_path, util::last_library_error()));
 
-    FfmObserverPluginApi *raw_api =
-        invoke_foreign_abi(get_api, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
+    FfmObserverPluginApi *raw_api = nullptr;
+    for (uint32_t requested_version = FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION;;
+         --requested_version) {
+      raw_api = invoke_foreign_abi(get_api, requested_version);
+      if (raw_api) {
+        uint32_t returned_version = 0;
+        std::memcpy(&returned_version, raw_api, sizeof(returned_version));
+        if (returned_version < kOldestCompatibleApiVersion ||
+            returned_version > requested_version) {
+          throw std::runtime_error(std::format(
+              "Perfsim backend returned incompatible API version {} for version {} request; "
+              "supported versions are {} through {}",
+              returned_version, requested_version, kOldestCompatibleApiVersion,
+              FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
+        }
+        negotiated_api_version = returned_version;
+        std::memcpy(&api, raw_api, sizeof(api));
+        break;
+      }
+      if (requested_version == kOldestCompatibleApiVersion)
+        break;
+    }
     if (!raw_api)
-      throw std::runtime_error(std::format("Perfsim backend rejected required FFM API version {}",
-                                           FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
-    // The adapter constructs v8-only TDM and metadata payloads, so a table
-    // tagged as any other ABI is unsafe.
-    uint32_t api_version = 0;
-    std::memcpy(&api_version, raw_api, sizeof(api_version));
-    if (api_version != FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION)
       throw std::runtime_error(
-          std::format("Perfsim backend returned API version {}; version {} is required",
-                      api_version, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
-    std::memcpy(&api, raw_api, sizeof(api));
+          std::format("Perfsim backend rejected supported FFM API versions {} through {}",
+                      kOldestCompatibleApiVersion, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
 
     require_callback(api.on_init, "on_init");
     require_callback(api.on_dispatch_begin, "on_dispatch_begin");
@@ -438,11 +459,78 @@ struct PerfsimPlugin::Impl {
           std::format("Perfsim backend is missing required callback {}", name));
   }
 
+  static std::mutex &host_log_mutex() {
+    // The backend mapping is intentionally process-lived and may retain the
+    // callback pointer. Keep its serialization object process-lived as well.
+    static auto *value = new std::mutex;
+    return *value;
+  }
+
+  static Impl *&host_log_instance() {
+    static Impl *value = nullptr;
+    return value;
+  }
+
+  static const char *host_log_level_name(FfmLogLevel level) {
+    switch (level) {
+    case FFM_LOG_DEBUG:
+      return "debug";
+    case FFM_LOG_INFO:
+      return "info";
+    case FFM_LOG_WARN:
+      return "warn";
+    case FFM_LOG_ERROR:
+      return "error";
+    default:
+      return "unknown";
+    }
+  }
+
+  static void host_log(FfmLogLevel level, const char *message) noexcept {
+    try {
+      std::lock_guard lock(host_log_mutex());
+      Impl *instance = host_log_instance();
+      if (!instance)
+        return;
+      instance->owner.sink().write(
+          std::format("[perfsim:{}] {}\n", host_log_level_name(level), message ? message : ""));
+    } catch (...) {
+      // The logger is a C ABI callback and must not propagate an exception into
+      // the backend. A failed diagnostic must not abort emulation.
+    }
+  }
+
+  void activate_host_log() {
+    std::lock_guard lock(host_log_mutex());
+    assert(host_log_instance() == nullptr);
+    host_log_instance() = this;
+  }
+
+  void deactivate_host_log() {
+    std::lock_guard lock(host_log_mutex());
+    if (host_log_instance() == this)
+      host_log_instance() = nullptr;
+  }
+
+  void write_sink(std::string_view message) {
+    std::lock_guard lock(host_log_mutex());
+    owner.sink().write(message);
+  }
+
   void init() {
     if (initialized || shutdown_called)
       return;
-    const FfmHostApi host{FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION};
-    invoke_foreign_abi(api.on_init, &host);
+    const bool supports_host_log = negotiated_api_version >= 12;
+    if (supports_host_log)
+      activate_host_log();
+    const FfmHostApi host{negotiated_api_version, supports_host_log ? &host_log : nullptr};
+    try {
+      invoke_foreign_abi(api.on_init, &host);
+    } catch (...) {
+      if (supports_host_log)
+        deactivate_host_log();
+      throw;
+    }
     initialized = true;
   }
 
@@ -462,6 +550,7 @@ struct PerfsimPlugin::Impl {
 
     if (initialized)
       invoke_foreign_abi(api.on_shutdown);
+    deactivate_host_log();
     shutdown_called = true;
   }
 
@@ -514,6 +603,11 @@ struct PerfsimPlugin::Impl {
             access.addresses = payload.addresses.get();
             access.data_size_bytes = payload.data_size_bytes;
             access.flags = encode_tdm_flags(payload.is_read, payload.is_write);
+            access.tile_dim0 = payload.tile_dim0;
+            access.tile_dim1 = payload.tile_dim1;
+            access.data_size = payload.data_size;
+            access.tensor_dim0_stride = payload.tensor_dim0_stride;
+            access.tensor_dim1_stride = payload.tensor_dim1_stride;
             invoke_foreign_abi(api.on_tdm_memory_access, &access);
           }
         },
@@ -648,8 +742,8 @@ struct PerfsimPlugin::Impl {
 
     for (auto &[dispatch_id, state] : dispatches) {
       if (!state.supported && !state.diagnostic_emitted) {
-        owner.sink().write(std::format("[rocjitsu:perfsim] skipped dispatch {}: {}\n", dispatch_id,
-                                       state.rejection_reason));
+        write_sink(std::format("[rocjitsu:perfsim] skipped dispatch {}: {}\n", dispatch_id,
+                               state.rejection_reason));
         state.diagnostic_emitted = true;
       }
     }
@@ -765,7 +859,7 @@ struct PerfsimPlugin::Impl {
       reject(access.dispatch_id, "memory observation has inconsistent lane masks");
       return;
     }
-    // FFM-v8 has no per-element validity field. Its native gfx1250 VBUFFER
+    // FFM has no per-element validity field. Its native gfx1250 VBUFFER
     // producer selects a lane when any component is in bounds, then reports
     // the instruction's nominal dword width (including for partially-OOB
     // B64/B96/B128 accesses). Validate RocJITsu's richer masks here, but
@@ -916,7 +1010,9 @@ struct PerfsimPlugin::Impl {
     const bool is_store = access.mnemonic == "tensor_store_from_lds";
     if ((!is_load && !is_store) || access.is_load != is_load || access.addresses.empty() ||
         !access.addresses.valid() || !std::has_single_bit(access.element_size_bytes) ||
-        access.element_size_bytes > 8 ||
+        access.element_size_bytes > 8 || access.data_size > 3 ||
+        access.element_size_bytes != (uint32_t{1} << access.data_size) || access.tile_dim0 == 0 ||
+        access.tensor_dim0_stride < 0 || access.tensor_dim1_stride < 0 ||
         access.addresses.size() > std::numeric_limits<uint32_t>::max()) {
       reject(access.dispatch_id, "tensor-DMA observation is malformed");
       return;
@@ -941,6 +1037,11 @@ struct PerfsimPlugin::Impl {
       return;
     }
     event.data_size_bytes = access.element_size_bytes;
+    event.tile_dim0 = access.tile_dim0;
+    event.tile_dim1 = access.tile_dim1;
+    event.data_size = access.data_size;
+    event.tensor_dim0_stride = access.tensor_dim0_stride;
+    event.tensor_dim1_stride = access.tensor_dim1_stride;
     event.is_read = is_load;
     event.is_write = is_store;
     record_event({access.dispatch_id, std::move(event)});
@@ -951,6 +1052,7 @@ struct PerfsimPlugin::Impl {
   AdapterConfig config;
   RetainedSharedLibrary library;
   FfmObserverPluginApiPrefix api{};
+  uint32_t negotiated_api_version = 0;
   bool initialized = false;
   bool shutdown_called = false;
   std::unordered_map<uint32_t, DispatchState> dispatches;
@@ -980,6 +1082,8 @@ void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &in
     return;
   }
   state.metadata = make_dispatch_metadata(info);
+  state.dispatch_name = info.kernelNameOrUnknown();
+  state.metadata.dispatch_name = state.dispatch_name.c_str();
   state.metadata_seen = true;
   if (const auto reason = validate_dispatch(info))
     impl_->reject(info.dispatch_id, *reason);
@@ -1113,7 +1217,9 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {
-    impl_->reject(wf.dispatch_id(), "instruction encoding is not representable by FFM v8");
+    impl_->reject(wf.dispatch_id(),
+                  std::format("instruction encoding is not representable by FFM v{}",
+                              impl_->negotiated_api_version));
     return;
   }
   if (inst.mnemonic().starts_with("scratch_")) {

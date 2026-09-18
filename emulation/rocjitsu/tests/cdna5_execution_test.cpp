@@ -4030,21 +4030,27 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   }
 }
 
-TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
+TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShifts) {
   struct SpecialSourceCase {
     std::string_view name;
     std::array<uint32_t, 2> words;
     PackedU64Pair expected;
   };
-  // LLVM's VSrc_b64 class and 64-bit special-register decoder define these
-  // selectors at this permanent revision:
-  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
-  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2215-L2259
+  // LLVM classifies this instruction as a single-SGPR-read operation: 32-bit
+  // scalar elements replicate one word, even when the operand names a pair.
+  // VCC and TTMP are scalar register classes in LLVM as well as ordinary SGPRs.
+  // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.h#L1707-L1717
+  // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp#L3695-L3712
+  // Each scalar source supplies shift 1 to both elements: (2 << 1) + 7 = 11,
+  // (3 << 1) + 11 = 17. The vector control supplies shifts (1, 2) instead.
   constexpr std::array kCases{
-      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 23u}},
-      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 23u}},
-      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 23u}},
+      SpecialSourceCase{"sgpr", {0xcc7e4004u, 0x1c401908u}, {11u, 17u}},
+      SpecialSourceCase{"ttmp", {0xcc7e4004u, 0x1c40d908u}, {11u, 17u}},
+      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 17u}},
+      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 17u}},
+      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 17u}},
       SpecialSourceCase{"scc", {0xcc7e4004u, 0x1c41fb08u}, {11u, 17u}},
+      SpecialSourceCase{"vgpr", {0xcc7e4004u, 0x1c421908u}, {11u, 23u}},
   };
 
   auto decoder =
@@ -4057,20 +4063,28 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
-    constexpr uint64_t kShiftPair = 0x0000000200000001ULL;
-    wf->set_exec_raw(kShiftPair);
-    wf->set_vcc_raw(kShiftPair);
-    wf->set_scratch_base(kShiftPair);
-    wf->write_scc(true);
-    write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
-    write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
-    write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
+    for (const uint32_t high_word : {2u, 0xffffffffu}) {
+      SCOPED_TRACE(high_word);
+      const uint64_t scalar_pair = (static_cast<uint64_t>(high_word) << 32) | 1u;
+      write_wave_sgpr(*cu, *wf, 12, 1u);
+      write_wave_sgpr(*cu, *wf, 13, high_word);
+      wf->set_ttmp(0, 1u);
+      wf->set_ttmp(1, high_word);
+      wf->set_exec_raw(scalar_pair);
+      wf->set_vcc_raw(scalar_pair);
+      wf->set_scratch_base(scalar_pair);
+      wf->write_scc(true);
+      write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
+      write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});
+      write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
+      write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
 
-    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
-    ASSERT_NE(decoded, nullptr);
-    ASSERT_NE(decoded->execute, nullptr);
-    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
-    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
+      ASSERT_NE(decoded, nullptr);
+      ASSERT_NE(decoded->execute, nullptr);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
+      EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+    }
   }
 }
 
