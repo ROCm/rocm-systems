@@ -149,19 +149,20 @@ The default and high presets use workgroup/LDS-cell strides of 256/256 and
 
 Each pair contains:
 
-- **Startup (seconds)**: the total cold-path latency through completion of the
-  first synchronized operation and its selected evidence checkpoints. It
-  includes ConSan transformation, replacement-object load/bind work,
-  first-dispatch setup, the operation itself, and any other warm-up cost. This
-  intentionally avoids exposing an implementation-dependent boundary between
-  instrumentation and first-run warm-up.
+- **Startup (seconds)**: instrumentation time plus the measured first operation.
+  PyTorch/Gluon measure the synchronized host operation, including load/bind,
+  first-dispatch warm-up, and selected evidence checkpoints. hipBLASLt instead
+  exposes GPU event times: its Startup includes instrumentation plus the first
+  device-timed batch, but excludes host client setup, loading outside the hook's
+  timer, and host numerical validation. It is not an end-to-end cold-start time;
+  capturing a first-batch host completion timestamp remains a runner improvement.
 - **Run (seconds and ratio)**: the absolute latency of the second identical
   synchronized operation, followed by that latency divided by the median
   second-operation time from the two initial native processes.
 
-The first operation is therefore both a correctness-checked warm-up and part of
-the reported Startup latency; none of its cost is discarded. Its host evidence
-analysis is included there as well. For ConSan, the harness uses
+The first operation is both a correctness-checked warm-up and part of the
+reported Startup latency. For the synchronized host measurements, its host
+evidence analysis is included there as well. For ConSan, the harness uses
 `RJ_CONSAN_EPOCH_ANALYSIS=manual` and keeps an explicit analysis window open
 from immediately before Run1 through its final synchronization. This includes
 every internal synchronized epoch belonging to Run1. Opaque subprocess
