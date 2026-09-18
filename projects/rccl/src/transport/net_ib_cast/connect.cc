@@ -845,14 +845,6 @@ fail:
 static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId,
                                           int depthMult) {
   uint nqps = comm->base.nqps;
-  struct ncclIbQpCreateAttr qpCreateAttrs;
-  memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
-  qpCreateAttrs.type = IBV_QPT_RC;
-  qpCreateAttrs.maxRecvWorkRequest = 0;
-  qpCreateAttrs.maxSendWorkRequest = meta->isRMA ? NCCL_IB_RMA_MAX_SEND_WRS : NCCL_IB_MAX_SEND_WRS;
-  qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
-  qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
-  qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -865,17 +857,15 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     ncclIbQp* localQp = &comm->base.qps[qpIndex];
     ncclIbQpInfo* localQpInfo = &meta->qpInfo[qpIndex];
 
-    qpCreateAttrs.cq = commDev->base.cq;
-    qpCreateAttrs.pd = commDev->base.pd;
-    qpCreateAttrs.qpContext = &comm->base.stats;
-
+    struct ncclIbQpCreateAttr qpCreateAttrs;
+    IbCastBuildDataQpCreateAttr(&comm->base, devIndex, &qpCreateAttrs);
     qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
     qpCreateAttrs.isCtsEnabled = comm->useCtsOffload;
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
-    qpCreateAttrs.ibDevN = commDev->base.ibDevN;
-    qpCreateAttrs.useIonic = IbCastAinicRoce;
-    qpCreateAttrs.isP2p = comm->base.isP2p;
+    qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+    qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
+    qpCreateAttrs.cqDepthMultiplier = depthMult;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1797,21 +1787,13 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       ncclIbDev* ibDev = &IbCastDevs[rCommDev->base.ibDevN];
 
       struct ncclIbQpCreateAttr qpCreateAttrs;
-      memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
-      qpCreateAttrs.type = IBV_QPT_RC;
-      qpCreateAttrs.cq = rCommDev->base.cq;
-      qpCreateAttrs.pd = rCommDev->base.pd;
+      IbCastBuildDataQpCreateAttr(&rComm->base, i, &qpCreateAttrs);
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest =
-        remMeta->isRMA ? NCCL_IB_RMA_MAX_FLUSH_WRS
-                       : (NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS);
-      qpCreateAttrs.qpContext = &rComm->base.stats;
       qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
       qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
       qpCreateAttrs.isDataQp = true;
       qpCreateAttrs.channelId = channelId;
-      qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
-      qpCreateAttrs.useIonic = IbCastAinicRoce;
+      qpCreateAttrs.isP2p = 0;
       if (IbCastCommIsPrimary(&rComm->base)) {
         // Flush QP is shared across comms in the group — enable WR depth
         // scaling and group-based UDMA pinning so it matches the data QPs.

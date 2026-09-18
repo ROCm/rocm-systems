@@ -12,11 +12,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "multiseg.h"
+
 // Shared limits and dependency-free boundary helpers for classic and CAST
 // NET/IB RMA. Keep these here so host tests exercise the exact production math.
 #ifndef NCCL_RMA_MAX_SEGMENTS
-#define NCCL_RMA_MAX_SEGMENTS 16
+#define NCCL_RMA_MAX_SEGMENTS NCCL_IB_MAX_SEGMENTS
 #endif
+static_assert(NCCL_RMA_MAX_SEGMENTS == NCCL_IB_MAX_SEGMENTS,
+              "RMA and classic IB segment caps must stay aligned");
 
 // 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
 #define NCCL_RMA_MAX_DATA_WRS (4 * NCCL_RMA_MAX_SEGMENTS)
@@ -98,6 +102,27 @@ static inline int ncclRmaLayoutsMatch(int lhsSegments, const size_t* lhsOffsets,
 static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const size_t* localSegOff, int rank) {
   if (rankSegOff == NULL || rank < 0) return localSegOff;
   return rankSegOff + (size_t)rank * (NCCL_RMA_MAX_SEGMENTS + 1);
+}
+
+// Map offset to the covering [segOff[s], segOff[s+1]) bucket. Offsets at or
+// past the terminal size clamp to the last segment, matching the CAST wrappers.
+static inline int ncclRmaSegIndexOf(int nSegments, const size_t* segOff, uint64_t off) {
+  if (nSegments < 1 || segOff == NULL) return 0;
+  for (int s = 0; s < nSegments; s++) {
+    if (off < segOff[s + 1]) return s;
+  }
+  return nSegments - 1;
+}
+
+static inline int ncclRmaOffsetRangeOk(int nSegments, const size_t* segOff, uint64_t off, size_t size) {
+  if (nSegments < 1 || segOff == NULL) return 0;
+  uint64_t bytes = segOff[nSegments];
+  return off <= bytes && (uint64_t)size <= bytes - off;
+}
+
+static inline int ncclRmaTranscriptHeaderOk(uint32_t magic, uint32_t version, uint32_t expectMagic,
+                                            uint32_t expectVersion) {
+  return magic == expectMagic && version == expectVersion;
 }
 
 // Count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a

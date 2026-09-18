@@ -24,10 +24,17 @@ class CollectMpiExportVarsTest(unittest.TestCase):
         self.assertNotIn("HOME", got)
 
     def test_merged_env_overrides_parent_leftover(self):
+        # The production call site copies merged_env into env first, so a key
+        # present in both already holds the JSON value. Leftover-only NCCL_* /
+        # RCCL_* keys are the real leftover export path.
         merged = {"NCCL_IB_QPS_PER_CONNECTION": "1"}
-        env = {"NCCL_IB_QPS_PER_CONNECTION": "2"}
+        env = {
+            "NCCL_IB_QPS_PER_CONNECTION": "1",
+            "NCCL_DEBUG_SUBSYS": "NET",
+        }
         got = dict(collect_mpi_export_vars(env, merged))
         self.assertEqual(got["NCCL_IB_QPS_PER_CONNECTION"], "1")
+        self.assertEqual(got["NCCL_DEBUG_SUBSYS"], "NET")
 
 
 if __name__ == "__main__":
