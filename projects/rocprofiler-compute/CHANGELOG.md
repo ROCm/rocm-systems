@@ -43,6 +43,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * gfx908–gfx942: added HBM and remote traffic percentages.
   * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
 
+* Analyze mode now auto-detects memory bandwidth analysis data from the profiling output. The `--membw-analysis` analyze option has been removed; use `--membw-analysis` only at profile time.
+
 ### Removed
 
 * Removed the `--kernel-verbose` analyze option and the kernel name shortener it drove. The option had no effect on any output.
@@ -74,6 +76,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
 * Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
+
+* Fixed `profile -b 3 --experimental --membw-analysis` not collecting memory bandwidth analysis counters.
 
 ### Upcoming changes
 

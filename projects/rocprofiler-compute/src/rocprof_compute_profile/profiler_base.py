@@ -198,6 +198,47 @@ class RocProfCompute_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
+
+        # Block 30 and block 21 require their respective experimental flags.
+        for block_input in args.filter_blocks or []:
+            if block_input.startswith("30") and (
+                len(block_input) == 2 or block_input[2] == "."
+            ):
+                if not getattr(args, "membw_analysis", False) or not getattr(
+                    args, "experimental", False
+                ):
+                    console_error(
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
+                        "feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        "--experimental --membw-analysis"
+                    )
+            if block_input in ("21", "pc_sampling"):
+                if not getattr(args, "pc_sampling", False) or not getattr(
+                    args, "experimental", False
+                ):
+                    console_error(
+                        "Block 21 (PC Sampling) is an experimental feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        "--experimental --pc-sampling"
+                    )
+
+        # When --pc-sampling is set, inject "21" into filter_blocks so the
+        # profiling config yaml records it and downstream code is unchanged.
+        if getattr(args, "pc_sampling", False):
+            current = list(args.filter_blocks or [])
+            if "21" not in current:
+                current.append("21")
+            args.filter_blocks = current
+
+        # When --membw-analysis is set, inject "30" into filter_blocks so the
+        # profiling config yaml records it and downstream code is unchanged.
+        if getattr(args, "membw_analysis", False):
+            current = list(args.filter_blocks or [])
+            if "30" not in current:
+                current.append("30")
+            args.filter_blocks = current
+
         selected_frameworks = _compute_selected_frameworks(args)
         if selected_frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(

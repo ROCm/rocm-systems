@@ -218,14 +218,14 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
         ),
         pytest.param(
             ["2", "21"],
-            {"torch_trace": True},
+            {"torch_trace": True, "pc_sampling": True, "experimental": True},
             False,
             {"torch"},
             id="mixed_torch_trace_preserved",
         ),
         pytest.param(
             ["21"],
-            {},
+            {"pc_sampling": True, "experimental": True},
             False,
             set(),
             id="pc_only_no_trace_flag",
@@ -574,7 +574,7 @@ def _make_rpc_args(
     experimental=False,
     mode="profile",
 ) -> argparse.Namespace:
-    """Build a minimal Namespace for RocProfCompute.sanitize() unit tests."""
+    """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
@@ -595,6 +595,15 @@ def _make_rpc_args(
         no_roof=False,
         name="unit-test",
         output_directory="/tmp/unit-test",
+        no_native_tool=False,
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        torch_trace=False,
+        triton_trace=False,
+        ml_api_trace=False,
+        kernel_iteration_range=None,
+        remaining=["--", "./myapp"],
     )
 
 
@@ -671,15 +680,49 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
         ),
     ],
 )
-def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_blocks):
+def test_sanitize_block_experimental_gating(
+    tmp_path, args, expect_error, expected_filter_blocks
+):
     """Unit test: block 21 and block 30 require their experimental flags."""
-    instance = _make_rpc_with_args(args)
+    binary = tmp_path / "myapp"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    args.remaining = ["--", str(binary)]
+    instance = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.sanitize()
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "args, expected_filter_blocks",
+    [
+        pytest.param(
+            _make_rpc_args(membw_analysis=True, experimental=True, filter_blocks=[]),
+            ["30"],
+            id="membw_analysis_with_experimental_injects_30",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["3"], membw_analysis=True, experimental=True),
+            ["3", "30"],
+            id="membw_analysis_with_existing_blocks_appends_30",
+        ),
+    ],
+)
+def test_sanitize_membw_analysis_injects_block_30(
+    tmp_path, args, expected_filter_blocks
+):
+    """Block 30 is injected into filter_blocks when --membw-analysis is set."""
+    binary = tmp_path / "myapp"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    args.remaining = ["--", str(binary)]
+    instance = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    instance.sanitize()
+    assert args.filter_blocks == expected_filter_blocks
 
 
 # ---------------------------------------------------------------------------
