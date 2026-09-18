@@ -85,6 +85,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     integration-test territory. Since this binary uses section GC, validate
     completeness by checking that the linked coverage report still contains
     the same `ras.cc` function inventory as the compiled source.
+  - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
+    `ras-diagnostics-common-test.cc`); suite
+    `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
+    filtering, aligned local-record collection, allocation and callback
+    failures, rank ordering and formatting, and reporter output.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
