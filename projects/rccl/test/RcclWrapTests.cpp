@@ -2622,7 +2622,7 @@ TEST(RcclAllReduceDdaDecision, Gfx1250_CeEligible_StillTakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
     InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(64ull * 1024 * 1024, ncclFloat32); // CE-eligible size, divisible by 8
+    size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within DDA entry cap (32 MiB), divisible by 8
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
 }
