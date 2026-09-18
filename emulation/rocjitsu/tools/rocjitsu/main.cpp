@@ -471,10 +471,11 @@ int main(int argc, char *argv[]) {
       auto settings =
           rocjitsu::config::load_execution_thread_settings(abs_config, rocjitsu::kEmbeddedSchema);
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
-      std::cout << "Budget | num_threads | cpu_dispatch_threads per GPU | Total\n";
+      std::cout
+          << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
       auto print = [&](const std::string &label) {
         const auto plan = settings.resolve(host);
-        uint64_t total = plan.engines;
+        uint64_t total = uint64_t{plan.engines} + plan.helpers;
         std::string dispatch;
         for (uint32_t width : plan.dispatch) {
           if (!dispatch.empty())
@@ -482,10 +483,11 @@ int main(int argc, char *argv[]) {
           dispatch += std::to_string(width);
           total += width - 1;
         }
-        std::cout << std::format("{} | {} | {} | {}\n", label, plan.engines, dispatch, total);
+        std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
+                                 plan.helpers, total);
       };
       print("Configured");
-      for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 48u, 64u}) {
+      for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
         settings.request.budget = budget;
         print(std::to_string(budget));
       }

@@ -265,6 +265,25 @@ fetch_at(InstructionCache &icache, const GpuMemory &memory, uint64_t pc, uint32_
 
 // Every four-byte-aligned PC in a two-line window, including the offsets whose
 // fetch window runs off the end of a line, must return the backing bytes.
+TEST(InstructionCacheTest, PeekOnlyReturnsPresentAlignedWordsForTheOwningVmid) {
+  GpuMemory memory("peek_memory");
+  InstructionCache cache;
+  constexpr uint64_t pc = 0x4000;
+  constexpr uint32_t value = 0x12345678;
+  uint32_t word = 0;
+  memory.write32(pc + 60, value);
+  EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
+  uint8_t fetched[InstructionCache::kFetchBytes];
+  cache.fetch(memory, pc, 0, fetched);
+  ASSERT_TRUE(cache.peek_word(pc + 60, 0, word));
+  EXPECT_EQ(word, value);
+  EXPECT_FALSE(cache.peek_word(pc + 61, 0, word));
+  EXPECT_FALSE(cache.peek_word(pc + 60, 1, word));
+  EXPECT_FALSE(cache.peek_word(pc + InstructionCache::kCacheBytes + 60, 0, word));
+  cache.invalidate_all();
+  EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
+}
+
 TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
   GpuMemory memory("memory");
   InstructionCache icache;

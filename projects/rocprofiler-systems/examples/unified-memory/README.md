@@ -104,7 +104,7 @@ Output files (written to the standard rocprofiler-systems output directory):
 | ------ | ---------- |
 | `unified_memory.txt` | Human-readable per-GPU summary: total page faults, trigger breakdown (`gpu_page_fault`, `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host effective migration throughput when migration events are present. |
 | `unified_memory.json` | Machine-readable equivalent with the same fields, plus an `xnack_enabled` flag and an always-present `device_to_device` bucket for schema stability. Migration buckets can remain at zero on systems that do not generate KFD migration events. |
-| `perfetto-trace.proto` | Standard Perfetto trace, including KFD page-fault tracks and migration tracks when migration events are present. |
+| `perfetto-trace.pftrace` | Standard Perfetto trace, including KFD page-fault tracks and migration tracks when migration events are present. |
 | `rocpd.db` *(optional)* | Standard ROCpd database; KFD events are recorded in the `kfd_page_fault` / `kfd_page_migrate` tables. |
 
 ### Shared-HBM Systems

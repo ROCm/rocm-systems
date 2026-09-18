@@ -85,8 +85,23 @@ public:
 
   /// @brief Discard every cached line (s_icache_inv).
   void invalidate_all() {
+    ++epoch_;
     for (Line &line : lines_)
       line.valid = false;
+  }
+
+  uint64_t epoch() const { return epoch_; }
+
+  /// @brief Read an already cached instruction word without fetching or filling.
+  /// @details This is only a hint for choosing an execution path. The caller
+  /// must still perform ordinary fetchability and debugger-coherence checks.
+  bool peek_word(uint64_t pc, uint32_t vmid, uint32_t &word) const {
+    const uint64_t addr = pc & ~uint64_t{kLineSize - 1};
+    const auto &line = lines_[(addr / kLineSize) & (kNumLines - 1)];
+    if ((pc & 3) || !line.valid || line.addr != addr || line.vmid != vmid)
+      return false;
+    std::memcpy(&word, line.data + (pc & (kLineSize - 1)), sizeof(word));
+    return true;
   }
 
 private:
@@ -111,6 +126,7 @@ private:
   }
 
   Line lines_[kNumLines];
+  uint64_t epoch_ = 0;
 };
 
 } // namespace amdgpu

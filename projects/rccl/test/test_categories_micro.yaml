@@ -17,6 +17,7 @@ test_categories:
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "RasMicrotest.*"
       - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
       - "GroupEndInternalTest.*"

@@ -15,6 +15,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
   false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
   fixed set of true tokens.
+- Perfetto trace output now defaults to the `.pftrace` extension instead of
+  `.proto`, and `--output-format pftrace` is the canonical token for
+  requesting it (`proto` is kept as a permanent backward-compatible alias).
 
 ### Resolved issues
 

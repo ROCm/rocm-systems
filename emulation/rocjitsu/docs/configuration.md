@@ -75,8 +75,9 @@ The example above is intentionally minimal.
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
 | `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to per-CP CU capacity. |
-| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses `min(process CPU affinity, 32)`; a positive value overrides that ceiling. |
-| `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` pairs, selected by total execution-thread cost. |
+| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity, with engine/dispatch cost capped at 32 and additive preset helpers up to 48 total; a positive value overrides the budget. |
+| `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
+| `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -98,12 +99,13 @@ partition. A single XCD is never split across partitions.
 selects the largest effective allocation fitting the budget, after applying
 explicit knob overrides and topology limits. A budget between table entries
 uses the lower entry; it does not create workers merely to exhaust the budget.
-Later entries break ties. The automatic ceiling is `min(process CPU affinity,
-32)`, with a minimum of one. Set `cpu_thread_budget` explicitly to allow a
-larger entry. A config without a table uses serial defaults for unspecified
+Later entries break ties. The automatic total budget is CPU affinity, with a
+minimum of one. Engine/dispatch cost stays capped at 32; helper entries may
+use additional affinity. Shipped presets stop at 48 total. A positive
+`cpu_thread_budget` overrides the budget, including the engine/dispatch cap. A config without a table uses serial defaults for unspecified
 knobs. Clocked mode uses only engines, capped by affinity/budget and XCD count.
 
-Explicit engine and dispatch values take precedence and may exceed the automatic
+Explicit engine, dispatch and helper values take precedence and may exceed the automatic
 ceiling. Engines are clamped to aggregate XCD count, and dispatch width to each
 SoC's largest per-CP CU count. No workload inspection is involved.
 
@@ -155,13 +157,13 @@ most the partitions covering its own GPU.
 
 #### Thread accounting and preferred allocations
 
-For E engine threads and per-SoC inclusive dispatch widths D, the retained
-execution allocation is **E + sum(D - 1)**. Each XCD submission runs on its
+For E engine threads, per-SoC inclusive dispatch widths D and H shared MMA
+helpers, the retained execution allocation is **E + sum(D - 1) + H**. Each XCD submission runs on its
 engine caller and can share the SoC's D-1 persistent workers. Callers progress
 concurrently and join only their own submission. Runtime, doorbell and daemon
 threads are outside this execution budget.
 
-The initial single-GPU tables use these engine/dispatch pairs:
+The single-GPU tables retain these synchronous engine/dispatch pairs (H=0):
 
 | Budget | gfx950 E/D | gfx1250 E/D | gfx1100/gfx1151/gfx1201 E/D |
 |---:|---:|---:|---:|
@@ -173,11 +175,11 @@ The initial single-GPU tables use these engine/dispatch pairs:
 | 24 | 8/17 | 8/17 | 1/16 |
 | 32 | 8/25 | 8/25 | 1/32 |
 
-A budget of 12 selects the eight-thread row. These initial tables stop at 32;
-a larger explicit budget permits larger entries in a custom table, and explicit
-engine/dispatch settings can exceed the budget. MI210 uses one engine and
-dispatch widths 1/2/4/8/16/32. CDNA3 uses the gfx950 allocations above.
-See [the design and evidence](concurrent-dispatch.md).
+The gfx950/gfx1250 tables also contain the [async MMA triples](async-instructions.md#thread-policy).
+Both keep 8/25/0 at 32 threads. Affinity above 32 selects additive helper rows
+at totals 34, 36, 40 and 48 (2, 4, 8 and 16 helpers). Larger hosts still select
+48. `async_helper_threads: 0` retains the synchronous choices above.
+A budget of 12 selects the eight-thread row.
 
 Print allocations for any target without constructing a simulated GPU:
 
@@ -215,15 +217,18 @@ so these retained pools do not imply simultaneous execution on every GPU.
 Dispatch workers can accelerate compute batches. The E=1 pin addresses the
 documented RCCL hang; the D=1 default preserves small-collective performance.
 
-Mirage embeds the single-GPU tables in its RocJITsu backend at build time and
-selects them by the agent's GPU target. The hardware agent format carries no
+Mirage embeds the tables in its RocJITsu backend at build time and
+selects them by the agent's GPU target and GPU count. The hardware agent format carries no
 host scheduling policy. Unknown targets use the serial fallback. For multiple
-GPUs, it converts each granule's budget B to E=1 and D=1+floor((B-1)/GPUs),
-matching the native multi-GPU presets, then leaves selection to rocjitsu.
-Its multi-GPU configurations default to E=1/D=1 for the same reasons. A positive
+GPUs, it uses the matching native preset when available. Other GPU counts
+convert each single-GPU granule's budget B to E=1, D=1+floor((B-1)/GPUs) and H=0,
+then leave selection to rocjitsu.
+Its multi-GPU configurations default to E=1/D=1/H=0 for the same reasons. A positive
 engine override can change that pin;
 `num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
-`num_threads` and `cpu_dispatch_threads`. A supplied config file is used verbatim.
+`num_threads`, `cpu_dispatch_threads` and `async_helper_threads`. A supplied
+config file is used verbatim. Automatic helper selection (-1) preserves the
+multi-GPU H=0 default; a positive override can enable helpers.
 Checkpoints retain the configured requests and tables, including custom tables,
 so restore re-evaluates that policy for the receiving process's affinity. They
 preserve the user's configuration, rather than an exact host allocation or a

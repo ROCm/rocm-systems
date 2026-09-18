@@ -421,7 +421,7 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 
 - Visit [ui.perfetto.dev](https://ui.perfetto.dev) in the web-browser
 - Select "Open trace file" from panel on the left
-- Locate the rocprofiler-systems perfetto output (extension: `.proto`)
+- Locate the rocprofiler-systems perfetto output (extension: `.pftrace`)
 
 ![rocprof-sys-perfetto](docs/data/rocprof-sys-perfetto.png)
 
@@ -446,7 +446,7 @@ Enable `traced` and `perfetto` in the background:
 ```shell
 pkill traced
 traced --background
-perfetto --out ./rocprof-sys-perfetto.proto --txt -c ${ROCPROFSYS_ROOT}/share/perfetto.cfg --background
+perfetto --out ./rocprof-sys-perfetto.pftrace --txt -c ${ROCPROFSYS_ROOT}/share/perfetto.cfg --background
 ```
 
 > [!NOTE]
