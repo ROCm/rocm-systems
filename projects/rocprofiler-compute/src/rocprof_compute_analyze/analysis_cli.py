@@ -15,6 +15,8 @@ from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
+    build_operator_summary,
+    copy_matched_operator_subtree,
     filter_forest_by_backend,
     get_matrix_ops_type,
     process_ml_api_trace_output,
@@ -392,4 +394,18 @@ class cli_analysis(OmniAnalyze_Base):
         self, args: argparse.Namespace, workload: schema.Workload, backend: str
     ) -> None:
         """Display the matched operator call tree for a single backend."""
-        return
+        if not workload.ml_api_glob_matches:
+            return
+        cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
+        label = cli["label"]
+        pattern_list = parse_operator_patterns(args, cli["filter_attr"])
+        subtree = copy_matched_operator_subtree(
+            workload.ml_api_call_trees, workload.ml_api_glob_matches
+        )
+        print(f"\n{'=' * 80}")
+        print(f"Matched {label} Operators: {', '.join(pattern_list)}")
+        print("Sorted by total GPU kernel duration.")
+        print(f"{'=' * 80}")
+        tty.show_call_tree(subtree)
+        tty.show_operator_summary(build_operator_summary(subtree))
+        print(f"{'=' * 80}")
