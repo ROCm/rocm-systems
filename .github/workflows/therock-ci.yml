@@ -280,14 +280,20 @@ jobs:
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:
+      - name: Report gate failure
+        if: ${{ needs.ci-gate.result != 'success' }}
+        run: |
+          echo "TheRock CI gate did not complete successfully."
+          exit 1
+
       - name: Report skipped workflow
-        if: ${{ needs.ci-gate.outputs.enabled != 'true' }}
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'false' }}
         run: |
           echo "TheRock CI is skipped by default for push and pull_request events."
           echo "Use workflow_dispatch or add the ci:single-arch label to a pull request to enable it."
 
       - name: Output failed jobs
-        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         run: |
           echo '${{ toJson(needs) }}'
           FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
