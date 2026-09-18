@@ -62,6 +62,8 @@ class Workload:
     filter_top_n: str = field(default_factory=str)
     # Marker CSV / counter CSV pairs, one entry per profiling pass.
     ml_api_trace_pairs: list[MlApiTracePair] = field(default_factory=list)
+    # Dispatches whose Correlation_ID is missing from that pass's marker CSV.
+    unmatched_kernel_frames: list[pd.DataFrame] = field(default_factory=list)
     # Matched ML API trace rows keyed by backend, populated by operator filters.
     matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None
