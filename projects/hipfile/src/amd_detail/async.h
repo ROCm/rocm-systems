@@ -52,8 +52,7 @@ public:
     bool                                 write_result{true};
     bool                                 committed{true};
     void (*io_fn)(void *){nullptr};
-    uint64_t             *signal_slot{nullptr};
-    std::atomic<uint64_t> offloads_done{0};
+    uint64_t *signal_slot{nullptr};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;

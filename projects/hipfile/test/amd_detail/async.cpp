@@ -326,8 +326,8 @@ TEST_F(HipFileAsyncOp, allocateSignalSlot_allocates_signal_memory_and_zeroes_it)
 {
     uint64_t slot_storage = 0xdeadbeef;
     EXPECT_CALL(mhip, hipExtMallocWithFlags(sizeof(uint64_t), _)).WillOnce(Return(&slot_storage));
-    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
     ASSERT_EQ(allocateSignalSlot(), &slot_storage);
+    ASSERT_EQ(slot_storage, 0u);
 }
 
 TEST_F(HipFileAsyncOp, asyncOp_destructor_frees_signal_slot)
@@ -370,10 +370,9 @@ TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
     });
     monitor.submitIo(op.get());
 
-    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
     captured();
     ASSERT_EQ(g_test_io_fn_calls.load(), 1);
-    ASSERT_EQ(op->offloads_done.load(), 1u);
+    ASSERT_EQ(slot_storage, 1u);
 
     op->signal_slot = nullptr;
 }
@@ -406,10 +405,9 @@ TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
     g_test_io_fn_calls.store(0);
 
     EXPECT_CALL(mmon, submitIo(op.get())).WillOnce(Throw(std::runtime_error("no capacity")));
-    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
     async_dispatch(op.get());
     ASSERT_EQ(g_test_io_fn_calls.load(), 1);
-    ASSERT_EQ(op->offloads_done.load(), 1u);
+    ASSERT_EQ(slot_storage, 1u);
 
     op->signal_slot = nullptr;
 }
@@ -692,7 +690,6 @@ TEST_P(FallbackAsyncIO, multipleChunksWithWaitValueQueueDispatchAndWait)
     EXPECT_CALL(mhip, hipHostFree(Eq(op_data))).WillOnce([](void *ptr) { free(ptr); });
     EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(Return(1024));
     EXPECT_CALL(mhip, hipExtMallocWithFlags(sizeof(uint64_t), _)).WillOnce(Return(&slot_storage));
-    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
     EXPECT_CALL(mhip, hipFree(&slot_storage));
     EXPECT_CALL(*mstream, getLock);
     EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
@@ -1198,7 +1195,6 @@ TEST_F(FastpathAsyncIO, validParamsWithWaitValueEnqueuesDispatchWaitAndCleanup)
     EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
     EXPECT_CALL(masync_monitor, addOp);
     EXPECT_CALL(mhip, hipExtMallocWithFlags(sizeof(uint64_t), _)).WillOnce(Return(&slot_storage));
-    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
     EXPECT_CALL(*mstream, getLock);
     EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
     EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_dispatch), _));

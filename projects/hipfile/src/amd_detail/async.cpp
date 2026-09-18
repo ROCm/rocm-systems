@@ -53,13 +53,7 @@ AsyncMonitor::~AsyncMonitor()
 static void
 signalOffloadComplete(AsyncOp *op)
 {
-    uint64_t completed = op->offloads_done.fetch_add(1, std::memory_order_release) + 1;
-    try {
-        Context<Hip>::get()->hipMemcpy(op->signal_slot, &completed, sizeof(completed), hipMemcpyHostToDevice);
-    }
-    catch (...) {
-        Context<Sys>::get()->syslog(LOG_CRIT, "Unable to signal async IO completion; stream may stall.");
-    }
+    std::atomic_ref<uint64_t>{*op->signal_slot}.fetch_add(1, std::memory_order_release);
 }
 
 void
@@ -136,8 +130,7 @@ allocateSignalSlot()
 {
     auto slot = static_cast<uint64_t *>(
         Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
-    uint64_t zero = 0;
-    Context<Hip>::get()->hipMemcpy(slot, &zero, sizeof(zero), hipMemcpyHostToDevice);
+    std::atomic_ref<uint64_t>{*slot}.store(0, std::memory_order_release);
     return slot;
 }
 
