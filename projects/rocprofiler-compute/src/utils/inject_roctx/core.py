@@ -109,7 +109,7 @@ _thread_local = threading.local()
 
 
 def resolve_user_caller_location() -> str:
-    """'file:line' for the nearest user frame, or 'python.dispatch:0'."""
+    """'file:line' for the nearest user frame, or 'n/a'."""
     frame = inspect.currentframe()
     while frame is not None:
         fn_path = frame.f_code.co_filename
@@ -118,7 +118,7 @@ def resolve_user_caller_location() -> str:
         if not in_package and not in_framework:
             return f"{Path(fn_path).name}:{frame.f_lineno}"
         frame = frame.f_back
-    return "python.dispatch:0"
+    return "n/a"
 
 
 def encode_marker_name(name: str) -> str:
@@ -130,14 +130,14 @@ def compose_marker(
     context: str,
     backend: str = "",
     args: str = "n/a",
-    seq: str = "n/a",
+    seqNr: str = "n/a",
     tid: str = "n/a",
     ftid: str = "n/a",
     scope: str = "n/a",
 ) -> str:
     full = (
         f"{encode_marker_name(marker)}:{context}"
-        f"|seq={seq}|tid={tid}|ftid={ftid}|scope={scope}|args={args}"
+        f"|seqNr={seqNr}|tid={tid}|ftid={ftid}|scope={scope}|args={args}"
     )
     if backend:
         full = f"{full}|{backend}"
