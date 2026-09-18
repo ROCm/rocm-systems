@@ -303,8 +303,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   }
 }
 
-void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
-                                                        amdgpu::Wavefront &wf) {
+void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(
+    const amdgpu::MemoryAccessObservation & /*access*/, const Instruction &inst,
+    amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
   auto *rs = s->race_state;
