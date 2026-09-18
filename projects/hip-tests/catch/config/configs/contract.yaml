@@ -1263,6 +1263,9 @@ contract:
   Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported:
     <<: *level_0
     tags: [vmm, P0]
+  Contract_Vmm_HipMemGetAccess_SetReadWrite_RoundTripsReadWrite:
+    <<: *level_0
+    tags: [vmm, P0]
   Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds:
     <<: *level_0
     tags: [vmm_handle, P0]
@@ -1564,9 +1567,6 @@ contract:
     <<: *level_0
     tags: [mem_location_pool, P0]
   Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool:
-    <<: *level_0
-    tags: [mem_location_pool, P0]
-  Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation:
     <<: *level_0
     tags: [mem_location_pool, P0]
   Contract_MemPoolShareableHandle_HipMemPoolExportToShareableHandle_ExportImportHandle_RoundTrips:

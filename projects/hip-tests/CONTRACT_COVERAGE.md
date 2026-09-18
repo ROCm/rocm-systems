@@ -170,7 +170,7 @@ binaries instead of exposing portable state to assert.
 | `mem_batch_copy` | 3 |
 | `mem_batch_copy_3d` | 4 |
 | `mem_batch_discard` | 7 |
-| `mem_location_pool` | 4 |
+| `mem_location_pool` | 3 |
 | `mem_map_array` | 2 |
 | `memory` | 5 |
 | `memory_pool` | 6 |
@@ -208,7 +208,7 @@ binaries instead of exposing portable state to assert.
 | `texture_reference` | 6 |
 | `texture_reference_symbol` | 10 |
 | `transfer` | 4 |
-| `vmm` | 5 |
+| `vmm` | 6 |
 | `vmm_handle` | 4 |
 
 ## Keeping coverage honest

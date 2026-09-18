@@ -6,7 +6,6 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
-#include <contract_cleanup.hh>
 
 namespace {
 bool MemoryPoolsSupported() {
@@ -87,39 +86,4 @@ HIP_TEST_CASE(Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroug
   HIP_CHECK(hipMemGetMemPool(&readback, &location, hipMemAllocationTypePinned));
   REQUIRE(readback == default_pool);
 #endif  // HT_NVIDIA && CUDA_VERSION < 13000
-}
-
-// @asserts: hipMemGetAccess - querying access for a pooled allocation's location returns a defined protection flag
-HIP_TEST_CASE(Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation) {
-  SkipIfMemoryPoolsUnsupported();
-  hip::contract::ContractCleanup cleanup;
-
-  hipMemLocation location = CurrentDeviceLocation();
-  hipStream_t stream = nullptr;
-  void* pooled = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
-  cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
-
-  const hipError_t alloc_status = hipMallocAsync(&pooled, 256, stream);
-  if (alloc_status == hipErrorNotSupported) {
-    HIP_SKIP_TEST("Stream-ordered allocation is not supported by this device/runtime path.");
-  }
-  HIP_CHECK(alloc_status);
-  // Free-and-drain on teardown: the async free is enqueued on the stream, then
-  // the stream is synchronized so the free completes before the stream-destroy
-  // action (registered earlier, so it runs after this one) tears the stream down.
-  cleanup.Add([pooled, stream] {
-    (void)hipFreeAsync(pooled, stream);
-    (void)hipStreamSynchronize(stream);
-  });
-  HIP_CHECK(hipStreamSynchronize(stream));
-  REQUIRE(pooled != nullptr);
-
-  // Querying access for the owning device location must succeed and report one of
-  // the defined protection flag values. The exact value is policy-dependent, so
-  // only membership in the valid set is asserted.
-  unsigned long long flags = 0xFFFFFFFFull;
-  HIP_CHECK(hipMemGetAccess(&flags, &location, pooled));
-  REQUIRE((flags == hipMemAccessFlagsProtNone || flags == hipMemAccessFlagsProtRead ||
-           flags == hipMemAccessFlagsProtReadWrite));
 }

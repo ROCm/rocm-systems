@@ -802,11 +802,10 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
 
-### `mem_location_pool` (4 cases)
+### `mem_location_pool` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
-| `Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation` | hipMemGetAccess | querying access for a pooled allocation's location returns a defined protection flag |
 | `Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool` | hipMemGetDefaultMemPool | querying the current device location's default memory pool returns a non-null pool when memory pools are supported |
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
@@ -1197,12 +1196,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Transfer_HipMemcpy_InvalidDirection_ReturnsInvalidMemcpyDirection` | hipMemcpy | an invalid memcpy kind is rejected with hipErrorInvalidMemcpyDirection |
 | `Contract_Transfer_HipMemcpy_ZeroBytes_Succeeds` | hipMemcpy | a zero-byte copy succeeds and leaves the destination unmodified |
 
-### `vmm` (5 cases)
+### `vmm` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_Vmm_HipMemAddressReserve_Free_Succeeds` | hipMemAddressReserve | reserving a virtual address range yields a non-null address that frees cleanly |
 | `Contract_Vmm_HipMemCreate_ReleaseAllocationHandle_SucceedsWhenSupported` | hipMemCreate | creating then releasing a physical allocation handle succeeds when supported |
+| `Contract_Vmm_HipMemGetAccess_SetReadWrite_RoundTripsReadWrite` | hipMemGetAccess | mapped VMM read-write access round-trips for the current device |
 | `Contract_Vmm_HipMemGetAllocationGranularity_Default_ReturnsPositiveValue` | hipMemGetAllocationGranularity | reports a positive minimum allocation granularity when VMM is supported |
 | `Contract_Vmm_HipMemMap_MapUnmap_SucceedsWhenSupported` | hipMemMap | mapping a handle into a reserved address range succeeds and unmaps cleanly when supported |
 | `Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported` | hipMemSetAccess | granting read-write access to mapped VMM memory allows a host round-trip through it |

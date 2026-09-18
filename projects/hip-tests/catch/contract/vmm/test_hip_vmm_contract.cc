@@ -166,3 +166,38 @@ HIP_TEST_CASE(Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported)
 
   REQUIRE(dst == src);
 }
+
+// @asserts: hipMemGetAccess - mapped VMM read-write access round-trips for the current device
+HIP_TEST_CASE(Contract_Vmm_HipMemGetAccess_SetReadWrite_RoundTripsReadWrite) {
+  SkipIfVmmUnsupported();
+  hip::contract::ContractCleanup cleanup;
+  const size_t size = AllocationGranularity();
+  void* address = nullptr;
+  hipMemGenericAllocationHandle_t handle{};
+
+  if (!CreateAllocationHandle(&handle, size)) {
+    HIP_SKIP_TEST("hipMemCreate is not supported by this device/runtime path.");
+  }
+  cleanup.Add([handle] { (void)hipMemRelease(handle); });
+
+  HIP_CHECK(hipMemAddressReserve(&address, size, 0, nullptr, 0));
+  cleanup.Add([address, size] { (void)hipMemAddressFree(address, size); });
+
+  const hipError_t map_status = hipMemMap(address, size, 0, handle, 0);
+  if (map_status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("hipMemMap is not supported by this device/runtime path.");
+  }
+  HIP_CHECK(map_status);
+  cleanup.Add([address, size] { (void)hipMemUnmap(address, size); });
+
+  hipMemAccessDesc access{};
+  access.location.type = hipMemLocationTypeDevice;
+  access.location.id = CurrentDevice();
+  access.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(address, size, &access, 1));
+
+  unsigned long long flags = hipMemAccessFlagsProtNone;
+  HIP_CHECK(hipMemGetAccess(&flags, &access.location, address));
+
+  REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+}

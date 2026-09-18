@@ -88,7 +88,7 @@ The first domains are:
 - `pointer_info`: pointer attribute, address-range, and memory-capacity query contracts
 - `pointer_query`: driver-style pointer attribute, pointer-attribute set, and allocation-size query contracts
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
-- `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
+- `vmm`: virtual memory management granularity, reserve, map, set/get access, and roundtrip contracts
 - `vmm_handle`: VMM allocation-handle retain, property query, and dma-buf address-range export contracts
 - `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) invalid-input rejection contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
@@ -108,7 +108,7 @@ The first domains are:
 - `green_context`: device/stream SM resource query, SM split, and green execution context creation, stream, and event contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
-- `mem_location_pool`: location-based memory pool set/get and access-query contracts
+- `mem_location_pool`: location-based memory pool set/get contracts
 - `mempool_shareable_handle`: shareable memory-pool handle export/import and pointer export/import contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
 - `logging`: AMD-gated extended logging enable/disable and parameter-configuration contracts
