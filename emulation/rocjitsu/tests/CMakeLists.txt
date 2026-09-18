@@ -555,6 +555,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
     patch/smem_builder_test.cpp
+    patch/entry_prologue_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
