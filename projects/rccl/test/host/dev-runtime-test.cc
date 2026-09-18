@@ -234,14 +234,6 @@ protected:
     g_devrBuildGinSegmentInfos = RealDevrBuildGinSegmentInfos;
   }
 
-  // rma.cc's ncclRmaProxyEnabled is compiled into this binary, so set the terms
-  // it reads rather than stubbing the predicate: a single LSA team switches it
-  // off on its own, and the enabled case needs a context and comm-wide support.
-  // The g_devrIsOneLsaTeam hook is restored by ResetDevRuntimeFakes in TearDown.
-  // rma.cc's ncclRmaProxyEnabled is compiled into this binary, so set the terms
-  // it reads rather than stubbing the predicate. Its first term is
-  // ncclDevrIsOneLsaTeam, which dev_runtime.cc derives from computeLsaSize --
-  // short-circuited by the fixture's non-zero bigSize, so lsaSize is taken as given.
   // Move nRanks, not lsaSize: lsaSize indexes the fixture's two-element
   // lsaRankList, so growing it reads off the end.
   static void RmaProxyTerms(ncclComm* c, bool enabled) {

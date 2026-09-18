@@ -23,8 +23,8 @@
 
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"   // g_loadParam, behind param_redirect.h
-#include "fakes/dev_runtime_micro_fakes.h"  // g_devrRmaProxyConnectOnce
+#include "fakes/nccl_fakes.h"
+#include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/rma_fakes.h"
 
 #include "nccl.h"

@@ -41,6 +41,8 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocation
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
