@@ -2562,7 +2562,8 @@ main(int argc, char** argv)
             else if(app_thread->terminationStatus() == ExitedViaSignal)
             {
                 auto sign = app_thread->getExitSignal();
-                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
+                fprintf(stderr, "\nApplication exited with signal: %i\n",
+                        static_cast<int>(sign));
             }
             code = app_thread->getExitCode();
         };
