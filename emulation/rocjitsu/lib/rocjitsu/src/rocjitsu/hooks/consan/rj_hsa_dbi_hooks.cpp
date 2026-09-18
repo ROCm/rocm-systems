@@ -2417,6 +2417,11 @@ public:
     // Runtime unload and the process-exit fallback must finalize exactly once.
     if (!active_)
       return;
+    // Opaque benchmark clients rely on this record even when the runtime
+    // retains an HSA reference and only the process-exit fallback runs.
+    log_message(
+        kLogInfo, "ConSan instrumentation timing total_ns=%llu",
+        static_cast<unsigned long long>(InstrumentationClock::instance().elapsed_nanoseconds()));
     const bool supercollider_active = config_ && config_->mode == Mode::SuperCollider;
     // Preserve the preset-only recommendation before clear_unlocked resets
     // config_. Explicit sampling controls belong to expert workflows: do not
@@ -5086,12 +5091,7 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   return true;
 }
 
-extern "C" RJ_HOOK_EXPORT void OnUnload() {
-  log_message(
-      kLogInfo, "ConSan instrumentation timing total_ns=%llu",
-      static_cast<unsigned long long>(InstrumentationClock::instance().elapsed_nanoseconds()));
-  layer().uninstall();
-}
+extern "C" RJ_HOOK_EXPORT void OnUnload() { layer().uninstall(); }
 
 extern "C" RJ_HOOK_EXPORT void
 rj_dbi_test_set_consan_transform_override(TransformOverride override) {
