@@ -109,8 +109,7 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
 }
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
-                                 L2Cache *l2, uint32_t wf_size,
-                                 uint32_t vgpr_storage_lane_count,
+                                 L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
       wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),

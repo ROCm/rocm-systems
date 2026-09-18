@@ -1368,8 +1368,8 @@ public:
   /// @param l2 Shared L2 cache (not owned).
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
                      L2Cache *l2)
-      : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE,
-                              Isa::WF_SIZE_MAX, effective_vgpr_allocation_block_size(config)) {
+      : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE, Isa::WF_SIZE_MAX,
+                              effective_vgpr_allocation_block_size(config)) {
     static_assert(!HasAccVgpr<Isa> || Isa::MAX_VGPRS_PER_WF == ACC_VGPR_OFFSET,
                   "AccVGPR allocation base must match execution-side addressing");
     const uint32_t vgprs_per_block = this->vgpr_allocation_block_size();
