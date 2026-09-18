@@ -45,6 +45,12 @@ THE SOFTWARE.
 /// primitives in asyncCopy.h, which implement the same interface on top of the
 /// async-to/from-LDS builtins instead of the tensor data mover.
 ///
+/// Each also has block-collective and warp-team forms -- *ByBlock() and *ByTeam()
+/// -- which spread one transfer across every warp, or across a contiguous warp
+/// range, the same way tdmCopy() / tdmCopyByTeam() do for the round trip. Mind the
+/// naming asymmetry: for the round trip the unsuffixed name is block-collective,
+/// while for these the unsuffixed name is warp-level.
+///
 /// \par Availability
 /// TDM is a hardware feature present on some architectures only. On a target
 /// without it, every entry point is `= delete`d: including the header is always
@@ -301,6 +307,97 @@ __device__ TDM_API void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst
 ///      matching-alignment requirement (peeled against \p globalDst here).
 template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes) TDM_DELETED;
+
+// ----------------------------------------------------------------------------
+//  BLOCK / TEAM ONE-WAY TRANSFERS
+// ----------------------------------------------------------------------------
+// The two primitives above move a range with ONE warp. The four below spread that
+// same range across every warp in the block, or across a contiguous warp team,
+// mirroring the tdmCopy() / tdmCopyByTeam() split on the round-trip API.
+//
+// Note the naming asymmetry: on the round-trip API the unsuffixed tdmCopy() is the
+// block-collective form, whereas here the unsuffixed asyncLoadToLDS() is the
+// WARP-level form, so the block form carries an explicit ByBlock suffix.
+//
+// How the work divides differs from the round trip in a way that matters. There the
+// LDS is per-warp scratch, so each warp gets its OWN window and round-trips its
+// slice through it. Here the LDS is the transfer's endpoint: one contiguous buffer
+// that the warps fill (or drain) cooperatively, each owning a disjoint byte slice of
+// it. Slices never overlap, so unlike the round trip there is no RAW/WAR hazard on
+// the LDS and no per-tile waiting -- each warp simply issues its own slice.
+//
+// Slices are cut on 256-byte boundaries (the TDM row width), so a warp's slice
+// inherits the base pointers' 128-byte alignment and its bulk stays whole rows. A
+// range shorter than one row, and the sub-row remainder of any range, go to a single
+// warp rather than being split further.
+// ----------------------------------------------------------------------------
+
+/// \brief BLOCK-COLLECTIVE transfer of \p sizeInBytes from global memory into LDS.
+///
+/// Call from ALL threads of the block with identical arguments. The range is split
+/// into contiguous per-warp slices and every warp transfers its own slice.
+///
+/// \param globalSrc   Source in global memory (HBM).
+/// \param ldsDst      Destination in LDS, \p sizeInBytes long. This is the whole
+///                    transfer's endpoint, NOT a per-warp staging window: each warp
+///                    writes a different part of it.
+/// \param sizeInBytes Number of bytes to transfer.
+///
+/// \tparam sp      SyncPolicy::Sync drains the CALLING WARP's slice before
+///                 returning; SyncPolicy::Async leaves it in flight for tdmWait().
+/// \tparam cp      Compile-time cache policy; see cachePolicy.h.
+/// \tparam Aligned Pass true only when \p globalSrc and \p ldsDst are both known to
+///                 be 128-byte aligned; this compiles out the head peel.
+///
+/// \warning Completion is PER-WAVE, so SyncPolicy::Sync only establishes that THIS
+///          warp's slice has landed. Before any thread touches a slice it did not
+///          transfer itself, the block needs a __syncthreads() placed after every
+///          warp has drained -- a bare Sync is NOT block-wide visibility.
+///
+/// \code
+///   // Fill a block-wide tile, then consume it from every thread.
+///   tdm::asyncLoadToLDSByBlock<SyncPolicy::Sync>(src, tile, tileBytes);
+///   __syncthreads();                    // required: other warps' slices
+/// \endcode
+template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ TDM_API void asyncLoadToLDSByBlock(const uint8_t* globalSrc, uint8_t* ldsDst,
+                                              size_t sizeInBytes) TDM_DELETED;
+
+/// \brief BLOCK-COLLECTIVE transfer of \p sizeInBytes from LDS out to global memory.
+/// \see asyncLoadToLDSByBlock for the calling convention, the slicing rules, the
+///      template parameters and the __syncthreads() requirement. Here the block must
+///      have finished PRODUCING \p ldsSrc (a __syncthreads() before the call) rather
+///      than after it.
+template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ TDM_API void asyncStoreFromLDSByBlock(const uint8_t* ldsSrc, uint8_t* globalDst,
+                                                 size_t sizeInBytes) TDM_DELETED;
+
+/// \brief WARP-SPECIALIZED transfer from global memory into LDS by one warp team.
+///
+/// Only warps in the half-open range [\p startWarpId, \p stopWarpId) participate;
+/// every other warp returns immediately and is free to compute. The range is split
+/// by RANK WITHIN THE TEAM, so disjoint teams can each run their own transfer
+/// concurrently into their own LDS buffer.
+///
+/// \param globalSrc   Source in global memory (HBM).
+/// \param ldsDst      Destination in LDS, \p sizeInBytes long (this team's buffer).
+/// \param sizeInBytes Number of bytes to transfer.
+/// \param startWarpId First warp of the team (inclusive).
+/// \param stopWarpId  One past the last warp (clamped to nWarps; ~0u = end).
+///
+/// \see asyncLoadToLDSByBlock for the template parameters and the per-wave
+///      completion caveat.
+/// \warning Give each team a NON-OVERLAPPING LDS buffer; the library trusts the
+///          pointer and size you pass.
+template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ TDM_API void asyncLoadToLDSByTeam(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes,
+                                             uint32_t startWarpId, uint32_t stopWarpId) TDM_DELETED;
+
+/// \brief WARP-SPECIALIZED transfer from LDS out to global memory by one warp team.
+/// \see asyncLoadToLDSByTeam for the team semantics and template parameters.
+template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ TDM_API void asyncStoreFromLDSByTeam(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes,
+                                                uint32_t startWarpId, uint32_t stopWarpId) TDM_DELETED;
 
 } // namespace tdm
 
@@ -663,6 +760,54 @@ namespace detail {
 __device__ inline uint32_t ldsAddrOf(const void* p) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
 }
+
+// ---- carve [0, sizeInBytes) into per-warp slices for the team [start, stop). ---
+// Returns this warp's slice, or false when it has nothing to transfer (off-team, or
+// the range was too short to reach it). Used by the ByBlock/ByTeam one-way entry
+// points, where the LDS side is the transfer endpoint rather than per-warp scratch,
+// so the slices tile one buffer instead of each warp owning a window.
+//
+// Slicing on whole `Grain` units is what preserves the alignment contract: every
+// slice start is a multiple of Grain (itself a multiple of the 128-byte peel
+// target), so `globalPtr + myStart` and `ldsPtr + myStart` keep the base pointers'
+// sub-128B alignment and an `Aligned` caller stays aligned. The sub-Grain remainder
+// is appended to the last issuing warp so coverage stays contiguous and gap-free.
+template <size_t Grain>
+__device__ inline bool ldsTeamSlice(size_t sizeInBytes, uint32_t startWarpId, uint32_t stopWarpId, size_t& myStart,
+                                    size_t& myBytes) {
+  const uint32_t W = warpSize;
+  const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
+  const uint32_t tid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
+  const uint32_t warpId = tid / W;
+  const uint32_t nWarps = (nThreads + W - 1) / W;
+
+  // --- team membership: this warp participates iff in [start, stop) --------
+  const uint32_t teamStop = (stopWarpId > nWarps) ? nWarps : stopWarpId;
+  if (startWarpId >= teamStop || warpId < startWarpId || warpId >= teamStop) return false;
+  const uint32_t rank = warpId - startWarpId;
+  const uint32_t teamWarps = teamStop - startWarpId; // >= 1
+
+  if (sizeInBytes == 0) return false;
+
+  const size_t nGrains = sizeInBytes / Grain;
+  if (nGrains == 0) { // shorter than one grain: not worth splitting
+    if (rank != 0) return false;
+    myStart = 0;
+    myBytes = sizeInBytes;
+    return true;
+  }
+
+  // More warps than grains would leave warps with nothing, so cap the issuers.
+  const uint32_t issuers = (size_t)teamWarps < nGrains ? teamWarps : (uint32_t)nGrains;
+  if (rank >= issuers) return false;
+
+  const size_t base = nGrains / issuers;
+  const size_t extra = nGrains % issuers;
+  myStart = (rank * base + (rank < extra ? rank : extra)) * Grain;
+  myBytes = (base + (rank < extra ? 1u : 0u)) * Grain;
+  if (rank == issuers - 1) myBytes += sizeInBytes - nGrains * Grain; // last takes the remainder
+  return true;
+}
 } // namespace detail
 
 template <SyncPolicy sp, CachePolicy cp, bool Aligned>
@@ -677,6 +822,42 @@ __device__ inline void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalD
   detail::warpLdsCopy<detail::LdsDir::Store, cp, Aligned>(reinterpret_cast<uint64_t>(globalDst),
                                                           detail::ldsAddrOf(ldsSrc), sizeInBytes);
   if constexpr (sp == SyncPolicy::Sync) tdmWait();
+}
+
+// Slices tile one LDS buffer, so a warp just transfers its own slice with the
+// warp-level path above. tdmWait() stays outside the slice check: TENSORcnt is
+// per-wave, so it is a no-op on a warp that issued nothing, and keeping it
+// unconditional leaves the wait warp-uniform (same shape as tdmCopyByTeam).
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncLoadToLDSByTeam(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes,
+                                            uint32_t startWarpId, uint32_t stopWarpId) {
+  size_t myStart, myBytes;
+  if (detail::ldsTeamSlice<detail::WIDTH>(sizeInBytes, startWarpId, stopWarpId, myStart, myBytes)) {
+    detail::warpLdsCopy<detail::LdsDir::Load, cp, Aligned>(reinterpret_cast<uint64_t>(globalSrc + myStart),
+                                                           detail::ldsAddrOf(ldsDst + myStart), myBytes);
+  }
+  if constexpr (sp == SyncPolicy::Sync) tdmWait();
+}
+
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncStoreFromLDSByTeam(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes,
+                                               uint32_t startWarpId, uint32_t stopWarpId) {
+  size_t myStart, myBytes;
+  if (detail::ldsTeamSlice<detail::WIDTH>(sizeInBytes, startWarpId, stopWarpId, myStart, myBytes)) {
+    detail::warpLdsCopy<detail::LdsDir::Store, cp, Aligned>(reinterpret_cast<uint64_t>(globalDst + myStart),
+                                                            detail::ldsAddrOf(ldsSrc + myStart), myBytes);
+  }
+  if constexpr (sp == SyncPolicy::Sync) tdmWait();
+}
+
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncLoadToLDSByBlock(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes) {
+  asyncLoadToLDSByTeam<sp, cp, Aligned>(globalSrc, ldsDst, sizeInBytes, /*start=*/0, /*stop=*/~0u);
+}
+
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncStoreFromLDSByBlock(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes) {
+  asyncStoreFromLDSByTeam<sp, cp, Aligned>(ldsSrc, globalDst, sizeInBytes, /*start=*/0, /*stop=*/~0u);
 }
 
 #endif // TDM_SUPPORTED

@@ -140,6 +140,49 @@ template <SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLI
 __device__ ASYNC_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst,
                                             size_t sizeInBytes) ASYNC_DELETED;
 
+// --- block / team one-way transfers ----------------------------------------------------------------------
+// The two primitives above move a range with ONE warp; the four below spread that same range across every
+// warp in the block, or across a contiguous warp team, mirroring the async::tdmCopy()/tdmCopyByTeam() split
+// on the round-trip API and the identically named entry points in tdm/tdmCopy.h.
+//
+// Note the naming asymmetry: on the round-trip API the unsuffixed name is the block-collective form, whereas
+// here the unsuffixed asyncLoadToLDS() is the WARP-level form, so the block form carries a ByBlock suffix.
+//
+// Work divides differently than on the round trip. There the LDS is per-warp scratch, so each warp gets its
+// own window and stages its slice through it. Here the LDS is the transfer's endpoint: one contiguous buffer
+// the warps fill (or drain) cooperatively, each owning a disjoint byte slice. Slices never overlap, so there
+// is no RAW/WAR hazard on the LDS and no per-tile waiting -- a warp just issues its own slice. Slices are cut
+// on 128-byte boundaries so each inherits the base pointers' alignment; a range shorter than that, and any
+// sub-128B remainder, goes to a single warp instead of being split further.
+//
+// Completion is PER-WAVE: SyncPolicy::Sync establishes only that the CALLING warp's slice has landed. Before
+// any thread touches a slice it did not transfer itself, the block needs a __syncthreads() placed after every
+// warp has drained -- a bare Sync is NOT block-wide visibility.
+
+// Block-collective global -> LDS transfer.  Call from ALL threads of the block with identical arguments;
+// ldsDst is the whole sizeInBytes-long endpoint, not a per-warp staging window.
+template <SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ ASYNC_API void asyncLoadToLDSByBlock(const uint8_t* globalSrc, uint8_t* ldsDst,
+                                                size_t sizeInBytes) ASYNC_DELETED;
+
+// Block-collective LDS -> global transfer.  The block must have finished PRODUCING ldsSrc (a __syncthreads()
+// before the call) rather than after it.
+template <SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ ASYNC_API void asyncStoreFromLDSByBlock(const uint8_t* ldsSrc, uint8_t* globalDst,
+                                                   size_t sizeInBytes) ASYNC_DELETED;
+
+// Warp-specialized global -> LDS transfer: only warps in [startWarpId, stopWarpId) participate (stopWarpId is
+// clamped to nWarps; ~0u means "to the end"), every other warp returns immediately.  Work splits by rank
+// within the team, so disjoint teams can each run their own transfer into their own LDS buffer.
+template <SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ ASYNC_API void asyncLoadToLDSByTeam(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes,
+                                               uint32_t startWarpId, uint32_t stopWarpId) ASYNC_DELETED;
+
+// Warp-specialized LDS -> global transfer.  See asyncLoadToLDSByTeam for the team semantics.
+template <SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
+__device__ ASYNC_API void asyncStoreFromLDSByTeam(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes,
+                                                  uint32_t startWarpId, uint32_t stopWarpId) ASYNC_DELETED;
+
 // ============================================================================
 //  IMPLEMENTATION of the three primitives declared above
 // ----------------------------------------------------------------------------
@@ -324,6 +367,52 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
   }
 }
 
+// Carve [0, sizeInBytes) into per-warp slices for the team [start, stop), returning this warp's slice or false
+// when it has nothing to transfer (off-team, or the range was too short to reach it). Used by the
+// ByBlock/ByTeam one-way entry points, where the LDS side is the transfer endpoint rather than per-warp
+// scratch, so the slices tile one buffer instead of each warp owning a window.
+//
+// Slicing on whole `Grain` units is what preserves the alignment contract: every slice start is a multiple of
+// Grain (itself a multiple of the 128-byte peel target), so `global + myStart` and `lds + myStart` keep the
+// base pointers' sub-128B alignment and an `Aligned` caller stays aligned. The sub-Grain remainder is
+// appended to the last issuing warp so coverage stays contiguous and gap-free.
+template <size_t Grain>
+__device__ inline bool ldsTeamSlice(size_t sizeInBytes, uint32_t startWarpId, uint32_t stopWarpId, size_t& myStart,
+                                    size_t& myBytes) {
+  const uint32_t W = warpSize;
+  const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
+  const uint32_t tid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
+  const uint32_t warpId = tid / W;
+  const uint32_t nWarps = (nThreads + W - 1) / W;
+
+  // --- team membership: this warp participates iff in [start, stop) --------
+  const uint32_t teamStop = (stopWarpId > nWarps) ? nWarps : stopWarpId;
+  if (startWarpId >= teamStop || warpId < startWarpId || warpId >= teamStop) return false;
+  const uint32_t rank = warpId - startWarpId;
+  const uint32_t teamWarps = teamStop - startWarpId; // >= 1
+
+  if (sizeInBytes == 0) return false;
+
+  const size_t nGrains = sizeInBytes / Grain;
+  if (nGrains == 0) { // shorter than one grain: not worth splitting
+    if (rank != 0) return false;
+    myStart = 0;
+    myBytes = sizeInBytes;
+    return true;
+  }
+
+  // More warps than grains would leave warps with nothing, so cap the issuers.
+  const uint32_t issuers = (size_t)teamWarps < nGrains ? teamWarps : (uint32_t)nGrains;
+  if (rank >= issuers) return false;
+
+  const size_t base = nGrains / issuers;
+  const size_t extra = nGrains % issuers;
+  myStart = (rank * base + (rank < extra ? rank : extra)) * Grain;
+  myBytes = (base + (rank < extra ? 1u : 0u)) * Grain;
+  if (rank == issuers - 1) myBytes += sizeInBytes - nGrains * Grain; // last takes the remainder
+  return true;
+}
+
 } // namespace async_detail
 
 template <int WAIT_CNT>
@@ -348,6 +437,48 @@ __device__ inline void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalD
   if constexpr (sp == SyncPolicy::Sync) {
     asyncWait<0>();
   }
+}
+
+// Slices tile one LDS buffer, so a warp just transfers its own slice with the warp-level path above.  The wait
+// stays outside the slice check: ASYNCcnt is per-wave, so it is a no-op on a warp that issued nothing, and
+// keeping it unconditional leaves the wait warp-uniform (same shape as async::tdmCopyByTeam).
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncLoadToLDSByTeam(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes,
+                                            uint32_t startWarpId, uint32_t stopWarpId) {
+  size_t myStart, myBytes;
+  if (async_detail::ldsTeamSlice<async_detail::NATURAL_ALIGNMENT_BYTES>(sizeInBytes, startWarpId, stopWarpId, myStart,
+                                                                       myBytes)) {
+    async_detail::warpAsyncCopy<async_detail::AsyncDir::Load, cp, Aligned>(globalSrc + myStart, ldsDst + myStart,
+                                                                           myBytes);
+  }
+  if constexpr (sp == SyncPolicy::Sync) {
+    asyncWait<0>();
+  }
+}
+
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncStoreFromLDSByTeam(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes,
+                                               uint32_t startWarpId, uint32_t stopWarpId) {
+  size_t myStart, myBytes;
+  if (async_detail::ldsTeamSlice<async_detail::NATURAL_ALIGNMENT_BYTES>(sizeInBytes, startWarpId, stopWarpId, myStart,
+                                                                       myBytes)) {
+    // Store direction only reads the LDS side; see asyncStoreFromLDS for why the const cast is safe.
+    async_detail::warpAsyncCopy<async_detail::AsyncDir::Store, cp, Aligned>(
+      globalDst + myStart, const_cast<uint8_t*>(ldsSrc) + myStart, myBytes);
+  }
+  if constexpr (sp == SyncPolicy::Sync) {
+    asyncWait<0>();
+  }
+}
+
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncLoadToLDSByBlock(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes) {
+  asyncLoadToLDSByTeam<sp, cp, Aligned>(globalSrc, ldsDst, sizeInBytes, /*start=*/0, /*stop=*/~0u);
+}
+
+template <SyncPolicy sp, CachePolicy cp, bool Aligned>
+__device__ inline void asyncStoreFromLDSByBlock(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes) {
+  asyncStoreFromLDSByTeam<sp, cp, Aligned>(ldsSrc, globalDst, sizeInBytes, /*start=*/0, /*stop=*/~0u);
 }
 
 #endif // ASYNC_COPY_SUPPORTED
