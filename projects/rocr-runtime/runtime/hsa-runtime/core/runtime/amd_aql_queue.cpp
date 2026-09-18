@@ -1366,6 +1366,38 @@ bool AqlQueue::DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* ar
       return true;
     }
 
+    // A scratch out-of-memory that cannot fit even a single wave suspends this
+    // queue; the packet processor will not run the faulting dispatch or anything
+    // queued behind it, so their completion signals would never be decremented
+    // by the GPU. Any host waiter (a blocking synchronize, or the client's queue
+    // teardown) would then block forever on a signal that can no longer be
+    // satisfied. Release those outstanding completion signals here with a
+    // negative (aborted) value so waiters wake; the failure itself is delivered
+    // to the client through errors_callback_ below. Only the recoverable
+    // scratch-shortage path reaches this - all other queue errors are unchanged.
+    if (errorCode == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
+      const uint64_t read_index = queue->LoadReadIndexRelaxed();
+      const uint64_t write_index = queue->LoadWriteIndexRelaxed();
+      const uint32_t ring_mask = queue->amd_queue_.hsa_queue.size - 1;
+      auto* ring =
+          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->amd_queue_.hsa_queue.base_address);
+      for (uint64_t index = read_index; index < write_index; ++index) {
+        hsa_kernel_dispatch_packet_t& pkt = ring[index & ring_mask];
+        const uint32_t type =
+            (atomic::Load(&pkt.header, std::memory_order_acquire) >> HSA_PACKET_HEADER_TYPE) &
+            ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+        if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH && type != HSA_PACKET_TYPE_AGENT_DISPATCH &&
+            type != HSA_PACKET_TYPE_BARRIER_AND && type != HSA_PACKET_TYPE_BARRIER_OR) {
+          continue;
+        }
+        // completion_signal sits at the same offset in every 64-byte AQL packet.
+        const hsa_signal_t completion = pkt.completion_signal;
+        if (completion.handle != 0) {
+          HSA::hsa_signal_store_screlease(completion, -1);
+        }
+      }
+    }
+
     queue->Suspend();
     if (queue->errors_callback_ != nullptr) {
       queue->errors_callback_(errorCode, queue->public_handle(), queue->errors_data_);
