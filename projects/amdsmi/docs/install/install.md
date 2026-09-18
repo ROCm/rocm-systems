@@ -22,7 +22,7 @@ they pull in, where the files land, and how much wiring you do yourself.
 | {ref}`ROCm Core SDK <install_rocm>` | Included | After you add `share/amd_smi` to `sys.path` | You want ROCm anyway. **Start here if you are unsure.** |
 | {ref}`Standalone package <install_without_rocm>` | After you add `bin/` to `PATH` | After you add `share/amd_smi` to `sys.path` | You want AMD SMI without the rest of the ROCm libraries and tools |
 | {ref}`Nightly build <install_nightly>` | Included in the virtual environment | After you add `share/amd_smi` to `sys.path` | You need a pre-release fix, or you are testing against an unreleased ROCm |
-| {ref}`Tarball <install_tarball>` | After you add `bin/` to `PATH` | After you add `share/amd_smi` to `sys.path` | You have no root access, need versions side by side, or are on an air-gapped host |
+| {ref}`Tarball <install_tarball>` | After you add `bin/` to `PATH` | After you add `share/amd_smi` to `sys.path` | You have no root access, need several versions side by side, or the machine cannot reach the package repositories |
 | {ref}`PyPI wheel <install_pypi>` | Not included | Ready to use, but it loads the host's `libamd_smi.so` | You only script against the Python API and already have a ROCm library on the host |
 
 :::{note}
