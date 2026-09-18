@@ -75,6 +75,22 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
 
    To build with AddressSanitizer instrumentation, see [Build with AddressSanitizer](#build_asan).
 
+   :::{note}
+   `make install` stages the Python module at `<prefix>/share/amd_smi/amdsmi`
+   and deliberately writes nothing to the interpreter's `site-packages`. That
+   second copy is made only when `DESTDIR` is set — which CPack and distro
+   packagers do and a plain install does not, so a direct install cannot land
+   files in the host's real `/usr`. `amd-smi` works as soon as `<prefix>/bin`
+   is on `PATH`, but `import amdsmi` needs `<prefix>/share/amd_smi` on
+   `sys.path`; see
+   {ref}`Make the Python module importable <install_python_module>`.
+
+   Packagers who need a different destination can set
+   `-DAMDSMI_SYSTEM_PYTHON_SITELIB=<dir>`. Left empty, it is detected from the
+   distro's default `python3` — the interpreter `amd-smi` itself runs under —
+   and CMake prints the path it chose during configuration.
+   :::
+
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper
 
@@ -86,7 +102,7 @@ regenerated automatically.
 To regenerate the wrapper, use the following command.
 
 ```shell
-./update_wrapper.sh
+tools/update_wrapper.sh
 ```
 
 After this command, the file in `py-interface/amdsmi_wrapper.py` will be updated
@@ -95,6 +111,32 @@ on compile.
 ```{note}
 You need Docker installed on your system to regenerate the Python wrapper.
 ```
+
+(build_python_wheel)=
+## Build the Python wheel
+
+The default build produces the system-package layout only. `-DBUILD_PYTHON_WHEEL=ON`
+additionally builds a self-contained wheel:
+
+```bash
+cmake -DBUILD_PYTHON_WHEEL=ON ..
+make -j $(nproc)
+```
+
+The wheel lands in `build/py-interface/python_package/` as
+`amdsmi-<version>+<commit>-py3-none-linux_x86_64.whl`. It carries a
+SONAME-isolated `libamd_smi_python.so` next to the wrapper, and the build flips
+the loader's `_AMDSMI_ALLOW_SYSTEM_FALLBACK` to `False` in the packaged copy, so
+this wheel never binds a system `libamd_smi.so` — see
+[The loader](../packaging.md#the-loader).
+
+Add `-DAMDSMI_WHEEL_RELEASE=ON` for a clean `MAJOR.MINOR.PATCH` version without
+the `+<commit>` local part, which PyPI rejects. The commit stays recoverable
+through `amdsmi.__commit__`.
+
+`-DBUILD_WRAPPER=ON` cannot be combined with this option; CMake rejects the
+pair, because regenerating the wrapper against `libamd_smi_python.so` emits
+bindings keyed on a library name the loader never populates.
 
 (build_tests)=
 ## Build the tests
