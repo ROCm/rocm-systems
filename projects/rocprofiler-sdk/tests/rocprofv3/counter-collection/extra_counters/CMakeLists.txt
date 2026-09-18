@@ -71,7 +71,7 @@ rocprofiler_add_integration_validate_test(
 
 # Representative parser, schema, and loader failures must produce a specific fatal
 # diagnostic without hanging. Exhaustive schema cases are covered by unit tests.
-function(add_invalid_yaml_test NAME ERROR_REGEX)
+function(ROCPROFILER_ADD_INVALID_YAML_TEST NAME ERROR_REGEX)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-extra-counters-invalid-${NAME}
         COMMAND
@@ -86,11 +86,13 @@ function(add_invalid_yaml_test NAME ERROR_REGEX)
         PRELOAD "${PRELOAD_ENV}")
 endfunction()
 
-add_invalid_yaml_test(malformed "Failed to parse extra counters YAML")
-add_invalid_yaml_test(
+ROCPROFILER_ADD_INVALID_YAML_TEST(malformed "Failed to parse extra counters YAML")
+ROCPROFILER_ADD_INVALID_YAML_TEST(
     missing_description
     "Invalid extra counters YAML: Counter 'TEST': missing 'description'")
-add_invalid_yaml_test(mixed_definition
-                      "Invalid extra counters YAML:.*'expression' cannot be combined")
-add_invalid_yaml_test(conflicting_duplicate
-                      "Conflicting counter definitions for 'GRBM_GUI_ACTIVE'")
+ROCPROFILER_ADD_INVALID_YAML_TEST(
+    mixed_definition
+    "Invalid extra counters YAML:.*'expression' cannot be combined")
+ROCPROFILER_ADD_INVALID_YAML_TEST(
+    conflicting_duplicate
+    "Conflicting counter definitions for 'GRBM_GUI_ACTIVE'")

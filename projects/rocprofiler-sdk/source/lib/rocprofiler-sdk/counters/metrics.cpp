@@ -153,11 +153,29 @@ get_constants(uint64_t starting_id)
     return constants;
 }
 
+/**
+ * Load counter metrics from the standard configuration or an API-provided
+ * extra-counter definition.
+ *
+ * Extra-counter YAML has the following structure:
+ *
+ * rocprofiler-sdk:
+ *   counters:
+ *     - name: COUNTER_NAME
+ *       description: General counter description
+ *       definitions:
+ *         - architectures: [gfxXX, gfxYY]
+ *           block: <optional>
+ *           event: <optional>
+ *           expression: <optional>
+ *
+ * A definition contains either an expression, or a block and event pair.
+ */
 counter_metrics_t
 loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
     // Stores metrics that are added via the API
-    static MetricMap added_metrics;
+    static MetricMap added_metrics {};
     auto             append_yaml = YAML::Node{};
 
     MetricMap ret;
