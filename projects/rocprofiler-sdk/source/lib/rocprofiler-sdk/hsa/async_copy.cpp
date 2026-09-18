@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
@@ -168,12 +169,15 @@ using traced_copy_data_vec_t = common::container::small_vector<traced_copy_data,
 
 struct async_copy_data
 {
-    hsa_signal_t                  orig_signal    = {};
-    hsa_signal_t                  rocp_signal    = {};
-    rocprofiler_thread_id_t       tid            = common::get_tid();
-    uint64_t                      start_ts       = 0;
-    context::correlation_id*      correlation_id = nullptr;
-    traced_copy_data_vec_t        traced_copies  = {};
+    using pooled_signal_t = common::container::pool_object<signal_t>;
+
+    hsa_signal_t             orig_signal        = {};
+    hsa_signal_t             rocp_signal        = {};
+    pooled_signal_t*         rocp_pooled_signal = nullptr;
+    rocprofiler_thread_id_t  tid                = common::get_tid();
+    uint64_t                 start_ts           = 0;
+    context::correlation_id* correlation_id     = nullptr;
+    traced_copy_data_vec_t   traced_copies      = {};
 
     auto get_lock() { return std::make_unique<std::unique_lock<std::mutex>>(m_mtx); }
 
@@ -496,34 +500,44 @@ populate_traced_copy_data(traced_copy_data&     _traced_copy,
 bool
 create_async_copy_signal(async_copy_data* _data)
 {
-    constexpr auto     _completion_signal_val = hsa_signal_value_t{1};
-    const uint32_t     _num_consumers         = 0;
-    const hsa_agent_t* _consumers             = nullptr;
-    hsa_status_t       _status                = HSA_STATUS_SUCCESS;
+    constexpr auto _completion_signal_val = hsa_signal_value_t{1};
+    auto*          _signal_pool           = get_signal_pool();
 
-    _status = get_core_table()->hsa_signal_create_fn(
-        _completion_signal_val, _num_consumers, _consumers, &_data->rocp_signal);
-
-    if(_status != HSA_STATUS_SUCCESS)
+    if(!_signal_pool)
     {
-        ROCP_ERROR << "hsa_signal_create returned non-zero error code " << _status;
+        ROCP_ERROR << "failed to get the HSA signal pool";
         return false;
     }
 
-    _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
-                                                                   HSA_SIGNAL_CONDITION_LT,
-                                                                   _completion_signal_val,
-                                                                   async_copy_handler,
-                                                                   _data);
+    auto& _pooled_signal = _signal_pool->acquire();
+
+    // A released pool entry retains its HSA handle. Only construct empty entries and reset the
+    // signal value explicitly before installing this submission's handler.
+    if(_pooled_signal.get().value.handle == 0)
+        construct_hsa_signal(_pooled_signal.get(), 0, 0, nullptr, 0);
+
+    ROCP_FATAL_IF(!_pooled_signal.in_use() || _pooled_signal.get().value.handle == 0)
+        << "acquired an invalid pooled async-copy signal";
+
+    _data->rocp_pooled_signal = &_pooled_signal;
+    _data->rocp_signal        = _pooled_signal.get().value;
+
+    get_core_table()->hsa_signal_store_screlease_fn(_data->rocp_signal, _completion_signal_val);
+
+    auto _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
+                                                                        HSA_SIGNAL_CONDITION_LT,
+                                                                        _completion_signal_val,
+                                                                        async_copy_handler,
+                                                                        _data);
 
     if(_status != HSA_STATUS_SUCCESS)
     {
         ROCP_ERROR << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
 
-        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
-            << ":: failed to destroy signal after async handler failed";
-
-        _data->rocp_signal = {};
+        ROCP_WARNING_IF(!_data->rocp_pooled_signal->release())
+            << "failed to release pooled signal after async handler registration failed";
+        _data->rocp_pooled_signal = nullptr;
+        _data->rocp_signal        = {};
         return false;
     }
 
@@ -531,17 +545,37 @@ create_async_copy_signal(async_copy_data* _data)
 }
 
 /**
- * @brief Tears down rocprofiler-owned signal state for an intercepted copy submission.
+ * @brief Releases the rocprofiler-owned signal for reuse after its async handler completes.
+ */
+void
+release_async_copy_signal(async_copy_data* _data)
+{
+    if(!_data || !_data->rocp_pooled_signal) return;
+
+    ROCP_WARNING_IF(!_data->rocp_pooled_signal->release())
+        << "failed to release pooled async-copy signal";
+    _data->rocp_pooled_signal = nullptr;
+    _data->rocp_signal        = {};
+}
+
+/**
+ * @brief Tears down an incomplete intercepted submission and refreshes its pooled signal.
  */
 void
 destroy_async_copy_data(async_copy_data* _data)
 {
     if(!_data) return;
 
-    if(_data->rocp_signal.handle != 0 && get_core_table()->hsa_signal_destroy_fn)
+    if(_data->rocp_pooled_signal)
     {
-        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
-        _data->rocp_signal = {};
+        if(_data->rocp_signal.handle != 0 && get_core_table()->hsa_signal_destroy_fn)
+        {
+            ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+            _data->rocp_pooled_signal->get().value = {};
+            construct_hsa_signal(_data->rocp_pooled_signal->get(), 0, 0, nullptr, 0);
+        }
+
+        release_async_copy_signal(_data);
     }
 
     delete _data;
@@ -603,13 +637,16 @@ async_copy_handler(hsa_signal_value_t, void* arg)
 
     auto _profile_time = tracing::profiling_time{copy_time_status, copy_time.start, copy_time.end};
 
-    // we need to decrement this reference count at the end of the functions
+    // Keep the active-signal count nonzero until all handler-owned state, including the pooled
+    // signal, has been released. Finalization waits on this count before clearing the signal pool.
     auto* _corr_id = _data->correlation_id;
     auto  _dtor    = common::scope_destructor{[&_lk, &_data, &_corr_id]() {
         _lk.reset();  // reset the unique_ptr so the lock is released
+        release_async_copy_signal(_data);
         delete _data;
 
         if(_corr_id) _corr_id->sub_ref_count();
+        if(get_active_signals()) get_active_signals()->fetch_sub(1);
     }};
 
     if(_profile_time.status == HSA_STATUS_SUCCESS)
@@ -674,9 +711,6 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         }
     }
 
-    // decrement the active signals
-    if(get_active_signals()) get_active_signals()->fetch_sub(1);
-
     auto* orig_amd_signal = convert_hsa_handle<amd_signal_t>(_data->orig_signal);
 
     // Original intercepted signal completion
@@ -691,8 +725,6 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         ROCP_TRACE << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
     }
-
-    ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
 
     return false;
 }
@@ -967,14 +999,15 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
                                        bool _decrement_corr_ref_count) {
         for(auto& [_idx, _data] : _intercept_data)
         {
-            if(_decrement_active_signals && get_active_signals())
-                get_active_signals()->fetch_sub(1);
+            auto* _corr_id = (_data) ? _data->correlation_id : nullptr;
 
-            if(_decrement_corr_ref_count && _data && _data->correlation_id)
-                _data->correlation_id->sub_ref_count();
+            if(_decrement_corr_ref_count && _corr_id) _corr_id->sub_ref_count();
 
             destroy_async_copy_data(_data);
             _data = nullptr;
+
+            if(_decrement_active_signals && get_active_signals())
+                get_active_signals()->fetch_sub(1);
         }
     };
 
@@ -1142,10 +1175,12 @@ async_copy_impl(Args... args)
 
     if(_status != HSA_STATUS_SUCCESS)
     {
-        if(get_active_signals()) get_active_signals()->fetch_sub(1);
-        if(_data->correlation_id) _data->correlation_id->sub_ref_count();
+        auto* _corr_id = _data->correlation_id;
         _lk.reset();
         destroy_async_copy_data(_data);
+        _data = nullptr;
+        if(_corr_id) _corr_id->sub_ref_count();
+        if(get_active_signals()) get_active_signals()->fetch_sub(1);
         return _status;
     }
 
