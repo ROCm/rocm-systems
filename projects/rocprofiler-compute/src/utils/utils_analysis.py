@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -573,6 +574,27 @@ def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
     return _outer_join_dispatches_and_markers(dispatch_df, pair.marker_df)
 
 
+_STITCH_STRIP_RE = re.compile(r"\|(?:seqNr|tid|ftid)=[^|]*")
+
+
+def _stitch_key_from_function(function_value: object) -> str:
+    """Function with |seqNr=, |tid=, and |ftid= tokens stripped."""
+    return _STITCH_STRIP_RE.sub("", str(function_value))
+
+
+def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
+    """Add stitch_key and function_ordinal in this pass's marker order."""
+    if pass_frame.empty:
+        return pass_frame
+    ordered = pass_frame
+    if "_marker_order" in pass_frame.columns:
+        ordered = pass_frame.sort_values("_marker_order", kind="mergesort")
+    result = ordered.copy()
+    result["stitch_key"] = result["Function"].map(_stitch_key_from_function)
+    result["function_ordinal"] = result.groupby("stitch_key", sort=False).cumcount()
+    return result
+
+
 def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
     """Dispatches whose Correlation_ID is not in that pass's marker CSV."""
     return joined_df[
@@ -661,7 +683,9 @@ def process_ml_api_trace_output(
         )
     for pair in workload.ml_api_trace_pairs:
         marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()
-        pair.joined_df = _group_kernels_onto_markers(marker_rows)
+        pair.joined_df = _add_stitch_key_and_ordinal(
+            _group_kernels_onto_markers(marker_rows)
+        )
 
 
 def validate_workload(path: str) -> None:
