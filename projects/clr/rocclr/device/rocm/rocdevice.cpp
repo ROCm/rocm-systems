@@ -173,6 +173,18 @@ int Device::agentGlobalIndex(hsa_agent_t agent) {
   return -1;
 }
 
+// Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
+bool Device::agentIsAPU(hsa_agent_t agent) {
+  uint8_t memory_properties[8] = {0};
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
+                          memory_properties)) {
+    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
+    return false;
+  }
+  return hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+}
+
 void Device::setupCpuAgent() {
   int32_t numaDistance = std::numeric_limits<int32_t>::max();
   uint32_t index = 0;  // 0 as default
@@ -658,13 +670,16 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
+  // Query before Settings::create() since the threshold selection depends on it.
+  isAPU_ = agentIsAPU(bkendDevice_);
+
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_)) {
+                                           isXgmi_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -1077,6 +1092,28 @@ bool Device::populateOCLDeviceConstants() {
                           &localUID)) {
     info_.luidLowPart_ = localUID.low;
     info_.luidHighPart_ = localUID.high;
+    // Node mask = this agent's index within its adapter (LUID). Agents sharing a
+    // LUID form a linked adapter; a standalone adapter reports 0x1. The LUID is
+    // zero on platforms without a WDDM adapter, where the node mask stays 0.
+    if ((localUID.low != 0) || (localUID.high != 0)) {
+      uint32_t luidNodeIndex = 0;
+      for (const auto& siblingAgent : gpu_agents_) {
+        if (siblingAgent.handle == bkendDevice_.handle) {
+          break;
+        }
+        hsa_luid_t siblingUID = {0};
+        if ((HSA_STATUS_SUCCESS ==
+             Hsa::agent_get_info(siblingAgent,
+                                 static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                                 &siblingUID)) &&
+            (siblingUID.low == localUID.low) && (siblingUID.high == localUID.high)) {
+          ++luidNodeIndex;
+        }
+      }
+      if (luidNodeIndex < 32) {
+        info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
+      }
+    }
   }
 
   if (HSA_STATUS_SUCCESS !=
@@ -1260,16 +1297,7 @@ bool Device::populateOCLDeviceConstants() {
 
   info_.maxWorkItemDimensions_ = 3;
 
-  uint8_t memory_properties[8];
-  // Get the memory property from ROCr.
-  if (HSA_STATUS_SUCCESS !=
-      Hsa::agent_get_info(bkendDevice_, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES,
-                         memory_properties)) {
-    LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
-  }
-
-  // Check if the device is APU
-  if (hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU)) {
+  if (isAPU_) {
     info_.hostUnifiedMemory_ = 1;
   }
 
@@ -1710,6 +1738,22 @@ bool Device::populateOCLDeviceConstants() {
       (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
       ? (atoi(sgprValue.c_str()))
       : 0;
+
+  std::string sgprAllocGranule, trapHandlerEnabled;
+  info_.sgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
+      ? atoi(sgprAllocGranule.c_str())
+      : 0;
+  // Comgr reports whether a trap handler is present, but not the size of the
+  // SGPR block it reserves per wave, which is arch-independent.
+  constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
+  info_.sgprTrapHandlerReserve_ =
+      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
+       atoi(trapHandlerEnabled.c_str()) != 0)
+      ? kTrapNumSgprs
+      : 0;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
+          info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
     info_.imageSupport_ =
@@ -2361,10 +2405,16 @@ uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags) const {
     return 0;
   }
 
+  uint64_t hsa_mem_flags = 0;
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (uncached && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
+    hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
 
   // We only allow pinned memory at this time.
-  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0,
+  hsa_status_t hsa_status = Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, hsa_mem_flags,
                                                     &hsa_vmem_handle);
 
   if (hsa_status != HSA_STATUS_SUCCESS) {
@@ -2464,7 +2514,9 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  if (flags.uncached_ && isa().versionMajor() == 12) {
+
+  // gfx120x does not support extended-scope fine-grained memory. So explicitly force the uncached flag.
+  if (flags.uncached_ && isa().versionMajor() == 12 && isa().versionMinor() == 0) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
@@ -3551,8 +3603,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
-    hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                           &extras.metadataRingBuffer);
+    // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
+    // which is the single gate every metadata path already checks.
+    if (DEBUG_CLR_ENABLE_KDQ) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &extras.metadataRingBuffer);
+    }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
       if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
@@ -3895,8 +3951,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
             std::string kernelName = vgpu->AnalyzeAqlQueue();
             const char* kname = kernelName.c_str();
             ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-                    "Memory Fault Error [%sGPU index: %u, "
-                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]",
                     host_tag.c_str(), roc_dev->index(),
                     event->memory_fault.virtual_address, kname);
           }
@@ -4073,26 +4128,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
 
-      // Prepare this signal for profiling: mark it as active and classify
-      // the packet type so checkGpuTime → addTimestamps only fires for
-      // kernel dispatches (not synthetic barriers).
+      // Prepare this signal for profiling. The dispatch path assigns this
+      // launch's slot only when the actual carrier is a kernel dispatch.
       ps->flags_.done_ = false;
-      // Record the queue this patched dispatch signal runs on (resolved from the
-      // owning segment's stream at launch) so profiling attributes it to the
-      // right stream rather than the graph launch stream.
-      ps->queue_index_ = patch.queue_index;
-      uint16_t hdr;
-      memcpy(&hdr, patch.packet, sizeof(hdr));
-      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
-      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
-      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
-      // the patched last-node completion signal contributes its GPU timing like
-      // every other graph kernel node.
-      const uint8_t amdFormat = patch.packet[2];
-      ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
-          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+      ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
@@ -4192,43 +4231,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
-  // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
-
-  if (kUseSimpleRR) {
-    // Simple round-robin: just cycle through valid engines
-    // This will be enabled for future GPUs where engine selection doesn't matter
-    if (validEngineMask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No valid SDMA engines for VirtualGPU %p", vgpu);
-      return 0;
-    }
-
-    // Cycle through bit positions, find next valid engine
-    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
-    uint32_t selected_mask = 0;
-
-    // Try up to 32 positions to find a valid engine
-    for (uint32_t i = 0; i < 32; ++i) {
-      uint32_t bit = (start_bit + i) % 32;
-      uint32_t mask = 1u << bit;
-      if (validEngineMask & mask) {
-        selected_mask = mask;
-        break;
-      }
-    }
-
-    vgpu_to_engine_[vgpu] = selected_mask;
-
-    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
-            vgpu, selected_mask, engine_type);
-
-    return selected_mask;
-  }
-
-  // Current path: Query HSA for engine status and preferences
+  // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
   uint32_t preferredMask = 0;
   hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -4238,6 +4241,22 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   if (status == HSA_STATUS_SUCCESS) {
     // Query preferred (high-bandwidth) engines
     status = Hsa::memory_get_preferred_copy_engine(peerAgent, copyAgent, &preferredMask);
+  }
+
+  const bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
+
+  // maxSdmaWriteMask_ describes CPU<->GPU traffic and includes the H2D/D2H blit
+  // slots, which ROCr refuses to drive a P2P copy on. The engines it does accept
+  // for an inter-GPU copy are the ones reported for the peer direction, so use
+  // those as the valid set instead. That query only lists engines which are idle
+  // at the time of the call, so keep the union per peer to stay correct once all
+  // of them are busy.
+  if (is_inter_gpu) {
+    uint32_t& peer_engine_mask = peer_engine_mask_[peerAgent.handle];
+    peer_engine_mask |= freeEngineMask;
+    if (peer_engine_mask != 0) {
+      validEngineMask = peer_engine_mask;
+    }
   }
 
   // Constrain to valid engines
@@ -4253,8 +4272,6 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
-
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated
     candidate_mask = validEngineMask & preferredMask;

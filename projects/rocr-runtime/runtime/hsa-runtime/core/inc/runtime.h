@@ -430,6 +430,13 @@ class Runtime {
   hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
                                const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
+  hsa_status_t SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
+                                          const hsa_agent_t* dst_agents,
+                                          uint32_t num_dst_agents,
+                                          uint32_t num_dep_signals,
+                                          const hsa_signal_t* dep_signals,
+                                          hsa_signal_t completion_signal);
+
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
                             uint64_t flags);
 
@@ -603,6 +610,10 @@ class Runtime {
   static void AsyncIPCSockServerConnLoop(void*);
 
   struct AllocationRegion {
+    /* Value of thunk_node_id when thunk_bo carries no GPU mapping, as happens
+       for an IPC import whose exporting device backs no usable agent. */
+    static constexpr HSAuint32 kNodeUnmapped = HSAuint32(-1);
+
     AllocationRegion()
         : region(NULL),
           size(0),
@@ -610,7 +621,7 @@ class Runtime {
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1) {}
+          thunk_node_id(kNodeUnmapped) {}
 
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags,
@@ -621,13 +632,19 @@ class Runtime {
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
           thunk_bo(nullptr),
-          thunk_node_id(-1),
+          thunk_node_id(kNodeUnmapped),
           driver_handle(driver_handle_arg) {}
 
     struct notifier_t {
       void* ptr;
       AMD::callback_t<hsa_amd_deallocation_callback_t> callback;
       void* user_data;
+    };
+
+    /* An import of thunk_bo's dma-buf made on a device other than the one that exported it. */
+    struct PeerImport {
+      HSAuint32 node_id;
+      HsaMemoryObjectHandle thunk_bo;
     };
 
     const MemoryRegion* region;
@@ -638,6 +655,7 @@ class Runtime {
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     HsaMemoryObjectHandle thunk_bo;
     HSAuint32 thunk_node_id;
+    std::vector<PeerImport> thunk_peer_imports;
     DriverMemoryHandle driver_handle;
   };
 
@@ -817,7 +835,15 @@ class Runtime {
   static __forceinline std::mutex& bootstrap_lock() {
     // This allocation is meant to last until the last thread has exited.
     // It is intentionally not freed.
-    static std::mutex* bootstrap_lock_ = new std::mutex;
+    // Built with -fno-threadsafe-statics, so a function-local static with a
+    // dynamic initializer is NOT thread-safe: concurrent first-time hsa_init()
+    // callers could each run 'new std::mutex' and serialize on different mutex
+    // objects, defeating Acquire/Release mutual exclusion. Guard the one-time
+    // init with a constant-initialized std::once_flag (its constexpr ctor makes
+    // it immune to -fno-threadsafe-statics) so all callers share one mutex.
+    static std::once_flag bootstrap_once;
+    static std::mutex* bootstrap_lock_ = nullptr;
+    std::call_once(bootstrap_once, []() { bootstrap_lock_ = new std::mutex; });
     return *bootstrap_lock_;
   }
   Runtime();
@@ -845,7 +871,7 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
-  /// @brief Load the rocjitsu hotswap backend as the first HSA tool.
+  /// @brief Load the rocjitsu hotswap hook as the first HSA tool.
   hsa_status_t LoadHotswapTool();
 
   /// @brief Call OnUnload method of each tool library.
@@ -873,6 +899,9 @@ class Runtime {
 
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
+
+  // GPU matching libhsakmt first_gpu_mem (KFD GTT anchor for host memory).
+  Agent* KfdGttAnchorGpu();
 
   // Mutex object to protect multithreaded access to ::allocation_map_.
   // Also ensures atomicity of pointer info queries by interlocking
@@ -1149,6 +1178,11 @@ class Runtime {
   int IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                       HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
                       bool isdmabufSysmem, uint32_t shared_handle);
+
+  /// @brief Release the buffer objects of an IPC import: the exporting device's handle and one
+  /// per peer device.
+  static void ReleaseImportHandles(HsaMemoryObjectHandle owner,
+                                   const std::vector<AllocationRegion::PeerImport>& peers);
 };
 
 }  // namespace core

@@ -36,6 +36,10 @@ struct ncclIbHandle {
   uint64_t magic; // random number to help debugging
   int isP2p;
   bool isRMA;
+  // GIDs of the listener's device PFs, used by the connector to find a local
+  // NIC on the same subnet (for multi-subnet RoCE direct-connect topologies).
+  // Zero-valued slots are ignored (validGid() returns false).
+  union ibv_gid listenGids[2];
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
@@ -53,6 +57,7 @@ struct ncclIbQpCreateAttr {
   int channelId;
   int ibDevN;
   bool useIonic;
+  int isP2p;
 };
 
 // Per-QP connection metatdata

@@ -2,49 +2,49 @@
   "schema": 1,
   "tests": {
     "barrier_signal_isfirst_test": {
-      "instructions_requiring_rewrite": 0
-    },
-    "cluster_load_test": {
-      "instructions_requiring_rewrite": 14
-    },
-    "ds_2addr_test": {
-      "instructions_requiring_rewrite": 9
-    },
-    "ds_addtid_test": {
-      "instructions_requiring_rewrite": 3
-    },
-    "ds_storexchg_2addr_test": {
-      "instructions_requiring_rewrite": 6
-    },
-    "fp8_e5m3_unpack_test": {
-      "instructions_requiring_rewrite": 5
-    },
-    "integer_wmma_hazard_test": {
-      "instructions_requiring_rewrite": 3
-    },
-    "s_clause_test": {
       "instructions_requiring_rewrite": 1
     },
-    "tensor_load_to_lds_test": {
+    "cluster_load_test": {
+      "instructions_requiring_rewrite": 15
+    },
+    "ds_2addr_test": {
+      "instructions_requiring_rewrite": 10
+    },
+    "ds_addtid_test": {
       "instructions_requiring_rewrite": 4
     },
-    "wmma_scale16_m16_test": {
-      "instructions_requiring_rewrite": 5
-    },
-    "wmma_scale16_m32_test": {
-      "instructions_requiring_rewrite": 8
-    },
-    "wmma_scale_regular_test": {
-      "instructions_requiring_rewrite": 11
-    },
-    "wmma_split_f16_test": {
-      "instructions_requiring_rewrite": 6
-    },
-    "wmma_split_f32_test": {
+    "ds_storexchg_2addr_test": {
       "instructions_requiring_rewrite": 7
     },
-    "wmma_split_fp4_test": {
+    "fp8_e5m3_unpack_test": {
+      "instructions_requiring_rewrite": 6
+    },
+    "integer_wmma_hazard_test": {
+      "instructions_requiring_rewrite": 4
+    },
+    "s_clause_test": {
+      "instructions_requiring_rewrite": 2
+    },
+    "tensor_load_to_lds_test": {
+      "instructions_requiring_rewrite": 6
+    },
+    "wmma_scale16_m16_test": {
+      "instructions_requiring_rewrite": 6
+    },
+    "wmma_scale16_m32_test": {
+      "instructions_requiring_rewrite": 9
+    },
+    "wmma_scale_regular_test": {
+      "instructions_requiring_rewrite": 12
+    },
+    "wmma_split_f16_test": {
+      "instructions_requiring_rewrite": 7
+    },
+    "wmma_split_f32_test": {
       "instructions_requiring_rewrite": 8
+    },
+    "wmma_split_fp4_test": {
+      "instructions_requiring_rewrite": 9
     }
   }
 }

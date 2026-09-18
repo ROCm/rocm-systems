@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-counter-collection-kernel-filtering
@@ -151,8 +151,8 @@ rocprofiler_add_integration_validate_test(
          --iteration-config
          ${CMAKE_CURRENT_BINARY_DIR}/input.yml
     TIMEOUT 120
-    LABELS "integration-tests" FIXTURES
-           rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
 
 # CLI filter coverage: --kernel-include-regex / --kernel-exclude-regex /
 # --kernel-iteration-range on the command line, plus edge cases.

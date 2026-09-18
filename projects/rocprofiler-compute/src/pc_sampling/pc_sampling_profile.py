@@ -5,8 +5,10 @@ import argparse
 import os
 import shlex
 import time
+from dataclasses import dataclass
 from typing import Optional, Union, cast
 
+from utils import rocprofv3_avail_interface
 from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
@@ -15,6 +17,77 @@ from utils.utils_common import (
     perform_attach_detach,
 )
 from utils.utils_profile import ProfilerOptions, is_live_attach
+
+# Interval defaults: cycles for stochastic, microseconds for host_trap.
+PC_SAMPLING_DEFAULT_INTERVALS = {"stochastic": 1048576, "host_trap": 512}
+
+
+@dataclass
+class PCSamplingLimits:
+    """Interval bounds a sampling method accepts, and whether it needs pow2."""
+
+    min_interval: int
+    max_interval: int
+    interval_pow2: bool = False
+
+
+def pc_sampling_interval_limits(
+    method: str,
+    sdk_tool_path: Optional[str] = None,
+) -> Optional[PCSamplingLimits]:
+    """Return the interval limits the GPUs report for one sampling method.
+
+    Mirrors `rocprofv3-avail info --pc-sampling`.
+
+    None means the agents were queried and none of them offers a configuration
+    for `method`. That is distinct from being unable to query at all, which
+    yields the SDK fallback limits: rocprofiler-sdk rejects a configuration no
+    agent accepts, so the caller has to stop rather than guess a range.
+    """
+    # Limits rocprofiler-sdk falls back to, see its
+    # source/lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.cpp
+    fallback = PCSamplingLimits(
+        min_interval=1,
+        max_interval=1048576,
+        interval_pow2=method == "stochastic",
+    )
+
+    try:
+        configs = rocprofv3_avail_interface.get_pc_sample_configs(sdk_tool_path)
+    except (AttributeError, OSError, ValueError) as err:
+        console_debug(f"PC sampling interval limit query failed: {err}")
+        return fallback
+
+    if configs is None:
+        return fallback
+
+    return _merge_interval_limits(configs).get(method)
+
+
+def _merge_interval_limits(
+    configs: list[tuple[int, ...]],
+) -> dict[str, PCSamplingLimits]:
+    """Merge every agent's configurations into per-method interval limits.
+
+    The SDK configures PC sampling when any single agent supports the request,
+    so the accepted range is the union across agents.
+    """
+    # Keyed on (method id, unit id) from rocprofiler-sdk/fwd.h, since the SDK
+    # matches a requested configuration on both fields.
+    supported = {(1, 2): "stochastic", (2, 3): "host_trap"}
+    limits: dict[str, PCSamplingLimits] = {}
+    for method_id, unit, minimum, maximum, flags in configs:
+        method = supported.get((method_id, unit))
+        if method is None:
+            continue
+        known = limits.setdefault(
+            method, PCSamplingLimits(min_interval=minimum, max_interval=maximum)
+        )
+        known.min_interval = min(known.min_interval, minimum)
+        known.max_interval = max(known.max_interval, maximum)
+        # INTERVAL_POW2 is bit 0 of the configuration flags.
+        known.interval_pow2 = known.interval_pow2 or bool(flags & 1)
+    return limits
 
 
 class PCSamplingProfile:

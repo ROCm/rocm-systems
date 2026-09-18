@@ -486,12 +486,12 @@ enumerate()
 
     // Deleter shared by every agent we emplace into `out`. Frees the
     // heap-allocated topology arrays (when present) and the agent struct.
-    auto agent_deleter = [](rocprofiler_agent_t* p) {
+    auto agent_deleter = [](platform::agent_info* p) {
         if(p)
         {
-            delete[] p->mem_banks;
-            delete[] p->caches;
-            delete[] p->io_links;
+            delete[] p->public_info.mem_banks;
+            delete[] p->public_info.caches;
+            delete[] p->public_info.io_links;
         }
         delete p;
     };
@@ -507,7 +507,8 @@ enumerate()
     // GPU adapters, so we add the CPU agent ourselves and shift the GPU agents
     // to start at logical_node_id=1 to stay aligned with HSA enumeration.
     {
-        auto cpu            = common::init_public_api_struct(rocprofiler_agent_t{});
+        auto  cpu_internal  = platform::agent_info{};
+        auto& cpu           = common::init_public_api_struct(cpu_internal.public_info);
         cpu.type            = ROCPROFILER_AGENT_TYPE_CPU;
         cpu.logical_node_id = logical;
         cpu.node_id         = static_cast<uint32_t>(logical);
@@ -554,7 +555,7 @@ enumerate()
             cpu_cores,
             cpu_name);
 
-        out.emplace_back(new rocprofiler_agent_t{cpu}, agent_deleter);
+        out.emplace_back(new platform::agent_info{cpu_internal}, agent_deleter);
     }
 
     // Index within GPU-type agents only (0-based). Distinct from logical_node_id,
@@ -683,11 +684,13 @@ enumerate()
             continue;
         }
 
+        auto  internal_info = platform::agent_info{};
+        auto& info          = common::init_public_api_struct(internal_info.public_info);
+
         // Counter collection derives everything from these, so a node that
         // cannot describe them fully is not publishable: aqlprofile divides by
         // simd_per_cu / num_shader_banks / cu_count, and counter definitions
         // are keyed by the gfx target name.
-        auto       info        = common::init_public_api_struct(rocprofiler_agent_t{});
         const auto gfx_name    = resolve_gfx_name(node->props);
         const auto gfx_version = ::rocprofiler::agent::parse_gfx_target_version(gfx_name);
         if(!gfx_version)
@@ -813,15 +816,7 @@ enumerate()
             info.num_xcc,
             info.family_id);
 
-        out.emplace_back(new rocprofiler_agent_t{info}, [](rocprofiler_agent_t* p) {
-            if(p)
-            {
-                delete[] p->mem_banks;
-                delete[] p->caches;
-                delete[] p->io_links;
-            }
-            delete p;
-        });
+        out.emplace_back(new platform::agent_info{internal_info}, agent_deleter);
     }
 
     return out;

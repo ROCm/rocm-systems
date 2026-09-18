@@ -53,7 +53,7 @@ if(REQUIRED_MODEL_ARCHES)
     endforeach()
 else()
     set(_required_symbol
-        "rocjitsu::cdna5::Decoder::decode(unsigned int const*)"
+        "rocjitsu::cdna5::Decoder::decode(unsigned int const*, util::DiagnosticEmitter const&)"
     )
     string(FIND "${_symbols}" "${_required_symbol}" _match)
     if(_match EQUAL -1)

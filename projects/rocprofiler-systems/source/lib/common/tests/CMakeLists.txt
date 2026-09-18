@@ -11,8 +11,10 @@ add_library(
     test_path.cpp
     test_pci_bdf.cpp
     test_remove_env.cpp
+    test_synchronized.cpp
     test_to_bool.cpp
     test_update_env.cpp
+    test_string_utility.cpp
 )
 
 target_link_libraries(

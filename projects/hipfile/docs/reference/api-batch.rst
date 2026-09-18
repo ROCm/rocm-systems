@@ -11,13 +11,6 @@ requests in a single call, poll for completion, cancel pending operations, and
 tear down batch handles. All batch types and functions belong to the
 ``batch`` Doxygen group declared in ``hipfile.h``.
 
-.. warning::
-
-   The batch API is not currently supported on the AMD backend.
-   ``hipFileBatchIOGetStatus``, ``hipFileBatchIOCancel``, and
-   ``hipFileBatchIODestroy`` are not implemented and return errors or perform
-   no operation. The maximum batch size is 128 operations.
-
 For related API surfaces, see :doc:`/reference/api-synchronous-io`,
 :doc:`/reference/api-async`, and :doc:`/reference/api-errors`.
 
@@ -30,3 +23,4 @@ contexts.
 
 .. doxygengroup:: batch
    :content-only:
+   :members:

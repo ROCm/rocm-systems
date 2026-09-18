@@ -43,8 +43,9 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_RV32I = 9,
   /// @brief RISC-V 64-bit integer base ISA.
   ROCJITSU_CODE_ARCH_RV64I = 10,
-  /// @brief gfx1250 ISA architecture.
-  ROCJITSU_CODE_ARCH_GFX1250 = 11,
+  /// @brief Compute Data Network Architecture 5 (CDNA5).
+  /// @note Keep this at the former GFX1250 value for C API compatibility.
+  ROCJITSU_CODE_ARCH_CDNA5 = 11,
   // \NPI new ISA family: add its public architecture identifier here and wire
   // its closed-world semantics through the ISA traits, properties, and users.
   /// @brief Number of named, built-in architectures.
@@ -57,6 +58,13 @@ typedef enum rj_code_arch_e {
 typedef uint32_t rj_code_binary_inst_t;
 
 /// @brief Instruction object.
+///
+/// @details A mutable pointer returned by rj_code_decoder_decode is an
+/// independent caller-owned object. Const pointers returned by basic-block
+/// accessors are borrowed from their owning list. Passing a borrowed pointer
+/// to the standalone instruction destruction API after casting away const is
+/// invalid. These are the two instruction ownership modes currently exposed
+/// by this API.
 typedef struct rj_code_inst_t rj_code_inst_t;
 
 /// @brief Opaque handle to a decoder object.
@@ -64,18 +72,22 @@ typedef struct rj_code_decoder_t rj_code_decoder_t;
 
 /// @brief Create a decoder for the architecture specified by @p arch.
 /// @param[in] arch Architecture to create a decoder for.
-/// @param[out] decoder Newly created decoder handle (refcount = 0).
+/// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
+/// on any failure when @p decoder itself is non-NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p arch is invalid or @p decoder is NULL.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR if this component did not bind @p arch.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder);
 
 /// @brief Create a decoder by canonical target ID or alias.
 /// @param[in] target_id Null-terminated target identity selected in this
 /// component's statically composed registry.
-/// @param[out] decoder Newly created decoder handle (refcount = 0).
+/// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
+/// on any failure when @p decoder itself is non-NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if an argument is NULL or empty.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR if this component did not include @p target_id.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create_for_target(const char *target_id,
                                                             rj_code_decoder_t **decoder);
@@ -99,18 +111,45 @@ RJ_API_EXPORT void rj_code_decoder_release(rj_code_decoder_t *decoder);
 RJ_API_EXPORT void rj_code_decoder_destroy(rj_code_decoder_t *decoder);
 
 /// @brief Decode an instruction from raw binary bits.
+///
+/// @details On success, @p inst receives an independent caller-owned
+/// instruction that remains valid after @p decoder is destroyed. Release it
+/// with rj_code_inst_destroy. On any failure, @p inst is set to NULL.
 /// @param[in] decoder The decoder object to use for decoding.
 /// @param[in] binary_inst Pointer to raw instruction bits in the instruction stream.
 /// @param[out] inst Pointer to the newly decoded instruction object.
 /// @retval ROCJITSU_STATUS_SUCCESS Instruction was decoded successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR Decoding failed.
 RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
                                                  const rj_code_binary_inst_t *binary_inst,
                                                  rj_code_inst_t **inst);
 
+/// @brief Destroy a caller-owned standalone decoded instruction.
+///
+/// @details This instruction type is not reference counted; destruction frees
+/// the object immediately. Only mutable instructions returned by
+/// rj_code_decoder_decode may be passed to this function. Const instructions
+/// returned by basic-block accessors are borrowed and remain owned by their
+/// list.
+/// @param[in] inst Caller-owned instruction to destroy (may be NULL).
+RJ_API_EXPORT void rj_code_inst_destroy(rj_code_inst_t *inst);
+
 /// @brief GPU target identifiers.
+///
+/// @details Named target values and ROCJITSU_CODE_TARGET_INVALID are stable C
+/// API values. New targets must use the next unallocated value without
+/// renumbering an existing target. ROCJITSU_CODE_TARGET_NUM_TARGETS is the
+/// one-past-the-last upper bound for named targets and grows when a target is
+/// added; it is not itself a target identifier. The ABI representation of
+/// rj_code_target_id_t is one 32-bit integer. C++ fixes the underlying type to
+/// int32_t; C clients must use a compiler ABI with a 32-bit enum representation.
+#ifdef __cplusplus
+typedef enum rj_code_target_id_t : int32_t {
+#else
 typedef enum rj_code_target_id_t {
+#endif
   /// @brief gfx90a target ID (CDNA2).
   ROCJITSU_CODE_TARGET_GFX90A = 0,
   /// @brief gfx942 target ID (CDNA3).
@@ -123,10 +162,14 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1201 = 4,
   /// @brief gfx1250 target ID.
   ROCJITSU_CODE_TARGET_GFX1250 = 5,
+  /// @brief gfx1251 target ID.
+  ROCJITSU_CODE_TARGET_GFX1251 = 6,
   // \NPI new GPU: add its public target identifier here and bind its
   // code-object name and ELF machine value in the corresponding ISA provider.
-  /// @brief Sentinel value representing an invalid target.
-  ROCJITSU_CODE_TARGET_INVALID = 6
+  /// @brief Number of named GPU targets and their exclusive upper bound.
+  ROCJITSU_CODE_TARGET_NUM_TARGETS = 7,
+  /// @brief Stable sentinel value representing an invalid target.
+  ROCJITSU_CODE_TARGET_INVALID = INT32_MAX
 } rj_code_target_id_t;
 
 /// @brief Instruction property flags.
@@ -222,11 +265,14 @@ typedef struct rj_code_inst_list_t rj_code_inst_list_t;
 
 /// @brief Create an instruction list from a code object.
 /// @param[in] obj Code object to decode instructions from.
-/// @param[in] target_id Target architecture for decoding.
+/// @param[in] target_id Concrete GPU target to use for decoding, not only its architecture family.
+/// If the code object has recognizable concrete-target metadata, this value must match it. An
+/// explicit target remains the fallback for legacy or synthetic objects whose target metadata is
+/// not recognizable.
 /// @param[out] inst_list Handle to the newly created instruction list (refcount = 0).
 /// @retval ROCJITSU_STATUS_SUCCESS Instruction list was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the target is
-/// unsupported.
+/// unsupported, or target_id does not match recognizable code-object target metadata.
 /// @retval ROCJITSU_STATUS_ERROR An instruction could not be decoded.
 RJ_API_EXPORT rj_status_t rj_code_inst_list_create(rj_code_object_t *obj,
                                                    rj_code_target_id_t target_id,
@@ -258,11 +304,14 @@ typedef struct rj_code_basic_block_t rj_code_basic_block_t;
 
 /// @brief Create a list of basic blocks from a code object's .text sections.
 /// @param[in] obj Code object to analyze.
-/// @param[in] target_id Target architecture for decoding.
+/// @param[in] target_id Concrete GPU target to use for decoding, not only its architecture family.
+/// If the code object has recognizable concrete-target metadata, this value must match it. An
+/// explicit target remains the fallback for legacy or synthetic objects whose target metadata is
+/// not recognizable.
 /// @param[out] list Handle to the newly created basic block list (refcount = 0; caller owns it).
 /// @retval ROCJITSU_STATUS_SUCCESS Basic block list was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL or the target is
-/// unsupported.
+/// unsupported, or target_id does not match recognizable code-object target metadata.
 /// @retval ROCJITSU_STATUS_ERROR An instruction could not be decoded.
 RJ_API_EXPORT rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj,
                                                           rj_code_target_id_t target_id,
@@ -368,7 +417,8 @@ rj_code_basic_block_first_inst(const rj_code_basic_block_t *block);
 
 /// @brief Get the next instruction in the same basic block.
 /// @param[in] inst Current instruction.
-/// @returns Pointer to the next instruction, or NULL if at the end of the block.
+/// @returns Pointer to the next instruction, or NULL if at the end of the block
+/// or if @p inst is a standalone instruction returned by rj_code_decoder_decode.
 RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst);
 
 /// @}

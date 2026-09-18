@@ -54,12 +54,14 @@ typedef enum rj_vm_mode_t {
 
 /// @brief Device command descriptor for rj_vm_execute.
 typedef struct rj_vm_cmd_t {
-  uint32_t cmd;              ///< Platform-specific command number.
-  void *buf;                 ///< Command arguments buffer (with inlined arrays).
-  size_t buf_size;           ///< Total size of the arguments buffer.
-  int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
-  rj_handle_t shared_handle; ///< [out] Borrowed backing handle, or -1; owned by the VM.
-  rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  uint32_t cmd;               ///< Platform-specific command number.
+  void *buf;                  ///< Command arguments buffer (with inlined arrays).
+  size_t buf_size;            ///< Total size of the arguments buffer.
+  int32_t result;             ///< [out] Return code (0 on success, negative errno on failure).
+  rj_handle_t shared_handle;  ///< [out] Borrowed backing handle, or -1; owned by the VM.
+  rj_handle_t in_handle;      ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  rj_handle_t in_mem_handle;  ///< [in,out] Debugger-authorized target /proc/pid/mem fd, or -1.
+  rj_handle_t in_proc_handle; ///< [in] Pinned target /proc/pid directory fd, or -1.
 } rj_vm_cmd_t;
 
 /// @brief Device memory mapping descriptor.
@@ -167,10 +169,12 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
 /// enable plugins without linking the simulator's C++ ABI. Call once after
 /// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
-/// no `plugins` attaches an empty group (near-zero overhead). This function must
-/// complete before the first rj_vm_step or rj_vm_run call and must not overlap
-/// either call; that ordering keeps plugin initialization and replacement
-/// outside the simulation-callback interval.
+/// no `plugins` attaches an empty group (near-zero overhead). Plugin load
+/// failures are best-effort unless the config sets the top-level
+/// `require_all_plugins` boolean to true. This function must complete before the
+/// first rj_vm_step or rj_vm_run call and must not overlap either call; that
+/// ordering keeps plugin initialization and replacement outside the
+/// simulation-callback interval.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON (same text used to create
 ///            the VM). Never NULL.
@@ -181,7 +185,8 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 ///            dynamic-linker search path (the interposer/local path).
 /// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or configuration failed.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, configuration failed, or a
+///                               required plugin could not be loaded.
 RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
                                              const char *plugin_dir);
 

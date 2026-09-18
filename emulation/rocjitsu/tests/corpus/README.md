@@ -60,3 +60,35 @@ exclusion, which prevents partial runs from becoming a develop baseline.
 
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
 runtime approaches the pytest timeout.
+
+## gfx1201 simulator exclusions
+
+`fpsan_global_load_tr_gfx12_w64_test` is excluded because its wave64
+`global_load_tr` path currently attempts to write a lane outside the gfx1201
+simulator wavefront. This is a simulator modeling gap, not a change introduced
+by the corpus SDK nightly.
+
+## Sanitizer simulator coverage
+
+The Clang and GCC ASan+UBSan lanes run the same target-qualified corpus as the
+release lane against a sanitizer-instrumented RocJITsu build. They use longer
+per-test timeouts to accommodate the instrumented simulator.
+
+Each case runs through `env` → `setpriv` → the process supervisor → `timeout` →
+`rocjitsu` → the optional HIP preload helper → the corpus executable. The
+run-wrapper `timeout` owns the per-test deadline and retains command output;
+pytest gets 15 seconds of cleanup headroom as a failsafe. Each target's
+failed-test rerun also has a 20-minute budget in CI, within the 60-minute
+workflow step.
+
+Clang sanitizer runs load HIP at child startup through the corpus-only helper.
+This keeps the shared Clang ASan runtime, simulator interposer, and HIP runtime
+in loader order without adding corpus-specific policy to the `rocjitsu`
+command-line interface. The GCC lane uses its executable-linked ASan runtime
+and leaves HIP loading to the corpus executable.
+
+Leak detection is disabled for the sanitizer corpus subprocesses because each
+target group mixes HIP-backed and pure simulator cases, while LeakSanitizer's
+stop-the-world scan stalls on HIP's multi-gigabyte mappings. The current corpus
+wrapper cannot vary that setting per individual case; ASan and UBSan remain
+enabled throughout.

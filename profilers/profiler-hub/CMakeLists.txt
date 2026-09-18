@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-project(profiler-hub VERSION 0.1.0)
+project(profiler-hub VERSION 0.2.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -131,6 +131,20 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
 endif()
 
 # ------------------------------------------------------------ #
+# Schema from rocprofiler-sdk-rocpd
+# ------------------------------------------------------------ #
+
+set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
+set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
+
+include(rocprofiler-sdk-rocpd)
+
+target_include_directories(
+    profiler-hub-objects
+    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+)
+
+# ------------------------------------------------------------ #
 # SQLite3
 # ------------------------------------------------------------ #
 
@@ -157,40 +171,6 @@ target_link_libraries(profiler-hub-objects PRIVATE spdlog::spdlog)
 
 include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
-
-# ------------------------------------------------------------ #
-# Schema from rocprofiler-sdk-rocpd
-# ------------------------------------------------------------ #
-
-set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
-
-include(rocm)
-include(rocprofiler-sdk-rocpd)
-
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub-objects
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub-objects
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
 
 # ------------------------------------------------------------ #
 # Logging
@@ -275,11 +255,13 @@ endforeach()
 # consumer needs. profiler-hub (SHARED) needs no such list: its dependencies
 # are already fully baked into the .so.
 #
-# Each dependency added here must also get a matching find_dependency() call
-# in profiler-hub-config.cmake.in (accumulated below into
-# profiler_hub_static_find_dependencies), or a consumer's find_package(
-# profiler-hub) + link against profiler-hub-static fails at generate time
-# because the INSTALL_INTERFACE target below is unresolvable.
+# Each dependency added here must also get a matching entry accumulated below
+# into profiler_hub_static_find_dependencies: the installed config resolves it
+# via conditional find_package() and records the result in
+# profiler-hub_static_FOUND (see profiler-hub-config.cmake.in). A shared-only
+# consumer is unaffected if one is missing on its prefix - CMake tolerates an
+# unresolvable INTERFACE_LINK_LIBRARIES entry on an IMPORTED target as long as
+# nothing actually links that target (verified empirically, CMake 3.28).
 #
 # Deliberately not keyed off ${_dep}_FOUND: that variable just reflects the
 # most recent find_package(${_dep}) call in this directory scope, and can
@@ -316,9 +298,15 @@ foreach(_dep fmt spdlog)
                 APPEND profiler_hub_static_iface_libs
                 "$<INSTALL_INTERFACE:${_dep}::${_dep}>"
             )
+            # QUIET, not find_dependency(): a miss on the consumer's prefix
+            # must set profiler-hub_static_MISSING_DEPENDENCIES, not abort
+            # the whole config for consumers who never touch the static lib.
             string(
                 APPEND profiler_hub_static_find_dependencies
-                "find_dependency(${_dep})\n"
+                "find_package(${_dep} QUIET)\n"
+                "if(NOT TARGET ${_dep}::${_dep})\n"
+                "    list(APPEND profiler-hub_static_MISSING_DEPENDENCIES \"${_dep}\")\n"
+                "endif()\n"
             )
         endif()
     endif()
@@ -326,20 +314,6 @@ endforeach()
 unset(_profiler_hub_dep_target)
 unset(_profiler_hub_dep_aliased)
 unset(_profiler_hub_dep_is_imported)
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    # rocprofiler-sdk-rocpd is only ever discovered via find_package() (see
-    # cmake/rocprofiler-sdk-rocpd.cmake); unlike fmt/spdlog it has no in-tree
-    # FetchContent fallback, so the target is always IMPORTED here and needs
-    # no IMPORTED-ness check.
-    list(
-        APPEND profiler_hub_static_iface_libs
-        "$<INSTALL_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>"
-    )
-    string(
-        APPEND profiler_hub_static_find_dependencies
-        "find_dependency(rocprofiler-sdk-rocpd)\n"
-    )
-endif()
 set_target_properties(
     profiler-hub-static
     PROPERTIES INTERFACE_LINK_LIBRARIES "${profiler_hub_static_iface_libs}"
@@ -388,17 +362,21 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 
 # Built from profiler_hub_static_iface_libs's accompanying
-# profiler_hub_static_find_dependencies (see the comment above that loop):
-# one find_dependency() per real, IMPORTED target that profiler-hub-static's
-# INTERFACE_LINK_LIBRARIES references, so a consumer's find_package(
-# profiler-hub) can resolve every one of them before profiler-hub-targets.cmake
-# is included.
+# profiler_hub_static_find_dependencies (see the comment above that loop): a
+# conditional find_package(... QUIET) per real, IMPORTED target that
+# profiler-hub-static's INTERFACE_LINK_LIBRARIES references, resolving each
+# before profiler-hub-targets.cmake is included so the static target links if
+# requested. A miss records the dependency name and clears
+# profiler-hub_static_FOUND instead of aborting - profiler-hub_FOUND (the
+# shared/default component) is untouched either way.
 if(NOT profiler_hub_static_find_dependencies STREQUAL "")
     set(PROFILER_HUB_FIND_DEPENDENCIES
-        "include(CMakeFindDependencyMacro)\n${profiler_hub_static_find_dependencies}"
+        "set(profiler-hub_static_MISSING_DEPENDENCIES \"\")\n${profiler_hub_static_find_dependencies}if(profiler-hub_static_MISSING_DEPENDENCIES)\n    set(profiler-hub_static_FOUND 0)\nelse()\n    set(profiler-hub_static_FOUND 1)\nendif()\n"
     )
 else()
-    set(PROFILER_HUB_FIND_DEPENDENCIES "")
+    set(PROFILER_HUB_FIND_DEPENDENCIES
+        "set(profiler-hub_static_MISSING_DEPENDENCIES \"\")\nset(profiler-hub_static_FOUND 1)\n"
+    )
 endif()
 
 configure_package_config_file(

@@ -252,6 +252,16 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "build_only: prevents the test from being run in install mode",  # TheRock CI runs in install mode
     )
+    config.addinivalue_line(
+        "markers",
+        "cap_perfmon: mark test as requiring CAP_PERFMON; skipped when the process "
+        "lacks this Linux capability (needed for GPU hardware performance counters)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "disable_archs(*archs): skip test when the detected GPU architecture is in "
+        "the provided set; each arg may be a str or an iterable of str",
+    )
 
     # See pytest_collection_modifyitems
     generic_functional_markers = [
@@ -310,7 +320,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "ainic",
         "network",
         "fork",
-        "user_api",
         "thread_limit",
         "pthreads",
         "rewrite_caller",
@@ -324,6 +333,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "tool_runner",
         "cli_help",
         "hpc",
         "hip",
@@ -601,6 +611,31 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
             except Exception as e:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
+        if "cap_perfmon" in item.keywords:
+            if not rocprof_config.capabilities.cap_perfmon:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason="Test requires CAP_PERFMON capability; "
+                        "either enable it or use CAP_SYS_ADMIN as a general override"
+                    )
+                )
+        if "disable_archs" in item.keywords:
+            marker = item.get_closest_marker("disable_archs")
+            disabled: set = set()
+            for arg in marker.args:
+                if isinstance(arg, str):
+                    disabled.add(arg)
+                else:
+                    disabled.update(arg)
+            if disabled:
+                info = get_gpu_info()
+                overlap = disabled.intersection(info.architectures)
+                if overlap:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason="Test disabled on " + ", ".join(sorted(overlap))
+                        )
+                    )
         if "multi_gpu" in item.keywords:
             num_gpu = item.get_closest_marker("multi_gpu").args[0]
             info = get_gpu_info()
@@ -756,7 +791,10 @@ def pytest_sessionfinish(session, exitstatus):
 def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if rocprof_config.capabilities.perf_events_usable:
         return None
-    return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
+    return (
+        "Requires either perf_event_paranoid <= 2, or CAP_PERFMON or "
+        "CAP_SYS_ADMIN to be available"
+    )
 
 
 def gpu_unavailable_reason() -> Optional[str]:
@@ -776,19 +814,41 @@ def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[st
 
 
 def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    if rocprof_config.capabilities.ptrace_scope == 0:
+    """Gate ``attach`` tests on whether ptrace attach is permitted.
+
+    Follows the yama policy documented in the Linux kernel's
+    ``Documentation/admin-guide/LSM/Yama.rst``:
+
+    * no sysctl -- yama is not active, so nothing restricts ptrace
+    * scope 0 -- classic ptrace permissions, attach is allowed
+    * scope 1/2 -- restricted, but CAP_SYS_PTRACE bypasses the restriction
+    * scope 3 -- attach is disabled outright and cannot be re-enabled
+      without a reboot
+    """
+    caps = rocprof_config.capabilities
+    scope = caps.ptrace_scope
+
+    if scope is None or scope == 0:
+        return None
+    if scope >= 3:
+        return (
+            f"yama ptrace_scope is {scope}: ptrace attach is disabled outright "
+            "and cannot be re-enabled without a reboot"
+        )
+    if caps.cap_sys_ptrace:
         return None
     return (
-        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
-        "to enable attaching to process"
+        f"Requires CAP_SYS_PTRACE or ptrace_scope 0 (currently {scope}). Run "
+        "'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope', or grant "
+        "CAP_SYS_PTRACE, to enable attaching to a running process"
     )
 
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_events_usable:
+    if caps.papi_nic_events is not None:
         return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
+    return "Requires PAPI network events to be available"
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1229,6 +1289,8 @@ def _ctest_generate_tests(
         "depends_on",
         "serialize",
         "class_name",
+        "cap_perfmon",
+        "disable_archs",
     }
     no_report_args_markers = {"rocpd"}
     only_report_args_markers = {"mpi_implementation"}
@@ -1571,6 +1633,10 @@ def _build_rocprofsys_config_header() -> list[str]:
     else:
         oshrun_version_str = "Not found"
 
+    ptrace_scope_str = (
+        "N/A (yama not active)" if cap.ptrace_scope is None else cap.ptrace_scope
+    )
+
     oshrun_strips_str = (
         "Yes (decoy '--' inserted)"
         if cap.oshrun_strips_double_dash
@@ -1661,8 +1727,10 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("CAP_SYS_PTRACE:", cap.cap_sys_ptrace),
         _row("Perf events usable:", cap.perf_events_usable),
-        _row("Ptrace scope:", cap.ptrace_scope),
+        _row("Ptrace scope:", ptrace_scope_str),
+        _row("Attach usable:", attach_unavailable_reason(rocprof_config) is None),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
         _row("AI NIC devices:", cap.ai_nic_devices),
@@ -1882,6 +1950,9 @@ def _cleanup_temp_patterns() -> list[str]:
                 f"{d}/rocprofsys-*.tmp",
                 f"{d}/buffered_storage*.bin",
                 f"{d}/metadata*.json",
+                f"{d}/perfetto-*.pftrace",
+                f"{d}/perfetto_trace*.pftrace",
+                # retained so stale artifacts from older builds are cleaned too
                 f"{d}/perfetto-*.proto",
                 f"{d}/perfetto_trace*.proto",
                 f"{d}/hsa-*.tmp",
@@ -2507,7 +2578,7 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
 
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
-        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)
+        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.pftrace)
         pass_regex: (Optional) Regex patterns that must be found in validation.stdout
         fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
         skip_on_fail: If True, skip instead of fail when validation fails
