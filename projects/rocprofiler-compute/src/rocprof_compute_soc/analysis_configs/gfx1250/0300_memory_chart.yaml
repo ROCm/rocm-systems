@@ -95,10 +95,11 @@ Panel Config:
         unit: Unit
       metric:
         # GL0 Utilization: TX_VMW_VMW_BUSY_sum is summed across all GL0 cache units (one per
-        # WGP). Use GRBM_GUI_ACTIVE * cu_per_gpu as the timebase (same as panel 9.01);
+        # WGP). Use per-XCD GRBM_GUI_ACTIVE * cu_per_gpu as the timebase (same as
+        # panel 9.01);
         # TX_VMW_GATE_EN1_sum is not comparable and produces >100% artifacts.
         GL0 Utilization:
-          value: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+          value: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         GL0 Read Requests:
           value: SUM(TX_VMW_REQ_READ_sum) / SUM($denom)

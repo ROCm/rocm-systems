@@ -67,6 +67,36 @@ TABLE_3013_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3013
 FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
 
 HBM_TRAFFIC_METRIC_NAMES = {"HBM Read Traffic", "HBM Write and Atomic Traffic"}
+GFX1250_CROSS_BLOCK_CONFIGS = (
+    pytest.param(
+        "0200_system_speed_of_light.yaml",
+        "$cu_per_gpu",
+        id="speed-of-light",
+    ),
+    pytest.param("0300_memory_chart.yaml", "$cu_per_gpu", id="memory-chart"),
+    pytest.param("0600_workgroup_manager_spi.yaml", "$se_per_gpu", id="spi"),
+    pytest.param(
+        "0800_gl0_texture_addresser_txa.yaml",
+        "$cu_per_gpu",
+        id="txa",
+    ),
+    pytest.param("0900_gl0_cache_and_lds.yaml", "$cu_per_gpu", id="gl0"),
+)
+GFX1250_CROSS_BLOCK_PRIORITY_METRICS = {
+    "6.1.0": "SPI Utilization",
+    "8.1.0": "Utilization",
+    "8.7.0": "Request Bus Utilization",
+    "8.7.1": "Request Bus Utilization - Atomic Data",
+    "8.8.0": "Command Bus Util",
+    "8.8.2": "Request Bus Util",
+    "9.1.0": "Utilization",
+}
+GFX1250_ANALYSIS_CONFIG_DIR = (
+    Path(config.rocprof_compute_home)
+    / "rocprof_compute_soc"
+    / "analysis_configs"
+    / "gfx1250"
+)
 
 
 @pytest.fixture
@@ -605,6 +635,66 @@ def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
 def test_same_bucket_priority_empty_for_gfx950():
     soc = _make_soc(PERFMON_CONFIG, arch="gfx950")
     assert soc._same_bucket_priority_metric_ids() == ()
+
+
+@pytest.mark.parametrize("config_name,unit_count", GFX1250_CROSS_BLOCK_CONFIGS)
+def test_gfx1250_cross_block_utilization_uses_per_xcd_timebase(
+    config_name,
+    unit_count,
+):
+    """Cross-block ratios must remove the XCD multiplier from GRBM cycles."""
+    config_text = (GFX1250_ANALYSIS_CONFIG_DIR / config_name).read_text(
+        encoding="utf-8"
+    )
+    assert "GRBM_GUI_ACTIVE_sum" not in config_text
+    assert "$SE_NUM" not in config_text
+    assert f"$GRBM_GUI_ACTIVE_PER_XCD * {unit_count}" in config_text
+
+
+def test_gfx1250_grbm_ratios_keep_matching_sum_timebases():
+    """GRBM-to-GRBM ratios retain sums over their matching XCD instances."""
+    grbm_config_path = (
+        GFX1250_ANALYSIS_CONFIG_DIR / "1700_graphics_register_bus_manager_grbm.yaml"
+    )
+    grbm_config = grbm_config_path.read_text(encoding="utf-8")
+    assert "GRBM_GUI_ACTIVE_sum" in grbm_config
+    assert "$GRBM_GUI_ACTIVE_PER_XCD" not in grbm_config
+
+
+def test_gfx1250_cross_block_utilization_metrics_share_perfmon_buckets(
+    gfx1250_soc,
+):
+    """Cross-block ratio partners must be collected in the same PMC pass."""
+    priority_metric_ids = gfx1250_soc._same_bucket_priority_metric_ids()
+    missing_metric_ids = GFX1250_CROSS_BLOCK_PRIORITY_METRICS.keys() - set(
+        priority_metric_ids
+    )
+    assert not missing_metric_ids, (
+        f"gfx1250 grouping policy is missing metric IDs: {missing_metric_ids}"
+    )
+
+    resolved_metrics = {
+        metric_id: _resolve_metric_name(
+            GFX1250_ANALYSIS_CONFIG_DIR.parent,
+            "gfx1250",
+            metric_id,
+        )
+        for metric_id in GFX1250_CROSS_BLOCK_PRIORITY_METRICS
+    }
+    unresolved_metric_ids = {
+        metric_id for metric_id, name in resolved_metrics.items() if name is None
+    }
+    assert not unresolved_metric_ids, (
+        f"gfx1250 policy metric IDs did not resolve: {unresolved_metric_ids}"
+    )
+    mismatched_metrics = {
+        metric_id: (resolved_metrics[metric_id], expected_name)
+        for metric_id, expected_name in GFX1250_CROSS_BLOCK_PRIORITY_METRICS.items()
+        if resolved_metrics.get(metric_id) != expected_name
+    }
+    assert not mismatched_metrics, (
+        f"gfx1250 policy metric names do not match: {mismatched_metrics}"
+    )
 
 
 # =============================================================================
