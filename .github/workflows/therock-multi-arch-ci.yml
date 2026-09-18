@@ -12,8 +12,8 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: pinned to ROCm/TheRock commit dd17fd59491c8b05a1ddb8d8403cfde7f27b8222.
-# NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
+# TheRock ref: single source of truth is .github/therock_ref.json.
+# Update it via .github/scripts/update_therock_ref.py (never hand-edit refs).
 
 # =============================================================================
 # TEMPORARY: MI455 (gfx125X) bringup configuration
@@ -128,17 +128,23 @@ jobs:
           sparse-checkout: |
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
+            .github/therock_ref.json
+            .github/actions/therock-ref
           sparse-checkout-cone-mode: false
+
+      - name: Resolve TheRock ref
+        id: therock_ref
+        uses: ./.github/actions/therock-ref
 
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+          ref: ${{ steps.therock_ref.outputs.ref }}
           path: _therock
           # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
           # build_tools/project_mappings.json are needed to map changed projects
-          # to build stages. Keep this ref in sync with the setup job's ref.
+          # to build stages.
           sparse-checkout: |
             BUILD_TOPOLOGY.toml
             build_tools/github_actions
@@ -183,7 +189,7 @@ jobs:
   setup:
     needs: [ci-gate, configure]
     if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+    uses: ./.github/workflows/_therock_setup_multi_arch.yml
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -208,8 +214,6 @@ jobs:
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
-      repository: ROCm/TheRock
-      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
@@ -237,7 +241,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+    uses: ./.github/workflows/_therock_multi_arch_ci_linux.yml
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -248,8 +252,6 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
-      repository: ROCm/TheRock
-      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     permissions:
       contents: read
       id-token: write
@@ -263,7 +265,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+    uses: ./.github/workflows/_therock_multi_arch_ci_windows.yml
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -272,8 +274,6 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
-      repository: ROCm/TheRock
-      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     permissions:
       contents: read
       id-token: write
@@ -289,12 +289,27 @@ jobs:
       - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
+      - name: "Checkout rocm-systems ref config"
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/therock_ref.json
+            .github/actions/therock-ref
+          sparse-checkout-cone-mode: true
+          path: "rocm-systems-ref"
+
+      - name: Resolve TheRock ref
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
+        id: therock_ref
+        uses: ./rocm-systems-ref/.github/actions/therock-ref
+
       - name: Checkout TheRock repository
         if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+          ref: ${{ steps.therock_ref.outputs.ref }}
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

@@ -10,7 +10,8 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: pinned to ROCm/TheRock commit dd17fd59491c8b05a1ddb8d8403cfde7f27b8222.
+# TheRock ref: single source of truth is .github/therock_ref.json.
+# Update it via .github/scripts/update_therock_ref.py (never hand-edit refs).
 
 # =============================================================================
 # TEMPORARY: MI455 (gfx125X) bringup configuration
@@ -40,7 +41,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+    uses: ./.github/workflows/_therock_setup_multi_arch.yml
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows)
@@ -50,8 +51,6 @@ jobs:
       windows_test_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
-      repository: ROCm/TheRock
-      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       external_repo: >-
@@ -93,7 +92,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+    uses: ./.github/workflows/_therock_multi_arch_ci_linux.yml
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -104,8 +103,6 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
-      repository: ROCm/TheRock
-      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     permissions:
       contents: read
       id-token: write
@@ -118,7 +115,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+    uses: ./.github/workflows/_therock_multi_arch_ci_windows.yml
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -127,8 +124,6 @@ jobs:
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
-      repository: ROCm/TheRock
-      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     permissions:
       contents: read
       id-token: write
@@ -142,11 +137,24 @@ jobs:
       - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
+      - name: "Checkout rocm-systems ref config"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/therock_ref.json
+            .github/actions/therock-ref
+          sparse-checkout-cone-mode: true
+          path: "rocm-systems-ref"
+
+      - name: Resolve TheRock ref
+        id: therock_ref
+        uses: ./rocm-systems-ref/.github/actions/therock-ref
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
+          ref: ${{ steps.therock_ref.outputs.ref }}
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

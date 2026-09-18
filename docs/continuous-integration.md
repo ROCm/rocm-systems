@@ -18,6 +18,7 @@ This document is to detail the various continuous integration (CI) systems that 
     1. [Overview](#win-overview)
 4. [TheRock CI](#therock-ci)
     1. [Overview](#rock-overview)
+    2. [Maintaining the pinned TheRock ref](#rock-ref)
 
 ## Azure Pipelines
 
@@ -110,3 +111,39 @@ graph TD;
 ## TheRock CI
 
 ### Overview <a id="rock-overview"></a>
+
+CI workflows under `.github/workflows/therock-*.yml` build and test against
+[ROCm/TheRock](https://github.com/ROCm/TheRock) pinned to a specific commit,
+rather than tracking its default branch, so that `rocm-systems` CI doesn't
+break every time TheRock's `main` changes.
+
+### Maintaining the pinned TheRock ref <a id="rock-ref"></a>
+
+The pinned commit is a single source of truth: `.github/therock_ref.json`.
+Every workflow that checks out TheRock resolves the ref from that file at
+runtime via the `.github/actions/therock-ref` composite action, instead of
+hardcoding a SHA in the workflow itself.
+
+The one exception is the three `.github/workflows/_therock_*.yml` internal
+wrapper workflows, which call TheRock's own reusable workflows
+(`setup_multi_arch.yml`, `multi_arch_ci_linux.yml`, `multi_arch_ci_windows.yml`)
+via `jobs.<id>.uses:`. GitHub Actions requires that target to be a static
+string literal, so it can't be resolved dynamically — these three files are
+the only place in the repo where the commit SHA is hardcoded.
+
+**To bump the pinned ref, do not hand-edit any of these files.** Instead run:
+
+```bash
+python .github/scripts/update_therock_ref.py <new_sha>
+```
+
+This updates `.github/therock_ref.json` and re-pins all three wrapper
+workflows in one step, keeping them in sync. The commit's exact timestamp is
+fetched straight from `<new_sha>` via `git` (a shallow fetch of TheRock, no
+GitHub API token needed); the config's `updated_date` is the local system
+date.
+
+`.github/scripts/tests/therock_ref_drift_test.py` runs as part of
+`therock-ci.yml` and fails CI if the wrappers' pins drift from
+`therock_ref.json`, or if a hardcoded TheRock commit SHA reappears anywhere
+else under `.github/workflows/`.

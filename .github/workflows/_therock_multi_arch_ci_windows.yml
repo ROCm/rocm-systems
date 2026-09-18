@@ -1,0 +1,49 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Internal wrapper around ROCm/TheRock's multi_arch_ci_windows.yml reusable
+# workflow. See _therock_setup_multi_arch.yml for the pinning convention;
+# do not hand-edit the commit pin, use .github/scripts/update_therock_ref.py.
+
+name: "[Internal] TheRock Multi-Arch CI - Windows"
+
+on:
+  workflow_call:
+    inputs:
+      build_config:
+        type: string
+      test_labels:
+        type: string
+      rocm_package_version:
+        type: string
+      test_type:
+        type: string
+      release_type:
+        type: string
+        default: ci
+      external_repo_config:
+        type: string
+        default: ""
+      changed_projects:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  call:
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18T07:13:59Z
+    with:
+      build_config: ${{ inputs.build_config }}
+      test_labels: ${{ inputs.test_labels }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      test_type: ${{ inputs.test_type }}
+      release_type: ${{ inputs.release_type }}
+      external_repo_config: ${{ inputs.external_repo_config }}
+      changed_projects: ${{ inputs.changed_projects }}
+      repository: ROCm/TheRock
+      ref: 01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18T07:13:59Z
+    permissions:
+      contents: read
+      id-token: write

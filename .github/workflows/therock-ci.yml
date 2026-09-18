@@ -74,14 +74,18 @@ jobs:
           pip install pydantic pytest requests
 
       - name: Run TheRock CI unit tests
-        run: python -m pytest .github/scripts/tests/therock_configure_ci_test.py
+        run: python -m pytest .github/scripts/tests/
+
+      - name: Resolve TheRock ref
+        id: therock_ref
+        uses: ./.github/actions/therock-ref
 
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
+          ref: ${{ steps.therock_ref.outputs.ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
