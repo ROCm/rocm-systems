@@ -320,7 +320,7 @@ def list_ml_operators(
     call_trees: dict[str, list[CallTreeNode]],
     framework_label: str = "PyTorch",
 ) -> None:
-    """Display operators as a unified call tree nested per Thread_Id.
+    """Display operators as a call tree sorted by GPU kernel duration.
 
     ``framework_label`` sets the heading text (for example "PyTorch" or
     "Triton").
@@ -332,7 +332,7 @@ def list_ml_operators(
 
     print(f"\n{'=' * 80}")
     print(f"{framework_label} Operator Call Tree: {workload_path}")
-    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print("Sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
     show_operator_summary(build_operator_summary(call_trees))
@@ -348,6 +348,15 @@ def format_duration(duration_ms: Optional[float]) -> str:
     if duration_ms < 0.01:
         return f"{duration_ms * 1000:.2f} us"
     return f"{duration_ms:.2f} ms"
+
+
+def _operator_display_name(node: CallTreeNode) -> str:
+    """Operator name with file:line when file_name is set."""
+    if not node.file_name:
+        return node.name
+    if node.line_number is None:
+        return f"{node.name} {node.file_name}"
+    return f"{node.name} {node.file_name}:{node.line_number}"
 
 
 def format_node_stats(node: CallTreeNode) -> str:
@@ -455,15 +464,17 @@ def print_wrapped_kernel_line(
 
 
 def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
-    """Print operator call trees nested per Thread_Id."""
-    for i, (thread_id, roots) in enumerate(call_trees.items()):
+    """Print top-level marker nodes sorted by total GPU duration."""
+    roots = [node for nodes in call_trees.values() for node in nodes]
+    roots.sort(key=lambda node: node.total_duration_ms, reverse=True)
+    for i, root in enumerate(roots):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        print(f"\nThread_Id {thread_id}")
-        for root in sorted(
-            roots, key=lambda node: node.total_duration_ms, reverse=True
+        print(f"\n{_operator_display_name(root)} {format_node_stats(root)}")
+        for child in sorted(
+            root.children, key=lambda node: node.total_duration_ms, reverse=True
         ):
-            print_operator_node(root)
+            print_operator_node(child)
 
 
 def show_operator_summary(summary_df: pd.DataFrame) -> None:
@@ -552,13 +563,15 @@ def print_operator_node(
     node_prefix = f"{indent}{branch_char}"
 
     if is_branching:
-        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
+        print_wrapped_tree_line(
+            node_prefix, f"{_operator_display_name(node)} {format_node_stats(node)}"
+        )
     else:
         if len(node.invocation_ids) > 0:
             suffix = f" (calls: {node.call_count})"
         else:
             suffix = ""
-        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
+        print_wrapped_tree_line(node_prefix, f"{_operator_display_name(node)}{suffix}")
 
     # Build new parent_pipes for children
     if is_last:
