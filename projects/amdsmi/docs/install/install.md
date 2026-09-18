@@ -7,9 +7,9 @@ myst:
 
 # Install the AMD SMI library and CLI tool
 
-AMD SMI is delivered as three pieces that ship together: the `libamd_smi` C
-library, the `amdsmi` Python module, and the `amd-smi` CLI. This page covers the
-system requirements and every supported way to get them onto a Linux system.
+AMD SMI has three pieces: the `libamd_smi` C library, the `amdsmi` Python
+module, and the `amd-smi` CLI. This page covers the system requirements and
+every supported way to get them onto a Linux system.
 
 (install_choose)=
 ## Choose an installation method
@@ -339,10 +339,10 @@ from.
 (install_python_module)=
 ## Make the Python module importable
 
-Every method except the {ref}`PyPI wheel <install_pypi>` *ships* the `amdsmi`
-module without *installing* it: the files land at `<root>/share/amd_smi/amdsmi`,
-and no package manager, `ldconfig` or pip step registers that directory with an
-interpreter. `import amdsmi` therefore fails until you put its parent on
+Every method on this page except the {ref}`PyPI wheel <install_pypi>` *ships*
+the `amdsmi` module without *installing* it: the files land at
+`<root>/share/amd_smi/amdsmi`, and no package manager, `ldconfig` or pip step
+registers that directory with an interpreter. `import amdsmi` therefore fails until you put its parent on
 `sys.path`. The `amd-smi` CLI is unaffected — it adds its own `share/amd_smi` to
 `sys.path` at startup.
 
@@ -409,9 +409,8 @@ These checks apply to every method. Run the ones that match what you installed.
    python3 -c "import amdsmi; print(amdsmi.__file__); print(amdsmi.amdsmi_get_lib_version())"
    ```
 
-   The printed path is the one piece of output worth reading carefully. On a
-   host with more than one AMD SMI present it tells you which install actually
-   won. If it is not the one you just installed, see
+   On a host with more than one AMD SMI present, the printed path is what tells
+   you which install won. If it is not the one you just installed, see
    [Packaging and install paths](../packaging.md) for the resolution order.
 
 ## Optional and advanced installation
