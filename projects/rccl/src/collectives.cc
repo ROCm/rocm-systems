@@ -6,7 +6,9 @@
  *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
+#include "bootstrap.h"
 #include "collectives.h"
+#include "config/collconfig.h"
 #include "enqueue.h"
 #include "graph/topo.h"
 #include "nccl.h"
@@ -17,6 +19,8 @@
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
+#include "algorithms/gin/gin_all_reduce.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "ce_coll.h"
@@ -26,6 +30,8 @@
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+
+#include <vector>
 
 using namespace rccl;
 
@@ -146,6 +152,18 @@ const char* ncclProtoToString(int proto) {
   }
 }
 
+static inline ncclResult_t ncclAllGatherConfigImpl(const void* sendbuff, void* recvbuff, size_t sendcount,
+                                                   ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
+                                                   const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncAllGather, "AllGather",
+                          sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
+                          ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  return ncclEnqueueCheck(&info);
+}
+
 NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
          ncclComm_t comm, cudaStream_t stream);
 
@@ -176,6 +194,28 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
   return ncclEnqueueCheck(&info);
 }
 
+NCCL_API(ncclResult_t, ncclAllGatherConfig, const void* sendbuff, void* recvbuff, size_t sendcount,
+         ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclAllGatherConfig(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+                                 ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) {
+  // Just pass the size of one message and not the total bytes sent/received.
+  NVTX3_FUNC_WITH_PARAMS(AllGatherConfig, NcclNvtxParamsAllGather,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype)));
+  return ncclAllGatherConfigImpl(sendbuff, recvbuff, sendcount, datatype, comm, stream, config);
+}
+
+static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
+                                                  ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream,
+                                                  const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncAlltoAll, "AlltoAll",
+                          sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
+                          ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  return ncclEnqueueCheck(&info);
+}
+
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
@@ -203,19 +243,45 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
 }
 
-// Check if symmteric kernels is requested for this collective
-bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
-                                const void* sendbuff, void* recvbuff) {
-  if (comm == nullptr || !comm->symmetricSupport) return false;
-  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
-  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
+  // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
+  // CE never dispatches. Full contract is on the declaration in rccl_common.h.
+  return !ceAlltoAllAllowed &&
+         rcclDdaEnabled(comm, totalBytes, kDdaAlltoAllGfx942ThresholdBytes, kDdaAlltoAllGfx950ThresholdBytes,
+                        kDdaAlltoAllGfx1250ThresholdBytes);
+}
 
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  ncclDevrFindWindow(comm, sendbuff, &sendWin);
-  ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+// Check if symmetric kernels are requested for this collective (local windows
+// only). Cross-rank agreement belongs in ncclMakeSymmetricTaskList at launch:
+// doing it here deadlocks ncclGroupStart because ranks enqueue one at a time.
+// Callers that report from a single rank must leave agreeAcrossRanks false
+// (the default) so they do not bootstrapAllGather alone.
+bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
+                                const void* sendbuff, void* recvbuff, bool agreeAcrossRanks) {
+  if (comm == nullptr) return false;
+
+  bool local = false;
+  if (comm->symmetricSupport && ncclSymkInitOnce(comm) == ncclSuccess &&
+      ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) {
+    struct ncclDevrWindow* sendWin = nullptr;
+    struct ncclDevrWindow* recvWin = nullptr;
+    ncclDevrFindWindow(comm, sendbuff, &sendWin);
+    ncclDevrFindWindow(comm, recvbuff, &recvWin);
+    local = sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+            (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  }
+  if (!agreeAcrossRanks || comm->nRanks < 2 || comm->bootstrap == nullptr) return local;
+
+  // Every rank that opted into agreement must enter the allgather, including
+  // ranks with symmetricSupport off (local is already false). Returning here
+  // would leave peers blocked in bootstrapAllGather.
+  std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
+  flags[(size_t)comm->rank] = local ? 1 : 0;
+  if (bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)) != ncclSuccess) return false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (flags[(size_t)r] == 0) return false;
+  }
+  return true;
 }
 
 static inline int hierarchicalShuffleNumBlocks(size_t totalBytes) {
@@ -376,6 +442,24 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
 
+// Window/graph prologue, then ncclCeAlltoAllEligible. CTA_POLICY_ZERO is also
+// checked by the caller so the default AlltoAll path skips this lookup.
+static ncclResult_t alltoAllRegisteredCeAllowed(ncclComm* comm, const void* sendbuff, void* recvbuff,
+                                                ncclDataType_t datatype, cudaStream_t stream, bool* allowed) {
+  *allowed = false;
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
+  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
+  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  *allowed = ncclCeAlltoAllEligible(comm, datatype, winRegType, hasSysmemSegment, ncclCudaGraphValid(ceGraph));
+  return ncclSuccess;
+}
+
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -425,26 +509,46 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclEnqueueCheck(&info);
     }
 #endif // ENABLE_ROCSHMEM
-    // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
-                       kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {
+#if defined(ENABLE_ROCSHMEM_GIN)
+    // GIN LSA/SDMA is checked before DDA on purpose, so an eligible call takes this path even below
+    // the DDA threshold. It measured at parity or better on small sizes.
+    if (ncclAllToAllGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype)) {
+      INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
+           comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
+      NCCLCHECK(ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream));
+      return ncclSuccess;
+    }
+#endif
+    // Symmetric kernels are not supported for AlltoAll, so unlike AllGather we cannot
+    // gate DDA on !symEligible. When single-node registered-window CE would dispatch,
+    // DDA must not early-return. Skip the window/graph probes unless DDA is actually enabled
+    // for this size and CTA_POLICY_ZERO is set -- the default AlltoAll path pays nothing.
+    const size_t totalBytes = comm->nRanks * count * ncclTypeSize(datatype);
+    bool ceAlltoAllAllowed = false;
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+        rcclAlltoAllShouldTakeDdaPath(comm, totalBytes, /*ceAlltoAllAllowed=*/false)) {
+      NCCLCHECK(alltoAllRegisteredCeAllowed(comm, sendbuff, recvbuff, datatype, stream, &ceAlltoAllAllowed));
+      if (ceAlltoAllAllowed) {
+        INFO(NCCL_COLL, "AllToAll: yielding DDA to CE (NCCL_CTA_POLICY_ZERO)");
+      }
+    }
+    if (rcclAlltoAllShouldTakeDdaPath(comm, totalBytes, ceAlltoAllAllowed)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
-        const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
         const int64_t llThresh = rcclParamDdaLLThreshold();
         const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
         // Small-chunk fast lane: LL protocol (no GPU barrier).
-        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= (size_t)llThresh &&
+        if (rcclParamDdaLL() && llThresh > 0 && totalBytes <= (size_t)llThresh &&
             ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+               comm->nRanks, comm->nNodes, count, (int)datatype, totalBytes);
           NCCLCHECK(ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream));
           return ncclSuccess;
         }
         // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
-        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= (size_t)ll128Thresh &&
+        if (rcclParamDdaLL128() && ll128Thresh > 0 && totalBytes <= (size_t)ll128Thresh &&
             ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+               comm->nRanks, comm->nNodes, count, (int)datatype, totalBytes);
           NCCLCHECK(ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream));
           return ncclSuccess;
         }
@@ -465,6 +569,27 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS
     };
   }
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclAlltoAllConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(AlltoAllConfig, NcclNvtxParamsAlltoAll,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype)));
+  return ncclAlltoAllConfigImpl(sendbuff, recvbuff, count, datatype, comm, stream, config);
+}
+
+static inline ncclResult_t ncclAllReduceConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
+                                                   ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                                   cudaStream_t stream, const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncAllReduce, "AllReduce",
+                          sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
+                          ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
   return ncclEnqueueCheck(&info);
 }
 
@@ -616,7 +741,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
   // Select the implementation once, in one place (rccl_wrap.cc). The returned
-  // decision drives dispatch here (CE 2-shot / DDA return early) and is carried
+  // decision drives dispatch here (GIN / CE 2-shot / DDA return early) and is carried
   // into taskAppend() via info so the CE-vs-kernel choice and graph-capture state
   // are never recomputed. rcclSelectAllReduce() also performs the CE graph-latch
   // tick, matching the previous inline behavior. The same function backs the
@@ -628,7 +753,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   info.decision = decision;
   info.decisionValid = true;
 
-  // Canonical selection line for addon backends (CE / DDA / symmetric). Native
+  // Canonical selection line for addon backends (GIN / CE / DDA / symmetric). Native
   // kernels report via the enqueue.cc channel{Lo..Hi} tuning line instead; this
   // names the addon RCCL runs so rcclGetCollImplInfo can be checked against it.
   if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
@@ -638,11 +763,33 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   }
 
   switch (decision.algo) {
-  case RCCL_CE_2SHOT:
+#if defined(ENABLE_ROCSHMEM_GIN)
+  case RCCL_GIN_SDMA:
+    INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
+         count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+#endif
+  case RCCL_CE_2SHOT: {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
          comm->rank, comm->nRanks);
-    return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
+    // This path bypasses ncclLaunchCeColl, so start the CeColl event here instead.
+    struct ncclCeCollArgs ceArgs = {};
+    ceArgs.func = ncclFuncAllReduce;
+    ceArgs.datatype = datatype;
+    ceArgs.redOp = op;
+    ceArgs.nElts = count;
+    ceArgs.eltSize = ncclTypeSize(datatype);
+    ceArgs.sendBuff = (uint8_t*)sendbuff;
+    ceArgs.recvBuff = (uint8_t*)recvbuff;
+    // No CollApi parent: this path returns before ncclEnqueueCheck, so the
+    // thread-local handle still names a previous collective.
+    NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
+    ncclResult_t ceRet = ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
+    ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
+    return ceRet;
+  }
   case RCCL_DDA_FABRIC_LL:
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
@@ -693,6 +840,27 @@ ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, si
   return ncclEnqueueCheck(&info);
 }
 
+NCCL_API(ncclResult_t, ncclAllReduceConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclAllReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                 ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(AllReduceConfig, NcclNvtxParamsAllReduce,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op));
+  return ncclAllReduceConfigImpl(sendbuff, recvbuff, count, datatype, op, comm, stream, config);
+}
+
+static inline ncclResult_t ncclBroadcastConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
+                                                   ncclDataType_t datatype, int root, ncclComm_t comm,
+                                                   cudaStream_t stream, const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncBroadcast, "Broadcast",
+                          sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
+                          BROADCAST_CHUNKSTEPS, BROADCAST_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  return ncclEnqueueCheck(&info);
+}
+
 NCCL_API(ncclResult_t, ncclBroadcast, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          int root, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
@@ -718,6 +886,15 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   return ncclEnqueueCheck(&info);
 }
+
+NCCL_API(ncclResult_t, ncclBroadcastConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclBroadcastConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                                 ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(BroadcastConfig, NcclNvtxParamsBroadcast,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root));
+  return ncclBroadcastConfigImpl(sendbuff, recvbuff, count, datatype, root, comm, stream, config);
+}
 /* Deprecated original "in place" function, similar to MPI */
 NCCL_API(ncclResult_t, ncclBcast, void* buff, size_t count, ncclDataType_t datatype, int root, ncclComm_t comm,
          cudaStream_t stream);
@@ -725,6 +902,18 @@ ncclResult_t ncclBcast(void* buff, size_t count, ncclDataType_t datatype, int ro
                        cudaStream_t stream) {
   NCCLCHECK(Recorder::instance().record(rrBcast, buff, buff, count, datatype, comm, stream, root));
   return ncclBroadcast(buff, buff, count, datatype, root, comm, stream);
+}
+
+static inline ncclResult_t ncclGatherConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
+                                                ncclDataType_t datatype, int root, ncclComm_t comm, cudaStream_t stream,
+                                                const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncGather, "Gather",
+                          sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
+                          GATHER_CHUNKSTEPS, GATHER_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclGather, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -742,6 +931,27 @@ ncclResult_t ncclGather_impl(const void* sendbuff, void* recvbuff, size_t count,
   return ncclEnqueueCheck(&info);
 }
 
+NCCL_API(ncclResult_t, ncclGatherConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclGatherConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                              ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(GatherConfig, NcclNvtxParamsGather,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root));
+  return ncclGatherConfigImpl(sendbuff, recvbuff, count, datatype, root, comm, stream, config);
+}
+
+static inline ncclResult_t ncclReduceConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
+                                                ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm,
+                                                cudaStream_t stream, const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncReduce, "Reduce",
+                          sendbuff, recvbuff, count, datatype, op, root, comm, stream, /* Args */
+                          REDUCE_CHUNKSTEPS, REDUCE_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  return ncclEnqueueCheck(&info);
+}
+
 NCCL_API(ncclResult_t, ncclReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
 ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -756,6 +966,28 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
 
   NCCLCHECK(Recorder::instance().record(rrReduce, info));
 
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclReduceConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                              ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                              const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(ReduceConfig, NcclNvtxParamsReduce,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, op));
+  return ncclReduceConfigImpl(sendbuff, recvbuff, count, datatype, op, root, comm, stream, config);
+}
+
+static inline ncclResult_t ncclReduceScatterConfigImpl(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                       ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                                       cudaStream_t stream, const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncReduceScatter, "ReduceScatter",
+                          sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
+                          REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
   return ncclEnqueueCheck(&info);
 }
 
@@ -958,6 +1190,28 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   }
 }
 
+NCCL_API(ncclResult_t, ncclReduceScatterConfig, const void* sendbuff, void* recvbuff, size_t recvcount,
+         ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclReduceScatterConfig(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+                                     ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream,
+                                     const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(ReduceScatterConfig, NcclNvtxParamsReduceScatter,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op));
+  return ncclReduceScatterConfigImpl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, config);
+}
+
+static inline ncclResult_t ncclScatterConfigImpl(const void* sendbuff, void* recvbuff, size_t count,
+                                                 ncclDataType_t datatype, int root, ncclComm_t comm,
+                                                 cudaStream_t stream, const ncclCollConfig_t* config) {
+  // clang-format off
+  struct ncclInfo info = {ncclFuncScatter, "Scatter",
+                          sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
+                          SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS};
+  // clang-format on
+  NCCLCHECK(ncclParseCollConfig(config, &info.collConfig));
+  return ncclEnqueueCheck(&info);
+}
+
 NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          int root, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
@@ -971,6 +1225,15 @@ ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t count
                           datatype,           ncclSum,           root,     comm,     stream, /* Args */
                           SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS};
   return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclScatterConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+         int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t ncclScatterConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
+                               ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) {
+  NVTX3_FUNC_WITH_PARAMS(ScatterConfig, NcclNvtxParamsScatter,
+                         NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root));
+  return ncclScatterConfigImpl(sendbuff, recvbuff, count, datatype, root, comm, stream, config);
 }
 
 NCCL_API(ncclResult_t, ncclSend, const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm,

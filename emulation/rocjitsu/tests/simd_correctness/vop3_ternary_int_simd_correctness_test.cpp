@@ -16,6 +16,10 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -116,15 +120,16 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop3_tern_int_mem"), l2("vop3_tern_int_l2") {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : gpu_mem("vop3_tern_int_mem"), l2("vop3_tern_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_int", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -141,7 +146,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -258,7 +263,7 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
       fx.cu->write_vgpr(base + 2, 0, golden.src2);
       fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
       fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
-      fx.cu->execute_instruction(inst.get(), *fx.wf);
+      EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
 
       EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), golden.expected);
       EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 1), DST_SENTINEL);

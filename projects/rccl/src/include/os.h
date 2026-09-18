@@ -67,7 +67,8 @@ ncclResult_t ncclOsSocketResetFd(struct ncclSocket* sock);
 void ncclOsSocketResetAccept(struct ncclSocket* sock);
 ncclResult_t ncclOsSocketTryAccept(struct ncclSocket* sock);
 
-void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond);
+void ncclOsSetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized);
+void ncclOsUnsetMutexCondShared(std::mutex& mutex, std::condition_variable& cond, int* initialized);
 
 void ncclOsCpuZero(ncclAffinity& affinity);
 int ncclOsCpuCount(const ncclAffinity& affinity);
@@ -81,6 +82,10 @@ int ncclOsGetCpu();
 ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen);
 
 ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen);
+
+// Compute partition mode of an AMD GPU ("SPX", "DPX", "CPX", ...). Yields an empty string where the
+// platform does not report one, which callers must read as "unknown", not as "not partitioned".
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen);
 
 #if NCCL_OS_WINDOWS
 // Forward declare nvmlDevice_t to avoid including nvml.h
