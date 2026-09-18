@@ -3175,6 +3175,8 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
         "num_threads=4",
         "-o",
         "cpu_dispatch_threads=17",
+        "-o",
+        "async_helper_threads=8",
         "--",
         "sh",
         "-c",
@@ -3184,6 +3186,7 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
     assert_eq!(config["cpu_thread_budget"], 64);
     assert_eq!(config["num_threads"], 4);
     assert_eq!(config["cpu_dispatch_threads"], 17);
+    assert_eq!(config["async_helper_threads"], 8);
     assert!(
         config["thread_allocations"]
             .as_array()
@@ -3205,5 +3208,6 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
     ]);
     let config: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(config["num_threads"], 1);
+    assert_eq!(config["async_helper_threads"], 0);
     assert_eq!(config["vm"]["gpu"]["num_gpus"], 2);
 }
