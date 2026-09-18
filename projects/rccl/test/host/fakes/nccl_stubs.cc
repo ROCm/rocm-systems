@@ -118,9 +118,13 @@ bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
+// Omitted when RCCL_STUBS_OMIT_ncclSymkFinalize is defined -- the unit under
+// test defines this itself (sym_kernels.cc).
+#ifndef RCCL_STUBS_OMIT_ncclSymkFinalize
 static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
+#endif
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 // Recording the comm matters: commCleanup forwards its own argument, so passing anything else would be invisible.
 // TRAP: the recording must live here, not in the functor's default -- the default is reachable from the
@@ -229,7 +233,9 @@ void ResetNcclStubs() {
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
   g_ncclMemFree = DefaultNcclMemFree;
+#ifndef RCCL_STUBS_OMIT_ncclSymkFinalize
   g_ncclSymkFinalize = DefaultNcclSymkFinalize;
+#endif
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_collTraceDestroy = DefaultCollTraceDestroy;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
