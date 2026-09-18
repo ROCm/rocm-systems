@@ -3198,34 +3198,17 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_NonLogOnceGuardWarnsOnEveryCall) {
 }
 
 // ===========================================================================
-// rcclDdaEnabled -- rccl_wrap.cc:648-667. rcclParamDdaEnable's real default
-// (1) and ncclGroupDepth's real default (0) both favor the "enabled" path,
+// rcclDdaEnabled -- rcclParamDdaEnable's real default (1) and
+// ncclGroupDepth's real default (0) both favor the "enabled" path,
 // so most branches are reachable without the seam; not cached, no isolation
-// needed.
+// needed. Threshold is passed explicitly by the caller (from the arch table).
 // ===========================================================================
 
 TEST(WrapMicrotest, DdaEnabled_DisabledByParamReturnsFalse) {
   ScopedHook loadParam(g_loadParam, ForceParam("RCCL_DDA_ENABLE", int64_t(0)));
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
-  DeleteCommWithArch(comm);
-}
-
-TEST(WrapMicrotest, DdaEnabled_Gfx1250UsesCallerDefaultThreshold) {
-  ncclComm* comm = MakeCommWithArch("gfx1250");
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, 0, /*gfx1250Default=*/2048));
-  DeleteCommWithArch(comm);
-}
-
-// Same ternary-with-fallback pattern as the gfx950 test below
-// (DdaEnabled_Gfx950FallsBackToParamThresholdWhenDefaultZero), but for
-// gfx1250 -- previously only the caller-provides-a-real-default case was
-// exercised; this closes the fallback-path gap.
-TEST(WrapMicrotest, DdaEnabled_Gfx1250FallsBackToParamThresholdWhenDefaultZero) {
-  ncclComm* comm = MakeCommWithArch("gfx1250");
-  // gfx1250Default == 0 -> falls back to rcclParamDdaThreshold()'s real default (128MiB); well within it.
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, 0, /*gfx1250Default=*/0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
@@ -3238,7 +3221,7 @@ TEST(WrapMicrotest, DdaEnabled_ImplicitLaunchOrderReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
   comm->config.launchOrderImplicit = 1;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
@@ -3250,7 +3233,7 @@ TEST(WrapMicrotest, DdaEnabled_InsideGroupReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
   ncclGroupDepth = 1;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   ncclGroupDepth = 0; // restore: other tests in this binary assume the default
   DeleteCommWithArch(comm);
 }
@@ -3258,36 +3241,28 @@ TEST(WrapMicrotest, DdaEnabled_InsideGroupReturnsFalse) {
 TEST(WrapMicrotest, DdaEnabled_Gfx942BelowRankThresholdReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 7; // below the 8-rank floor
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, DdaEnabled_Gfx942WithinThresholdReturnsTrue) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/2048, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/2048, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, DdaEnabled_Gfx942AboveThresholdReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/2049, /*gfx942Default=*/2048, 0, 0));
-  DeleteCommWithArch(comm);
-}
-
-TEST(WrapMicrotest, DdaEnabled_Gfx950FallsBackToParamThresholdWhenDefaultZero) {
-  ncclComm* comm = MakeCommWithArch("gfx950");
-  comm->nRanks = 8;
-  // gfx950Default == 0 -> falls back to rcclParamDdaThreshold()'s real default (128MiB); well within it.
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, /*gfx950Default=*/0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/2049, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx90a");
   comm->nRanks = 8;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, /*gfx950Default=*/2048, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
@@ -3790,7 +3765,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       "Wrap_SelectAllReduce_DdaFabricLLChosenOnGfx1250",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -3817,7 +3792,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
       []() {
         g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -3846,7 +3821,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThres
       "Wrap_SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThreshold",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -3875,7 +3850,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL
       "Wrap_SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL128Eligible",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         // g_allReduceDdaFabricLLEligible / LL128Eligible left at their default (false).
@@ -3900,7 +3875,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch) {
       "Wrap_SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250

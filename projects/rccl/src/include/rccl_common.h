@@ -267,7 +267,7 @@ bool rcclNcclAlgoEnvIsSet();
 // gfx1250 may still take fabric DDA when CE is eligible. DDA must also be enabled for this
 // arch/size. Host-side and GPU-free so the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                    bool symEligible, bool ceAllReduceAllowed);
+                                    bool symEligible, bool ceAllReduceAllowed, bool query);
 // Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
 // symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
 // `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.
@@ -346,9 +346,8 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 // Returns true when the DDA fast path should be attempted for this arch/size.
 // `threshold` is the per-collective cap from rcclDdaEntryThreshold(). 0 disables
 // DDA for the call.
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold);
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
-                    size_t gfx950Default, size_t gfx1250Default);
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
+                    bool query = false, const char* prefix = nullptr);
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
