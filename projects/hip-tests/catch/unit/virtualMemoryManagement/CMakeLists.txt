@@ -46,6 +46,14 @@ hip_add_exe_to_target(NAME VirtualMemoryManagementTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
+if(UNIX)
+  add_executable(hipVmmSupportProbe EXCLUDE_FROM_ALL hipVmmSupportProbe_Exe.cc)
+  set_source_files_properties(hipVmmSupportProbe_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipVmmSupportProbe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(VirtualMemoryManagementTest hipVmmSupportProbe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipVmmSupportProbe)
+endif()
+
 if(UNIX AND HIP_PLATFORM MATCHES "amd")
   # hipMemCreateHostNuma.cc uses libnuma for NUMA node discovery and placement
   # verification (numa_available(), numa_max_node(), move_pages(), etc.).

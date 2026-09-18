@@ -15,6 +15,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <hip_test_process.hh>
 #include "hip_vmm_common.hh"
 
 #define DATA_SIZE (1 << 13)
@@ -414,6 +415,15 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
+  constexpr int kVmmUnsupportedExitCode = 77;
+  hip::SpawnProc vmmSupportProbe("hipVmmSupportProbe", true, true);
+  const int probeExitCode = vmmSupportProbe.run();
+  INFO("VMM support probe output:\n" << vmmSupportProbe.getOutput());
+  if (probeExitCode == kVmmUnsupportedExitCode) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+  }
+  REQUIRE(probeExitCode == 0);
+
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2], fdpid[2];
@@ -425,12 +435,16 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
 
   if (pid == 0) {  // child
     auto pid2 = fork();
+    REQUIRE(pid2 >= 0);
     if (pid2 == 0) {  // grandchild
       REQUIRE(close(fd[1]) == 0);
       REQUIRE(close(fdSig[0]) == 0);
+      REQUIRE(close(fdpid[0]) == 0);
+      REQUIRE(close(fdpid[1]) == 0);
       // Wait for parent process to create the socket.
       size_t size_mem = 0;
-      REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
+      REQUIRE(hip::readAll(fd[0], &size_mem, sizeof(size_mem)));
+      REQUIRE(close(fd[0]) == 0);
       CTX_CREATE();
 
       // Open Socket as client
@@ -439,7 +453,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
 
       // Signal Parent process that Child is ready to receive msg
       int sig = 0;
-      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+      REQUIRE(hip::writeAll(fdSig[1], &sig, sizeof(sig)));
+      REQUIRE(close(fdSig[1]) == 0);
 
       // receive message from parent provess
       checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
@@ -480,28 +495,31 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
       HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
       CTX_DESTROY();
       checkSysCallErrors(sockObj.closeThisSock());
-      REQUIRE(close(fd[0]) == 0);
-      REQUIRE(close(fdSig[1]) == 0);
-      exit(0);
+      _exit(0);
     } else {
       int status;
+      REQUIRE(close(fd[0]) == 0);
+      REQUIRE(close(fd[1]) == 0);
+      REQUIRE(close(fdSig[0]) == 0);
+      REQUIRE(close(fdSig[1]) == 0);
       REQUIRE(close(fdpid[0]) == 0);
-      REQUIRE(write(fdpid[1], &pid2, sizeof(pid2)) >= 0);
-      REQUIRE(wait(&status) >= 0);
-      REQUIRE(status == 0);
+      REQUIRE(hip::writeAll(fdpid[1], &pid2, sizeof(pid2)));
       REQUIRE(close(fdpid[1]) == 0);
-      exit(0);
+      REQUIRE(waitpid(pid2, &status, 0) == pid2);
+      REQUIRE(WIFEXITED(status));
+      REQUIRE(WEXITSTATUS(status) == 0);
+      _exit(0);
     }
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
     REQUIRE(close(fdpid[1]) == 0);
-    int pid_grChld = 0;
-    REQUIRE(read(fdpid[0], &pid_grChld, sizeof(pid_grChld)) >= 0);
+    pid_t pid_grChld = 0;
+    REQUIRE(hip::readAll(fdpid[0], &pid_grChld, sizeof(pid_grChld)));
+    REQUIRE(close(fdpid[0]) == 0);
     CTX_CREATE();
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
-    checkVMMSupported(device);
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
@@ -524,23 +542,23 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
     // Create the socket for communication as Server
     ipcSocketCom sockObj(true);
     // Signal child process that socket is ready
-    REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
+    REQUIRE(hip::writeAll(fd[1], &size_mem, sizeof(size_mem)));
+    REQUIRE(close(fd[1]) == 0);
     // Wait for the child process to receive msg
     int sig = 0;
-    REQUIRE(read(fdSig[0], &sig, sizeof(int)) >= 0);
+    REQUIRE(hip::readAll(fdSig[0], &sig, sizeof(sig)));
+    REQUIRE(close(fdSig[0]) == 0);
     checkSysCallErrors(sockObj.sendShareableHdl(shareable_handle, pid_grChld));
     // Wait for child process to exit.
     int status;
-    REQUIRE(wait(&status) >= 0);
-    REQUIRE(status == 0);
+    REQUIRE(waitpid(pid, &status, 0) == pid);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
 
     // Free all resources
     HIP_CHECK(hipMemRelease(handle));
     CTX_DESTROY();
     checkSysCallErrors(sockObj.closeThisSock());
-    REQUIRE(close(fd[1]) == 0);
-    REQUIRE(close(fdSig[0]) == 0);
-    REQUIRE(close(fdpid[0]) == 0);
   }
 }
 
