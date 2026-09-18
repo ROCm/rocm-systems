@@ -262,7 +262,7 @@ For the exact configuration behind a preset, run ``rocprof-sys-run --explain=<na
 Output formats
 ================
 
-ROCm Systems Profiler supports several output formats, each suited to a different analysis or visualization workflow. ``rocpd`` is the default output format.
+ROCm Systems Profiler supports several output formats, each suited to a different analysis or visualization workflow. ``rocpd`` is expected to become the default output format in an upcoming release.
 
 .. list-table::
    :header-rows: 1
@@ -271,14 +271,14 @@ ROCm Systems Profiler supports several output formats, each suited to a differen
      - File extension
      - Description
      - Viewer
-   * - ROCm Profiling Data (rocpd)
-     - ``.db``
-     - Detailed trace and counter data stored as a SQLite3 database; queryable with SQL or convertible to other formats via ``rocpd convert``
-     - `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_
    * - Perfetto (proto)
      - ``.proto``
      - Detailed trace stored as a protocol buffer for interactive timeline visualization
      - `ui.perfetto.dev <https://ui.perfetto.dev>`_
+   * - ROCm Profiling Data (rocpd)
+     - ``.db``
+     - Detailed trace and counter data stored as a SQLite3 database; queryable with SQL or convertible to other formats via ``rocpd convert``
+     - `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_
    * - Text
      - ``.txt``
      - Aggregated results (mean, min, max, stddev per function) as human-readable text
@@ -290,7 +290,7 @@ ROCm Systems Profiler supports several output formats, each suited to a differen
 
 Output-format selection differs by tool:
 
-* When no ``--output-format`` is specified, ``rocprof-sys-run`` and ``rocprof-sys-sample`` produce a rocpd (SQLite3 database) trace:
+* When no ``--output-format`` is specified, ``rocprof-sys-run`` and ``rocprof-sys-sample`` produce a Perfetto (proto) trace:
 
   .. code-block:: shell
 
