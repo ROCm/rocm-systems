@@ -18,7 +18,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.ml_api_trace_errors import UnaccountedKernelError
+from utils.ml_api_trace_errors import PassMarkerMismatchError, UnaccountedKernelError
 from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
@@ -585,7 +585,10 @@ def _stitch_key_from_function(function_value: object) -> str:
 def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
     """Add stitch_key and function_ordinal in this pass's marker order."""
     if pass_frame.empty:
-        return pass_frame
+        result = pass_frame.copy()
+        result["stitch_key"] = pd.Series(dtype=str)
+        result["function_ordinal"] = pd.Series(dtype=int)
+        return result
     ordered = pass_frame
     if "_marker_order" in pass_frame.columns:
         ordered = pass_frame.sort_values("_marker_order", kind="mergesort")
@@ -593,6 +596,120 @@ def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
     result["stitch_key"] = result["Function"].map(_stitch_key_from_function)
     result["function_ordinal"] = result.groupby("stitch_key", sort=False).cumcount()
     return result
+
+
+_PASS_DROP_COLUMNS = (
+    "Correlation_ID",
+    "GUID",
+    "stitch_key",
+    "function_ordinal",
+    "_pass_id",
+    "_marker_order",
+)
+_COLLAPSED_MARKER_COLUMNS = (
+    "Function",
+    "Thread_Id",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Kernel_Names",
+    "Kernel_Start_Timestamps",
+    "Kernel_End_Timestamps",
+)
+
+
+def _kernel_names_as_set(names: object) -> frozenset[str]:
+    if names is None or (isinstance(names, float) and pd.isna(names)):
+        return frozenset()
+    return frozenset(str(name) for name in names)
+
+
+def _collapse_matching_markers_across_passes(
+    pass_frames: list[pd.DataFrame],
+) -> pd.DataFrame:
+    """Match operator occurrences across passes and keep the first pass row."""
+    if not pass_frames:
+        return pd.DataFrame(columns=list(_COLLAPSED_MARKER_COLUMNS))
+    labeled_frames = []
+    for pass_id, frame in enumerate(pass_frames):
+        labeled = frame.copy()
+        labeled["_pass_id"] = pass_id
+        labeled_frames.append(labeled)
+    concatenated = pd.concat(labeled_frames, ignore_index=True)
+    if concatenated.empty:
+        collapsed = concatenated
+    elif len(pass_frames) == 1:
+        collapsed = concatenated
+    else:
+        pass_counts = [len(frame) for frame in pass_frames]
+        if len(set(pass_counts)) != 1:
+            console_error(
+                "analysis",
+                str(
+                    PassMarkerMismatchError(
+                        stitch_key="",
+                        function_ordinal=None,
+                        disagreeing_values=f"per-pass marker counts {pass_counts}",
+                    )
+                ),
+            )
+        expected_passes = set(range(len(pass_frames)))
+        records: list[dict[str, Any]] = []
+        grouped = concatenated.groupby(
+            ["stitch_key", "function_ordinal"], sort=False, dropna=False
+        )
+        for (stitch_key, ordinal), group in grouped:
+            present_passes = set(group["_pass_id"].tolist())
+            missing_passes = sorted(expected_passes - present_passes)
+            if missing_passes:
+                console_error(
+                    "analysis",
+                    str(
+                        PassMarkerMismatchError(
+                            stitch_key=str(stitch_key),
+                            function_ordinal=int(ordinal),
+                            disagreeing_values=f"missing passes {missing_passes}",
+                        )
+                    ),
+                )
+            kernel_name_sets = [
+                _kernel_names_as_set(
+                    group[group["_pass_id"] == pass_id].iloc[0]["Kernel_Names"]
+                )
+                for pass_id in range(len(pass_frames))
+            ]
+            if len(set(kernel_name_sets)) != 1:
+                console_error(
+                    "analysis",
+                    str(
+                        PassMarkerMismatchError(
+                            stitch_key=str(stitch_key),
+                            function_ordinal=int(ordinal),
+                            disagreeing_values=f"Kernel_Names {list(kernel_name_sets)}",
+                        )
+                    ),
+                )
+            first = group[group["_pass_id"] == 0].iloc[0]
+            records.append({
+                "Function": first["Function"],
+                "Thread_Id": first["Thread_Id"],
+                "Start_Timestamp": first["Start_Timestamp"],
+                "End_Timestamp": first["End_Timestamp"],
+                "Kernel_Names": first["Kernel_Names"],
+                "Kernel_Start_Timestamps": first["Kernel_Start_Timestamps"],
+                "Kernel_End_Timestamps": first["Kernel_End_Timestamps"],
+            })
+        collapsed = pd.DataFrame.from_records(records)
+    drop_columns = [
+        column for column in _PASS_DROP_COLUMNS if column in collapsed.columns
+    ]
+    if drop_columns:
+        collapsed = collapsed.drop(columns=drop_columns)
+    if collapsed.empty:
+        return collapsed
+    return collapsed.sort_values(
+        by=["Thread_Id", "Start_Timestamp", "End_Timestamp"],
+        kind="mergesort",
+    )
 
 
 def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
@@ -686,6 +803,9 @@ def process_ml_api_trace_output(
         pair.joined_df = _add_stitch_key_and_ordinal(
             _group_kernels_onto_markers(marker_rows)
         )
+    workload.ml_api_trace_df = _collapse_matching_markers_across_passes([
+        pair.joined_df for pair in workload.ml_api_trace_pairs
+    ])
 
 
 def validate_workload(path: str) -> None:
