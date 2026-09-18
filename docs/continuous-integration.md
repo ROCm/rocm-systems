@@ -134,12 +134,14 @@ the only place in the repo where the commit SHA is hardcoded.
 **To bump the pinned ref, do not hand-edit any of these files.** Instead run:
 
 ```bash
-python .github/scripts/update_therock_ref.py <new_sha> [--commit-date YYYY-MM-DD]
+python .github/scripts/update_therock_ref.py <new_sha>
 ```
 
 This updates `.github/therock_ref.json` and re-pins all three wrapper
-workflows in one step, keeping them in sync. If `--commit-date` is omitted,
-it's fetched automatically from the GitHub API.
+workflows in one step, keeping them in sync. The commit's exact timestamp is
+fetched straight from `<new_sha>` via `git` (a shallow fetch of TheRock, no
+GitHub API token needed); the config's `updated_date` is the local system
+date.
 
 `.github/scripts/tests/therock_ref_drift_test.py` runs as part of
 `therock-ci.yml` and fails CI if the wrappers' pins drift from
