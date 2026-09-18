@@ -10,6 +10,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <type_traits>
 
 // Keep this fixture independent from observer_abi_v13.h. These declarations
@@ -264,6 +265,7 @@ using namespace foreign_ffm_v13;
 
 std::mutex trace_mutex;
 void (*host_log)(FfmLogLevel, const char *) = nullptr;
+std::thread host_log_worker;
 
 std::uint8_t memory_flag_byte(bool is_atomic, bool is_read, bool is_write) {
   FfmMemoryAccess access{};
@@ -322,8 +324,15 @@ void on_init(const FfmHostApi *host) {
     return;
   }
   host_log = host->log;
-  if (mode_is("host_log") && host_log)
+  if (mode_is("v12_only") || mode_is("v11_only"))
+    trace(host_log ? "host_log present" : "host_log absent");
+  if ((mode_is("host_log") || mode_is("v12_only")) && host_log)
     host_log(FFM_LOG_WARN, "fake backend initialized");
+  if (mode_is("async_host_log") && host_log) {
+    auto logger = host_log;
+    host_log_worker =
+        std::thread([logger]() { logger(FFM_LOG_WARN, "fake backend worker initialized"); });
+  }
   trace("init " + std::to_string(version));
 }
 
@@ -482,6 +491,8 @@ void on_tdm_memory_access_v8(const foreign_ffm_v8::FfmTdmMemoryAccess *access) {
 }
 
 void on_shutdown() {
+  if (host_log_worker.joinable())
+    host_log_worker.join();
   if (mode_is("host_log") && host_log)
     host_log(FFM_LOG_ERROR, "fake backend shutting down");
   host_log = nullptr;
@@ -520,11 +531,14 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
     return reinterpret_cast<foreign_ffm_v13::FfmObserverPluginApi *>(&api_v8);
   }
 
-  if (host_api_version != 13)
+  const std::uint32_t accepted_request = mode_is("v12_only") ? 12 : mode_is("v11_only") ? 11 : 13;
+  if (host_api_version != accepted_request)
     return nullptr;
 
   api = {};
-  api.api_version = mode_is("old_version")       ? 12
+  api.api_version = mode_is("v12_only")          ? 12
+                    : mode_is("v11_only")        ? 11
+                    : mode_is("old_version")     ? 12
                     : mode_is("too_old_version") ? 7
                     : mode_is("bad_version")     ? 14
                                                  : 13;
@@ -547,4 +561,8 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
   return &api;
 }
 
-__attribute__((destructor)) static void on_unload() { trace("unload"); }
+__attribute__((destructor)) static void on_unload() {
+  if (host_log_worker.joinable())
+    host_log_worker.join();
+  trace("unload");
+}

@@ -259,7 +259,9 @@ public:
 ```
 
 The sink is assigned by the `ExecutionPluginGroup` when the plugin is
-added. If no group configures a sink, the default is stderr.
+added. Writes through sinks assigned by one group are serialized at the
+group's fanout boundary, including writes from asynchronous plugin workers.
+If no group configures a sink, the default is stderr.
 
 `KernelDispatchInfo` reports the effective LDS allocation in
 `lds_size_bytes`, the descriptor-selected `wave_size`, the configured

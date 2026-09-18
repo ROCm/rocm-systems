@@ -20,17 +20,22 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #ifndef PERFSIM_FAKE_BACKEND_PATH
@@ -249,6 +254,83 @@ protected:
   std::unique_ptr<rocjitsu::test::ScopedEnvironmentVariable> mode_env_;
 };
 
+class BlockingOverlapSink final : public PluginSink {
+public:
+  void write(std::string_view) override {
+    const int active = active_writes_.fetch_add(1, std::memory_order_relaxed) + 1;
+    int observed = max_active_writes_.load(std::memory_order_relaxed);
+    while (active > observed &&
+           !max_active_writes_.compare_exchange_weak(observed, active, std::memory_order_relaxed)) {
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!first_entered_) {
+      first_entered_ = true;
+      cv_.notify_all();
+      cv_.wait(lock, [&]() { return release_first_; });
+    } else if (active > 1) {
+      overlap_observed_ = true;
+      cv_.notify_all();
+    }
+    active_writes_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  bool wait_for_first(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return first_entered_; });
+  }
+
+  bool wait_for_overlap(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return overlap_observed_; });
+  }
+
+  void release_first() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    release_first_ = true;
+    cv_.notify_all();
+  }
+
+  int max_active_writes() const { return max_active_writes_.load(std::memory_order_relaxed); }
+
+private:
+  std::atomic<int> active_writes_{0};
+  std::atomic<int> max_active_writes_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool first_entered_ = false;
+  bool overlap_observed_ = false;
+  bool release_first_ = false;
+};
+
+class InitSinkWriterPlugin final : public ExecutionPlugin {
+public:
+  explicit InitSinkWriterPlugin(BlockingOverlapSink &sink_probe)
+      : ExecutionPlugin("init_sink_writer"), sink_probe_(sink_probe) {}
+
+  void onInit() override {
+    const bool backend_write_entered = sink_probe_.wait_for_first(std::chrono::seconds(5));
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      write_started_ = true;
+      cv_.notify_all();
+    }
+    if (backend_write_entered)
+      sink().write("peer plugin initialized\n");
+  }
+
+  bool wait_for_write_start(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return write_started_; });
+  }
+
+private:
+  BlockingOverlapSink &sink_probe_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool write_started_ = false;
+};
+
 TEST(PerfsimPluginConfigTest, EscapesBackendPathAsJson) {
   std::string path{"a\"b\\c\n"};
   path.push_back('\x01');
@@ -461,6 +543,63 @@ TEST_F(PerfsimPluginTest, AcceptsBackendSelectedCompatibleVersion) {
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
 }
 
+TEST_F(PerfsimPluginTest, FallsBackToV12WithDispatchNameAndHostLogger) {
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v12_only", 1);
+  const std::string config = std::string{"{\"plugins\":{\"perfsim\":"} + plugin_config() + "}}";
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_EQ(PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR), 1);
+  group.onInit();
+
+  KernelDispatchInfo info = dispatch_info(12);
+  info.kernel_name = "v12_fallback_kernel";
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 12"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 11"), 0);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 12"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "host_log present"), 1);
+  EXPECT_NE(line_with_prefix(trace, "begin 12 96 128 4096 32 1 32 2 3 32 1 1 "
+                                    "v12_fallback_kernel"),
+            trace.size());
+  EXPECT_NE(sink.str().find("[perfsim:warn] fake backend initialized\n"), std::string::npos);
+}
+
+TEST_F(PerfsimPluginTest, FallsBackToV11WithDispatchNameAndNoHostLogger) {
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v11_only", 1);
+  const std::string config = std::string{"{\"plugins\":{\"perfsim\":"} + plugin_config() + "}}";
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_EQ(PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR), 1);
+  group.onInit();
+
+  KernelDispatchInfo info = dispatch_info(11);
+  info.kernel_name = "v11_fallback_kernel";
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 12"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 11"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 10"), 0);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 11"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "host_log absent"), 1);
+  EXPECT_NE(line_with_prefix(trace, "begin 11 96 128 4096 32 1 32 2 3 32 1 1 "
+                                    "v11_fallback_kernel"),
+            trace.size());
+  EXPECT_EQ(sink.str().find("fake backend initialized"), std::string::npos);
+}
+
 TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction) {
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v8_only", 1);
   WaveFixture fixture;
@@ -489,55 +628,79 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
   EXPECT_EQ(diagnostic.find("FFM v13"), std::string::npos);
 }
 
-TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaElementSize) {
-  WaveFixture fixture;
+TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
+  struct MalformedCase {
+    std::string_view name;
+    uint32_t element_size_bytes;
+    uint32_t data_size;
+    uint32_t tile_dim0;
+    int64_t tensor_dim0_stride;
+    int64_t tensor_dim1_stride;
+  };
+  constexpr std::array cases{
+      MalformedCase{"non_power_of_two_element_size", 3, 2, 1, 0, 0},
+      MalformedCase{"element_size_code_mismatch", 4, 1, 1, 0, 0},
+      MalformedCase{"zero_tile_dim0", 4, 2, 0, 0, 0},
+      MalformedCase{"negative_tensor_dim0_stride", 4, 2, 1, -1, 0},
+      MalformedCase{"negative_tensor_dim1_stride", 4, 2, 1, 0, -1},
+  };
   const std::string config = plugin_config();
-  testing::internal::CaptureStderr();
-  {
-    PerfsimPlugin plugin(config.c_str());
-    plugin.onInit();
+  for (size_t index = 0; index < cases.size(); ++index) {
+    const MalformedCase &test_case = cases[index];
+    SCOPED_TRACE(test_case.name);
+    WaveFixture fixture;
+    testing::internal::CaptureStderr();
+    {
+      PerfsimPlugin plugin(config.c_str());
+      plugin.onInit();
 
-    const KernelDispatchInfo info = dispatch_info(18);
-    plugin.onAmdgpuDispatchPacketProcessed(info);
-    plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
-    plugin.onAmdgpuWavefrontDispatched(wave);
+      const uint32_t dispatch_id = 18 + static_cast<uint32_t>(index);
+      const KernelDispatchInfo info = dispatch_info(dispatch_id);
+      plugin.onAmdgpuDispatchPacketProcessed(info);
+      plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+      Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+      plugin.onAmdgpuWavefrontDispatched(wave);
 
-    const std::array<uint32_t, 3> words{0xD0710001, 0x7C000000, 0x18140C00};
-    SyntheticInstruction tensor("tensor_load_to_lds", words, MEMORY_OP);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x1280, tensor, wave);
-    const std::array<uint64_t, 1> addresses{0x300000};
-    TensorDmaMemoryAccessObservation access;
-    access.mnemonic = "tensor_load_to_lds";
-    access.pc = 0x1280;
-    access.compute_unit_id = static_cast<uint32_t>(wave.cu().id());
-    access.dispatch_id = info.dispatch_id;
-    access.queue_id = wave.queue_id();
-    access.workgroup_id = wave.wg_id();
-    access.wavefront_id = wave.wf_id();
-    access.process_id = wave.process_id();
-    access.element_size_bytes = 3;
-    access.tile_dim0 = 1;
-    access.data_size = 2;
-    access.is_load = true;
-    access.addresses = std::span<const uint64_t>(addresses);
-    plugin.onAmdgpuTensorDmaMemoryAccess(access);
+      const std::array<uint32_t, 3> words{0xD0710001, 0x7C000000, 0x18140C00};
+      SyntheticInstruction tensor("tensor_load_to_lds", words, MEMORY_OP);
+      plugin.onAmdgpuBeforeExecuteInstruction(0x1280, tensor, wave);
+      const std::array<uint64_t, 1> addresses{0x300000};
+      TensorDmaMemoryAccessObservation access;
+      access.mnemonic = "tensor_load_to_lds";
+      access.pc = 0x1280;
+      access.compute_unit_id = static_cast<uint32_t>(wave.cu().id());
+      access.dispatch_id = info.dispatch_id;
+      access.queue_id = wave.queue_id();
+      access.workgroup_id = wave.wg_id();
+      access.wavefront_id = wave.wf_id();
+      access.process_id = wave.process_id();
+      access.element_size_bytes = test_case.element_size_bytes;
+      access.is_load = true;
+      access.addresses = std::span<const uint64_t>(addresses);
+      access.tile_dim0 = test_case.tile_dim0;
+      access.tile_dim1 = 1;
+      access.data_size = test_case.data_size;
+      access.tensor_dim0_stride = test_case.tensor_dim0_stride;
+      access.tensor_dim1_stride = test_case.tensor_dim1_stride;
+      plugin.onAmdgpuTensorDmaMemoryAccess(access);
 
-    const std::array<uint32_t, 1> end_words{0xBF810000};
-    SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-    plugin.onAmdgpuBeforeExecuteInstruction(0x128C, end, wave);
-    plugin.onAmdgpuWavefrontHalted(wave);
-    plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
-    plugin.onShutdown();
+      const std::array<uint32_t, 1> end_words{0xBF810000};
+      SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+      plugin.onAmdgpuBeforeExecuteInstruction(0x128C, end, wave);
+      plugin.onAmdgpuWavefrontHalted(wave);
+      plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+      plugin.onShutdown();
+    }
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_NE(diagnostic.find("tensor-DMA observation is malformed"), std::string::npos);
+
+    const std::string dispatch_prefix = std::to_string(18 + index) + " ";
+    const auto trace = lines(read_file(trace_.path()));
+    EXPECT_EQ(line_with_prefix(trace, "begin " + dispatch_prefix), trace.size());
+    EXPECT_EQ(line_with_prefix(trace, "instruction " + dispatch_prefix), trace.size());
+    EXPECT_EQ(line_with_prefix(trace, "tdm " + dispatch_prefix), trace.size());
+    EXPECT_EQ(line_with_prefix(trace, "end " + dispatch_prefix), trace.size());
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_NE(diagnostic.find("tensor-DMA observation is malformed"), std::string::npos);
-
-  const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(line_with_prefix(trace, "begin 18 "), trace.size());
-  EXPECT_EQ(line_with_prefix(trace, "instruction 18 "), trace.size());
-  EXPECT_EQ(line_with_prefix(trace, "tdm 18 "), trace.size());
-  EXPECT_EQ(line_with_prefix(trace, "end 18 "), trace.size());
 }
 
 TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
@@ -1777,6 +1940,32 @@ TEST_F(PerfsimPluginTest, RoutesV13HostLogThroughConfiguredSink) {
 
   EXPECT_NE(sink.str().find("[perfsim:warn] fake backend initialized\n"), std::string::npos);
   EXPECT_NE(sink.str().find("[perfsim:error] fake backend shutting down\n"), std::string::npos);
+}
+
+TEST_F(PerfsimPluginTest, SerializesBackendWorkerAndPeerPluginAtSharedSink) {
+  const std::string config = std::string{"{\"plugins\":{\"perfsim\":"} + plugin_config() + "}}";
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "async_host_log", 1);
+  PluginSinkConfig sink_config;
+  BlockingOverlapSink &sink = sink_config.emplace<BlockingOverlapSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_EQ(PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR), 1);
+  auto peer = std::make_unique<InitSinkWriterPlugin>(sink);
+  InitSinkWriterPlugin *peer_ptr = peer.get();
+  ASSERT_TRUE(group.add(std::move(peer)));
+
+  std::thread init_thread([&]() { group.onInit(); });
+  const bool first_entered = sink.wait_for_first(std::chrono::seconds(5));
+  const bool peer_started = peer_ptr->wait_for_write_start(std::chrono::seconds(5));
+  const bool overlap_observed =
+      peer_started && sink.wait_for_overlap(std::chrono::milliseconds(100));
+  sink.release_first();
+  init_thread.join();
+  group.onShutdown();
+
+  EXPECT_TRUE(first_entered);
+  EXPECT_TRUE(peer_started);
+  EXPECT_FALSE(overlap_observed);
+  EXPECT_EQ(sink.max_active_writes(), 1);
 }
 
 TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
