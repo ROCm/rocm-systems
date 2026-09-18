@@ -50,7 +50,7 @@ is_configured_on_agent(rocprofiler_agent_id_t agent_id)
 }
 
 void
-signal_completion_hook(const ::rocprofiler::hsa::Queue&                           queue,
+signal_completion_hook(const ::rocprofiler::hsa::Queue*                           queue,
                        const ::rocprofiler::hsa::rocprofiler_packet&              kernel_packet,
                        std::shared_ptr<::rocprofiler::hsa::queue_info_session_t>& session,
                        ::rocprofiler::hsa::packet_data_t& /*packet*/,
@@ -59,10 +59,11 @@ signal_completion_hook(const ::rocprofiler::hsa::Queue&                         
 {
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(!session) return;
-    // kernel_completion_cb takes a mutable reference to the kernel packet even
-    // though it does not modify it; copy to bind a non-const lvalue.
-    auto kern_pkt = kernel_packet;
-    hsa::kernel_completion_cb(queue.get_agent().get_rocp_agent(), kern_pkt, *session);
+    CHECK(queue);
+    const auto* agent = queue->get_agent().get_rocp_agent();
+    CHECK(agent);
+    if(!is_pc_sample_service_configured(agent->id)) return;
+    hsa::kernel_completion_cb(agent, kernel_packet, *session);
 #else
     (void) queue;
     (void) kernel_packet;
