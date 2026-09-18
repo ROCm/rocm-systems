@@ -1493,7 +1493,9 @@ constexpr std::string_view kDkmsAmdgpuDkmsConfName = "dkms.conf";
 constexpr std::string_view kDkmsAmdgpuDkmsConfPackageName = "PACKAGE_NAME";
 constexpr std::string_view kDkmsAmdgpuDkmsConfPackageVersion = "PACKAGE_VERSION";
 
-const auto kAmdgpuDkmsVersionDirRegex = std::regex{R"(^\d+\.\d+\.\d+-\d+\.\d+\.\d+$)"};
+// Ubuntu appends ".<os_release>" (e.g. "-2370381.24.04"); other distros'
+// PACKAGE_VERSION may end at the build number, so only that part is required.
+const auto kAmdgpuDkmsVersionDirRegex = std::regex{R"(^\d+\.\d+\.\d+-\d+(\..*)?$)"};
 const auto kAmdgpuModuleVersionRegex = std::regex{R"(^\d+\.\d+\.\d+\.\d+$)"};
 
 using smi_amdgpu_dkms_conf_t = std::pair<std::string, std::string>;
