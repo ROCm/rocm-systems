@@ -19,7 +19,7 @@ by its ratio to the matching uninstrumented second run.
 | TokenSpeed Qwen3-0.6B prefill | 2.72 s | 0.0182 s (1×) | 265 s | 0.044 s (2.41×) | 266 s | 0.703 s (38.6×) | 192 s | 0.0196 s (1.07×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-qwen-prefill--native-validation.log>) |
 | TokenSpeed Qwen3-0.6B real cached decode | 0.0265 s | 0.0179 s (1×) | 267 s | 0.043 s (2.4×) | 266 s | 0.621 s (34.7×) | 187 s | 0.0191 s (1.06×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-qwen-decode--native-validation.log>) |
 | TokenSpeed Triton FP8 block-scaled GEMM | 0.0785 s | 0.000356 s (1×) | 26.2 s | 0.000373 s (1.05×) | 26.3 s | 0.000358 s (1.01×) | 22.3 s | 0.000395 s (1.11×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/tokenspeed-fp8-blockscale-gemm--native-validation.log>) |
-| TokenSpeed Gluon BF16 MoE | pending | pending | pending | pending | pending | pending | pending | pending | [native-reference-1: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260918/tokenspeed-bf16-moe/tokenspeed-bf16-moe--native-reference-1.log>) |
+| TokenSpeed Gluon BF16 MoE | pending | pending | pending | pending | pending | pending | pending | pending | [native-reference-2: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260918/tokenspeed-bf16-moe/tokenspeed-bf16-moe--native-reference-2.log>) |
 
 ## Completion run (September 18, 2026)
 
