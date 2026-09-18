@@ -13,20 +13,27 @@ from pathlib import Path
 from unittest import mock
 
 
+_PACKAGE_DIR = Path(__file__).resolve().parents[4] / "py-interface"
+
+
 def _load_source_package() -> types.ModuleType:
-    package_dir = Path(__file__).resolve().parents[4] / "py-interface"
     package = types.ModuleType("amdsmi_driver_versions_under_test")
-    package.__path__ = [str(package_dir)]
+    package.__path__ = [str(_PACKAGE_DIR)]
     sys.modules[package.__name__] = package
     package.amdsmi_wrapper = importlib.import_module(f"{package.__name__}.amdsmi_wrapper")
     package.amdsmi_interface = importlib.import_module(f"{package.__name__}.amdsmi_interface")
     return package
 
 
-amdsmi = _load_source_package()
+amdsmi = _load_source_package() if _PACKAGE_DIR.is_dir() else None
 
 
 class TestDriverVersions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if amdsmi is None:
+            raise unittest.SkipTest(f"amdsmi py-interface source not found at {_PACKAGE_DIR}")
+
     def test_struct_layout_includes_new_fields(self) -> None:
         struct_type = amdsmi.amdsmi_wrapper.struct_amdsmi_driver_info_t
         self.assertEqual(ctypes.sizeof(struct_type), 1536)

@@ -5,12 +5,12 @@
 """amd-smi version driver field tests."""
 
 import importlib.util
+import io
 import sys
 import types
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
-from unittest import mock
-
 
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
@@ -20,6 +20,11 @@ _DRIVER_INFO = {
     "driver_build_version": "2370381",
     "driver_full_version": "6.19.14.31400000-2370381",
 }
+
+
+class _LibraryError(RuntimeError):
+    def get_error_info(self) -> str:
+        return "not supported"
 
 
 class _Logger:
@@ -41,16 +46,19 @@ class _Logger:
         return None
 
 
-def _load_version_module() -> types.ModuleType:
-    interface = types.SimpleNamespace(
+def _default_interface() -> types.SimpleNamespace:
+    return types.SimpleNamespace(
         amdsmi_get_lib_version=lambda: {"major": 27, "minor": 1, "release": 0},
         amdsmi_get_rocm_version=lambda: (True, "10.1.0"),
         amdsmi_get_processor_handles=lambda: ["gpu0"],
         amdsmi_get_gpu_driver_info=lambda _gpu: _DRIVER_INFO,
     )
+
+
+def _load_version_module(interface: types.SimpleNamespace) -> types.ModuleType:
     amdsmi = types.ModuleType("amdsmi")
     amdsmi.amdsmi_interface = interface
-    amdsmi.amdsmi_exception = types.SimpleNamespace(AmdSmiLibraryException=RuntimeError)
+    amdsmi.amdsmi_exception = types.SimpleNamespace(AmdSmiLibraryException=_LibraryError)
     version_metadata = types.ModuleType("_version")
     version_metadata.__version__ = "1.0.0"
 
@@ -76,7 +84,15 @@ def _load_version_module() -> types.ModuleType:
 
 
 def _run_version(gpu_version: bool = True, human_readable: bool = False) -> dict:
-    module = _load_version_module()
+    return _run_version_with_interface(
+        _default_interface(), gpu_version=gpu_version, human_readable=human_readable
+    )
+
+
+def _run_version_with_interface(
+    interface: types.SimpleNamespace, gpu_version: bool = True, human_readable: bool = False
+) -> dict:
+    module = _load_version_module(interface)
     commands = object.__new__(module.VersionCommands)
     commands.logger = _Logger(human_readable=human_readable)
     commands.helpers = types.SimpleNamespace()
@@ -87,6 +103,12 @@ def _run_version(gpu_version: bool = True, human_readable: bool = False) -> dict
 
 
 class TestVersionDriverOutput(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = Path(__file__).resolve().parents[4] / "amdsmi_cli/subcommands/version.py"
+        if not path.is_file():
+            raise unittest.SkipTest(f"amd-smi CLI version.py not found at {path}")
+
     def test_json_reports_driver_fields(self) -> None:
         output = _run_version()
         self.assertEqual(output["driver_full_version"], "6.19.14.31400000-2370381")
@@ -97,10 +119,11 @@ class TestVersionDriverOutput(unittest.TestCase):
         self.assertNotIn("amdgpu_dkms_version", output)
 
     def test_human_readable_reports_driver_fields_in_order(self) -> None:
-        with mock.patch("builtins.print") as printed:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
             _run_version(human_readable=True)
 
-        line = printed.call_args[0][0]
+        line = stdout.getvalue()
         self.assertIn("AMDGPU Version: 6.19.14.31400000-2370381", line)
         self.assertNotIn("Kernel version:", line)
         self.assertNotIn("Driver version:", line)
@@ -112,6 +135,26 @@ class TestVersionDriverOutput(unittest.TestCase):
         self.assertNotIn("driver_kernel_version", output)
         self.assertNotIn("driver_version", output)
         self.assertNotIn("driver_build_version", output)
+
+    def test_empty_gpu_list_reports_full_version_as_na(self) -> None:
+        interface = _default_interface()
+        interface.amdsmi_get_processor_handles = lambda: []
+
+        output = _run_version_with_interface(interface)
+
+        self.assertEqual(output["driver_full_version"], "N/A")
+
+    def test_driver_info_failure_reports_full_version_as_na(self) -> None:
+        interface = _default_interface()
+
+        def raise_driver_info(_gpu: object) -> None:
+            raise _LibraryError("not supported")
+
+        interface.amdsmi_get_gpu_driver_info = raise_driver_info
+
+        output = _run_version_with_interface(interface)
+
+        self.assertEqual(output["driver_full_version"], "N/A")
 
 
 if __name__ == "__main__":

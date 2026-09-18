@@ -1225,7 +1225,7 @@ int main() {
         CHK_AMDSMI_RET(ret)
         printf("    Output of amdsmi_get_gpu_driver_info:\n");
         printf("\tDriver name: %s\n", driver_info.driver_name);
-        printf("\tKernel version: %s\n", driver_info.driver_kernel_version);
+        printf("\tamdgpu module version: %s\n", driver_info.driver_kernel_version);
         printf("\tDriver version: %s\n", driver_info.driver_version);
         printf("\tBuild version: %s\n", driver_info.driver_build_version);
         printf("\tFull version: %s\n", driver_info.driver_full_version);

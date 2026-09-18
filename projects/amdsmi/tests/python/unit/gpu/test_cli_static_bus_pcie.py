@@ -271,6 +271,8 @@ class TestCliStaticBusPcieValid(unittest.TestCase):
 class TestCliStaticDriverVersions(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        if not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
         cls.interface = _install_fake_modules({})
         cls.interface.amdsmi_get_gpu_driver_info = lambda _handle: {
             "driver_name": "amdgpu",
@@ -293,8 +295,5 @@ class TestCliStaticDriverVersions(unittest.TestCase):
         commands.static_gpu(args)
 
         driver_info = commands.logger.store_gpu_json_output[-1]["driver"]
+        self.assertEqual(set(driver_info), {"name", "amdgpu_version", "os_kernel_version"})
         self.assertEqual(driver_info["amdgpu_version"], "6.19.14.31400000-2370381")
-        self.assertNotIn("kernel_version", driver_info)
-        self.assertNotIn("version", driver_info)
-        self.assertNotIn("build_version", driver_info)
-        self.assertNotIn("full_version", driver_info)

@@ -12,7 +12,6 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_date": "2026/09/16 00:00",
@@ -146,6 +145,13 @@ def _banner_payload() -> dict:
 
 
 class TestDefaultDriverHeader(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        root = _project_root()
+        for relative_path in ("amdsmi_cli/subcommands/default.py", "amdsmi_cli/amdsmi_logger.py"):
+            if not (root / relative_path).is_file():
+                raise unittest.SkipTest(f"amd-smi CLI source not found at {root / relative_path}")
+
     def test_default_payload_uses_driver_info(self) -> None:
         output = _run_default()
         self.assertEqual(output["version_info"]["driver info"], _DRIVER_INFO)
@@ -169,6 +175,23 @@ class TestDefaultDriverHeader(unittest.TestCase):
         self.assertFalse(any(line.startswith("| Kernel Version:") for line in lines))
         self.assertFalse(any(line.startswith("| Driver Version:") for line in lines))
         self.assertFalse(any(line.startswith("| Build Version:") for line in lines))
+
+    def test_banner_uses_os_kernel_when_driver_info_is_unavailable(self) -> None:
+        module = _load_logger_module()
+        logger = module.AMDSMILogger(
+            helpers=types.SimpleNamespace(os_info=lambda: "Linux Baremetal")
+        )
+        payload = _banner_payload()
+        payload["version_info"]["driver info"] = "N/A"
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout):
+            logger.print_default_output(payload)
+
+        lines = stdout.getvalue().splitlines()
+        os_kernel_line = next(line for line in lines if line.startswith("| OS kernel Version:"))
+        self.assertIn("6.8.0-124-generic", os_kernel_line)
+        self.assertFalse(any(line.startswith("| AMDGPU Version:") for line in lines))
 
 
 if __name__ == "__main__":
