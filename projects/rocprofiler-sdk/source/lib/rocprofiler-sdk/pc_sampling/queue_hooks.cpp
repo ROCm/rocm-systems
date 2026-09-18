@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,11 @@ namespace rocprofiler
 {
 namespace pc_sampling
 {
+// The compile gate cannot move into is_pc_sample_service_configured: this file is
+// added to the object library before the early return in CMakeLists.txt, so it is
+// always built, while service.cpp (which defines that function) is added after and
+// is absent from the build when PC sampling is compiled out. The guard has to stay
+// at the call site to keep the write interceptor linkable in that configuration.
 bool
 is_configured_on_agent(rocprofiler_agent_id_t agent_id)
 {
