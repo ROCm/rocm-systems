@@ -1330,10 +1330,14 @@ rocpd_processor_t::post_process_metadata()
         uid.name                = pmc_info.name;
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
-        pmc_info_data.target_arch =
+        // Copy into owned string: writer API stores string_view.
+        const std::optional<std::string> target_arch =
             pmc_info.target_arch.empty()
                 ? std::nullopt
-                : std::optional<std::string_view>{ pmc_info.target_arch };
+                : std::optional<std::string>{ pmc_info.target_arch };
+        pmc_info_data.target_arch      = target_arch.has_value()
+                                             ? std::optional<std::string_view>{ *target_arch }
+                                             : std::nullopt;
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;
