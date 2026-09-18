@@ -415,6 +415,32 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
            {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
            {kCodeFill1250, sizeof(kCodeFill1250), 19, 8},                   // gfx1250
+       }},
+      {"SwapCopy",
+       {
+           {NULL, 0, 0, 0},                                           // gfx7 (not supported)
+           {NULL, 0, 0, 0},                                           // gfx8 (not supported)
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 16, 16},          // gfx9
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 16, 16},          // gfx90a
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 16, 16},          // gfx942
+           {kCodeSwapCopy1010, sizeof(kCodeSwapCopy1010), 16, 16},    // gfx1010
+           {kCodeSwapCopy10, sizeof(kCodeSwapCopy10), 16, 16},        // gfx10
+           {kCodeSwapCopy11, sizeof(kCodeSwapCopy11), 16, 16},        // gfx11
+           {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 16, 16},        // gfx12
+           {kCodeSwapCopy1250, sizeof(kCodeSwapCopy1250), 16, 16},    // gfx1250
+       }},
+      {"BroadcastCopy",
+       {
+           {NULL, 0, 0, 0},                                             // gfx7 (not supported)
+           {NULL, 0, 0, 0},                                             // gfx8 (not supported)
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 20},  // gfx9
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 20},  // gfx90a
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 20},  // gfx942
+           {kCodeBroadcastCopy1010, sizeof(kCodeBroadcastCopy1010), 24, 20},  // gfx1010
+           {kCodeBroadcastCopy10, sizeof(kCodeBroadcastCopy10), 24, 20},      // gfx10
+           {kCodeBroadcastCopy11, sizeof(kCodeBroadcastCopy11), 24, 20},      // gfx11
+           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 24, 20},      // gfx12
+           {kCodeBroadcastCopy1250, sizeof(kCodeBroadcastCopy1250), 24, 20},  // gfx1250
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
@@ -2116,15 +2142,52 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
     out_signal.SubRelease(1);
     return HSA_STATUS_SUCCESS;
   }
-  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
-  case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST: {
+    // Broadcast shader fallback: 1-to-N copy using BlitKernel
+    SetCopyRequestRefCount(true);
+    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+
+    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+
+    if (profiling_enabled())
+      out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+    std::vector<core::Signal*> gang_signals;
+    return blit_dev->SubmitBroadcastCopyCommand(op.src, op.dst_list, op.num_entries,
+                                                 op.size, dep_signals, out_signal, gang_signals);
+  }
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP: {
+    // Swap shader fallback: bidirectional buffer exchange using BlitKernel
+    // This is needed when XNACK is enabled (SDMA swap copy broken with XNACK)
+    if (op.num_entries != 0) {
+      // Multi-entry swap not supported in shader fallback
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Asymmetric swap is not supported: both regions must be the same size
+    // (mirrors the native DmaCopySwap path).
+    if (op.src_size != op.dst_size) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    SetCopyRequestRefCount(true);
+    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+
+    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+
+    if (profiling_enabled())
+      out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+    std::vector<core::Signal*> gang_signals;
+    return blit_dev->SubmitSwapCopyCommand(const_cast<void*>(op.src), op.dst, op.src_size,
+                                            dep_signals, out_signal, gang_signals);
+  }
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-    // No shader-blit equivalent for broadcast/swap/indirect yet; these are the
-    // slots for the 1-to-N / swap / indirect blit shaders once added. Until
-    // then, reject under SDMA=0 (same as the SDMA fan-out path would), leaving
-    // the completion signal untouched as above.
+    // Indirect copy has no shader-blit equivalent; it is served only by the
+    // native SDMA wait/signal-indirect path (gfx125+). Under SDMA=0 reject it,
+    // leaving the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
