@@ -85,19 +85,16 @@ class KernelStats:
 class CallTreeNode:
     """A node in the operator call tree.
 
-    Local to this frame:
-      - invocation_ids: distinct Context_Id prefixes at this frame's depth.
-      - call_count: derived as len(invocation_ids); see the property below.
+    children is the list of child operator nodes. file_name, line_number,
+    and backend are optional fields copied from a marker row when set.
+    invocation_ids stores marker-start strings for this node.
 
     Inclusive over this node plus all descendants:
-      - kernel_launches: kernel dispatches in the subtree.
-      - total_duration_ms: cumulative GPU time in the subtree.
-      - min_dispatch_ns / max_dispatch_ns / mean_dispatch_ns: per-kernel-dispatch
-        duration stats. None when no non-zero-duration dispatch is in the subtree.
+      kernel_launches, total_duration_ms, min/max/mean dispatch stats.
     """
 
     name: str
-    children: dict[str, "CallTreeNode"] = field(default_factory=dict)
+    children: list["CallTreeNode"] = field(default_factory=list)
     kernels: dict[str, KernelStats] = field(default_factory=dict)
     kernel_launches: int = 0
     total_duration_ms: float = 0.0
@@ -105,6 +102,9 @@ class CallTreeNode:
     min_dispatch_ns: Optional[float] = None
     max_dispatch_ns: Optional[float] = None
     mean_dispatch_ns: Optional[float] = None
+    file_name: Optional[str] = None
+    line_number: Optional[int] = None
+    backend: Optional[str] = None
 
     @property
     def call_count(self) -> int:
@@ -183,7 +183,7 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
         if stats.max_duration_ns is not None:
             maxes.append(stats.max_duration_ns)
 
-    for child in node.children.values():
+    for child in node.children:
         child_rollup = rollup_node_stats(child)
         launches += child_rollup.launches
         total_duration_ns += child_rollup.total_duration_ns
@@ -359,9 +359,18 @@ def build_call_trees(
         current_node = location_root
         for i, encoded_segment in enumerate(op_path.split("/")):
             path_segment = decode_marker_name(encoded_segment)
-            if path_segment not in current_node.children:
-                current_node.children[path_segment] = CallTreeNode(name=path_segment)
-            current_node = current_node.children[path_segment]
+            child_node = next(
+                (
+                    child
+                    for child in current_node.children
+                    if child.name == path_segment
+                ),
+                None,
+            )
+            if child_node is None:
+                child_node = CallTreeNode(name=path_segment)
+                current_node.children.append(child_node)
+            current_node = child_node
             if i < len(ctx_segments):
                 current_node.invocation_ids.add("/".join(ctx_segments[: i + 1]))
 
@@ -460,8 +469,8 @@ def build_operator_summary(
     rows: list[dict[str, Any]] = []
 
     def walk(node: CallTreeNode, location: str, path_parts: list[str]) -> None:
-        for child_name, child in node.children.items():
-            full_path = path_parts + [child_name]
+        for child in node.children:
+            full_path = path_parts + [child.name]
             if child.kernel_launches > 0:
                 has_calls = len(child.invocation_ids) > 0
                 calls = len(child.invocation_ids) if has_calls else float("nan")

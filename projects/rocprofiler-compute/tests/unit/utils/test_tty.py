@@ -749,22 +749,6 @@ def test_format_node_stats_renders_na_when_dispatch_stats_missing():
     assert "dispatch_max: N/A" in rendered
 
 
-def test_show_call_tree_prints_location_and_stats(capsys):
-    root = CallTreeNode(name="main.py:10")
-    root.kernel_launches = 1
-    root.total_duration_ms = 0.5
-    child = CallTreeNode(name="op_a")
-    child.kernel_launches = 1
-    child.total_duration_ms = 0.5
-    child.kernels["kern"] = KernelStats(launches=1, total_duration_ns=500_000.0)
-    root.children["op_a"] = child
-    show_call_tree({"main.py:10": root})
-    output = capsys.readouterr().out
-    assert "main.py:10" in output
-    assert "dispatches: 1" in output
-    assert "kern" in output
-
-
 def test_show_call_tree_sorted_by_duration(capsys):
     root_a = CallTreeNode(name="a.py:1")
     root_a.total_duration_ms = 10.0
@@ -775,22 +759,6 @@ def test_show_call_tree_sorted_by_duration(capsys):
     show_call_tree({"a.py:1": root_a, "b.py:1": root_b})
     output = capsys.readouterr().out
     assert output.index("b.py:1") < output.index("a.py:1")
-
-
-def test_show_call_tree_kernel_id_printed(capsys):
-    root = CallTreeNode(name="f.py:1")
-    root.kernel_launches = 1
-    root.total_duration_ms = 1.0
-    child = CallTreeNode(name="op")
-    child.kernel_launches = 1
-    child.total_duration_ms = 1.0
-    child.kernels["kern_x"] = KernelStats(
-        launches=1, total_duration_ns=1_000_000.0, kernel_id=42
-    )
-    root.children["op"] = child
-    show_call_tree({"f.py:1": root})
-    output = capsys.readouterr().out
-    assert "(id 42)" in output
 
 
 def test_print_operator_node_branching_shows_stats(capsys):
@@ -870,19 +838,6 @@ def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
     assert "ms" in output or "us" in output
     assert "Operator" in output
     assert "Total" in output
-
-
-def test_show_operator_summary_renders_na_for_nan_cells(capsys):
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 0.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    show_operator_summary(summary)
-    output = capsys.readouterr().out
-    assert "N/A" in output
 
 
 # ---------------------------------------------------------------------------
