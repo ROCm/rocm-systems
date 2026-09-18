@@ -73,6 +73,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "on GPU:0.*SQ_WAVES.*GRBM_COUNT.*TCC_HIT"
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -83,6 +84,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "on GPU:0.*SQ_WAVES.*GRBM_COUNT.*TCC_HIT"
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
