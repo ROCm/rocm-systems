@@ -567,6 +567,54 @@ def filter_forest_by_backend(
     return filtered
 
 
+def copy_matched_operator_subtree(
+    forest: dict[str, list[CallTreeNode]],
+    matched_nodes: list[CallTreeNode],
+) -> dict[str, list[CallTreeNode]]:
+    """Copy each matched node with its ancestors and descendants."""
+    match_ids = {id(node) for node in matched_nodes}
+    keep_ids: set[int] = set()
+
+    def walk(node: CallTreeNode, ancestor_matched: bool) -> bool:
+        is_match = id(node) in match_ids
+        keep_below = ancestor_matched or is_match
+        descendant_kept = False
+        for child in node.children:
+            if walk(child, keep_below):
+                descendant_kept = True
+        keep_this = keep_below or descendant_kept
+        if keep_this:
+            keep_ids.add(id(node))
+        return keep_this
+
+    for roots in forest.values():
+        for root in roots:
+            walk(root, False)
+
+    def copy_kept(node: CallTreeNode) -> Optional[CallTreeNode]:
+        if id(node) not in keep_ids:
+            return None
+        copied = clone_call_tree_node(node)
+        kept_children: list[CallTreeNode] = []
+        for child in node.children:
+            copied_child = copy_kept(child)
+            if copied_child is not None:
+                kept_children.append(copied_child)
+        copied.children = kept_children
+        return copied
+
+    subtree: dict[str, list[CallTreeNode]] = {}
+    for thread_id, roots in forest.items():
+        kept_roots: list[CallTreeNode] = []
+        for root in roots:
+            copied_root = copy_kept(root)
+            if copied_root is not None:
+                kept_roots.append(copied_root)
+        if kept_roots:
+            subtree[thread_id] = kept_roots
+    return subtree
+
+
 def _node_source_location(node: CallTreeNode) -> str:
     """file:line from the node, or empty when file_name is unset."""
     if not node.file_name:
