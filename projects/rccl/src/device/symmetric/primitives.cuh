@@ -17,18 +17,145 @@
 #include <cuda/std/ranges>
 #endif
 
-#if __CUDA_ARCH__ >= 1000
+////////////////////////////////////////////////////////////////////////////////
+// Async tile staging: NVIDIA TMA and AMD gfx1250 TDM
+//
+// The deep loops in all_gather/all_reduce/reduce_scatter can move a tile through
+// the warp's shared-memory scratch with a DMA engine instead of per-lane vector
+// loads. NVIDIA drives that with TMA, gfx1250 with the Tensor Data Mover. The two
+// engines disagree on who issues a transfer and on how completion is observed:
+//
+//                 NVIDIA (sm_100+)               AMD gfx1250
+//   issue         one thread; the descriptor     the whole warp; the descriptor
+//                 is built per-thread            lives in SGPRs, so the
+//                                                arguments must be wave-uniform
+//   completion    a shared-memory mbarrier       the per-wave TENSORcnt, so only
+//                 carrying a byte count, which   the warp that issued a transfer
+//                 any thread may wait on         can drain it, and no shared
+//                                                object is involved
+//
+// The ncclSymkTile* wrappers below absorb that difference. Every one of them is
+// called by the WHOLE warp with wave-uniform arguments and narrows to a single
+// thread internally where the hardware wants that, so the loops keep one shape.
+// The `tma` names below (tmaSmemStruct, EnableTma, ...) now denote the async-tile
+// path on either vendor; they match the ncclSymkKernelId_*Tma* kernel names.
+////////////////////////////////////////////////////////////////////////////////
+#if defined(__HIP_PLATFORM_AMD__)
+#include "tdm/tdmCopy.h"
+// TDM_SUPPORTED is a device-pass constant: gfx1250, a compiler carrying the
+// builtin, and an SDK shipping the descriptor header. Every other arch, and the
+// host pass, keep the vector path.
+#define NCCL_SYMK_TILE_TMA 0
+#define NCCL_SYMK_TILE_TDM TDM_SUPPORTED
+#else
+#define NCCL_SYMK_TILE_TMA (__CUDA_ARCH__ >= 1000)
+#define NCCL_SYMK_TILE_TDM 0
+#endif
+#define NCCL_SYMK_ASYNC_TILE (NCCL_SYMK_TILE_TMA || NCCL_SYMK_TILE_TDM)
+
+#if NCCL_SYMK_ASYNC_TILE
+#if NCCL_SYMK_TILE_TMA
 #include <cuda/barrier>
 #include <cuda/ptx>
 
 namespace ptx = cuda::ptx;
 
+using ncclSymkTileBar = cuda::barrier<cuda::thread_scope_block>;
+#else
+// TDM completion is a per-wave counter, so gfx1250 needs no shared-memory
+// barrier. The empty type keeps tmaSmemStruct's layout common to both paths.
+struct ncclSymkTileBar {};
+
+// Tiles are streamed once and read back by a peer, not by this GPU, so keep them
+// out of the local caches. Matches kRcclTdmPolicy on the SIMPLE TDM path.
+static constexpr CachePolicy kNcclSymkTilePolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+#endif
+
 template <typename Pack, int UnrollPacks, int UnrollPeers = 1>
 struct tmaSmemStruct {
   alignas(16) Pack buff[UnrollPeers][UnrollPacks * WARP_SIZE];
-  cuda::barrier<cuda::thread_scope_block> bar;
+  ncclSymkTileBar bar;
 };
+
+// Arm the staging barrier. `arrivers` is how many lanes will arrive on it, which
+// differs by loop: the all-gather deep loop stages from lane 0 alone, the reduce
+// loops stage across the whole warp. TDM has no barrier to arm.
+static __device__ __forceinline__ void ncclSymkTileBarInit(ncclSymkTileBar* bar, int arrivers, int lane) {
+#if NCCL_SYMK_TILE_TMA
+  if (lane == 0) init(bar, arrivers);
+#else
+  (void)bar, (void)arrivers, (void)lane;
 #endif
+}
+
+// Start a global -> shared transfer of `bytes` into the warp's tile, leaving it in
+// flight. `pending` accumulates the bytes the next barrier arrival has to account
+// for; TDM counts its own transfers, so it is left alone there.
+static __device__ __forceinline__ void ncclSymkTileLoad(void* smem, void const* global, size_t bytes,
+                                                        ncclSymkTileBar& bar, size_t& pending, int lane) {
+#if NCCL_SYMK_TILE_TMA
+  if (lane == 0) {
+    cuda::device::memcpy_async_tx((char*)smem, (char const*)global, cuda::aligned_size_t<16>(bytes), bar);
+    pending += bytes;
+  }
+#else
+  (void)bar, (void)pending, (void)lane;
+  tdm::asyncLoadToLDS<SyncPolicy::Async, kNcclSymkTilePolicy>((uint8_t const*)global, (uint8_t*)smem, bytes);
+#endif
+}
+
+// Wait for the loads this warp started to land in shared memory. `Arrivers` must
+// match what ncclSymkTileBarInit() armed the barrier with.
+template <int Arrivers>
+static __device__ __forceinline__ void ncclSymkTileLoadWait(ncclSymkTileBar& bar, size_t& pending, int lane) {
+#if NCCL_SYMK_TILE_TMA
+  if (Arrivers != 1 || lane == 0) {
+    ncclSymkTileBar::arrival_token token = cuda::device::barrier_arrive_tx(bar, 1, pending);
+    bar.wait(std::move(token));
+  }
+  pending = 0;
+#else
+  (void)bar, (void)pending, (void)lane;
+  tdm::tdmWait();
+#endif
+}
+
+// Start a shared -> global transfer of `bytes` out of the warp's tile, leaving it
+// in flight. Several of these may be issued back to back (one per peer) before a
+// single ncclSymkTileStoreWait(); they all read the tile, so they cannot conflict.
+static __device__ __forceinline__ void ncclSymkTileStore(void* global, void const* smem, size_t bytes, int lane) {
+#if NCCL_SYMK_TILE_TMA
+  if (lane == 0) ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, global, smem, bytes);
+#else
+  (void)lane;
+  tdm::asyncStoreFromLDS<SyncPolicy::Async, kNcclSymkTilePolicy>((uint8_t const*)smem, (uint8_t*)global, bytes);
+#endif
+}
+
+// Drain the stores this warp started, so its tile can be refilled.
+static __device__ __forceinline__ void ncclSymkTileStoreWait(int lane) {
+#if NCCL_SYMK_TILE_TMA
+  if (lane == 0) {
+    ptx::cp_async_bulk_commit_group();
+    ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
+  }
+#else
+  (void)lane;
+  tdm::tdmWait();
+#endif
+}
+
+// Publish the lanes' ordinary shared-memory writes to the DMA engine that is about
+// to read them out of the tile.
+static __device__ __forceinline__ void ncclSymkTileFenceSmem() {
+#if NCCL_SYMK_TILE_TMA
+  ptx::fence_proxy_async(ptx::space_shared);
+#else
+  __threadfence_block();
+#endif
+  __syncwarp();
+}
+#endif // NCCL_SYMK_ASYNC_TILE
 
 // HIP has no __isShared() (used only as a __builtin_assume hint); map it to the AMDGCN builtin.
 #if defined(__HIP_PLATFORM_AMD__) && !defined(NCCL_SYMK_HAVE_ISSHARED)
@@ -380,15 +507,16 @@ struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> {
 };
 #endif
 
-#if __CUDA_ARCH__ >= 1000
-static __device__ __forceinline__ void tmaLoadStoreMc(char* dest, char* smem, char* source, size_t size,
-                                                      cuda::barrier<cuda::thread_scope_block>& bar) {
-  cuda::device::memcpy_async_tx((char*)smem, (const char*)source, cuda::aligned_size_t<16>(size), bar);
-  cuda::barrier<cuda::thread_scope_block>::arrival_token token = cuda::device::barrier_arrive_tx(bar, 1, size);
-  bar.wait(std::move(token));
-  ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, dest, smem, size);
-  ptx::cp_async_bulk_commit_group();
-  ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
+#if NCCL_SYMK_ASYNC_TILE
+// Round-trip one tile global -> shared -> global. Called by the whole warp with
+// wave-uniform arguments.
+static __device__ __forceinline__ void tmaLoadStoreMc(char* dest, char* smem, char const* source, size_t size,
+                                                      ncclSymkTileBar& bar, int lane) {
+  size_t pending = 0;
+  ncclSymkTileLoad(smem, source, size, bar, pending, lane);
+  ncclSymkTileLoadWait</*Arrivers=*/1>(bar, pending, lane);
+  ncclSymkTileStore(dest, smem, size, lane);
+  ncclSymkTileStoreWait(lane);
 }
 #endif
 
@@ -401,7 +529,7 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
   uintptr_t outputUptr = reinterpret_cast<uintptr_t>(output.multimemPtr(handler.comm.lsaMultimem));
   uint32_t alignment = uint32_t(inputUptr - outputUptr);
   uint32_t nPreBytes =
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 :
 #endif
                                           (16 - input.offset) % 16;
@@ -409,7 +537,7 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t nSufBytes;
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   int lane = t % WARP_SIZE;
   int lw = threadIdx.x / WARP_SIZE;
   extern __shared__ char smemScratch[];
@@ -422,14 +550,14 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
     uint32_t nChunks = (nBytes - cursor) / BytePerChunk;
     uintptr_t cursorAfter = cursor + uintptr_t(nChunks) * BytePerChunk;
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     // Initialize share memory pointer and barrier
     constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
     using tmaSmemStruct_t = tmaSmemStruct<BytePack<BytePerPack>, UnrollPacks>;
     constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
     tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      if (lane == 0) init(&tmaSmem->bar, 1);
+      ncclSymkTileBarInit(&tmaSmem->bar, /*arrivers=*/1, lane);
     }
 #endif
 
@@ -439,11 +567,13 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
     int nIters = nChunks - t / WARP_SIZE;
     NVCC_PRAGMA_UNROLL_DISABLED
     while (0 < nIters) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        if (lane == 0)
-          tmaLoadStoreMc((char*)(outputUptr + cursor), (char*)tmaSmem->buff[0], (char*)(inputUptr + cursor), tileSize,
-                         tmaSmem->bar);
+        // The vector path gives every lane its own slot in the tile; a DMA
+        // descriptor is wave-uniform, so back that slot out to the tile base.
+        uintptr_t tileCursor = cursor - uintptr_t(lane) * BytePerPack;
+        tmaLoadStoreMc((char*)(outputUptr + tileCursor), (char*)tmaSmem->buff[0], (char const*)(inputUptr + tileCursor),
+                       tileSize, tmaSmem->bar, lane);
       } else
 #endif
       {

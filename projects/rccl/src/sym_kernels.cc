@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "sym_kernels.h"
+#include "archinfo.h"
 #include "comm.h"
 #include "device.h"
 #include "nccl_device/core_tmp.h"
@@ -130,11 +131,21 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
-// [RCCL] TMA is an NVIDIA-only hardware feature; keep the symmetric TMA kernels off by default.
+// [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
+// Data Mover on gfx1250. Still opt-in while the gfx1250 path is being brought up.
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
-  return comm->minCompCap >= 100 && ncclParamSymTmaEnable();
+  if (!ncclParamSymTmaEnable()) return false;
+#if defined(__HIP_PLATFORM_AMD__)
+  // [RCCL] minCompCap is a CUDA compute capability and AMD never reports 100+, so
+  // gate on the arch that carries the Tensor Data Mover instead. These kernels are
+  // all LSA-scoped (kernelMask_LSA), so every participating rank is on this node
+  // and shares this arch.
+  return comm->archName && IsArchMatch(comm->archName, "gfx1250");
+#else
+  return comm->minCompCap >= 100;
+#endif
 }
 
 static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;

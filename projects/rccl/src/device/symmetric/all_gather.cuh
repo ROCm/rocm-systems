@@ -27,21 +27,21 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
 
   Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE +
                    (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                      EnableTma ? 0 :
 #endif
                                  lane);
 
   ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE +
                               (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                                 EnableTma ? 0 :
 #endif
                                             lane);
 
   Pack tmp[UnrollPacks];
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   int lw = threadIdx.x / WARP_SIZE;
   extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks>;
@@ -51,28 +51,22 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
 #endif
   bool skip = false; // all lanes issue loads/stores
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
+  size_t pending = 0;
   if NCCL_IF_CONSTEXPR (EnableTma) {
-    if (lane == 0) {
-      // lane0 issues async.cp.bulk commands
-      init(&tmaSmem->bar, 1);
-    } else {
-      // other lanes can skip the loop
-      skip = true;
-    }
+    ncclSymkTileBarInit(&tmaSmem->bar, /*arrivers=*/1, lane);
+    // TMA issues from lane 0, so the rest of the warp has nothing left to do.
+    // TDM needs the whole warp to build the descriptor, so every lane stays in.
+    skip = NCCL_SYMK_TILE_TMA && lane != 0;
   }
 #endif
 
   nIters -= w;
   if (0 < nIters) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      if (lane == 0) {
-        cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks, cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-        cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-          cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tileSize);
-        tmaSmem->bar.wait(std::move(token));
-      }
+      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+      ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
     } else
 #endif
     {
@@ -97,9 +91,9 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
           NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
             if (partial && dr == nRanks) break;
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize);
+              ncclSymkTileStore(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
@@ -110,12 +104,9 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
             }
             if (++r == nRanks) r = 0;
           }
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
-            if (lane == 0) {
-              ptx::cp_async_bulk_commit_group();
-              ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
-            }
+            ncclSymkTileStoreWait(lane);
           }
 #endif
         }
@@ -124,14 +115,10 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
       outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       nIters -= wn;
       if (nIters <= 0) break;
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        if (lane == 0) {
-          cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks, cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-          cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-            cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tileSize);
-          tmaSmem->bar.wait(std::move(token));
-        }
+        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+        ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
       } else
 #endif
       {
@@ -185,7 +172,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
   uint32_t nPreBytes =
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 :
 #endif
                                           (16 - input.offset) % 16;
@@ -193,7 +180,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   if NCCL_IF_CONSTEXPR (EnableTma) {
     if (alignment % 256 == 0) {
       constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkAlign256BDeepUnrollPacks, UnrollPeers = 2;
