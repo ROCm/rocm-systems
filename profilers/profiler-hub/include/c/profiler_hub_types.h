@@ -23,6 +23,8 @@ extern "C"
         PH_RESULT_INVALID_CONTEXT,           /**< Context argument was null or invalid. */
         PH_RESULT_INVALID_ARGUMENT,          /**< A non-context argument was null or
                                                  invalid. */
+        PH_RESULT_FUTURE_ALLOCATION_FAILED,  /**< An async task could not be submitted
+                                                 (out of memory). */
     } ph_result_t;
 
     struct ph_ctx;
@@ -160,7 +162,7 @@ extern "C"
     typedef ph_version_t ph_library_version_t;
     typedef ph_version_t ph_schema_version_t;
 
-    /** @brief Callback signature for ph_future_get() (not yet implemented). */
+    /** @brief Callback signature for ph_future_get(). */
     typedef void (*ph_task_fn)(void* user_data);
 
     // NOLINTEND

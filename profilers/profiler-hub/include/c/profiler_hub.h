@@ -99,8 +99,11 @@ extern "C"
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p events is
      *         null or @p track_id does not identify a known track.
      * @note @p events->events and every ph_event_t::name in it point into
-     *       memory owned by @p ctx and follow the same lifetime rule as
-     *       ph_get_track_list().
+     *       memory owned by @p ctx and remain valid until @p ctx is freed.
+     *       Unlike ph_get_track_list()/ph_get_node(), a later call to this
+     *       function does NOT invalidate an earlier one's result -- each
+     *       call gets its own private storage, safe to read concurrently
+     *       from multiple calls (including calls made via ph_future_get()).
      */
     ph_result_t ph_get_track_events(ph_ctx_t         ctx,
                                     uint32_t         track_id,
@@ -121,7 +124,11 @@ extern "C"
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p samples is
      *         null or @p track_id does not identify a known track.
      * @note @p samples->samples points into memory owned by @p ctx and
-     *       follows the same lifetime rule as ph_get_track_list().
+     *       remains valid until @p ctx is freed. Unlike
+     *       ph_get_track_list()/ph_get_node(), a later call to this
+     *       function does NOT invalidate an earlier one's result -- each
+     *       call gets its own private storage, safe to read concurrently
+     *       from multiple calls (including calls made via ph_future_get()).
      */
     ph_result_t ph_get_track_samples(ph_ctx_t          ctx,
                                      uint32_t          track_id,
@@ -130,10 +137,23 @@ extern "C"
                                      ph_sample_list_t* samples);
 
     /**
-     * @brief Not yet implemented.
-     * @warning Declared for the planned async task API but has no
-     *          definition in the current version of the library; calling it
-     *          will fail to link.
+     * @brief Submits @p task_fn for asynchronous execution on @p ctx's
+     *        internal thread pool.
+     * @param ctx Context to submit the task to. Owns the returned future;
+     *        it is cancelled and waited on if still live when @p ctx is
+     *        freed.
+     * @param future Out parameter receiving the new future handle. Must
+     *        not be null.
+     * @param task_fn Callback invoked with @p user_data on a worker
+     *        thread. Must write any result/error into memory owned by
+     *        @p user_data; this API has no return-value/error channel.
+     * @param user_data Passed through to @p task_fn unchanged.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future or
+     *         @p task_fn is null, PH_RESULT_FUTURE_ALLOCATION_FAILED if
+     *         the future could not be allocated.
+     * @note Caller owns @p *future and must release it with
+     *       ph_future_free().
      */
     ph_result_t ph_future_get(ph_ctx_t     ctx,
                               ph_future_t* future,
@@ -141,20 +161,40 @@ extern "C"
                               void*        user_data);
 
     /**
-     * @brief Not yet implemented.
-     * @warning See ph_future_get().
+     * @brief Blocks until @p future's task finishes running or is
+     *        cancelled.
+     * @param ctx Context @p future was created through.
+     * @param future Future to wait on.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future is
+     *         null or was not issued by @p ctx.
      */
     ph_result_t ph_future_wait(ph_ctx_t ctx, ph_future_t future);
 
     /**
-     * @brief Not yet implemented.
-     * @warning See ph_future_get().
+     * @brief Cancels @p future's task.
+     * @param ctx Context @p future was created through.
+     * @param future Future to cancel.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future is
+     *         null or was not issued by @p ctx.
+     * @note If the task has not started running yet, it is skipped
+     *       entirely. If it is already running, cancellation is a no-op:
+     *       @p task_fn's void(*)(void*) signature gives it no way to
+     *       observe a stop request, so it always runs to completion once
+     *       started.
      */
     ph_result_t ph_future_cancel(ph_ctx_t ctx, ph_future_t future);
 
     /**
-     * @brief Not yet implemented.
-     * @warning See ph_future_get().
+     * @brief Releases @p future.
+     * @param ctx Context @p future was created through.
+     * @param future Future to release.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p future is
+     *         null or was not issued by @p ctx.
+     * @warning Does not wait for the task to finish; call
+     *          ph_future_wait() first if that is required.
      */
     ph_result_t ph_future_free(ph_ctx_t ctx, ph_future_t future);
 
