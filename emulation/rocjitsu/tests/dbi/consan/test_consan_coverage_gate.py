@@ -8,7 +8,6 @@ import subprocess
 import sys
 import unittest
 
-
 DBI_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DBI_DIR))
 from consan_coverage_gate import (  # noqa: E402
@@ -23,7 +22,6 @@ from consan_validation_test_support import (  # noqa: E402
     log,
     verdict,
 )
-
 
 
 class ConSanCoverageGateTest(unittest.TestCase):
@@ -59,9 +57,42 @@ class ConSanCoverageGateTest(unittest.TestCase):
         decision = acceptance_decision(log(coverage(), verdict()))
         self.assertTrue(decision.accepted, decision.reasons)
         self.assertEqual(decision.evidence.coverage[0].reader, 7)
-        self.assertEqual(decision.evidence.verdict.patched_supported["access"], (20, 20))
+        self.assertEqual(
+            decision.evidence.verdict.patched_supported["access"], (20, 20)
+        )
 
-    def test_accepts_allowlist_excluded_and_duplicate_semantic_site_evidence(self) -> None:
+    def test_sampling_hint_is_advice_not_coverage_evidence(self) -> None:
+        for message in (
+            "No races were reported under sampled coverage.",
+            "No runtime evidence was collected under sampled coverage.",
+        ):
+            hint = (
+                "[rocjitsu-dbi-hooks] ConSan coverage hint: "
+                + message
+                + " For increased coverage, retry with RJ_CONSAN_PRESET=high."
+                + " No reports does not establish race freedom."
+            )
+            with self.subTest(message=message):
+                expected = parse_coverage_evidence(log(coverage(), verdict()))
+                actual = parse_coverage_evidence(
+                    log(coverage(), verdict()) + "\n" + hint
+                )
+                self.assertEqual(actual, expected)
+                with self.assertRaisesRegex(
+                    CoverageParseError, "missing ConSan coverage record"
+                ):
+                    parse_coverage_evidence(hint)
+                with self.assertRaises(CoverageParseError):
+                    parse_coverage_evidence(
+                        log(coverage(), verdict())
+                        + "\n"
+                        + hint
+                        + "\n[rocjitsu-dbi-hooks] ConSan coverage broken"
+                    )
+
+    def test_accepts_allowlist_excluded_and_duplicate_semantic_site_evidence(
+        self,
+    ) -> None:
         empty_counts = {
             f"{kind}_{counter}": "0"
             for kind in ("access", "barrier", "atomic", "fence")
@@ -111,9 +142,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
             )
         )
         self.assertTrue(decision.accepted, decision.reasons)
-        self.assertEqual(
-            decision.evidence.sites[0].reason, "container_filter_excluded"
-        )
+        self.assertEqual(decision.evidence.sites[0].reason, "container_filter_excluded")
 
     def test_accepts_supercollider_aggregate_without_site_rows(self) -> None:
         aggregate = coverage(
@@ -308,14 +337,19 @@ class ConSanCoverageGateTest(unittest.TestCase):
                         barrier_patched="0",
                         atomic_supported="0",
                         atomic_patched="0",
-                        fence_supported="0", fence_patched="0",
+                        fence_supported="0",
+                        fence_patched="0",
                     )
-                    updates.update(access="0/0", barrier="0/0", atomic="0/0", fence="0/0")
+                    updates.update(
+                        access="0/0", barrier="0/0", atomic="0/0", fence="0/0"
+                    )
                 decision = acceptance_decision(log(coverage_line, verdict(**updates)))
                 self.assertFalse(decision.accepted)
                 self.assertIn(f"verdict {name}=false", decision.reasons)
 
-    def test_rejects_patched_supported_mismatch_even_if_booleans_claim_complete(self) -> None:
+    def test_rejects_patched_supported_mismatch_even_if_booleans_claim_complete(
+        self,
+    ) -> None:
         with self.assertRaises(CoverageParseError):
             acceptance_decision(
                 log(
@@ -346,7 +380,9 @@ class ConSanCoverageGateTest(unittest.TestCase):
             fence_patched="0",
         )
         with self.assertRaises(CoverageParseError):
-            acceptance_decision(log(first, second, verdict(applicable_code_objects="2")))
+            acceptance_decision(
+                log(first, second, verdict(applicable_code_objects="2"))
+            )
 
     def test_rejects_unsupported_counter_even_if_booleans_claim_complete(self) -> None:
         with self.assertRaises(CoverageParseError):
@@ -467,52 +503,52 @@ class ConSanCoverageGateTest(unittest.TestCase):
 
     def test_retains_actual_hook_site_outcomes_and_detailed_reasons(self) -> None:
         text = log(
-                coverage(
-                    analysis_complete="false",
-                    access_discovered="21",
-                    access_unsupported="1",
-                    barrier_patched="3",
-                    barrier_resource_failed="1",
-                    atomic_patched="1",
-                    atomic_placement_or_lowering_failed="1",
-                ),
-                coverage_site(),
-                coverage_site(
-                    kind="barrier",
-                    disposition="supported",
-                    reason="none",
-                    outcome="resource_failed",
-                    lowering_reason="unsupported_resource_plan",
-                    resource_reason="dynamic_stack",
-                    text="0x20",
-                    mnemonic="s_barrier_wait",
-                ),
-                coverage_site(
-                    kind="atomic",
-                    disposition="supported",
-                    reason="none",
-                    outcome="placement_or_lowering_failed",
-                    lowering_reason="instrumentation_patch_missing",
-                    text="0x30",
-                    mnemonic="global_atomic_add",
-                ),
-                coverage_site(
-                    kind="fence",
-                    disposition="supported",
-                    reason="none",
-                    outcome="patched",
-                    lowering_reason="none",
-                    text="0x40",
-                    mnemonic="fence",
-                ),
-                verdict(
-                    analysis_complete="false",
-                    static_complete="false",
-                    incomplete_code_objects="1",
-                    barrier="3/4",
-                    atomic="1/2",
-                ),
-            )
+            coverage(
+                analysis_complete="false",
+                access_discovered="21",
+                access_unsupported="1",
+                barrier_patched="3",
+                barrier_resource_failed="1",
+                atomic_patched="1",
+                atomic_placement_or_lowering_failed="1",
+            ),
+            coverage_site(),
+            coverage_site(
+                kind="barrier",
+                disposition="supported",
+                reason="none",
+                outcome="resource_failed",
+                lowering_reason="unsupported_resource_plan",
+                resource_reason="dynamic_stack",
+                text="0x20",
+                mnemonic="s_barrier_wait",
+            ),
+            coverage_site(
+                kind="atomic",
+                disposition="supported",
+                reason="none",
+                outcome="placement_or_lowering_failed",
+                lowering_reason="instrumentation_patch_missing",
+                text="0x30",
+                mnemonic="global_atomic_add",
+            ),
+            coverage_site(
+                kind="fence",
+                disposition="supported",
+                reason="none",
+                outcome="patched",
+                lowering_reason="none",
+                text="0x40",
+                mnemonic="fence",
+            ),
+            verdict(
+                analysis_complete="false",
+                static_complete="false",
+                incomplete_code_objects="1",
+                barrier="3/4",
+                atomic="1/2",
+            ),
+        )
         evidence = parse_coverage_evidence(text)
         self.assertEqual(len(evidence.sites), 28)
         self.assertEqual(evidence.sites[0].reason, "unsupported_mnemonic")
@@ -534,7 +570,9 @@ class ConSanCoverageGateTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         output = json.loads(completed.stdout)
         self.assertEqual(output["coverage_sites"][1]["outcome"], "resource_failed")
-        self.assertEqual(output["coverage_sites"][1]["resource_reason"], "dynamic_stack")
+        self.assertEqual(
+            output["coverage_sites"][1]["resource_reason"], "dynamic_stack"
+        )
         self.assertEqual(output["coverage_sites"][2]["text_offset"], 0x30)
         self.assertEqual(output["coverage_sites"][3]["outcome"], "patched")
 
@@ -563,7 +601,9 @@ class ConSanCoverageGateTest(unittest.TestCase):
             coverage_site(reader="8"),
         )
         for site_line in cases:
-            with self.subTest(site_line=site_line), self.assertRaises(CoverageParseError):
+            with self.subTest(site_line=site_line), self.assertRaises(
+                CoverageParseError
+            ):
                 parse_coverage_evidence(log(coverage(), site_line, verdict()))
 
     def test_rejects_missing_or_ambiguous_records(self) -> None:
@@ -585,7 +625,9 @@ class ConSanCoverageGateTest(unittest.TestCase):
         self.assertEqual(evidence.sites, ())
         self.assertEqual(evidence.coverage[0].counts["access_patched"], 20)
 
-    def test_allows_reused_reader_only_for_aggregate_supercollider_records(self) -> None:
+    def test_allows_reused_reader_only_for_aggregate_supercollider_records(
+        self,
+    ) -> None:
         updates = {
             "mode": "supercollider",
             "analysis_complete": "false",
@@ -594,38 +636,49 @@ class ConSanCoverageGateTest(unittest.TestCase):
             "access_unsupported": "48",
         }
         for kind in ("barrier", "atomic", "fence"):
-            updates.update({
-                f"{kind}_supported": "0",
-                f"{kind}_patched": "0",
-                f"{kind}_unsupported": "0",
-            })
+            updates.update(
+                {
+                    f"{kind}_supported": "0",
+                    f"{kind}_patched": "0",
+                    f"{kind}_unsupported": "0",
+                }
+            )
         record = coverage(**updates)
-        evidence = parse_coverage_evidence(log(
-            record,
-            record,
-            verdict(
-                analysis_complete="false",
-                static_complete="false",
-                applicable_code_objects="2",
-                incomplete_code_objects="2",
-                access="48/48",
-                barrier="0/0",
-                atomic="0/0",
-                fence="0/0",
-            ),
-            synthesize_sites=False,
-        ))
+        evidence = parse_coverage_evidence(
+            log(
+                record,
+                record,
+                verdict(
+                    analysis_complete="false",
+                    static_complete="false",
+                    applicable_code_objects="2",
+                    incomplete_code_objects="2",
+                    access="48/48",
+                    barrier="0/0",
+                    atomic="0/0",
+                    fence="0/0",
+                ),
+                synthesize_sites=False,
+            )
+        )
         self.assertEqual(len(evidence.coverage), 2)
 
     def test_reused_reader_is_disambiguated_by_load_occurrence(self) -> None:
         first = coverage(reader=7, load="41")
         second = coverage(reader=7, load="42")
-        evidence = parse_coverage_evidence(log(
-            first,
-            second,
-            verdict(applicable_code_objects="2", access="40/40", barrier="8/8",
-                    atomic="4/4", fence="2/2"),
-        ))
+        evidence = parse_coverage_evidence(
+            log(
+                first,
+                second,
+                verdict(
+                    applicable_code_objects="2",
+                    access="40/40",
+                    barrier="8/8",
+                    atomic="4/4",
+                    fence="2/2",
+                ),
+            )
+        )
         self.assertEqual(
             [(record.reader, record.load) for record in evidence.coverage],
             [(7, 41), (7, 42)],
@@ -633,13 +686,22 @@ class ConSanCoverageGateTest(unittest.TestCase):
         self.assertEqual({site.load for site in evidence.sites}, {41, 42})
 
     def test_rejects_duplicate_load_occurrence_even_when_reader_is_reused(self) -> None:
-        with self.assertRaisesRegex(CoverageParseError, "duplicate coverage load identities"):
-            parse_coverage_evidence(log(
-                coverage(reader=7, load="41"),
-                coverage(reader=7, load="41"),
-                verdict(applicable_code_objects="2", access="40/40", barrier="8/8",
-                        atomic="4/4", fence="2/2"),
-            ))
+        with self.assertRaisesRegex(
+            CoverageParseError, "duplicate coverage load identities"
+        ):
+            parse_coverage_evidence(
+                log(
+                    coverage(reader=7, load="41"),
+                    coverage(reader=7, load="41"),
+                    verdict(
+                        applicable_code_objects="2",
+                        access="40/40",
+                        barrier="8/8",
+                        atomic="4/4",
+                        fence="2/2",
+                    ),
+                )
+            )
 
     def test_rejects_duplicate_keys_and_malformed_fields(self) -> None:
         cases = {
@@ -664,7 +726,9 @@ class ConSanCoverageGateTest(unittest.TestCase):
             (coverage(), verdict(access=f"{1 << 64}/{1 << 64}")),
         )
         for coverage_line, verdict_line in cases:
-            with self.subTest(line=coverage_line), self.assertRaises(CoverageParseError):
+            with self.subTest(line=coverage_line), self.assertRaises(
+                CoverageParseError
+            ):
                 parse_coverage_evidence(log(coverage_line, verdict_line))
 
     def test_rejects_cross_record_count_disagreement(self) -> None:
@@ -679,9 +743,7 @@ class ConSanCoverageGateTest(unittest.TestCase):
                 parse_coverage_evidence(log(coverage(), verdict_line))
 
     def test_rejects_nonzero_dynamic_incompleteness_despite_true_claim(self) -> None:
-        decision = acceptance_decision(
-            log(coverage(), verdict(dynamic_incomplete="1"))
-        )
+        decision = acceptance_decision(log(coverage(), verdict(dynamic_incomplete="1")))
         self.assertFalse(decision.accepted)
         self.assertIn("dynamic analysis incomplete: 1", decision.reasons)
 
