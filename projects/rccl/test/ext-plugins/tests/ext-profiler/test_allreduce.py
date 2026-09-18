@@ -379,6 +379,8 @@ def test_ce_events_traced(paths):
         "-e", "8M",
         "-f", "2",
         "-g", "1",
+        # CE needs symmetrically registered buffers.
+        "-R", "2",
     ]
 
     log_dir = os.path.join(paths.LOGDIR, "allreduce_ext_profiler_test_logs")
@@ -396,7 +398,7 @@ def test_ce_events_traced(paths):
 
     assert result.returncode == 0, f"CE AllReduce profiling test failed, see {log_file}"
 
-    if not paths.check_event_in_log(log_file, "CE 2-shot AllReduce"):
+    if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo CE"):
         pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
 
     trace_files = glob.glob(trace_pattern)
@@ -472,6 +474,8 @@ def test_ce_pool_wrap_does_not_hang(paths):
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
         "-b", "1M", "-e", "4M", "-f", "2", "-g", "1", "-n", "100", "-w", "20",
+        # CE needs symmetrically registered buffers.
+        "-R", "2",
     ]
 
     with open(log_file, "w") as logfile:
@@ -482,7 +486,7 @@ def test_ce_pool_wrap_does_not_hang(paths):
         except subprocess.TimeoutExpired:
             pytest.fail(f"CE pool wrap hung, see {log_file}")
 
-    if not paths.check_event_in_log(log_file, "CE 2-shot AllReduce"):
+    if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo CE"):
         pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
 
     assert result.returncode == 0, f"CE AllReduce with a wrapping pool failed, see {log_file}"
