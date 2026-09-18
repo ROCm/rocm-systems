@@ -19,6 +19,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <unistd.h>
+
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -30,7 +32,12 @@
 // not link, so it defines its own.
 #define HIP_CHECK(error)                                                                           \
   do {                                                                                             \
+    std::cerr << "[hipGetProcAddress IPC event][child pid=" << getpid() << "] BEGIN " << #error    \
+              << std::endl;                                                                        \
     hipError_t local_error = (error);                                                              \
+    std::cerr << "[hipGetProcAddress IPC event][child pid=" << getpid() << "] END " << #error      \
+              << " status=" << static_cast<int>(local_error) << " ("                               \
+              << hipGetErrorString(local_error) << ")" << std::endl;                               \
     if (local_error != hipSuccess) {                                                               \
       std::cout << "child: " << #error << " failed with " << hipGetErrorString(local_error)        \
                 << " (" << static_cast<int>(local_error) << ")" << std::endl;                      \
@@ -51,6 +58,9 @@ static __global__ void addOneKernel(int* arr, int arrSize) {
 }
 
 int main(int argc, char** argv) {
+  std::cerr << "[hipGetProcAddress IPC event][child pid=" << getpid() << "] ENTER main"
+            << std::endl;
+
   if (argc < 2 || argc > 3) {
     std::cout << "child: usage: " << argv[0] << " <handle-hex> [device-id]" << std::endl;
     return 1;
@@ -98,7 +108,11 @@ int main(int argc, char** argv) {
   HIP_CHECK(hipMalloc(&devMem, Nbytes));
 
   HIP_CHECK(hipMemcpyAsync(devMem, hostMem.data(), Nbytes, hipMemcpyHostToDevice, stream));
+  std::cerr << "[hipGetProcAddress IPC event][child pid=" << getpid()
+            << "] BEGIN kernel launch addOneKernel" << std::endl;
   addOneKernel<<<1, 1, 0, stream>>>(devMem, N);
+  std::cerr << "[hipGetProcAddress IPC event][child pid=" << getpid()
+            << "] END kernel launch addOneKernel status=submitted" << std::endl;
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpyAsync(hostMem.data(), devMem, Nbytes, hipMemcpyDeviceToHost, stream));
 
@@ -118,5 +132,7 @@ int main(int argc, char** argv) {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipEventDestroy(event));
 
+  std::cerr << "[hipGetProcAddress IPC event][child pid=" << getpid()
+            << "] BODY_COMPLETE; process teardown follows" << std::endl;
   return 0;
 }

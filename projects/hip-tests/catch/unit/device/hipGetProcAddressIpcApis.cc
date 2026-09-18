@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 #include <cerrno>
 #include <cstdlib>
+#include <iostream>
 #include <optional>
 #include <string>
 #include "hipGetProcAddressHelpers.hh"
@@ -120,17 +121,34 @@ namespace {
 
 void runIpcEventProcAddressTest(std::optional<int> parentDeviceId,
                                 std::optional<int> childDeviceId) {
+  const auto trace = [](const char* marker) {
+    std::cerr << "[hipGetProcAddress IPC event][parent pid=" << getpid() << "] " << marker
+              << std::endl;
+  };
+  const auto checkHipCall = [](const char* operation, const auto& call) {
+    std::cerr << "[hipGetProcAddress IPC event][parent pid=" << getpid() << "] BEGIN " << operation
+              << std::endl;
+    const hipError_t status = call();
+    std::cerr << "[hipGetProcAddress IPC event][parent pid=" << getpid() << "] END " << operation
+              << " status=" << static_cast<int>(status) << " (" << hipGetErrorString(status) << ")"
+              << std::endl;
+    HIP_CHECK(status);
+  };
+
+  trace("ENTER");
   if (parentDeviceId) {
-    HIP_CHECK(hipSetDevice(*parentDeviceId));
+    checkHipCall("hipSetDevice", [&] { return hipSetDevice(*parentDeviceId); });
   }
 
   void* hipIpcGetEventHandle_ptr = nullptr;
 
   int currentHipVersion = 0;
-  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+  checkHipCall("hipRuntimeGetVersion", [&] { return hipRuntimeGetVersion(&currentHipVersion); });
 
-  HIP_CHECK(hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr, currentHipVersion,
-                              0, nullptr));
+  checkHipCall("hipGetProcAddress(hipIpcGetEventHandle)", [&] {
+    return hipGetProcAddress("hipIpcGetEventHandle", &hipIpcGetEventHandle_ptr, currentHipVersion,
+                             0, nullptr);
+  });
   REQUIRE(hipIpcGetEventHandle_ptr != nullptr);
 
   auto dyn_hipIpcGetEventHandle_ptr =
@@ -138,11 +156,14 @@ void runIpcEventProcAddressTest(std::optional<int> parentDeviceId,
 
   // Interprocess events must disable timing.
   hipEvent_t event = nullptr;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming));
+  checkHipCall("hipEventCreateWithFlags", [&] {
+    return hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming);
+  });
   REQUIRE(event != nullptr);
 
   hipIpcEventHandle_t handle{};
-  HIP_CHECK(dyn_hipIpcGetEventHandle_ptr(&handle, event));
+  checkHipCall("hipIpcGetEventHandle",
+               [&] { return dyn_hipIpcGetEventHandle_ptr(&handle, event); });
 
   std::string args = ipcHandleToHex(handle);
   if (childDeviceId) {
@@ -150,14 +171,28 @@ void runIpcEventProcAddressTest(std::optional<int> parentDeviceId,
   }
 
   // The event must stay alive until the child has attached to it.
+  trace("BEGIN SpawnProc constructor");
   hip::SpawnProc proc("hipGetProcAddressIpcEventImport", true);
-  REQUIRE(proc.spawn(args) == 0);
+  trace("END SpawnProc constructor");
 
-  int childExit = proc.wait();
+  trace("BEGIN spawn");
+  const int spawn_status = proc.spawn(args);
+  std::cerr << "[hipGetProcAddress IPC event][parent pid=" << getpid()
+            << "] END spawn status=" << spawn_status << std::endl;
+  REQUIRE(spawn_status == 0);
+
+  std::cerr << "[hipGetProcAddress IPC event][parent pid=" << getpid()
+            << "] child pid=" << proc.getProcess() << std::endl;
+
+  trace("BEGIN wait");
+  const int childExit = proc.wait();
+  std::cerr << "[hipGetProcAddress IPC event][parent pid=" << getpid()
+            << "] END wait exit_status=" << childExit << std::endl;
   INFO("Child process output:\n" << proc.getOutput());
   REQUIRE(childExit == 0);
 
-  HIP_CHECK(hipEventDestroy(event));
+  checkHipCall("hipEventDestroy", [&] { return hipEventDestroy(event); });
+  trace("BODY_COMPLETE");
 }
 }  // namespace
 
