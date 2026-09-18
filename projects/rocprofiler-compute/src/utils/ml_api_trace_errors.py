@@ -88,6 +88,25 @@ class MissingSourceLocationError(MlApiTraceError):
         )
 
 
+class MarkerNotNestedError(MlApiTraceError):
+    """A consolidated marker row is missing from the nested call forest."""
+
+    def __init__(
+        self,
+        operator_name: str,
+        thread_id: str,
+        start_timestamp: object,
+    ) -> None:
+        self.operator_name = operator_name
+        self.thread_id = thread_id
+        self.start_timestamp = start_timestamp
+        super().__init__(
+            "Marker was not nested for "
+            f"Operator_Name={operator_name} Thread_Id={thread_id} "
+            f"Start_Timestamp={start_timestamp}"
+        )
+
+
 def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
     columns = ["Kernel_Name", "Correlation_ID"]
     if "GUID" in unmatched_rows.columns:

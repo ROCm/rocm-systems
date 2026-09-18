@@ -20,6 +20,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.ml_api_trace_errors import (
+    MarkerNotNestedError,
     MissingSourceLocationError,
     OverlappingMarkerRangeError,
     PassMarkerMismatchError,
@@ -413,6 +414,47 @@ def nest_marker_intervals(
             rollup_node_stats(root)
         forest[thread_key] = roots
     return forest
+
+
+def _nested_invocation_keys(
+    forest: dict[str, list[CallTreeNode]],
+) -> set[tuple[str, str]]:
+    """Return (Thread_Id, marker-start) pairs present in the forest."""
+    keys: set[tuple[str, str]] = set()
+
+    def walk(thread_id: str, node: CallTreeNode) -> None:
+        for invocation_id in node.invocation_ids:
+            keys.add((thread_id, invocation_id))
+        for child in node.children:
+            walk(thread_id, child)
+
+    for thread_id, roots in forest.items():
+        for root in roots:
+            walk(thread_id, root)
+    return keys
+
+
+def _validate_all_markers_nested(
+    trace_df: pd.DataFrame, forest: dict[str, list[CallTreeNode]]
+) -> None:
+    """Exit if a consolidated marker row is missing from the nested forest."""
+    if trace_df.empty:
+        return
+    nested_keys = _nested_invocation_keys(forest)
+    for row in trace_df.itertuples(index=False):
+        thread_id = str(row.Thread_Id)
+        start_key = str(row.Start_Timestamp)
+        if (thread_id, start_key) not in nested_keys:
+            console_error(
+                "analysis",
+                str(
+                    MarkerNotNestedError(
+                        operator_name=str(row.Operator_Name),
+                        thread_id=thread_id,
+                        start_timestamp=row.Start_Timestamp,
+                    )
+                ),
+            )
 
 
 def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
@@ -985,7 +1027,7 @@ def process_ml_api_trace_output(
     workload: schema.Workload,
     workload_dir: str,
 ) -> None:
-    """Load, join, and drop unmatched kernel rows for each profiling pass."""
+    """Load, join, nest, and validate ML API marker rows for operator analyze."""
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     csv_pairs = _find_ml_api_trace_csv_pairs(Path(workload_dir))
     if not csv_pairs:
@@ -1028,6 +1070,7 @@ def process_ml_api_trace_output(
         ])
     )
     workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df)
+    _validate_all_markers_nested(workload.ml_api_trace_df, workload.ml_api_call_trees)
 
 
 def validate_workload(path: str) -> None:
