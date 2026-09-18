@@ -7,8 +7,8 @@ by its ratio to the matching uninstrumented second run.
 
 | Workload | Uninstrumented Startup | Uninstrumented Run | Default Mode Startup | Default Mode Run | Default Mode (high) Startup | Default Mode (high) Run | SuperCollider Startup | SuperCollider Run | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| PyTorch synthetic dense prefill (32-token prompt) | 3.12 s | 0.0028 s (1×) | running | running | pending | pending | pending | pending | [default--audit-on: running](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-dense-prefill--default--audit-on.log>) |
-| PyTorch synthetic dense decode (one continuous-batch tick) | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
+| PyTorch synthetic dense prefill (32-token prompt) | 3.12 s | 0.0028 s (1×) | 234 s | 0.00573 s (2.05×) | 235 s | 0.0737 s (26.3×) | 167 s | 0.00344 s (1.23×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-dense-prefill--native-validation.log>) |
+| PyTorch synthetic dense decode (one continuous-batch tick) | 2.77 s | 0.00295 s (1×) | 249 s | 0.00796 s (2.7×) | running | running | pending | pending | [default-high--audit-on: running](</home/benjacob/work/consan-benchmark-gfx950-20260917/pytorch-synthetic-decode--default-high--audit-on.log>) |
 | PyTorch synthetic four-expert top-1 MoE prefill (16-token prompt) | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
 | Gluon verified shared-memory round trip (1024 elements) | 0.471 s | 0.0000865 s (1×) | 0.476 s | 0.000102 s (1.17×) | 0.477 s | 0.000106 s (1.23×) | 0.477 s | 0.000104 s (1.2×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/gluon-shared-roundtrip--native-validation.log>) |
 | hipBLASLt/Tensile verified FP16 GEMM (512×512×512) | 0.000011 s | 0.00000986 s (1×) | 5.61 s | 0.000399 s (40.5×) | 5.59 s | 0.00693 s (703×) | 3.47 s | 0.000016 s (1.63×) | [native-validation: accepted](</home/benjacob/work/consan-benchmark-gfx950-20260917/hipblaslt-tensile-gemm--native-validation.log>) |
