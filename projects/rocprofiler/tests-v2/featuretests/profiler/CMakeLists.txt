@@ -233,7 +233,7 @@ install(
         DESTINATION
             ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
         COMPONENT tests)
-target_link_libraries(hsa_async_mem_copy hsa-runtime64::hsa-runtime64 Threads::Threads dl
+target_link_libraries(hsa_async_mem_copy PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl
                       stdc++fs)
 
 # Setup testing
@@ -259,7 +259,7 @@ target_include_directories(
     multithreaded_testapp
     PRIVATE ${PROJECT_SOURCE_DIR}
             ${PROJECT_SOURCE_DIR}/tests-v2/featuretests/profiler/apps)
-target_link_libraries(multithreaded_testapp hsa-runtime64::hsa-runtime64 Threads::Threads
+target_link_libraries(multithreaded_testapp PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads
                       dl stdc++fs amd_comgr)
 set_target_properties(
     multithreaded_testapp

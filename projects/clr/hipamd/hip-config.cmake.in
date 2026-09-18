@@ -99,7 +99,7 @@ if(NOT DEFINED HIP_PLATFORM)
     # Prefer the platform this package was built for: @HIP_PLATFORM@ is
     # substituted by configure_package_config_file at install time so the
     # installed config reflects the actual build rather than the consuming host.
-    if("@HIP_PLATFORM@")
+    if(NOT "@HIP_PLATFORM@" STREQUAL "")
       set(HIP_PLATFORM "@HIP_PLATFORM@")
       message(STATUS "HIP_PLATFORM (from build): ${HIP_PLATFORM}")
     else()
