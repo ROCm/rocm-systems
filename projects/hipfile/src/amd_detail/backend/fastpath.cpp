@@ -248,9 +248,21 @@ Fastpath::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
     op->failover = std::move(failover);
     Context<AsyncMonitor>::get()->addOp(op);
 
+    if (stream->canUseStreamWaitValue()) {
+        op->io_fn       = async_fastpath_copy;
+        op->signal_slot = allocateSignalSlot();
+    }
+
     try {
         auto stream_lock = stream->getLock();
-        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_fastpath_copy, op.get());
+        if (op->signal_slot) {
+            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_dispatch, op.get());
+            Context<Hip>::get()->hipStreamWaitValue64(op->stream->getHipStream(), op->signal_slot, 1,
+                                                      hipStreamWaitValueGte, ~uint64_t{0});
+        }
+        else {
+            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_fastpath_copy, op.get());
+        }
         Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
     }
     catch (...) {

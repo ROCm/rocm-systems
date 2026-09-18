@@ -1064,12 +1064,13 @@ struct FastpathAsyncIO : public HipFileOpened {
           buffer_offset{0}, bytes_transferred{0}
     {
     }
-    void SetUpStreamFlags()
+    void SetUpStreamFlags(bool wait_value = false)
     {
         EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
         EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
         EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(false));
         EXPECT_CALL(*mstream, pageAligned).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*mstream, canUseStreamWaitValue).Times(AnyNumber()).WillRepeatedly(Return(wait_value));
         EXPECT_CALL(*mbuffer, getBuffer)
             .Times(AnyNumber())
             .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0xFEFEFEFE)));
@@ -1134,6 +1135,27 @@ TEST_F(FastpathAsyncIO, validParamsEnqueuesCopyAndCleanup)
     EXPECT_CALL(*mstream, getHipStream).Times(2);
     EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _));
     EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+    Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_transferred,
+                        mstream);
+}
+
+TEST_F(FastpathAsyncIO, validParamsWithWaitValueEnqueuesDispatchWaitAndCleanup)
+{
+    SetUpStreamFlags(true);
+    StrictMock<MAsyncMonitor> masync_monitor;
+    uint64_t                  slot_storage = 0;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(mhip, hipExtMallocWithFlags(sizeof(uint64_t), _)).WillOnce(Return(&slot_storage));
+    EXPECT_CALL(mhip, hipMemcpy(&slot_storage, _, sizeof(uint64_t), hipMemcpyHostToDevice));
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_dispatch), _));
+    EXPECT_CALL(mhip, hipStreamWaitValue64(_, &slot_storage, 1, hipStreamWaitValueGte, _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+    EXPECT_CALL(mhip, hipFree(&slot_storage));
     Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_transferred,
                         mstream);
 }
