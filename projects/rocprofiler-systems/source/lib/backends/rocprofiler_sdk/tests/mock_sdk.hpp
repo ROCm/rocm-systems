@@ -30,6 +30,7 @@ static constexpr status_t k_status_error                  = -1;
 static constexpr status_t k_status_buffer_busy            = -2;
 static constexpr status_t k_status_hsa_not_loaded         = -3;
 static constexpr status_t k_status_error_invalid_argument = -4;
+static constexpr status_t k_status_error_not_implemented  = -5;
 
 struct context_id
 {
@@ -423,6 +424,8 @@ struct mock_sdk
     static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED = k_status_hsa_not_loaded;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         k_status_error_invalid_argument;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        k_status_error_not_implemented;
 
     // ── Counter constants ─────────────────────────────────────────────────────
     static constexpr counter_flag_t            COUNTER_FLAG_NONE      = 0;

@@ -448,8 +448,16 @@ public:
         callback_tracing_record_t rec, callback_tracing_operation_args_cb_t cb,
         std::int32_t max_deref, void* user_data)
     {
-        sdk_check<Wrapper>(Wrapper::iterate_callback_tracing_kind_operation_args(
-            rec, cb, max_deref, user_data));
+        // Some callback-tracing kinds (e.g. ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API)
+        // declare a kind but do not implement argument iteration for it. Argument
+        // iteration only supplies best-effort debug-annotation data, so treat
+        // "not implemented" as "no args available" instead of a fatal error.
+        const auto status = Wrapper::iterate_callback_tracing_kind_operation_args(
+            rec, cb, max_deref, user_data);
+        if(status != Wrapper::STATUS_ERROR_NOT_IMPLEMENTED)
+        {
+            sdk_check<Wrapper>(status);
+        }
     }
 
     static void iterate_counter_dimensions(counter_id_t id, available_dimensions_cb_t cb,
