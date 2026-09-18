@@ -44,7 +44,14 @@ THE SOFTWARE.
 template <typename T>
 class BatchedKernelParams {
 public:
+    BatchedKernelParams() = default;
     ~BatchedKernelParams() { if (dev_) { (void)hipFree(dev_); } }
+
+    // Owns a raw device buffer; copying/moving would double-free it.
+    BatchedKernelParams(const BatchedKernelParams &) = delete;
+    BatchedKernelParams &operator=(const BatchedKernelParams &) = delete;
+    BatchedKernelParams(BatchedKernelParams &&) = delete;
+    BatchedKernelParams &operator=(BatchedKernelParams &&) = delete;
 
     void Reset() { host_.clear(); max_gx_ = 0; max_gy_ = 0; }
 
