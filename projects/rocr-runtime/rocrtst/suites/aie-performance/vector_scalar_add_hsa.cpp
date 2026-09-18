@@ -10,10 +10,13 @@
 
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <new>
 #include <numeric>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -133,11 +136,16 @@ hsa_status_t find_memory_pool(hsa_amd_memory_pool_t pool, void* data) {
 // itself, which is part of the work this benchmark now prices.
 std::vector<std::uint8_t> read_file(const std::filesystem::path& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
-  if (!f) return {};
+  if (!f) throw std::runtime_error("Cannot open " + path.string());
   const auto size = static_cast<std::size_t>(f.tellg());
   f.seekg(0);
   std::vector<std::uint8_t> data(size);
   f.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size));
+  // Without this a truncated file yields a zero-padded tail, and the code object reader reports a
+  // malformed image rather than the short read that caused it.
+  if (static_cast<std::size_t>(f.gcount()) != size) {
+    throw std::runtime_error("Short read loading " + path.string());
+  }
   return data;
 }
 
@@ -146,34 +154,42 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path& path) {
 std::uint64_t load_hsaco(hsa_agent_t agent, hsa_executable_t* executable,
                          hsa_code_object_reader_t* reader) {
   const auto image = read_file(g_hsaco_path);
-  if (image.empty()) {
-    throw std::runtime_error("Failed to read hsaco: " + g_hsaco_path.string());
-  }
   if (hsa_code_object_reader_create_from_memory(image.data(), image.size(), reader) !=
       HSA_STATUS_SUCCESS) {
     throw std::runtime_error("Failed to create a code object reader");
   }
+  // From here on the caller has nothing to release yet, so each failure releases what this
+  // function has already created rather than leaking it into the throw.
   if (hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
                                 executable) != HSA_STATUS_SUCCESS) {
+    hsa_code_object_reader_destroy(*reader);
+    *reader = {};
     throw std::runtime_error("Failed to create an executable");
   }
+  const auto fail = [&](const char* what) {
+    hsa_executable_destroy(*executable);
+    hsa_code_object_reader_destroy(*reader);
+    *executable = {};
+    *reader = {};
+    throw std::runtime_error(what);
+  };
   if (hsa_executable_load_agent_code_object(*executable, agent, *reader, nullptr, nullptr) !=
       HSA_STATUS_SUCCESS) {
-    throw std::runtime_error("Failed to load the hsaco");
+    fail("Failed to load the hsaco");
   }
   if (hsa_executable_freeze(*executable, nullptr) != HSA_STATUS_SUCCESS) {
-    throw std::runtime_error("Failed to freeze the executable");
+    fail("Failed to freeze the executable");
   }
   hsa_executable_symbol_t symbol{};
   if (hsa_executable_get_symbol_by_name(*executable, g_kernel_name, &agent, &symbol) !=
       HSA_STATUS_SUCCESS) {
-    throw std::runtime_error(std::string("Kernel not found in hsaco: ") + g_kernel_name);
+    fail("Kernel not found in hsaco");
   }
   std::uint64_t kernel_object = 0;
   if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
                                      &kernel_object) != HSA_STATUS_SUCCESS ||
       kernel_object == 0) {
-    throw std::runtime_error("Kernel object is not available");
+    fail("Kernel object is not available");
   }
   return kernel_object;
 }
@@ -190,282 +206,229 @@ std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, void* ou
   while (wr_idx - hsa_queue_load_read_index_scacquire(q) >= q->size) {
     // spin
   }
-  const std::uint64_t pkt_idx = wr_idx & mask;
-
-  // Write packet
-  auto* pkt = queue + pkt_idx;
-  *pkt = {};
-  pkt->header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
+  // Built here and stored into the ring in one assignment: writing the READY header into the
+  // live slot first would let a processor still draining the previous doorbell see a ready packet
+  // whose kernel object has not been written yet.
+  hsa_amd_aie_kernel_dispatch_packet_t pkt{};
+  pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-  pkt->opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
-  pkt->count = 24;
-  pkt->completion_signal.handle = 0;
-  pkt->kernel_object_low = kernel_object & 0xFFFFFFFF;
-  pkt->kernel_object_high = kernel_object >> 32;
-  pkt->num_kernargs = 2;
-  pkt->kernarg_address = kernargs;
+  pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
+  pkt.count = 24;
+  pkt.completion_signal.handle = 0;
+  pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
+  pkt.kernel_object_high = kernel_object >> 32;
+  pkt.num_kernargs = 2;
+  pkt.kernarg_address = kernargs;
 
+  queue[wr_idx & mask] = pkt;
   return wr_idx;
 }
 
+// Everything a benchmark needs: an initialized runtime, an agent, a queue, a loaded hsaco and
+// per-dispatch buffers. Set up outside the timed loop, and released in reverse order by the
+// destructor -- notably before hsa_shut_down, which a plain scope-exit ordering got wrong.
+struct PdiHarness {
+  hsa_agent_t agent{};
+  hsa_amd_memory_pool_t data_pool{};
+  hsa_amd_memory_pool_t kernarg_pool{};
+  hsa_queue_t* queue = nullptr;
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  std::uint64_t kernel_object = 0;
+  std::vector<std::uint32_t*> inputs;
+  std::vector<std::uint32_t*> outputs;
+
+  explicit PdiHarness(std::int32_t num_dispatches) {
+    try {
+      Acquire(num_dispatches);
+    } catch (...) {
+      // A throwing constructor does not run its own destructor, so anything already acquired
+      // would leak -- including the hsa_init refcount, once per benchmark case.
+      Release();
+      throw;
+    }
+  }
+
+  // Throws on failure so a benchmark body can report it through SkipWithError.
+  void Acquire(std::int32_t num_dispatches) {
+    if (hsa_init() != HSA_STATUS_SUCCESS) throw std::runtime_error("hsa_init failed");
+    initialized_ = true;
+
+    if (hsa_iterate_agents(find_aie_agent, &agent) != HSA_STATUS_INFO_BREAK) {
+      throw std::runtime_error("No AIE agent found");
+    }
+
+    // data_memory: coarse-grained, allocatable (for tensor data)
+    find_pool_data data_pool_data{};
+    data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+    data_pool_data.expected_allocatable = true;
+    if (hsa_amd_agent_iterate_memory_pools(agent, find_memory_pool, &data_pool_data) !=
+        HSA_STATUS_INFO_BREAK) {
+      throw std::runtime_error("No allocatable coarse-grained pool found");
+    }
+    data_pool = data_pool_data.pool;
+
+    // kernarg_memory: KERNARG_INIT, allocatable; falls back to the data pool
+    find_pool_data kernarg_pool_data{};
+    kernarg_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+    kernarg_pool_data.expected_allocatable = true;
+    if (hsa_amd_agent_iterate_memory_pools(agent, find_memory_pool, &kernarg_pool_data) !=
+        HSA_STATUS_INFO_BREAK) {
+      kernarg_pool_data.pool = data_pool;
+    }
+    kernarg_pool = kernarg_pool_data.pool;
+
+    std::uint32_t min_queue_size = 0;
+    if (hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size) !=
+        HSA_STATUS_SUCCESS) {
+      throw std::runtime_error("Failed to get min queue size");
+    }
+    if (hsa_queue_create(agent, min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
+                         &queue) != HSA_STATUS_SUCCESS) {
+      throw std::runtime_error("Failed to create HSA queue");
+    }
+
+    kernel_object = load_hsaco(agent, &executable, &reader);
+
+    inputs.resize(num_dispatches, nullptr);
+    outputs.resize(num_dispatches, nullptr);
+    for (std::int32_t i = 0; i < num_dispatches; ++i) {
+      if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
+                                       reinterpret_cast<void**>(&inputs[i])) !=
+              HSA_STATUS_SUCCESS ||
+          hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
+                                       reinterpret_cast<void**>(&outputs[i])) !=
+              HSA_STATUS_SUCCESS) {
+        throw std::runtime_error("Failed to allocate I/O buffers");
+      }
+      std::iota(inputs[i], inputs[i] + N, 1);
+      std::fill_n(outputs[i], N, 0);
+    }
+  }
+
+  ~PdiHarness() { Release(); }
+
+  void Release() {
+    for (auto* p : outputs) {
+      if (p) hsa_amd_memory_pool_free(p);
+    }
+    for (auto* p : inputs) {
+      if (p) hsa_amd_memory_pool_free(p);
+    }
+    if (executable.handle) hsa_executable_destroy(executable);
+    if (reader.handle) hsa_code_object_reader_destroy(reader);
+    if (queue) hsa_queue_destroy(queue);
+    if (initialized_) hsa_shut_down();
+
+    outputs.clear();
+    inputs.clear();
+    executable = {};
+    reader = {};
+    kernel_object = 0;
+    queue = nullptr;
+    initialized_ = false;
+  }
+
+  PdiHarness(const PdiHarness&) = delete;
+  PdiHarness& operator=(const PdiHarness&) = delete;
+
+  // Confirm the kernel ran; otherwise the numbers time a no-op dispatch.
+  // Input is [1..N], so element i must come back as i + 2.
+  bool verify() const {
+    for (auto* out : outputs) {
+      for (std::size_t i = 0; i < N; ++i) {
+        if (out[i] != i + 2) return false;
+      }
+    }
+    return true;
+  }
+
+ private:
+  bool initialized_ = false;
+};
+
 }  // namespace
 
+// Dispatch N PDI+insts packets per iteration with the kernargs prepared up front.
 static void VectorScalarAddHSA(benchmark::State& state) {
-  // --- Initialize HSA runtime ---
-  if (hsa_init() != HSA_STATUS_SUCCESS) {
-    state.SkipWithError("hsa_init failed");
-    return;
-  }
-
-  // --- Find AIE agent ---
-  hsa_agent_t aie_agent{};
-  if (hsa_iterate_agents(find_aie_agent, &aie_agent) != HSA_STATUS_INFO_BREAK) {
-    state.SkipWithError("No AIE agent found");
-    hsa_shut_down();
-    return;
-  }
-
-  // --- Discover memory pools (data / kernarg) ---
-
-  // data_memory: coarse-grained, allocatable (for tensor data)
-  find_pool_data data_pool_data{};
-  data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-  data_pool_data.expected_allocatable = true;
-  hsa_amd_agent_iterate_memory_pools(aie_agent, find_memory_pool, &data_pool_data);
-
-  // kernarg_memory: KERNARG_INIT, allocatable (for payloads); fallback to data
-  find_pool_data kernarg_pool_data{};
-  kernarg_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
-  kernarg_pool_data.expected_allocatable = true;
-  auto ka_status =
-      hsa_amd_agent_iterate_memory_pools(aie_agent, find_memory_pool, &kernarg_pool_data);
-  if (ka_status != HSA_STATUS_INFO_BREAK) {
-    // fallback to data pool
-    kernarg_pool_data.pool = data_pool_data.pool;
-  }
-
-  auto data_pool = data_pool_data.pool;
-  auto kernarg_pool = kernarg_pool_data.pool;
-
-  // --- Create queue (uses min_queue_size) ---
-  std::uint32_t min_queue_size = 0;
-  if (hsa_agent_get_info(aie_agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size) !=
-      HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to get min queue size");
-    hsa_shut_down();
-    return;
-  }
-
-  hsa_queue_t* queue = nullptr;
-  if (hsa_queue_create(aie_agent, min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
-                       &queue) != HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to create HSA queue");
-    hsa_shut_down();
-    return;
-  }
-
-  // --- Load the hsaco and take the kernel object handle ---
-  hsa_executable_t executable{};
-  hsa_code_object_reader_t reader{};
-  std::uint64_t kernel_object = 0;
-  try {
-    kernel_object = load_hsaco(aie_agent, &executable, &reader);
-  } catch (const std::exception& e) {
-    state.SkipWithError(e.what());
-    hsa_queue_destroy(queue);
-    hsa_shut_down();
-    return;
-  }
-
   const std::int32_t num_dispatches = state.range(0);
+  try {
+    PdiHarness h(num_dispatches);
 
-  // --- Allocate I/O buffers in data_memory ---
-  std::vector<std::uint32_t*> inputs(num_dispatches, nullptr);
-  std::vector<std::uint32_t*> outputs(num_dispatches, nullptr);
-  for (std::int32_t i = 0; i < num_dispatches; ++i) {
-    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
-                                     reinterpret_cast<void**>(&inputs[i])) != HSA_STATUS_SUCCESS) {
-      state.SkipWithError("Failed to allocate input buffer");
-      return;
-    }
-    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
-                                     reinterpret_cast<void**>(&outputs[i])) != HSA_STATUS_SUCCESS) {
-      state.SkipWithError("Failed to allocate output buffer");
-      return;
-    }
-    // Initialize input: [1, 2, ..., 1024]
-    std::iota(inputs[i], inputs[i] + N, 1);
-    // Initialize output: all zeros
-    std::fill_n(outputs[i], N, 0);
-  }
-
-  // Allocate kernargs from kernarg_memory
-  std::vector<uint64_t*> kernargs_vec(num_dispatches, nullptr);
-  for (std::int32_t i = 0; i < num_dispatches; ++i) {
-    if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
-                                     reinterpret_cast<void**>(&kernargs_vec[i])) !=
-        HSA_STATUS_SUCCESS) {
-      state.SkipWithError("Failed to allocate payload buffer");
-      return;
-    }
-
-    // Set args
-    kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
-    kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
-    kernargs_vec[i][2] = DATA_SIZE;  // input size
-    kernargs_vec[i][3] = DATA_SIZE;  // output size
-  }
-
-  // --- Benchmark loop ---
-  for (auto _ : state) {
-    std::uint64_t last_wr_idx = 0;
+    std::vector<std::uint64_t*> kernargs(num_dispatches, nullptr);
     for (std::int32_t i = 0; i < num_dispatches; ++i) {
-      // Dispatch HSA packet
-      last_wr_idx = dispatch_packet(kernel_object, inputs[i], outputs[i], kernargs_vec[i], queue);
+      if (hsa_amd_memory_pool_allocate(h.kernarg_pool, 4 * sizeof(std::uint64_t), 0,
+                                       reinterpret_cast<void**>(&kernargs[i])) !=
+          HSA_STATUS_SUCCESS) {
+        state.SkipWithError("Failed to allocate kernarg buffer");
+        return;
+      }
+      kernargs[i][0] = reinterpret_cast<std::uint64_t>(h.inputs[i]);
+      kernargs[i][1] = reinterpret_cast<std::uint64_t>(h.outputs[i]);
+      kernargs[i][2] = DATA_SIZE;  // input size
+      kernargs[i][3] = DATA_SIZE;  // output size
     }
 
-    // Ring doorbell
-    hsa_signal_store_screlease(queue->doorbell_signal, last_wr_idx);
+    for (auto _ : state) {
+      std::uint64_t last_wr_idx = 0;
+      for (std::int32_t i = 0; i < num_dispatches; ++i) {
+        last_wr_idx =
+            dispatch_packet(h.kernel_object, h.inputs[i], h.outputs[i], kernargs[i], h.queue);
+      }
 
-    benchmark::ClobberMemory();
-  }
+      // The doorbell store submits and waits, so the whole batch is timed.
+      hsa_signal_store_screlease(h.queue->doorbell_signal, last_wr_idx);
 
-  // --- Teardown ---
-  hsa_queue_destroy(queue);
-  for (std::int32_t i = 0; i < num_dispatches; ++i) {
-    hsa_amd_memory_pool_free(outputs[i]);
-    hsa_amd_memory_pool_free(inputs[i]);
-    hsa_amd_memory_pool_free(kernargs_vec[i]);
+      benchmark::ClobberMemory();
+    }
+
+    if (!h.verify()) state.SkipWithError("Incorrect kernel output");
+
+    for (auto* p : kernargs) {
+      if (p) hsa_amd_memory_pool_free(p);
+    }
+  } catch (const std::exception& e) {
+    // Google Benchmark does not catch, so without this a missing artifact or a failed allocation
+    // terminates the whole run instead of failing one case.
+    state.SkipWithError(e.what());
   }
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
-  hsa_shut_down();
 }
 
+// Same, but the kernargs are carved out of a bump allocator inside the loop, so the numbers
+// include the cost of preparing arguments per dispatch.
 static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
-  // --- Initialize HSA runtime ---
-  if (hsa_init() != HSA_STATUS_SUCCESS) {
-    state.SkipWithError("hsa_init failed");
-    return;
-  }
-
-  // --- Find AIE agent ---
-  hsa_agent_t aie_agent{};
-  if (hsa_iterate_agents(find_aie_agent, &aie_agent) != HSA_STATUS_INFO_BREAK) {
-    state.SkipWithError("No AIE agent found");
-    hsa_shut_down();
-    return;
-  }
-
-  // --- Discover memory pools (data / kernarg) ---
-
-  // data_memory: coarse-grained, allocatable (for tensor data)
-  find_pool_data data_pool_data{};
-  data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-  data_pool_data.expected_allocatable = true;
-  hsa_amd_agent_iterate_memory_pools(aie_agent, find_memory_pool, &data_pool_data);
-
-  // kernarg_memory: KERNARG_INIT, allocatable (for payloads); fallback to data
-  find_pool_data kernarg_pool_data{};
-  kernarg_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
-  kernarg_pool_data.expected_allocatable = true;
-  auto ka_status =
-      hsa_amd_agent_iterate_memory_pools(aie_agent, find_memory_pool, &kernarg_pool_data);
-  if (ka_status != HSA_STATUS_INFO_BREAK) {
-    // fallback to data pool
-    kernarg_pool_data.pool = data_pool_data.pool;
-  }
-
-  auto data_pool = data_pool_data.pool;
-  auto kernarg_pool = kernarg_pool_data.pool;
-
-  // --- Create queue (uses min_queue_size) ---
-  std::uint32_t min_queue_size = 0;
-  if (hsa_agent_get_info(aie_agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size) !=
-      HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to get min queue size");
-    hsa_shut_down();
-    return;
-  }
-
-  hsa_queue_t* queue = nullptr;
-  if (hsa_queue_create(aie_agent, min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
-                       &queue) != HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to create HSA queue");
-    hsa_shut_down();
-    return;
-  }
-
-  // --- Load the hsaco and take the kernel object handle ---
-  hsa_executable_t executable{};
-  hsa_code_object_reader_t reader{};
-  std::uint64_t kernel_object = 0;
+  const std::int32_t num_dispatches = state.range(0);
   try {
-    kernel_object = load_hsaco(aie_agent, &executable, &reader);
+    PdiHarness h(num_dispatches);
+
+    // Declared after the harness, so it is destroyed before it -- its pool memory must be freed
+    // while the runtime is still up.
+    HsaBumpAllocator kernarg_alloc(h.kernarg_pool, num_dispatches * 4 * sizeof(std::uint64_t));
+
+    for (auto _ : state) {
+      kernarg_alloc.reset();
+      std::uint64_t last_wr_idx = 0;
+      for (std::int32_t i = 0; i < num_dispatches; ++i) {
+        auto* kernargs = kernarg_alloc.allocate<std::uint64_t>(4);
+        kernargs[0] = reinterpret_cast<std::uint64_t>(h.inputs[i]);
+        kernargs[1] = reinterpret_cast<std::uint64_t>(h.outputs[i]);
+        kernargs[2] = DATA_SIZE;  // input size
+        kernargs[3] = DATA_SIZE;  // output size
+
+        last_wr_idx =
+            dispatch_packet(h.kernel_object, h.inputs[i], h.outputs[i], kernargs, h.queue);
+      }
+
+      hsa_signal_store_screlease(h.queue->doorbell_signal, last_wr_idx);
+
+      benchmark::ClobberMemory();
+    }
+
+    if (!h.verify()) state.SkipWithError("Incorrect kernel output");
   } catch (const std::exception& e) {
     state.SkipWithError(e.what());
-    hsa_queue_destroy(queue);
-    hsa_shut_down();
-    return;
   }
-
-  const std::int32_t num_dispatches = state.range(0);
-
-  // --- Allocate I/O buffers in data_memory ---
-  std::vector<std::uint32_t*> inputs(num_dispatches, nullptr);
-  std::vector<std::uint32_t*> outputs(num_dispatches, nullptr);
-  for (std::int32_t i = 0; i < num_dispatches; ++i) {
-    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
-                                     reinterpret_cast<void**>(&inputs[i])) != HSA_STATUS_SUCCESS) {
-      state.SkipWithError("Failed to allocate input buffer");
-      return;
-    }
-    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
-                                     reinterpret_cast<void**>(&outputs[i])) != HSA_STATUS_SUCCESS) {
-      state.SkipWithError("Failed to allocate output buffer");
-      return;
-    }
-    // Initialize input: [1, 2, ..., 1024]
-    std::iota(inputs[i], inputs[i] + N, 1);
-    // Initialize output: all zeros
-    std::fill_n(outputs[i], N, 0);
-  }
-
-  // --- Bump allocator for kernargs ---
-  HsaBumpAllocator kernarg_alloc(kernarg_pool, num_dispatches * 4 * sizeof(uint64_t));
-
-  // --- Benchmark loop ---
-  std::vector<uint64_t*> kernargs_vec(num_dispatches, nullptr);
-  for (auto _ : state) {
-    kernarg_alloc.reset();
-    std::uint64_t last_wr_idx = 0;
-    for (std::int32_t i = 0; i < num_dispatches; ++i) {
-      kernargs_vec[i] = kernarg_alloc.allocate<uint64_t>(4);
-      kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
-      kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
-      kernargs_vec[i][2] = DATA_SIZE;  // input size
-      kernargs_vec[i][3] = DATA_SIZE;  // output size
-
-      // Dispatch HSA packet
-      last_wr_idx = dispatch_packet(kernel_object, inputs[i], outputs[i], kernargs_vec[i], queue);
-    }
-
-    // Ring doorbell
-    hsa_signal_store_screlease(queue->doorbell_signal, last_wr_idx);
-
-    benchmark::ClobberMemory();
-  }
-
-  // --- Teardown ---
-  hsa_queue_destroy(queue);
-  for (std::int32_t i = 0; i < num_dispatches; ++i) {
-    hsa_amd_memory_pool_free(outputs[i]);
-    hsa_amd_memory_pool_free(inputs[i]);
-  }
-  hsa_executable_destroy(executable);
-  hsa_code_object_reader_destroy(reader);
-  hsa_shut_down();
 }
 
 BENCHMARK(VectorScalarAddHSA)->Unit(benchmark::kMicrosecond)->RangeMultiplier(2)->Range(1, 32);

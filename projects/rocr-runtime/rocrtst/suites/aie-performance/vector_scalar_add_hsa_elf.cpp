@@ -152,19 +152,22 @@ std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, void* ou
     // spin until a slot frees up
   }
 
-  auto* pkt = queue + (wr_idx & mask);
-  *pkt = {};
-  pkt->header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
+  // Built here and stored into the ring in one assignment: writing the READY header into the
+  // live slot first would let a processor still draining the previous doorbell see a ready packet
+  // whose kernel object has not been written yet.
+  hsa_amd_aie_kernel_dispatch_packet_t pkt{};
+  pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-  pkt->opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
-  pkt->count = 24;
-  pkt->completion_signal.handle = 0;
-  pkt->kernel_object_low = kernel_object & 0xFFFFFFFF;
-  pkt->kernel_object_high = kernel_object >> 32;
-  pkt->num_kernargs = NUM_KERNARGS;
-  pkt->kernarg_address = kernargs;
+  pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
+  pkt.count = 24;
+  pkt.completion_signal.handle = 0;
+  pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
+  pkt.kernel_object_high = kernel_object >> 32;
+  pkt.num_kernargs = NUM_KERNARGS;
+  pkt.kernarg_address = kernargs;
 
+  queue[wr_idx & mask] = pkt;
   return wr_idx;
 }
 
@@ -173,7 +176,6 @@ std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, void* ou
 // loop measures only sync, dispatch and wait.
 struct ElfHarness {
   hsa_agent_t agent{};
-  hsa_amd_memory_pool_t dev_pool{};
   hsa_amd_memory_pool_t data_pool{};
   hsa_amd_memory_pool_t kernarg_pool{};
   hsa_queue_t* queue = nullptr;
@@ -214,12 +216,6 @@ struct ElfHarness {
       throw std::runtime_error(std::string("full-ELF dispatch needs an aie2p agent, found '") +
                                agent_name + "'");
     }
-
-    find_pool_data dev_pool_data{};
-    dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-    dev_pool_data.expected_allocatable = false;
-    hsa_amd_agent_iterate_memory_pools(agent, find_memory_pool, &dev_pool_data);
-    dev_pool = dev_pool_data.pool;
 
     find_pool_data data_pool_data{};
     data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
