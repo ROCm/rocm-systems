@@ -110,6 +110,19 @@ TEST_F(SymKernelMicrotest, MaxChunkElts_UnhandledCombination_ReturnsZeroRegardle
 
 // ---- ncclSymkMask: kmask assembly (2GB/64GB thresholds, Tma gating, Gin gating; hasLsaMultimem false throughout) ----
 
+// Factory lambdas (see ForceLegacyCudaRegister/ReuseSysmemHandlesOn): every other param keeps its default.
+std::function<int64_t(const char*, int64_t)> SymTmaEnable(int64_t value) {
+  return [value](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_TMA_ENABLE" ? value : deftVal;
+  };
+}
+
+std::function<int64_t(const char*, int64_t)> SymGinKernelsEnable(int64_t value) {
+  return [value](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? value : deftVal;
+  };
+}
+
 class SymKernelMaskTest : public SymKernelMicrotest {
  protected:
   static constexpr ncclDataType_t kTy = ncclFloat32;
@@ -132,9 +145,7 @@ TEST_F(SymKernelMaskTest, At2GB_LLKernelCleared) {
 
 TEST_F(SymKernelMaskTest, JustBelow64GB_NonLLKernelSurvives) {
   comm_->minCompCap = 100;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   size_t nElts = NEltsForBytes(32 * (size_t(2) << 30) - NCCL_SYM_KERNEL_CELL_SIZE);
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -142,9 +153,7 @@ TEST_F(SymKernelMaskTest, JustBelow64GB_NonLLKernelSurvives) {
 
 TEST_F(SymKernelMaskTest, At64GB_EntireMaskZeroed) {
   comm_->minCompCap = 100;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   size_t nElts = NEltsForBytes(32 * (size_t(2) << 30));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts, /*symAligned16B=*/true);
   EXPECT_EQ(kmask, 0u);
@@ -152,9 +161,7 @@ TEST_F(SymKernelMaskTest, At64GB_EntireMaskZeroed) {
 
 TEST_F(SymKernelMaskTest, TmaAvailable_CompCapAtBoundaryAndAligned_TmaKernelSurvives) {
   comm_->minCompCap = 100;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -162,9 +169,7 @@ TEST_F(SymKernelMaskTest, TmaAvailable_CompCapAtBoundaryAndAligned_TmaKernelSurv
 
 TEST_F(SymKernelMaskTest, CompCapJustBelowBoundary_TmaKernelCleared) {
   comm_->minCompCap = 99;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -172,7 +177,7 @@ TEST_F(SymKernelMaskTest, CompCapJustBelowBoundary_TmaKernelCleared) {
 
 TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
   comm_->minCompCap = 100;
-  ScopedHook loadParam(g_loadParam, [](const char*, int64_t) -> int64_t { return 0; });
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(0));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -180,9 +185,7 @@ TEST_F(SymKernelMaskTest, TmaParamDisabled_TmaKernelCleared) {
 
 TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
   comm_->minCompCap = 100;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
   uint32_t kmask =
       ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
@@ -194,9 +197,7 @@ TEST_F(SymKernelMaskTest, NeedGinFalse_HasGinTrue_GinKernelClearedNonGinKernelSu
     t.nRanks = c->nRanks;  // LSA spans the whole communicator: single-node, needGin false
     return t;
   });
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
@@ -208,7 +209,7 @@ TEST_F(SymKernelMaskTest, NeedGinFalse_HasGinFalse_GinKernelClearedNonGinKernelS
     t.nRanks = c->nRanks;
     return t;
   });
-  ScopedHook loadParam(g_loadParam, [](const char*, int64_t) -> int64_t { return 0; });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(0));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
@@ -220,9 +221,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinTrue_GinKernelSurvivesNonGinKernelCl
     t.nRanks = 2;  // LSA spans fewer ranks than the communicator: multi-node, needGin true
     return t;
   });
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t) -> int64_t {
-    return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? 1 : 0;
-  });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
@@ -234,7 +233,7 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
     t.nRanks = 2;
     return t;
   });
-  ScopedHook loadParam(g_loadParam, [](const char*, int64_t) -> int64_t { return 0; });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(0));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD));
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
@@ -275,6 +274,29 @@ TEST_F(SymKernelMaskTest, HasLDMC_F8Type_CompCapAtBoundary_Survives) {
   comm_->compCap = 100;
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3, /*nElts=*/1024);
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
+}
+
+TEST_F(SymKernelMaskTest, HasLDMC_F32Type_ValidRed_Survives) {
+  comm_->symkState.hasLsaMultimem = true;
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, /*nElts=*/1024);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
+}
+
+// f32/f64 do not accept ncclDevMinMax, unlike the int/f16/bf16 and f8 cases above.
+TEST_F(SymKernelMaskTest, HasLDMC_F32Type_MinMaxRed_Cleared) {
+  comm_->symkState.hasLsaMultimem = true;
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat32, /*nElts=*/1024);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
+}
+
+TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST));
+}
+
+TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncBroadcast, ncclDevSum, kTy, /*nElts=*/1024);
+  EXPECT_EQ(kmask, 0u);
 }
 
 TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_JustBelowPerRank2GB_LLKernelSurvives) {
