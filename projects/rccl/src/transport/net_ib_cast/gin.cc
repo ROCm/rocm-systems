@@ -1190,6 +1190,7 @@ ncclResult_t IbCastRmaIbProxyTest(void* collComm, void* request, int* done) {
 
   if (req->type == NCCL_NET_IB_REQ_FAILED) {
     *done = 1;
+    IbCastRmaReleaseWrs(req);
     NCCLCHECK(IbCastFreeRequest(req));
     return ncclRemoteError;
   }

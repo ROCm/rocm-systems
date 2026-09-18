@@ -531,11 +531,16 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = base->isRma ? NCCL_IB_RMA_MAX_SEND_WRS : NCCL_IB_MAX_SEND_WRS;
   } else {
-    IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
+    if (base->resiliency) {
+      IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
+    } else {
+      out->maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
+    }
     // Match ToRts: P2P CTS posts an unsignaled side-table WR before the CTS WR.
     // Resiliency signals every CTS WR, so 1x times two WRs; otherwise 2x times
     // two WRs. RMA recv QPs are flush QPs. AINIC recovery rebuilds through this
-    // builder.
+    // builder. Do not call IbCastResiliencyDataRqSizeGet when resiliency is
+    // NULL: that helper dereferences resCtx->baseComm.
     out->maxSendWorkRequest =
       base->isRma ? NCCL_IB_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2;
   }
