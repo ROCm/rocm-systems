@@ -376,6 +376,15 @@ def nest_marker_intervals(
     return forest
 
 
+def _node_source_location(node: CallTreeNode) -> str:
+    """file:line from the node, or empty when file_name is unset."""
+    if not node.file_name:
+        return ""
+    if node.line_number is None:
+        return node.file_name
+    return f"{node.file_name}:{node.line_number}"
+
+
 def build_operator_summary(
     call_trees: dict[str, list[CallTreeNode]],
 ) -> pd.DataFrame:
@@ -388,7 +397,7 @@ def build_operator_summary(
 
     - Operator: full path of the operator (e.g. "aten::matmul/aten::mm").
 
-    - Location: Thread_Id of the nested marker.
+    - Location: file:line from the operator node when file_name is set.
 
     - Calls: how many times this operator was invoked. NaN when the trace
       did not include marker-start invocation ids.
@@ -467,13 +476,13 @@ def build_operator_summary(
                 ),
             })
         for child in node.children:
-            walk(child, location, path_parts + [child.name])
+            walk(child, _node_source_location(child), path_parts + [child.name])
 
     all_roots: list[CallTreeNode] = []
-    for thread_id, roots in call_trees.items():
+    for roots in call_trees.values():
         all_roots.extend(roots)
         for root in roots:
-            walk(root, str(thread_id), [root.name])
+            walk(root, _node_source_location(root), [root.name])
 
     if not rows:
         return pd.DataFrame(columns=columns)
