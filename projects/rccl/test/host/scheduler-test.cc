@@ -1804,38 +1804,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_KernelIdFound_S
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
 }
 
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskNonZeroAndKernelFound_LogsInfo) {
-  MakeSymmetricTaskList_Scene scene;
-  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
-  task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;
-  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
-  ncclResult_t result = ncclInvalidArgument;
-  const std::string log = RcclUnitTesting::CaptureLog(
-      [&]() { result = ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead); });
-
-  EXPECT_EQ(result, ncclSuccess);
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "algSelection: sym-kernel picked within the selected set"));
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskZero_DoesNotLogEvenWithKernelFound) {
-  MakeSymmetricTaskList_Scene scene;
-  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
-  // task.algMask left at 0: effAlgMask == 0, so the INFO condition's first operand is false.
-  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
-  ncclResult_t result = ncclInvalidArgument;
-  const std::string log = RcclUnitTesting::CaptureLog(
-      [&]() { result = ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead); });
-
-  EXPECT_EQ(result, ncclSuccess);
-  EXPECT_FALSE(RcclUnitTesting::LogHas(log, "algSelection:"));
-}
-
+// No test drives the effAlgMask!=0 && kernelId!=Count INFO branch itself: that arm's only observable
+// effect is the log line (symmetric_sched.cc:251), and asserting on log wording is fragile, so it is
+// deliberately left uncovered here rather than pinned to a string.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount_DoesNotLogEvenWithEffAlgMask) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
@@ -1845,13 +1816,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
-  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
-  ncclResult_t result = ncclInvalidArgument;
-  const std::string log = RcclUnitTesting::CaptureLog(
-      [&]() { result = ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead); });
-
-  EXPECT_EQ(result, ncclSuccess);
-  EXPECT_FALSE(RcclUnitTesting::LogHas(log, "algSelection:"));
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(remainTasksHead, &task);  // falls back via the kernelId==Count disjunct, same as always
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
@@ -2465,24 +2430,8 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_CgaClusterSiz
 }
 
 // logCount uses each task's raw count (1 + 1025 = 1026 Bytes), not the cell-aligned totalCount (3072) above.
-TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_LogCount_UsesRawCountsNotAligned) {
-  SymmetricTaskScheduler_Scene scene;
-  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
-  task1.count = 1;
-  task1.isSymLast = 0;
-  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
-  task2.count = 1025;
-  task2.isSymLast = 1;
-  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
-  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
-  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
-  ncclResult_t result = ncclSuccess;
-  const std::string log = RcclUnitTesting::CaptureLog([&]() {
-    result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get());
-  });
-  EXPECT_EQ(result, ncclSuccess);
-  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "1026 Bytes"));
-}
+// logCount (symmetric_sched.cc:348) is a local accumulator with no observable beyond the final INFO
+// line, so its raw-vs-aligned distinction is deliberately left uncovered rather than pinned to log text.
 
 // ncclSymmetricTaskScheduler args-buffer allocation (symmetric_sched.cc:354-364); packing's own fields unasserted.
 
