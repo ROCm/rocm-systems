@@ -18,23 +18,6 @@
 // per segment up to this limit.
 #ifndef NCCL_RMA_MAX_SEGMENTS
 #define NCCL_RMA_MAX_SEGMENTS 16
-
-static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int maxDevsPerNic) {
-  if (ibDevNs == NULL || ibDevN < 0 || rank < 0 || maxDevsPerNic < 1) return -1;
-  const int* slots = ibDevNs + (size_t)rank * (size_t)maxDevsPerNic;
-  for (int d = 0; d < maxDevsPerNic; d++) {
-    if (slots[d] == ibDevN) return d;
-  }
-  return -1;
-}
-
-
-// Data WRs look up the remote QP's physical device. Flush RDMA_READs look up
-// the local QP's physical device in the same remote handle.
-static inline int ncclRmaRkeyIbDevN(int localIbDevN, int remoteIbDevN, int flushMode) {
-  return flushMode ? localIbDevN : remoteIbDevN;
-}
-
 #endif
 
 // 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
@@ -213,5 +196,32 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
                                uint32_t optFlags, void** request);
 ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request);
 ncclResult_t rcclRmaIbProxyTestFailed(struct ncclIbRequest* req, int* done);
+
+
+static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int maxDevsPerNic) {
+  if (ibDevNs == NULL || ibDevN < 0 || rank < 0 || maxDevsPerNic < 1) return -1;
+  const int* slots = ibDevNs + (size_t)rank * (size_t)maxDevsPerNic;
+  for (int d = 0; d < maxDevsPerNic; d++) {
+    if (slots[d] == ibDevN) return d;
+  }
+  return -1;
+}
+
+// Data WRs look up the remote QP's physical device. Flush RDMA_READs look up
+// the local QP's physical device in the same remote handle.
+static inline int ncclRmaRkeyIbDevN(int localIbDevN, int remoteIbDevN, int flushMode) {
+  return flushMode ? localIbDevN : remoteIbDevN;
+}
+
+static inline int ncclRmaOffsetRangeOk(int nSegments, const size_t* segOff, uint64_t off, size_t size) {
+  if (nSegments < 1 || segOff == NULL) return 0;
+  uint64_t bytes = segOff[nSegments];
+  return off <= bytes && (uint64_t)size <= bytes - off;
+}
+
+static inline int ncclRmaTranscriptHeaderOk(uint32_t magic, uint32_t version, uint32_t expectMagic,
+                                            uint32_t expectVersion) {
+  return magic == expectMagic && version == expectVersion;
+}
 
 #endif
