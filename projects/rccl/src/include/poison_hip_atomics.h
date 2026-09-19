@@ -32,6 +32,13 @@
 #include <hip/hip_runtime.h>
 #endif
 
+// rocSHMEM's Anvil device headers call __hip_atomic_* from templates
+// (atomic.hpp, anvil_device.hpp). #pragma GCC poison applies to later
+// instantiations even if those headers were parsed first, so a pre-include
+// does not help. The two GIN-SDMA kernel TUs pass
+// -DNCCL_GIN_ANVIL_SDMA_ENABLE=1 and skip the pragma entirely. That is a
+// coverage hole for those two TUs only; every other RCCL TU still poisons.
+#if !defined(NCCL_GIN_ANVIL_SDMA_ENABLE) || !NCCL_GIN_ANVIL_SDMA_ENABLE
 // clang-format off
 // clang-format has no notion of a line-continued #pragma: it joins the whole
 // directive onto one ~300-column line.  Keep it off across this block so the
@@ -50,5 +57,6 @@
   __hip_atomic_fetch_min \
   __hip_atomic_fetch_max
 // clang-format on
+#endif
 
 #endif
