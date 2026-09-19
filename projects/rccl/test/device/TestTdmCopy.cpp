@@ -59,34 +59,35 @@ constexpr uint32_t kTeamToEnd = ~0u;
 // non-TDM device pass) while emitting the real copy for the gfx1250 device pass.
 
 // Whole-block copy of [0, n): dst <- src. Every thread calls with identical args.
-// CP is the compile-time cache policy threaded into the tensor load/store.
-template<bool ASYNC, CachePolicy CP = DEFAULT_CACHE_POLICY>
+// LOCAL_CP is the cache policy for the read leg (src), REMOTE_CP for the write leg
+// (dst); each becomes the cpol immediate of its own tensor instruction.
+template<bool ASYNC, CachePolicy LOCAL_CP = DEFAULT_CACHE_POLICY, CachePolicy REMOTE_CP = DEFAULT_CACHE_POLICY>
 __global__ void kTdmBlockCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
                               [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes) {
 #if TDM_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   if constexpr (ASYNC) {
-    tdm::tdmCopyAsync<CP>(dst, src, n, lds, ldsBytes);
+    tdm::tdmCopyAsync<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes);
     tdm::tdmWait();
   } else {
-    tdm::tdmCopy<CP>(dst, src, n, lds, ldsBytes);
+    tdm::tdmCopy<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes);
   }
   __syncthreads();
 #endif
 }
 
 // Warp-specialized copy: only warps in [start, stop) participate.
-template<bool ASYNC>
+template<bool ASYNC, CachePolicy LOCAL_CP = DEFAULT_CACHE_POLICY, CachePolicy REMOTE_CP = DEFAULT_CACHE_POLICY>
 __global__ void kTdmTeamCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
                              [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes,
                              [[maybe_unused]] uint32_t start, [[maybe_unused]] uint32_t stop) {
 #if TDM_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   if constexpr (ASYNC) {
-    tdm::tdmCopyAsyncByTeam(dst, src, n, lds, ldsBytes, start, stop);
+    tdm::tdmCopyAsyncByTeam<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes, start, stop);
     tdm::tdmWait();   // no-op on warps that issued nothing
   } else {
-    tdm::tdmCopyByTeam(dst, src, n, lds, ldsBytes, start, stop);
+    tdm::tdmCopyByTeam<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes, start, stop);
   }
   __syncthreads();
 #endif
@@ -374,16 +375,24 @@ TEST_F(TdmTwoTeamTest, Blocking) { run<false>(8192, 2048, 256); }
 TEST_F(TdmTwoTeamTest, Async)    { run<true>(8192, 2048, 256);  }
 
 // ===========================================================================
-//  Non-default cache policy still copies correctly.
+//  Non-default cache policies still copy correctly.
 // ===========================================================================
 
-// A non-default cache policy proves the cp template argument threads all the way
-// through the tensor load/store as their immediate cpol operand.
+// A non-default cache policy proves a policy template argument threads all the way
+// through to a tensor instruction's immediate cpol operand.
 constexpr CachePolicy kTdmAltCachePolicy = createCachePolicy(TemporalHint::NT, MemScope::DEV);
+
+// The pair the two-policy API exists for: the read leg stays at device scope (the
+// source is local HBM) while the write leg goes out to system scope (the
+// destination is a peer's memory). Distinct values, so a swapped or shared policy
+// shows up as a different cpol immediate in the generated ISA.
+constexpr CachePolicy kTdmLocalCachePolicy  = createCachePolicy(TemporalHint::NT, MemScope::DEV);
+constexpr CachePolicy kTdmRemoteCachePolicy = createCachePolicy(TemporalHint::HT, MemScope::SYS);
 
 class TdmCachePolicyTest : public TdmCopyTest {
 protected:
-  void run(size_t n, size_t lds, int off, int block) {
+  template<CachePolicy LOCAL_CP, CachePolicy REMOTE_CP>
+  void run(size_t n, size_t lds, int off, int block, const std::string& tag) {
     if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
 
     const size_t srcTotal  = static_cast<size_t>(off) + n;
@@ -398,15 +407,60 @@ protected:
     DeviceBuffer<uint8_t> d_dst(dstTotal);
     d_dst.copyFrom(h_dstInit);
 
-    kTdmBlockCopy<false, kTdmAltCachePolicy><<<1, block, lds>>>(
+    kTdmBlockCopy<false, LOCAL_CP, REMOTE_CP><<<1, block, lds>>>(
         d_dst.ptr + copyStart, d_src.ptr + off, n, lds);
     syncAndCheck();
 
     auto h_out = d_dst.copyTo();
-    checkCopy(h_out, h_src, static_cast<size_t>(off), copyStart, n, "alt_cache_policy");
+    checkCopy(h_out, h_src, static_cast<size_t>(off), copyStart, n, tag);
+  }
+
+  // Same, driven through the warp-specialized entry points.
+  template<CachePolicy LOCAL_CP, CachePolicy REMOTE_CP>
+  void runByTeam(size_t n, size_t lds, int off, int block, uint32_t start, uint32_t stop,
+                 const std::string& tag) {
+    if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+
+    const size_t srcTotal  = static_cast<size_t>(off) + n;
+    const size_t dstTotal  = static_cast<size_t>(kGuard) + off + n + kGuard;
+    const size_t copyStart = static_cast<size_t>(kGuard) + off;
+
+    auto h_src = makePattern(srcTotal, 0xB0A7u);
+    DeviceBuffer<uint8_t> d_src(srcTotal);
+    d_src.copyFrom(h_src);
+
+    std::vector<uint8_t> h_dstInit(dstTotal, kSentinel);
+    DeviceBuffer<uint8_t> d_dst(dstTotal);
+    d_dst.copyFrom(h_dstInit);
+
+    kTdmTeamCopy<false, LOCAL_CP, REMOTE_CP><<<1, block, lds>>>(
+        d_dst.ptr + copyStart, d_src.ptr + off, n, lds, start, stop);
+    syncAndCheck();
+
+    auto h_out = d_dst.copyTo();
+    checkCopy(h_out, h_src, static_cast<size_t>(off), copyStart, n, tag);
   }
 };
 
-TEST_F(TdmCachePolicyTest, NonDefaultPolicy) { run(6000, 2048, 64, 256); }
+// Each policy is varied on its own, so a mix-up that dropped one of the two (or
+// applied the other's value to both legs) still has to copy correctly here.
+TEST_F(TdmCachePolicyTest, NonDefaultRemotePolicy) {
+  run<DEFAULT_CACHE_POLICY, kTdmAltCachePolicy>(6000, 2048, 64, 256, "alt_remote_policy");
+}
+
+TEST_F(TdmCachePolicyTest, NonDefaultLocalPolicy) {
+  run<kTdmAltCachePolicy, DEFAULT_CACHE_POLICY>(6000, 2048, 64, 256, "alt_local_policy");
+}
+
+TEST_F(TdmCachePolicyTest, DistinctLocalAndRemotePolicies) {
+  run<kTdmLocalCachePolicy, kTdmRemoteCachePolicy>(6000, 2048, 64, 256, "distinct_policies");
+}
+
+// The head/tail edges and the 1-D tail tile are issued by the team's first warp, so
+// a small odd size on a sub-team covers those paths with distinct policies too.
+TEST_F(TdmCachePolicyTest, DistinctPoliciesByTeam) {
+  runByTeam<kTdmLocalCachePolicy, kTdmRemoteCachePolicy>(6000, 2048, 64, 128, 1, kTeamToEnd,
+                                                        "distinct_policies_team");
+}
 
 }  // namespace RcclUnitTesting

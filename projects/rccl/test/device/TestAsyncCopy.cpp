@@ -17,9 +17,10 @@
 //   * async::tdmCopyByTeam()       - blocking, warp-specialized (a contiguous team)
 //   * async::tdmCopyAsyncByTeam()  - non-blocking, warp-specialized
 //
-// It additionally checks that a non-default compile-time cache policy still
-// produces a correct copy (the policy is baked into the async instructions as
-// their immediate cpol operand).
+// It additionally checks that non-default compile-time cache policies still produce
+// a correct copy, varying the read leg's (local) and write leg's (remote) policy
+// independently. Each is baked into its async instructions as their immediate cpol
+// operand.
 
 #include "DeviceTestBase.hpp"
 
@@ -49,33 +50,34 @@ constexpr CachePolicy kAltCachePolicy = createCachePolicy(TemporalHint::NT, MemS
 // ---------------------------------------------------------------------------
 
 // Whole-block copy of [0, n): dst <- src. Every thread calls with identical args.
-template<bool ASYNC, CachePolicy CP = DEFAULT_CACHE_POLICY>
+// LOCAL_CP applies to the read leg (src), REMOTE_CP to the write leg (dst).
+template<bool ASYNC, CachePolicy LOCAL_CP = DEFAULT_CACHE_POLICY, CachePolicy REMOTE_CP = DEFAULT_CACHE_POLICY>
 __global__ void kAsyncBlockCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
                                 [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes) {
 #if ASYNC_COPY_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   if constexpr (ASYNC) {
-    async::tdmCopyAsync<CP>(dst, src, n, lds, ldsBytes);
+    async::tdmCopyAsync<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes);
     async::tdmWait();
   } else {
-    async::tdmCopy<CP>(dst, src, n, lds, ldsBytes);
+    async::tdmCopy<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes);
   }
   __syncthreads();
 #endif
 }
 
 // Warp-specialized copy: only warps in [start, stop) participate.
-template<bool ASYNC, CachePolicy CP = DEFAULT_CACHE_POLICY>
+template<bool ASYNC, CachePolicy LOCAL_CP = DEFAULT_CACHE_POLICY, CachePolicy REMOTE_CP = DEFAULT_CACHE_POLICY>
 __global__ void kAsyncTeamCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
                                [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes,
                                [[maybe_unused]] uint32_t start, [[maybe_unused]] uint32_t stop) {
 #if ASYNC_COPY_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   if constexpr (ASYNC) {
-    async::tdmCopyAsyncByTeam<CP>(dst, src, n, lds, ldsBytes, start, stop);
+    async::tdmCopyAsyncByTeam<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes, start, stop);
     async::tdmWait();   // no-op on warps that issued nothing
   } else {
-    async::tdmCopyByTeam<CP>(dst, src, n, lds, ldsBytes, start, stop);
+    async::tdmCopyByTeam<LOCAL_CP, REMOTE_CP>(dst, src, n, lds, ldsBytes, start, stop);
   }
   __syncthreads();
 #endif
@@ -350,9 +352,15 @@ TEST_F(AsyncTwoTeamTest, Async)    { run<true>(8192, 2048, 256);  }
 //  Non-default cache policy still copies correctly.
 // ===========================================================================
 
+// The near/far pair, matching TestTdmCopy.cpp so the two implementations are
+// exercised with the same local/remote split.
+constexpr CachePolicy kAsyncLocalCachePolicy  = createCachePolicy(TemporalHint::NT, MemScope::DEV);
+constexpr CachePolicy kAsyncRemoteCachePolicy = createCachePolicy(TemporalHint::HT, MemScope::SYS);
+
 class AsyncCachePolicyTest : public AsyncCopyTest {
 protected:
-  void run(size_t n, size_t lds, int off, int block) {
+  template<CachePolicy LOCAL_CP, CachePolicy REMOTE_CP>
+  void run(size_t n, size_t lds, int off, int block, const std::string& tag) {
     if (!supported_) GTEST_SKIP() << "async copy not supported on this device";
 
     const size_t srcTotal  = static_cast<size_t>(off) + n;
@@ -367,15 +375,25 @@ protected:
     DeviceBuffer<uint8_t> d_dst(dstTotal);
     d_dst.copyFrom(h_dstInit);
 
-    kAsyncBlockCopy<false, kAltCachePolicy><<<1, block, lds>>>(
+    kAsyncBlockCopy<false, LOCAL_CP, REMOTE_CP><<<1, block, lds>>>(
         d_dst.ptr + copyStart, d_src.ptr + off, n, lds);
     syncAndCheck();
 
     auto h_out = d_dst.copyTo();
-    checkCopy(h_out, h_src, static_cast<size_t>(off), copyStart, n, "alt_cache_policy");
+    checkCopy(h_out, h_src, static_cast<size_t>(off), copyStart, n, tag);
   }
 };
 
-TEST_F(AsyncCachePolicyTest, NonDefaultPolicy) { run(6000, 2048, 64, 256); }
+TEST_F(AsyncCachePolicyTest, NonDefaultRemotePolicy) {
+  run<DEFAULT_CACHE_POLICY, kAltCachePolicy>(6000, 2048, 64, 256, "alt_remote_policy");
+}
+
+TEST_F(AsyncCachePolicyTest, NonDefaultLocalPolicy) {
+  run<kAltCachePolicy, DEFAULT_CACHE_POLICY>(6000, 2048, 64, 256, "alt_local_policy");
+}
+
+TEST_F(AsyncCachePolicyTest, DistinctLocalAndRemotePolicies) {
+  run<kAsyncLocalCachePolicy, kAsyncRemoteCachePolicy>(6000, 2048, 64, 256, "distinct_policies");
+}
 
 }  // namespace RcclUnitTesting
