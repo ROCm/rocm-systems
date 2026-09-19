@@ -116,47 +116,27 @@ public:
 private:
   /**
    * @brief Reserve space in the sq to post this many wqes.
-   * @param wf_info Wavefront information.
    * @param num_wqes number of sq wqes to reserve for this wave.
    * @return position of my_tid=0's wqe.
    */
-  __device__ uint32_t reserve_sq(const ActiveWFInfo& wf_info, uint32_t num_wqes);
-  __device__ uint32_t reserve_sq_single(uint32_t num_wqes);
+  __device__ uint32_t reserve_sq(uint32_t num_wqes);
 
   /**
    * @brief Ring the sq doorbell maintaining order between waves.
-   * @param wf_info Wavefront information.
    * @param my_sq_prod position of my_tid=0's wqe.
    * @param num_wqes number of sq wqes posted in this wave.
    * @param wqe this thread's wqe.
    * @return doorbell producer index.
    */
-  __device__ uint32_t commit_sq(const ActiveWFInfo& wf_info, uint32_t my_sq_prod,
-                                uint32_t num_wqes);
-  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t num_wqes);
+  __device__ uint32_t commit_sq(uint32_t my_sq_prod, uint32_t num_wqes);
 
   __device__ void ring_doorbell(uint32_t pos);
-  __device__ void ring_doorbell_single(uint32_t pos);
-
-  /**
-   * @brief Helper method to poll the next completion queue entry.
-   */
-  __device__ void poll_wave_cqes(uint64_t activemask);
 
   /**
    * @brief Helper method to drain completion queue entries.
-   * @param wf_info Wavefront information.
    * @param cons wait for sq.msn to catch up to this position.
    */
-  __device__ void quiet_internal_ccqe(const ActiveWFInfo& wf_info, uint32_t cons);
-  __device__ void quiet_internal_ccqe_single(uint32_t cons);
-
-  /**
-   * @brief Helper method to drain completion queue entries.
-   * @param wf_info Wavefront information.
-   * @param cons wait for sq.msn to catch up to this position.
-   */
-  __device__ void quiet_internal(const ActiveWFInfo& wf_info, uint32_t cons);
+  __device__ void poll_cq_until(uint32_t cons);
 
   enum ionic_v1_cqe_qtf_bits_be : uint32_t {
     IONIC_V1_CQE_COLOR_BE = endian::to_be<uint32_t>(IONIC_V1_CQE_COLOR),
@@ -176,13 +156,12 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   //using PostOptions = PostOpt<Options...>;
-  uint32_t num_wqes = 1;
-  if (wf_info.scope == ThreadScope::thread) {
-    num_wqes = wf_info.num_pe_group_lanes;
+  uint32_t num_wqes = wf_info.num_pe_group_lanes;
+  uint32_t my_sq_prod = 0;
+  if (wf_info.is_pe_group_first) {
+    my_sq_prod = reserve_sq(num_wqes);
   }
-
-  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
-
+  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
   struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
   uint16_t wqe_flags = 0;
@@ -233,7 +212,9 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
     __HIP_MEMORY_SCOPE_AGENT);
 
-  commit_sq(wf_info, my_sq_prod, num_wqes);
+  if (wf_info.is_pe_group_first) {
+    commit_sq(my_sq_prod, num_wqes);
+  }
 }
 
 // precondition: called with all active lanes using different QPs
@@ -241,8 +222,8 @@ template <QueuePairIONIC::OpCode Op, typename... Options>
 __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
   //using PostOptions = PostOpt<Options...>;
-  uint32_t num_wqes = 1;
-  uint32_t my_sq_prod = reserve_sq_single(num_wqes);
+  static constexpr uint32_t num_wqes = 1;
+  uint32_t my_sq_prod = reserve_sq(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
   struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
   uint16_t wqe_flags = 0;
@@ -290,7 +271,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
 
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
-  commit_sq_single(my_sq_prod, num_wqes);
+  commit_sq(my_sq_prod, num_wqes);
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
@@ -301,24 +282,31 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
-  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
+  uint32_t my_sq_prod = 0;
+  uint64_t* wave_fetch_atomic = nullptr;
+
+  if (wf_info.is_pe_group_first) {
+    my_sq_prod = reserve_sq(num_wqes);
+    if constexpr (Fetch == AMOFetchType::Blocking) {
+      using PopBackResult = decltype(fetching_atomic_freelist->pop_front());
+      PopBackResult res{nullptr, false};
+      do {
+        res = fetching_atomic_freelist->pop_front();
+      } while (!res.success);
+      wave_fetch_atomic = res.value;
+    }
+  }
+
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    wave_fetch_atomic =
+        reinterpret_cast<uint64_t*>(__shfl(reinterpret_cast<uintptr_t>(wave_fetch_atomic),
+                                           wf_info.pe_group_first_phys_lane_id));
+  }
+
+  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
   struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
   uint16_t wqe_flags = 0;
-  uint32_t cons;
-
-  uint64_t* wave_fetch_atomic{nullptr};
-  if constexpr (Fetch == AMOFetchType::Blocking) {
-    if (wf_info.is_pe_group_first) {
-      auto res = fetching_atomic_freelist->pop_front();
-      while (!res.success) {
-        res = fetching_atomic_freelist->pop_front();
-      }
-      wave_fetch_atomic = res.value;
-    }
-    wave_fetch_atomic = (uint64_t*)__shfl((uint64_t)wave_fetch_atomic,
-                         wf_info.pe_group_first_phys_lane_id);
-  }
 
   if (!(my_sq_pos & (sq.mask + 1))) {
     wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
@@ -351,10 +339,14 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
     __HIP_MEMORY_SCOPE_AGENT);
 
-  cons = commit_sq(wf_info, my_sq_prod, num_wqes);
+  if (wf_info.is_pe_group_first) {
+    uint32_t cons = commit_sq(my_sq_prod, num_wqes);
+    if constexpr (Fetch == AMOFetchType::Blocking) {
+      poll_cq_until(cons);
+    }
+  }
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    quiet_internal(wf_info, cons);
     uint64_t ret = wave_fetch_atomic[wf_info.pe_group_logical_lane_id];
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
     if (wf_info.is_pe_group_first) {
@@ -370,21 +362,22 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
   //using PostOptions = PostOpt<Options...>;
-  uint32_t num_wqes = 1;
-  uint32_t my_sq_prod = reserve_sq_single(num_wqes);
+  static constexpr uint32_t num_wqes = 1;
+  uint32_t my_sq_prod = reserve_sq(num_wqes);
+  uint64_t* wave_fetch_atomic = nullptr;
+
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    using PopBackResult = decltype(fetching_atomic_freelist->pop_front());
+    PopBackResult res{nullptr, false};
+    do {
+      res = fetching_atomic_freelist->pop_front();
+    } while (!res.success);
+    wave_fetch_atomic = res.value;
+  }
+
   uint32_t my_sq_pos = my_sq_prod;
   struct ionic_v1_wqe *wqe = &sq.buf[my_sq_pos & sq.mask];
   uint16_t wqe_flags = 0;
-  uint32_t cons;
-
-  uint64_t* wave_fetch_atomic{nullptr};
-  if constexpr (Fetch == AMOFetchType::Blocking) {
-    auto res = fetching_atomic_freelist->pop_front();
-    while (!res.success) {
-      res = fetching_atomic_freelist->pop_front();
-    }
-    wave_fetch_atomic = res.value;
-  }
 
   if (!(my_sq_pos & (sq.mask + 1))) {
     wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
@@ -414,10 +407,10 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
 
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
-  cons = commit_sq_single(my_sq_prod, num_wqes);
+  uint32_t cons = commit_sq(my_sq_prod, num_wqes);
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    quiet_internal_ccqe_single(cons);
+    poll_cq_until(cons);
     uint64_t ret = wave_fetch_atomic[0];
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
     fetching_atomic_freelist->push_back(wave_fetch_atomic);
@@ -427,164 +420,63 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
 
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairIONIC::quiet_single() {
-  quiet_internal_ccqe_single(sq.pos);
+  poll_cq_until(sq.pos);
 }
 
-__device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(
-    const ActiveWFInfo& wf_info, uint32_t num_wqes) {
-  uint32_t my_sq_prod = 0;
-
+// precondition: called with all active lanes using different QPs
+__device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(uint32_t num_wqes) {
   // reserve space for wqes in sq
-  if (wf_info.is_pe_group_first) {
-    my_sq_prod = __hip_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED,
-                 __HIP_MEMORY_SCOPE_AGENT);
-  }
-  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
-
+  uint32_t my_sq_prod = __hip_atomic_fetch_add(&sq.pos, num_wqes,
+                                               __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   // wait for that space to be available
-  quiet_internal(wf_info, my_sq_prod + num_wqes - sq.mask);
-
+  poll_cq_until(my_sq_prod + num_wqes - sq.mask);
   return my_sq_prod;
 }
 
-__device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq_single(
-    uint32_t num_wqes) {
-  uint32_t my_sq_prod = 0;
-
-  // reserve space for wqes in sq
-  my_sq_prod = __hip_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-  // wait for that space to be available
-  quiet_internal_ccqe_single(my_sq_prod + num_wqes - sq.mask);
-
-  return my_sq_prod;
-}
-
+// precondition: called with all active lanes using different QPs
 __device__ __forceinline__ uint32_t QueuePairIONIC::commit_sq(
-    const ActiveWFInfo& wf_info, uint32_t my_sq_prod, uint32_t num_wqes) {
-  uint32_t dbprod = my_sq_prod + num_wqes;
-
-  spin_lock_acquire_shared(&sq.lock, wf_info.pe_group_mask);
-
-  if (wf_info.is_pe_group_first && ((sq.dbpos - dbprod) & (1u << 31))) {
-    sq.dbpos = dbprod;
-
-    ring_doorbell(dbprod);
-  }
-
-  spin_lock_release_shared(&sq.lock, wf_info.pe_group_mask);
-
-  return dbprod;
-}
-
-__device__ __forceinline__ uint32_t QueuePairIONIC::commit_sq_single(
     uint32_t my_sq_prod, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
   spin_lock_acquire_unique(&sq.lock);
-
   if ((sq.dbpos - dbprod) & (1u << 31)) {
     sq.dbpos = dbprod;
 
-    ring_doorbell_single(dbprod);
+    ring_doorbell(dbprod);
   }
-
   spin_lock_release_unique(&sq.lock);
 
   return dbprod;
 }
 
+// precondition: called with all active lanes using different QPs
 __device__ __forceinline__ void QueuePairIONIC::ring_doorbell(uint32_t pos) {
-  // When threads write at once to the same address, not all writes reach the bus.
-  // Take turns and insert a thread fence between writes to the same address.
-  uint64_t activemask = get_active_lane_mask();
-  int lane_id         = get_active_lane_num(activemask);
-  int lane_count      = get_active_lane_count(activemask);
-
-  for (int i = 0; i < lane_count; i++) {
-    if (lane_id == i) {
-      __threadfence();
-      __atomic_store_n(sq.dbreg, sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
-    }
-  }
-  __threadfence();
-}
-
-__device__ __forceinline__ void QueuePairIONIC::ring_doorbell_single(uint32_t pos) {
-  // When threads write at once to the same address, not all writes reach the bus.
-  // Take turns and insert a thread fence between writes to the same address.
-  __threadfence();
-  __atomic_store_n(&sq.dbreg[8 * __lane_id()], sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
-}
-
-__device__ inline void QueuePairIONIC::poll_wave_cqes(uint64_t activemask) {
-  int my_logical_lane_id = get_active_lane_num(activemask);
-  uint32_t my_cq_pos = cq.pos + my_logical_lane_id;
-
-  /* Look at the cqe at the current position in the cq buffer */
-  struct ionic_v1_cqe *cqe = &cq.buf[my_cq_pos & cq.mask];
-
-  /* Determine expected color based on cq wrap count */
-  uint32_t qtf_color_bit = IONIC_V1_CQE_COLOR_BE;
-  uint32_t qtf_color_exp = qtf_color_bit;
-  if (my_cq_pos & (cq.mask + 1)) {
-    qtf_color_exp = 0;
-  }
-
-  /* Check if my cqe color == expected color */
-  uint32_t qtf_be = *(volatile uint32_t *)(&cqe->qid_type_flags);
-  if ((qtf_be & qtf_color_bit) != qtf_color_exp) {
-    return;
-  }
-
-  uint32_t msn = endian::from_be(cqe->send.msg_msn);
-
-  /* Report if the completion indicates an error. */
-  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
-#if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = endian::from_be(qtf_be);
-    uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
-    uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
-    uint32_t flag = qtf & 0xf;
-    uint32_t status = endian::from_be(cqe->status_length);
-    uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
-
-    LOGD_ERROR("QUIET ERROR: qid %u type %u flag %#x status %u msn %u npg %lu",
-               qid, type, flag, status, msn, npg);
-#endif
-    /* No other way to signal an error, so just crash. */
-    abort();
-  }
-
-  /* Only proceed with the furthest ahead cqe to update the sq state */
-  uint64_t my_lane_mask = 1ull << __lane_id();
-  uint64_t lesser_lane_mask = my_lane_mask - 1;
-  if (my_lane_mask != (__ballot(true) & activemask & ~lesser_lane_mask)) {
-    return;
-  }
-
-  /* update position in the cq */
-  cq.pos = my_cq_pos + 1;
-
   /*
-   * Ring cq doorbell frequently enough to avoid cq full.
+   * Notes on ionic doorbell ringing:
+   *   - The size of doorbell page is 4 KiB.
+   *   - The size of a doorbell is 8 B.
+   *   - There are 8 queue types (qtype0, qtype1, qtype2, ..., qtype7).
+   *   - Each queue type has a separate doorbell.
+   *   - Doorbells repeat across the entire page,
+   *     i.e. doorbell for qtype7 is followed by qtype0 again:
+   *     [db0, db1, db2, db3, db4, db5, db6, db7, db0, db1, ..., db7, db0, db1, ...]
+   *   - A queue can be signalled using any doorbell for that queue type.
    *
-   * NB: IONIC_CQ_GRACE is 100
+   * In conclusion:
+   * A doorbell page has 64 doorbells for each queue type, strided by 8 doorbells (64 B).
+   * Since wf_size <= 64, each lane can ring using a different doorbell in the doorbell page.
+   * This avoids the missed-write issue when multiple lanes write to the same address.
    */
-  if (((cq.pos - cq.dbpos) & cq.mask) >= 100) {
-    cq.dbpos = cq.pos;
-    __atomic_store_n(cq.dbreg, cq.dbval | (cq.mask & cq.dbpos), __ATOMIC_SEQ_CST); //TODO:maybe relaxed?
-  }
+  static constexpr size_t num_qtypes = 8;
+  size_t lane_db_offset = __lane_id() * num_qtypes;
 
-  sq.msn = msn;
+  uint64_t dbval = sq.dbval | (pos & sq.mask);
+  __hip_atomic_store(&sq.dbreg[lane_db_offset], dbval,
+                     __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-__device__ inline void QueuePairIONIC::quiet_internal_ccqe(
-    const ActiveWFInfo& wf_info, uint32_t cons) {
-  if (!wf_info.is_pe_group_first) {
-    return;
-  }
-
+// precondition: called with all active lanes using different QPs
+__device__ inline void QueuePairIONIC::poll_cq_until(uint32_t cons) {
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
   uint32_t msn = endian::from_be(cqe->send.msg_msn);
@@ -611,75 +503,6 @@ __device__ inline void QueuePairIONIC::quiet_internal_ccqe(
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
-  }
-}
-
-__device__ inline void QueuePairIONIC::quiet_internal_ccqe_single(
-    uint32_t cons) {
-  volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
-  uint32_t qtf_be = cqe->qid_type_flags;
-  uint32_t msn = endian::from_be(cqe->send.msg_msn);
-  while ((msn - cons) & 0x800000) {
-    if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
-      break;
-    }
-
-    qtf_be = cqe->qid_type_flags;
-    msn = endian::from_be(cqe->send.msg_msn);
-  }
-
-  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
-#if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = endian::from_be(qtf_be);
-    uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
-    uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
-    uint32_t flag = qtf & 0xf;
-    uint32_t status = endian::from_be(cqe->status_length);
-    uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
-
-    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
-               qid, type, flag, status, msn, npg);
-#endif
-    /* No other way to signal an error, so just crash. */
-    abort();
-  }
-}
-
-__device__ inline void QueuePairIONIC::quiet_internal(
-    const ActiveWFInfo& wf_info, uint32_t cons) {
-  uint32_t greed = 10;
-
-  if (!cq.mask) {
-    quiet_internal_ccqe(wf_info, cons);
-    return;
-  }
-
-  /* wait for sq.msn to catch up or pass cons. */
-  /* 0x800000 - sign bit for 24-bit fields     */
-  while ((sq.msn - cons) & 0x800000) {
-    if (!spin_lock_try_acquire_shared(&cq.lock, wf_info.pe_group_mask)) {
-      continue;
-    }
-
-    /* with lock acquired, this wave polls cqes until caught up */
-    while ((sq.msn - cons) & 0x800000) {
-      uint32_t old_sq_msn = sq.msn;
-
-      poll_wave_cqes(wf_info.pe_group_mask);
-
-      if (!((sq.msn - cons) & 0x800000)) {
-        if (sq.msn == old_sq_msn) {
-          break;
-        }
-        if (!greed) {
-          break;
-        }
-        --greed;
-      }
-    }
-
-    spin_lock_release_shared(&cq.lock, wf_info.pe_group_mask);
-    break;
   }
 }
 
