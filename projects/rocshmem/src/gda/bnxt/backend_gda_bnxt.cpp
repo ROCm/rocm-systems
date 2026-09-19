@@ -39,14 +39,10 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   struct bnxt_re_dv_obj dv_obj;
   struct bnxt_re_dv_cq dv_cq;
   struct bnxt_re_dv_qp dv_qp;
-  struct ibv_qp *ib_qp;
   int err;
 
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
+  struct ibv_qp *ib_qp = qps[conn_num];
   const NicDevice& nic = nic_for_qp(conn_num);
-
-  ib_qp = qps[conn_num];
 
   /* Export SCQ */
   memset(&dv_obj, 0, sizeof(struct bnxt_re_dv_obj));
@@ -69,27 +65,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
   CHECK_HIP(hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
-  uint32_t  qpn        = ib_qp->qp_num;
-  uintptr_t heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base());
-  uintptr_t heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]);
-  size_t    heap_size  = heap.get_size();
-  uint32_t  lkey       = nic.heap_mr->lkey;
-  uint32_t  rkey       = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
-
-  host_qps.emplace_back(nic.pd_orig);
-  const QueuePairHost &host_qp = host_qps.back();
-
-  uint64_t*            fetching_atomic          = host_qp.fetching_atomic;
-  uint32_t             fetching_atomic_lkey     = host_qp.fetching_atomic_mr->lkey;
-  uint64_t*            nonfetching_atomic       = host_qp.nonfetching_atomic;
-  uint32_t             nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey;
-  FreeList<uint64_t*>* fetching_atomic_freelist = host_qp.fetching_atomic_freelist;
-  const BufferInfo*    local_buffers            = host_qp.buffer_info;
-  size_t               num_user_buffers         = host_qp.num_user_buffers;
-
-  const SymmBufferInfo *symm_buffers = get_symm_buffers_slice(pe, nic_idx);
-  const int            *symm_count   = symm_count_;
-
   uint64_t* dbr = reinterpret_cast<uint64_t*>(gpu_dbr_ptr);
 
   void*    sq_buf      = bnxt_qps[conn_num].sq_buf;
@@ -110,12 +85,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* QueuePair is either QueuePairBNXT or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairBNXT&&,
    * so just use that instead of trying to figure out which one we're using */
-  new (gpu_qp) QueuePair{QueuePairBNXT{qpn, heap_laddr, lkey, heap_raddr, rkey, heap_size,
-                                       fetching_atomic, fetching_atomic_lkey,
-                                       nonfetching_atomic, nonfetching_atomic_lkey,
-                                       fetching_atomic_freelist,
-                                       local_buffers, num_user_buffers,
-                                       symm_buffers, symm_count, dbr,
+  new (gpu_qp) QueuePair{QueuePairBNXT{ib_qp->qp_num, gpu_qp_init_info(conn_num), dbr,
                                        bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
                                                       psn_sz_log2, mtu},
                                        bnxt_device_cq{cq_buf, cq_depth}}};

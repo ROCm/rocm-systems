@@ -56,6 +56,27 @@
 namespace rocshmem {
 
 /*
+ * @brief Information required for initializing a Queue Pair.
+ */
+struct QueuePairInitInfo {
+  uintptr_t heap_laddr;
+  uintptr_t heap_raddr;
+  size_t    heap_size;
+  uint32_t  heap_lkey;
+  uint32_t  heap_rkey;
+
+  uint64_t             *fetching_atomic;
+  uint64_t             *nonfetching_atomic;
+  uint32_t             fetching_atomic_lkey;
+  uint32_t             nonfetching_atomic_lkey;
+  FreeList<uint64_t*>  *fetching_atomic_freelist;
+  const BufferInfo     *local_buffers;
+  size_t               num_user_buffers;
+  const SymmBufferInfo *symm_buffers;
+  const int            *symm_count;
+};
+
+/*
  * @brief CRTP base class for Provider-specific Queue Pair implementations.
  */
 template <typename Provider>
@@ -204,39 +225,24 @@ protected:
    * @brief Constructor.
    *
    * @param[in] qpn Queue Pair number.
-   * @param[in] heap Heap info (local and remote bases, LKey and RKey, and length) for this QP.
-   * @param[in] fetching_atomic Array used for the return values of fetching AMOs.
-   * @param[in] fetching_atomic_lkey LKey for fetching_atomic.
-   * @param[in] nonfetching_atomic Single location used for the return values of nonfetching AMOs.
-   * @param[in] nonfetching_atomic_lkey LKey for nonfetching_atomic.
-   * @param[in] fetching_atomic_freelist Pointer to freelist for fetching_atomic.
-   * @param[in] local_buffers Array of BufferInfo used for user-registered local buffers.
-   * @param[in] num_user_buffers Maximum number of user-registered local buffers.
-   * @param[in] symm_buffers Array of SymmBufferInfo used for user-registered symmetric buffers.
-   * @param[in] symm_count Pointer to number of symmetric buffers that are currently registered.
+   * @param[in] init_info Initialization information for this QP.
    */
-  __host__ explicit QueuePairDevice(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
-                                    uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
-                                    uint64_t *fetching_atomic, uint32_t fetching_atomic_lkey,
-                                    uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
-                                    FreeList<uint64_t*> *fetching_atomic_freelist,
-                                    const BufferInfo *local_buffers, size_t num_user_buffers,
-                                    const SymmBufferInfo *symm_buffers, const int *symm_count)
-    : heap{.local_base  = heap_laddr,
-           .remote_base = heap_raddr,
-           .length      = heap_size,
-           .lkey        = to_provider_endianness(heap_lkey),
-           .rkey        = to_provider_endianness(heap_rkey)},
+  __host__ explicit QueuePairDevice(uint32_t qpn, QueuePairInitInfo&& init_info)
+    : heap{.local_base  = init_info.heap_laddr,
+           .remote_base = init_info.heap_raddr,
+           .length      = init_info.heap_size,
+           .lkey        = to_provider_endianness(init_info.heap_lkey),
+           .rkey        = to_provider_endianness(init_info.heap_rkey)},
       qp_num{qpn},
-      fetching_atomic{fetching_atomic},
-      nonfetching_atomic{nonfetching_atomic},
-      fetching_atomic_lkey{to_provider_endianness(fetching_atomic_lkey)},
-      nonfetching_atomic_lkey{to_provider_endianness(nonfetching_atomic_lkey)},
-      fetching_atomic_freelist{fetching_atomic_freelist},
-      local_buffers{local_buffers},
-      num_user_buffers{num_user_buffers},
-      symm_buffers{symm_buffers},
-      symm_count{symm_count} { }
+      fetching_atomic{init_info.fetching_atomic},
+      nonfetching_atomic{init_info.nonfetching_atomic},
+      fetching_atomic_lkey{to_provider_endianness(init_info.fetching_atomic_lkey)},
+      nonfetching_atomic_lkey{to_provider_endianness(init_info.nonfetching_atomic_lkey)},
+      fetching_atomic_freelist{init_info.fetching_atomic_freelist},
+      local_buffers{init_info.local_buffers},
+      num_user_buffers{init_info.num_user_buffers},
+      symm_buffers{init_info.symm_buffers},
+      symm_count{init_info.symm_count} { }
 
   /**
    * @brief Convenience Constructor for GIN. Unspecified values are nullptr or 0.
@@ -252,13 +258,13 @@ protected:
    */
   __host__ explicit QueuePairDevice(uint32_t qpn,
                                     uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey)
-    : QueuePairDevice{qpn, /* heap_laddr */ 0, /* heap_lkey */ 0,
-                      /* heap_raddr */ 0, /* heap_rkey */ 0, /* heap_size */ 0,
-                      /* fetching_atomic */ nullptr, /* fetching_atomic_lkey */ 0,
-                      nonfetching_atomic, nonfetching_atomic_lkey,
-                      /* fetching_atomic_freelist */ nullptr,
-                      /* local_buffers */ nullptr, /* num_user_buffers */ 0,
-                      /* symm_buffers */ nullptr, /* symm_count */ nullptr} { }
+    : QueuePairDevice{qpn, QueuePairInitInfo{
+          .heap_laddr = 0, .heap_raddr = 0, .heap_size = 0, .heap_lkey = 0, .heap_rkey = 0,
+          .fetching_atomic      = nullptr, .nonfetching_atomic      = nonfetching_atomic,
+          .fetching_atomic_lkey = 0,       .nonfetching_atomic_lkey = nonfetching_atomic_lkey,
+          .fetching_atomic_freelist = nullptr,
+          .local_buffers = nullptr, .num_user_buffers = 0,
+          .symm_buffers  = nullptr, .symm_count       = nullptr}} { }
 
   __host__ QueuePairDevice(const QueuePairDevice& other)            = delete;
   __host__ QueuePairDevice& operator=(const QueuePairDevice& other) = delete;

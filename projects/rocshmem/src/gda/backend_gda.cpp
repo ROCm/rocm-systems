@@ -2221,6 +2221,30 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   }
 }
 
+QueuePairInitInfo GDABackend::gpu_qp_init_info(int conn_num) {
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp(conn_num);
+  const NicDevice& nic = nic_for_qp(conn_num);
+
+  host_qps.emplace_back(nic.pd_orig);
+  const QueuePairHost &host_qp = host_qps.back();
+
+  return {.heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base()),
+          .heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]),
+          .heap_size  = heap.get_size(),
+          .heap_lkey  = nic.heap_mr->lkey,
+          .heap_rkey  = heap_rkey[flat_pe_nic_idx(pe, nic_idx)],
+          .fetching_atomic          = host_qp.fetching_atomic,
+          .nonfetching_atomic       = host_qp.nonfetching_atomic,
+          .fetching_atomic_lkey     = host_qp.fetching_atomic_mr->lkey,
+          .nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey,
+          .fetching_atomic_freelist = host_qp.fetching_atomic_freelist,
+          .local_buffers    = host_qp.buffer_info,
+          .num_user_buffers = host_qp.num_user_buffers,
+          .symm_buffers = get_symm_buffers_slice(pe, nic_idx),
+          .symm_count   = symm_count_};
+}
+
 void GDABackend::create_qps(int sq_length) {
   struct ibv_qp_init_attr_ex attr;
 

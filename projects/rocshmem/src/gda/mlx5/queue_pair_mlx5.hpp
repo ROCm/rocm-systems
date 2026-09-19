@@ -79,20 +79,9 @@ private:
 #endif
 
 public:
-  __host__ explicit QueuePairMLX5(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
-                                  uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
-                                  uint64_t *fetching_atomic, uint32_t fetching_atomic_lkey,
-                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
-                                  FreeList<uint64_t*> *fetching_atomic_freelist,
-                                  const BufferInfo *local_buffers, size_t num_user_buffers,
-                                  const SymmBufferInfo *symm_buffers, const int *symm_count,
+  __host__ explicit QueuePairMLX5(uint32_t qpn, QueuePairInitInfo&& init_info,
                                   gda_mlx5_device_sq&& sq, gda_mlx5_device_cq&& cq)
-    : QueuePairDevice{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
-                      fetching_atomic, fetching_atomic_lkey,
-                      nonfetching_atomic, nonfetching_atomic_lkey,
-                      fetching_atomic_freelist,
-                      local_buffers, num_user_buffers,
-                      symm_buffers, symm_count},
+    : QueuePairDevice{qpn, std::move(init_info)},
       sq{std::move(sq)}, cq{std::move(cq)} { }
 
   __host__ explicit QueuePairMLX5(uint32_t qpn,

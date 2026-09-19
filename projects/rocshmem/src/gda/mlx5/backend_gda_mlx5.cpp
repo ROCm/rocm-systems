@@ -96,37 +96,12 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
    * };
    */
 
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
-  const NicDevice& nic = nic_for_qp(conn_num);
-
   int hip_dev_id{-1};
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   void* gpu_db_ptr{nullptr};
   // not necessary to switch between BlueFlame buffer halves when using it as a doorbell only
   rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE,
                                  &gpu_db_ptr, hip_dev_id);
-
-  uint32_t  qpn        = qp.qpn;
-  uintptr_t heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base());
-  uintptr_t heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]);
-  size_t    heap_size  = heap.get_size();
-  uint32_t  lkey       = nic.heap_mr->lkey;
-  uint32_t  rkey       = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
-
-  host_qps.emplace_back(nic.pd_orig);
-  const QueuePairHost &host_qp = host_qps.back();
-
-  uint64_t*            fetching_atomic          = host_qp.fetching_atomic;
-  uint32_t             fetching_atomic_lkey     = host_qp.fetching_atomic_mr->lkey;
-  uint64_t*            nonfetching_atomic       = host_qp.nonfetching_atomic;
-  uint32_t             nonfetching_atomic_lkey  = host_qp.nonfetching_atomic_mr->lkey;
-  FreeList<uint64_t*>* fetching_atomic_freelist = host_qp.fetching_atomic_freelist;
-  const BufferInfo*    local_buffers            = host_qp.buffer_info;
-  size_t               num_user_buffers         = host_qp.num_user_buffers;
-
-  const SymmBufferInfo *symm_buffers = get_symm_buffers_slice(pe, nic_idx);
-  const int            *symm_count   = symm_count_;
 
   gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
   // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
@@ -140,12 +115,7 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* QueuePair is either QueuePairMLX5 or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
    * so just use that instead of trying to figure out which one we're using */
-  new (gpu_qp) QueuePair{QueuePairMLX5{qpn, heap_laddr, lkey, heap_raddr, rkey, heap_size,
-                                       fetching_atomic, fetching_atomic_lkey,
-                                       nonfetching_atomic, nonfetching_atomic_lkey,
-                                       fetching_atomic_freelist,
-                                       local_buffers, num_user_buffers,
-                                       symm_buffers, symm_count,
+  new (gpu_qp) QueuePair{QueuePairMLX5{qp.qpn, gpu_qp_init_info(conn_num),
                                        gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
                                        gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
 }

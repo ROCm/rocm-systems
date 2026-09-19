@@ -558,6 +558,7 @@ class GDABackend : public Backend {
   void cleanup_heap_memory_rkey();
 
   void initialize_gpu_qp(QueuePair* qp, int conn_num);
+  QueuePairInitInfo gpu_qp_init_info(int conn_num);
 
 #if defined(GDA_IONIC)
   void ionic_initialize_gpu_qp(QueuePair* qp, int conn_num);
