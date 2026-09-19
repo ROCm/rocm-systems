@@ -57,6 +57,9 @@ typedef void (*rocprofiler_client_detach_t)(rocprofiler_client_id_t);
  * configuration.
  * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure_attach in
  * ::rocprofiler_tool_configure_result_t.
+ * @return int
+ * @retval 0 attach succeeded
+ * @retval non-zero attach failed
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef int (*rocprofiler_tool_attach_t)(rocprofiler_client_detach_t detach_func,

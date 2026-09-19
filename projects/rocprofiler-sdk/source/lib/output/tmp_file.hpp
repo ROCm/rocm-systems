@@ -29,6 +29,7 @@
 #include <fstream>
 #include <ios>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <type_traits>
@@ -49,10 +50,10 @@ struct tmp_file
     explicit operator bool() const;
 
     template <typename Tp>
-    std::streampos write(const Tp* data, size_t num_records);
+    std::optional<std::streampos> write(const Tp* data, size_t num_records);
 
     template <typename Tp>
-    std::streampos write(const Tp& data);
+    std::optional<std::streampos> write(const Tp& data);
 
     template <typename Tp>
     std::vector<Tp> read(std::streampos seekpos);
@@ -67,23 +68,32 @@ struct tmp_file
 };
 
 template <typename Tp>
-std::streampos
+std::optional<std::streampos>
 tmp_file::write(const Tp* data, size_t num_records)
 {
     auto lk = std::unique_lock<std::mutex>{file_mutex};
 
-    if(!stream.is_open()) open();
+    if(!stream.is_open() && !open())
+    {
+        ROCP_ERROR << "failed to open temporary file for write: '" << filename << "'";
+        return std::nullopt;
+    }
     ROCP_CI_LOG_IF(WARNING, stream.tellg() != stream.tellp())  // this should always be true
         << "tellg=" << stream.tellg() << ", tellp=" << stream.tellp();
 
     auto pos = stream.tellp();
     stream.write(reinterpret_cast<const char*>(&num_records), sizeof(size_t));
     stream.write(reinterpret_cast<const char*>(data), num_records * sizeof(Tp));
+    if(!stream.good())
+    {
+        ROCP_ERROR << "failed to write temporary file: '" << filename << "'";
+        return std::nullopt;
+    }
     return pos;
 }
 
 template <typename Tp>
-std::streampos
+std::optional<std::streampos>
 tmp_file::write(const Tp& data)
 {
     static_assert(std::is_standard_layout<Tp>::value, "only supports standard layout types");
@@ -91,7 +101,11 @@ tmp_file::write(const Tp& data)
 
     auto lk = std::unique_lock<std::mutex>{file_mutex};
 
-    if(!stream.is_open()) open();
+    if(!stream.is_open() && !open())
+    {
+        ROCP_ERROR << "failed to open temporary file for write: '" << filename << "'";
+        return std::nullopt;
+    }
     ROCP_CI_LOG_IF(WARNING, stream.tellg() != stream.tellp())
         << fmt::format("tellg={}, tellp={}", stream.tellg(), stream.tellp());
 
@@ -99,6 +113,11 @@ tmp_file::write(const Tp& data)
     size_t num_records = 1;
     stream.write(reinterpret_cast<const char*>(&num_records), sizeof(size_t));
     stream.write(reinterpret_cast<const char*>(&data), num_records * sizeof(Tp));
+    if(!stream.good())
+    {
+        ROCP_ERROR << "failed to write temporary file: '" << filename << "'";
+        return std::nullopt;
+    }
     return pos;
 }
 
@@ -107,7 +126,11 @@ std::vector<Tp>
 tmp_file::read(std::streampos seekpos)
 {
     auto lk = std::unique_lock<std::mutex>{file_mutex};
-    if(!stream.is_open()) open();
+    if(!stream.is_open() && !open())
+    {
+        ROCP_ERROR << "failed to open temporary file for read: '" << filename << "'";
+        return {};
+    }
 
     stream.seekg(seekpos);
     size_t num_elements = 0;
