@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
@@ -14,7 +13,9 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
+class GpuVm;
 class L2Cache;
+enum class VmAccessOutcome : uint8_t;
 
 /// @brief L1 Scalar Cache (K$) controller for SMEM instructions.
 ///
@@ -45,23 +46,23 @@ public:
   /// @param l2 New L2 cache (not owned).
   void set_l2(L2Cache *l2);
 
-  /// @brief Set the memory subsystem for PTE MTYPE lookups.
-  void set_memory(GpuMemory *mem);
+  /// @brief Set the VM service used for process-scoped MTYPE lookups.
+  void set_gpu_vm(GpuVm *gpu_vm);
 
   /// @brief Scalar load: read num_dwords contiguous dwords from addr.
   ///
   /// Fetches from K$ on hit, or fills from L2 on miss. Handles requests
   /// that span multiple cache lines.
-  void load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0);
+  VmAccessOutcome load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0);
 
   /// @brief Scalar load: read num_bytes contiguous bytes from addr.
-  void load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0);
+  VmAccessOutcome load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0);
 
   /// @brief Scalar store: write num_dwords contiguous dwords to addr.
   ///
   /// Cacheable stores read-allocate and write through each modified byte range
   /// to L2. UC and CC stores bypass K$.
-  void store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0);
+  VmAccessOutcome store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0);
 
   /// @brief Handle s_dcache_wb; a no-op because K$ is write-through.
   /// @param vmid Ignored. Retained only for call-site signature symmetry.
@@ -71,18 +72,16 @@ public:
   void invalidate_all();
 
 private:
-  void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0);
   void flush_line(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all_lines();
   void synchronize_epoch();
 
   CacheStore cache_;
   L2Cache *l2_;
-  GpuMemory *memory_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
   uint64_t coherence_epoch_ = 0;
 };
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_L1_SCALAR_CACHE_H_
