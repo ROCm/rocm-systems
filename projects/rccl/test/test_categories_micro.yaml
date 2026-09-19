@@ -18,6 +18,7 @@ test_categories:
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasMicrotest.*"
+      - "RasDiagnosticsCommonMicrotest.*"
       - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
       - "GroupEndInternalTest.*"
