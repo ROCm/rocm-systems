@@ -9,8 +9,11 @@
 #include <hip/hip_runtime.h>
 
 #include "rocshmem/rocshmem.hpp"
+#include "atomic.hpp"
 
 using namespace rocshmem;
+
+namespace atomic = rocshmem::detail::atomic;
 
 /******************************************************************************
  * DEVICE HELPERS
@@ -48,7 +51,8 @@ __device__ void validate_buffer_device(const char *buf, size_t size,
   // GPU via IPC is visible after wait_until returns.  Agent scope covers all
   // caches on this GPU; workgroup scope would not suffice for cross-GPU writes.
   //TODO: THIS FENCE SHOULD PROBABLY BE IN wait_until rather than here
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+  atomic::threadfence<atomic::memory_scope::device,
+                      atomic::memory_order::acquire>();
   for (size_t i = size - 1 - lane; i < size; i -= wave_SZ()) {
     char expected = iter_fill(iter, base_idx + i);
     if (buf[i] != expected) {
