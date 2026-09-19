@@ -125,7 +125,7 @@ def code_object_file_path(request):
     # hsa_file_load = re.compile(".*copy.hsaco$")
     code_object_files = {}
     code_object_memory = []
-    hsa_memory_load_pattern = "gfx[a-z0-9]+_copy_memory.hsaco"
+    hsa_memory_load_pattern = "gfx[a-zA-Z0-9_-]+_copy_memory.hsaco"
     for root, dirs, files in os.walk(file_path, topdown=True):
         for file in files:
             filename = os.path.join(root, file)
