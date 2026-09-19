@@ -5266,8 +5266,12 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
   //  the environment first.
   status_code = setup_gpu_metrics_reading(type);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
-    // At this point we should have a valid gpu_metrics pointer.
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    // Keep NOT_SUPPORTED intact: it means the device reports a metrics revision
+    // we cannot model, which callers must be able to tell apart from data that
+    // is present but unusable.
+    if (status_code != rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
        << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)
@@ -5389,10 +5393,9 @@ auto Device::dev_copy_internal_to_external_metrics(DevInfoTypes type)
   std::string gpu_metrics_path = get_sys_file_path_by_type(type, true);
 
   if (!m_gpu_metrics_ptr) {
-    // The metrics version is validated when the header is read
-    // (setup_gpu_metrics_reading() returns NOT_SUPPORTED for versions we cannot
-    // model), so reaching the copy stage with no object means a recognized
-    // version produced no table -- a genuine data inconsistency.
+    // Callers stop on the NOT_SUPPORTED reported while reading the header, so a
+    // missing object here means a recognized version produced no table -- a
+    // genuine data inconsistency rather than an unsupported revision.
     status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
@@ -5666,7 +5669,19 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
     return status_code;
   }
 
-  dev->dev_log_gpu_metrics(ostrstream);
+  // An unsupported metrics revision has no table to copy, so stop here and let
+  // the caller see NOT_SUPPORTED instead of the unexpected-data result the copy
+  // stage would report.
+  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream);
+  if (setup_status == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Cause: Metric version found is not supported"
+       << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
+       << " | File: " << file_name << " | Returning = " << getRSMIStatusString(setup_status, false)
+       << " |";
+    LOG_ERROR(ss);
+    return setup_status;
+  }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -5739,7 +5754,19 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind, rsmi_gpu_
     return status_code;
   }
 
-  dev->dev_log_gpu_metrics(ostrstream, type);
+  // An unsupported metrics revision has no table to copy, so stop here and let
+  // the caller see NOT_SUPPORTED instead of the unexpected-data result the copy
+  // stage would report.
+  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream, type);
+  if (setup_status == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Cause: Metric version found is not supported"
+       << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
+       << " | File: " << file_name << " | Returning = " << getRSMIStatusString(setup_status, false)
+       << " |";
+    LOG_ERROR(ss);
+    return setup_status;
+  }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics(type);
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
