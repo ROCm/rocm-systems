@@ -50,6 +50,7 @@
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
+#include "core/inc/runtime.h"
 #include "core/util/utils.h"
 
 namespace rocr {
@@ -572,7 +573,9 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
   std::map<KernelType, const char*> kernel_names = {
       {KernelType::CopyAligned, "CopyAligned"},
       {KernelType::CopyMisaligned, "CopyMisaligned"},
-      {KernelType::Fill, "Fill"}};
+      {KernelType::Fill, "Fill"},
+      {KernelType::SwapCopy, "SwapCopy"},
+      {KernelType::BroadcastCopy, "BroadcastCopy"}};
 
   for (auto kernel_name : kernel_names) {
     KernelCode& kernel = kernels_[kernel_name.first];
@@ -648,6 +651,65 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   return HSA_STATUS_SUCCESS;
 }
 
+void BlitKernel::SubmitDependentSignalBarriers(
+    uint64_t barrier_start_index, std::vector<core::Signal*>& dep_signals) {
+  if (dep_signals.empty()) return;
+
+  // Insert barrier packets to handle dependent signals.
+  // Barrier bit keeps signal checking traffic from competing with a copy.
+  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+  hsa_barrier_and_packet_t barrier_packet = {0};
+  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+
+  hsa_barrier_and_packet_t* queue_buffer =
+      reinterpret_cast<hsa_barrier_and_packet_t*>(
+          queue_->public_handle()->base_address);
+
+  uint64_t barrier_index = barrier_start_index;
+  const size_t dep_signal_count = dep_signals.size();
+  for (size_t i = 0; i < dep_signal_count; ++i) {
+    const size_t idx = i % 5;
+    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
+    if (i == (dep_signal_count - 1) || idx == 4) {
+      std::atomic_thread_fence(std::memory_order_acquire);
+      queue_buffer[(barrier_index)&queue_bitmask_] = barrier_packet;
+      std::atomic_thread_fence(std::memory_order_release);
+      queue_buffer[(barrier_index)&queue_bitmask_].header = kBarrierPacketHeader;
+
+      LogPrint(HSA_AMD_LOG_FLAG_AQL,
+      "HWq=%p, id=%lu, Barrier Header = "
+      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+      "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
+      "rptr=%lu, wptr=%lu",
+      queue_->public_handle()->base_address, queue_->public_handle()->id,
+      kBarrierPacketHeader,
+      extractAqlBits(kBarrierPacketHeader,
+                    HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
+      extractAqlBits(kBarrierPacketHeader,
+                    HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
+      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+      barrier_packet.dep_signal[0].handle,
+      barrier_packet.dep_signal[1].handle,
+      barrier_packet.dep_signal[2].handle,
+      barrier_packet.dep_signal[3].handle,
+      barrier_packet.dep_signal[4].handle,
+      barrier_packet.completion_signal.handle,
+      queue_->LoadReadIndexRelaxed(), barrier_index);
+
+      ++barrier_index;
+
+      memset(&barrier_packet, 0, sizeof(hsa_barrier_and_packet_t));
+      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+    }
+  }
+}
+
 hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     void* dst, const void* src, size_t size,
     std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
@@ -679,58 +741,8 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
 
   uint64_t write_index_temp = write_index;
 
-  // Insert barrier packets to handle dependent signals.
-  // Barrier bit keeps signal checking traffic from competing with a copy.
-  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
-      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-
-  hsa_barrier_and_packet_t barrier_packet = {0};
-  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
-
-  hsa_barrier_and_packet_t* queue_buffer =
-      reinterpret_cast<hsa_barrier_and_packet_t*>(
-          queue_->public_handle()->base_address);
-
-  const size_t dep_signal_count = dep_signals.size();
-  for (size_t i = 0; i < dep_signal_count; ++i) {
-    const size_t idx = i % 5;
-    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
-    if (i == (dep_signal_count - 1) || idx == 4) {
-      std::atomic_thread_fence(std::memory_order_acquire);
-      queue_buffer[(write_index)&queue_bitmask_] = barrier_packet;
-      std::atomic_thread_fence(std::memory_order_release);
-      queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
-
-      LogPrint(HSA_AMD_LOG_FLAG_AQL,
-      "HWq=%p, id=%lu, Barrier Header = "
-      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-      "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
-      "rptr=%lu, wptr=%lu",
-      queue_->public_handle()->base_address, queue_->public_handle()->id,
-      kBarrierPacketHeader,
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0].handle,
-      barrier_packet.dep_signal[1].handle,
-      barrier_packet.dep_signal[2].handle,
-      barrier_packet.dep_signal[3].handle,
-      barrier_packet.dep_signal[4].handle,
-      barrier_packet.completion_signal.handle,
-      queue_->LoadReadIndexRelaxed(), write_index);
-
-      ++write_index;
-
-      memset(&barrier_packet, 0, sizeof(hsa_barrier_and_packet_t));
-      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
-    }
-  }
+  SubmitDependentSignalBarriers(write_index, dep_signals);
+  write_index += num_barrier_packet;
 
   // Insert dispatch packet for copy kernel.
   KernelArgs* args = ObtainAsyncKernelCopyArg();
@@ -995,6 +1007,155 @@ uint64_t BlitKernel::PendingBytes() {
   // Zero is a valid return in this case since the command which was last when the search started is
   // now complete.
   return 0;
+}
+
+hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const* dst_list,
+                                                    uint32_t num_destinations, size_t size,
+                                                    std::vector<core::Signal*>& dep_signals,
+                                                    core::Signal& out_signal,
+                                                    std::vector<core::Signal*>& gang_signals) {
+  if (src == nullptr || dst_list == nullptr || num_destinations == 0 || num_destinations > 1024) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  for (uint32_t i = 0; i < num_destinations; ++i) {
+    if (dst_list[i] == nullptr) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
+  if (size == 0) {
+    out_signal.SubRelease(1);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // copy_size is uint32_t in kernel args, so limit to 4GB per destination
+  if (size > UINT32_MAX) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Allocate GPU-accessible memory for destination address list
+  void* dst_list_gpu = nullptr;
+  const size_t dst_list_size = num_destinations * sizeof(uint64_t);
+
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
+  dst_list_gpu =
+      gpuAgent->system_allocator()(dst_list_size, 16, core::MemoryRegion::AllocateNoFlags);
+
+  if (dst_list_gpu == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  // Copy destination addresses to GPU buffer
+  uint64_t* dst_addrs_gpu = reinterpret_cast<uint64_t*>(dst_list_gpu);
+  for (uint32_t i = 0; i < num_destinations; ++i) {
+    dst_addrs_gpu[i] = reinterpret_cast<uint64_t>(dst_list[i]);
+  }
+
+  std::atomic_thread_fence(std::memory_order_release);
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+  const uint32_t total_num_packet = num_barrier_packet + 1;
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(total_num_packet);
+    RecordBlitHistory(size * num_destinations, write_index + total_num_packet - 1);
+  }
+
+  SubmitDependentSignalBarriers(write_index, dep_signals);
+
+  // Calculate dispatch parameters: 1 workgroup per destination, 64 threads per workgroup
+  const uint32_t threads_per_workgroup = 64;
+  const uint32_t num_workgroups = num_destinations;
+  const uint32_t total_workitems = threads_per_workgroup * num_workgroups;
+
+  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  args->broadcast.src_addr = reinterpret_cast<uint64_t>(src);
+  args->broadcast.dst_list_addr = reinterpret_cast<uint64_t>(dst_list_gpu);
+  args->broadcast.num_destinations = num_destinations;
+  args->broadcast.copy_size = static_cast<uint32_t>(size);
+  args->broadcast.num_workitems = total_workitems;
+
+  const uint64_t dispatch_index = write_index + num_barrier_packet;
+
+  // Register async cleanup for dst_list_gpu BEFORE dispatch.
+  // Handler fires when signal reaches 0 (after kernel completion).
+  hsa_status_t handler_status = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+      core::Signal::Convert(&out_signal), HSA_SIGNAL_CONDITION_EQ, 0,
+      [](hsa_signal_value_t, void* arg) -> bool {
+        void* buf = arg;
+        hsa_amd_memory_pool_free(buf);
+        return false;
+      },
+      dst_list_gpu);
+
+  if (handler_status != HSA_STATUS_SUCCESS) {
+    // Handler registration failed - free buffer and return error before dispatch
+    hsa_amd_memory_pool_free(dst_list_gpu);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  PopulateQueue(dispatch_index, uintptr_t(kernels_[KernelType::BroadcastCopy].code_buf_), args,
+                total_workitems, core::Signal::Convert(&out_signal));
+
+  ReleaseWriteIndex(write_index, total_num_packet);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitSwapCopyCommand(void* addr_a, void* addr_b, size_t size,
+                                               std::vector<core::Signal*>& dep_signals,
+                                               core::Signal& out_signal,
+                                               std::vector<core::Signal*>& gang_signals) {
+  if (addr_a == nullptr || addr_b == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (size == 0) {
+    out_signal.SubRelease(1);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // swap_size is uint32_t in kernel args, so limit to 4GB
+  if (size > UINT32_MAX) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+  const uint32_t total_num_packet = num_barrier_packet + 1;
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(total_num_packet);
+    // Swap moves 2x the size (read both, write both)
+    RecordBlitHistory(size * 2, write_index + total_num_packet - 1);
+  }
+
+  SubmitDependentSignalBarriers(write_index, dep_signals);
+
+  // Calculate dispatch parameters: each thread handles 16 bytes
+  const uint32_t bytes_per_thread = 16;
+  // Align size up to 16 bytes, then divide to get thread count
+  const uint32_t aligned_size =
+      (static_cast<uint32_t>(size) + bytes_per_thread - 1) & ~(bytes_per_thread - 1);
+  const uint32_t total_workitems = aligned_size / bytes_per_thread;
+
+  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  args->swap.addr_a = reinterpret_cast<uint64_t>(addr_a);
+  args->swap.addr_b = reinterpret_cast<uint64_t>(addr_b);
+  args->swap.swap_size = static_cast<uint32_t>(size);
+
+  const uint64_t dispatch_index = write_index + num_barrier_packet;
+
+  PopulateQueue(dispatch_index, uintptr_t(kernels_[KernelType::SwapCopy].code_buf_), args,
+                total_workitems, core::Signal::Convert(&out_signal));
+
+  ReleaseWriteIndex(write_index, total_num_packet);
+
+  return HSA_STATUS_SUCCESS;
 }
 
 }  // namespace amd
