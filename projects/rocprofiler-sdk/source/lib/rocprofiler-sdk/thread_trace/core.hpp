@@ -178,6 +178,9 @@ public:
                                  const hsa::packet_data_t&        packet_data);
     const auto& get_agents() const { return agents; }
 
+    /// Number of injected trace packets still awaiting post_kernel_call.
+    int pending_post_moves() const { return post_move_data.load(); }
+
     std::unordered_set<rocprofiler_agent_id_t> configured_agents() const;
 
 private:

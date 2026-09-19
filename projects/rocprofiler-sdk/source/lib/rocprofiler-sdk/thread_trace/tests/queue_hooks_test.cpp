@@ -147,7 +147,7 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     thread_trace::write_hook(fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
 
     ASSERT_FALSE(inst_pkt.empty()) << "write_hook must inject ATT control packet";
-    EXPECT_GE(tracer.post_move_data.load(), 1);
+    EXPECT_GE(tracer.pending_post_moves(), 1);
 
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_FALSE(thread_trace::is_any_active());
@@ -158,7 +158,7 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
 
     thread_trace::signal_completion_hook(fq, pkt, sess, packet_data, inst_pkt, {});
 
-    EXPECT_EQ(tracer.post_move_data.load(), 0)
+    EXPECT_EQ(tracer.pending_post_moves(), 0)
         << "post_move_data must drain via signal_completion_hook after stop_context";
 
     registration::set_init_status(1);
