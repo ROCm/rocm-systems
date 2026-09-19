@@ -61,6 +61,52 @@ enum class ValueType : uint32
     Str,     ///< String type.
 };
 
+/// Determines the maximum of two numbers.
+///
+/// @returns The larger of the two inputs.
+template <typename T>
+constexpr T Max(
+    T value1,  ///< First value to check.
+    T value2)  ///< Second value to check.
+{
+    return ((value1 > value2) ? value1 : value2);
+}
+
+/// Determines the maximum of N numbers.
+///
+/// @returns The largest of all the inputs.
+template <typename T, typename... Ts>
+constexpr T Max(
+    T     value1,  ///< First value to check.
+    T     value2,  ///< Second value to check.
+    Ts... values)  ///< Additional values to check.
+{
+    return Max(((value1 > value2) ? value1 : value2), values...);
+}
+
+/// Determines the minimum of two numbers.
+///
+/// @returns The smaller of the two inputs.
+template <typename T>
+constexpr T Min(
+    T value1,  ///< First value to check.
+    T value2)  ///< Second value to check.
+{
+    return ((value1 < value2) ? value1 : value2);
+}
+
+/// Determines the minimum of N numbers.
+///
+/// @returns The smallest of all the inputs.
+template <typename T, typename... Ts>
+constexpr T Min(
+    T     value1,  ///< First value to check.
+    T     value2,  ///< Second value to check.
+    Ts... values)  ///< Additional values to check.
+{
+    return Min(((value1 < value2) ? value1 : value2), values...);
+}
+
 /// Determines the length of an array at compile-time.
 ///
 /// @returns The length of the array.
@@ -132,6 +178,27 @@ constexpr size_t VoidPtrDiff(
 {
     PAL_CONSTEXPR_ASSERT(p1 >= p2);
     return (static_cast<const uint8*>(p1) - static_cast<const uint8*>(p2));
+}
+
+/// Determines whether two generic ranges of memory of the same size overlap.
+///
+/// This function is a high-performance overlap test intended for cases like array assignment or Span assignment. The
+/// assumption that both ranges have the same size is an optimization for those use-cases.
+///
+/// Note that null pointers are not handled specially, they are treated as memory ranges beginning at whatever platform
+/// specific location nullptr occupies (i.e. address zero). If the caller wishes for null pointers to be considered
+/// always non-overlapping they must implement that logic directly.
+///
+/// Also, this function defines zero-length ranges to never overlap.
+///
+inline bool VoidPtrsOverlap(
+    const void* pPtr1,    ///< [in] Points to the beginning of the first memory range.
+    const void* pPtr2,    ///< [in] Points to the beginning of the second memory range.
+    size_t      numBytes) ///< [in] The size of both memory ranges in bytes.
+{
+    // This branchless implemenation assumes that ranges must be contiguous in address space. No tricky business like
+    // starting a range near the end of the address space which wraps around past the 0xFF...FF, 0x0 boundary!
+    return Max(uintptr_t(pPtr1), uintptr_t(pPtr2)) - Min(uintptr_t(pPtr1), uintptr_t(pPtr2)) < numBytes;
 }
 
 /// Returns the high 32 bits of a 64-bit integer.
@@ -837,52 +904,6 @@ constexpr T Pow2AlignDown(
     return (value & ~(alignment - 1));
 }
 
-/// Determines the maximum of two numbers.
-///
-/// @returns The larger of the two inputs.
-template <typename T>
-constexpr T Max(
-    T value1,  ///< First value to check.
-    T value2)  ///< Second value to check.
-{
-    return ((value1 > value2) ? value1 : value2);
-}
-
-/// Determines the maximum of N numbers.
-///
-/// @returns The largest of all the inputs.
-template <typename T, typename... Ts>
-constexpr T Max(
-    T     value1,  ///< First value to check.
-    T     value2,  ///< Second value to check.
-    Ts... values)  ///< Additional values to check.
-{
-    return Max(((value1 > value2) ? value1 : value2), values...);
-}
-
-/// Determines the minimum of two numbers.
-///
-/// @returns The smaller of the two inputs.
-template <typename T>
-constexpr T Min(
-    T value1,  ///< First value to check.
-    T value2)  ///< Second value to check.
-{
-    return ((value1 < value2) ? value1 : value2);
-}
-
-/// Determines the minimum of N numbers.
-///
-/// @returns The smallest of all the inputs.
-template <typename T, typename... Ts>
-constexpr T Min(
-    T     value1,  ///< First value to check.
-    T     value2,  ///< Second value to check.
-    Ts... values)  ///< Additional values to check.
-{
-    return Min(((value1 < value2) ? value1 : value2), values...);
-}
-
 /// Clamps the input number so that it falls in-between the lower and upper bounds (inclusive).
 ///
 /// @returns Clamped input number.
@@ -1002,6 +1023,39 @@ inline void Strncat(
 #endif
 }
 
+/// Simple wrapper for getenv_s or getenv which provides a safe version of getenv.
+///
+/// @returns Pointer to the environment variable value, or nullptr if it is not set.
+inline const char* GetEnv(
+    const char* pName,  ///< [in]  Name of the environment variable to retrieve.
+    char*       pBuf,   ///< [out] Buffer to store the value on Windows.
+    size_t      bufSize) ///< Size of pBuf in bytes.
+{
+    PAL_ASSERT(pName != nullptr);
+
+#if defined(_WIN32)
+    size_t len = 0;
+    getenv_s(&len, pBuf, bufSize, pName);
+    return (len > 0) ? pBuf : nullptr;
+#else
+    return getenv(pName);
+#endif
+}
+
+/// Simple wrapper for strerror_s or strerror which provides a safe version of strerror.
+inline void StrError(
+    char*  pBuf,    ///< [out] Buffer to receive the error string.
+    size_t bufSize, ///< Size of pBuf in bytes.
+    int    errnum)  ///< Error number to convert to a string.
+{
+#if defined(_WIN32)
+    strerror_s(pBuf, bufSize, errnum);
+#else
+    // strerror returns a pointer to a static buffer; copy it into pBuf for a consistent interface.
+    Strncpy(pBuf, strerror(errnum), bufSize);
+#endif
+}
+
 /// Simple wrapper for strtok_s or strtok_r which provides a safe version of strtok.
 inline char* Strtok(
     char*       str,    ///< [in] Token string.
@@ -1033,6 +1087,21 @@ inline void* VoidPtrAlign(
     PAL_ASSERT(IsPowerOfTwo(alignment));
 
     return reinterpret_cast<void*>(
+               (reinterpret_cast<size_t>(ptr) + (alignment - 1)) & ~(alignment - 1));
+}
+
+/// Rounds the specified const pointer up to the nearest value meeting the specified 'alignment'.
+/// Only power of 2 alignments are supported by this function.
+///
+/// @returns Aligned pointer.
+inline const void* VoidPtrAlign(
+    const void* ptr,       ///< Pointer to align.
+    size_t      alignment) ///< Desired alignment.
+{
+    // This function only works for POW2 alignment
+    PAL_ASSERT(IsPowerOfTwo(alignment));
+
+    return reinterpret_cast<const void*>(
                (reinterpret_cast<size_t>(ptr) + (alignment - 1)) & ~(alignment - 1));
 }
 
@@ -1388,39 +1457,49 @@ inline void Mbstowcs(
 /// Performs a safe wcstombs by requiring the destination buffer size.
 inline void Wcstombs(
     char*          pDst,           ///< [out] dst string
-    const wchar_t* pSrc,           ///< [in] src string
+    const wchar_t* pSrc,           ///< [in] src string, must be null terminated
     size_t         dstSizeInBytes) ///< size of the destination buffer in bytes
 {
     PAL_ASSERT(pDst != nullptr);
     PAL_ASSERT(pSrc != nullptr);
 
-    bool result = false;
-    // clamp the conversion to the size of the dst buffer (1 char reserved for the NULL terminator)
+    if (dstSizeInBytes > 0)
+    {
+        bool failed    = false;
+        bool truncated = false;
+
 #if defined(_WIN32)
-    size_t bytesConverted = 0;
-    errno_t retCode = wcstombs_s(&bytesConverted, pDst, dstSizeInBytes, pSrc, (dstSizeInBytes - 1));
+        // _TRUNCATE converts as much as will fit, always null terminates, and reports STRUNCATE
+        // instead of discarding the whole result.
+        size_t        bytesConverted = 0;
+        const errno_t retCode        = wcstombs_s(&bytesConverted, pDst, dstSizeInBytes, pSrc, _TRUNCATE);
 
-    result = (retCode != 0) ? false : true;
+        truncated = (retCode == STRUNCATE);
+        failed    = ((retCode != 0) && (truncated == false));
 #else
-    size_t retCode = wcstombs(pDst, pSrc, (dstSizeInBytes - 1));
+        const size_t bytesConverted = wcstombs(pDst, pSrc, dstSizeInBytes);
 
-    result = (retCode == static_cast<size_t>(-1)) ? false : true;
+        failed = (bytesConverted == static_cast<size_t>(-1));
+
+        if ((failed == false) && (bytesConverted == dstSizeInBytes))
+        {
+            // wcstombs only null terminates when the result fits inside the limit passed in.
+            truncated                = true;
+            pDst[dstSizeInBytes - 1] = '\0';
+        }
 #endif
 
-    if (result == false)
-    {
-        // A non-convertible character was encountered.
-        PAL_ASSERT_ALWAYS();
-        pDst[0] = '\0';
-    }
-
-    if (wcslen(pSrc) >= dstSizeInBytes)
-    {
-        // Assert to alert the user when the string has been truncated.
-        PAL_ASSERT_ALWAYS();
-
-        // NULL terminate the string.
-        pDst[dstSizeInBytes - 1] = '\0';
+        if (failed == true)
+        {
+            // A non-convertible character was encountered.
+            PAL_ASSERT_ALWAYS();
+            pDst[0] = '\0';
+        }
+        else
+        {
+            // Let the caller know the string did not fit. pDst is still null terminated.
+            PAL_ALERT(truncated == true);
+        }
     }
 }
 
@@ -1730,6 +1809,11 @@ void AssignArrayRange(
         PAL_ASSERT_ALWAYS();
         count = maxCount;
     }
+
+    // It's illegal to use AssignArrayRange on overlapping ranges. Unlike the overflow checks above, we don't need an
+    // early return here as executing an overlapping assignment may corrupt data but won't write out of bounds. If we
+    // find a use-case for overlapping array assignments we can add a new function for overlapping arrays.
+    PAL_ASSERT(VoidPtrsOverlap(pSrcStart, pDstStart, sizeof(T) * count) == false);
 
     // This is an optimization for MSVC, which ignores the restrict keywords when it inlines this function, generating
     // a slower assignment loop which handles overlapping arrays. Note that by C++ spec definition only trivially
