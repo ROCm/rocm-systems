@@ -120,6 +120,17 @@ enum MemRangeDmaBufMappingType : uint64_t {
   MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
 };
 
+//! Outcome of a DMA-BUF handle export, see Device::GetHandleForAddressRange().
+//! kNotSupported must stay distinct from kError: a request can be perfectly well formed and
+//! still be unsatisfiable by the device, e.g. a PCIe-mapped export on an APU, which has no BAR
+//! aperture for a third-party device to reach. Collapsing that into a generic failure would
+//! report it to the application as an invalid argument.
+enum class HandleExportResult : uint32_t {
+  kSuccess = 0,   ///< Handle was exported.
+  kNotSupported,  ///< Request is valid but unsupported on this device.
+  kError,         ///< Export failed.
+};
+
 //! Maps hipFuncCache_t to group memory carveout percentage.
 //! PreferL1 maps to 1% (not 0%) because 0 means "no preference" in the
 //! AQL packet's group_mem_carveout field; 1% is the minimum value that
@@ -993,9 +1004,9 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
-                                 unsigned long long flags) {
-    return false;
+  virtual HandleExportResult GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                               unsigned long long flags) {
+    return HandleExportResult::kError;
   }
 
  protected:
@@ -2444,8 +2455,8 @@ class Device : public RuntimeObject {
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
-                                unsigned long long flags);
+  HandleExportResult GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                              unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);
