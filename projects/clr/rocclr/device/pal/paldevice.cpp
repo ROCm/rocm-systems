@@ -89,6 +89,9 @@ static constexpr PalDevice supportedPalDevices[] = {
     {11, 5, 1, "gfx1151", Pal::AsicRevision::StrixHalo},
     {11, 5, 2, "gfx1152", Pal::AsicRevision::Krackan1},
     {11, 5, 3, "gfx1153", Pal::AsicRevision::Krackan2},
+    {11, 7, 0, "gfx1170", Pal::AsicRevision::Gfx1170},
+    {11, 7, 1, "gfx1171", Pal::AsicRevision::Gfx1171},
+    {11, 7, 2, "gfx1172", Pal::AsicRevision::Gfx1172},
     {12, 0, 0, "gfx1200", Pal::AsicRevision::Navi44},
     {12, 0, 1, "gfx1201", Pal::AsicRevision::Navi48},
 };

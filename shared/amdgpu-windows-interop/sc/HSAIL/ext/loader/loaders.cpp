@@ -109,6 +109,9 @@ namespace loader {
     gfx1103.handle = 1103;
     gfx1150.handle = 1150;
     gfx1151.handle = 1151;
+    gfx1170.handle = 1170;
+    gfx1171.handle = 1171;
+    gfx1172.handle = 1172;
 #endif // GFX11_BUILD
   }
 
@@ -180,6 +183,12 @@ namespace loader {
       return gfx1150;
     } else if (sname == "AMD:AMDGPU:11:5:1") {
       return gfx1151;
+    } else if (sname == "AMD:AMDGPU:11:7:0") {
+      return gfx1170;
+    } else if (sname == "AMD:AMDGPU:11:7:1") {
+      return gfx1171;
+    } else if (sname == "AMD:AMDGPU:11:7:2") {
+      return gfx1172;
     }
 #endif // GFX11_BUILD
 
