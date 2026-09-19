@@ -84,7 +84,7 @@ kernel_dispatch_phase_enter_hook(
 }
 
 void
-kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
+kernel_dispatch_phase_exit_hook(const hsa::Queue* /*queue*/,
                                 const hsa::rocprofiler_packet& /*kernel_packet*/,
                                 std::shared_ptr<hsa::queue_info_session_t>& session,
                                 hsa::packet_data_t&                         packet,

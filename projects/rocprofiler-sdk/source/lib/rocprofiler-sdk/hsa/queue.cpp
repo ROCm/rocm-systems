@@ -171,7 +171,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         // Counter collection completion is migrated off the callback registry (see
         // WriteInterceptor); invoke it explicitly here.
-        counters::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
+        counters::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
                                                   packet.kernel_packet,
                                                   _session,
                                                   packet,

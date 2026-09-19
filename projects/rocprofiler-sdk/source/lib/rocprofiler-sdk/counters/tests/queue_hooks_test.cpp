@@ -88,6 +88,13 @@ get_client_ctx()
     return ctx;
 }
 
+// Reset the shared handle so a later test in this binary starts from a fresh context.
+void
+set_client_ctx(rocprofiler_context_id_t& ctx)
+{
+    ctx = rocprofiler_context_id_t{0};
+}
+
 void
 test_init()
 {
@@ -186,12 +193,7 @@ TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_i
 
     // Must return without touching registered counter contexts (no init required).
     rocprofiler::counters::kernel_dispatch_phase_exit_hook(
-        *reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
-        fq_pkt,
-        sess,
-        packet,
-        inst_pkt,
-        rocprofiler::kernel_dispatch::profiling_time{});
+        nullptr, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
     SUCCEED();
 }
 
@@ -350,7 +352,7 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
         inst_pkt.emplace_back(std::move(in_flight[i]), hsa::queue_hooks::COUNTERS_CLIENT_ID);
 
         rocprofiler::counters::kernel_dispatch_phase_exit_hook(
-            fq, pkt, sess, packet_data, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
+            &fq, pkt, sess, packet_data, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
 
         size_t remaining = num_dispatches;
         cb_info->packet_return_map.rlock([&](const auto& data) { remaining = data.size(); });
