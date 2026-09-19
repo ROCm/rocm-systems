@@ -1169,10 +1169,13 @@ hipError_t GraphExecBase::EnsureCrossDeviceStream() {
 
 // ================================================================================================
 void GraphExecBase::FindStreamsReqPerDev() {
-  // Count streams required per device based on stream-to-device mappings
+  // Size the pool from the highest stream id in use, not from the number of
+  // ids in use. GraphNode::SetStream indexes the pool with stream_id_, so a
+  // schedule that leaves a gap in the ids it hands out needs a pool larger
+  // than the number of ids: {0, 1, 3} is three ids but still needs four slots.
   for (auto const& [stream_id, dev_ids] : streams_dev_ids_) {
     for (auto dev_id : dev_ids) {
-      max_streams_dev_[dev_id]++;
+      max_streams_dev_[dev_id] = std::max(max_streams_dev_[dev_id], stream_id + 1);
     }
   }
 
