@@ -8,6 +8,7 @@
  */
 #include <nanobind/nanobind.h>
 #include <rocshmem/rocshmem.hpp>
+#include <rocshmem/qp_introspect.hpp>
 #include <hip/hip_runtime.h>
 #include <cstdint>
 #include <cstring>
@@ -21,6 +22,32 @@
 using namespace nanobind;
 using namespace rocshmem;
 using rocshmem4py::resolve_team_handle;
+
+namespace {
+
+// QpInfo carries a tagged union: only the arm named by `vendor` holds a defined
+// value. Reading another arm is undefined in C++, so the Python accessors gate
+// on the tag and raise instead of handing back whatever bytes happen to be
+// there. This is the whole reason the vendor fields are properties rather than
+// plain def_ro members.
+void require_vendor(const rocshmem::QpInfo &info, rocshmem::QpInfoVendor want,
+                    const char *field) {
+  if (info.vendor != want) {
+    std::ostringstream oss;
+    oss << "QpInfo." << field << " is only valid when vendor is "
+        << static_cast<uint32_t>(want) << "; this QP reports vendor "
+        << static_cast<uint32_t>(info.vendor);
+    // AttributeError, not RuntimeError: these are properties, and Python
+    // expects a failed attribute access to raise AttributeError. It is also
+    // what makes hasattr() answer correctly -- hasattr swallows only
+    // AttributeError, so with RuntimeError it propagates and
+    // hasattr(qp, "mlx5_dbrec") raises instead of returning False.
+    // nanobind maps attribute_error to Python's AttributeError.
+    throw nanobind::attribute_error(oss.str().c_str());
+  }
+}
+
+}  // namespace
 
 NB_MODULE(_rocshmem4py, m) {
   m.doc() = "Python bindings for ROCSHMEM library";
@@ -499,4 +526,135 @@ NB_MODULE(_rocshmem4py, m) {
   m.attr("ROCSHMEM_CMP_GE") = int_(static_cast<int>(ROCSHMEM_CMP_GE));
   m.attr("ROCSHMEM_CMP_LT") = int_(static_cast<int>(ROCSHMEM_CMP_LT));
   m.attr("ROCSHMEM_CMP_LE") = int_(static_cast<int>(ROCSHMEM_CMP_LE));
+
+  // -------------------------------------------------------------------------
+  // GDA queue-pair introspection
+  // -------------------------------------------------------------------------
+
+  enum_<QpInfoVendor>(m, "QpInfoVendor",
+      "NIC provider owning a QpInfo. Selects which vendor-specific "
+      "attributes are readable.")
+    .value("UNKNOWN", QpInfoVendor::UNKNOWN)
+    .value("IONIC", QpInfoVendor::IONIC)
+    .value("BNXT", QpInfoVendor::BNXT)
+    .value("MLX5", QpInfoVendor::MLX5);
+
+  class_<QpInfo>(m, "QpInfo",
+      "Device-visible resources of one peer's RC queue pair.\n\n"
+      "Addresses are device virtual addresses in the address space of the GPU "
+      "owning the QP; depths are in ring slots. The vendor-specific attributes "
+      "raise AttributeError unless `vendor` matches, so hasattr() reports False "
+      "for the arms that do not apply.")
+    .def_ro("sq_buf", &QpInfo::sq_buf, "Send queue ring buffer.")
+    .def_ro("sq_prod", &QpInfo::sq_prod,
+        "Address of the live SQ producer counter. An external WQE builder must "
+        "continue this sequence rather than restart it, or its posts collide "
+        "with rocSHMEM's own.")
+    .def_ro("cq_buf", &QpInfo::cq_buf, "Completion queue ring buffer.")
+    .def_ro("base_heap", &QpInfo::base_heap,
+        "Local symmetric heap base for this QP.")
+    .def_ro("sq_depth", &QpInfo::sq_depth, "SQ capacity in WQE slots.")
+    .def_ro("cq_depth", &QpInfo::cq_depth, "CQ capacity in CQE slots.")
+    .def_ro("lkey", &QpInfo::lkey, "Local heap memory key.")
+    .def_ro("rkey", &QpInfo::rkey, "Peer heap memory key for this connection.")
+    .def_ro("qpn", &QpInfo::qpn, "QP number.")
+    .def_ro("vendor", &QpInfo::vendor, "Provider owning this QP.")
+
+    // ionic
+    .def_prop_ro("ionic_db", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::IONIC, "ionic_db");
+        return i.ionic.db;
+      }, "ionic: SQ doorbell register.")
+    .def_prop_ro("ionic_dbval", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::IONIC, "ionic_dbval");
+        return i.ionic.dbval;
+      }, "ionic: base doorbell value; the producer index is OR'ed in.")
+    .def_prop_ro("ionic_sq_mask", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::IONIC, "ionic_sq_mask");
+        return i.ionic.sq_mask;
+      }, "ionic: SQ index wrap mask (depth - 1).")
+    .def_prop_ro("ionic_cq_mask", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::IONIC, "ionic_cq_mask");
+        return i.ionic.cq_mask;
+      }, "ionic: CQ index wrap mask (depth - 1).")
+    .def_prop_ro("ionic_udma_idx", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::IONIC, "ionic_udma_idx");
+        return i.ionic.udma_idx;
+      }, "ionic: which of the NIC's two UDMA engines this QP is bound to.")
+
+    // mlx5
+    .def_prop_ro("mlx5_dbrec", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::MLX5, "mlx5_dbrec");
+        return i.mlx5.dbrec;
+      }, "mlx5: SQ doorbell record.")
+    .def_prop_ro("mlx5_bf", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::MLX5, "mlx5_bf");
+        return i.mlx5.bf;
+      }, "mlx5: BlueFlame register; the WQE itself is written here.")
+
+    // bnxt
+    .def_prop_ro("bnxt_dbr", [](const QpInfo &i) {
+        require_vendor(i, QpInfoVendor::BNXT, "bnxt_dbr");
+        return i.bnxt.dbr;
+      }, "bnxt: doorbell record.");
+
+  m.def("rocshmem_qp_introspect_provider",
+    []() { return rocshmem_qp_introspect_provider(); },
+    "The active GDA provider, whether or not it is supported here.\n\n"
+    "QpInfoVendor.UNKNOWN means rocSHMEM is not initialized or the backend is\n"
+    "not GDA. A known vendor together with rocshmem_qp_introspect_available()\n"
+    "== False means the NIC was detected but introspection is not implemented\n"
+    "for it yet (mlx5 and bnxt are TODO). Those two situations need different\n"
+    "fixes and are indistinguishable from a None result alone.\n\n"
+    "Safe to call before rocshmem_init().");
+
+  m.def("rocshmem_qp_introspect_available",
+    []() { return rocshmem_qp_introspect_available(); },
+    "True if QP introspection is usable here: rocSHMEM is initialized, the\n"
+    "active backend is GDA, and its provider is one this API can describe\n"
+    "(today, ionic). Check this to branch on capability rather than inferring\n"
+    "it from a None result -- None also means 'this peer/ctx_id names no QP',\n"
+    "which is a different situation.\n\n"
+    "False on an mlx5 or bnxt GDA backend: the NIC is detected but unsupported.\n"
+    "Use rocshmem_qp_introspect_provider() to tell that apart from 'no GDA'.\n\n"
+    "Safe to call before rocshmem_init() (returns False).");
+
+  m.def("rocshmem_query_qp_info",
+    [](int peer, int ctx_id) -> object {
+      // Caller errors raise; None is reserved for "not applicable in this
+      // environment". Collapsing both into None makes a bad argument
+      // indistinguishable from an unsupported backend, which is precisely the
+      // ambiguity that lets a broken caller look like an inactive one.
+      if (ctx_id <= 0) {
+        throw value_error(
+            "ctx_id must be > 0; ctx_id 0 is the default context whose "
+            "producer index, send-queue lock and cached doorbell position "
+            "rocSHMEM keeps to itself, and a queue shared with an external "
+            "builder does not run a workload to completion");
+      }
+      // Check the environment before the peer bound: without an active backend
+      // rocshmem_n_pes() is not meaningful, and "wrong backend" is the more
+      // useful answer than "bad peer".
+      if (!rocshmem_qp_introspect_available()) return none();
+
+      const int n_pes = rocshmem_n_pes();
+      if (peer < 0 || peer >= n_pes) {
+        std::ostringstream oss;
+        oss << "peer " << peer << " is out of range [0, " << n_pes << ")";
+        throw value_error(oss.str().c_str());
+      }
+
+      QpInfo info{};
+      if (!rocshmem_query_qp_info(peer, ctx_id, &info)) return none();
+      return cast(info);
+    },
+    "Describe the RC QP to `peer` within `ctx_id`.\n\n"
+    "Returns a QpInfo on success, or None when introspection does not apply in\n"
+    "this environment -- the backend is not GDA, the provider is unsupported, or\n"
+    "`ctx_id` names no QP (e.g. beyond the configured context count). Use\n"
+    "rocshmem_qp_introspect_available() to distinguish 'wrong backend' up front.\n\n"
+    "Raises ValueError for caller errors: ctx_id <= 0, or peer outside\n"
+    "[0, n_pes). ctx_id 0 is the default context rocSHMEM drives itself; its\n"
+    "queue state is not safely shared with an external descriptor builder.",
+    arg("peer"), arg("ctx_id"));
 }
