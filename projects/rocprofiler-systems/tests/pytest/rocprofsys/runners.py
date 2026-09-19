@@ -365,6 +365,7 @@ class BaselineRunner(BaseRunner):
         "rocprof-sys-sample",
         "rocprof-sys-run",
         "rocprof-sys-avail",
+        "rocsys",
     }
 
     def __init__(
