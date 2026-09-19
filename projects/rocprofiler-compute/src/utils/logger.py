@@ -48,7 +48,7 @@ def demarcate(function: Callable[..., R]) -> Callable[..., R]:
     return wrap_function
 
 
-def console_error(*argv: Any, exit: bool = True) -> None:
+def console_error(*argv: Any, exit: bool = True, exit_code: int = 1) -> None:
     if len(argv) > 1:
         logging.error(f"[{argv[0]}] {argv[1]}")
     elif len(argv) == 1:
@@ -56,7 +56,7 @@ def console_error(*argv: Any, exit: bool = True) -> None:
     else:
         logging.error("Empty error message")
     if exit:
-        sys.exit(1)
+        sys.exit(exit_code)
 
 
 def console_log(*argv: Any, indent_level: int = 0) -> None:
