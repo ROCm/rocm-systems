@@ -17,7 +17,9 @@
 /.github/scripts/check_rccl_cluster_runner_allowlist.py               @ROCm/rccl-ci
 /.github/scripts/rccl_detect_coco_changes.py                          @ROCm/rccl-ci
 /.github/scripts/rccl_coco_matrix.py                                    @ROCm/rccl-ci
+/.github/scripts/rccl_resolve_coco_run.py                               @ROCm/rccl-ci
 /.github/scripts/tests/rccl_coco_matrix_test.py                         @ROCm/rccl-ci
+/.github/scripts/tests/rccl_resolve_coco_run_test.py                    @ROCm/rccl-ci
 /.github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py    @ROCm/rccl-ci
 /.github/scripts/tests/rccl_detect_coco_changes_test.py               @ROCm/rccl-ci
 
