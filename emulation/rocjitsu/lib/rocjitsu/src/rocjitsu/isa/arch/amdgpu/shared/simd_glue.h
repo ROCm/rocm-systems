@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 namespace rocjitsu::cdna5 {
@@ -848,6 +849,72 @@ template <typename T, typename Inst, typename BinOp>
 /// call site costs nothing on toolchains without `<experimental/simd>`.
 template <typename T, typename Inst, typename BinOp>
 [[nodiscard]] bool try_execute_binary_vop2_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
+/// Execute the paired integer operations found in streaming-store kernels.
+/// Resolve checked views once and load both slot results before either write,
+/// since the two destinations may alias the other slot's sources. Opcode IDs
+/// come from the generated ISA rather than being duplicated in this helper.
+template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vopd_integer_pair_simd(Wavefront &wf, const Slot &x,
+                                                             const Slot &y) {
+  if (wf.wf_size() != 32 || simd_force_scalar())
+    return false;
+  const auto is_integer_slot = [](const Slot &slot) {
+    if (slot.neg != 0 || slot.has_src2_operand || slot.src2_is_imm)
+      return false;
+    if (slot.op != kMovOp && slot.op != kAddOp && slot.op != kLshlOp)
+      return false;
+    return slot.dst->simd_capable() && slot.src0->simd_capable() &&
+           (slot.op == kMovOp || slot.src1->simd_capable());
+  };
+  if (!is_integer_slot(x) || !is_integer_slot(y))
+    return false;
+  const uint64_t exec = static_cast<uint32_t>(wf.exec());
+  if (exec == 0)
+    return true;
+  RegisterAccess registers(wf);
+  const auto x_src0 = registers.read_operand(*x.src0, exec);
+  const auto y_src0 = registers.read_operand(*y.src0, exec);
+  std::optional<RegisterAccess::OperandReadView> x_src1;
+  std::optional<RegisterAccess::OperandReadView> y_src1;
+  if (x.op != kMovOp)
+    x_src1.emplace(registers.read_operand(*x.src1, exec));
+  if (y.op != kMovOp)
+    y_src1.emplace(registers.read_operand(*y.src1, exec));
+  const auto x_dst = registers.write_operand(*x.dst, exec);
+  const auto y_dst = registers.write_operand(*y.dst, exec);
+  const auto evaluate = [](const Slot &slot, const auto &src0_view, const auto &src1_view,
+                           uint32_t lane_base) {
+    const auto src0 = src0_view.template load_native<uint32_t>(lane_base);
+    switch (slot.op) {
+    case kMovOp:
+      return src0;
+    case kAddOp:
+      return src0 + src1_view->template load_native<uint32_t>(lane_base);
+    case kLshlOp:
+      return simd_lshl_u32(src1_view->template load_native<uint32_t>(lane_base), src0);
+    default:
+      throw util::UnimplementedInst("unsupported VOPD integer SIMD operation");
+    }
+  };
+  constexpr uint32_t kWidth = util::native_width_v<uint32_t>;
+  for (uint32_t lane_base = 0; lane_base < wf.wf_size(); lane_base += kWidth) {
+    const uint64_t lane_mask = (exec >> lane_base) & util::mask<uint64_t>(kWidth);
+    if (lane_mask == 0)
+      continue;
+    const auto x_result = evaluate(x, x_src0, x_src1, lane_base);
+    const auto y_result = evaluate(y, y_src0, y_src1, lane_base);
+    x_dst.template store_native<uint32_t>(lane_base, x_result, lane_mask);
+    y_dst.template store_native<uint32_t>(lane_base, y_result, lane_mask);
+  }
+  return true;
+}
+
+template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
+[[nodiscard]] bool try_execute_vopd_integer_pair_simd(Wavefront &, const Slot &, const Slot &) {
   return false;
 }
 
