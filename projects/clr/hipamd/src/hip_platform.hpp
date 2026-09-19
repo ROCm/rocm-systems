@@ -29,6 +29,11 @@ class PlatformState {
   hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
   hipError_t UnloadModule(hipModule_t hmod);
 
+  //! Publishes a library-owned DynCO under its module handle so the
+  //! hipModuleGet*() functions can use handle returned by hipLibraryGetModule().
+  hipError_t RegisterLibraryModule(hipModule_t hmod, hip::DynCO* dynCO);
+  void UnregisterLibraryModule(hipModule_t hmod);
+
   //! Tracks kernel handles from creation to release, so IsValidFuncHandle() can
   //! reject a pointer that never came from the runtime.
   void RegisterFuncHandle(const void* hfunc) {
@@ -110,12 +115,17 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
+  //! Remove all the texture references associated with the module
+  void RemoveTexRefs(hipModule_t hmod);
+
   std::recursive_mutex lock_;       //!< Guards PlatformState globals
   std::recursive_mutex lg_lock_;    //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
+  //! Subset of dynCO_map_ keys whose DynCO is owned by a LibraryContainer.
+  std::unordered_set<hipModule_t> library_modules_;
   std::mutex funcHandleLock_;
   std::unordered_set<const void*> funcHandles_;
   hip::StatCO statCO_;              //!< Static Code object var

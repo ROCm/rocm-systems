@@ -92,3 +92,27 @@ library:
   Unit_hipLibrary_LoadUnloadCycle:
     <<: *level_2
     tags: [module]
+  Unit_hipLibraryGetModule_Positive_Basic:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Positive_BuildsOnFirstUse:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Positive_ModuleGetFunctionAndLaunch:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Positive_ModuleGetGlobalParity:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Positive_MatchesLibraryGetKernel:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Negative_ModuleUnloadRefused:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Negative_StaleAfterLibraryUnload:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetModule_Negative_Parameters:
+    <<: *level_2
+    tags: [module]
