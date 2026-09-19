@@ -386,6 +386,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
         "PYTHON_PATH"
+        "LIBRARY_PATH"
         "ENVIRONMENT"
         "PRELOAD"
         "FIXTURES_SETUP"
