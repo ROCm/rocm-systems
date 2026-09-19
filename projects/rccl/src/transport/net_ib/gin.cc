@@ -730,18 +730,19 @@ reconcile:
   if (ncclRmaRegistrationHandleReady(rmaMrHandle, nSeg)) {
     memcpy(localRegistration.segOff, rmaMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   }
-  // Heap recv is only used for nranks>64. If any rank lacks it, every rank must
-  // allGather a compact status, not the full registration record.
+  // Full-record heap recv is only used for nranks>64. Compact have/status
+  // allGathers overlay the unused stack slab so a heap failure still gathers.
   {
     int allHaveRegs = (registrations != NULL);
     if (cComm->nranks > (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
       int have = (registrations != NULL);
-      if (registrations != NULL) {
-        haveRecv = (int*)registrations;
-      } else if (ncclCalloc(&haveRecv, cComm->nranks) != ncclSuccess) {
-        WARN("NET/IB/RMA: failed to allocate registration consensus buffer");
-        goto fail;
-      } else {
+      haveRecv = (int*)ncclRmaCompactConsensusRecv(registrations, registrationsStack, sizeof(registrationsStack),
+                                                   cComm->nranks, sizeof(int));
+      if (haveRecv == NULL) {
+        if (ncclCalloc(&haveRecv, cComm->nranks) != ncclSuccess) {
+          WARN("NET/IB/RMA: failed to allocate registration consensus buffer");
+          goto fail;
+        }
         haveRecvHeap = 1;
       }
       NCCLCHECKGOTO(cComm->allGather(cComm, &have, haveRecv, sizeof(int)), ret, fail);
@@ -759,10 +760,9 @@ reconcile:
     }
     if (!allHaveRegs) {
       ncclResult_t st = localRegistration.status != ncclSuccess ? localRegistration.status : ncclSystemError;
-      ncclResult_t* stRecv = NULL;
-      if (registrations != NULL) {
-        stRecv = (ncclResult_t*)registrations;
-      } else {
+      ncclResult_t* stRecv = (ncclResult_t*)ncclRmaCompactConsensusRecv(
+          registrations, registrationsStack, sizeof(registrationsStack), cComm->nranks, sizeof(ncclResult_t));
+      if (stRecv == NULL) {
         NCCLCHECKGOTO(ncclCalloc(&statusOnly, cComm->nranks), ret, fail);
         stRecv = statusOnly;
       }
