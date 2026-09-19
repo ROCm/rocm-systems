@@ -1493,6 +1493,12 @@ bool rcclCeArGraphSafe(struct ncclComm* comm) {
   return !comm->ceColl.graphModeSeen;
 }
 
+bool rcclCeStagedUnregisteredEligible(int nRanks, size_t msgBytes, ncclDataType_t datatype, ncclRedOp_t op,
+                                      bool force, bool ceArGraphAllowed, bool ceUsable) {
+  return force && ceArGraphAllowed && ceUsable && ncclCeImplemented(ncclFuncAllReduce, (int)op, datatype) &&
+         msgBytes <= ncclCeAllReduceStagingBufBytes(nRanks);
+}
+
 // Single source of truth for AllReduce implementation selection. See the header
 // comment on rcclSelectAllReduce(). The priority chain and every gate below are a
 // faithful consolidation of what was previously split between ncclAllReduce_impl()
@@ -1713,10 +1719,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
   const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegForce = force && !symEligible && ceRegInWindow;
-  // FORCE unregistered CE copies through ceARTmpBuf. Cap this arm on the staging
-  // size so a larger message stays on the kernel path instead of selecting CE and failing.
+  // FORCE unregistered CE copies through ceARTmpBuf. Also require a driver that
+  // implements CE and a message that fits the staging buffer.
   const bool ceStagedUnregistered =
-    force && ceAllReduceAllowed && (msgBytes <= ncclCeAllReduceStagingBufBytes(comm->nRanks));
+    rcclCeStagedUnregisteredEligible(comm->nRanks, msgBytes, datatype, op, force, ceArGraphAllowed, ceAllReduceAllowed);
   if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
