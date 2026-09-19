@@ -18,11 +18,11 @@
 //!
 //! The mapping is very nearly a function of its inputs, and everything
 //! it decides is testable without a container runtime or an emulator.
-//! The one thing it asks the world about is a containerised
-//! `--workdir`, which is a question only the image can answer and is
-//! asked only when the caller passed one. One more thing is read from
-//! the process rather than passed in — which runtime directory this
-//! mirage resolved — and both callers necessarily agree on it.
+//! One thing it asks the world about is a containerised `--workdir`,
+//! which is a question only the image can answer and is asked only when
+//! the caller passed one. One more thing is read from the process rather
+//! than passed in — which runtime directory this mirage resolved — and
+//! both callers necessarily agree on it.
 //!
 //! Whether the caller's streams are a terminal used to be read here too,
 //! and it was the one input that broke the promise above. A test runs
@@ -32,6 +32,25 @@
 //! most needed pinning was the branch no test could enter. It is a
 //! parameter now, [`CallerStreams`], which the caller probes once with
 //! [`CallerStreams::probe`] and a test states outright.
+//!
+//! The ROCr preflight is the exception that stayed, and the promise
+//! above is narrower for it. Once the concrete specs exist,
+//! [`build_specs`] asks whether the ROCm runtime each host process will
+//! load knows the ISA the session emulates — reading this process's
+//! environment, the workload's executable and the runtime that
+//! executable resolves — and prints a warning on stderr when it does
+//! not. It is here because here is the only place both `mirage run` and
+//! every `mirage exec` have a concrete command, workdir and environment
+//! to ask about; an earlier version that lived in the run checked the
+//! run and silently skipped every exec.
+//!
+//! What the `CallerStreams` lesson costs is paid rather than ignored.
+//! The decision — which specs to ask about, which sessions to skip
+//! without asking, how ranks that share loader inputs collapse to one
+//! question, and what the notice says — is `unsupported_target_notices`,
+//! a pure function of the description, the specs and a verdict its
+//! caller supplies, which the tests drive with a stub. Ambient here is
+//! the answer, never the policy.
 
 use std::collections::BTreeMap;
 
@@ -465,7 +484,87 @@ pub fn build_specs(
             });
         }
     }
+    warn_if_the_runtime_cannot_see_the_device(desc, &specs);
     Ok(specs)
+}
+
+/// Warn about an emulated ISA only after the workload's concrete
+/// [`SpawnSpec`] exists.
+///
+/// This placement is what makes the answer belong to the process that
+/// will actually run: `mirage run` and every later `mirage exec` both
+/// pass here, and the spec already contains their distinct command,
+/// workdir, environment layering and `--clear-env-vars` policy.
+fn warn_if_the_runtime_cannot_see_the_device(desc: &SessionDescription, specs: &[SpawnSpec]) {
+    let notices = unsupported_target_notices(desc, specs, |isa, spec| {
+        let probe = rocr_probe_spec(desc, spec);
+        let env = crate::process::resolved_env(&probe);
+        mirage_core::rocr::check_target_for_process(
+            isa,
+            &probe.command,
+            probe.workdir.as_deref().map(std::path::Path::new),
+            &env,
+            probe.inherit_env,
+        )
+    });
+    for notice in notices {
+        eprintln!("mirage: {notice}");
+    }
+}
+
+/// A workload spec made safe to inspect with the ELF loader trace.
+///
+/// rocjitsu's own KMD interposer is known not to select ROCr, but
+/// running the trace with it would initialise the interposer outside
+/// the session it belongs to. Remove that one known preload only when it
+/// is the whole value. A user preload stays in a merged value, and an
+/// inherited preload remains in the inherited environment; either
+/// makes the answer [`mirage_core::rocr::TargetSupport::Unknown`].
+fn rocr_probe_spec(desc: &SessionDescription, spec: &SpawnSpec) -> SpawnSpec {
+    let mut probe = spec.clone();
+    if let Some(injected) = &desc.ld_preload
+        && probe.env.get("LD_PRELOAD") == Some(injected)
+    {
+        probe.env.remove("LD_PRELOAD");
+    }
+    probe
+}
+
+fn unsupported_target_notices(
+    desc: &SessionDescription,
+    specs: &[SpawnSpec],
+    mut support: impl FnMut(&str, &SpawnSpec) -> mirage_core::rocr::TargetSupport,
+) -> Vec<String> {
+    if desc.containers.is_some() {
+        return Vec::new();
+    }
+    let Some(isa) = desc.emulated_isa.as_deref() else {
+        return Vec::new();
+    };
+
+    let mut checked = std::collections::BTreeSet::new();
+    let mut notices = std::collections::BTreeSet::new();
+    for spec in specs.iter().filter(|spec| spec.container.is_none()) {
+        let loader_env: Vec<(String, String)> = spec
+            .env
+            .iter()
+            .filter(|(key, _)| mirage_core::rocr::affects_process_probe(key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let fingerprint = (
+            spec.command.clone(),
+            spec.workdir.clone(),
+            spec.inherit_env,
+            loader_env,
+        );
+        if !checked.insert(fingerprint) {
+            continue;
+        }
+        if let mirage_core::rocr::TargetSupport::Unsupported(problem) = support(isa, spec) {
+            notices.insert(problem.explain());
+        }
+    }
+    notices.into_iter().collect()
 }
 
 /// `n` as an English ordinal: `1st`, `2nd`, `3rd`, `4th`, `21st`.
@@ -728,6 +827,7 @@ mod tests {
     fn job(node_count: u32, nproc: u32) -> SessionDescription {
         SessionDescription {
             session: SessionId::new("s").unwrap(),
+            emulated_isa: None,
             node_count,
             nproc_per_node: nproc,
             workdir: "/work".to_string(),
@@ -758,6 +858,121 @@ mod tests {
 
     fn id() -> ExecId {
         ExecId::new("e-1").unwrap()
+    }
+
+    fn unsupported(isa: &str) -> mirage_core::rocr::TargetSupport {
+        mirage_core::rocr::TargetSupport::Unsupported(Box::new(
+            mirage_core::rocr::UnsupportedTarget {
+                target: isa.to_string(),
+                runtime: std::path::PathBuf::from("/opt/rocm/lib/libhsa-runtime64.so.1"),
+                version: Some("7.0.2.2".to_string()),
+                references: 45,
+            },
+        ))
+    }
+
+    /// Both `mirage run` and `mirage exec` call `build_specs`; keeping
+    /// the diagnostic on that shared path means an attached command is
+    /// checked against its own loader environment too.
+    #[test]
+    fn an_unsupported_emulated_target_produces_a_notice_for_the_concrete_process() {
+        let mut description = desc(1);
+        let mut def = exec_def(1, None);
+        def.clear_env = true;
+        let specs = build_specs(&description, &def, &id(), CAPTURED).unwrap();
+        description.emulated_isa = Some("gfx1250".to_string());
+
+        let notices = unsupported_target_notices(&description, &specs, |isa, spec| {
+            assert_eq!(isa, "gfx1250");
+            assert!(
+                !spec.inherit_env,
+                "the check must receive the workload's clear-env policy"
+            );
+            unsupported(isa)
+        });
+
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].contains("gfx1250"), "{notices:?}");
+        assert!(notices[0].contains("no GPU"), "{notices:?}");
+    }
+
+    #[test]
+    fn no_target_and_containerised_sessions_are_not_probed() {
+        let description = desc(1);
+        let def = exec_def(1, None);
+        let specs = build_specs(&description, &def, &id(), CAPTURED).unwrap();
+        let called = std::cell::Cell::new(false);
+        let check = |_: &str, _: &SpawnSpec| {
+            called.set(true);
+            unsupported("gfx1250")
+        };
+        assert!(unsupported_target_notices(&description, &specs, check).is_empty());
+
+        let mut containerised = description;
+        containerised.emulated_isa = Some("gfx1250".to_string());
+        containerised.containers = Some(ContainerTargets {
+            provider: "provider".to_string(),
+            names: vec!["node".to_string()],
+            scratch: std::path::PathBuf::from("/tmp"),
+        });
+        assert!(unsupported_target_notices(&containerised, &specs, check).is_empty());
+        assert!(!called.get(), "neither exempt session may reach the probe");
+    }
+
+    #[test]
+    fn identical_rank_loader_inputs_are_checked_once() {
+        let mut description = job(2, 2);
+        let def = exec_def(2, None);
+        let specs = build_specs(&description, &def, &id(), CAPTURED).unwrap();
+        description.emulated_isa = Some("gfx1250".to_string());
+        let calls = std::cell::Cell::new(0);
+
+        let notices = unsupported_target_notices(&description, &specs, |isa, _| {
+            calls.set(calls.get() + 1);
+            unsupported(isa)
+        });
+
+        assert_eq!(
+            calls.get(),
+            1,
+            "rank-only environment must not repeat the loader trace"
+        );
+        assert_eq!(notices.len(), 1, "the warning must not repeat per rank");
+    }
+
+    #[test]
+    fn only_the_emulator_owned_preload_is_removed_from_the_loader_probe() {
+        let description = desc(1);
+        let def = exec_def(1, None);
+        let spec = build_specs(&description, &def, &id(), CAPTURED)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            spec.env.get("LD_PRELOAD").map(String::as_str),
+            Some("/lib/interpose.so")
+        );
+        assert!(
+            !rocr_probe_spec(&description, &spec)
+                .env
+                .contains_key("LD_PRELOAD"),
+            "the loader trace must not initialise the emulator outside its session"
+        );
+
+        let mut def = exec_def(1, None);
+        def.exec
+            .env
+            .insert("LD_PRELOAD".to_string(), "/user/mine.so".to_string());
+        let spec = build_specs(&description, &def, &id(), CAPTURED)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            rocr_probe_spec(&description, &spec)
+                .env
+                .get("LD_PRELOAD")
+                .map(String::as_str),
+            Some("/lib/interpose.so:/user/mine.so"),
+            "a user preload must make the verdict unknown, not be stripped"
+        );
     }
 
     #[test]

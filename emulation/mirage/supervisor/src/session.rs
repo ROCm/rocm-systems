@@ -459,7 +459,8 @@ impl Session {
         alive
     }
 
-    /// Record the emulator injection to apply to every workload.
+    /// Record the emulator injection and the session metadata derived
+    /// while that exact injection was materialised.
     pub fn set_injection(&self, injection: InjectionDef) {
         self.lock().injection = injection;
     }
@@ -841,10 +842,11 @@ impl Session {
     /// remapped onto the in-container mounts here, once, rather than at
     /// every call site.
     ///
-    /// Every call describes the same session: the shape is the one fixed
-    /// at creation, and the rendezvous port is picked once and kept, so a
-    /// `mirage exec` in another terminal joins the job rather than
-    /// starting a differently-shaped one beside it.
+    /// Every call describes the same session: the shape is fixed at
+    /// creation, the emulated ISA is fixed when the injection is
+    /// materialised, and the rendezvous port is picked once and kept.
+    /// A `mirage exec` in another terminal therefore joins the job rather
+    /// than starting a differently-shaped one beside it.
     ///
     /// # Errors
     ///
@@ -914,9 +916,11 @@ impl Session {
             }
             None => (injection.env.clone(), injection.ld_preload.clone()),
         };
+        let emulated_isa = injection.emulated_isa.clone();
 
         Ok(SessionDescription {
             session: self.def.id.clone(),
+            emulated_isa,
             node_count,
             nproc_per_node: job_nproc,
             workdir: self.def.workdir.clone(),
@@ -2017,6 +2021,23 @@ mod tests {
         assert_eq!(
             after, 1,
             "editing a topology reshaped a session that was already running"
+        );
+    }
+
+    #[test]
+    fn a_live_sessions_isa_is_the_one_prepared_at_bring_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = a_session(dir.path(), profile(1, 1));
+        session.set_injection(InjectionDef {
+            emulated_isa: Some("gfx942".to_string()),
+            ..Default::default()
+        });
+        session.set_phase(true, state::READY, None);
+
+        assert_eq!(
+            session.describe().unwrap().emulated_isa.as_deref(),
+            Some("gfx942"),
+            "describe must use the ISA captured with the materialised injection"
         );
     }
 
