@@ -93,5 +93,15 @@ public:
     static constexpr const char *const ASYNC_BUFFER_SIZE{"HIPFILE_ASYNC_BUFFER_SIZE"};
 
     static std::optional<size_t> async_buffer_size();
+
+    /// @brief Allows IO operations to take place between files and host memory
+    ///
+    /// If enabled (default), file read/write operations allow host memory registered buffers in
+    /// addition to GPU buffers
+    static constexpr const char *const HOST{"HIPFILE_HOST"};
+
+    /// @brief Get the value of HIPFILE_HOST from the environment
+    /// @return An optional boolean if HIPFILE_HOST was set, nullopt otherwise.
+    static std::optional<bool> host();
 };
 }
