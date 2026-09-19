@@ -57,7 +57,9 @@ std::function<void(void*, void const*)> g_ncclDevCommCopyLsaData = DefaultNcclDe
 
 // The externals the #included devcomm .cc files link against.
 extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_ncclTeamLsa(comm); }
-void ncclDevCommCopyLsaData(void* dst, void const* src) { g_ncclDevCommCopyLsaData(dst, src); }
+// No wrapper definition here: dev_runtime.cc supplies the real
+// ncclDevCommCopyLsaData in this binary. The hook above survives because
+// devcomm-test.cc macro-shims its own call sites onto it.
 
 void ResetDevcommFakes() {
   g_ncclTeamLsa = DefaultNcclTeamLsa;
