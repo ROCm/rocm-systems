@@ -57,6 +57,9 @@ jobs:
       - name: Run e2e tests
         run: npm run test:e2e
 
+      - name: Smoke test production hosting and caching
+        run: npm run test:e2e:production
+
       - name: Run chart race tests
         run: npm run test:e2e:chart-race
 

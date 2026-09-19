@@ -47,6 +47,7 @@ test('renders the dashboard shell and run progress while data is still loading',
     await expect.poll(() => progress.getAttribute('aria-valuenow')).not.toBeNull();
     await expect(progress).toHaveAttribute('aria-valuetext', /\d+ of \d+ run files loaded/);
     await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Reload all data' })).toBeDisabled();
   } finally {
     releaseRunRequest();
   }
@@ -54,6 +55,45 @@ test('renders the dashboard shell and run progress while data is still loading',
   await expect(page.getByTestId('dashboard-data-loading')).toHaveCount(0);
   await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
+});
+
+test('offers an explicit full data reload', async ({ page }) => {
+  let indexRequests = 0;
+  let cacheBustedIndexRequests = 0;
+  const runGenerations = [];
+  await page.route('**/data/index.json*', async (route) => {
+    indexRequests += 1;
+    if (new URL(route.request().url()).searchParams.has('reload')) {
+      cacheBustedIndexRequests += 1;
+    }
+    await route.continue();
+  });
+  await page.route('**/data/runs/*.json*', async (route) => {
+    runGenerations.push(new URL(route.request().url()).searchParams.get('reload'));
+    await route.continue();
+  });
+
+  await page.goto('/');
+  const reload = page.getByRole('button', { name: 'Reload all data' });
+  await expect(reload).toBeEnabled();
+  await expect(reload).toHaveClass(/MuiButton-colorInherit/);
+  const initialIndexRequests = indexRequests;
+  await reload.click();
+
+  await expect.poll(() => indexRequests).toBeGreaterThan(initialIndexRequests);
+  expect(cacheBustedIndexRequests).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
+
+  const savedGeneration = await page.evaluate(
+    () => window.localStorage.getItem('rocjitsu-data-cache-generation'),
+  );
+  expect(savedGeneration).toBeTruthy();
+
+  runGenerations.length = 0;
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
+  expect(runGenerations.length).toBeGreaterThan(0);
+  expect(runGenerations.every((generation) => generation === savedGeneration)).toBe(true);
 });
 
 test('fails closed when an indexed run is invalid', async ({ page }) => {
@@ -77,25 +117,27 @@ test('fails closed when an indexed run is invalid', async ({ page }) => {
   await expect(failure).toContainText('No available test data');
   await expect(failure).toContainText(invalidRunFile);
   await expect(failure).toContainText('references an invalid test catalog');
+  await expect(page.getByRole('button', { name: 'Reload all data' }))
+    .toHaveClass(/MuiButton-colorPrimary/);
   await expect(page.getByTestId('latest-results')).toBeVisible();
   await expect(page.getByTestId('latest-results').locator('tbody tr')).toHaveCount(1);
 });
 
 test('offers a working Retry after a fatal data failure', async ({ page }) => {
-  let failIndex = true;
+  let remainingFailures = 3;
   await page.route('**/data/index.json', async (route) => {
-    if (!failIndex) {
+    if (remainingFailures === 0) {
       await route.continue();
       return;
     }
-    failIndex = false;
-    await route.fulfill({ status: 503, contentType: 'text/plain', body: 'unavailable' });
+    remainingFailures -= 1;
+    await route.abort('failed');
   });
 
   await page.goto('/');
   const failure = page.getByTestId('dashboard-data-error');
   await expect(failure).toContainText('No available test data');
-  await expect(failure).toContainText('503');
+  await expect(failure).toContainText('Unable to reach published dashboard data');
   await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
   await expect(page.getByLabel('Targets')).toBeDisabled();
   await expect(page.getByLabel('Suites')).toBeDisabled();

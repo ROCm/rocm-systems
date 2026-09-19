@@ -2,10 +2,10 @@
 
 React + Vite source for the Rocjitsu simulation-performance dashboard, with MUI components and
 ECharts visualizations. This directory contains application source, build configuration,
-and tests. Where the browser fetches benchmark JSON depends on the build mode: a plain
-build reads the site's own `data/` directory, and the `pages` build reads
-`rocjitsu-dashboard/data/` from the `gh-pages-rocjitsu` branch of the same GitHub
-repository.
+and tests. Production builds fetch benchmark JSON from `rocjitsu-dashboard/data/` on
+the `gh-pages-rocjitsu branch` in the `ROCm/rocm-systems` repository.
+
+**Live website:** [RocJitsu Performance Dashboard](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/)
 
 ## Quick start: preview with dummy data
 
@@ -23,11 +23,9 @@ Open http://localhost:4174 to visualize the website with dummy benchmark data.
 Press **Ctrl+C** to stop the preview. The fixture build uses `.test-dist/` and the
 fixture preview always uses port 4174; the production preview uses port 4173.
 
-Both builds produce application files in `dist/` without dummy data. `npm run build`
-keeps the original layout, where `data/` sits next to the application and is served
-from the same host. `npm run build:pages` loads JSON from
-`https://raw.githubusercontent.com/<owner>/rocm-systems/refs/heads/gh-pages-rocjitsu/rocjitsu-dashboard/data/`,
-which must contain `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`.
+The production build writes application files to `dist/` without dummy data and loads
+JSON from the [`gh-pages-rocjitsu` branch](https://raw.githubusercontent.com/ROCm/rocm-systems/refs/heads/gh-pages-rocjitsu/rocjitsu-dashboard/data/).
+The data directory must contain `metadata.json`, `index.json`, `test-catalogs/`, and `runs/`.
 Before every data publication, validate the complete staged data directory:
 
 ```bash
@@ -40,7 +38,7 @@ publication gate.
 
 See the [build and test guide](docs/build-and-test.md) for local development with
 dummy data or a local data directory (`npm run dev:data -- <data-directory>`),
-browser setup, verification commands, and production build modes.
+browser setup, verification commands, and the production build.
 
 ## Source layout
 

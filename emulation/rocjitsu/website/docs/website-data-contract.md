@@ -11,14 +11,20 @@ Schema version 1 uses plain JSON, immutable test catalogs, and one run file per 
 | `data/test-catalogs/<catalog-id>.json` | An immutable test-definition snapshot and target applicability | The planned test set changes |
 | `data/runs/<run-id>.json` | One plugin execution across every catalog target | A run is first published |
 
-The paths above are relative to the data directory, which the application locates
-according to its build mode. A plain build reads `data/` next to the deployed
-application; the `pages` build reads `rocjitsu-dashboard/data/` from the
-`gh-pages-rocjitsu` branch of `rocm-systems`. Either way the build contains no
-benchmark JSON and fetches it at runtime. This package does not define how the
-application is deployed. Test fixtures are dummy records and must not be published.
+Production builds fetch these paths from `rocjitsu-dashboard/data/` on the
+`gh-pages-rocjitsu` branch of `ROCm/rocm-systems`. The build contains no
+benchmark JSON. Fixture builds and local-data servers expose the same paths
+under `./data/`, using the same runtime loader and validator. This package does
+not define how the application is deployed. Test fixtures are dummy records and
+must not be published.
 
-Upload a new catalog before any run that references it. Upload run files before publishing the updated index. Existing catalogs and runs are immutable.
+Published benchmark data will be validated and managed by a separate
+data-publication workflow. Website development and CI validate application code
+and fixtures only; they do not guarantee the availability or validity of
+published data.
+
+Upload a new catalog before any run that references it. Upload run files before
+publishing the updated index. Existing catalogs and runs are immutable.
 
 ## Hosting requirements
 
@@ -29,10 +35,31 @@ build does not configure HTTP response headers.
 | URL | Recommended host behavior |
 | --- | --- |
 | `data/metadata.json`, `data/index.json` | Revalidate on every load, for example `Cache-Control: no-cache`. The browser also requests them with `cache: 'no-store'`. |
-| `data/test-catalogs/*.json`, `data/runs/*.json` | Immutable once published; serve a long-lived `Cache-Control: public, max-age=31536000, immutable` so repeat visits refetch only new runs. |
+| `data/test-catalogs/*.json`, `data/runs/*.json` | Immutable once published; the browser requests cached copies with `cache: 'force-cache'`. Hosts should still send `Cache-Control: public, max-age=31536000, immutable`. |
+
+The dashboard's **Reload all data** action first requests cache-busted
+metadata and index URLs. It then requests every run named by that fresh index
+and every catalog referenced by those runs with the same per-click cache-busting
+token and `cache: 'reload'`. This bypasses both browser and shared CDN cache
+entries and stores the fresh immutable files in a new per-browser cache
+generation. The generation is persisted only after the complete dataset
+validates, so the user's next normal refresh reuses those files without purging
+or changing another user's cache. Metadata and index requests remain
+`cache: 'no-store'` because they are mutable. This lets a user recover after a
+publisher corrects content under an existing filename, although publishing a
+new filename remains the required normal practice.
+
+The loader retries transient network failures and HTTP 408, 429, and 5xx
+responses twice. It honors a bounded `Retry-After` response or otherwise applies
+jittered backoff. Other HTTP failures, malformed JSON, and validation errors
+fail immediately. If the retry budget is exhausted, the dashboard fails closed
+instead of displaying a partial history.
 
 Publishing a mutated catalog or run under an existing filename is a contract violation:
 cached clients can keep the old body until cache expiry. Publish a new ID instead.
+Never delete a published catalog or run file: clients can temporarily retain an
+older index that still references it. Remove obsolete runs from new indexes while
+leaving their immutable files available.
 
 ## `metadata.json`
 
@@ -294,8 +321,9 @@ The overall runtime overhead is the geometric mean of per-test duration ratios. 
 3. Give each plugin execution a unique `id` and the same controlled `comparisonId`.
 4. Include exactly one completed, failed, or timed-out result for every catalog test applicable to every target.
 5. Validate the complete staged data directory with `npm run validate:data -- <data-directory>`.
-6. Upload each `data/runs/<run-id>.json`.
-7. Add the run filenames to `data/index.json`, update `generatedAt`, and publish the index last.
+6. Upload each new catalog and `data/runs/<run-id>.json`.
+7. Add the run filenames to `data/index.json`, update `generatedAt`, and publish
+   the index last.
 
 No React or Vite build is required for a data-only GitHub Pages update.
 Validation is mandatory before publication. The browser runs the same validation and

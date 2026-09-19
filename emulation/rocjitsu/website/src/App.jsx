@@ -34,6 +34,7 @@ import { createDashboardTheme } from './theme/theme';
 import { formatFullDate, shortSha } from './utils/formatters';
 
 const { metadataUrl: dataMetadataUrl, indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
+const DATA_CACHE_GENERATION_STORAGE_KEY = 'rocjitsu-data-cache-generation';
 
 function LoadingDataState({ progress }) {
   const determinate = progress.total > 0;
@@ -311,7 +312,11 @@ export default function App() {
   // Progress is tagged with the attempt that produced it so a retry starts from zero without an
   // extra state reset.
   const [progress, setProgress] = useState({ attempt: 0, loaded: 0, total: 0 });
-  const [attempt, setAttempt] = useState(0);
+  const [loadRequest, setLoadRequest] = useState(() => ({
+    attempt: 0,
+    reloadAll: false,
+    cacheGeneration: window.localStorage.getItem(DATA_CACHE_GENERATION_STORAGE_KEY),
+  }));
   const theme = useMemo(() => createDashboardTheme(mode), [mode]);
 
   useEffect(() => {
@@ -320,10 +325,19 @@ export default function App() {
       metadataUrl: dataMetadataUrl,
       indexUrl: dataIndexUrl,
       signal: controller.signal,
+      reloadAll: loadRequest.reloadAll,
+      cacheGeneration: loadRequest.cacheGeneration,
       onManifest: (manifest) => setDataState((current) => ({ ...current, manifest })),
-      onProgress: ({ loaded, total }) => setProgress({ attempt, loaded, total }),
+      onProgress: ({ loaded, total }) => setProgress({
+        attempt: loadRequest.attempt,
+        loaded,
+        total,
+      }),
     })
-      .then(({ data, sourceData }) => {
+      .then(({ data, sourceData, cacheGeneration }) => {
+        if (loadRequest.reloadAll && cacheGeneration) {
+          window.localStorage.setItem(DATA_CACHE_GENERATION_STORAGE_KEY, cacheGeneration);
+        }
         setDataState({ data, manifest: data, sourceData, error: null });
       })
       .catch((error) => {
@@ -331,7 +345,7 @@ export default function App() {
         setDataState((current) => ({ ...current, data: null, sourceData: null, error }));
       });
     return () => controller.abort();
-  }, [attempt]);
+  }, [loadRequest]);
 
   const toggleMode = () => {
     setMode((current) => {
@@ -346,20 +360,38 @@ export default function App() {
       <CssBaseline />
       <DashboardHeader
         data={dataState.data ?? dataState.manifest}
+        dataError={dataState.error}
         downloadData={dataState.sourceData}
         loading={!dataState.data && !dataState.error}
         mode={mode}
+        onReloadData={() => {
+          setDataState({ data: null, manifest: null, sourceData: null, error: null });
+          setLoadRequest((current) => ({
+            ...current,
+            attempt: current.attempt + 1,
+            reloadAll: true,
+          }));
+        }}
         onToggleMode={toggleMode}
       />
       {!dataState.data && !dataState.error && (
-        <LoadingDataState progress={progress.attempt === attempt ? progress : { loaded: 0, total: 0 }} />
+        <LoadingDataState
+          progress={
+            progress.attempt === loadRequest.attempt
+              ? progress
+              : { loaded: 0, total: 0 }
+          }
+        />
       )}
       {dataState.error && (
         <EmptyDataState
           error={dataState.error}
           onRetry={() => {
             setDataState((current) => ({ ...current, error: null }));
-            setAttempt((current) => current + 1);
+            setLoadRequest((current) => ({
+              ...current,
+              attempt: current.attempt + 1,
+            }));
           }}
         />
       )}

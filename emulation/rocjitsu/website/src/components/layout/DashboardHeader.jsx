@@ -12,11 +12,20 @@ import {
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import CloudSyncRoundedIcon from '@mui/icons-material/CloudSyncRounded';
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import FiberManualRecordRoundedIcon from '@mui/icons-material/FiberManualRecordRounded';
 import { formatFullDate, formatRelativeTime } from '../../utils/formatters';
 
-export default function DashboardHeader({ data, downloadData, loading = false, mode, onToggleMode }) {
+export default function DashboardHeader({
+  data,
+  dataError = null,
+  downloadData,
+  loading = false,
+  mode,
+  onReloadData,
+  onToggleMode,
+}) {
   const downloadJson = () => {
     if (!downloadData) return;
     const blob = new Blob([JSON.stringify(downloadData, null, 2)], { type: 'application/json' });
@@ -99,13 +108,44 @@ export default function DashboardHeader({ data, downloadData, loading = false, m
           </Box>
         </Stack>
         <Stack direction="row" sx={{ gap: 0.75, ml: 1 }}>
+          <Tooltip title="Use when dashboard data still appears stale or incorrect after refreshing the page. If the problem continues, clear this site's cached data in your browser settings.">
+            <span>
+              <Button
+                aria-label="Reload all data"
+                color={dataError ? 'primary' : 'inherit'}
+                disabled={loading}
+                onClick={onReloadData}
+                startIcon={<CloudSyncRoundedIcon />}
+                variant="outlined"
+                sx={{
+                  height: 40,
+                  minWidth: { xs: 40, md: 'auto' },
+                  px: { xs: 1, md: 1.5 },
+                  borderColor: dataError ? 'primary.main' : 'divider',
+                  color: dataError ? 'primary.main' : 'inherit',
+                  '&:hover': {
+                    borderColor: 'primary.main',
+                    color: 'primary.main',
+                  },
+                }}
+              >
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
+                  Reload all data
+                </Box>
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             variant="outlined"
             color="inherit"
             startIcon={<DownloadRoundedIcon />}
             disabled={!downloadData}
             onClick={downloadJson}
-            sx={{ display: { xs: 'none', sm: 'inline-flex' }, borderColor: 'divider' }}
+            sx={{
+              display: { xs: 'none', sm: 'inline-flex' },
+              height: 40,
+              borderColor: 'divider',
+            }}
           >
             Download JSON
           </Button>
