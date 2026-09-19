@@ -173,20 +173,13 @@ static SharedSignal* AllocateDeviceSignalBlock(core::Agent& device_agent) {
     throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
                              "Agent has no host visible coarse grain device local memory region.");
 
-  // AllocateUncached matches what this tree does for the analogous object, the
-  // device resident AQL ring buffer, which the command processor also reads
-  // (AqlQueue::AqlQueue(), core/runtime/amd_aql_queue.cpp).  It is a GPU-side
-  // page attribute: it reaches KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED and sets MTYPE
-  // to UC in the GPU page tables, and does NOT change the host mapping -- which
-  // is why the write combining drain in default_signal.cpp is still needed.  In
-  // KfdDriver::AllocateMemory() it also clears the KMT CoarseGrain and
-  // ExtendedCoherent bits, so the allocation is uncached rather than coarse
-  // grain; the region is still chosen by the coarse grain predicate above.
+  // The slab block carries AllocateDirect | AllocateUncached, matching the device
+  // resident AQL ring buffer (AqlQueue::AqlQueue()).  Uncached is a GPU-side page
+  // attribute only and does NOT change the host mapping -- which is why the write
+  // combining drain in default_signal.cpp is still needed.
   //
-  // Do not drop it.  It was removed once and restored after GPU hangs on gfx1250
-  // with older MEC firmware, on a buffer the command processor also reads.  The
-  // flags now sit on the slab block in GpuAgent::GrowOrderingEdgeSlab() -- same
-  // two flags, same region, one call per agent instead of one per signal.
+  // Do not drop it: it was removed once and restored after GPU hangs on gfx1250
+  // with older MEC firmware, on a buffer the command processor also reads.
   hsa_status_t why = HSA_STATUS_SUCCESS;
   void* ptr = static_cast<AMD::GpuAgent&>(device_agent).AcquireOrderingEdgeSlot(&why);
   if (ptr == nullptr) {
@@ -196,10 +189,9 @@ static SharedSignal* AllocateDeviceSignalBlock(core::Agent& device_agent) {
     throw std::bad_alloc();  // this one really is out of memory
   }
 
-  // Constructed here, not when the block was allocated.  That is what keeps slot
-  // construction lazy, and what makes reuse correct: a recycled slot is fully
-  // reinitialised -- value word, mailbox pointer, timestamps, core_signal back
-  // pointer and Check<> id -- before its handle goes out again.
+  // Constructed here, not when the block was allocated: that keeps construction
+  // lazy and makes reuse correct -- a recycled slot is fully reinitialised
+  // before its handle goes out again.
   return new (ptr) SharedSignal();
 }
 

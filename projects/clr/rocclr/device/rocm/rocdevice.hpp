@@ -83,18 +83,15 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   //! Handle of a device resident twin of signal_, published by the producing command so
   //! another queue can name it in barrier_packet_.dep_signal[] instead of signal_; zero when
-  //! none was published.  The consumer reads it without this object's lock: the release store
-  //! in VirtualGPU::PublishOrderingEdge() publishes edge_owner_ and edge_slot_ with it, and
-  //! orders it after the arming store on the slot.
+  //! none was published.  Read without this object's lock: the release store in
+  //! VirtualGPU::PublishOrderingEdge() publishes edge_owner_ and edge_slot_ with it.
   std::atomic<uint64_t> edge_handle_{0};
   const Device* edge_owner_ = nullptr;  //!< Device whose pool owns edge_slot_
   uint32_t edge_slot_ = 0;              //!< Index of that slot inside the pool
 
-  //! Returns a published edge slot to its owner's free list.  Called from the destructor and
-  //! from the point in ActiveSignal() where this object is about to be re-armed - the two
-  //! places clr already knows no command holds it.  That is the property slot reuse needs: a
-  //! consumer's barrier packet can only name a slot while the command that waits still holds
-  //! the producing command, and that command holds this object.
+  //! Returns a published edge slot to its owner's free list.  Called only where clr already
+  //! knows no command holds this object - the destructor, and the re-arm in ActiveSignal() -
+  //! which is the property slot reuse needs.
   void ReleaseOrderingEdge();
 
   //! Cached timing data - populated when signal completes, avoids repeated HSA calls

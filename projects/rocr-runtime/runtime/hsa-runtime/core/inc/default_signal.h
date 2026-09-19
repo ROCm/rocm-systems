@@ -157,14 +157,15 @@ class BusyWaitSignal : public Signal {
  protected:
   bool _IsA(rtti_t id) const { return id == &rtti_id(); }
 
-  /// @brief Guard on every host read-modify-write of the value word.
-  /// A lock-prefixed x86 RMW issued against a device memory aperture is not
-  /// promoted to a PCIe atomic transaction; it becomes a read followed by an
-  /// independent write and can silently lose a concurrent device update.
-  /// There is no correct fallback and no status return on these entry points,
-  /// so a signal whose value word is device resident fails hard here.  This
-  /// path is unconditional: it survives NDEBUG.
+  /// @brief Guard on every host read-modify-write of the value word.  A
+  /// lock-prefixed RMW against a device memory aperture is not promoted to a bus
+  /// atomic and can silently lose a concurrent device update.  These entry points
+  /// have no status return, so this fails hard, unconditionally, NDEBUG or not.
   void RejectHostAtomicRmw() const;
+
+  /// @brief Drain the write combining buffers after a host store, when the
+  /// value word is device resident.  No-op otherwise.
+  void DrainDeviceResidentStore() const;
 
  private:
   static __forceinline int& rtti_id() {

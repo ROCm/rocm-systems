@@ -236,10 +236,8 @@ class SharedSignalPool_t : private BaseShared {
   SharedSignal* alloc();
 
   /// @brief Placement-aware overload, matching PageAllocator<T>::alloc().  This
-  /// pool's blocks come from BaseShared's process-global allocator, bound to one
-  /// CPU agent's fine-grain kernarg system region, so agent_node_id == 0 is the
-  /// only placement it can honour; anything else throws.  A caller needing
-  /// another placement must own the allocation itself.
+  /// pool's blocks are process-global host kernarg memory, so agent_node_id == 0
+  /// is the only placement it can honour; anything else throws.
   SharedSignal* alloc(int agent_node_id, int flags);
 
   void free(SharedSignal* ptr);
@@ -261,14 +259,11 @@ class LocalSignal {
   }
   LocalSignal(hsa_signal_value_t initial_value, bool exportable);
 
-  /// @brief Place the whole 128 byte ABI block in device_agent's local memory
-  /// rather than in the process-global fine grain host pool, so that a GPU
-  /// waiting on the value word reads locally instead of across the host bus.
-  /// The caller must have checked the agent can support it -- see
-  /// hsa_amd_signal_create_v2().
-  ///
-  /// The block is one slot of that agent's ordering edge slab.  It returns to
-  /// the free list on destruction and stays mapped until the agent goes away.
+  /// @brief Place the whole ABI block in device_agent's local memory rather than
+  /// in the host pool, so a GPU waiting on the value word reads locally.  The
+  /// caller must have checked the agent supports it -- see
+  /// hsa_amd_signal_create_v2().  The block is one slot of that agent's ordering
+  /// edge slab and returns to its free list on destruction.
   LocalSignal(hsa_signal_value_t initial_value, core::Agent& device_agent);
 
   ~LocalSignal();
@@ -329,19 +324,11 @@ class Signal {
     // not change the value; the write to the value word's cache line is what
     // breaks a monitor parked on it.
     //
-    // Skipped on a device resident word: a host lock-prefixed read-modify-write
-    // at a device aperture is not promoted to a bus atomic (see
-    // IsDeviceResidentValue), so the "harmless" CAS is neither.  Nothing is
-    // stranded by skipping it.  The only constructor that takes an agent builds
-    // a core::DefaultSignal, whose host waiters spin in
-    // BusyWaitSignal::WaitRelaxed() and do not park in MWAITX on such a word
-    // (default_signal.cpp), so there is no monitor to break.  InterruptSignal,
-    // whose waiters sleep on an event, has no agent-taking constructor and so
-    // cannot be device resident.
-    //
-    // The assert only documents the precondition -- an ordering edge is not an
-    // object a host thread waits on.  NDEBUG erases it; the carve-out above is
-    // what release builds rely on.
+    // Skipped on a device resident word, where that CAS is not a bus atomic (see
+    // IsDeviceResidentValue).  Nothing is stranded: such a signal is always a
+    // core::DefaultSignal, whose waiters spin rather than park in MWAITX on such
+    // a word, so there is no monitor to break.  The assert only documents the
+    // precondition; release builds rely on the carve-out.
     assert((!device_resident_value_ || waiting_ == 0) &&
            "ordering edge signal destroyed with a registered waiter");
     if (--refcount_ == 0 && !device_resident_value_) CasRelaxed(0, 0);

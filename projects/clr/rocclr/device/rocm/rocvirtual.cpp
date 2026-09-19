@@ -68,13 +68,10 @@ namespace amd::roc {
 
 static constexpr uint16_t kInvalidAql = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
-// Passed to WaitingSignal() by the three call sites whose result goes straight into an AQL
-// packet executed by this queue's own command processor - a barrier's dep_signal[], or the
-// signal a barrier-value packet watches.  Every other caller hands the same
-// list to ROCr as dep_signals[] of an async copy, an SVM prefetch or an SVM discard, where
-// the runtime reads the value word on the host - the one role in which a device resident
-// word is a pessimisation.  Opting in per call site rather than keying on HwQueueEngine
-// keeps that set greppable and stops it growing silently when a caller is added.
+// Passed to WaitingSignal() by the call sites whose result goes straight into an AQL packet
+// executed by this queue's own command processor.  Every other caller hands the list to ROCr
+// as dep_signals[], where the value word is read on the host - the one role in which a device
+// resident word is a pessimisation.  Opted in per call site, so that set stays greppable.
 static constexpr bool kAqlBarrierDep = true;
 
 static constexpr uint16_t kBarrierPacketHeader =
@@ -945,14 +942,10 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
         // Wait on CPU for completion if requested
         CpuWaitForSignal(external_signals_[i]);
       } else {
-        // Add HSA signal for tracking on GPU.  If the producer published a device resident
-        // twin, and this list goes into an AQL packet on the twin's own device, name the
-        // twin.  Both conditions are load bearing:
-        //   - aql_barrier_dep excludes the copy, prefetch and discard callers, which hand
-        //     this list to ROCr as dep_signals[] and have its value word host-polled.
-        //   - the owner test excludes a consumer on another device.  The word is mapped
-        //     into one agent's page tables; a foreign CP would take a memory violation.
-        // The satisfied test above stays on signal_, so this site adds no host bus read.
+        // Add HSA signal for tracking on GPU.  Name a published device resident twin only
+        // when this list goes into an AQL packet on the twin's own device: the word is mapped
+        // into one agent's page tables, so a foreign command processor would take a memory
+        // violation, and a host-polled dep_signals[] would gain nothing.
         const ProfilingSignal* prof_signal = external_signals_[i];
         const uint64_t edge = prof_signal->edge_handle_.load(std::memory_order_acquire);
         hsa_signal_t dep = prof_signal->signal_;
@@ -2901,11 +2894,9 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  * current host timestamp if no signal is available.
  */
 void VirtualGPU::profilingEnd(bool clearHwEvent, bool publishOrderingEdge) {
-  // Here rather than in each submit method: this is the one point every command passes on
-  // its way out, with its packets already in the ring and its HwEvent still set.  The edge
-  // is a separate packet, so it has to sit behind the point it denotes.
-  // Not when clearHwEvent is set: the block below releases the HwEvent, and that is the only
-  // route a consumer has to the edge, so one published here could never be named.
+  // Here rather than in each submit method: the one point every command passes with its
+  // packets already in the ring and its HwEvent still set.  Not when clearHwEvent is set -
+  // the block below releases the HwEvent, which is a consumer's only route to the edge.
   if (publishOrderingEdge && !clearHwEvent && command_->isCrossStreamProducer()) {
     PublishOrderingEdge();
   }
@@ -5292,17 +5283,10 @@ void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 
 // ================================================================================================
 // Publish a device resident twin of the current command's completion signal, so that a queue
-// which later waits on this event names a value word in its own local memory.
-//
-// Eligibility is decided by the caller, because the two producer shapes are recognised by
-// unrelated tests: an eager hipEventRecord marker by marker_ts_, and a command an enqueuer
-// marked with setCrossStreamProducer() by that bit.  Markers from hipStreamWaitEvent carry
-// marker_ts_ == false and are the consuming side.
-//
-// Cost is one barrier-AND packet with no dependencies and no cache operation, appended after
-// the command's own packet, plus the read and the arming store in AcquireOrderingEdge().  The
-// ordinary completion signal keeps every other role - HwEvent, host waits, profiling
-// timestamps, async handlers - none of which an ordering edge signal may take.
+// which later waits on this event names a value word in its own local memory.  Eligibility is
+// decided by the caller: the two producer shapes are recognised by unrelated tests, marker_ts_
+// and setCrossStreamProducer().  The ordinary completion signal keeps every other role -
+// HwEvent, host waits, profiling timestamps, async handlers - which an edge may not take.
 void VirtualGPU::PublishOrderingEdge() {
   if (!dev().orderingEdgeSignals()) {
     return;
@@ -5311,11 +5295,9 @@ void VirtualGPU::PublishOrderingEdge() {
   if (hw_event == nullptr) {
     return;
   }
-  // The edge is decremented by a barrier packet on gpu_queue_ carrying no dependencies, so it
-  // can only stand in for a completion signal this queue's own command processor produces.  A
-  // command an SDMA engine retires - a copy that took the async path - is not one: its signal
-  // and the edge packet are unordered, and a consumer that named the edge would proceed while
-  // the copy was still running.
+  // The edge is decremented by a barrier packet on gpu_queue_ with no dependencies, so it can
+  // only stand in for a completion this queue's own command processor produces.  An SDMA
+  // retired command is not one: its signal and the edge packet are unordered.
   if (hw_event->engine_ != HwQueueEngine::Compute) {
     return;
   }
@@ -5330,11 +5312,9 @@ void VirtualGPU::PublishOrderingEdge() {
   if (edge.handle == 0) {
     return;
   }
-  // kNopPacketHeader carries HSA_FENCE_SCOPE_NONE on both fences, so this packet performs no
-  // cache operation - but dispatchBarrierPacket() sets the dirty flag unconditionally and
-  // only clears it for a system scope release.  Left set, it would make isFenceDirty() true
-  // after every hipEventRecord, adding a marker to hipStreamQuery, to null stream and device
-  // synchronisation and to every queue finish.  Restore it: no cache state changed.
+  // kNopPacketHeader fences at HSA_FENCE_SCOPE_NONE, so no cache state changed - but
+  // dispatchBarrierPacket() sets the dirty flag unconditionally.  Left set it would make
+  // isFenceDirty() true after every hipEventRecord.  Restore it.
   const bool fence_dirty = isFenceDirty();
   constexpr bool kSkipSignal = true;
   dispatchBarrierPacket(kNopPacketHeader, kSkipSignal, edge);

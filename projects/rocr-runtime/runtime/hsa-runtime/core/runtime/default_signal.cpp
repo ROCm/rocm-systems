@@ -47,12 +47,7 @@
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
-#include <xmmintrin.h>
 #define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
-// Drain the write combining buffers.  See StoreRelaxed().
-#define ROCR_WC_DRAIN() _mm_sfence()
-#else
-#define ROCR_WC_DRAIN() std::atomic_thread_fence(std::memory_order_release)
 #endif
 
 namespace rocr {
@@ -67,10 +62,8 @@ BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC, bool dev
 void BusyWaitSignal::RejectHostAtomicRmw() const {
   if (!IsDeviceResidentValue()) return;
 
-  // Reached only if a caller performed a read-modify-write on a signal it
-  // asked to have placed in device memory.  The API layer rejects these with
-  // HSA_STATUS_ERROR_INVALID_SIGNAL; these entry points have no status return,
-  // and completing the operation would corrupt the value word, so stop.
+  // These entry points have no status return and completing the operation would
+  // corrupt the value word, so stop.
   fprintf(stderr,
           "HSA: read-modify-write on a device resident signal value word is "
           "not supported.\n");
@@ -87,33 +80,24 @@ hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
       atomic::Load(&signal_.value, std::memory_order_acquire));
 }
 
+void BusyWaitSignal::DrainDeviceResidentStore() const {
+  if (!IsDeviceResidentValue()) return;
+
+  // A write combining store can linger in a WC buffer after a later store to a
+  // different aperture - a doorbell - is already visible, so the drain has to
+  // follow the store rather than precede it.  Not PcieWcFlush(): its readback is
+  // the host bus read this placement exists to remove.
+  atomic::Fence(std::memory_order_release);
+}
+
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
-
-  if (IsDeviceResidentValue()) {
-    // The value word is in device memory, written through a write combining
-    // aperture.  A relaxed store can still sit in a write combining buffer when
-    // a later store to a different aperture - a queue doorbell, typically - has
-    // become visible, so the command processor can see the doorbell before the
-    // value.  Same hazard, and same fence, as the device memory ring buffer
-    // stores; unconditional here because this store is not per-dispatch, where
-    // those sites test needsPcieOrdering().
-    //
-    // Not PcieWcFlush(): its body ends in a readback, which on a device resident
-    // word is the host bus read this placement exists to remove, and it would be
-    // paid on every store.
-    //
-    // This is the ONLY host write site drained.  StoreRelease() fences BEFORE
-    // its store and emits nothing after it, and SharedSignal::CopyPrep() writes
-    // a destination block's header with plain stores; neither is reachable with
-    // a device resident target today, and a caller that makes one reachable must
-    // close it.
-    ROCR_WC_DRAIN();
-  }
+  DrainDeviceResidentStore();
 }
 
 void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  DrainDeviceResidentStore();
 }
 
 hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
@@ -146,12 +130,9 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
-    // MONITORX arms a hardware monitor on a cache line.  A device resident value
-    // word is mapped write combining, not write-back cacheable, and the
-    // architecture does not guarantee a monitor can be established on such a
-    // line - the park would degenerate into a timed sleep that the awaited write
-    // does not end.  Spin instead; the loop already re-reads the word and
-    // re-tests the condition every iteration.
+    // MONITORX is not guaranteed to arm on a write combining line, so the park
+    // would degenerate into a timed sleep the awaited write does not end.  Spin
+    // instead; the loop re-reads the word and re-tests the condition anyway.
     if (g_use_mwaitx && !IsDeviceResidentValue()) {
       // Use timer-enabled mwaitx for busy waiting
       timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);

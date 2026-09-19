@@ -1039,11 +1039,9 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
   CATCH;
 }
 
-// An ordering edge signal (hsa_amd_signal_create_v2 with
-// HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD) keeps its value
-// word in device memory, where a host read-modify-write is not atomic.  Entry
-// points that hand that word to the host, or that make the runtime host-poll
-// it, refuse rather than return something the caller cannot use safely.
+// An ordering edge signal keeps its value word in device memory, where a host
+// read-modify-write is not atomic.  Entry points that hand that word to the host,
+// or that make the runtime host-poll it, refuse.
 static bool IsOrderingEdgeSignal(hsa_signal_t handle) {
   if (handle.handle == 0) return false;
   core::Signal* signal = core::Signal::Convert(handle);
@@ -1074,16 +1072,11 @@ static constexpr uint16_t kAllSignalCreateFlags =
 // header has already been checked.
 static hsa_status_t CreateOrderingEdgeSignal(hsa_amd_signal_create_desc_t& d) {
   // No fall back to a host resident signal: a caller that silently received one
-  // would believe it had taken the fast path forever.  Ask the agent first with
-  // HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED, which distinguishes "not
-  // this machine" from "not this runtime" - an older runtime answers
-  // HSA_STATUS_ERROR_INVALID_ARGUMENT to the unknown enumerant.
+  // would believe it had taken the fast path forever.
   if (d.attributes & HSA_AMD_SIGNAL_IPC) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  // HSA_AMD_SIGNAL_AMD_GPU_ONLY is accepted and INERT: this path always
-  // constructs a core::DefaultSignal with no event mailbox, set or not.  Do not
-  // make it class selective the way hsa_amd_signal_create is -
-  // Signal::DestroySignal()'s carve-out argues from the class being fixed here,
-  // and would break silently.
+  // HSA_AMD_SIGNAL_AMD_GPU_ONLY is accepted and INERT.  Do not make it class
+  // selective the way hsa_amd_signal_create is: Signal::DestroySignal()'s
+  // carve-out argues from the class being fixed here, and would break silently.
   if (d.num_consumers != 1) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   IS_BAD_PTR(d.consumers);
 
@@ -1137,12 +1130,9 @@ hsa_status_t hsa_amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs, uint3
       continue;
     }
 
-    // Undefined flag bits are REJECTED, not ignored.  No other flag or attribute
-    // word in this header does that: hsa_amd_signal_create tests the two
-    // attribute bits it knows and validates none of the rest, and
-    // hsa_amd_queue_create validates its descriptor version by equality but lets
-    // an unknown flag bit through.  A caller that sets a placement flag this
-    // runtime predates must not receive a signal that silently lacks it.
+    // Undefined flag bits are REJECTED, not ignored: a caller that sets a
+    // placement flag this runtime predates must not receive a signal that
+    // silently lacks it.
     if ((d.flags & ~kAllSignalCreateFlags) != 0) {
       record(HSA_STATUS_ERROR_INVALID_ARGUMENT);
       continue;
@@ -1159,10 +1149,8 @@ hsa_status_t hsa_amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs, uint3
     if ((d.flags & HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD) != 0) {
       st = CreateOrderingEdgeSignal(d);
     } else {
-      // System memory is the default placement and is exactly what
-      // hsa_amd_signal_create produces.  Call it rather than reimplementing
-      // its consumer-list and interrupt-signal selection logic, so the two
-      // entry points cannot drift apart.
+      // Call hsa_amd_signal_create rather than reimplementing its consumer-list
+      // and interrupt-signal selection, so the two entry points cannot drift.
       st = AMD::hsa_amd_signal_create(d.initial_value, d.num_consumers, d.consumers, d.attributes,
                                       &d.signal);
     }
