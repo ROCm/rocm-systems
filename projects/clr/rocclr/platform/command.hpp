@@ -308,6 +308,24 @@ class GraphKernelArgManager {
   virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
 };
 
+struct GraphKernargSlot {
+  address addr;
+  size_t size;
+  int devId;
+};
+
+struct GraphPacketCaptureContext {
+  std::vector<uint8_t*>* gpuPackets = nullptr;  //!< Receives the captured GPU packets
+  std::vector<uint8_t*>* gpuMetadataPackets = nullptr;  //!< Metadata packets (parallel to gpuPackets); null disables metadata capture
+  std::vector<uint8_t*>* reusableGpuPackets = nullptr;  //!< Prior capture's packets eligible for buffer reuse
+  std::vector<uint8_t*>* reusableGpuMetadataPackets = nullptr;
+  std::vector<GraphKernargSlot>* kernargSlots = nullptr;  //!< Per-node kernarg slot cache
+  size_t* kernargSlotIndex = nullptr;  //!< Next slot to consume in kernargSlots
+  bool reuseKernargSlots = true;  //!< Reuse matching kernarg slots instead of allocating fresh
+  GraphKernelArgManager* kernArgMgr = nullptr;  //!< KernelMgr for graph
+  const std::string** capturedKernelName = nullptr;  //!< Kernel under capture
+};
+
 /*! \brief An operation that is submitted to a command queue.
  *
  *  %Command is the abstract base type of all OpenCL operations
@@ -326,11 +344,8 @@ class Command : public Event {
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
-  std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
-  std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
-  GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
+  GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -375,31 +390,33 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
-  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
-  //! packet that parallels each captured AQL packet.
-  void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
-                            amd::GraphKernelArgManager* graphKernArgMgr,
-                            const std::string** capturedKernelName,
-                            std::vector<uint8_t*>* metadataPackets = nullptr) {
+  //! Sets AQL capture state and context; a non-null ctx->gpuMetadataPackets also captures metadata packets.
+  void setPktCapturingState(bool state, GraphPacketCaptureContext* ctx) {
     packetCapturing_ = state;
-    gpuPackets_ = packet;
-    gpuMetadataPackets_ = metadataPackets;
-    graphKernArgMgr_ = graphKernArgMgr;
-    capturedKernelName_ = capturedKernelName;
+    graphCapture_ = ctx;
   }
 
   //! Updates kernel name with the captured kernel name (stores pointer, no copy)
   void SetKernelName(const std::string& kernelName) {
-    if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = &kernelName;
+    if (graphCapture_ != nullptr && graphCapture_->capturedKernelName != nullptr) {
+      *graphCapture_->capturedKernelName = &kernelName;
     }
   }
 
   //! Returns the graph executable object command belongs to.
   const uint8_t* getAqlPacket() const {
-    uint8_t* packet = new uint8_t[64];
-    gpuPackets_->push_back(packet);
+    std::vector<uint8_t*>& gpuPackets = *graphCapture_->gpuPackets;
+    std::vector<uint8_t*>* reusablePackets = graphCapture_->reusableGpuPackets;
+    uint8_t* packet = nullptr;
+    const size_t packetIndex = gpuPackets.size();
+    if (reusablePackets != nullptr && packetIndex < reusablePackets->size()) {
+      packet = (*reusablePackets)[packetIndex];
+      (*reusablePackets)[packetIndex] = nullptr;
+    }
+    if (packet == nullptr) {
+      packet = new uint8_t[64];
+    }
+    gpuPackets.push_back(packet);
     return packet;
   }
 
@@ -407,21 +424,54 @@ class Command : public Event {
   //! Returns nullptr if metadata capture is not enabled.
   //! The buffer is initialized with HSA_PACKET_TYPE_INVALID
   uint8_t* getMetadataPacket() const {
-    if (gpuMetadataPackets_ == nullptr) {
+    if (graphCapture_ == nullptr || graphCapture_->gpuMetadataPackets == nullptr) {
       return nullptr;
     }
-    uint8_t* packet = new uint8_t[256]();
+    std::vector<uint8_t*>& metadataPackets = *graphCapture_->gpuMetadataPackets;
+    std::vector<uint8_t*>* reusablePackets = graphCapture_->reusableGpuMetadataPackets;
+    uint8_t* packet = nullptr;
+    const size_t packetIndex = metadataPackets.size();
+    if (reusablePackets != nullptr && packetIndex < reusablePackets->size()) {
+      packet = (*reusablePackets)[packetIndex];
+      (*reusablePackets)[packetIndex] = nullptr;
+    }
+    if (packet == nullptr) {
+      packet = new uint8_t[256];
+    }
+    memset(packet, 0, 256);
     static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
     static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
     for (size_t h = 0; h < 4; ++h) {
       memcpy(packet + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
     }
-    gpuMetadataPackets_->push_back(packet);
+    metadataPackets.push_back(packet);
     return packet;
   }
 
   address getGraphKernArg(int size, int alignment, int devId) {
-    return graphKernArgMgr_->AllocKernArg(size, alignment, devId);
+    std::vector<GraphKernargSlot>* kernargSlots = graphCapture_->kernargSlots;
+    size_t* kernargSlotIndex = graphCapture_->kernargSlotIndex;
+    if (kernargSlots == nullptr || kernargSlotIndex == nullptr) {
+      return graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
+    }
+
+    const size_t slotIndex = (*kernargSlotIndex)++;
+    if (graphCapture_->reuseKernargSlots && slotIndex < kernargSlots->size()) {
+      GraphKernargSlot& slot = (*kernargSlots)[slotIndex];
+      if (slot.addr != nullptr && slot.devId == devId && slot.size >= static_cast<size_t>(size) &&
+          reinterpret_cast<uintptr_t>(slot.addr) % alignment == 0) {
+        return slot.addr;
+      }
+    }
+
+    address addr = graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
+    GraphKernargSlot slot{addr, static_cast<size_t>(size), devId};
+    if (slotIndex < kernargSlots->size()) {
+      (*kernargSlots)[slotIndex] = slot;
+    } else {
+      kernargSlots->push_back(slot);
+    }
+    return addr;
   }
 
   //! Overload new/delete for fast commands allocation/destruction
