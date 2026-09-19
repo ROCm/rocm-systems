@@ -1856,7 +1856,7 @@ void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 1u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 1u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -1900,7 +1900,7 @@ void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -1944,7 +1944,7 @@ void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -1988,7 +1988,7 @@ void VCvtScalePk8F16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 4u))
+    if (!regs.validate_vgpr_access(src_base, 1u) || !regs.validate_vgpr_access(dst_base, 4u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2022,7 +2022,7 @@ void VCvtScalePk8Bf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 4u))
+    if (!regs.validate_vgpr_access(src_base, 1u) || !regs.validate_vgpr_access(dst_base, 4u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2056,7 +2056,7 @@ void VCvtScalePk8F32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 1u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 1u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2087,7 +2087,7 @@ void VCvtScalePk8F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+    if (!regs.validate_vgpr_access(src_base, 2u) || !regs.validate_vgpr_access(dst_base, 4u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2121,7 +2121,7 @@ void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+    if (!regs.validate_vgpr_access(src_base, 2u) || !regs.validate_vgpr_access(dst_base, 4u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2155,7 +2155,7 @@ void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 2u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2186,7 +2186,7 @@ void VCvtScalePk8F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+    if (!regs.validate_vgpr_access(src_base, 2u) || !regs.validate_vgpr_access(dst_base, 4u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2220,7 +2220,7 @@ void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 4u))
+    if (!regs.validate_vgpr_access(src_base, 2u) || !regs.validate_vgpr_access(dst_base, 4u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2254,7 +2254,7 @@ void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 2u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 2u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2285,7 +2285,7 @@ void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 1u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 1u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -2327,7 +2327,7 @@ void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 1u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
@@ -2370,7 +2370,7 @@ void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
@@ -2413,7 +2413,7 @@ void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
@@ -2456,7 +2456,7 @@ void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 1u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
@@ -2499,7 +2499,7 @@ void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 1u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -2544,7 +2544,7 @@ void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 1u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 1u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -2589,7 +2589,7 @@ void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -2634,7 +2634,7 @@ void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -2679,7 +2679,7 @@ void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -2724,7 +2724,7 @@ void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -2769,7 +2769,7 @@ void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -2811,7 +2811,7 @@ void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
@@ -2854,7 +2854,7 @@ void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -2896,7 +2896,7 @@ void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 4u) || !regs.owns_vgpr_range(dst_base, 2u))
+    if (!regs.validate_vgpr_access(src_base, 4u) || !regs.validate_vgpr_access(dst_base, 2u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 4u, 1ULL << lane);
@@ -2939,7 +2939,7 @@ void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 3u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -2981,7 +2981,7 @@ void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 3u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -3023,7 +3023,7 @@ void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 16u))
+    if (!regs.validate_vgpr_access(src_base, 3u) || !regs.validate_vgpr_access(dst_base, 16u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -3062,7 +3062,7 @@ void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 3u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -3104,7 +3104,7 @@ void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 8u))
+    if (!regs.validate_vgpr_access(src_base, 3u) || !regs.validate_vgpr_access(dst_base, 8u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -3146,7 +3146,7 @@ void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 3u) || !regs.owns_vgpr_range(dst_base, 16u))
+    if (!regs.validate_vgpr_access(src_base, 3u) || !regs.validate_vgpr_access(dst_base, 16u))
       continue;
     uint32_t scale_payload = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;
@@ -3185,7 +3185,7 @@ void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 16u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
@@ -3227,7 +3227,7 @@ void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 16u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 16u, 1ULL << lane);
@@ -3269,7 +3269,7 @@ void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -3312,7 +3312,7 @@ void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -3355,7 +3355,7 @@ void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -3398,7 +3398,7 @@ void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     auto src_region = regs.read_vgpr_region(src_base, 8u, 1ULL << lane);
@@ -3441,7 +3441,7 @@ void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 16u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -3485,7 +3485,7 @@ void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 16u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 16u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -3529,7 +3529,7 @@ void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -3574,7 +3574,7 @@ void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -3619,7 +3619,7 @@ void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
@@ -3664,7 +3664,7 @@ void VCvtScalef32SrPk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         wf.vgpr_alloc().base +
         *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
     amdgpu::RegisterAccess regs(wf);
-    if (!regs.owns_vgpr_range(src_base, 8u) || !regs.owns_vgpr_range(dst_base, 3u))
+    if (!regs.validate_vgpr_access(src_base, 8u) || !regs.validate_vgpr_access(dst_base, 3u))
       continue;
     float scale = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     uint32_t seed = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));

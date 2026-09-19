@@ -96,7 +96,7 @@ void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lan
   }
   uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, detail::write_vgpr_role(*this));
   uint32_t reg = wf.vgpr_alloc().base + voff;
-  if (!wf.cu().raw_cu().owns_vgpr_range(wf, reg, 1))
+  if (!wf.cu().raw_cu().validate_vgpr_access(wf, reg, 1))
     return;
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
   uint8_t *dst = amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu()).raw_vgpr_data(reg);
