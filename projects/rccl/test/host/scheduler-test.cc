@@ -18,13 +18,18 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
+#include "config/algorithm_registry.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/dev_runtime_fakes.h"
-#include "fakes/scheduler_fakes.h"
+#include "fakes/enqueue_symbols_fakes.h"
+#include "fakes/nccl_stubs.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/tuning_fakes.h"
 
 // ENABLE_WARP_SPEED is this binary's own compile definition (CMakeLists.txt), not shared with any other TU.
+
+// The only src/config/algorithm_registry.cc symbol symmetric_sched.cc calls, and only inside an INFO() log-guard.
+const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
@@ -210,7 +215,8 @@ class SchedulerMicrotest : public ::testing::Test {
     g_symkAvailable = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; };
   }
   void TearDown() override {
-    ResetSchedulerFakes();        // this file's own scheduler_fakes.{h,cc} seams
+    ResetEnqueueSymbolsFakes();   // this file's own enqueue_symbols_fakes.{h,cc} seams
+    ResetNcclStubs();             // clears ncclDevFuncNameToId; other tests here use it as a plain global, not a hook
     ResetSymKernelsFakes();      // g_symRegType is a plain global, not a ScopedHook-restorable std::function
     ResetBootstrapStubs();       // covers g_bootstrapAllGather
     ResetDevRuntimeFakes();      // covers g_devrFindWindow/g_devrInitOnce/g_devrWindowHasSysmemSegment
@@ -1093,16 +1099,20 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetSymRegTypeFails_PropagatesEr
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
 }
 
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceForcedOutDespiteGoodWindows_GoesToRemainder) {
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceNotForcedOutWhenSymKernelsGenerated_EntersSymmetricBucket) {
   MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
   ncclTaskColl task{};
   task.func = ncclFuncAllReduce;
   g_symRegType = ncclSymSendRegRecvReg;  // windows are GOOD here, isolating this from the window-rejection test
   struct ncclTaskColl* remainTasksHead = nullptr;
 
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(remainTasksHead, &task);
+  // GENERATE_SYM_KERNELS is defined (the shipping config), so AllReduce is no longer special-cased out; it enters
+  // the symmetric bucket like Broadcast below and hits the same zero-workArgsBytes guard.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
   EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllLocalChecksPass_NRanksOne_GoesToSymmetricBucket) {

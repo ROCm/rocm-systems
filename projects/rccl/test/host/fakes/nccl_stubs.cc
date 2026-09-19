@@ -104,11 +104,9 @@ ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSucce
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
-// Omitted when RCCL_STUBS_OMIT_ncclProfilerPluginLoaded is defined -- scheduler_fakes.cc
-// owns a controllable g_profilerPluginLoaded seam instead, for the scheduler binary.
-#ifndef RCCL_STUBS_OMIT_ncclProfilerPluginLoaded
-bool ncclProfilerPluginLoaded(void) { return false; }
-#endif
+static bool DefaultProfilerPluginLoaded() { return false; }
+std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
@@ -203,11 +201,7 @@ const char* rcclGitHash = "microtest";
 int ncclCudaDriverVersionCache = 12000;       // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
-// Omitted when RCCL_STUBS_OMIT_ncclDevFuncNameToId is defined -- scheduler_fakes.cc owns
-// this table directly for the scheduler binary (its ScheduleBcastTasksToPlan_* tests write it).
-#ifndef RCCL_STUBS_OMIT_ncclDevFuncNameToId
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
-#endif
 
 // Default 1 (!= VerSuccess) means "version unknown", so showVersion()'s runtime-ROCm block is skipped.
 int g_getROCmVersionResult = 1;
@@ -252,4 +246,6 @@ void ResetNcclStubs() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  ncclDevFuncNameToId.clear();
 }

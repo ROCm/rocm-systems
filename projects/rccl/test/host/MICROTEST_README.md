@@ -96,7 +96,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
-- **`rccl-UnitTestsMicroScheduler`** — `allgatherv_sched.cc` +
+- **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
   `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
   both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
   not sharing `rccl-UnitTestsMicro`: some of its test scenarios need
@@ -256,7 +256,7 @@ symbol.
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
-| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroScheduler`, which compiles the real files and tests them directly) | `fakes/scheduler_fakes.cc` |
+| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroWarpSpeed`, which compiles the real files and tests them directly) | `fakes/enqueue_symbols_fakes.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -598,7 +598,7 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroScheduler`,
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
 `rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test

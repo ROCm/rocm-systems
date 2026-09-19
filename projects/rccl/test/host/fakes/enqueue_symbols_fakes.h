@@ -4,10 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Controllable seams for externals allgatherv_sched.cc/symmetric_sched.cc reach that nothing else fakes yet.
+// Controllable seams for enqueue.cc's own externals, for binaries that fake rather than compile enqueue.cc.
 
-#ifndef RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
-#define RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
+#ifndef RCCL_TEST_HOST_FAKES_ENQUEUE_SYMBOLS_FAKES_H_
+#define RCCL_TEST_HOST_FAKES_ENQUEUE_SYMBOLS_FAKES_H_
 
 #include <cstdint>
 #include <functional>
@@ -49,9 +49,6 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, stru
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff;
 
-// plugin/profiler.cc's ncclProfilerPluginLoaded: default matches nccl_stubs.cc (no plugin loaded).
-extern std::function<bool()> g_profilerPluginLoaded;
+void ResetEnqueueSymbolsFakes();
 
-void ResetSchedulerFakes();
-
-#endif  // RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
+#endif  // RCCL_TEST_HOST_FAKES_ENQUEUE_SYMBOLS_FAKES_H_

@@ -4,23 +4,20 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// See scheduler_fakes.h.
+// See enqueue_symbols_fakes.h.
 
 #include <functional>
-#include <unordered_map>
 
 #include "comm.h"
 #include "device.h"
 #include "enqueue.h"
 #include "nccl.h"
-#include "profiler.h"
 #include "sym_kernels.h"
 #include "tuning.h"
-#include "config/algorithm_registry.h"
 
 #include "signature-drift.h"
 
-#include "scheduler_fakes.h"
+#include "enqueue_symbols_fakes.h"
 #include "sym_kernels_fakes.h"  // g_symkAvailable and the sym_kernels.cc seams below's canonical home
 #include "tuning_fakes.h"       // g_tuningCompute's canonical home
 
@@ -31,7 +28,6 @@ ASSERT_HOOK_MATCHES_PROD(g_addWorkBatchToPlan, ncclAddWorkBatchToPlan);
 ASSERT_HOOK_MATCHES_PROD(g_addProxyOpIfNeeded, ncclAddProxyOpIfNeeded);
 ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
-ASSERT_HOOK_MATCHES_PROD(g_profilerPluginLoaded, ncclProfilerPluginLoaded);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
@@ -85,11 +81,7 @@ static ncclResult_t DefaultGetRegBuff(struct ncclComm*, struct ncclTaskColl*, in
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff = DefaultGetRegBuff;
 
-// Matches nccl_stubs.cc's own hardcoded false: no profiler plugin loaded in this binary by default.
-static bool DefaultProfilerPluginLoaded() { return false; }
-std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
-
-void ResetSchedulerFakes() {
+void ResetEnqueueSymbolsFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
   g_ncclGetAlgoInfo = DefaultGetAlgoInfo;
@@ -98,8 +90,6 @@ void ResetSchedulerFakes() {
   g_addProxyOpIfNeeded = DefaultAddProxyOpIfNeeded;
   g_getCollNetSupport = DefaultGetCollNetSupport;
   g_getRegBuff = DefaultGetRegBuff;
-  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
-  ncclDevFuncNameToId.clear();
 }
 
 // src/enqueue/enqueue.cc
@@ -125,13 +115,4 @@ ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, in
   return g_getRegBuff(comm, task, out);
 }
 
-// Generated device-function table; empty default matches nccl_stubs.cc's own (a miss returns -1 with a WARN).
-std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
-
-// src/config/algorithm_registry.cc: a fixed name is fine, INFO()'s macro guard only evaluates this when logging is on.
-const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
-
 // src/tuning/tuning.cc's ncclTuningCompute is defined in tuning_fakes.cc.
-
-// src/plugin/profiler.cc
-bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
