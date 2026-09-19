@@ -546,7 +546,26 @@ uint64_t XdnaDriver::GetDevHeapByteSize() {
 
 hsa_status_t XdnaDriver::Init() { return InitDeviceHeap(); }
 
-hsa_status_t XdnaDriver::ShutDown() { return FreeDeviceHeap(); }
+hsa_status_t XdnaDriver::ShutDown() {
+  // FreeDeviceHeap() first: it closes the heap BO with an ioctl on fd_, so it
+  // has to run while the devnode is still open.
+  const hsa_status_t heap_status = FreeDeviceHeap();
+
+  // Close() last, so this gives back the open as well as the heap and a caller
+  // that has called ShutDown() owes no Close() - the same shape as
+  // KfdDriver::ShutDown() and KfdVirtioDriver::ShutDown(). Without it the
+  // devnode fd survives for the rest of the process: InitializeDriver()'s guard
+  // calls ShutDown() on the driver whose Init() failed and nothing calls
+  // Close() after it.
+  const hsa_status_t close_status = Close();
+
+  // Both stages run whatever the first one returns, because returning early on
+  // the heap error would strand the fd this exists to close. The heap error
+  // wins when both fail: it is the earlier stage, so it is the cause rather
+  // than a consequence, which is how KfdDriver::ShutDown() ranks its three
+  // stages.
+  return heap_status != HSA_STATUS_SUCCESS ? heap_status : close_status;
+}
 
 hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
   switch (query) {

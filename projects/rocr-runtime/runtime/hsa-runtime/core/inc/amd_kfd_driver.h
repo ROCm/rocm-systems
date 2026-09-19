@@ -197,8 +197,46 @@ public:
   /// @brief Disable the KFD runtime if Init() enabled it.
   hsa_status_t DisableRuntime();
 
+  /// @brief Whether the flags below describe a process this one forked from.
+  ///
+  /// @details They are plain bools, so fork() copies them into a child that
+  /// holds none of the references they describe: the thunk zeroes its own
+  /// counters from child_fork_handler(), and nothing under core/ installs a
+  /// pthread_atfork handler that would fix these up. Recording the owning pid
+  /// mirrors what the thunk does with parent_pid, and for the same reason it
+  /// avoids atfork - a handler cannot be uninstalled, and a process can fork
+  /// without going through libc's fork().
+  ///
+  /// Each of DisableRuntime(), ReleaseTopologySnapshot() and Close() tests this
+  /// and gives up its own claim without calling the thunk, so each is correct
+  /// called directly or through ShutDown() and ShutDown() needs no special case
+  /// of its own. What an inherited claim would cost differs per stage; Close()
+  /// carries the worked example.
+  bool InheritedAcrossFork() const;
+
   mutable bool topology_snapshot_acquired_ = false;
   bool runtime_enabled_ = false;
+
+  /// @brief Whether this driver owns the thunk's open reference.
+  ///
+  /// @details Load-bearing rather than bookkeeping, because the failure path
+  /// closes twice: InitializeDriver()'s guard calls ShutDown() when Init()
+  /// fails and returns false, AMD::Load() then returns false, and its guard
+  /// runs Runtime::DestroyTopology() -> AMD::Unload() -> ShutDown() on the same
+  /// driver. Close() is the last stage of both.
+  ///
+  /// libhsakmt's own refcount cannot absorb that. It is a single global
+  /// counter - hsakmt_kfd_open_count, dxg_open_count - that cannot tell which
+  /// consumer is calling, so two closes against one open walk it two steps
+  /// down, and its 1->0 transition is destructive:
+  /// hsakmt_fmm_clear_all_aperture() munmaps and remaps the dGPU shared
+  /// aperture, and the DXG path closes the fd and shuts DXCore down under
+  /// whatever other consumer still holds the thunk open.
+  bool kfd_opened_ = false;
+
+  /// @brief The process that took whatever the flags above claim.
+  const int owner_pid_;
+
   mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.

@@ -1453,18 +1453,6 @@ Queue::release_signal(pooled_signal_t* signal)
     }
 }
 
-void
-Queue::destroy_signal(pooled_signal_t* signal)
-{
-    release_signal(signal);
-
-    if(signal && get_core_table() && get_core_table()->hsa_signal_destroy_fn)
-    {
-        get_core_table()->hsa_signal_destroy_fn(signal->get().value);
-        signal->get().value = null_hsa_signal;
-    }
-}
-
 bool
 Queue::sync() const
 {

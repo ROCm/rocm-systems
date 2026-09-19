@@ -65,6 +65,39 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       reinterpret_cast<const void*>(&GetAdjacentThunkLibraryPath), library_name);
 }
 
+// Stand-ins for the entry points a shared thunk is allowed not to export.
+// Binding an unresolved one to a stub instead of leaving it null is what lets
+// every call site call it without first proving it is there: the call reports
+// HSAKMT_STATUS_NOT_SUPPORTED, which is already what a thunk that exports the
+// entry point but does not implement it returns (libhsakmt/src/extsem.c is the
+// example), so a caller has one status to handle rather than two states.
+//
+// Each signature matches the typedef it stands in for exactly, so the address
+// needs no cast to be assigned to the pointer.
+HSAKMT_STATUS SetSigbusDelayNotSupported(HSAuint32, HSAuint32) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS ImportExternalSemaphoreNotSupported(HSAuint32, void*,
+                                                  HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE,
+                                                  HSA_EXTERNAL_SEMAPHORE_HANDLE*) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS DestroyExternalSemaphoreNotSupported(HSA_EXTERNAL_SEMAPHORE_HANDLE) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS QueueSignalExternalSemaphoreNotSupported(HSA_QUEUEID, HSA_EXTERNAL_SEMAPHORE_HANDLE,
+                                                       HSAuint64) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS QueueWaitExternalSemaphoreNotSupported(HSA_QUEUEID, HSA_EXTERNAL_SEMAPHORE_HANDLE,
+                                                     HSAuint64) {
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
 }  // namespace
 
   std::string ThunkLoader::whoami() {
@@ -148,7 +181,7 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
     }
   }
 
-  void ThunkLoader::LoadThunkApiTable() {
+  bool ThunkLoader::LoadThunkApiTable() {
     if (IsSharedLibraryLoaded()) {
       rocr::os::DlError(); // Clear any existing error messages
 
@@ -335,8 +368,13 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtSetTrapHandler) = (HSAKMT_DEF(hsaKmtSetTrapHandler)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetTrapHandler");
       if (HSAKMT_PFN(hsaKmtSetTrapHandler) == nullptr) goto LOAD_ERROR;
 
-      // only resolved when libhsakmt exposes the RAS-poison opt-in.
+      // Optional: only resolved when libhsakmt exposes the RAS-poison opt-in.
+      // Unresolved means the stub above rather than null, so this one missing
+      // does not fail the table load and does not leave a pointer no caller
+      // may follow.
       HSAKMT_PFN(hsaKmtSetSigbusDelay) = (HSAKMT_DEF(hsaKmtSetSigbusDelay)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetSigbusDelay");
+      if (HSAKMT_PFN(hsaKmtSetSigbusDelay) == nullptr)
+        HSAKMT_PFN(hsaKmtSetSigbusDelay) = &SetSigbusDelayNotSupported;
 
       HSAKMT_PFN(hsaKmtGetTileConfig) = (HSAKMT_DEF(hsaKmtGetTileConfig)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetTileConfig");
       if (HSAKMT_PFN(hsaKmtGetTileConfig) == nullptr) goto LOAD_ERROR;
@@ -455,12 +493,26 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto LOAD_ERROR;
 
-      // Optional: a missing export leaves the pfn null (KfdDriver guards
-      // each call) instead of failing the whole table load.
+      // Optional, and the same deal: a missing export costs the stub, not the
+      // table load. Import and destroy are taken as a pair, because a thunk
+      // offering one without the other offers a semaphore this process could
+      // never give back - so if either is missing both become the stub and the
+      // import is refused before it happens rather than after.
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtImportExternalSemaphore");
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyExternalSemaphore");
+      if (HSAKMT_PFN(hsaKmtImportExternalSemaphore) == nullptr ||
+          HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr) {
+        HSAKMT_PFN(hsaKmtImportExternalSemaphore) = &ImportExternalSemaphoreNotSupported;
+        HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = &DestroyExternalSemaphoreNotSupported;
+      }
+
       HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueSignalExternalSemaphore");
+      if (HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
+        HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = &QueueSignalExternalSemaphoreNotSupported;
+
       HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueWaitExternalSemaphore");
+      if (HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
+        HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = &QueueWaitExternalSemaphoreNotSupported;
 
       HSAKMT_PFN(hsaKmtHandleExport) = (HSAKMT_DEF(hsaKmtHandleExport)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtHandleExport");
       if (HSAKMT_PFN(hsaKmtHandleExport) == nullptr) goto LOAD_ERROR;
@@ -519,10 +571,19 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)rocr::os::GetExportAddress(thunk_handle, "drmCommandWriteRead");
       if (DRM_PFN(drmCommandWriteRead) == nullptr) goto LOAD_ERROR;
       debug_print("Load all DTIF APIs OK!\n");
-      return;
+      return true;
 
 LOAD_ERROR:
-      fprintf(stderr, "GetExportAddress failed: %s\n", rocr::os::DlError());
+  // Binding stopped at the first entry point this thunk does not export,
+  // so nothing after it in the table was ever bound. Those slots hold the
+  // nullptr their declarations give them, so a caller that ignores this
+  // failure gets a null dereference naming the function it called rather
+  // than a jump to a non-canonical address. Saying so here is the
+  // difference between the caller abandoning the load and the runtime
+  // finding out the hard way.
+  const char* error = rocr::os::DlError();
+  fprintf(stderr, "GetExportAddress failed: %s\n", error == nullptr ? "unknown error" : error);
+  return false;
     } else {
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&hsaKmtOpenKFD);
       HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)(&hsaKmtCloseKFD);
@@ -656,41 +717,61 @@ LOAD_ERROR:
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
 #endif
     }
+
+    return true;
   }
 
   bool ThunkLoader::CreateThunkInstance() {
     if (!IsDTIF())
       return true;
 
+    if (thunk_handle == nullptr) return false;
+
+    // Both halves up front. A thunk exporting DtifCreate but not DtifDestroy
+    // would otherwise hand over an instance that nothing in this process can
+    // ever give back, and the load would only find that out during its own
+    // rollback, with the library about to be closed underneath it.
     DtifCreateFunc* pfnDtifCreate =
         (DtifCreateFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifCreate");
-    if (pfnDtifCreate != nullptr) {
-      if (pfnDtifCreate("HSA") != nullptr) {
-        debug_print("DtifCreate OK!\n");
-        return true;
-      } else {
-        debug_print("DtifCreate failed!\n");
-        return false;
-      }
+    DtifDestroyFunc* pfnDtifDestroy =
+        (DtifDestroyFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifDestroy");
+    if (pfnDtifCreate == nullptr || pfnDtifDestroy == nullptr) {
+      debug_print("DtifCreate/DtifDestroy not both exported, refusing the thunk.\n");
+      return false;
     }
-    return false;
+
+    if (pfnDtifCreate("HSA") == nullptr) {
+      debug_print("DtifCreate failed!\n");
+      return false;
+    }
+
+    // Taking the instance and recording how to give it back are the same act.
+    dtif_destroy_ = pfnDtifDestroy;
+    debug_print("DtifCreate OK!\n");
+    return true;
   }
 
   bool ThunkLoader::DestroyThunkInstance() {
     if (!IsDTIF())
       return true;
 
-    if (thunk_handle == nullptr)
-      return false;
+    // Nothing to give back. The load can fail before CreateThunkInstance() ever
+    // runs - LoadThunkApiTable() rejecting an incomplete table - or inside it,
+    // and either way the rollback still comes through here. There is no lookup
+    // on this path at all now: if an instance is owned then the way to release
+    // it was resolved before it was taken, and if none is owned there is
+    // nothing to look up.
+    if (dtif_destroy_ == nullptr) return true;
 
-    DtifDestroyFunc* pfnDtifDestroy =
-        (DtifDestroyFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifDestroy");
-    if (pfnDtifDestroy != nullptr) {
-      pfnDtifDestroy();
-      debug_print("DtifDestroy OK!\n");
-      return true;
-    }
-    return false;
+    // Dropped before the call rather than after it, so a destroy that fails
+    // cannot be retried into a second release. Ownership ends here either way:
+    // there is no second instance to give back.
+    DtifDestroyFunc* pfnDtifDestroy = dtif_destroy_;
+    dtif_destroy_ = nullptr;
+
+    pfnDtifDestroy();
+    debug_print("DtifDestroy OK!\n");
+    return true;
   }
 
   bool ThunkLoader::CheckThunkAbi() {

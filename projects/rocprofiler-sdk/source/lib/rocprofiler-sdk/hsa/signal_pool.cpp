@@ -24,7 +24,6 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 namespace rocprofiler
@@ -38,6 +37,22 @@ signal_pool_exists()
 {
     return (common::static_object<common::container::pool<signal_t>>::get() != nullptr);
 }
+
+// the other half of the pooled signal's lifecycle: construct_hsa_signal creates the handle on
+// acquire, this destroys it once pool<Tp>::clear() retires the object.
+void
+destroy_hsa_signal(signal_t& signal)
+{
+    // the handle is left in place rather than nulled. The only caller is pool::clear(), which
+    // retires its storage instead of freeing it, so AsyncSignalHandler can still reach this
+    // object through packet_data_t::pooled_signal afterwards -- and it exempts the pooled
+    // completion signal from destruction by comparing the dispatch-time copy of the handle
+    // against this field. Nulling turns that exemption off and destroys the handle a second
+    // time. Nor is that read a data race: the only other writer is construct_hsa_signal, which
+    // pool::acquire() runs on every acquire, and a retired object can never be re-acquired.
+    if(get_core_table() && get_core_table()->hsa_signal_destroy_fn)
+        get_core_table()->hsa_signal_destroy_fn(signal.value);
+}
 }  // namespace
 
 signal_t&
@@ -47,6 +62,30 @@ construct_hsa_signal(signal_t&          signal,
                      const hsa_agent_t* consumers,
                      uint64_t           attributes)
 {
+    // pool<Tp>::acquire(FuncT&&, Args&&...) runs this on every acquire, reused objects
+    // included, and nothing in the pool destroys a handle between acquires: release() is
+    // bookkeeping only and destroy_hsa_signal() runs from clear(), which retires the object
+    // rather than returning it to the free list. Creating unconditionally therefore overwrote a
+    // live handle with a fresh one on every reuse and leaked the old one -- one signal per
+    // intercepted dispatch, against a 4096 KFD event limit per process that HSA exhausts
+    // silently. Reuse the handle instead. A null handle still takes the create path: it is the
+    // pool's batch constructor that skips creating once finalization has started, and this call
+    // is the lazy-creation path those objects depend on.
+    if(signal.value.handle != 0)
+    {
+        // the handle is reused, the value is not. Nothing else resets it: the pooled branch of
+        // a completion handler releases the object without touching the value, so a reused
+        // signal arrives holding whatever its last user left - routinely -1, because the paths
+        // that store 0 and let the GPU decrement past it release it in that state. Returning
+        // here without this store is what made initial_value a documented parameter that the
+        // common path ignores, and it left every caller performing a relative operation
+        // depending on a base value it did not set.
+        if(get_core_table() && get_core_table()->hsa_signal_store_screlease_fn)
+            get_core_table()->hsa_signal_store_screlease_fn(signal.value, initial_value);
+
+        return signal;
+    }
+
     auto status = HSA_STATUS_SUCCESS;
     if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
         status = HSA_STATUS_ERROR;
@@ -98,7 +137,7 @@ signal_pool_fini()
         std::call_once(_once, [&]() { ROCP_INFO << pool->get_usage_report(); });
 
         // always try to clear
-        pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
+        pool->clear(destroy_hsa_signal);
     }
 }
 

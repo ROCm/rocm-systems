@@ -1,6 +1,8 @@
 #
 #   Tests for the common library
 #
+rocprofiler_deactivate_clang_tidy()
+
 project(rocprofiler-sdk-tests-common LANGUAGES C CXX)
 
 set(common_sources
@@ -11,6 +13,7 @@ set(common_sources
     md5sum.cpp
     mpl.cpp
     parse.cpp
+    pool.cpp
     regex.cpp
     sha256.cpp
     string_entry.cpp
