@@ -605,6 +605,7 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       std::string Name = "";
       bool XnackSupported = false;
       bool SrameccSupported = false;
+      bool XnackAlwaysOn = false;
     };
 
     // TODO: Move isa registry into the loader.
@@ -655,8 +656,8 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1153: MI.Name = "gfx1153"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: MI.Name = "gfx1200"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1201: MI.Name = "gfx1201"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250: MI.Name = "gfx1250"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT: MI.Name = "gfx1250-strict"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250: MI.Name = "gfx1250"; MI.XnackSupported = true; MI.SrameccSupported = true; MI.XnackAlwaysOn = true; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT: MI.Name = "gfx1250-strict"; MI.XnackSupported = true; MI.SrameccSupported = true; MI.XnackAlwaysOn = true; break;
 
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    MI.Name = "gfx9-generic";    MI.XnackSupported = true; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  MI.Name = "gfx9-4-generic";  MI.XnackSupported = true;  MI.SrameccSupported = true; break;
@@ -664,7 +665,7 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC: MI.Name = "gfx10-3-generic"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC:   MI.Name = "gfx11-generic";   MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:   MI.Name = "gfx12-generic";   MI.XnackSupported = false; MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC: MI.Name = "gfx12-5-generic"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_5_GENERIC: MI.Name = "gfx12-5-generic"; MI.XnackSupported = false; MI.SrameccSupported = false; MI.XnackAlwaysOn = true; break;
       default: return false;
       }
       return true;
@@ -805,10 +806,12 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
           else if (MI.SrameccSupported)
             MI.Name += ":sramecc-";
 
-          if (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V3)
-            MI.Name += ":xnack+";
-          else if (MI.XnackSupported)
-            MI.Name += ":xnack-";
+          if (!MI.XnackAlwaysOn) {
+            if (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V3)
+              MI.Name += ":xnack+";
+            else if (MI.XnackSupported)
+              MI.Name += ":xnack-";
+          }
         } else if (code_object_major_version >= 4) {
           switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_SRAMECC_V4) {
           case ELF::EF_AMDGPU_FEATURE_SRAMECC_OFF_V4:
@@ -819,13 +822,22 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
             break;
           }
 
-          switch (img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V4) {
-          case ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4:
-            MI.Name += ":xnack-";
-            break;
-          case ELF::EF_AMDGPU_FEATURE_XNACK_ON_V4:
-            MI.Name += ":xnack+";
-            break;
+          const unsigned xnack = img->EFlags() & ELF::EF_AMDGPU_FEATURE_XNACK_V4;
+          if (MI.XnackAlwaysOn) {
+            // Fixed-on XNACK is recorded in ELF but is not a target-ID modifier.
+            // Retain compatibility with older producers that marked it unsupported
+            // or unspecified, while refusing an explicit incompatible OFF setting.
+            if (xnack == ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4)
+              return false;
+          } else {
+            switch (xnack) {
+            case ELF::EF_AMDGPU_FEATURE_XNACK_OFF_V4:
+              MI.Name += ":xnack-";
+              break;
+            case ELF::EF_AMDGPU_FEATURE_XNACK_ON_V4:
+              MI.Name += ":xnack+";
+              break;
+            }
           }
 
           // Generic version is not part of the ISA name.

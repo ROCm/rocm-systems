@@ -306,11 +306,19 @@ const Isa* Isa::findIsa(const char* isaName) {
   if (!isaName) return nullptr;
   const char* prefix = std::strstr(isaName, hsaIsaNamePrefix);
   if (prefix != isaName) return nullptr;
-  const char* targetId = isaName + std::strlen(hsaIsaNamePrefix);
+  std::string targetId = isaName + std::strlen(hsaIsaNamePrefix);
+  // Older COMGR versions spell fixed-on XNACK from the ELF flags as a target
+  // modifier. These processors have no selectable XNACK mode: accept ON as
+  // their canonical target, but keep rejecting OFF and unsupported features.
+  for (const char* fixedXnackTarget : {"gfx1250", "gfx1250-strict", "gfx12-5-generic"}) {
+    if (targetId == std::string(fixedXnackTarget) + ":xnack+") {
+      targetId = fixedXnackTarget;
+      break;
+    }
+  }
   auto supportedIsas_ = supportedIsas();
-  auto isaIter = std::find_if(supportedIsas_.first, supportedIsas_.second, [&](const Isa& isa) {
-    return std::strcmp(targetId, isa.targetId_) == 0;
-  });
+  auto isaIter = std::find_if(supportedIsas_.first, supportedIsas_.second,
+                              [&](const Isa& isa) { return targetId == isa.targetId_; });
   return isaIter == supportedIsas_.second ? nullptr : isaIter;
 }
 
@@ -1384,7 +1392,7 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
   }
-  
+
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
   return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle, flags);
 }
