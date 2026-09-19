@@ -32,6 +32,8 @@
 //      RCCL_RMA_RELOAD_COUNTER_FILE (iputSignal also RCCL_RMA_SIGNAL_COUNTER_FILE)
 //      so RmaExternalPluginPutSignal.* can prove the host put/signal APIs reach
 //      the plugin primitives (a fire-and-forget check: no wait, no validation).
+//      GinPluginInitFail.* drives the same vtable with RCCL_GIN_TEST_PLUGIN_MODE
+//      to cover NCCL 2.30.7 / NVIDIA/nccl#2179 (finalize after devices() fails).
 //
 // Compiled as C++ (the RCCL project only enables CXX/HIP), so each plugin symbol
 // is exported with C linkage and default visibility for RCCL's dlsym() lookup.
@@ -45,6 +47,13 @@
 //   devices_fail  - init() succeeds but devices() reports an error, which is the
 //                   companion case where finalize() must still run.
 // Both new modes record via RCCL_NET_TEST_{INIT,FINALIZE}_FILE.
+//
+// RCCL_GIN_TEST_PLUGIN_MODE selects a failure to inject on the GIN/RMA stub:
+//   init_fail     - init() reports an error (finalize must not run).
+//   devices_fail  - init() succeeds but devices() reports an error.
+//   devices_zero  - init() succeeds but devices() reports ndev = 0.
+// Both devices_* modes must still run finalize() (NVIDIA/nccl#2179).
+// Records via RCCL_GIN_TEST_{INIT,FINALIZE}_FILE.
 //
 // Both plugins share the real RCCL plugin headers (nccl_net.h transitively
 // provides the v12 net ABI, net_device.h and the GIN proxy constants); this
@@ -211,14 +220,33 @@ struct RmaStubCtx {
 
 static int gRmaRequestSentinel = 0;
 
+enum GinPluginTestMode {
+  kGinModeDefault,
+  kGinModeInitFail,
+  kGinModeDevicesFail,
+  kGinModeDevicesZero,
+};
+
+static GinPluginTestMode ginTestMode() {
+  const char* mode = getenv("RCCL_GIN_TEST_PLUGIN_MODE");
+  if (mode == nullptr) return kGinModeDefault;
+  if (strcmp(mode, "init_fail") == 0) return kGinModeInitFail;
+  if (strcmp(mode, "devices_fail") == 0) return kGinModeDevicesFail;
+  if (strcmp(mode, "devices_zero") == 0) return kGinModeDevicesZero;
+  return kGinModeDefault;
+}
+
 __hidden ncclResult_t stubInit(void** ctx, uint64_t /*commId*/, ncclDebugLogger_t /*logFunction*/) {
   recordLine("RCCL_RMA_RELOAD_INIT_FILE");
+  recordLine("RCCL_GIN_TEST_INIT_FILE");
+  if (ginTestMode() == kGinModeInitFail) return ncclSystemError;
   if (ctx) *ctx = new RmaStubComm{0, 1};
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubDevices(int* ndev) {
-  if (ndev) *ndev = 1;
+  if (ginTestMode() == kGinModeDevicesFail) return ncclSystemError;
+  if (ndev) *ndev = (ginTestMode() == kGinModeDevicesZero) ? 0 : 1;
   return ncclSuccess;
 }
 
@@ -347,6 +375,7 @@ __hidden ncclResult_t stubQueryLastError(void* /*ginCtx*/, bool* hasError) {
 }
 
 __hidden ncclResult_t stubFinalize(void* ctx) {
+  recordLine("RCCL_GIN_TEST_FINALIZE_FILE");
   delete static_cast<RmaStubComm*>(ctx);
   return ncclSuccess;
 }

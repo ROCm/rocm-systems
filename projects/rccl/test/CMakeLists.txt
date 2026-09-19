@@ -274,6 +274,7 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
+    GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp
@@ -321,7 +322,8 @@ if(BUILD_TESTS)
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
   # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
-    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12")
+    "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
+    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
   # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
