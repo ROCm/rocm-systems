@@ -25,6 +25,7 @@
 #define __KFD__TEST__UTIL__QUEUE__H__
 
 #include "hsakmt/hsakmt.h"
+#include <sstream>
 #include <vector>
 
 typedef struct {
@@ -47,6 +48,20 @@ typedef enum {
     HEAD_TAIL = 2,
 } TSPattern;
 
+/* Which engine moves the bytes.
+ *
+ * COPY_SDMA uses the dedicated DMA engines. COPY_BLIT runs a copy kernel on the
+ * CUs, which is what ROCr does for large copies. The two have different peak
+ * bandwidth and behave differently over XGMI, so a P2P measurement that only
+ * covers one of them is only half the picture.
+ *
+ * COPY_BLIT requires src, dst and size to be 16-byte aligned.
+ */
+typedef enum {
+    COPY_SDMA = 0,
+    COPY_BLIT = 1,
+} CopyEngine;
+
 typedef struct {
     /* input values*/
     HSAuint32 node;
@@ -62,9 +77,10 @@ typedef struct {
     /* private: Output values for internal use.*/
     HSAuint64 queue_id;
     HSAuint64 packet_id;
-} SDMACopyParams;
+} GpuCopyParams;
 
-void sdma_multicopy(SDMACopyParams *array, int n,
+void gpu_multicopy(GpuCopyParams *array, int n, CopyEngine engine,
         HSAuint64 *speedSmall = 0, HSAuint64 *speedLarge = 0, std::stringstream *s = 0);
-void sdma_multicopy(std::vector<SDMACopyParams> &array, int mashup = 1, TSPattern tsp = ALLTS);
+void gpu_multicopy(std::vector<GpuCopyParams> &array, CopyEngine engine,
+        int mashup = 1, TSPattern tsp = ALLTS);
 #endif //__KFD__TEST__UTIL__QUEUE__H__
