@@ -689,6 +689,8 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
           *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes,
           helper.copyMetadata());
       break;
+    case hipWriteBuffer:
+    case hipReadBuffer:
     case hipHostToHost:
       assert(false && "Unreachable case");
       break;
@@ -798,7 +800,8 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   if (!isHostAsync) {
     command->queue()->finishCommand(command);
   } else if (!isGPUAsync) {
-    assert(dstDeviceMemory != nullptr || srcDeviceMemory != nullptr && "Must have device memory to have GPU async");
+    assert((dstDeviceMemory != nullptr || srcDeviceMemory != nullptr) &&
+           "Must have device memory to have GPU async");
     amd::Memory* syncMemory = (dstDeviceMemory != nullptr) ? dstDeviceMemory : srcDeviceMemory;
     hip::Stream* pStream = hip::getNullStream(syncMemory->GetDeviceById()->context());
     amd::Command::EventWaitList waitList;
@@ -2560,7 +2563,7 @@ hipError_t hipMemcpy2DValidateArray(hipArray_const_t arr, size_t wOffset, size_t
 hipError_t hipMemcpy2D_common(void* dst, size_t dpitch, const void* src, size_t spitch,
                               size_t width, size_t height, hipMemcpyKind kind,
                               hipStream_t stream = nullptr, bool isAsync = false) {
-  hipError_t validateParams = hipSuccess, validateSrc = hipSuccess, validateDst = hipSuccess;
+  hipError_t validateParams = hipSuccess;
   if ((validateParams = hipMemcpy2DValidateParams(kind, stream)) != hipSuccess) {
     return validateParams;
   }
@@ -3327,7 +3330,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   hipError_t status = hipSuccess;
 
   *failIdx = SIZE_MAX;
-  for (int i = 0; i < numOps; ++i) {
+  for (size_t i = 0; i < numOps; ++i) {
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
     status = ihipMemcpy3D(&parms, stream, true);
     if (status != hipSuccess) {
@@ -3838,7 +3841,7 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
     HIP_RETURN(hipErrorInvalidContext);
   }
 
-  if (ihandle->owners_device_id >= g_devices.size()) {
+  if (static_cast<size_t>(ihandle->owners_device_id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3934,8 +3937,8 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     HIP_RETURN(hipErrorInvalidValue);
   }
   size_t offset = 0;
-  amd::Memory* memObj = (ptr != nullptr) ? getMemoryObject(hip::getCurrentDevice(), ptr, offset) : nullptr;
-  int device = 0;
+  amd::Memory* memObj =
+      (ptr != nullptr) ? getMemoryObject(hip::getCurrentDevice(), ptr, offset) : nullptr;
   device::Memory* devMem = nullptr;
   memset(attributes, 0, sizeof(hipPointerAttribute_t));
 
@@ -4299,8 +4302,8 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
 
   // Ignore the status, hipDrvPointerGetAttributes always returns success
   // If the ptr is invalid, the queried attributes will be assigned default values
-  for (int i = 0; i < numAttributes; ++i) {
-    hipError_t status = ihipPointerGetAttributes(data[i], attributes[i], ptr);
+  for (size_t i = 0; i < numAttributes; ++i) {
+    (void)ihipPointerGetAttributes(data[i], attributes[i], ptr);
   }
   HIP_RETURN(hipSuccess);
 }
@@ -4911,7 +4914,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
   CHECK_STREAM_CAPTURE_SUPPORTED();
 
   auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
-  const device::Memory* devMem = buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+  (void)buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {mipmapDesc->extent.width,
                                           mipmapDesc->extent.height,

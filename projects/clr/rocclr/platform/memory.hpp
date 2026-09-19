@@ -328,8 +328,8 @@ class Memory : public amd::RuntimeObject {
   );
 
   //! Find the section for the given device. Return NULL if not found.
-  device::Memory* getDeviceMemory(const Device& dev,  //!< Device object
-                                  bool alloc = true   //!< Allocates memory
+  [[nodiscard]] device::Memory* getDeviceMemory(const Device& dev,  //!< Device object
+                                                bool alloc = true   //!< Allocates memory
   );
 
   //! Get origianl device memory
