@@ -4728,6 +4728,8 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
+    // Skip tool initialization in child processes that should not open the device.
+    if(getenv("ROCPROFV3_PLAYBACK_CHILD") != nullptr) return nullptr;
     initialize_logging();
 
     // set the client name
