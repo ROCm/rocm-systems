@@ -54,7 +54,8 @@ RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
-RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
+constexpr int AinicMaxDirectAGScale = 8;
+RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", -1);
 RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
@@ -92,10 +93,6 @@ static inline bool rcclCollSupportsRing(ncclFunc_t func) {
           func == ncclFuncBroadcast || func == ncclFuncReduce);
 }
 
-static inline bool rcclIsGfx120x(char const* arch) {
-  return IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201");
-}
-
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
@@ -103,6 +100,22 @@ int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
                                /*ncclFuncAllGather*/ 98304,
                                /*ncclFuncReduceScatter*/ 98304,
                                /*ncclFuncAllReduce*/ 16384,
+                               /*ncclFuncSendRecv*/ 0,
+                               /*ncclFuncSend*/ 0,
+                               /*ncclFuncRecv*/ 0};
+  if (collectiveFunc < sizeof(SingleNodeLLCutoffs) / sizeof(int)) {
+    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  }
+  return returnVal;
+}
+
+int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
+  int returnVal = NCCL_PROTO_SIMPLE;
+  int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
+                               /*ncclFuncReduce*/ 1024,
+                               /*ncclFuncAllGather*/ 24756,
+                               /*ncclFuncReduceScatter*/ 24756,
+                               /*ncclFuncAllReduce*/ 65536,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};
@@ -138,16 +151,23 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && rcclIsGfx120x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
-    const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
-    if (str) {
-      int disable = strtol(str, NULL, 0);
-      if (disable == 1) {
-        info->protocol = NCCL_PROTO_SIMPLE;
-      }
+    /**
+     * We prefer simple protocol when p2p_disabled = 1,
+     * This is due to a fix in LL protocol implementation
+     * for gfx120x with __HIP_MEMORY_SCOPE_SYSTEM in prims_ll.h
+     * causing poor performance but keeps the LL protocol functional
+     */
+    bool p2p_disabled = ncclParamP2pDisable();
+    if (p2p_disabled) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+    }
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110" /*match gfx110x*/)) {
+    if (comm->nNodes == 1) {
+      info->protocol = rcclGetProtoForGfx110x(info->func, sizePerRank);
     }
   } else if (!userProtocolInput && comm->nNodes >= 2 &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
@@ -218,7 +238,10 @@ extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
-  if (comm->nNodes < 2 || !rcclParamChannelTuningEnable()) {
+  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
+                               IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+  // Make an exception for gfx110x and gfx120x
+  if ((!isGfx_110x_120x && (comm->nNodes < 2)) || !rcclParamChannelTuningEnable()) {
     INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
     return ncclSuccess;
   }
@@ -245,14 +268,17 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
   int minNChannels = ncclParamMinNchannels();
   int maxNChannels = std::max(comm->nChannels / scalingFactor, static_cast<int>(ncclParamMaxNchannels()));
   size_t bytesPerRank = divUp(nBytes, comm->nRanks);
+  const int myRank = comm->rank;
 
   for (int channelCountIndex = 0; channelCountIndex < RCCL_CHANNELS_TUNABLE_ENTRIES; ++channelCountIndex) {
     size_t minByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][0];
     size_t maxByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][1];
-    INFO(NCCL_TUNING,
-         "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
-         "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
-         nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
+    if (myRank == 0) {
+      INFO(NCCL_TUNING,
+           "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
+           "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+           nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
+    }
     if (minByteThreshold == CHAN_THRESHOLDS_UNDEFINED || maxByteThreshold == CHAN_THRESHOLDS_UNDEFINED) {
       INFO(NCCL_TUNING, "RCCL tuning model does not define threshold for coll:%i and nbytes:%lu", coll, nBytes);
       break; // Skip undefined thresholds
@@ -265,15 +291,19 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
       if (channelCount >= minNChannels && channelCount <= maxNChannels && channelCount >= minCTAs &&
           channelCount <= maxCTAs) {
         nc = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][2];
-        INFO(NCCL_TUNING,
-             "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
-             "MinTrafficPerchannel thresholds",
-             channelCount);
+        if (myRank == 0) {
+          INFO(NCCL_TUNING,
+               "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
+               "MinTrafficPerchannel thresholds",
+               channelCount);
+        }
       } else {
-        INFO(NCCL_TUNING,
-             "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
-             "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
-             channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
+        if (myRank == 0) {
+          INFO(NCCL_TUNING,
+               "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
+               "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+               channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
+        }
       }
 
       break;
@@ -743,13 +773,14 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
   static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
-  if (userDirectAllGatherInput != 0) {
+  if (userDirectAllGatherInput < 0) {
+    // DIRECT ALLGATHER disabled on AINIC by default on scale >8 nodes, and enabled otherwise.
+    if (rcclUseAinic() && (comm->nNodes > AinicMaxDirectAGScale)) {
+      INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC by default for %d+ nodes. ", AinicMaxDirectAGScale);
+      return false;
+    }
+  } else if (userDirectAllGatherInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
-    return false;
-  }
-
-  if (rcclUseAinic()) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC. ");
     return false;
   }
 
@@ -1190,10 +1221,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows.
+    // Match taskAppend's single-node and hierarchical CE gates for -A 1 reporting.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
-    if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+    const bool hierCeAvailable = !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype,
+                                                                     winRegType, sendWin, recvWin);
+    if ((ceAvailable || hierCeAvailable) && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
@@ -1496,7 +1529,8 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
   }
 }
 
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
   if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
     return false;
   }
@@ -1508,16 +1542,17 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) 
   // 3. or any collective task is not using RING algorithm
   bool hasP2p = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
   bool hasBcast = !ncclIntruQueueEmpty(&plan->bcastTaskQueue);
-  bool hasNonRing = false;
-  struct ncclTaskColl* task = ncclIntruQueueHead(&plan->collTaskQueue);
-  while (task != nullptr) {
-    if (task->algorithm != NCCL_ALGO_RING || !(task->useWarpSpeed)) {
-      hasNonRing = true;
-      break;
-    }
-    task = task->next;
+  while (collHead != nullptr && nCollTasks != 0) {
+    if (collHead->algorithm != NCCL_ALGO_RING || !collHead->useWarpSpeed) return false;
+    collHead = collHead->next;
+    if (nCollTasks > 0) nCollTasks--;
   }
-  return (!hasP2p && !hasBcast && !hasNonRing);
+  return !hasP2p && !hasBcast && nCollTasks <= 0;
+}
+
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  return rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&plan->collTaskQueue),
+                                /*nCollTasks=*/-1);
 }
 
 bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {

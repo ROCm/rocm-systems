@@ -217,10 +217,17 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
 
-#if defined(ENABLE_FAULT_INJECTION)
 // Regression guard - force the removed scratchpad RDMA_WRITE back. On a dma-buf
 // scratchpad this must reproduce the fault (flush no longer succeeds), proving
 // the WRITE is the culprit and that removing it is the fix.
+//
+// Disabled: the NCCL v2.31.2-1 sync (#10785) added this case but not the two
+// things it calls. RunRecvFlushBurst has no forceWrite parameter and there is no
+// gdrSupported(), so a --debug --tests_build --enable-mpi-tests build of develop
+// does not compile once ENABLE_FAULT_INJECTION is on. Restoring the forceWrite
+// hook is a decision for whoever owns the GDR flush fence, not something to
+// guess at here, so the case is guarded off rather than half-fixed.
+#if 0
 TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
@@ -237,7 +244,7 @@ TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
         EXPECT_NE(forced, ncclSuccess)
             << "forced scratchpad RDMA_WRITE on a dma-buf buffer should fault the flush QP";
 }
-#endif  // ENABLE_FAULT_INJECTION
+#endif  // disabled pending the forceWrite hook
 
 }  // namespace
 
