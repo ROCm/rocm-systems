@@ -18,6 +18,22 @@ protected:
     DdaAlltoAllMockComm mockComm_;
 };
 
+TEST_F(DdaAlltoAllThresholdTest, UndefinedLaunchOrderDoesNotDisableDda)
+{
+    mockComm_.reset("gfx950:sramecc+:xnack-");
+    mockComm_.comm.config.launchOrderImplicit = NCCL_CONFIG_UNDEF_INT;
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+}
+
+TEST_F(DdaAlltoAllThresholdTest, ExplicitImplicitLaunchOrderDisablesDda)
+{
+    mockComm_.reset("gfx950:sramecc+:xnack-");
+    mockComm_.comm.config.launchOrderImplicit = 1;
+    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+}
+
 TEST_F(DdaAlltoAllThresholdTest, Gfx942_ExactlyAt4MbThreshold_Enabled)
 {
     mockComm_.reset("gfx942:sramecc+:xnack-");
@@ -127,11 +143,14 @@ TEST_F(DdaAlltoAllThresholdTest, FewerThanEightRanks_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_Disabled)
+TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_DoesNotDisableAlltoAll)
 {
+    // AllReduce/AllGather DDA yields to symmetric kernels, but AlltoAll has no
+    // symmetric kernel (collectives.cc), so rcclDdaEnabled stays independent of
+    // comm->symmetricSupport.
     mockComm_.reset("gfx950:sramecc+:xnack-");
     mockComm_.comm.symmetricSupport = 1;
-    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 

@@ -25,7 +25,12 @@ from packaging.version import Version as _Version
 
 from nccl._version import __version__
 from nccl.bindings import nccl as _nccl_bindings
-from nccl.bindings import nccl_ep as _ep_bindings
+
+# nccl_ep is not built on ROCm; version reporting already treats it as optional.
+try:
+    from nccl.bindings import nccl_ep as _ep_bindings
+except ImportError:  # pragma: no cover
+    _ep_bindings = None
 
 __all__ = ["LibraryInfo", "VersionInfo", "get_version", "show_versions"]
 
@@ -127,8 +132,9 @@ class VersionInfo:
     """Build/load info for ``libnccl.so``."""
 
     nccl_ep: LibraryInfo | None
-    """Build/load info for ``libnccl_ep.so``, or None on CUDA-12 hosts where
-    ``libnccl_ep.so`` cannot load."""
+    """Build/load info for ``libnccl_ep.so``, or None where it is unavailable:
+    CUDA-12 hosts, where the library cannot load, and ROCm, where the bindings
+    are not built at all."""
 
 
 def _nccl_library_info() -> LibraryInfo:
@@ -158,7 +164,10 @@ def _nccl_ep_importable() -> bool:
 
 
 def _nccl_ep_library_info() -> LibraryInfo | None:
-    if not _nccl_ep_importable():
+    # The bindings are optional: they are not built on ROCm. Checked here
+    # rather than in the probe above, which callers may patch, because this
+    # is the only place the extension is dereferenced.
+    if _ep_bindings is None or not _nccl_ep_importable():
         return None
     version = _decode_version(_ep_bindings.get_version())
     path = _resolve_so_path("libnccl_ep.so")

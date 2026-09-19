@@ -27,6 +27,9 @@ set(RJ_OBJECT_LIBS
     rocjitsu_dbt_config
     rocjitsu_pci
 )
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    list(APPEND RJ_OBJECT_LIBS rocjitsu_plugin_perfsim)
+endif()
 
 if(RJ_INSTALL_TESTS)
     set(RJ_INSTALL_TEST_DIR "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests")
@@ -411,6 +414,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_loader_fixture(good)
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
+
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        add_library(
+            rocjitsu_perfsim_fake_backend
+            MODULE
+            perfsim_fake_backend.cpp
+        )
+        set_target_properties(
+            rocjitsu_perfsim_fake_backend
+            PROPERTIES
+                CXX_VISIBILITY_PRESET hidden
+                C_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        rj_configure_target(rocjitsu_perfsim_fake_backend TEST)
+    endif()
 endif()
 
 add_executable(
@@ -434,6 +453,9 @@ add_executable(
     lds_test.cpp
     l2_cache_test.cpp
     instruction_cache_test.cpp
+    async_mma_policy_test.cpp
+    matrix_coexecution_test.cpp
+    matrix_coexecution_lifetime_test.cpp
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
@@ -451,6 +473,7 @@ add_executable(
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
     patch/instruction_builder_test.cpp
+    patch/vector_builder_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -461,6 +484,8 @@ add_executable(
     patch/probe_live_in_test.cpp
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
+    dbi/dbi_arg_sim_test.cpp
+    dbi/dbi_mask_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -480,6 +505,10 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    division_test.cpp
+    division_macro_test.cpp
+    valu_floating_policy_test.cpp
+    atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
@@ -488,6 +517,7 @@ add_executable(
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
     util_observable_shared_mutex_test.cpp
+    host_mapping_lock_test.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -547,6 +577,7 @@ add_executable(
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     race-detector/race_log_expectation_test.cpp
+    big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
@@ -554,6 +585,9 @@ add_executable(
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
 )
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
+endif()
 if(HAS_DEVICE_KERNELS)
     target_sources(
         rocjitsu_tests
@@ -619,6 +653,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        target_compile_definitions(
+            rocjitsu_tests
+            PRIVATE
+                PERFSIM_FAKE_BACKEND_PATH="$<TARGET_FILE:rocjitsu_perfsim_fake_backend>"
+                PERFSIM_PLUGIN_DIR="${PROJECT_BINARY_DIR}"
+        )
+        add_dependencies(
+            rocjitsu_tests
+            rocjitsu_perfsim_fake_backend
+            rocjitsu_plugin_perfsim_so
+        )
+    endif()
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
@@ -670,6 +717,7 @@ add_executable(
     rocjitsu_analysis_tests
     analysis/decoder_window_test.cpp
     analysis/free_registers_test.cpp
+    analysis/reachable_cfg_test.cpp
     code/amdgpu_code_object_test.cpp
     code/kernel_descriptor_scan_test.cpp
     code/kernel_scope_test.cpp
@@ -698,8 +746,46 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
-# Exercise the Linux-only model ISA contract in a decoder-only final link.
+add_executable(
+    waitcheck_target_test
+    analysis/waitcheck_target_test.cpp
+    analysis/waitcheck_state_test.cpp
+)
+target_link_libraries(
+    waitcheck_target_test
+    PRIVATE
+        rocjitsu_waitcheck_state
+        rocjitsu_waitcheck_target
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_target_test WARNINGS)
+rj_add_gtest_tests(waitcheck_target_test)
+
+# Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Isolate allocator fault injection from the simulator test executable.
+    add_executable(
+        cache_allocation_failure_test
+        cache_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        cache_allocation_failure_test
+        PRIVATE simdojo_headers GTest::gtest_main
+    )
+    target_compile_options(
+        cache_allocation_failure_test
+        PRIVATE -fno-builtin-calloc
+    )
+    target_link_options(
+        cache_allocation_failure_test
+        PRIVATE "LINKER:--wrap=calloc"
+    )
+    rj_configure_target(cache_allocation_failure_test WARNINGS)
+    rj_add_gtest_tests(cache_allocation_failure_test)
+
+    # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
     target_include_directories(
         rocjitsu_model_only_test
@@ -905,6 +991,7 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
     add_dependencies(
         probe_fixture_test
         probe_rj_nop_probe_gfx90a
+        probe_rj_arg_probe_gfx90a
         probe_callable_sgpr_probe_gfx950
     )
     rj_configure_target(probe_fixture_test TEST)
@@ -916,6 +1003,16 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         COMMAND probe_fixture_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_COMMAND "bin/probe_fixture_test"
+    )
+    rj_add_test(
+        NAME "ProbeFixture.ArgProbeReceivesItsArgumentInV0"
+        COMMAND
+            probe_fixture_test
+            --gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "bin/probe_fixture_test"
+            "--gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0"
     )
     rj_add_test(
         NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
@@ -1566,6 +1663,22 @@ rj_add_interposer_test_suite(
 )
 
 rj_add_interposer_test_suite(
+    InterposerFreshForkTest
+    ChildAndGrandchildInitializeIndependentBackends
+    ChildFopenPreservesLibcModeSemantics
+)
+
+# TSan cannot start backend threads after a multithreaded fork. Keep the
+# single-threaded nested-fork case above in TSan, and run concurrent mappings in
+# regular and ASan/UBSan builds without disabling TSan's post-fork checks.
+if(NOT RJ_ENABLE_TSAN)
+    rj_add_interposer_test_suite(
+        InterposerFreshForkTest
+        ConcurrentMappingsPreserveIndependentChildBackends
+    )
+endif()
+
+rj_add_interposer_test_suite(
     InterposerForkTest
     ChildRefusesGpuEndpointsBeforeExec
     ChildRefusesEveryGpuEndpointSpelling
@@ -1808,7 +1921,17 @@ if(HSA_RUNTIME64)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
-    foreach(_hsa_test IN ITEMS InitSucceeded GpuAgentFound)
+    set(_rj_hsa_tests InitSucceeded GpuAgentFound)
+    # The prebuilt ROCr runtime owns the direct queue's write-pointer release
+    # and read-pointer acquire. TSan cannot observe those uninstrumented
+    # operations, so it reports unordered packet and result accesses here.
+    # Keep the public API regression in regular and ASan/UBSan builds; the
+    # instrumented Gfx1250SdmaTest.ConcurrentPublicationAcross32BitBoundary
+    # regression validates the simulator's acquire edge under TSan.
+    if(NOT RJ_ENABLE_TSAN)
+        list(APPEND _rj_hsa_tests SdmaPublishesCompletePackets)
+    endif()
+    foreach(_hsa_test IN LISTS _rj_hsa_tests)
         rj_add_test(
             NAME "HsaTest.${_hsa_test}"
             COMMAND
@@ -3014,7 +3137,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
-        # The only case that reaches ROCr's pinned SDMA blit, and both sanitizers
+        # These cases reach ROCr's pinned SDMA blit, and both sanitizers
         # report that library rather than rocjitsu. TSan sees the blit's memcpy
         # into the ring but not the release store on the doorbell that follows
         # it, because libhsa-runtime64 is not instrumented; the pair it forms
@@ -3022,10 +3145,15 @@ if(RJ_ENABLE_HIP_TESTS)
         # the fetch looks unordered. LSan reports ~5.7 KB allocated entirely
         # within that library, in frames with no rocjitsu caller. Neither is
         # actionable from here, and suppressing them by file would hide the same
-        # classes of defect on the paths rocjitsu does own. The case still runs
-        # in regular builds, in both local and daemon mode, which is where it
-        # regression-tests the transfer.
+        # classes of defect on the paths rocjitsu does own. The cases still run
+        # in regular builds, in both local and daemon mode, to cover transfers
+        # and LDS reuse.
         if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            rj_add_hip_test_case(
+                hip_memcpy_test
+                "HipMemcpyTest.MaskedStreamLdsReuse"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+            )
             rj_add_hip_test_case(
                 hip_memcpy_test
                 "HipMemcpyTest.RoundTripPageableAbovePinThreshold"
@@ -3127,6 +3255,7 @@ if(RJ_ENABLE_HIP_TESTS)
         set(RJ_DAEMON_TESTS
             RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
+            DaemonTest.ForkserverChildrenInitializeIndependentBackends
             DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
@@ -3138,6 +3267,11 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
+        # ROCr leaks also affect masked LDS reuse in daemon mode. Its TSan
+        # case passes, so keep that coverage as well as regular builds.
+        if(NOT RJ_ENABLE_ASAN)
+            list(APPEND RJ_DAEMON_TESTS DaemonTest.HipMaskedStreamLdsReuse)
+        endif()
         # Excluded under sanitizers for the reason given at its local-mode
         # registration above: the pinned SDMA path this case exists to cover
         # runs inside an uninstrumented libhsa-runtime64, and both the race TSan

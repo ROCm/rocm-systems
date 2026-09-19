@@ -114,8 +114,8 @@ TEST(CounterMemoryManagerTest, CopyEvents)
 
 TEST(TraceMemoryManagerTest, TraceControlBufAndATTParams)
 {
-    hsa_agent_t        agent = {.handle = 1};
-    TraceMemoryManager mgr(agent, dummy_alloc, dummy_dealloc, dummy_copy, nullptr);
+    aqlprofile_agent_handle_t agent = {.handle = 1};
+    TraceMemoryManager        mgr(agent, dummy_alloc, dummy_dealloc, dummy_copy, nullptr);
     mgr.CreateTraceControlBuf(64);
     auto buf = mgr.GetTraceControlBuf<uint8_t>();
     ASSERT_NE(buf, nullptr);
@@ -134,7 +134,7 @@ TEST(TraceMemoryManagerTest, TraceControlBufAndATTParams)
 
 TEST(CodeobjMemoryManagerTest, CmdBufferAlloc)
 {
-    hsa_agent_t          agent = {.handle = 1};
-    CodeobjMemoryManager mgr(agent, dummy_alloc, dummy_dealloc, 128, nullptr);
+    aqlprofile_agent_handle_t agent = {.handle = 1};
+    CodeobjMemoryManager      mgr(agent, dummy_alloc, dummy_dealloc, 128, nullptr);
     ASSERT_NE(mgr.cmd_buffer.get(), nullptr);
 }
