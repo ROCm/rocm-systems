@@ -16,6 +16,7 @@
  */
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <vector>
 #include <atomic>
 #include <functional>
@@ -1026,6 +1027,67 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress) {
   HIP_CHECK(hipFree(C_d));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream1));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verifies that capture teardown destroys a graph supplied to hipStreamBeginCaptureToGraph
+ *      when capture is invalidated, ends with unjoined work, or its origin stream is destroyed.
+ *      hipStreamEndCapture returns a null graph on the failure paths, and the original handle is
+ *      no longer valid.
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCaptureToGraph.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_Positive_CaptureTeardownDestroysGraph) {
+  hipGraph_t graph{nullptr};
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  SECTION("Invalidated capture") {
+    StreamsGuard streams(1);
+    EventsGuard events(1);
+    hipGraph_t captureResult = graph;
+
+    HIP_CHECK(hipStreamBeginCaptureToGraph(streams[0], graph, nullptr, nullptr, 0,
+                                           hipStreamCaptureModeThreadLocal));
+    HIP_CHECK(hipEventRecord(events[0], streams[0]));
+    REQUIRE(hipEventQuery(events[0]) != hipSuccess);
+    (void)hipGetLastError();
+
+    HIP_CHECK_ERROR(hipStreamEndCapture(streams[0], &captureResult),
+                    hipErrorStreamCaptureInvalidated);
+    REQUIRE(captureResult == nullptr);
+  }
+
+  SECTION("Unjoined capture") {
+    LinearAllocGuard<int> devMem(LinearAllocs::hipMalloc, sizeof(int));
+    StreamsGuard streams(2);
+    EventsGuard events(1);
+    hipGraph_t captureResult = graph;
+
+    HIP_CHECK(hipStreamBeginCaptureToGraph(streams[0], graph, nullptr, nullptr, 0,
+                                           hipStreamCaptureModeThreadLocal));
+    HIP_CHECK(hipEventRecord(events[0], streams[0]));
+    HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
+    HIP_CHECK(hipMemsetAsync(devMem.ptr(), 0, sizeof(int), streams[1]));
+
+    HIP_CHECK_ERROR(hipStreamEndCapture(streams[0], &captureResult),
+                    hipErrorStreamCaptureUnjoined);
+    REQUIRE(captureResult == nullptr);
+  }
+
+  SECTION("Destroyed origin stream") {
+    hipStream_t stream = nullptr;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 0,
+                                           hipStreamCaptureModeThreadLocal));
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  HIP_CHECK_ERROR(hipGraphDestroy(graph), hipErrorInvalidValue);
 }
 
 /**

@@ -14,6 +14,7 @@
 #include "hip_graph_capture.hpp"
 
 #include <atomic>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -372,8 +373,7 @@ namespace hip {
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
     Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
-           const std::vector<uint32_t>& cuMask = {},
-           hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone);
+           const std::vector<uint32_t>& cuMask = {});
 
     // --- Core stream operations ---
 
@@ -418,22 +418,19 @@ namespace hip {
     static bool StreamCaptureBlocking();
     /// Check Stream Capture status to make sure it is done
     static bool StreamCaptureOngoing(hipStream_t hStream);
-    /// Generate ID for stream capture unique over the lifetime of the process
-    static uint64_t GenerateCaptureID() {
-      static std::atomic<uint64_t> uid(0);
-      return ++uid;
-    }
-
     /// Returns capture status of the current stream
-    hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
+    hipStreamCaptureStatus GetCaptureStatus() const {
+      return captureStatus_.load(std::memory_order_acquire);
+    }
     /// Returns capture mode of the current stream
     hipStreamCaptureMode GetCaptureMode() const { return captureMode_; }
     /// Returns if stream is origin stream
     bool IsOriginStream() const { return originStream_; }
-    /// Mark this stream as the origin of a capture
-    void SetOriginStream() { originStream_ = true; }
-    /// Returns captured graph
-    hip::Graph* GetCaptureGraph() const { return pCaptureGraph_; }
+    /// Returns the graph being recorded by the capture this stream takes part in, or null when
+    /// it is not capturing. The graph lives on the origin.
+    hip::Graph* GetCaptureGraph() const {
+      return captureOwner_ != nullptr ? captureOwner_->captureGraph_.get() : nullptr;
+    }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
     /// Set last captured graph node
@@ -443,31 +440,26 @@ namespace hip {
       return removedDependencies_;
     }
     /// Append captured node via the wait event cross stream
-    void AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
-                              bool replace = false);
-    /// Set graph that is being captured
-    void SetCaptureGraph(hip::Graph* pGraph) {
-      pCaptureGraph_ = pGraph;
-      captureStatus_ = hipStreamCaptureStatusActive;
-    }
-    /// Release graph when capture is invalidated
-    void ReleaseCaptureGraph();
-    /// Drop the capture-graph pointer without freeing it (forks alias the origin's graph).
-    void ClearCaptureGraph() { pCaptureGraph_ = nullptr; }
-    /// Generate and assign a new capture ID (used at BeginCapture)
-    void SetCaptureID() { captureID_ = GenerateCaptureID(); }
-    /// Inherit capture ID from the parent stream
-    void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
+    hipError_t AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
+                                    bool replace = false);
+    /// Begin a capture with this stream as its origin, and its only member until others join.
+    /// The origin owns the graph for the life of the capture.
+    void StartCapture(std::unique_ptr<hip::Graph> graph, hipStreamCaptureMode mode);
+    /// Enroll this stream in the capture that `member` takes part in. Membership is tracked on
+    /// the capture's origin, so this publishes into the origin's set, not into `member`'s.
+    void JoinCapture(hip::Stream* member);
     /// Reset capture parameters, optionally keeping an invalidated status observable.
-    hipError_t EndCapture(bool preserveInvalidated = false);
+    /// The single entry point for capture teardown, on the origin and on participants alike,
+    /// and the only place the captured graph is disposed of.
+    ///
+    /// Returns the graph, which the caller then owns, when the origin ends a capture that is
+    /// still valid. Returns null for a participant, whose departure leaves the capture running,
+    /// and for an invalidated capture, whose graph is destroyed here instead.
+    [[nodiscard]] hip::Graph* EndCapture(bool preserveInvalidated = false);
     /// Set capture status
-    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
-    /// Set capture mode
-    void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
-    /// Set parent stream
-    void SetParentStream(hipStream_t parentStream) { parentStream_ = parentStream; }
-    /// Get parent stream
-    hipStream_t GetParentStream() const { return parentStream_; }
+    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) {
+      captureStatus_.store(captureStatus, std::memory_order_release);
+    }
     /// Get capture ID
     uint64_t GetCaptureID() const { return captureID_; }
     /// Associate an event with the current capture
@@ -485,10 +477,9 @@ namespace hip {
       std::scoped_lock lock(lock_);
       captureEvents_.erase(e);
     }
-    /// Register a parallel (forked) capture stream
-    void SetParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.insert(s); }
-    /// Remove a parallel capture stream
-    void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
+    /// Mark the whole capture that this stream belongs to as invalidated: the origin and
+    /// every stream enrolled in it. Callable from the origin or from any participant.
+    void InvalidateCapture();
 
     // --- Execution context (green context) lifecycle ---
     /// Marks the stream as detached: its owning ExecutionCtx has been
@@ -506,9 +497,19 @@ namespace hip {
     }
 
   private:
-    ~Stream() = default;
+    ~Stream();
 
-    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ bookkeeping
+    /// Generate ID for stream capture unique over the lifetime of the process
+    static uint64_t GenerateCaptureID() {
+      static std::atomic<uint64_t> uid(0);
+      return ++uid;
+    }
+
+    /// Return this stream's capture fields to defaults. Requires lock_ to be held, since
+    /// EndCapture applies it to a participant while holding the origin's lock too.
+    void ResetCaptureStateLocked(bool preserveInvalidated);
+
+    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ and captureStreams_
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
     unsigned int flags_;                     //!< Creation flags (e.g. hipStreamNonBlocking)
@@ -520,14 +521,20 @@ namespace hip {
     std::atomic<hipError_t> async_error_{hipSuccess};
 
     // ----- Stream capture state -----
-    hipStreamCaptureStatus captureStatus_{hipStreamCaptureStatusNone}; //!< Current capture status
-    hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
+    //!< Current capture status. Atomic because every capture API reads it without taking lock_.
+    std::atomic<hipStreamCaptureStatus> captureStatus_{hipStreamCaptureStatusNone};
+    /// Graph being constructed by the capture this stream started, and set on no other
+    /// stream. EndCapture hands it to the caller, or destroys it if the capture was
+    /// invalidated.
+    std::unique_ptr<hip::Graph> captureGraph_;
     hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
     bool originStream_ = false;                           //!< True if this stream started capture
-    hipStream_t parentStream_ = nullptr;                  //!< Parent stream (null for origin)
+    hip::Stream* captureOwner_ = nullptr;                 //!< Origin owning this capture; the
+                                                          //!< origin points at itself
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
-    std::unordered_set<hipStream_t> parallelCaptureStreams_; //!< Forked parallel capture branches
+    std::unordered_set<hip::Stream*> captureStreams_;     //!< Streams enrolled in this capture,
+                                                          //!< excluding the origin. Origin only.
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 
