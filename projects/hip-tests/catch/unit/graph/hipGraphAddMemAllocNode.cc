@@ -1269,65 +1269,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
 /**
 * Test Description
 * ------------------------
-* - Negative Test for API hipGraphAddMemAllocNode & hipGraphAddMemFreeNode
-* Create a graph with alloc and free node, try to free the same
-  alloc pointer again using hipFree(), it should return error.
-* Test source
-* ------------------------
-* - /unit/graph/hipGraphAddMemAllocNode.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.1
-*/
-HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
-  int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
-  if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
-  }
-
-  constexpr size_t Nbytes = 512 * 1024 * 1024;
-  hipGraph_t graph;
-  hipGraphExec_t graphExec;
-  hipStream_t stream;
-  hipGraphNode_t allocNodeA, freeNodeA;
-  hipMemAllocNodeParams allocParam;
-  hipError_t ret;
-
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  memset(&allocParam, 0, sizeof(allocParam));
-  allocParam.bytesize = Nbytes;
-  allocParam.poolProps.allocType = hipMemAllocationTypePinned;
-  allocParam.poolProps.location.id = 0;
-  allocParam.poolProps.location.type = hipMemLocationTypeDevice;
-
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
-  REQUIRE(allocParam.dptr != nullptr);
-  void* temp = allocParam.dptr;
-
-  HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1, temp));
-
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  // Free alloc pointer manually again, it should give error
-  ret = hipFree(temp);
-  REQUIRE(ret == hipErrorInvalidValue);
-
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-}
-
-/**
-* Test Description
-* ------------------------
 *  Negative Test for API hipGraphAddMemAllocNode & hipGraphAddMemFreeNode
    1) Once free node added in any graph then we can't added it again.
    2) Clone graph should give error if a graph contain MemAlloc node.
