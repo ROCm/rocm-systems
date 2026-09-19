@@ -29,6 +29,8 @@ struct Hash128 {
 
 }  // namespace hrr_cap
 
+struct HipDispatchTable;
+
 // ---------------------------------------------------------------------------
 // Public API — called from hip_context.cpp and hip_capture.cpp
 // ---------------------------------------------------------------------------
@@ -39,11 +41,20 @@ bool hip_capture_enabled();
 // Return the output directory from the env var
 const char* hip_capture_output_dir();
 
-// Snapshot real fn ptrs (must be called while live table holds real ptrs)
-void hip_capture_build_table();
+// Snapshot real fn ptrs (must be called while live table holds real ptrs).
+// Pass the table explicitly when it is not yet reachable through
+// hip::GetHipDispatchTable() — see hip_capture_install_early().
+void hip_capture_build_table(const HipDispatchTable* live = nullptr);
 
 // Install capture shims into live dispatch tables
-void hip_capture_install();
+void hip_capture_install(HipDispatchTable* target = nullptr);
+
+// Called from UpdateDispatchTable(HipDispatchTable*) once every slot holds its
+// real function pointer, which is the last moment before a caller can load a
+// slot and dispatch through it. Installing here rather than from
+// hip_capture_init() is what lets the process's very first HIP call be
+// recorded; see the ordering note in hip_capture.cpp.
+void hip_capture_install_early(HipDispatchTable* table);
 
 // Restore real dispatch tables
 void hip_capture_uninstall();

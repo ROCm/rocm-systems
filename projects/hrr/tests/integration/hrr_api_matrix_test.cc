@@ -77,6 +77,7 @@ HrrReplayClass expect_code_to_class(int code) {
     case kHrrExpectErrorStub: return HrrReplayClass::kErrorStub;
     case kHrrExpectHandlerError: return HrrReplayClass::kHandlerError;
     case kHrrExpectCrash:     return HrrReplayClass::kCrash;
+    case kHrrExpectUnreplayable: return HrrReplayClass::kUnreplayable;
     default:                  return HrrReplayClass::kReal;
   }
 }
@@ -179,6 +180,20 @@ void write_observation(const TierObservation& obs) {
   f << (first ? "" : "\n  ") << "}\n}\n";
 }
 
+// Whether this part can hold a texture, surface or array handle at all.
+// Several unreachable: groups were measured on a part that cannot, and their
+// declarations describe only such a part; queried once because it cannot
+// change under a run.
+bool device_has_image_support() {
+  static const bool supported = [] {
+    int value = 0;
+    return hipDeviceGetAttribute(&value, hipDeviceAttributeImageSupport, 0) ==
+               hipSuccess &&
+           value != 0;
+  }();
+  return supported;
+}
+
 // ---------------------------------------------------------------------------
 // Capture one workload and fold what it recorded into `obs`.
 //
@@ -192,7 +207,13 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
                 ("hrr_matrix_" + direct_case)};
 
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    // Captured, not inherited: this runs once per workload in the tier, and an
+    // uncaptured child prints a full Catch2 run banner to the parent's stdout
+    // every time. The transcript is kept and reported only on the failure path
+    // below, so a green tier is silent and a failed workload still shows what
+    // its child did. See hrr_spawn_direct in hrr_test_common.hh.
+    hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true,
+                              /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
@@ -200,7 +221,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
     // exit clean, so a non-zero exit is a genuine failure. Reporting it as a
     // warning would let the tier quietly degrade to zero coverage.
     if (ret != 0) {
-      FAIL_CHECK("workload " << direct_case << " exited " << ret);
+      FAIL_CHECK("workload " << direct_case << " exited " << ret
+                             << "\n--- child output ---\n"
+                             << proc.getOutput() << "--- end child output ---");
       return;
     }
   }
@@ -314,7 +337,7 @@ void run_tier(const std::string& tier) {
   const HrrTierFloor& floor = tier_floor(tier);
 
   if (floor.gpus > 1 && visible_device_count() < floor.gpus) {
-    HRR_SKIP("tier requires at least two visible GPUs");
+    HRR_SKIP_CASE("tier requires at least two visible GPUs");
   }
 
   TierObservation obs;
@@ -386,6 +409,15 @@ void run_tier(const std::string& tier) {
       INFO("Declared in api_matrix.yaml as failing for this tier's arguments");
       continue;
     }
+    // The matrix declared this API unreachable on a part without image
+    // support, and the reason only describes such a part. This one has image
+    // support, so the API became reachable and nobody has measured what it
+    // does here. Assert nothing rather than hold it to an expectation derived
+    // where no texture handle could exist.
+    if (e.applies_when == kHrrWhenNoImageSupport && device_has_image_support()) {
+      INFO("Declared for parts without image support; unmeasured on this part");
+      continue;
+    }
     CHECK(observed == expected);
   }
 
@@ -439,7 +471,7 @@ void run_tier(const std::string& tier) {
  *     the substrate every Instinct serving deployment depends on cannot land
  *     silently.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T0");
 }
 
@@ -457,7 +489,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T0_Roundtrip", "[.][hrr][api-matrix]") {
  *     report rather than PASS: they turn into XPASS the day P2 lands, which is
  *     the signal to update api_matrix.yaml.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T1");
 }
 
@@ -477,7 +509,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T1_Roundtrip", "[.][hrr][api-matrix]") {
  *   - Runs under the replay watchdog, so the H2 hang fails the test in bounded
  *     time instead of wedging the job.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T2");
 }
 
@@ -493,7 +525,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T2_Roundtrip", "[.][hrr][api-matrix]") {
  *     HIP_VISIBLE_DEVICES=6,7. Skips cleanly on a single-GPU host rather than
  *     failing, so the rest of the matrix stays runnable anywhere.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T3");
 }
 
@@ -509,7 +541,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T3_Roundtrip", "[.][hrr][api-matrix]") {
  *     point: a NOOP that quietly became a real handler, or the reverse,
  *     changes what every existing recording means.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T4");
 }
 
@@ -524,10 +556,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_T4_Roundtrip", "[.][hrr][api-matrix]") {
  *     rocFFT/rocSPARSE/rocRAND import zero texture symbols, and the
  *     managed-memory caller that does exist belongs to a recommender workload
  *     absent from Instinct MLPerf submissions.
- *   - Hidden ([.]) so it does not run by default. run-api-matrix.sh
- *     --include-deprioritised runs it by name.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[.][hrr][api-matrix]") {
+TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[hrr][api-matrix]") {
   run_tier("T5");
 }
 
@@ -540,7 +570,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_T5_Roundtrip", "[.][hrr][api-matrix]") {
  *   - This is what catches a bad regeneration before a GPU run wastes time on
  *     it, and it is why the header is generated rather than hand-written.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") {
+TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[hrr][api-matrix][cpu]") {
   REQUIRE(kHrrApiMatrixCount > 500);
   REQUIRE(kHrrTierFloorCount >= 1);
 
@@ -563,7 +593,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") 
     REQUIRE(e.api != nullptr);
     REQUIRE(e.tier != nullptr);
     CHECK(e.expect >= kHrrExpectReal);
-    CHECK(e.expect <= kHrrExpectCrash);
+    CHECK(e.expect <= kHrrExpectUnreplayable);
     CHECK(tiers.count(e.tier) == 1);
     CHECK(seen.insert(e.api).second);
   }
@@ -579,18 +609,20 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") 
  *     between hrr-playback and this matrix, and nothing else in the build
  *     would notice if the wording changed, so pin the exact shapes here.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") {
+TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[hrr][api-matrix][cpu]") {
   const std::string noop_line =
       "[HRR] NOOP playback handler called for hipHostAlloc \xE2\x80\x94 this "
       "API is not replayed; results may differ from capture.\n";
   const std::string stub_line =
-      "[HRR] hipGraphCreate: explicit (node-API) graph construction is NOT "
-      "supported by HRR replay.\n";
+      "[HRR] hipGraphAddNode: not reconstructable at replay, so the call is "
+      "skipped and the graph it belongs to is marked incomplete; "
+      "instantiating that graph fails loudly rather than running a graph "
+      "that is missing work.\n";
   const std::string clean = "[HRR]   D2H checks     : 4 pass, 0 fail\n";
 
   CHECK(hrr_observed_replay_class(noop_line, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
-  CHECK(hrr_observed_replay_class(stub_line, "hipGraphCreate") ==
+  CHECK(hrr_observed_replay_class(stub_line, "hipGraphAddNode") ==
         HrrReplayClass::kErrorStub);
   CHECK(hrr_observed_replay_class(clean, "hipMalloc") == HrrReplayClass::kReal);
 
@@ -598,7 +630,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
   // the API name for exactly this reason.
   CHECK(hrr_observed_replay_class(noop_line, "hipHostMalloc") ==
         HrrReplayClass::kReal);
-  CHECK(hrr_observed_replay_class(stub_line, "hipGraphClone") ==
+  CHECK(hrr_observed_replay_class(stub_line, "hipGraphAddMemsetNode") ==
         HrrReplayClass::kReal);
 
   // HIP API names prefix one another, so a marker that is not bounded at the
@@ -619,7 +651,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
   const std::string both = noop_line + stub_line;
   CHECK(hrr_observed_replay_class(both, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
-  CHECK(hrr_observed_replay_class(both, "hipGraphCreate") ==
+  CHECK(hrr_observed_replay_class(both, "hipGraphAddNode") ==
         HrrReplayClass::kErrorStub);
 
   // A handler that returns a HIP error reports itself in one of two forms
@@ -651,6 +683,27 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
   CHECK(failed.count("hipStreamAddCallback") == 1);
   CHECK(hrr_observed_replay_class(many, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
+
+  // An unreplayable API returns hipErrorNotSupported, so it appears in the
+  // failed-API list as well. The refusal is the more specific fact and must
+  // win, or a declared scope exclusion would read as a handler that broke.
+  const std::string unreplayable_line =
+      "[HRR] hipStreamAddCallback: NOT REPLAYABLE \xE2\x80\x94 the callback is "
+      "a host function pointer belonging to the capturing process. The call is "
+      "in the archive but its effect cannot be reproduced here.\n";
+  const std::string unreplayable_pair =
+      unreplayable_line +
+      "[HRR] Error: T19 Event 71 (hipStreamAddCallback) returned 801 "
+      "(operation not supported) \xE2\x80\x94 continuing\n";
+  CHECK(hrr_observed_replay_class(unreplayable_pair, "hipStreamAddCallback") ==
+        HrrReplayClass::kUnreplayable);
+  CHECK(hrr_observed_replay_class(unreplayable_pair, "hipMalloc") ==
+        HrrReplayClass::kReal);
+  // A handler that genuinely failed is still HANDLER_ERROR when some other API
+  // was the unreplayable one.
+  CHECK(hrr_observed_replay_class(unreplayable_line + continued_line,
+                                  "hipDrvLaunchKernelEx") ==
+        HrrReplayClass::kHandlerError);
 
   // Only the fatal form means the replay stopped; the continuing form must not
   // be read as a truncated run, or every tier would fail on its own design.
@@ -702,7 +755,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
  *     APIs. The sample below is a verbatim `hrr-playback --info` report,
  *     including the surrounding sections the parser has to stop at.
  */
-TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") {
+TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[hrr][api-matrix][cpu]") {
   const std::string sample =
       "HRR Archive: /tmp/cap/pid-7\n"
       "========================================\n"

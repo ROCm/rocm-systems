@@ -108,6 +108,16 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
     optional_out[kNullWriteIndex] = 1.0f;
 }
 
+// Occupies its stream long enough that anything enqueued behind it cannot
+// complete before work submitted to an independent stream. The accumulator
+// feeds a store so the loop cannot be optimized away, and it is chained so the
+// iterations cannot be reassociated into a closed form.
+__global__ void hrr_repro_spin(uint64_t iters, unsigned* sink) {
+  unsigned acc = 1;
+  for (uint64_t i = 0; i < iters; ++i) acc = acc * 1664525u + 1013904223u;
+  sink[0] = acc;
+}
+
 // ===========================================================================
 // A1. First-hipMalloc capture regression
 //
@@ -326,6 +336,79 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dsrc));
   HRR_HIP_CHECK(hipFree(dout));
   delete[] hout;
+}
+
+// ===========================================================================
+// A6. Null-stream zeroing ordered against a write on a non-blocking stream
+//
+// Regression guard for issue #10967.
+//
+// hipMemset on device memory at offset 0 is asynchronous — ihipMemset() forces
+// isAsync for it, "spec says hipMemset will be asynchronous when destination
+// memory is device memory and pointer is non-offseted"
+// (clr/hipamd/src/hip_memory.cpp:3444-3454) — so it is only enqueued on the
+// null stream. A hipStreamNonBlocking stream never joins the null stream
+// (Device::WaitActiveStreams(), clr/hipamd/src/hip_device.cpp). A workload that
+// zeroes a slot and then writes it from a non-blocking stream therefore orders
+// the two not at all, and the zeroing can land last: the slot reads back 0
+// instead of the value written.
+//
+// Unit_HRR_StreamWriteValue_Direct had exactly that shape, which is why it
+// failed as "0 == 0xdeadbeeffeedface" on RDNA parts, intermittently, and with
+// no HRR present at all. Draining after the write does not help, because the
+// zeroing may already have overwritten it; the drain has to go between them.
+//
+// This case pins that contract deterministically instead of by timing luck: a
+// spin kernel is parked on the null stream ahead of the memset, so an unordered
+// zeroing is guaranteed to land after the write on any architecture. Delete the
+// hipDeviceSynchronize() below and this fails everywhere, which is the point —
+// the original test only failed where the window happened to be wide enough.
+// ===========================================================================
+TEST_CASE("Unit_HRR_NullStreamMemsetOrdering", "[hrr]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+
+  int canUseStreamValue = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
+                                  hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (!canUseStreamValue) {
+    HRR_SKIP_CASE("stream write value unsupported");
+  }
+
+  constexpr uint64_t kVal64 = 0xDEADBEEFFEEDFACEull;
+  // Long enough to cover the memset that follows it on any part, short enough
+  // not to lengthen the suite noticeably. Correctness does not depend on the
+  // exact value: too small only makes the unfixed code flaky again rather than
+  // making the fixed code fail.
+  constexpr uint64_t kSpinIters = 200000000ull;
+
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  uint64_t* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, sizeof(uint64_t)));
+  unsigned* sink = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&sink, sizeof(unsigned)));
+
+  // Null stream: a long spin, then the zeroing queued behind it.
+  hipLaunchKernelGGL(hrr_repro_spin, dim3(1), dim3(1), 0, nullptr,
+                     kSpinIters, sink);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipMemset(d, 0, sizeof(uint64_t)));
+
+  // The ordering this case exists to assert.
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  HRR_HIP_CHECK(hipStreamWriteValue64(s, d, kVal64, 0));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+
+  uint64_t h64 = 0;
+  HRR_HIP_CHECK(hipMemcpy(&h64, d, sizeof(h64), hipMemcpyDeviceToHost));
+  REQUIRE(h64 == kVal64);
+
+  HRR_HIP_CHECK(hipFree(sink));
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
 }
 
 /**

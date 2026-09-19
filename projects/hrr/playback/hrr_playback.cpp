@@ -1383,6 +1383,17 @@ int main(int argc, char** argv) {
       env_size_or("HIP_HRR_REPLAY_SYNC_WATCHDOG_MS", ctx.sync_watchdog_ms));
   ctx.dump_ptrs_ordinal =
       env_size_or("HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", ctx.dump_ptrs_ordinal);
+  ctx.scan_args_ordinal =
+      env_size_or("HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL", ctx.scan_args_ordinal);
+  ctx.scan_args_bytes =
+      env_size_or("HIP_HRR_REPLAY_SCAN_ARGS_BYTES", ctx.scan_args_bytes);
+  ctx.scan_h2d = env_size_or("HIP_HRR_REPLAY_SCAN_H2D", 0u) != 0;
+  ctx.audit_host_args =
+      env_size_or("HIP_HRR_REPLAY_AUDIT_HOST_ARGS", 0u) != 0;
+  // The scan reads the pointer arguments, which the pointer dump is what
+  // collects, so asking for one implies the other.
+  if (ctx.scan_args_ordinal && !ctx.dump_ptrs_ordinal)
+    ctx.dump_ptrs_ordinal = ctx.scan_args_ordinal;
 
   if (archive_path.empty()) {
     fprintf(stderr, "[HRR] No archive path specified\n");

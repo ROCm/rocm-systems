@@ -22,9 +22,14 @@
 # every API's replay class still matches what HRR's generator declares.
 #
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
-# api_matrix.yaml.  Regenerate after an upstream classification change with:
-#   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
-#       <this dir>/hrr_api_matrix_expectations.h
+# api_matrix.yaml, both in ../../tools/api-matrix.  Regenerate after an upstream
+# classification change with:
+#   ../../tools/api-matrix/check_matrix.py --emit-cxx
+#
+# hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
+# argument no allocation explains: a sentinel keeps its value, an
+# address-shaped lost pointer becomes null. Contains its own hidden
+# [.][hrr-direct] workload.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -38,6 +43,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_spt_workload_test.cc
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
+  hrr_kernel_args_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -96,6 +102,15 @@ target_link_libraries(hrr-integration-tests PRIVATE
 if(NOT WIN32)
   find_package(hsa-runtime64 CONFIG REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+  # ROCr is found REQUIRED and linked just above, so on every platform that gets
+  # here the HSA headers and symbols are available and the cases that call HSA
+  # directly can compile. Define the macro they are guarded by at the same place
+  # the dependency is resolved, so the two can never drift apart. Without this
+  # those cases leave the binary with no signal at all -- not failed, not
+  # skipped, absent from the report entirely -- which is how
+  # Unit_HRR_Regions_MemcpyFirstTouchMaterialization went missing from a green
+  # 106/106 run. tests/expected_cases_integration.txt is the backstop.
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
 endif()
 
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by
