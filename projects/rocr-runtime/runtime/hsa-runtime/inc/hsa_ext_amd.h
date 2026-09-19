@@ -3929,7 +3929,14 @@ typedef struct hsa_amd_queue_create_desc_s {
   uint32_t queue_size_bytes;
   /** Dispatch and wavefront scheduling priority. HSA_AMD_QUEUE_PRIORITY_NORMAL = default. */
   hsa_amd_queue_priority_t priority;
-  /** Callback invoked by the runtime for asynchronous queue errors. May be NULL. */
+  /** Callback invoked by the runtime for asynchronous queue errors. May be NULL.
+   *
+   *  For ::HSA_AMD_QUEUE_ENGINE_SDMA the callback may run after
+   *  ::hsa_queue_destroy has returned, because destroying a queue whose packets
+   *  hung the engine is what prompts the driver to reset it. In that case
+   *  @c source is the destroyed queue's former handle and must be compared but
+   *  not dereferenced. The runtime stops reporting errors for a destroyed queue
+   *  shortly after it is destroyed. */
   void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data);
   /** Application data passed to @c callback. May be NULL. */
   void *callback_data;

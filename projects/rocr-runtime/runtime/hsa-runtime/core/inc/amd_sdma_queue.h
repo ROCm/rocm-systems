@@ -53,7 +53,10 @@ class SdmaQueue : public core::Queue, private core::LocalSignal, public core::Do
   /// @param[in] size_bytes Size of the queue ring buffer in bytes.
   /// @param[in] flags Queue memory placement flags.
   /// @param[in] sdma_engine_id SDMA engine index, or -1 for runtime selection.
-  SdmaQueue(core::Agent* agent, size_t size_bytes, uint64_t flags, int32_t sdma_engine_id);
+  /// @param[in] callback Asynchronous error callback, or nullptr for none.
+  /// @param[in] err_data Application data passed to @p callback.
+  SdmaQueue(core::Agent* agent, size_t size_bytes, uint64_t flags, int32_t sdma_engine_id,
+            core::HsaEventCallback callback = nullptr, void* err_data = nullptr);
   ~SdmaQueue() override;
 
   /// @brief Create the backing KFD SDMA queue and populate the public handle.
@@ -135,6 +138,12 @@ class SdmaQueue : public core::Queue, private core::LocalSignal, public core::Do
   HsaQueueResource queue_resource_;
   int32_t sdma_engine_id_;
   bool active_;
+
+  // Asynchronous error callback. SDMA queues cannot report a per-queue error
+  // reason, so the runtime holds this registration and drives it from the
+  // agent's hardware exception handler.
+  core::HsaEventCallback errors_callback_;
+  void* errors_data_;
 };
 
 }  // namespace AMD
