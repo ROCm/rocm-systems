@@ -8,6 +8,7 @@ set(rocprofiler_sdk_components_unit_tests_sources
     test_callback_domain.cpp
     test_domain_registry.cpp
     test_domain_service.cpp
+    test_types.cpp
 )
 
 add_library(
