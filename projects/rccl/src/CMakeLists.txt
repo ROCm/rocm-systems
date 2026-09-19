@@ -847,9 +847,11 @@ if (gen_py_result)
 endif()
 
 if (GENERATE_SYM_KERNELS)
-  # Execute the python script to generate required symmetric memory kernels
+  # Execute the python script to generate required symmetric memory kernels.
+  # GPU_TARGETS selects the arch-specific algos (the Tma* kernels need gfx1250's
+  # Tensor Data Mover).
   execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py ${GEN_SYM_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py ${GEN_SYM_DIR} "${GPU_TARGETS}"
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_sym_py_result
     ERROR_VARIABLE gen_sym_py_error
