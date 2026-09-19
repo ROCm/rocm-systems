@@ -6990,6 +6990,37 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'kVopdFmacF64' not in exec_cpp
 
 
+@pytest.mark.parametrize('missing_op', [None, 'VopdAddNcU32', 'VopdLshlrevB32'])
+def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op):
+    class ReducedVopdProfile(Rdna4Profile):
+        @property
+        def vopd_slot_ops(self):
+            return tuple(
+                op for op in super().vopd_slot_ops if op.enum_name != missing_op
+            )
+
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        generated_dir_name='rdna4',
+        cpp_namespace='rdna4',
+        profile=ReducedVopdProfile(),
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / 'rdna4' / 'vopd_exec.cpp').read_text()
+    assert ('try_execute_vopd_integer_pair_simd<' in exec_cpp) == (missing_op is None)
+    if missing_op is not None:
+        assert f'k{missing_op}' not in exec_cpp
+
+    # MOV must observe only src0 while preserving the generated negation policy.
+    execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
+    assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
+    assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+
+
 def test_rdna4_profile_enables_generated_vopd():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
