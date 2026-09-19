@@ -18,16 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from datetime import datetime
 from subprocess import Popen, PIPE
 import argparse
 import os
-import shutil
 import sys
-import platform
-import glob
-import pandas as pd
-from pathlib import Path
 
 __license__ = "MIT"
 __version__ = "1.0"
@@ -76,7 +70,7 @@ else:
     resultsPath = resultsDir+'/rocDecode_videoDecode_results'
 
 run_rocDecode_app = os.path.abspath(rocDecode_exe)
-os.system('(mkdir -p ' +  resultsPath + ')')
+os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
 else:
@@ -92,8 +86,9 @@ else:
     print("\nERROR: The input directory path is either for a file or directory does not exist!")
     exit()
 
-if os.path.exists(resultsPath+'/rocDecode_output.log'):
-    os.remove(resultsPath+'/rocDecode_output.log')
+outputLogPath = os.path.join(resultsPath, 'rocDecode_output.log')
+if os.path.exists(outputLogPath):
+    os.remove(outputLogPath)
 
 print("Starting conformance test .....................................\n")
 streamFileDir = filesDir + '/Streams/'
@@ -116,7 +111,19 @@ if streamListSize != md5ListSize:
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
     md5FilePath = md5FileDir + md5FileList[i]
-    os.system(run_rocDecode_app +' -i ' + streamFilePath + ' ' + bsReaderOption + ' -md5_check ' + md5FilePath + ' -d ' + str(gpuDeviceID) + ' | tee -a ' + resultsPath + '/rocDecode_output.log')
+    command = [run_rocDecode_app, '-i', streamFilePath]
+    if bsReaderOption:
+        command.append(bsReaderOption)
+    command.extend(['-md5_check', md5FilePath, '-d', str(gpuDeviceID)])
+
+    with open(outputLogPath, 'a') as outputLog:
+        with Popen(command, stdout=PIPE, text=True) as process:
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                outputLog.write(line)
+        if process.returncode != 0:
+            sys.exit(process.returncode)
     print("======================================================================================\n")
 
 fileString = 'Input file'
@@ -125,7 +132,7 @@ matchString = 'MD5 digest matches the reference MD5 digest'
 mismatchString = 'MD5 digest does not match the reference MD5 digest'
 passNum = 0
 failNum = 0
-with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
+with open(outputLogPath, 'r') as logFile:
     resultFile = open(resultsPath + '/rocDecode_conformance.log', 'w')
     resultFile.write("=========================\n")
     resultFile.write("Conformance test results\n")
