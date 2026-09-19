@@ -22,53 +22,40 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _TEAM_BROADCAST_TESTER_HPP_
-#define _TEAM_BROADCAST_TESTER_HPP_
-
-#include <functional>
-#include <utility>
+#ifndef _TYPED_RMA_TESTER_HPP_
+#define _TYPED_RMA_TESTER_HPP_
 
 #include "tester.hpp"
 
-using namespace rocshmem;
-
-/************* *****************************************************************
+/******************************************************************************
  * HOST TESTER CLASS
+ *
+ * Exercises the typed RMA device APIs (rocshmem_ctx_T_put/get/put_nbi/get_nbi
+ * and rocshmem_ctx_T_p/g) for a specific element type T.  Used to provide
+ * __half and __hip_bfloat16 coverage for GetTestType, GetNBITestType,
+ * PutTestType, PutNBITestType, PTestType, and GTestType.
  *****************************************************************************/
-template <typename T1>
-class TeamBroadcastTester : public Tester {
+template <typename T>
+class TypedRMATester : public Tester {
  public:
-  explicit TeamBroadcastTester(TesterArguments args);
-  virtual ~TeamBroadcastTester();
+  explicit TypedRMATester(TesterArguments args);
+  virtual ~TypedRMATester();
 
-  std::string typeName() const override { return type_name<T1>(); }
+  std::string typeName() const override { return type_name<T>(); }
 
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void preLaunchKernel() override;
-
   virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                             size_t size) override;
 
-  virtual void postLaunchKernel() override;
-
   virtual void verifyResults(size_t size) override;
 
-  T1 *source_buf;
-  T1 *dest_buf;
-
- private:
-  int my_pe = 0;
-  int n_pes = 0;
-  /**
-   * This constant should equal ROCSHMEM_MAX_NUM_TEAMS - 1.
-   * The default value for the maximum number of teams is 40.
-   */
-  int num_teams = 39;
-  rocshmem_team_t *team_bcast_world_dup;
+  T *source = nullptr;
+  T *dest   = nullptr;
+  int *grid_psync = nullptr;
 };
 
-#include "team_broadcast_tester.cpp"
+#include "typed_rma_tester.cpp"
 
 #endif
