@@ -58,6 +58,20 @@ class _FakeHandle:
         self.value = value
 
 
+def _fabric_entry(timestamp, error_severity):
+    """A fabric CPER entry shaped like ``amdsmi_get_fabric_cper_entries`` returns one.
+
+    The IFoE placeholder GUID maps to no known notify type, so the formatted
+    ``notify_type`` is ``"Unknown"``; ``source`` is what marks it as fabric.
+    """
+    return {
+        "timestamp": timestamp,
+        "error_severity": error_severity,
+        "notify_type": "Unknown",
+        "source": "fabric",
+    }
+
+
 class _FakeLibraryException(Exception):
     def __init__(self, code=0, message="mock error"):
         super().__init__(message)
@@ -217,6 +231,16 @@ class TestCliRasCperJson(unittest.TestCase):
         self.interface.amdsmi_get_gpu_kfd_info = lambda _h: {"current_partition_id": 0}
         self.interface.amdsmi_get_gpu_cper_entries = lambda _h, _m, _s, cursor: ({}, cursor, [], 0)
 
+        # Default: no fabric CPER entries (raises NOT_SUPPORTED)
+        def _fabric_not_supported(_h, _m, _s, cursor):
+            exc = _FakeLibraryException(
+                code=self.interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                message="Fabric CPER not supported",
+            )
+            raise exc
+
+        self.interface.amdsmi_get_fabric_cper_entries = _fabric_not_supported
+
     def _make_commands(self):
         commands = object.__new__(self.ras_module.RasCommands)
         commands.logger = self.logger_cls(format="json", destination="stdout")
@@ -317,6 +341,94 @@ class TestCliRasCperJson(unittest.TestCase):
 
         self.assertEqual(captured.strip(), "[]")
         self.assertEqual(json.loads(captured), [])
+
+    def test_fabric_cper_with_gpu_cper_unified_output(self):
+        counts_gpu = {}
+        counts_fabric = {}
+
+        def _gpu_entries(handle, _mask, _size, cursor):
+            seen = counts_gpu.get(handle.value, 0)
+            counts_gpu[handle.value] = seen + 1
+            if seen == 0:
+                entry = {
+                    "timestamp": "2026/08/24 12:00:00",
+                    "error_severity": "fatal",
+                    "notify_type": "RUNTIME",
+                }
+                return ({0: entry}, cursor + 1, [b""], 0)
+            return ({}, cursor, [], 0)
+
+        def _fabric_entries(handle, _mask, _size, cursor):
+            seen = counts_fabric.get(handle.value, 0)
+            counts_fabric[handle.value] = seen + 1
+            if seen == 0:
+                entry = _fabric_entry("2026/08/24 12:05:00", "non_fatal_uncorrected")
+                return ({0: entry}, cursor + 1, [b""], 0)
+            return ({}, cursor, [], 0)
+
+        self.interface.amdsmi_get_gpu_cper_entries = _gpu_entries
+        self.interface.amdsmi_get_fabric_cper_entries = _fabric_entries
+
+        commands = self._make_commands()
+        captured = self._run_ras(commands, _build_ras_args(self._handles))
+
+        parsed = json.loads(captured)
+        self.assertIsInstance(parsed, list)
+
+        # Expect 2 GPUs × 2 entries (1 GPU + 1 fabric) = 4 total rows
+        self.assertEqual(len(parsed), 4, f"expected 2 GPU + 2 fabric entries, got: {parsed!r}")
+
+        severities = [row["severity"] for row in parsed]
+        self.assertIn("FATAL", severities, "Should have GPU CPER entry")
+        self.assertIn("FABRIC-LINKDOWN", severities, "Should have fabric CPER entry")
+
+    def test_fabric_cper_only_no_gpu_cper(self):
+        counts_fabric = {}
+
+        def _fabric_entries(handle, _mask, _size, cursor):
+            seen = counts_fabric.get(handle.value, 0)
+            counts_fabric[handle.value] = seen + 1
+            if seen == 0:
+                entry = _fabric_entry("2026/08/24 13:00:00", "fatal")
+                return ({0: entry}, cursor + 1, [b""], 0)
+            return ({}, cursor, [], 0)
+
+        self.interface.amdsmi_get_fabric_cper_entries = _fabric_entries
+
+        commands = self._make_commands()
+        captured = self._run_ras(commands, _build_ras_args(self._handles))
+
+        parsed = json.loads(captured)
+        self.assertIsInstance(parsed, list)
+        self.assertEqual(len(parsed), 2, f"expected 2 fabric entries (1 per GPU), got: {parsed!r}")
+
+        for row in parsed:
+            self.assertEqual(row["severity"], "FABRIC-FATAL")
+
+    def test_fabric_cper_not_supported_graceful_fallback(self):
+        def _gpu_entries(handle, _mask, _size, cursor):
+            if cursor == 0:
+                entry = {
+                    "timestamp": "2026/08/24 14:00:00",
+                    "error_severity": "fatal",
+                    "notify_type": "RUNTIME",
+                }
+                return ({0: entry}, cursor + 1, [b""], 0)
+            return ({}, cursor, [], 0)
+
+        self.interface.amdsmi_get_gpu_cper_entries = _gpu_entries
+        # fabric_cper already set to raise NOT_SUPPORTED in setUp
+
+        commands = self._make_commands()
+        captured = self._run_ras(commands, _build_ras_args(self._handles))
+
+        parsed = json.loads(captured)
+        self.assertIsInstance(parsed, list)
+
+        # GPU entries only: one per GPU, with the fabric call raising NOT_SUPPORTED.
+        self.assertEqual(len(parsed), 2)
+        for row in parsed:
+            self.assertEqual(row["severity"], "FATAL")
 
 
 if __name__ == "__main__":
