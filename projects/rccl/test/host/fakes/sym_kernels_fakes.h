@@ -20,13 +20,29 @@
 // is an explicit, counted, overridable seam rather than a fixed stub result.
 extern ncclSymRegType_t g_symRegType;
 extern ncclResult_t g_getSymRegTypeResult;
-extern int g_getSymRegTypeCalls;
+extern int g_getSymRegTypeCalls;  // no test currently reads this counter
 extern std::function<ncclResult_t(struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t*)>
     g_getSymRegType;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkInitOnce;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
 extern std::function<bool(int)> g_symkKernelIdIsLL;
+
+// sym_kernels.cc's ncclSymkLLKernelMask: default has no bits set (the LL-kernel-init-once check never fires).
+extern std::function<int()> g_symkLLKernelMask;
+
+// sym_kernels.cc's ncclSymkDynamicSmemKernelMask: default has no bits set (kernelDynSmem stays 0).
+extern std::function<int()> g_symkDynamicSmemKernelMask;
+
+// sym_kernels.cc's ncclSymkGetKernelIndex: default always selects index 0.
+extern std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_symkGetKernelIndex;
+
+// sym_kernels.cc's ncclSymkKernelIdToString: default returns a fixed, recognizable name.
+extern std::function<const char*(int)> g_symkKernelIdToString;
+
+// sym_kernels.cc's ncclSymkMakeDevWork: trivial success; does not populate *outDevWork.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
+    g_symkMakeDevWork;
 
 void ResetSymKernelsFakes();
 
