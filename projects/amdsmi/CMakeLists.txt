@@ -13,6 +13,15 @@ set(CPACK_PACKAGE_NAME amd-smi-lib CACHE STRING "")
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
+
+# Root of the rocm-systems monorepo, used to locate shared infrastructure such
+# as the CTest test-filter categories under shared/ctest. Guarded so standalone
+# or sparse checkouts of amdsmi (where ../../shared does not exist) keep working.
+if(NOT DEFINED ROCM_SYSTEMS_ROOT)
+    set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+    get_filename_component(ROCM_SYSTEMS_ROOT "${ROCM_SYSTEMS_ROOT}" ABSOLUTE)
+endif()
+
 ## Include common cmake modules
 include(utils)
 include(help_package)

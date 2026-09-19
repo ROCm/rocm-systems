@@ -108,6 +108,50 @@ def main():
         print(f"# Detected OS: {platform.system()}")
         print(f"# Timeout multiplier: {timeout_multiplier}")
 
+        def write_suite(suite_name, pattern_string, labels, timeout, env_string, comment=None):
+            """Emit one add_test/set_tests_properties block to stdout and, when an
+            install file is open, its relative-path install-tree equivalent.
+
+            Used by the SR-IOV cross-product section below; the category and
+            per-arch sections above inline their own equivalent emission.
+            """
+            label_string = '"' + ";".join(labels) + '"'
+            if comment:
+                print(comment)
+            print("add_test(")
+            print(f"  NAME {suite_name}")
+            print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
+            print(f"  WORKING_DIRECTORY {working_dir}")
+            print(")")
+            print(f"set_tests_properties({suite_name} PROPERTIES")
+            print(f"  LABELS {label_string}")
+            print(f"  TIMEOUT {timeout}")
+            if env_string:
+                print(f'  ENVIRONMENT "{env_string}"')
+            print(")")
+            print()
+
+            if install_file_handle:
+                try:
+                    install_file_handle.write(
+                        f'add_test({suite_name} "../{target_name}" --gtest_filter={pattern_string})\n'
+                    )
+                    env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
+                    install_file_handle.write(
+                        f"set_tests_properties({suite_name} PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop})\n\n"
+                    )
+                    install_file_handle.flush()
+                except OSError as e:
+                    print(
+                        f"Warning: I/O error writing {suite_name} to install test file: {e}",
+                        file=sys.stderr,
+                    )
+                except Exception as e:
+                    print(
+                        f"Warning: Unexpected error writing {suite_name} to install test file: {type(e).__name__}: {e}",
+                        file=sys.stderr,
+                    )
+
         # Store category information for later use with GPU exclusions
         category_data = {}
 
@@ -228,6 +272,37 @@ def main():
         # - Test name format: {target_name}_{category}_{gpu_arch}_suite
         # - Uses gtest filter: "{category_patterns}:-{gpu_exclusion_patterns}"
         # ========================================================================
+
+        # ========================================================================
+        # Environment (SR-IOV) exclusions -- an arch-agnostic exclusion axis.
+        #
+        # exclude_SRIOV lists tests that fail only on SR-IOV virtual functions
+        # (they work on bare metal), so they must NOT be baked into the per-arch
+        # blocks. Instead we cross-product this set with every arch block (and
+        # with the arch-agnostic base) below, tagging each variant with the
+        # env label (e.g. ex_sriov). test_runner.py detects a VF at runtime and
+        # selects the matching *_sriov variant; off-VF it excludes it. This
+        # section is a no-op for components that do not define exclude_SRIOV.
+        # ========================================================================
+        exclude_sriov_config = config.get("exclude_SRIOV", {}) or {}
+        _sriov_patterns_raw = exclude_sriov_config.get("test_patterns", []) or []
+        sriov_patterns = []
+        for p in _sriov_patterns_raw:
+            if isinstance(p, list):
+                sriov_patterns.extend(p)
+            else:
+                sriov_patterns.append(p)
+        # Deduplicate while preserving order.
+        sriov_patterns = list(dict.fromkeys(sriov_patterns))
+        sriov_labels = exclude_sriov_config.get("labels", []) or []
+        # Category labels this env exclusion applies to, and the env label(s)
+        # (any label starting with "ex_", e.g. ex_sriov) to tag variants with.
+        sriov_categories = {l for l in sriov_labels if l in category_data}
+        sriov_env_labels = [l for l in sriov_labels if l.startswith("ex_")]
+        sriov_exclude_string = ":".join(sriov_patterns)
+        sriov_enabled = bool(
+            sriov_patterns and sriov_env_labels and sriov_categories
+        )
 
         # Collect all ex_gpu labels and their corresponding GPU architectures
 
@@ -353,6 +428,59 @@ def main():
                             f"Warning: Unexpected error writing GPU exclude {category_name}_{gpu_arch} to install test file: {type(e).__name__}: {e}",
                             file=sys.stderr,
                         )
+
+                # SR-IOV variant of this arch suite: layer the env excludes on
+                # top of the arch excludes so a VF run drops arch + SR-IOV
+                # failures together. Tagged with the arch label AND the env
+                # label(s); test_runner.py selects this only when it detects a
+                # VF for a matching arch.
+                if sriov_enabled and category_name in sriov_categories:
+                    sriov_combined_exclude = (
+                        combined_exclude_string + ":" + sriov_exclude_string
+                        if combined_exclude_string
+                        else sriov_exclude_string
+                    )
+                    sriov_pattern_string = (
+                        positive_string + "-" + sriov_combined_exclude
+                    )
+                    write_suite(
+                        f"{target_name}_{category_name}_{gpu_arch}_sriov_suite",
+                        sriov_pattern_string,
+                        cat_labels + [ex_gpu_label] + sriov_env_labels,
+                        timeout,
+                        env_string,
+                        comment=f"# SR-IOV + GPU exclusion for {gpu_arch} - {category_name} category",
+                    )
+
+        # ========================================================================
+        # Arch-agnostic SR-IOV suites: category excludes + SR-IOV excludes, with
+        # NO ex_gpu label. Selected on a VF whose arch has no exclude_gpu block
+        # (test_runner.py adds -LE ex_gpu in that case, so an arch-tagged variant
+        # would be filtered out). No-op when exclude_SRIOV is not defined.
+        # ========================================================================
+        if sriov_enabled:
+            for category_name in sorted(sriov_categories):
+                cat_data = category_data[category_name]
+                positive_string = cat_data["positive_string"]
+                cat_exclude_string = cat_data["exclude_string"]
+                cat_labels = cat_data["labels"]
+                timeout = cat_data["timeout"]
+                env_string = cat_data["env_string"]
+
+                combined_exclude = (
+                    cat_exclude_string + ":" + sriov_exclude_string
+                    if cat_exclude_string
+                    else sriov_exclude_string
+                )
+                pattern_string = positive_string + "-" + combined_exclude
+                write_suite(
+                    f"{target_name}_{category_name}_sriov_suite",
+                    pattern_string,
+                    cat_labels + sriov_env_labels,
+                    timeout,
+                    env_string,
+                    comment=f"# SR-IOV exclusion (arch-agnostic) - {category_name} category",
+                )
 
 
 if __name__ == "__main__":
