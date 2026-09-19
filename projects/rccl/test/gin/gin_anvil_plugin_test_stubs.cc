@@ -13,7 +13,6 @@
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
-
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <cstring>
@@ -21,13 +20,28 @@
 
 namespace GinAnvilPluginStubs {
 
+struct IntraNodeBootstrapCall {
+  std::vector<int> ranks;
+  int rank = -1;
+  int nranks = 0;
+  int tag = -1;
+};
+
 struct State {
   int probeResult = 1;
   bool bootstrapFail = false;
   int bootstrapNranks = 1;
+  std::vector<std::vector<int>> bootstrapIntResults;
+  IntraNodeBootstrapCall lastIntraNodeAllGather;
+  IntraNodeBootstrapCall lastIntraNodeBarrier;
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
+  bool connCheckVerifyMissing = false;
+  int connCheckMissingCalls = 0;
+  int connCheckWriteCalls = 0;
+  int connCheckVerifyCalls = 0;
+  std::vector<unsigned long long> connCheckWriteStamps;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
 };
 
@@ -46,10 +60,28 @@ void Reset() { g = State{}; }
 void SetProbeResult(int result) { g.probeResult = result; }
 void SetBootstrapFail(bool fail) { g.bootstrapFail = fail; }
 void SetBootstrapNranks(int nranks) { g.bootstrapNranks = nranks; }
+void SetBootstrapIntResult(const int* values, int count) {
+  g.bootstrapIntResults.emplace_back(values, values + count);
+}
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetConnCheckVerifyMissing(bool missing) { g.connCheckVerifyMissing = missing; }
+void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
+int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
+int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
+unsigned long long GetConnCheckWriteStamp(int call) {
+  return call >= 0 && static_cast<size_t>(call) < g.connCheckWriteStamps.size()
+             ? g.connCheckWriteStamps[static_cast<size_t>(call)]
+             : 0;
+}
+const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
+int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
+int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
+int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
+int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
 
 }  // namespace GinAnvilPluginStubs
 
@@ -66,16 +98,64 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   (void)fmt;
 }
 
-ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
-  (void)commState;
+static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
-  if (size == static_cast<int>(sizeof(int))) {
-    int* devs = static_cast<int*>(allData);
-    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
-      if (devs[i] < 0) devs[i] = 0;
+  if (size != static_cast<int>(sizeof(int)) || nranks < 1) return ncclSuccess;
+  int* devs = static_cast<int*>(allData);
+  if (!GinAnvilPluginStubs::g.bootstrapIntResults.empty()) {
+    const std::vector<int>& vals = GinAnvilPluginStubs::g.bootstrapIntResults.front();
+    for (int i = 0; i < nranks; ++i) {
+      devs[i] = static_cast<size_t>(i) < vals.size() ? vals[static_cast<size_t>(i)] : 0;
     }
+    GinAnvilPluginStubs::g.bootstrapIntResults.erase(GinAnvilPluginStubs::g.bootstrapIntResults.begin());
+    return ncclSuccess;
+  }
+  int known = -1;
+  int maxv = 0;
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] >= 0) known = devs[i];
+    if (devs[i] > maxv) maxv = devs[i];
+  }
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] < 0 && known >= 0) devs[i] = known;
+    if (devs[i] < 0) devs[i] = 0;
+  }
+  // Conn-check allgather: replicate the max missing count (single-process sim).
+  if (maxv > 0) {
+    for (int i = 0; i < nranks; ++i) devs[i] = maxv;
   }
   return ncclSuccess;
+}
+
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  (void)commState;
+  return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
+}
+
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
+  (void)commState;
+  (void)rank;
+  (void)nranks;
+  (void)tag;
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  return ncclSuccess;
+}
+
+ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData,
+                                         int size) {
+  (void)commState;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
+  return stubIntAllGather(allData, nranks, size);
+}
+
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.nranks = nranks;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.tag = tag;
+  return bootstrapBarrier(commState, rank, nranks, tag);
 }
 
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
@@ -162,4 +242,44 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+// [GIN-CONN-CHECK] Host stubs for gin_plugin_anvil_sdma.cc when this TU is linked
+// into rccl-UnitTestsGinAnvilPlugin without gin_anvil_conn_check_device.cc (compiled
+// as plain C++). Production librccl resolves these from the HIP device TU instead.
+extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
+                                 unsigned long long stamp, hipStream_t stream) {
+  (void)remoteAddrsDev;
+  (void)nRanks;
+  (void)selfRank;
+  (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckWriteCalls;
+  GinAnvilPluginStubs::g.connCheckWriteStamps.push_back(stamp);
+  return 0;
+}
+
+extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp,
+                                 int* missingDev, hipStream_t stream) {
+  (void)localSignals;
+  (void)stamp;
+  (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckVerifyCalls;
+  if (missingDev && nRanks > 0) {
+    bool missingForRetry = GinAnvilPluginStubs::g.connCheckMissingCalls > 0;
+    if (missingForRetry) --GinAnvilPluginStubs::g.connCheckMissingCalls;
+    bool injectMissing = false;
+#ifdef ENABLE_FAULT_INJECTION
+    if (const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK")) {
+      injectMissing = atoi(injEnv) >= 0;
+    }
+#endif
+    const bool simulateMissing =
+        GinAnvilPluginStubs::g.connCheckVerifyMissing || missingForRetry || injectMissing;
+    std::vector<int> missing(static_cast<size_t>(nRanks), simulateMissing ? 1 : 0);
+    if (hipMemcpy(missingDev, missing.data(), sizeof(int) * static_cast<size_t>(nRanks),
+                  hipMemcpyHostToDevice) != hipSuccess) {
+      return -1;
+    }
+  }
+  return 0;
 }

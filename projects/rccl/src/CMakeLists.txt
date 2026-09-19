@@ -209,6 +209,7 @@ set(SRC_FILES
   include/gdr_peermem.h
   include/gdrwrap.h
   include/gin.h
+  include/gin/gin_anvil_conn_check.h
   include/gin/gin_host.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_host_proxy.h
@@ -589,8 +590,9 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
+    src/gin/gin_anvil_conn_check_device.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
-    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
 endif()
 
@@ -910,6 +912,7 @@ if(ENABLE_DEVICE_LINKER)
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_anvil_conn_check_device\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
