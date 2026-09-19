@@ -380,6 +380,10 @@ parse:
         PASS_REGEX: '*'
         APP_EXTRA_FLAGS: '*'
         ROCPROFV3_EXTRA_FLAGS: '*'
+    rocprofiler_add_invalid_yaml_test:
+      kwargs:
+        NAME: '*'
+        ERROR_REGEX: '*'
   override_spec: {}
   vartags: []
   proptags: []
