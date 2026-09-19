@@ -52,6 +52,23 @@ namespace QueuePairOption {
   template <auto V>
   using constant_t = std::integral_constant<decltype(V), V>;
 
+  /*
+   * @brief Type trait for defining default values for options.
+   */
+  template <template<auto> typename option_tag> struct default_option { };
+
+  /*
+   * @brief Helper type alias for the default_option type trait.
+   */
+  template <template<auto> typename option_tag>
+  using default_option_t = typename default_option<option_tag>::type;
+
+  /*
+   * @brief Helper variable for the default option value.
+   */
+  template <template<auto> typename option_tag>
+  constexpr inline auto default_option_v = default_option_t<option_tag>::value;
+
   enum class UpdateThread {
     All,
     Last,
@@ -64,11 +81,21 @@ namespace QueuePairOption {
   template <bool ring_db>
   struct ring_db_tag : constant_t<ring_db> { };
 
+  template <> struct default_option<ring_db_tag> {
+    /* default: DO ring the doorbell */
+    using type = ring_db_tag<true>;
+  };
+
   /*
    * @brief Option: whether thread safety will be enforced.
    */
   template <bool thread_safe>
   struct thread_safe_tag : constant_t<thread_safe> { };
+
+  template <> struct default_option<thread_safe_tag> {
+    /* default: DO use thread safety */
+    using type = thread_safe_tag<true>;
+  };
 
   /*
    * @brief Option: whether the number of available send queue entries will be checked.
@@ -76,11 +103,21 @@ namespace QueuePairOption {
   template <bool check_sq>
   struct check_sq_tag : constant_t<check_sq> { };
 
+  template <> struct default_option<check_sq_tag> {
+    /* default: DO check the SQ */
+    using type = check_sq_tag<true>;
+  };
+
   /*
    * @brief Option: which threads' WQEs will generate CQEs.
    */
   template <UpdateThread update_cq>
   struct update_cq_tag : constant_t<update_cq> { };
+
+  template <> struct default_option<update_cq_tag> {
+    /* default: all WQEs update the CQ */
+    using type = update_cq_tag<UpdateThread::All>;
+  };
 
   /* forward declaration */
   template <typename... Options> struct PostOpt;
@@ -163,13 +200,13 @@ namespace QueuePairOption {
        : PostOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
-                 update_cq_tag</* default: all WQEs update the CQ */ UpdateThread::All>,
+                 default_option_t<update_cq_tag>,
                  Options...> {
     /* inherit constructor */
     using PostOpt<ring_db_tag<ring_db>,
                   thread_safe_tag<thread_safe>,
                   check_sq_tag<check_sq>,
-                  update_cq_tag<UpdateThread::All>,
+                  default_option_t<update_cq_tag>,
                   Options...
                  >::PostOpt;
   };
@@ -182,12 +219,12 @@ namespace QueuePairOption {
                  Options...>
        : PostOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
-                 check_sq_tag</* default: DO check the SQ */ true>,
+                 default_option_t<check_sq_tag>,
                  Options...> {
     /* inherit constructor */
     using PostOpt<ring_db_tag<ring_db>,
                   thread_safe_tag<thread_safe>,
-                  check_sq_tag<true>,
+                  default_option_t<check_sq_tag>,
                   Options...
                  >::PostOpt;
   };
@@ -198,11 +235,11 @@ namespace QueuePairOption {
   struct PostOpt<ring_db_tag<ring_db>,
                  Options...>
        : PostOpt<ring_db_tag<ring_db>,
-                 thread_safe_tag</* default: DO use thread safety */ true>,
+                 default_option_t<thread_safe_tag>,
                  Options...> {
     /* inherit constructor */
     using PostOpt<ring_db_tag<ring_db>,
-                  thread_safe_tag<true>,
+                  default_option_t<thread_safe_tag>,
                   Options...
                  >::PostOpt;
   };
@@ -211,13 +248,20 @@ namespace QueuePairOption {
    * else matches PostOpt<ring_db_tag, Options...> */
   template <typename... Options>
   struct PostOpt
-       : PostOpt<ring_db_tag</* default: DO ring the doorbell */ true>,
+       : PostOpt<default_option_t<ring_db_tag>,
                  Options...> {
     /* inherit constructor */
-    using PostOpt<ring_db_tag<true>,
+    using PostOpt<default_option_t<ring_db_tag>,
                   Options...
                  >::PostOpt;
   };
+
+  /* ensure default PostOpt<> uses all the default options */
+  static_assert(PostOpt<>::RingDB     == default_option_v<ring_db_tag>     &&
+                PostOpt<>::ThreadSafe == default_option_v<thread_safe_tag> &&
+                PostOpt<>::CheckSQ    == default_option_v<check_sq_tag>    &&
+                PostOpt<>::UpdateCQ   == default_option_v<update_cq_tag>);
+
 }  // namespace QueuePairOption
 
 /*
