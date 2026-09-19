@@ -8,6 +8,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
+  - New C API `amdsmi_get_link_topology()` returns a single `amdsmi_link_topology_t` aggregating link weight, link status, link type, hop count, and framebuffer-sharing capability between two GPUs, matching the existing host interface.
+  - New Python and Rust bindings expose the same topology data.
+  - Behavior note for callers migrating from the component APIs: for a self-pair (identical source and destination), the call short-circuits to `link_type = AMDSMI_LINK_TYPE_INTERNAL`, `num_hops = 0`, `weight = 0`, `fb_sharing = 1`, and `link_status = AMDSMI_LINK_STATUS_ENABLED`. This is intentionally different from the underlying calls, where `amdsmi_topo_get_link_type(j, j)` reports PCIe with 2 hops and `amdsmi_topo_get_link_weight(j, j)` reports twice the NUMA node weight (typically 40).
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
 
