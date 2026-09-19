@@ -92,6 +92,7 @@ test_categories:
       # Specialized tests
       - "shmemptr_.*"
       - "library_info_.*"
+      - "buffer_register_symmetric_.*"
       - "hipmodule_init_.*"
 
     labels:

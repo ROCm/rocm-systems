@@ -172,6 +172,7 @@ declare -A TEST_NUMBERS=(
   ["tile_reduce"]="155"
   ["tile_reduce_wave"]="156"
   ["tile_reduce_wg"]="157"
+  ["buffer_register_symmetric"]="162"
 )
 
 # Detect which runtime to use
@@ -252,6 +253,14 @@ AdjustGridBarrierProblemSize() {
 
 # Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [[ "$1" == "buffer_register_symmetric" ]]; then
+    local selected_backend="${ROCSHMEM_BACKEND:-${ROCSHMEM_BACKEND_TYPE:-$TEST}}"
+    if [[ "${ROCSHMEM_HEAP_ALLOCATOR_TYPE,,}" != "vmm_posix" ]]; then
+      echo "Skip:   buffer_register_symmetric (set ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix)"
+      return
+    fi
+  fi
+
   if [ $USE_SLR -eq 1 ]; then
     ExecTest_SLR "$@"
   else
@@ -296,10 +305,7 @@ ExecTest_SLR() {
 
   NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # Build command as an array using SLR instead of MPI
   local -a cmd
@@ -308,7 +314,7 @@ ExecTest_SLR() {
   # Build environment variable list
   env_vars=(
     "ROCSHMEM_SLR_NP=$NUM_RANKS"
-    "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+    "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
     "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
   )
 
@@ -318,6 +324,14 @@ ExecTest_SLR() {
   fi
   if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
     env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
+  fi
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
+    env_vars+=(
+      "ROCSHMEM_GDA_ENABLE_DMABUF=1"
+    )
+    if [[ "${selected_backend:-}" == gda* ]]; then
+      env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
+    fi
   fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
@@ -437,10 +451,7 @@ ExecTest_MPI() {
 
   NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # MPI Parameters
   LAUNCHER=mpirun
@@ -457,16 +468,30 @@ ExecTest_MPI() {
 
   # Build command as an array to avoid command injection with eval
   local -a cmd
+  local -a test_env_args
+  test_env_args=()
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
+    test_env_args+=(
+      -x "ROCSHMEM_TEST_UUID=1"
+      -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=$ROCSHMEM_HEAP_ALLOCATOR_TYPE"
+      -x "ROCSHMEM_GDA_ENABLE_DMABUF=1"
+    )
+    if [[ "${selected_backend:-}" == gda* ]]; then
+      test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")
+    fi
+  fi
+
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
         -mca pml "${OMPI_MCA_pml:-ucx}"
         -mca osc "${OMPI_MCA_osc:-ucx}"
-        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
         ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+        "${test_env_args[@]}"
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
@@ -934,6 +959,9 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "library_info"     2       1            1
+  ExecTest  "buffer_register_symmetric" 2  1         1       64
+  ExecTest  "buffer_register_symmetric" 2  2        64       64
+  ExecTest  "buffer_register_symmetric" 4  2        64       64
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
