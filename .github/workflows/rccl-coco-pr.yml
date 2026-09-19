@@ -13,8 +13,8 @@ name: RCCL coco PR
 # in .github/scripts/rccl_coco_matrix.py. Keep coco job keys as
 # <prefix>-rccl-pr-{build,smoke}; tRCCL config validation enforces that shape.
 #
-# The run is --skip-baselines, so every stack builds the PR head except the one
-# named by baseline_stack, which the regression-perf lane measures against.
+# PR runs pass --skip-baselines with no --baseline-stack until the perf stack
+# key is validated in the pinned harness.
 #
 # "RCCL PR gate" is the check to mark required on the protected branches.
 on:
@@ -142,7 +142,6 @@ jobs:
       mode: pr
       build_only: true
       job: ${{ matrix.prefix }}-rccl-pr-build
-      baseline_stack: rocm-10.0-ga_rccl-develop-perf
       runs_on: ${{ matrix.runner }}
       pr_number: ${{ needs.setup.outputs.pr_number }}
       pr_sha: ${{ needs.setup.outputs.pr_sha }}
@@ -167,7 +166,6 @@ jobs:
     with:
       mode: pr
       job: ${{ matrix.prefix }}-rccl-pr-smoke
-      baseline_stack: rocm-10.0-ga_rccl-develop-perf
       runs_on: ${{ matrix.runner }}
       pr_number: ${{ needs.setup.outputs.pr_number }}
       pr_sha: ${{ needs.setup.outputs.pr_sha }}
