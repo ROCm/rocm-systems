@@ -186,6 +186,10 @@ public:
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
  private:
   /// @brief Destroys @p bo_handle.
   ///
