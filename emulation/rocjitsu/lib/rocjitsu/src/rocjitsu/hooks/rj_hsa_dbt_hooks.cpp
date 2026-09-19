@@ -31,6 +31,7 @@
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/arena_alloc.h"
+#include "util/diagnostic.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
 
@@ -367,33 +368,31 @@ void restore_signal_backtrace_handlers() {
 
 /// @brief Load and validate DBT hook configuration from the runtime config file.
 [[nodiscard]] std::optional<HookConfig> parse_config() {
-  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest;
-  try {
-    dbt_guest = rocjitsu::config::load_dbt_guest_config_from_runtime_config();
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n", error.what());
+  util::StringDiagnostic config_error;
+  rocjitsu::config::DbtGuestConfigResult dbt_guest_result =
+      rocjitsu::config::load_dbt_guest_config_from_runtime_config(config_error.emitter());
+  if (dbt_guest_result.failed()) {
+    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n",
+                 config_error.message().c_str());
     return std::nullopt;
   }
-  if (!dbt_guest) {
-    std::fprintf(stderr, "[rocjitsu-hooks] runtime config is required for the DBT HSA hook\n");
-    return std::nullopt;
-  }
+  rocjitsu::config::DbtGuestConfig dbt_guest = std::move(dbt_guest_result).value();
 
-  if (!dbt_guest->enabled) {
+  if (!dbt_guest.enabled) {
     std::fprintf(stderr, "[rocjitsu-hooks] runtime config does not enable dbt_guest mode\n");
     return std::nullopt;
   }
 
-  auto target = parse_target(dbt_guest->host.isa);
+  auto target = parse_target(dbt_guest.host.isa);
   if (!target) {
     std::fprintf(stderr, "[rocjitsu-hooks] invalid dbt_guest.host_isa='%s'\n",
-                 dbt_guest->host.isa.c_str());
+                 dbt_guest.host.isa.c_str());
     return std::nullopt;
   }
-  auto guest = parse_target(dbt_guest->guest_isa);
+  auto guest = parse_target(dbt_guest.guest_isa);
   if (!guest) {
     std::fprintf(stderr, "[rocjitsu-hooks] invalid dbt_guest.guest_isa='%s'\n",
-                 dbt_guest->guest_isa.c_str());
+                 dbt_guest.guest_isa.c_str());
     return std::nullopt;
   }
 
@@ -401,11 +400,11 @@ void restore_signal_backtrace_handlers() {
   config.target = *target;
   config.source_override = *guest;
   config.guest_target = *guest;
-  config.host_gpu_id = dbt_guest->host.gpu_id;
-  config.log_level = clamp_log_level(dbt_guest->log_level);
-  config.signal_backtrace = dbt_guest->signal_backtrace;
-  config.guest_revision = processor_revision_from_config(dbt_guest->guest_revision);
-  config.host_revision = processor_revision_from_config(dbt_guest->host_revision);
+  config.host_gpu_id = dbt_guest.host.gpu_id;
+  config.log_level = clamp_log_level(dbt_guest.log_level);
+  config.signal_backtrace = dbt_guest.signal_backtrace;
+  config.guest_revision = processor_revision_from_config(dbt_guest.guest_revision);
+  config.host_revision = processor_revision_from_config(dbt_guest.host_revision);
   return config;
 }
 

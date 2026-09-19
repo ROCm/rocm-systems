@@ -27,6 +27,7 @@
 #include "embedded_schema.h"
 #include "launch_preload.h"
 #include "rocm_visibility.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <cctype>
@@ -516,8 +517,15 @@ int main(int argc, char *argv[]) {
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
+  util::StringDiagnostic dbt_config_error;
+  rocjitsu::config::DbtGuestConfigResult dbt_guest_result =
+      rocjitsu::config::load_dbt_guest_config_from_file(abs_config, dbt_config_error.emitter());
+  if (dbt_guest_result.failed()) {
+    std::cerr << std::format("rocjitsu: failed to parse config: {}\n", dbt_config_error.message());
+    return 1;
+  }
+  dbt_guest_config = std::move(dbt_guest_result).value();
   try {
-    dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
     if (!dbt_guest_config.enabled)
       (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
   } catch (const std::exception &e) {
