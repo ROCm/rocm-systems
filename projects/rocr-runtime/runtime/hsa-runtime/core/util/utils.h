@@ -60,6 +60,10 @@
 #include <thread>
 #include <locale>
 
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
 #if defined(__GNUC__)
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
@@ -422,6 +426,49 @@ static __forceinline std::string& rtrim(std::string& s) {
 
 static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
+static __forceinline void cpu_relax() {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_pause();
+#elif __has_builtin(__builtin_arm_yield)
+  __builtin_arm_yield();
+#elif __has_builtin(__builtin_riscv_pause)
+  __builtin_riscv_pause();
+#else
+#warning "No cpu_relax() implementation for this processor"
+#endif
+}
+
+static __forceinline void store_fence() {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_sfence();
+#elif __has_builtin(__builtin_arm_dmb)
+  __builtin_arm_dmb(0x2);  // oshst
+#else
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
+
+static __forceinline void memory_fence() {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_mfence();
+#elif __has_builtin(__builtin_arm_dsb)
+  __builtin_arm_dsb(0xf);  // sy
+#else
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
+}
+
+static __forceinline void cacheline_flush(const void* p) {
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
+  _mm_clflush(p);
+#elif __has_builtin(__builtin_arm_dcimvac)
+  __builtin_arm_dcimvac(const_cast<void*>(p));
+#else
+#warning "No cacheline_flush() implementation for this processor"
+  (void)p;
+#endif
+}
+
 /// @brief: Flush the cachelines associated with the
 /// provided address, offset, and length
 /// @param: base(Input), base address to flush
@@ -449,7 +496,7 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
-    _mm_clflush((const void*)cur);
+    cacheline_flush(cur);
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }
