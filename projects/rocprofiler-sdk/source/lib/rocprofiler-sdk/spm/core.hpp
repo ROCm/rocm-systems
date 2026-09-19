@@ -112,6 +112,13 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
 bool
 is_spm_explicitly_enabled();
 
+rocprofiler_status_t
+configure_agent_collection(rocprofiler_context_id_t                 context_id,
+                           rocprofiler_buffer_id_t                  buffer_id,
+                           rocprofiler_agent_id_t                   agent_id,
+                           rocprofiler_device_counting_service_cb_t cb,
+                           void*                                    user_data);
+
 /*
  * start dispatch SPM context
  */

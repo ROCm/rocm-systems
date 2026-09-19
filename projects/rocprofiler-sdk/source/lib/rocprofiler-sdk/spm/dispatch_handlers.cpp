@@ -262,10 +262,12 @@ post_kernel_call(const context::context*                           ctx,
                 CHECK_NOTNULL(hsa::get_queue_controller())
                     ->get_core_table()
                     .hsa_signal_destroy_fn(pkt->before_krn_barrier_pkt.at(1).dep_signal[0]);
+
                 if(!pkt->kfd_stop())
                 {
                     ROCP_ERROR << "SPM KFD stop failed in post-kernel completion";
                 }
+
                 if(pkt->cb.record_cb)
                 {
                     pkt->cb.record_cb(&pkt->cb.dispatch_data,
