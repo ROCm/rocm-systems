@@ -21,6 +21,7 @@
 #
 # ##############################################################################
 
+# Temporary no-op change on rocjpeg to exercise TheRock Multi-arch CI
 cmake_minimum_required(VERSION 3.15)
 
 # ROCM Path
