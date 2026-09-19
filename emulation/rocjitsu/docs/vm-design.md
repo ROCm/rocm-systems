@@ -298,9 +298,12 @@ carries among other things:
 - `sgprs_per_wf` / `vgprs_per_wf` - register requirements (from code object)
 
 Wavefronts are distributed round-robin across CUs within the XCD. Each CU
-allocates a contiguous block in its physical SGPR and VGPR files for the
-wavefront. For a fanned-out dispatch this walk covers only the XCD's own share
-of the grid; see *Queue ownership and XCD fan-out* above.
+allocates a contiguous range of indices in its physical SGPR and VGPR files
+for the wavefront. Backing storage is allocated lazily in 4 KiB chunks on first
+mutable access; const reads of absent chunks return zero without allocating.
+The backing storage need not be contiguous across chunks. For a fanned-out
+dispatch this walk covers only the XCD's own share of the grid; see *Queue
+ownership and XCD fan-out* above.
 
 ---
 

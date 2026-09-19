@@ -831,11 +831,6 @@ public:
   /// @param val Value to write.
   virtual void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
 
-  /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
-  /// @param base Base register index in the SGPR file.
-  /// @returns Pointer to the contiguous SGPR data.
-  const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
-
   /// @brief Return a raw pointer to one VGPR in the physical file.
   /// @details This bypasses plugin read hooks and should not be used directly
   /// by instruction emulators. It is reserved for RegisterAccess, VM storage
@@ -924,9 +919,11 @@ public:
     return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(raw_vgpr_data(base));
   }
 
-  /// @brief Return the SGPR register file (for serialization).
+  using SgprFile = simdojo::RegisterFile<uint32_t, simdojo::RegisterFileStorage::SOFTWARE_LAZY>;
+
+  /// @brief Return the SGPR register file for serialization and diagnostics.
   /// @returns Const reference to the SGPR register file.
-  const simdojo::RegisterFile<uint32_t> &sgpr_file() const { return sgpr_file_; }
+  const SgprFile &sgpr_file() const { return sgpr_file_; }
 
   /// @brief Return the decoder (for external decode if needed).
   /// @returns Const pointer to the ISA decoder.
@@ -1065,7 +1062,7 @@ protected:
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
-  simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
+  SgprFile sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
   /// @brief Hold the wave-state lock, then notify the CP once it is released.
   /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
