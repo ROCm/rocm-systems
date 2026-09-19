@@ -35,6 +35,9 @@ set(rocprofv3-rocpd-env
 
 find_package(Python3 REQUIRED)
 
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
 #########################################################################################
 #
 # generate rocpd database
@@ -50,8 +53,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-rename)
 
 rocprofiler_add_integration_execute_test(
@@ -63,8 +65,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-rename)
 
 #########################################################################################
@@ -82,7 +83,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-rename-csv-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd-rename)
@@ -96,7 +96,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-rename-csv-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd-rename)

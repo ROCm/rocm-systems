@@ -25,6 +25,13 @@ endif()
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
 
+if(ROCPROFILER_MEMCHECK MATCHES "^(Address|Leak|Thread)Sanitizer$")
+    # ASan, LSan, and TSan install their own sigaction interceptors. Interposing sigaction
+    # from the preloaded tool can recursively enter the sanitizer during initialization.
+    target_compile_definitions(rocprofiler-sdk-tool
+                               PRIVATE ROCPROFV3_DISABLE_SIGACTION_INTERPOSITION=1)
+endif()
+
 target_link_libraries(
     rocprofiler-sdk-tool
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library

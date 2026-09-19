@@ -75,8 +75,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ARBITRARY_ENV_VARIABLE=%tag%-trace-inp-yaml"
+    ENVIRONMENT "${PRELOAD_ENV}" "ARBITRARY_ENV_VARIABLE=%tag%-trace-inp-yaml"
     FIXTURES_SETUP rocprofv3-test-summary-inp-yaml)
 
 rocprofiler_add_integration_validate_test(

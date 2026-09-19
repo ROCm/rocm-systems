@@ -25,14 +25,6 @@
 #define ROCPROFV3_PUBLIC_API   __attribute__((visibility("default")));
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
-#if defined(__has_feature)
-#    if __has_feature(thread_sanitizer)
-#        define ROCPROFV3_THREAD_SANITIZER 1
-#    endif
-#elif defined(__SANITIZE_THREAD__)
-#    define ROCPROFV3_THREAD_SANITIZER 1
-#endif
-
 #include <dlfcn.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -73,8 +65,7 @@ __libc_start_main(int (*)(int, char**, char**),
 sighandler_t
 signal(int signum, sighandler_t handler) ROCPROFV3_PUBLIC_API;
 
-#if !defined(ROCPROFV3_THREAD_SANITIZER)
-// breaks thread sanitizer
+#if !defined(ROCPROFV3_DISABLE_SIGACTION_INTERPOSITION)
 int
 sigaction(int                              signum,
           const struct sigaction* restrict act,
@@ -157,11 +148,13 @@ signal(int signum, sighandler_t handler)
     return rocprofv3_signal(signum, handler);
 }
 
+#if !defined(ROCPROFV3_DISABLE_SIGACTION_INTERPOSITION)
 int
 sigaction(int signum, const struct sigaction* restrict act, struct sigaction* restrict oldact)
 {
     return rocprofv3_sigaction(signum, act, oldact);
 }
+#endif
 
 int
 __libc_start_main(int (*_main)(int, char**, char**),

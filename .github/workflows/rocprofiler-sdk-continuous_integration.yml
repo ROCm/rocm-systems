@@ -506,17 +506,16 @@ jobs:
             -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     needs: ci_config
-    name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    name: ${{ matrix.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
+        # ASan and TSan run on PRs and pushes; nightly and manual runs cover all four.
+        sanitizer: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["AddressSanitizer", "ThreadSanitizer", "LeakSanitizer", "UndefinedBehaviorSanitizer"]' || '["AddressSanitizer", "ThreadSanitizer"]') }}
         system:
-          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
 
     runs-on: ${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}
     container:
@@ -623,11 +622,11 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
         enable-rocprof-trace-decoder-build: 'true'
-        ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
+        ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}-${{ matrix.system.gpu }}-${{ matrix.sanitizer }}
         ccache-variant: ccache
 
     - name: Configure, Build, and Test
-      timeout-minutes: 30
+      timeout-minutes: 50
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
@@ -635,12 +634,12 @@ jobs:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
         if [[ -n "${HIP_VISIBLE_DEVICES:-}" ]]; then unset GPU_DEVICE_ORDINAL; fi
         python3 ./source/scripts/run-ci.py -B build \
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }} \
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.sanitizer }} \
           --build-jobs 16 \
           --mode ${CI_MODE} \
           --site ${{ needs.ci_config.outputs.gfx94x_sandbox_runner }} \
           --gpu-targets ${{ env.GPU_TARGETS }} \
-          --memcheck ${{ matrix.system.sanitizer }} \
+          --memcheck ${{ matrix.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
           -- \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
