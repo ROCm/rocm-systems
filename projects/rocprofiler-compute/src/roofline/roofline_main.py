@@ -3,6 +3,7 @@
 
 import argparse
 import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Optional
 
@@ -12,7 +13,7 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from roofline.roofline_frame import FrameAnchors, frame_bounds
+from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
@@ -44,6 +45,7 @@ from utils.roofline_calc import (
     XMIN,
     OpsSupport,
     construct_roof,
+    machine_ceilings,
     sanitize_mem_level,
 )
 from utils.specs import MachineSpecs
@@ -51,7 +53,7 @@ from utils.utils_analysis import get_matrix_ops_type
 
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
 DEFAULT_PEAK = "HBM"
-DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 100000.0)
+DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
 TRACE_COLORS: dict[str, dict[str, str]] = {
     "l0": {"html": "#F0E442", "cli": "brown+"},
@@ -68,10 +70,48 @@ _ROOF_SAMPLES_PER_DECADE = 48
 _ROOF_SAMPLES_MIN = 64
 _ROOF_SAMPLES_MAX = 800
 
+# The precision the standalone page opens with when the run benchmarked it.
+_PREFERRED_DEFAULT_PRECISION = "FP32"
+
 
 def _figure_class(dtype: str) -> str:
     """Return OP or FLOP; integer datatypes use the ops figure."""
     return "OP" if str(dtype).startswith("I") else "FLOP"
+
+
+def _default_precisions(precisions: list[str]) -> list[str]:
+    """The precisions the page opens with: FP32 when the run has it, else the
+    first datatype plotted."""
+    if _PREFERRED_DEFAULT_PRECISION in precisions:
+        return [_PREFERRED_DEFAULT_PRECISION]
+    return precisions[:1]
+
+
+def _roof_clipped_to_peak(
+    sample_ai: list[float],
+    bandwidth: float,
+    top_peak: float,
+) -> tuple[list[float], list[float]]:
+    """The diagonal y = bandwidth * AI drawn only up to where it meets top_peak.
+
+    Mirrors the client's re-clipping so the shipped roof already matches the
+    precisions the page opens with.
+    """
+    knee_ai = top_peak / bandwidth
+    points = sorted(
+        (ai, bandwidth * ai)
+        for ai in sample_ai
+        if ai > 0 and math.isfinite(ai) and ai < knee_ai and bandwidth * ai < top_peak
+    )
+    xs: list[float] = []
+    ys: list[float] = []
+    for ai, perf in points:
+        if not xs or ai > xs[-1]:
+            xs.append(ai)
+            ys.append(perf)
+    xs.append(knee_ai)
+    ys.append(top_peak)
+    return xs, ys
 
 
 def get_color(category: str, backend: str = "html") -> str:
@@ -94,6 +134,28 @@ def _roof_sample_count(low_ai: float, high_ai: float) -> int:
     return int(min(max(samples, _ROOF_SAMPLES_MIN), _ROOF_SAMPLES_MAX))
 
 
+def _decade_label(value: float) -> str:
+    """Format a positive decade bound compactly and exactly."""
+    return f"1e{int(round(math.log10(value)))}"
+
+
+def _frame_subtitle(
+    bounds: tuple[float, float, float, float], is_machine_frame: bool
+) -> str:
+    """Name the source and bounds of the frame shown by both axes."""
+    x_lo, x_hi, y_lo, y_hi = bounds
+    source = (
+        "Axes fixed to this GPU"
+        if is_machine_frame
+        else "Default axes - benchmark ceilings unavailable"
+    )
+    return (
+        f"{source} - "
+        f"AI {_decade_label(x_lo)} to {_decade_label(x_hi)} - "
+        f"performance {_decade_label(y_lo)} to {_decade_label(y_hi)}"
+    )
+
+
 class Roofline:
     def __init__(
         self,
@@ -109,6 +171,8 @@ class Roofline:
         self.__view_models: dict[str, RooflineViewModel] = {}
         self.__compute_peaks: dict[str, list[tuple[str, float]]] = {}
         self.__ceiling_by_dtype: dict[str, dict[str, Any]] = {}
+        self.__frame_bounds: Optional[tuple[float, float, float, float]] = None
+        self.__frame_from_machine_ceilings: Optional[bool] = None
 
     def _ceiling_for_dtype(self, dtype: str) -> dict[str, Any]:
         if dtype not in self.__ceiling_by_dtype:
@@ -116,9 +180,18 @@ class Roofline:
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype,
                 mspec=self.__mspec,
-                ai_data=self.__ai_data,
             )
         return self.__ceiling_by_dtype[dtype]
+
+    def _canonical_frame_bounds(self) -> tuple[float, float, float, float]:
+        """Return this machine's shared frame, computing it only once."""
+        if self.__frame_bounds is None:
+            machine_frame = canonical_frame(
+                *machine_ceilings(self.__run_parameters, self.__mspec)
+            )
+            self.__frame_from_machine_ceilings = machine_frame is not None
+            self.__frame_bounds = machine_frame or DEFAULT_AXIS_BOUNDS
+        return self.__frame_bounds
 
     def roof_setup(self) -> None:
         workload_dir_val = self.__run_parameters.get("workload_dir")
@@ -201,51 +274,6 @@ class Roofline:
             return None
         return (cap / bandwidth, cap)
 
-    def _frame_anchors(
-        self,
-        sanitized_cache_hierarchy: list[str],
-        compute_peaks: list[tuple[str, float]],
-        ops_flops: str,
-    ) -> FrameAnchors:
-        """What the opening frame has to hold, read off the geometry this figure
-        draws: the knee each diagonal is really capped at, every stacked
-        datatype's ceiling, and the kernel dots the page opens with."""
-        anchors = FrameAnchors()
-        cap, _ = self._envelope_compute_cap(compute_peaks)
-        for level in sanitized_cache_hierarchy:
-            bandwidth = self._peak_value(self.__ceiling_data, level.lower())
-            if not bandwidth or bandwidth <= 0:
-                continue
-            anchors.bandwidths.append(bandwidth)
-            knee = self._roof_knee(bandwidth, cap)
-            if knee:
-                anchors.points.append(knee)
-        anchors.throughputs.extend(peak for _, peak in compute_peaks if peak > 0)
-        anchors.points.extend(self._opening_kernel_points(ops_flops))
-        return anchors
-
-    def _opening_kernel_points(self, ops_flops: str) -> list[tuple[float, float]]:
-        """The kernel dots the page opens with: one memory level's points, or
-        every level's when the kernel panel opens on all peaks."""
-        peak = self.__view_models[ops_flops].default_peak
-        levels = (
-            [f"ai_{peak.lower()}"]
-            if peak and peak != ALL_PEAKS_VALUE
-            else list(CACHE_LEVELS)
-        )
-        ai_data = self.__ai_data or {}
-        points: list[tuple[float, float]] = []
-        for level in levels:
-            level_points = ai_data.get(level)
-            if not level_points or len(level_points) < 2:
-                continue
-            points.extend(
-                (float(ai), float(perf))
-                for ai, perf in zip(level_points[0], level_points[1])
-                if ai is not None and perf is not None
-            )
-        return points
-
     def _add_compute_ceiling(
         self,
         fig: go.Figure,
@@ -280,6 +308,7 @@ class Roofline:
             "traceIndex": len(fig.data) - 1,
             "label": ceiling_name,
             "peakPerf": peak_perf,
+            "dtype": dtype,
         })
         fig.add_trace(
             go.Scatter(
@@ -296,6 +325,7 @@ class Roofline:
         view_model.compute_overlay_traces.append({
             "traceIndex": len(fig.data) - 1,
             "peakPerf": peak_perf,
+            "sourceTraceIndex": view_model.compute_traces[-1]["traceIndex"],
         })
 
     def _figure_compute_peaks(self, ops_flops: str) -> list[tuple[str, float]]:
@@ -482,15 +512,19 @@ class Roofline:
 
     @demarcate
     def construct_plotly_figures(
-        self, ai_data: dict[str, Any]
+        self, ai_data: dict[str, Any], datatypes: Optional[list[str]] = None
     ) -> tuple[Optional[go.Figure], Optional[go.Figure], str, str]:
         """
         Build raw Plotly figure objects from pre-computed AI data.
 
         Returns (ops_figure, flops_figure, ops_dt_list, flops_dt_list).
-        No I/O or HTML wrapping.
+        No I/O or HTML wrapping. When datatypes is None, use every datatype
+        supported by the profiled GPU architecture.
         """
         self.roof_setup()
+        self.__frame_bounds = None
+        self.__frame_from_machine_ceilings = None
+        self._canonical_frame_bounds()
         self.__view_models = {}
         self.__compute_peaks = {}
         self.__ceiling_by_dtype = {}
@@ -508,8 +542,13 @@ class Roofline:
 
         figures: dict[str, Optional[go.Figure]] = {"OP": None, "FLOP": None}
         datatype_lists: dict[str, str] = {"OP": "", "FLOP": ""}
+        selected_datatypes = (
+            datatypes
+            if datatypes is not None
+            else list(SUPPORTED_DATATYPES.get(self.__mspec.gpu_arch, {}))
+        )
 
-        for dt in self.__run_parameters.get("roofline_data_type", []):
+        for dt in selected_datatypes:
             if not self._datatype_supported(dt):
                 console_error(
                     f"{dt} is not a supported datatype for roofline profiling on "
@@ -545,7 +584,7 @@ class Roofline:
         ops_dt_list: str,
         flops_dt_list: str,
     ) -> None:
-        """Write Plotly figures to standalone HTML files on disk."""
+        """Write one precision-selectable Plotly HTML document to disk."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
         if self.__run_parameters.get("kernel_filter", False):
@@ -560,29 +599,120 @@ class Roofline:
                     kernel_list += "_" + name
 
         workload_dir = self.__run_parameters["workload_dir"]
-        prefix = f"{workload_dir}/empirRoof_gpu-{dev_id}"
-
-        wrote = False
-        for ops_flops, figure, dt_list in (
-            ("OP", ops_figure, ops_dt_list),
-            ("FLOP", flops_figure, flops_dt_list),
-        ):
-            if not figure:
-                continue
+        figure, view_model = self._combined_html_figure(ops_figure, flops_figure)
+        if figure is not None:
             document = build_interactive_document(
                 figure,
-                self.__view_models.get(ops_flops, RooflineViewModel()),
-                title=(
-                    f"Empirical Roofline Analysis "
-                    f"({'Ops' if ops_flops == 'OP' else 'Flops'})"
-                ),
+                view_model,
+                title="Empirical Roofline Analysis",
             )
-            path = f"{prefix}{dt_list}{kernel_list}.html"
+            path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
-            wrote = True
-
-        if wrote:
             console_log("roofline", "Roofline HTML files saved.")
+
+    def _combined_html_figure(
+        self,
+        ops_figure: Optional[go.Figure],
+        flops_figure: Optional[go.Figure],
+    ) -> tuple[Optional[go.Figure], RooflineViewModel]:
+        """Combine selected floating-point and integer compute ceilings into one
+        standalone figure. Bandwidth roofs and kernel points are shared, so the
+        floating-point figure provides those traces whenever it is available.
+        """
+        source_key = "FLOP" if flops_figure is not None else "OP"
+        source_figure = flops_figure or ops_figure
+        if source_figure is None:
+            return None, RooflineViewModel()
+
+        figure = go.Figure(source_figure)
+        source_model = self.__view_models.get(source_key, RooflineViewModel())
+        view_model = RooflineViewModel(
+            peaks=list(source_model.peaks),
+            peak_colors=dict(source_model.peak_colors),
+            default_peak=source_model.default_peak,
+            kernels=list(source_model.kernels),
+            kernel_trace_indices=list(source_model.kernel_trace_indices),
+            roofline_traces=[dict(roof) for roof in source_model.roofline_traces],
+            compute_traces=list(source_model.compute_traces),
+            compute_overlay_traces=list(source_model.compute_overlay_traces),
+            frame=deepcopy(source_model.frame),
+        )
+
+        if source_key == "FLOP" and ops_figure is not None:
+            ops_model = self.__view_models.get("OP", RooflineViewModel())
+            overlay_by_source = {
+                overlay["sourceTraceIndex"]: overlay
+                for overlay in ops_model.compute_overlay_traces
+            }
+            for trace in ops_model.compute_traces:
+                original_index = trace["traceIndex"]
+                new_index = len(figure.data)
+                figure.add_trace(ops_figure.data[original_index])
+                merged_trace = dict(trace)
+                merged_trace["traceIndex"] = new_index
+                view_model.compute_traces.append(merged_trace)
+
+                overlay = overlay_by_source.get(original_index)
+                if overlay:
+                    overlay_index = len(figure.data)
+                    figure.add_trace(ops_figure.data[overlay["traceIndex"]])
+                    view_model.compute_overlay_traces.append({
+                        "traceIndex": overlay_index,
+                        "peakPerf": overlay["peakPerf"],
+                        "sourceTraceIndex": new_index,
+                    })
+
+        view_model.precisions = list(
+            dict.fromkeys(trace["dtype"] for trace in view_model.compute_traces)
+        )
+        view_model.default_precisions = _default_precisions(view_model.precisions)
+        self._preselect_default_precisions(figure, view_model)
+        return figure, view_model
+
+    @staticmethod
+    def _preselect_default_precisions(
+        figure: go.Figure,
+        view_model: RooflineViewModel,
+    ) -> None:
+        """Ship the standalone figure already narrowed to the precisions the page
+        opens with, so the first paint matches the controller's initial state
+        instead of flashing every ceiling before the client hides them.
+
+        Only the standalone document is touched; the Dash figures keep every
+        ceiling because the WebUI has no precision selector to restore them.
+        """
+        selected = set(view_model.default_precisions)
+        if not selected:
+            return
+
+        for trace in view_model.compute_traces:
+            figure.data[trace["traceIndex"]].visible = trace["dtype"] in selected
+
+        top_peak = max(
+            (
+                trace["peakPerf"]
+                for trace in view_model.compute_traces
+                if trace["dtype"] in selected
+            ),
+            default=0.0,
+        )
+        if not top_peak > 0:
+            return
+
+        for roof in view_model.roofline_traces:
+            bandwidth = roof["bandwidth"]
+            if not bandwidth > 0:
+                continue
+            roof_trace = figure.data[roof["traceIndex"]]
+            # The client re-clips from this grid, so it keeps the full sample
+            # density when the reader selects a taller precision.
+            sample_ai = [float(ai) for ai in roof_trace.x]
+            roof["sampleAi"] = sample_ai
+            roof_trace.x, roof_trace.y = _roof_clipped_to_peak(
+                sample_ai, bandwidth, top_peak
+            )
+            roof["kneeAi"] = roof_trace.x[-1]
+            roof["kneePerf"] = roof_trace.y[-1]
 
     @staticmethod
     def generate_html_section(
@@ -663,6 +793,11 @@ class Roofline:
                 },
                 default_peak=ALL_PEAKS_VALUE,
             )
+        x_lo, x_hi, y_lo, y_hi = self._canonical_frame_bounds()
+        self.__view_models[ops_flops].frame = {
+            "x": [x_lo, x_hi],
+            "y": [y_lo, y_hi],
+        }
         compute_peaks = self._figure_compute_peaks(ops_flops)
 
         if plot_kernels:
@@ -673,10 +808,6 @@ class Roofline:
                 compute_peaks,
             )
 
-        bounds = frame_bounds(
-            self._frame_anchors(sanitized_cache_hierarchy, compute_peaks, ops_flops)
-        )
-        x_lo, x_hi, y_lo, y_hi = bounds if bounds else DEFAULT_AXIS_BOUNDS
         # Roofs are densely sampled across so they stay hoverable
         # throughout the visible range.
         roof_dense_lo = x_lo / ROOF_DENSE_PAD_FACTOR
@@ -699,8 +830,6 @@ class Roofline:
 
         if is_new_figure:
             self._apply_plotly_layout(fig, dtype, ops_flops, (x_lo, x_hi, y_lo, y_hi))
-        else:
-            self._extend_stacked_title(fig, dtype)
 
         return fig
 
@@ -904,6 +1033,9 @@ class Roofline:
     ) -> None:
         """Apply log axes, initial framing, and shared styling to a new figure."""
         view_x_lo, view_x_hi, view_y_lo, view_y_hi = view_bounds
+        frame_subtitle = _frame_subtitle(
+            view_bounds, self.__frame_from_machine_ceilings is True
+        )
         fig.update_xaxes(
             type="log",
             range=[float(np.log10(view_x_lo)), float(np.log10(view_x_hi))],
@@ -917,7 +1049,7 @@ class Roofline:
         fig.update_layout(
             template="plotly_white",
             title=dict(
-                text=f"Empirical Roofline Analysis ({dtype})",
+                text=(f"Empirical Roofline Analysis<br><sup>{frame_subtitle}</sup>"),
                 x=0.5,
                 xanchor="center",
                 font=dict(size=15),
@@ -925,7 +1057,7 @@ class Roofline:
             autosize=True,
             dragmode="pan",
             hovermode="closest",
-            margin=dict(l=82, r=40, b=62, t=62, pad=4, autoexpand=False),
+            margin=dict(l=82, r=40, b=62, t=80, pad=4, autoexpand=False),
             showlegend=True,
             hoverlabel=dict(
                 bgcolor="white",
@@ -934,17 +1066,6 @@ class Roofline:
                 font=dict(size=13, color="#1b1f24"),
             ),
         )
-
-    def _extend_stacked_title(self, fig: go.Figure, dtype: str) -> None:
-        """Extend an existing figure's title to list every stacked datatype."""
-        if not fig.layout.title.text:
-            return
-        title_text = fig.layout.title.text
-        if "(" in title_text and ")" in title_text:
-            prefix = title_text.split("(")[0]
-            existing_types = title_text.split("(")[1].split(")")[0]
-            if dtype not in existing_types.split(", "):
-                fig.layout.title.text = f"{prefix}({existing_types}, {dtype})"
 
     def cli_generate_plot(
         self,

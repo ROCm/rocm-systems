@@ -12,7 +12,6 @@
 #include "common/path.hpp"
 #include "common/static_object.hpp"
 #include "common/string_utility.hpp"
-#include "constraint.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
 #include "mproc.hpp"
@@ -27,9 +26,15 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/papi/papi_common.hpp>
+#include <timemory/components/papi/papi_config.hpp>
+#include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/papi/types.hpp>
+#include <timemory/components/roofline/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -41,6 +46,7 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
@@ -375,8 +381,8 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 // for ENV_NAME -- std::string{} can be constructed from either.
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
     [&]() {                                                                              \
-        auto _env_name = std::string{ ENV_NAME };                                        \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+        auto       _env_name = std::string{ ENV_NAME };                                  \
+        const auto _ret      = _config->insert<TYPE, TYPE>(                              \
             _env_name,                                                              \
             std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
             DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
@@ -821,29 +827,26 @@ configure_settings(bool _init)
         "roctxRangeStart/roctxRangeStop markers.",
         std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
 
-    auto _clock_choices = std::vector<std::string>{};
-    for(const auto& itr : constraint::get_valid_clock_ids())
-    {
-        _clock_choices.emplace_back(
-            fmt::format("({}|{}|{})", itr.name, itr.value, itr.raw_name));
-    }
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::TRACE_PERIODS,
-                              "Similar to specify trace delay and/or duration except in "
-                              "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
-                              "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>",
-                              std::string{}, "trace", "profile", "perfetto", "timemory");
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::TRACE_PERIODS,
+        "Space- or semicolon-separated list of trace windows. Each entry has the form "
+        "<DELAY>:<DURATION> or <DELAY>:<DURATION>:<REPEAT>. The clock used for all "
+        "entries is controlled by ROCPROFSYS_TRACE_PERIOD_CLOCK_ID.",
+        std::string{}, "trace", "profile", "perfetto", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
-        "Set the default clock ID for ROCPROFSYS_TRACE_DELAY, ROCPROFSYS_TRACE_DURATION, "
-        "and/or ROCPROFSYS_TRACE_PERIODS. E.g. \"realtime\" == the delay/duration is "
-        "governed by the elapsed realtime, \"cputime\" == the delay/duration is governed "
-        "by the elapsed CPU-time within the process, etc. Note: when using CPU-based "
-        "timing, it is recommened to scale the value by the number of threads and be "
-        "aware that rocprof-sys may contribute to advancing the process CPU-time",
-        "CLOCK_REALTIME", "trace", "profile", "perfetto", "timemory")
-        ->set_choices(_clock_choices);
+        "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
+        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
+        "    10 real seconds regardless of how many CPU cores are active.\n"
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
+        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
+        "    across all threads. Useful when you want to skip a fixed amount of\n"
+        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
+        "    instrumentation itself contributes to the CPU-time counter.",
+        "realtime", "trace", "profile", "perfetto", "timemory")
+        ->set_choices({ "realtime", "cputime" });
 
     ROCPROFSYS_CONFIG_SETTING(
         double, env_vars::SAMPLING_FREQ,
@@ -1145,7 +1148,7 @@ configure_settings(bool _init)
                               "perfetto", "io", "filename", "deprecated", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::PERFETTO_FILE, "Perfetto filename",
-                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
+                              std::string{ "perfetto-trace.pftrace" }, "perfetto", "io",
                               "filename", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -1435,23 +1438,42 @@ configure_settings(bool _init)
     const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
                                ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
 
+    // The PAPI net component reads /proc/net/dev and does not use perf_event.
+    // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
+    // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
-                    "CAP_SYS_ADMIN)",
-                    _paranoid);
-        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
-                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = std::string{};
+        constexpr std::string_view k_papi_net_component_prefix = "net:::";
+        const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [k_papi_net_component_prefix](const std::string& event) {
+                return event.starts_with(k_papi_net_component_prefix);
+            });
+        if(!all_events_network_related)
+        {
+            LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                        "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                        "CAP_SYS_ADMIN)",
+                        _paranoid);
+            LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                        "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                        "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+            _config->get_papi_events() = std::string{};
+        }
+        else if(!papi_events.empty())
+        {
+            LOG_DEBUG("perf_event_paranoid={} but all PAPI events use the net component "
+                      "(reads /proc/net/dev, no perf_event required). "
+                      "Proceeding with NIC profiling.",
+                      _paranoid);
+        }
     }
     else
     {
@@ -2726,13 +2748,13 @@ get_perfetto_output_filename()
     {
         LOG_ERROR("Error! ROCPROFSYS_PERFETTO_FILE not found. Please check your "
                   "environment configuration.");
-        return fmt::format("{}/perfetto-trace-{}.proto", pwd, getpid());
+        return fmt::format("{}/perfetto-trace-{}.pftrace", pwd, getpid());
     }
 
     auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
     auto dir = std::string{};
-    auto ext = std::string{ "proto" };
+    auto ext = std::string{ "pftrace" };
 
     if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
@@ -3093,68 +3115,81 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
     return result;
 }
 
+/**
+ * Get the Perfetto output filename with a suffix.
+ *
+ * @param suffix The suffix to add to the Perfetto output filename.
+ * @return The Perfetto output filename with the suffix.
+ */
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
-    static auto _v   = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
-    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    static auto s_setting = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
+    auto        val = static_cast<tim::tsettings<std::string>&>(*s_setting->second).get();
 
-    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", _val, suffix);
+    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", val, suffix);
 
     // If absolute path is provided, return it as-is
-    if(!_val.empty() && _val.at(0) == '/')
+    if(!val.empty() && val.at(0) == '/')
     {
-        LOG_DEBUG("Absolute path, returning: '{}'", _val);
-        return _val;
+        LOG_DEBUG("Absolute path, returning: '{}'", val);
+        return val;
     }
 
-    auto _pos_dir = _val.find_last_of('/');
-    auto _dir     = std::string{};
-    auto _ext     = std::string{ "proto" };
+    // Parse the filename into directory, basename, and extension
+    auto pos_dir = val.find_last_of('/');
+    auto dir     = std::string{};
+    auto ext     = std::string{ "pftrace" };
 
-    if(_pos_dir != std::string::npos)
+    // If the filename contains a directory, extract it
+    if(pos_dir != std::string::npos)
     {
-        _dir = _val.substr(0, _pos_dir + 1);
-        _val = _val.substr(_pos_dir + 1);
+        dir = val.substr(0, pos_dir + 1);
+        val = val.substr(pos_dir + 1);
     }
 
-    auto _pos_ext = _val.find_last_of('.');
-    if(_pos_ext + 1 < _val.length())
+    // Extract the extension
+    auto pos_ext = val.find_last_of('.');
+    if(pos_ext != std::string::npos && pos_ext + 1 < val.length())
     {
-        _ext = _val.substr(_pos_ext + 1);
-        _val = _val.substr(0, _pos_ext);
+        ext = val.substr(pos_ext + 1);
+        val = val.substr(0, pos_ext);
     }
 
     // Check if explicitly set via environment OR config file
     // If explicitly set, don't add suffix; otherwise use provided suffix
-    bool _explicitly_set =
-        (_v->second->get_environ_updated() || _v->second->get_config_updated());
+    bool explicitly_set = (s_setting->second->get_environ_updated() ||
+                           s_setting->second->get_config_updated());
 
-    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", _dir, _val,
-              _ext, _explicitly_set);
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", dir, val,
+              ext, explicitly_set);
     LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
 
-    auto _cfg = settings::compose_filename_config{
-        !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
-        suffix,                               // suffix value
-        false,                                // make_dir
-        _dir                                  // explicit_path
+    auto cfg = settings::compose_filename_config{
+        !explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
+        suffix,                              // suffix value
+        false,                               // make_dir
+        dir                                  // explicit_path
     };
 
-    _val = settings::compose_output_filename(_val, _ext, _cfg);
+    val = settings::compose_output_filename(val, ext, cfg);
 
-    LOG_DEBUG("After compose_output_filename: '{}'", _val);
+    LOG_DEBUG("After compose_output_filename: '{}'", val);
 
-    if(!_val.empty() && _val.at(0) != '/')
+    // If the path is relative, prepend the current working directory
+    if(!val.empty() && val.at(0) != '/')
     {
-        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
-                                        get_config()->get_tag());
-        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
-        return _result;
+        const auto* pwd    = getenv("PWD");
+        auto        result = settings::format(
+            fmt::format("{}/{}", (pwd != nullptr && pwd[0] != '\0') ? pwd : ".", val),
+            get_config()->get_tag());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", result);
+        return result;
     }
 
-    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
-    return _val;
+    // If the path is absolute, return it as-is
+    LOG_DEBUG("Path is absolute, returning: '{}'", val);
+    return val;
 }
 
 std::string

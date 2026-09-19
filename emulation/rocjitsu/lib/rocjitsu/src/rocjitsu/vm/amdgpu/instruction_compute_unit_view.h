@@ -29,6 +29,7 @@ class L2Cache;
 class Lds;
 class OperandExecutionAccess;
 class RegisterAccess;
+struct TensorDmaMemoryAccessObservation;
 class Wavefront;
 
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
@@ -57,6 +58,8 @@ public:
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  bool observes_tensor_dma_memory_access() const;
+  void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }

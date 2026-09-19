@@ -384,7 +384,7 @@ class MIGPUSpecs:
         """
         Return a list of the cache and memory levels supported by the specific gpu model
         """
-        return cls._gpu_design[gpu_model.lower()].get("memory_levels", [])
+        return cls._gpu_design.get(gpu_model.lower(), {}).get("memory_levels", [])
 
     @classmethod
     def get_chip_id_dict(cls) -> dict[int, str]:
