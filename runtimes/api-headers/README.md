@@ -5,6 +5,8 @@ C++ consumers and Rust API bindings.
 
 The headers are organized by API family under `include/`:
 
+- `abce`: Accelerated Blit Copy Engine, the header-only SDMA copy library; see
+  `include/abce/README.md`.
 - `amdf`: AMD Framework API headers.
 - `hsa`: Heterogeneous System Architecture API headers.
 - `uapi`: Linux userspace API headers used by ROCm runtimes.
@@ -23,6 +25,9 @@ These files are mirrors for runtime consumers; their primary sources remain:
 Changes belong in the primary location first and are then copied here without
 local edits. The HSA, DRM, KFD, and UDMABUF mirrors are byte-identical to their
 primary files in this checkout.
+
+`abce` is not a mirror: `include/abce` is its primary location, and it is
+edited here.
 
 These headers are not yet exposed through a CMake target. As runtime components
 begin consuming them from this repository, build integration will be added to
