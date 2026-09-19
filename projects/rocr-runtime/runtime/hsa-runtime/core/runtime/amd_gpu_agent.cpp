@@ -2126,6 +2126,10 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
     // then, reject under SDMA=0 (same as the SDMA fan-out path would), leaving
     // the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT:
+    // Rect copies are SDMA-only, as they are for hsa_amd_memory_async_copy_rect, so
+    // report the same unavailability the SDMA path would.
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
   // No default case: keep the switch exhaustive over hsa_amd_memory_copy_op_t
@@ -2220,6 +2224,9 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
       status = DmaCopyIndirect(op, dep_signals);
       break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT:
+      status = DmaCopyRectBatch(op, dep_signals);
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -2258,6 +2265,38 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
                                                       dep_signals, out_signal);
 
   return stat;
+}
+
+hsa_status_t GpuAgent::DmaCopyRectBatch(const hsa_amd_memory_copy_op_t& op,
+                                        std::vector<core::Signal*>& dep_signals) {
+  if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  core::Signal& out_signal = *core::Signal::Convert(op.completion_signal);
+
+  // The op carries no explicit direction: the agent pair gives the same engine choice the
+  // hsa_amd_copy_direction_t of hsa_amd_memory_async_copy_rect would have, since that entry
+  // point routes everything except host-to-device over BlitDevToHost as well.
+  const bool is_h2d =
+      core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice &&
+      core::Agent::Convert(op.dst_agent)->device_type() == core::Agent::kAmdGpuDevice;
+
+  SetCopyRequestRefCount(true);
+  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+  lazy_ptr<core::Blit>& blit = GetBlitObject(is_h2d ? BlitHostToDev : BlitDevToHost);
+
+  if (!blit->isSDMA()) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  if (profiling_enabled()) {
+    // Track the agent so we could translate the resulting timestamp to system
+    // domain correctly.
+    out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+  }
+
+  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+  return sdmaBlit->SubmitBatchCopyRectCommand(op.rect_list, op.num_entries, dep_signals,
+                                              out_signal);
 }
 
 hsa_status_t GpuAgent::DmaFill(void* ptr, uint32_t value, size_t count) {

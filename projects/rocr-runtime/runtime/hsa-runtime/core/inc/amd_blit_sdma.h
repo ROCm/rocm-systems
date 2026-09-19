@@ -72,6 +72,11 @@ class BlitSdmaBase : public core::Blit {
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
 
+  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_entry_t* entries,
+                                                  size_t num_entries,
+                                                  std::vector<core::Signal*>& dep_signals,
+                                                  core::Signal& out_signal) = 0;
+
   virtual hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
                                      const std::vector<core::Signal*>& dep_signals,
                                      core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) = 0;
@@ -253,6 +258,19 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) override;
 
+  /// @brief Lower num_entries independent rect copies into one command buffer and issue a
+  /// single SubmitCommand, so the batch costs one ring reservation, one fence and one
+  /// completion signal instead of num_entries of each.
+  ///
+  /// @param entries Array of rect copy entries, lowered (and thus executed) in array order.
+  /// @param num_entries Number of entries.
+  /// @param dep_signals Signals waited on once, before the first entry.
+  /// @param out_signal Signal decremented once, after the last entry retires.
+  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_entry_t* entries,
+                                                  size_t num_entries,
+                                                  std::vector<core::Signal*>& dep_signals,
+                                                  core::Signal& out_signal) override;
+
   /// @brief Submit a broadcast linear copy command. Copies from a single source
   /// to multiple destinations using SDMA broadcast packets (2 dsts per packet).
   /// If the destination count is odd, the last destination uses a regular
@@ -407,6 +425,14 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
                             const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                             const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                             const hsa_dim3_t* range);
+
+  /// @brief Validate one rect operand and append its packets via @p append.  Throws
+  /// AMD::hsa_exception on invalid geometry.  Factored out of SubmitCopyRectCommand so a
+  /// batch can lower many operands into one shared packet buffer.
+  void ValidateAndBuildCopyRect(const std::function<void*(size_t)>& append,
+                                const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
+                                const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
+                                const hsa_dim3_t* range);
 
   void BuildFillCommand(char* cmd_addr, uint32_t num_fill_command, void* ptr, uint32_t value,
                         size_t count);

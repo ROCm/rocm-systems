@@ -517,6 +517,15 @@ hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agen
   CATCH;
 }
 
+// The batch API takes an array of these and the runtime indexes it with its own sizeof, so
+// growing the struct would silently reinterpret every element past the first for a caller
+// that was not recompiled.  The version field cannot rescue that: the stride is needed
+// before any element other than the first can be read.  A new operation type must therefore
+// fit in the existing layout, as HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT does by overlaying
+// rect_list on the src union.
+static_assert(sizeof(hsa_amd_memory_copy_op_t) == 128,
+              "hsa_amd_memory_copy_op_t layout is ABI, it must not grow.");
+
 hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
                                              uint32_t num_copy_ops,
                                              uint32_t num_dep_signals,
@@ -561,7 +570,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     core::Agent* src_agent = core::Agent::Convert(op.src_agent);
     IS_VALID(src_agent);
 
-    if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+    if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
@@ -699,6 +708,31 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
       break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT:
+      // Geometry lives in rect_list, which overlays the src union.  There is no scalar
+      // form, so the slots a rect op does not use must be left clear.
+      if (op.rect_list == nullptr || op.num_entries == 0 || op.dst != nullptr ||
+          op.size != 0 || op.unused_size != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      dst_agent = core::Agent::Convert(op.dst_agent);
+      IS_VALID(dst_agent);
+      // The entries of a rect op become one SDMA submission, and SubmitCommand caches the
+      // dependent signal values in a fixed HSA_MAX_DEP_SIGNALS stack array, so a larger
+      // count has to be rejected here rather than truncated.
+      if (num_dep_signals > HSA_MAX_DEP_SIGNALS)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      for (uint32_t d = 0; d < op.num_entries; ++d) {
+        const hsa_amd_memory_copy_rect_entry_t& entry = op.rect_list[d];
+        IS_BAD_PTR(entry.src.base);
+        IS_BAD_PTR(entry.dst.base);
+        // Unlike hsa_amd_memory_async_copy_rect, a degenerate range cannot be silently
+        // turned into a no-op: every entry has to contribute at least one packet for the
+        // submission to keep a one-to-one entry/packet mapping.  Callers must filter
+        // empty copies out.
+        if (entry.range.x == 0 || entry.range.y == 0 || entry.range.z == 0)
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -727,12 +761,16 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
           (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
       const bool is_swap =
           (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
+      // A rect op is multi-entry but keeps one scalar src_agent / dst_agent pair for the
+      // whole op, so it resolves its copy agent the same way a single-entry op does.
+      const bool is_rect =
+          (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT);
 
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
         if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
           return HSA_STATUS_ERROR_INVALID_AGENT;
         copy_agent = src_agent;
-      } else if (is_multi && !is_swap && !is_indirect) {
+      } else if (is_multi && !is_swap && !is_indirect && !is_rect) {
         if (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
           // D2D or D2H: use src GPU as the copy engine.
           copy_agent = src_agent;
@@ -845,7 +883,6 @@ hsa_status_t hsa_amd_memory_async_copy_rect(
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
-
 
 hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable) {
   TRY;

@@ -59,6 +59,12 @@ extern const char* BlitImageSourceCode;
 
 bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
 
+void VirtualDevice::submitBatchCopyRectMemory(amd::BatchCopyRectMemoryCommand& cmd) {
+  // Reachable only if a caller built the command for a backend whose
+  // Settings::batch_copy_rect_supported_ is clear, which hipMemcpy3DBatchAsync checks.
+  ShouldNotReachHere();
+}
+
 }  // namespace amd::device
 
 static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone) ==

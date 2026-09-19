@@ -1856,10 +1856,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyMulticastCommand(
 }
 
 template <bool useGCR, bool scopeFields>
-hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
-    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
-    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
-    core::Signal& out_signal) {
+void BlitSdma<useGCR, scopeFields>::ValidateAndBuildCopyRect(
+    const std::function<void*(size_t)>& append, const hsa_pitched_ptr_t* dst,
+    const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
+    const hsa_dim3_t* range) {
   // Hardware requires DWORD alignment for base address, pitches
   // Also confirm that we have a geometric rect (copied block does not wrap an edge).
   if (((uintptr_t)dst->base) % 4 != 0 || ((uintptr_t)src->base) % 4 != 0)
@@ -1888,14 +1888,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
 
   const uint max_pitch = 1 << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);
 
-  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
-  std::vector<uint64_t> bytes_moved;
-  auto append = [&](size_t size) {
-    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
-    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
-    return &pkts.back();
-  };
-
   // Do wide pitch 2D copies along X-Z
   if (range->z == 1 && (src->pitch > max_pitch || dst->pitch > max_pitch)) {
     hsa_pitched_ptr_t Src = *src;
@@ -1921,8 +1913,53 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
   } else {
     BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
   }
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
+    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
+    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
+  auto append = [&](size_t size) {
+    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
+    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
+    return &pkts.back();
+  };
+
+  ValidateAndBuildCopyRect(append, dst, dst_offset, src, src_offset, range);
 
   uint64_t size = static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
+
+  std::vector<core::Signal*> gang_signals(0);
+
+  return SubmitCommand(&pkts[0], pkts.size() * sizeof(SDMA_PKT_COPY_LINEAR_RECT), size, dep_signals,
+                       out_signal, gang_signals);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBatchCopyRectCommand(
+    const hsa_amd_memory_copy_rect_entry_t* entries, size_t num_entries,
+    std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
+  std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
+  // Most entries lower to a single packet; oversized ones grow the vector further.
+  pkts.reserve(num_entries);
+  auto append = [&](size_t size) {
+    assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
+    pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
+    return &pkts.back();
+  };
+
+  uint64_t size = 0;
+  for (size_t i = 0; i < num_entries; ++i) {
+    const hsa_amd_memory_copy_rect_entry_t& entry = entries[i];
+    // Throws on invalid geometry, which unwinds out of the API entry point before anything
+    // has been written to the ring, so a rejected batch submits nothing.
+    ValidateAndBuildCopyRect(append, &entry.dst, &entry.dst_offset, &entry.src,
+                             &entry.src_offset, &entry.range);
+    size += static_cast<uint64_t>(entry.range.x) * static_cast<uint64_t>(entry.range.y) *
+            entry.range.z;
+  }
 
   std::vector<core::Signal*> gang_signals(0);
 
