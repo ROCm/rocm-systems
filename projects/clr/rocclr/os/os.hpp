@@ -161,6 +161,13 @@ class Os : AllStatic {
   //! Set the page protections for the given memory region.
   static bool protectMemory(void* addr, size_t size, MemProt prot);
 
+  //! Advise the OS that [addr, addr+size) will be read soon, so it can start
+  //! faulting the pages in (POSIX: madvise(MADV_WILLNEED)). Best-effort and
+  //! non-blocking; a no-op where unsupported. Used before a large pageable
+  //! host->device copy so a reclaimed file-backed source is pulled back with
+  //! clustered readahead instead of page-at-a-time under get_user_pages().
+  static void prefetchRange(const void* addr, size_t size);
+
   //! Allocate an aligned chunk of memory.
   static void* alignedMalloc(size_t size, size_t alignment);
   //! Deallocate an aligned chunk of memory.
