@@ -91,6 +91,9 @@ def _install_fake_amdsmi():
         "jpeg_activity": "N/A",
     }
     interface._NA_amdsmi_get_gpu_metrics_info = lambda: {}
+    # An unmapped version, so unsupported-field filtering suppresses nothing and
+    # these tests see the vcn_busy behavior alone.
+    interface.amdsmi_get_gpu_metrics_header_info = lambda _h: {}
     interface.amdsmi_get_gpu_partition_metrics_info = lambda _h: None
     interface.amdsmi_get_gpu_activity = lambda _h: {"gfx_activity": 30}
     interface.amdsmi_get_vcn_busy_percent = lambda _h: 42
@@ -107,6 +110,10 @@ def _install_fake_amdsmi():
 
 
 def _load_metric_module():
+    # metric.py imports its CLI-level siblings by bare name.
+    cli_dir = os.path.dirname(os.path.dirname(METRIC_PATH))
+    if cli_dir not in sys.path:
+        sys.path.insert(0, cli_dir)
     spec = importlib.util.spec_from_file_location("metric_under_test_vcn", METRIC_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
