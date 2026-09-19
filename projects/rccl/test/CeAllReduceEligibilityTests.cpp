@@ -16,6 +16,7 @@
 #include "rccl_common.h"
 #include "graph.h"
 #include "rccl_decision.h"
+#include "rocmwrap.h"
 
 #include <chrono>
 #include <cstdint>
@@ -357,6 +358,16 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isol
     options.stopOnFirstFailure = false;
     options.verboseLogging = true;
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+TEST(RcclCeAllReduceEligibility, StagedUnregisteredRejectsUnsupportedDriver)
+{
+    const int savedDriverVersion = ncclCudaDriverVersionCache;
+    ncclCudaDriverVersionCache = 0;
+    EXPECT_FALSE(rcclCeStagedUnregisteredEligible(
+        /*nRanks=*/4, /*msgBytes=*/4096, ncclFloat32, ncclProd,
+        /*force=*/true, /*ceArGraphAllowed=*/true, /*ceUsable=*/true));
+    ncclCudaDriverVersionCache = savedDriverVersion;
 }
 
 // FORCE + unregistered still uses ceUsable's 256 MiB cap. Messages between the
