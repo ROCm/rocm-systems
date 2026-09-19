@@ -506,7 +506,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemGetDefaultMemPool = 484,
   HIP_API_ID_hipDeviceGetLuid = 485,
   HIP_API_ID_hipInitDevice = 486,
-  HIP_API_ID_LAST = 486,
+  HIP_API_ID_hipDeviceGetExecAffinitySupport = 487,
+  HIP_API_ID_LAST = 487,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -583,6 +584,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceGetCacheConfig: return "hipDeviceGetCacheConfig";
     case HIP_API_ID_hipDeviceGetDefaultMemPool: return "hipDeviceGetDefaultMemPool";
     case HIP_API_ID_hipDeviceGetDevResource: return "hipDeviceGetDevResource";
+    case HIP_API_ID_hipDeviceGetExecAffinitySupport: return "hipDeviceGetExecAffinitySupport";
     case HIP_API_ID_hipDeviceGetExecutionCtx: return "hipDeviceGetExecutionCtx";
     case HIP_API_ID_hipDeviceGetGraphMemAttribute: return "hipDeviceGetGraphMemAttribute";
     case HIP_API_ID_hipDeviceGetLimit: return "hipDeviceGetLimit";
@@ -1063,6 +1065,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceGetCacheConfig", name) == 0) return HIP_API_ID_hipDeviceGetCacheConfig;
   if (strcmp("hipDeviceGetDefaultMemPool", name) == 0) return HIP_API_ID_hipDeviceGetDefaultMemPool;
   if (strcmp("hipDeviceGetDevResource", name) == 0) return HIP_API_ID_hipDeviceGetDevResource;
+  if (strcmp("hipDeviceGetExecAffinitySupport", name) == 0) return HIP_API_ID_hipDeviceGetExecAffinitySupport;
   if (strcmp("hipDeviceGetExecutionCtx", name) == 0) return HIP_API_ID_hipDeviceGetExecutionCtx;
   if (strcmp("hipDeviceGetGraphMemAttribute", name) == 0) return HIP_API_ID_hipDeviceGetGraphMemAttribute;
   if (strcmp("hipDeviceGetLimit", name) == 0) return HIP_API_ID_hipDeviceGetLimit;
@@ -1723,6 +1726,12 @@ typedef struct hip_api_data_s {
       hipDevResource resource__val;
       hipDevResourceType type;
     } hipDeviceGetDevResource;
+    struct {
+      int* pi;
+      int pi__val;
+      hipExecAffinityType type;
+      hipDevice_t dev;
+    } hipDeviceGetExecAffinitySupport;
     struct {
       hipExecutionCtx_t* ctx;
       hipExecutionCtx_t ctx__val;
@@ -4632,6 +4641,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDeviceGetDevResource.device = (hipDevice_t)device; \
   cb_data.args.hipDeviceGetDevResource.resource = (hipDevResource*)resource; \
   cb_data.args.hipDeviceGetDevResource.type = (hipDevResourceType)type; \
+};
+// hipDeviceGetExecAffinitySupport[('int*', 'pi'), ('hipExecAffinityType', 'type'), ('hipDevice_t', 'dev')]
+#define INIT_hipDeviceGetExecAffinitySupport_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDeviceGetExecAffinitySupport.pi = (int*)pi; \
+  cb_data.args.hipDeviceGetExecAffinitySupport.type = (hipExecAffinityType)type; \
+  cb_data.args.hipDeviceGetExecAffinitySupport.dev = (hipDevice_t)dev; \
 };
 // hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
 #define INIT_hipDeviceGetExecutionCtx_CB_ARGS_DATA(cb_data) { \
@@ -7572,6 +7587,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipDeviceGetDevResource:
       if (data->args.hipDeviceGetDevResource.resource) data->args.hipDeviceGetDevResource.resource__val = *(data->args.hipDeviceGetDevResource.resource);
       break;
+// hipDeviceGetExecAffinitySupport[('int*', 'pi'), ('hipExecAffinityType', 'type'), ('hipDevice_t', 'dev')]
+    case HIP_API_ID_hipDeviceGetExecAffinitySupport:
+      if (data->args.hipDeviceGetExecAffinitySupport.pi) data->args.hipDeviceGetExecAffinitySupport.pi__val = *(data->args.hipDeviceGetExecAffinitySupport.pi);
+      break;
 // hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
     case HIP_API_ID_hipDeviceGetExecutionCtx:
       if (data->args.hipDeviceGetExecutionCtx.ctx) data->args.hipDeviceGetExecutionCtx.ctx__val = *(data->args.hipDeviceGetExecutionCtx.ctx);
@@ -9610,6 +9629,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipDeviceGetDevResource.resource == NULL) oss << ", resource=NULL";
       else { oss << ", resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.resource__val); }
       oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetDevResource.type);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDeviceGetExecAffinitySupport:
+      oss << "hipDeviceGetExecAffinitySupport(";
+      if (data->args.hipDeviceGetExecAffinitySupport.pi == NULL) oss << "pi=NULL";
+      else { oss << "pi="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecAffinitySupport.pi__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecAffinitySupport.type);
+      oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetExecAffinitySupport.dev);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGetExecutionCtx:
