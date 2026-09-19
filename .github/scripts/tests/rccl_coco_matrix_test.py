@@ -24,6 +24,12 @@ class ScheduledRunsTest(unittest.TestCase):
         self.assertIn("oci-nixl-nightly", jobs)
         self.assertNotIn("ruby64-rccl-perf-weekly", jobs)
 
+    def test_weekly_emits_only_weekly_jobs(self):
+        with mock.patch.object(matrix, "set_github_output") as emit:
+            matrix.scheduled_runs("weekly")
+        jobs = {entry["job"] for entry in json.loads(emit.call_args.args[0]["matrix"])["include"]}
+        self.assertEqual(jobs, {"ruby64-rccl-perf-weekly", "oci-rccl-perf-weekly"})
+
     def test_monthly_emits_only_monthly_jobs(self):
         with mock.patch.object(matrix, "set_github_output") as emit:
             matrix.scheduled_runs("monthly")
@@ -34,6 +40,22 @@ class ScheduledRunsTest(unittest.TestCase):
 
 
 class PrClustersTest(unittest.TestCase):
+    def test_runners_are_on_the_cluster_allowlist(self):
+        allowlist = (
+            Path(__file__).resolve().parents[1]
+            / "allowlist"
+            / "cluster-runners.allowlist"
+        )
+        listed = {
+            line.split("#", 1)[0].strip()
+            for line in allowlist.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith(".github/")
+        }
+        for entry in matrix.PR_CLUSTERS:
+            self.assertIn(entry["runner"], listed)
+        for runner in matrix.SCHEDULED_RUNNERS.values():
+            self.assertIn(runner, listed)
+
     def test_emits_ruby_and_oci(self):
         with mock.patch.object(matrix, "set_github_output") as emit:
             matrix.pr_clusters()

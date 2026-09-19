@@ -24,6 +24,14 @@ from ci_utils import set_github_output
 
 ALLOWLIST_PATH = Path(".github/scripts/allowlist/cluster-runners.allowlist")
 WORKFLOWS_DIR = Path(".github/workflows")
+# Runner labels also live here; usage is allowed when every workflow that
+# reads the matrix output is on the allowlist.
+MATRIX_SOURCES = {
+    Path(".github/scripts/rccl_coco_matrix.py"): {
+        ".github/workflows/rccl-coco-pr.yml",
+        ".github/workflows/rccl-coco-scheduled.yml",
+    },
+}
 
 
 def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
@@ -62,17 +70,38 @@ def line_assigns_runner(line: str, runner: str) -> bool:
     return re.search(pattern, stripped, re.IGNORECASE) is not None
 
 
+def _scan_file_for_runners(path: Path, runners: set[str]) -> dict[str, set[str]]:
+    hits = {runner: set() for runner in runners}
+    rel = path.as_posix()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        for runner in runners:
+            if line_assigns_runner(raw, runner):
+                hits[runner].add(rel)
+    return hits
+
+
 def scan_workflow_usage(runners: set[str]) -> dict[str, set[str]]:
     usage = {runner: set() for runner in runners}
     for path in sorted(WORKFLOWS_DIR.iterdir()):
         if path.suffix not in {".yml", ".yaml"}:
             continue
-        rel = path.as_posix()
-        for raw in path.read_text(encoding="utf-8").splitlines():
-            for runner in runners:
-                if line_assigns_runner(raw, runner):
-                    usage[runner].add(rel)
+        for runner, paths in _scan_file_for_runners(path, runners).items():
+            usage[runner].update(paths)
+    for path in sorted(MATRIX_SOURCES):
+        if not path.is_file():
+            continue
+        for runner, paths in _scan_file_for_runners(path, runners).items():
+            usage[runner].update(paths)
     return usage
+
+
+def matrix_source_allowed(
+    path: str, allowed_workflows: set[str]
+) -> bool:
+    consumers = MATRIX_SOURCES.get(Path(path))
+    if consumers is None:
+        return False
+    return consumers.issubset(allowed_workflows)
 
 
 def git_diff_new_runner_usage(
@@ -86,6 +115,7 @@ def git_diff_new_runner_usage(
             f"{base}..{head}",
             "--",
             ".github/workflows",
+            ".github/scripts/rccl_coco_matrix.py",
         ],
         capture_output=True,
         text=True,
@@ -139,7 +169,12 @@ def main(argv: list[str]) -> int:
     exit_code = 0
 
     for runner, using in sorted(scan_workflow_usage(runners).items()):
-        disallowed = sorted(path for path in using if path not in allowed_workflows)
+        disallowed = sorted(
+            path
+            for path in using
+            if path not in allowed_workflows
+            and not matrix_source_allowed(path, allowed_workflows)
+        )
         if not disallowed:
             continue
         exit_code = 1
@@ -167,7 +202,12 @@ def main(argv: list[str]) -> int:
                 print(f"  {path}: {content}")
 
             new_in_disallowed = sorted(
-                {path for path, _ in new_lines if path not in allowed_workflows}
+                {
+                    path
+                    for path, _ in new_lines
+                    if path not in allowed_workflows
+                    and not matrix_source_allowed(path, allowed_workflows)
+                }
             )
             if new_in_disallowed:
                 exit_code = 1
