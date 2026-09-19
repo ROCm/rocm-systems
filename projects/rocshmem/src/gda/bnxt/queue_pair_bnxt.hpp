@@ -496,39 +496,39 @@ __device__ __forceinline__ void* QueuePairBNXT::get_hwqe(
 
 __device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
     bnxt_device_sq& sq, uint32_t msg_len) {
-   uint32_t npsn = 0, start_psn = 0, next_psn = 0;
-   struct bnxt_re_msns msns;
-   uint64_t *msns_ptr;
-   uint32_t pkt_cnt = 0;
-   /* Start slot index of the WQE */
-   uint32_t st_idx = sq.tail; // * BNXT_RE_STATIC_WQE_SIZE_SLOTS; Do we need this?
-   // Get the MSN table address
-   msns_ptr = (uint64_t *)pull_psn_buff(sq);
-   // Start PSN is the last recorded PSN
-   // Calculate the packet count based on the len of the WQE/MTU
-   msns.start_idx_next_psn_start_psn = 0;
-   start_psn = sq.psn;
-   pkt_cnt = (msg_len / sq.mtu);
+  uint32_t npsn = 0, start_psn = 0, next_psn = 0;
+  struct bnxt_re_msns msns;
+  uint64_t *msns_ptr;
+  uint32_t pkt_cnt = 0;
+  /* Start slot index of the WQE */
+  uint32_t st_idx = sq.tail; // * BNXT_RE_STATIC_WQE_SIZE_SLOTS; Do we need this?
+  // Get the MSN table address
+  msns_ptr = (uint64_t *)pull_psn_buff(sq);
+  // Start PSN is the last recorded PSN
+  // Calculate the packet count based on the len of the WQE/MTU
+  msns.start_idx_next_psn_start_psn = 0;
+  start_psn = sq.psn;
+  pkt_cnt = (msg_len / sq.mtu);
 
-   if (msg_len % sq.mtu)
-       pkt_cnt++;
+  if (msg_len % sq.mtu)
+    pkt_cnt++;
 
-   /* Increment the psn even for 0 len packets
-    * e.g. for opcode rdma-write-with-imm-data
-    * with length field = 0
-    */
-   if (msg_len == 0)
-       pkt_cnt = 1;
+  /* Increment the psn even for 0 len packets
+   * e.g. for opcode rdma-write-with-imm-data
+   * with length field = 0
+   */
+  if (msg_len == 0)
+    pkt_cnt = 1;
 
-   /* make it 24 bit */
-   next_psn = sq.psn + pkt_cnt;
-   npsn = next_psn;
-   sq.psn = next_psn;
-   msns.start_idx_next_psn_start_psn |= update_msn_tbl(st_idx, npsn, start_psn);
-   sq.msn++;
-   sq.msn %= sq.msn_tbl_sz;
+  /* make it 24 bit */
+  next_psn = sq.psn + pkt_cnt;
+  npsn = next_psn;
+  sq.psn = next_psn;
+  msns.start_idx_next_psn_start_psn |= update_msn_tbl(st_idx, npsn, start_psn);
+  sq.msn++;
+  sq.msn %= sq.msn_tbl_sz;
 
-   memcpy(msns_ptr, &msns, sizeof(uint64_t));
+  memcpy(msns_ptr, &msns, sizeof(uint64_t));
 }
 
 __device__ __forceinline__ void QueuePairBNXT::incr_tail(

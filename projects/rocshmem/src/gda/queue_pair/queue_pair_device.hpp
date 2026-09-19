@@ -325,7 +325,7 @@ public:
     if constexpr (Op == OpCode::RDMA_WRITE) {
       return size <= Traits::InlineThreshold;
     } else {
-      return  false;
+      return false;
     }
   }
 
