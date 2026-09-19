@@ -172,6 +172,14 @@ declare -A TEST_NUMBERS=(
   ["tile_reduce"]="155"
   ["tile_reduce_wave"]="156"
   ["tile_reduce_wg"]="157"
+  ["tile_put_wave_rowmajor"]="162"
+  ["tile_put_wave_colmajor"]="163"
+  ["tile_get_wave_rowmajor"]="164"
+  ["tile_get_wave_colmajor"]="165"
+  ["tile_put_wg_rowmajor"]="166"
+  ["tile_put_wg_colmajor"]="167"
+  ["tile_get_wg_rowmajor"]="168"
+  ["tile_get_wg_colmajor"]="169"
 )
 
 # Detect which runtime to use
@@ -1017,38 +1025,61 @@ TestTiles() {
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
 
-  ExecTest  "tile_put_contiguous"       2       1            1
-  ExecTest  "tile_put_rowmajor"         2       1            1
-  ExecTest  "tile_put_colmajor"         2       1            1
-  ExecTest  "tile_put_arbitrary"        2       1            1
-  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE
-  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_contiguous"       2       1            1
-  ExecTest  "tile_get_rowmajor"         2       1            1
-  ExecTest  "tile_get_colmajor"         2       1            1
-  ExecTest  "tile_get_arbitrary"        2       1            1
-  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_put_1d"               2       1            1
-  ExecTest  "tile_get_1d"               2       1            1
-  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_put_contiguous"       2       1            1            1048576
+  ExecTest  "tile_put_rowmajor"         2       1            1            1048576
+  ExecTest  "tile_put_colmajor"         2       1            1            1048576
+  ExecTest  "tile_put_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_contiguous"       2       1            1            1048576
+  ExecTest  "tile_get_rowmajor"         2       1            1            1048576
+  ExecTest  "tile_get_colmajor"         2       1            1            1048576
+  ExecTest  "tile_get_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_1d"               2       1            1            1048576
+  ExecTest  "tile_get_1d"               2       1            1            1048576
+  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_broadcast"            2       1            1
   ExecTest  "tile_broadcast"            4       1            1
-  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE
-  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
+  # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE   ""       4
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((4 * 4))
+  ExecTest  "tile_broadcast_wave"       4       4            $WAVE_SIZE   ""       4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
   ExecTest  "tile_allgather"            2       1            1
   ExecTest  "tile_allgather"            4       1            1
-  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE
-  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
+  # tile_allgather_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE   ""       4
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((4 * 4))
+  ExecTest  "tile_allgather_wave"       4       4            $WAVE_SIZE   ""       4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
   ExecTest  "tile_reduce"               2       1            1
   ExecTest  "tile_reduce"               4       1            1
-  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
-  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
+  # tile_reduce_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE   ""       4
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((4 * 4))
+  ExecTest  "tile_reduce_wave"          4       4            $WAVE_SIZE   ""       4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
   ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
 }

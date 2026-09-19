@@ -173,6 +173,14 @@ set(TEST_reducescatter_wave 154)
 set(TEST_tile_reduce 155)
 set(TEST_tile_reduce_wave 156)
 set(TEST_tile_reduce_wg 157)
+set(TEST_tile_put_wave_rowmajor 162)
+set(TEST_tile_put_wave_colmajor 163)
+set(TEST_tile_get_wave_rowmajor 164)
+set(TEST_tile_get_wave_colmajor 165)
+set(TEST_tile_put_wg_rowmajor 166)
+set(TEST_tile_put_wg_colmajor 167)
+set(TEST_tile_get_wg_rowmajor 168)
+set(TEST_tile_get_wg_colmajor 169)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -638,13 +646,21 @@ function(_add_single_rocshmem_test)
         set(TEST_TIMEOUT 300)  # 5 minutes
     endif()
 
+    # Compute MAX_NUM_CONTEXTS: wave tests need one context per wave (WGs * waves-per-WG);
+    # all other tests need one context per WG.
+    if(DEFINED TEST_NUM_WF)
+        math(EXPR TEST_MAX_NUM_CONTEXTS "${TEST_WORKGROUPS} * ${TEST_NUM_WF}")
+    else()
+        set(TEST_MAX_NUM_CONTEXTS "${TEST_WORKGROUPS}")
+    endif()
+
     # Build test command - choose launcher based on MPI availability
     if(USE_SLR_LAUNCHER)
         # SLR mode: Direct execution with ROCSHMEM_SLR_NP environment variable
         # Use system env instead of cmake -E env for portability (build-host cmake path doesn't leak into install)
         set(TEST_COMMAND
             env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
-            "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+            "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_MAX_NUM_CONTEXTS}"
             "ROCSHMEM_HEAP_SIZE=6442450944"
         )
 
@@ -678,7 +694,7 @@ function(_add_single_rocshmem_test)
 
         # Export environment variables to MPI ranks via -x flags
         list(APPEND TEST_COMMAND
-            -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+            -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_MAX_NUM_CONTEXTS}"
             -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
             -x "ROCSHMEM_HEAP_SIZE=6442450944"
         )
@@ -1277,34 +1293,42 @@ function(add_tile_tests)
 	# Tile tests are only supported on IPC and GDA backends
     # These tests use 2D strided memory access patterns
     begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
-        add_rocshmem_functional_test(NAME tile_put_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_put_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_put_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_put_arbitrary RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_put_1d RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_put_contiguous RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_colmajor RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_arbitrary RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_1d RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
     end_test_group()
 
     # Wavefront and workgroup tile put tests
     # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
     begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
-        add_rocshmem_functional_test(NAME tile_put_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1)
-        add_rocshmem_functional_test(NAME tile_put_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_put_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_wave_rowmajor RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_wave_colmajor RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_wg_rowmajor RANKS 2 WORKGROUPS 1 NUM_WF 16 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_put_wg_colmajor RANKS 2 WORKGROUPS 1 NUM_WF 16 MAX_MSG_SIZE 1048576)
     end_test_group()
 
     begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
-        add_rocshmem_functional_test(NAME tile_get_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_get_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_get_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_get_arbitrary RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME tile_get_1d RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_get_contiguous RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_colmajor RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_arbitrary RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_1d RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
     end_test_group()
 
     # Wavefront and workgroup tile get tests
     # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
     begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
-        add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1)
-        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16)
-        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_wave_rowmajor RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_wave_colmajor RANKS 2 WORKGROUPS 1 NUM_WF 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_wg_rowmajor RANKS 2 WORKGROUPS 1 NUM_WF 16 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_wg_colmajor RANKS 2 WORKGROUPS 1 NUM_WF 16 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 NUM_WF 16 MAX_MSG_SIZE 1048576)
     end_test_group()
 
     # Tile collective tests (broadcast and allgather)
@@ -1313,9 +1337,9 @@ function(add_tile_tests)
         # Thread-level broadcast - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 4 WORKGROUPS 1 THREADS 1)
-        # Wave-level broadcast
-        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 NUM_WF 1)
-        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 1 NUM_WF 1)
+        # Wave-level broadcast - each wave uses its own context; MAX_NUM_CONTEXTS = WGs * NUM_WF
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 4 NUM_WF 4)
         # Workgroup-level broadcast
         add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
         add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
@@ -1325,9 +1349,9 @@ function(add_tile_tests)
         # Thread-level allgather - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_allgather RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_allgather RANKS 4 WORKGROUPS 1 THREADS 1)
-        # Wave-level allgather
-        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 NUM_WF 1)
-        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 1 NUM_WF 1)
+        # Wave-level allgather - each wave uses its own context; MAX_NUM_CONTEXTS = WGs * NUM_WF
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 4 NUM_WF 4)
         # Workgroup-level allgather
         add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
         add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
@@ -1338,12 +1362,14 @@ function(add_tile_tests)
         add_rocshmem_functional_test(NAME tile_reduce RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 262144)
-        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 2 WORKGROUPS 1 THREADS 64)
-        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 THREADS 64)
-        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 2048)
-        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
-        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
-        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 2048)
+        # Wave-level reduce - each wave uses its own context; MAX_NUM_CONTEXTS = WGs * NUM_WF
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 4 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 4 NUM_WF 4 MAX_MSG_SIZE 2048)
+        # Workgroup-level reduce
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 4 NUM_WF 1 MAX_MSG_SIZE 2048)
     end_test_group()
 endfunction()
 

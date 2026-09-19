@@ -103,43 +103,53 @@ __global__ void TileAllgatherThreadTest(rocshmem_team_t team,
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
-// Wave-level allgather test - single WG, single wave
-__global__ void TileAllgatherWaveTest(rocshmem_team_t team,
+// Wave-level allgather test - each wave uses its own team and context
+__global__ void TileAllgatherWaveTest(rocshmem_team_t *teams,
                                       float *source, float *dest,
                                       int tile_extent_0, int tile_extent_1,
                                       int my_world_pe, int n_pes,
                                       ShmemContextType ctx_type,
-                                      int wf_size,
+                                      int wf_size, int num_waves_per_wg,
                                       int *error_flag) {
-  __shared__ rocshmem_ctx_t ctx;
+  extern __shared__ rocshmem_ctx_t ctx_array[];
 
-  // Create context from team
-  rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
+  int t_id      = get_flat_block_id();
+  int wg_id     = get_flat_grid_id();
+  int wf_id     = t_id / wf_size;
+  int wg_offset = wg_id * num_waves_per_wg;
+  int flat_wf_id = wg_offset + wf_id;
+
+  // All threads in the WG collectively create one context per wave.
+  for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
+    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
+                                &ctx_array[wf_i]);
+    __syncthreads();
+  }
 
   int tile_size = tile_extent_0 * tile_extent_1;
+  // Each wave has its own source tile and its own n_pes-wide dest region
+  float *my_source = source + flat_wf_id * tile_size;
+  float *my_dest   = dest   + flat_wf_id * tile_size * n_pes;
 
-  Tensor2D<float> src_tensor(source, tile_extent_0, tile_extent_1);
-  Tensor2D<float> dst_tensor(dest, tile_extent_0 * n_pes, tile_extent_1);
+  Tensor2D<float> src_tensor(my_source, tile_extent_0, tile_extent_1);
+  Tensor2D<float> dst_tensor(my_dest, tile_extent_0 * n_pes, tile_extent_1);
   Tuple2D start(0, 0);
   Tuple2D boundary(tile_extent_0, tile_extent_1);
 
-  // Only first wave performs allgather
-  if (threadIdx.x < wf_size) {
-    rocshmem_ctx_tile_allgather_wave(ctx, team, dst_tensor, src_tensor,
-                                     start, boundary, 0);
-  }
+  rocshmem_ctx_tile_allgather_wave(ctx_array[wf_id], teams[flat_wf_id],
+                                   dst_tensor, src_tensor, start, boundary, 0);
   __syncthreads();
 
-  // Verify on thread 0
-  if (threadIdx.x == 0) {
+  // Verify — one thread per wave checks its own dest region
+  if (t_id % wf_size == 0) {
     for (int pe = 0; pe < n_pes; pe++) {
       int offset = pe * tile_size;
       for (int idx = 0; idx < tile_size; idx++) {
-        float expected = pe * 100.0f + idx;
-        float actual = dest[offset + idx];
+        float expected = pe * 100.0f + flat_wf_id * 1000.0f + idx;
+        float actual = my_dest[offset + idx];
         if (actual != expected) {
-          printf("Wave-level: PE %d verification failed for PE %d's data at [%d]: got %f, expected %f\n",
-                 my_world_pe, pe, idx, actual, expected);
+          printf("Wave-level: PE %d wave %d verification failed for PE %d's data at [%d]: got %f, expected %f\n",
+                 my_world_pe, flat_wf_id, pe, idx, actual, expected);
           *error_flag = 1;
         }
       }
@@ -147,7 +157,12 @@ __global__ void TileAllgatherWaveTest(rocshmem_team_t team,
   }
 
   __syncthreads();
-  rocshmem_wg_ctx_destroy(&ctx);
+
+  // Destroy all contexts — WG-collective, same order as creation
+  for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
+    rocshmem_wg_ctx_destroy(&ctx_array[wf_i]);
+    __syncthreads();
+  }
 }
 
 // Workgroup-level allgather test - multiple WGs with different teams
@@ -157,14 +172,14 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
                                    int my_world_pe, int n_pes,
                                    ShmemContextType ctx_type,
                                    int *error_flag) {
-  __shared__ rocshmem_ctx_t ctx;
+  extern __shared__ rocshmem_ctx_t ctx_array[];
   int wg_id = get_flat_grid_id();
 
   // Each workgroup uses a DIFFERENT team
   rocshmem_team_t my_team = teams[wg_id % num_teams];
 
   // Create context from this workgroup's specific team
-  rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx);
+  rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx_array[0]);
 
   // Calculate offset for this workgroup's tiles
   int tile_size = tile_extent_0 * tile_extent_1;
@@ -178,7 +193,7 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
   Tuple2D boundary(tile_extent_0, tile_extent_1);
 
   // Perform tile allgather - each PE contributes its tile, all PEs receive all tiles
-  rocshmem_ctx_tile_allgather_wg(ctx, my_team, dst_tensor, src_tensor,
+  rocshmem_ctx_tile_allgather_wg(ctx_array[0], my_team, dst_tensor, src_tensor,
                                   start, boundary, 0);
 
   __syncthreads();
@@ -206,9 +221,9 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
   __syncthreads();
 
   // Team barrier - each workgroup synchronizes on its own team
-  rocshmem_ctx_sync_wg(ctx, my_team);
+  rocshmem_ctx_sync_wg(ctx_array[0], my_team);
 
-  rocshmem_wg_ctx_destroy(&ctx);
+  rocshmem_wg_ctx_destroy(&ctx_array[0]);
 }
 
 /******************************************************************************
@@ -216,7 +231,9 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
  *****************************************************************************/
 TileAllgatherTester::TileAllgatherTester(TesterArguments args)
     : Tester(args) {
-  num_teams = args.num_wgs;  // Default to num_wgs teams.
+  // Wave test needs one team per wave (num_wgs * num_warps); WG test needs
+  // one team per WG (num_wgs).  Allocate the larger so one array covers both.
+  num_teams = args.num_wgs * num_warps;
 
   // Allocate teams using hipHostMalloc
   CHECK_HIP(hipHostMalloc(&teams, num_teams * sizeof(rocshmem_team_t)));
@@ -226,13 +243,13 @@ TileAllgatherTester::TileAllgatherTester(TesterArguments args)
     teams[i] = ROCSHMEM_TEAM_INVALID;
   }
 
-  // Allocate tile data
-  tile_extent_0 = 8;  // Default tile size
+  // Allocate tile data — one source tile and n_pes dest tiles per wave slot
+  tile_extent_0 = 8;
   tile_extent_1 = 8;
   int tile_size = tile_extent_0 * tile_extent_1;
   int n_pes = rocshmem_n_pes();
 
-  // Each workgroup needs: 1 source tile + n_pes destination tiles
+  // num_teams slots, each needing 1 source tile + n_pes destination tiles
   int total_src_size = tile_size * num_teams;
   int total_dst_size = tile_size * n_pes * num_teams;
 
@@ -265,48 +282,44 @@ TileAllgatherTester::~TileAllgatherTester() {
 void TileAllgatherTester::resetBuffers([[maybe_unused]] size_t size) {
   int tile_size = tile_extent_0 * tile_extent_1;
   int n_pes = rocshmem_n_pes();
-  int total_src_size = tile_size * num_teams;
   int total_dst_size = tile_size * n_pes * num_teams;
 
-  // Initialize source data: each PE's data is pe * 100 + wg_id * 1000 + element_index
-  for (int wg = 0; wg < num_teams; wg++) {
-    int offset = wg * tile_size;
+  for (int slot = 0; slot < num_teams; slot++) {
+    int src_offset = slot * tile_size;
     for (int i = 0; i < tile_size; i++) {
-      source[offset + i] = args.myid * 100.0f + wg * 1000.0f + i;
+      source[src_offset + i] = args.myid * 100.0f + slot * 1000.0f + i;
     }
   }
 
-  // Initialize dest to invalid value
   for (int i = 0; i < total_dst_size; i++) {
     dest[i] = -1.0f;
   }
 
-  // Reset error flag
   int zero = 0;
   CHECK_HIP(hipMemcpy(error_flag, &zero, sizeof(int), hipMemcpyHostToDevice));
 }
 
 void TileAllgatherTester::preLaunchKernel() {
   int n_pes = rocshmem_n_pes();
+  int teams_needed;
 
-  if (_type == TileAllgatherWGTestType) {
-    // Multi-team case: Create multiple duplicate teams (all PEs are members of all teams)
-    for (int i = 0; i < num_teams; i++) {
-      teams[i] = ROCSHMEM_TEAM_INVALID;
-      rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0, &teams[i]);
-
-      if (teams[i] == ROCSHMEM_TEAM_INVALID) {
-        printf("PE %d: Failed to create team %d\n", args.myid, i);
-        rocshmem_global_exit(1);
-      }
-    }
+  if (_type == TileAllgatherWaveTestType) {
+    // One team per wave (num_wgs * num_warps)
+    teams_needed = args.num_wgs * num_warps;
+  } else if (_type == TileAllgatherWGTestType) {
+    // One team per WG
+    teams_needed = args.num_wgs;
   } else {
-    // Single-team case: Create just one team for thread/wave level tests
-    teams[0] = ROCSHMEM_TEAM_INVALID;
-    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0, &teams[0]);
+    // Thread-level: single team
+    teams_needed = 1;
+  }
 
-    if (teams[0] == ROCSHMEM_TEAM_INVALID) {
-      printf("PE %d: Failed to create team\n", args.myid);
+  for (int i = 0; i < teams_needed; i++) {
+    teams[i] = ROCSHMEM_TEAM_INVALID;
+    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
+                                &teams[i]);
+    if (teams[i] == ROCSHMEM_TEAM_INVALID) {
+      printf("PE %d: Failed to create team %d\n", args.myid, i);
       rocshmem_global_exit(1);
     }
   }
@@ -325,19 +338,27 @@ void TileAllgatherTester::launchKernel(dim3 gridSize, dim3 blockSize,
                          args.myid, n_pes, _shmem_context, error_flag);
       break;
 
-    case TileAllgatherWaveTestType:
-      // Wave-level test: single WG, single wave
-      hipLaunchKernelGGL(TileAllgatherWaveTest, dim3(1), blockSize, 0, stream,
-                         teams[0], source, dest, tile_extent_0, tile_extent_1,
-                         args.myid, n_pes, _shmem_context, wf_size, error_flag);
+    case TileAllgatherWaveTestType: {
+      // Wave-level test: all WGs, each wave uses its own team and context
+      size_t wave_shared = num_warps * sizeof(rocshmem_ctx_t);
+      hipLaunchKernelGGL(TileAllgatherWaveTest, gridSize, blockSize,
+                         wave_shared, stream,
+                         teams, source, dest, tile_extent_0, tile_extent_1,
+                         args.myid, n_pes, _shmem_context,
+                         wf_size, num_warps, error_flag);
       break;
+    }
 
-    case TileAllgatherWGTestType:
-      // Workgroup-level test: multiple WGs with different teams
-      hipLaunchKernelGGL(TileAllgatherTest, dim3(num_teams), blockSize, 0, stream,
-                         teams, num_teams, source, dest, tile_extent_0, tile_extent_1,
+    case TileAllgatherWGTestType: {
+      // Workgroup-level test: multiple WGs, each with its own team and context
+      size_t wg_shared = sizeof(rocshmem_ctx_t);
+      hipLaunchKernelGGL(TileAllgatherTest, dim3(args.num_wgs), blockSize,
+                         wg_shared, stream,
+                         teams, args.num_wgs, source, dest,
+                         tile_extent_0, tile_extent_1,
                          args.myid, n_pes, _shmem_context, error_flag);
       break;
+    }
 
     default:
       fprintf(stderr, "Unknown TileAllgather test type\n");
@@ -346,20 +367,19 @@ void TileAllgatherTester::launchKernel(dim3 gridSize, dim3 blockSize,
 }
 
 void TileAllgatherTester::postLaunchKernel() {
-  // Destroy teams after each iteration to prevent resource exhaustion
-  if (_type == TileAllgatherWGTestType) {
-    // Multi-team case: destroy all teams
-    for (int i = 0; i < num_teams; i++) {
-      if (teams[i] != ROCSHMEM_TEAM_INVALID) {
-        rocshmem_team_destroy(teams[i]);
-        teams[i] = ROCSHMEM_TEAM_INVALID;
-      }
-    }
+  int teams_to_destroy;
+  if (_type == TileAllgatherWaveTestType) {
+    teams_to_destroy = args.num_wgs * num_warps;
+  } else if (_type == TileAllgatherWGTestType) {
+    teams_to_destroy = args.num_wgs;
   } else {
-    // Single-team case: destroy the one team
-    if (teams[0] != ROCSHMEM_TEAM_INVALID) {
-      rocshmem_team_destroy(teams[0]);
-      teams[0] = ROCSHMEM_TEAM_INVALID;
+    teams_to_destroy = 1;
+  }
+
+  for (int i = 0; i < teams_to_destroy; i++) {
+    if (teams[i] != ROCSHMEM_TEAM_INVALID) {
+      rocshmem_team_destroy(teams[i]);
+      teams[i] = ROCSHMEM_TEAM_INVALID;
     }
   }
 }
