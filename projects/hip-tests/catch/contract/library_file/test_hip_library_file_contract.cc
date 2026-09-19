@@ -9,9 +9,17 @@
 #include <hip_test_common.hh>
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 // The library-from-file and managed-symbol APIs (hipLibraryLoadFromFile,
 // hipLibraryGetManaged) are exercised on both backends: on NVIDIA they map to
@@ -68,15 +76,18 @@ bool CompileLibrarySource(std::vector<char>& code) {
   return true;
 }
 
-// Compiles the library source and writes it to a unique per-test file in the
-// current working directory, returning the path. Skips when HIPRTC is
-// unavailable. The caller must remove the file when done.
+// Compile to a temp file: installed test directories may be read-only.
+// Returns the path; the caller must remove the file.
 std::string WriteCodeObjectFile(const char* suffix) {
   std::vector<char> code;
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  const std::string path = std::string("hip-contract-library-file-") + suffix + ".code";
+  const std::string path =
+      (std::filesystem::temp_directory_path() /
+       ("hip-contract-library-file-" + std::string(suffix) + "-" +
+        std::to_string(getpid()) + ".code"))
+          .string();
   std::ofstream out(path, std::ios::binary);
   REQUIRE(out.is_open());
   out.write(code.data(), static_cast<std::streamsize>(code.size()));

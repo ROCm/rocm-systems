@@ -13,6 +13,7 @@
 #include <utils.hh>
 
 #include <chrono>
+#include <filesystem>
 #include <thread>
 
 namespace {
@@ -628,6 +629,13 @@ struct ipcHdl {
     char *name;
 };
 
+#if !HT_WIN
+// IPC socket path in the temp directory so tests work from read-only cwd.
+inline std::string ipcSocketPath(pid_t pid) {
+  return (std::filesystem::temp_directory_path() / std::to_string(pid)).string();
+}
+#endif
+
 class ipcSocketCom {
   ipcHdl *handle;
 
@@ -645,8 +653,8 @@ class ipcSocketCom {
     int server_fd;
     struct sockaddr_un servaddr;
 
-    char name[16];
-    sprintf(name, "%u", getpid());
+    std::string nameStr = ipcSocketPath(getpid());
+    const char *name = nameStr.c_str();
 
     handle = new ipcHdl;
     if (nullptr == handle) {
@@ -660,6 +668,8 @@ class ipcSocketCom {
 
     if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("Socket failure: Socket creation failed");
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -669,7 +679,10 @@ class ipcSocketCom {
 
     size_t len = strlen(name);
     if (len > (sizeof(servaddr.sun_path) - 1)) {
-      perror("Socket failure: Cannot bind provided name to socket. Name too large");
+      fprintf(stderr, "Socket failure: Cannot bind provided name to socket. Name too large\n");
+      close(server_fd);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -677,6 +690,9 @@ class ipcSocketCom {
 
     if (bind(server_fd, (struct sockaddr *)&servaddr, SUN_LEN(&servaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
+      close(server_fd);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -724,18 +740,30 @@ class ipcSocketCom {
 
     if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("IPC failure:Socket creation error");
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    char name[16];
 
-    sprintf(name, "%u", getpid());
+    std::string nameStr = ipcSocketPath(getpid());
+    const char *name = nameStr.c_str();
 
+    if (strlen(name) > (sizeof(cliaddr.sun_path) - 1)) {
+      fprintf(stderr, "Socket failure: Cannot bind provided name to socket. Name too large\n");
+      close(sock);
+      delete handle;
+      handle = nullptr;
+      return -1;
+    }
     strcpy(cliaddr.sun_path, name);
     if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
+      close(sock);
+      delete handle;
+      handle = nullptr;
       return -1;
     }
 
@@ -892,7 +920,12 @@ public:
 
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
-    strcpy(cliaddr.sun_path, std::to_string(process).c_str());
+    std::string destPath = ipcSocketPath(process);
+    if (destPath.size() > (sizeof(cliaddr.sun_path) - 1)) {
+      fprintf(stderr, "Socket failure: Cannot address socket. Name too large\n");
+      return -1;
+    }
+    strcpy(cliaddr.sun_path, destPath.c_str());
 
     int sendfd = (int)shareableHdl;
 
