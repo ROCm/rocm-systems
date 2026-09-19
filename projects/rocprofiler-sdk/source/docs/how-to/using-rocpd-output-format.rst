@@ -864,13 +864,15 @@ rocpd merge - Database merging tool
 
 - Database consolidation: Combines multiple ``rocpd`` databases into a single unified database file.
 
-- Schema integrity: Validates before merging, that all input databases share the same schema version.
+- Schema integrity: Validates input database objects and physical table layouts against a supported ROCpd schema version. All input databases must use the same version.
 
-- Comprehensive merging: Preserves all database objects including tables, views, indexes, and triggers.
+- Trusted schema reconstruction: Copies profiling rows into canonical tables and rebuilds indexes and views from the installed, versioned ROCpd schemas. Additional metadata key/value rows are preserved. Custom persistent tables, indexes, views, and triggers are not supported.
+
+- Input compatibility: Canonical views and standalone indexes may be missing from input databases. Merge reconstructs them from trusted schemas, and the importer builds trusted temporary analysis views. Required physical tables and their constraints remain validated, including CHECK expressions (ignoring whitespace, comments, and keyword case); canonical indexes that are present must match the expected structure.
 
 - Data aggregation: Creates UNION views that automatically aggregate data from all merged sources.
 
-- Integrity handling: Re-enables SQLite foreign key enforcement for subsequent operations on the merged database.
+- Integrity handling: Checks foreign-key relationships and database integrity before atomically publishing the completed output. Failed merges preserve an existing destination.
 
 **Command-line options:**
 
@@ -988,9 +990,15 @@ The following table provides a detailed listing of the ``rocpd merge`` command-l
 
 **Important considerations:**
 
+- Offline databases: Close input databases before merging or importing them. Inputs are attached read-only and immutable; non-empty WAL or rollback-journal sidecars are rejected to avoid silently omitting committed data. This also applies to automatic merging during analysis, including singleton batches.
+
+- Existing destinations: Keep the destination closed to all readers and writers for the entire merge. A destination with any ``-wal``, ``-shm``, or ``-journal`` sidecar is rejected, including empty or orphaned sidecars. Recover/checkpoint the old database with SQLite, switch it to DELETE journal mode, and close it before retrying. Do not delete journal files to bypass these checks. Sidecar checks do not synchronize with concurrent SQLite connections.
+
+- Self-contained output: Merged output uses DELETE journal mode and is published as a single database file. An input database cannot also be the destination.
+
 - Schema version compatibility: All input databases must have matching schema versions. Merging fails if version mismatches are detected.
 
-- Table name uniqueness: The merge operation assumes globally unique table names across all input databases.
+- Partition uniqueness: Duplicate ROCpd UUID partitions across input databases are rejected, including partitions in previously merged inputs.
 
 - Merged database size: The output database size equals the sum of all input database sizes plus index overhead.
 
