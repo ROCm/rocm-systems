@@ -610,6 +610,24 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->nvlsSupport) NCCLCHECK(ncclNvlsFree(comm));
 #endif
 
+  // Stop and join the profiler thread BEFORE the destructor loop runs.
+  //
+  // The thread polls comm->profiler.workStarted/workCompleted/workPhases for
+  // every op still queued in pt->active. Those three buffers are host-pinned
+  // and are released by ncclDestructorFnCudaHostFree entries pushed onto
+  // comm->destructorHead (see ncclCommPushCudaHostFree), i.e. by the loop
+  // immediately below. Destroying the thread afterwards left a window in
+  // which it dereferenced an unmapped pinned mapping and took SIGSEGV at
+  // profilerProgressOps():
+  //     op->workStarted[ch].data[slot].counter
+  // The crash needs an op that has not completed yet, so it is timing
+  // dependent: it reproduces on a single node with any collective once a
+  // profiler plugin is attached, and never without one.
+  //
+  // This also has to precede the free(comm->abortFlag) below, which the thread
+  // loads through pt->abortFlag on every wake.
+  NCCLCHECK(ncclProfilerThreadDestroy(comm));
+
   struct ncclDestructor* dtor = comm->destructorHead;
   while (dtor != nullptr) {
     NCCLCHECK(dtor->fn(dtor));
@@ -651,7 +669,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
        comm->rank, comm->nRanks, comm->cudaDev, comm->busId, comm->commHash, abort ? "Abort" : "Destroy");
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
-  NCCLCHECK(ncclProfilerThreadDestroy(comm));
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
   if (sharedResRefCount == 0) {
     NCCLCHECK(ncclNetFinalize(comm));
