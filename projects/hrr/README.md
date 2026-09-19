@@ -179,6 +179,7 @@ capture.hrr/
   pid-<pid>/
     events.bin
     blobs/
+    code_objects/
     regions/          (optional)
     manifest.json
 ```
@@ -188,7 +189,14 @@ capture.hrr/
   dispatch table never saw. Written by code outside the runtime, never by
   capture itself
 - **blobs/** — host payloads referenced by the trace
+- **code_objects/** — device images, one per `amd::Program`, named by hash; a
+  launch records the hash so kernels sharing a name (Triton emits many
+  `triton_`) still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
+
+Every recorded code object should start with `\x7fELF`,
+`__CLANG_OFFLOAD_BUNDLE__` or `CCOB`; capture warns and records nothing rather
+than storing an image that fails only at replay with HIP error 200.
 
 Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-format notes).
 
