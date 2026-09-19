@@ -2915,6 +2915,41 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
 // ================================================================================================
 bool KernelBlitManager::WriteBufferBatch(
     const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
+  // When device memory is host-accessible, use HostBlitManager (matches the
+  // writeBuffer() fast path). This avoids pinning pageable host memory which
+  // produces GPU VAs that DTIF fast-copy can't dereference on the CPU.
+  if (dev().settings().blocking_blit_) {
+    bool all_direct = true;
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      Memory* dst_memory = dev().getRocMemory(op.dst_memory);
+      if (dst_memory && !dst_memory->isHostMemDirectAccess() &&
+          !gpuMem(*dst_memory).IsPersistentDirectMap()) {
+        all_direct = false;
+        break;
+      }
+    }
+    if (all_direct) {
+      gpu().releaseGpuMemoryFence();
+      for (const amd::BatchWriteMemoryOp& op : write_ops) {
+        Memory* dst_memory = dev().getRocMemory(op.dst_memory);
+        if (dst_memory) {
+          HostBlitManager::writeBuffer(op.src_host, *dst_memory,
+                                       amd::Coord3D(op.dst_offset),
+                                       amd::Coord3D(op.size), false, op.metadata);
+        }
+      }
+      synchronize();
+      return true;
+    }
+  }
+
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
+      gpu().releaseGpuMemoryFence();
+      break;
+    }
+  }
+
   std::vector<amd::BatchCopyOp> pinned_copy_ops;
   std::vector<BufferState> pinned_buffers;
   std::vector<BatchRawCopyOp> staging_copy_ops;
@@ -3027,6 +3062,34 @@ bool KernelBlitManager::WriteBufferBatch(
 
 // ================================================================================================
 bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& read_ops) const {
+  // When device memory is host-accessible, use HostBlitManager (matches the
+  // readBuffer() fast path). Avoids pinning host memory which produces GPU VAs
+  // that DTIF fast-copy can't dereference on the CPU.
+  if (dev().settings().blocking_blit_) {
+    bool all_direct = true;
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      Memory* src_memory = dev().getRocMemory(op.src_memory);
+      if (src_memory && !src_memory->isHostMemDirectAccess() &&
+          !gpuMem(*src_memory).IsPersistentDirectMap()) {
+        all_direct = false;
+        break;
+      }
+    }
+    if (all_direct) {
+      gpu().releaseGpuMemoryFence();
+      for (const amd::BatchReadMemoryOp& op : read_ops) {
+        Memory* src_memory = dev().getRocMemory(op.src_memory);
+        if (src_memory) {
+          HostBlitManager::readBuffer(*src_memory, op.dst_host,
+                                      amd::Coord3D(op.src_offset),
+                                      amd::Coord3D(op.size), false, op.metadata);
+        }
+      }
+      synchronize();
+      return true;
+    }
+  }
+
   struct StagingReadBack {
     address staging;
     address dst;
