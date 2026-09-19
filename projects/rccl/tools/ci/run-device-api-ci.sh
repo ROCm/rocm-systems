@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Run the RCCL device-API benchmark suite (symmetric memory / LSA device kernels
-# / GIN proxy) against the freshly built rccl-tests tree. Mirrors the legacy
-# rocJenkins "device-api" testCommand.
+# Run the RCCL device-API benchmark suite (symmetric memory / GIN proxy)
+# against the freshly built rccl-tests tree. Mirrors the legacy rocJenkins
+# "device-api" testCommand. LSA all_reduce_perf (-D 1/-D 2) is not launched:
+# that binary still does not build under ENABLE_ROCSHMEM_GIN.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), the in-tree RCCL build at
-# projects/rccl/build/release, and rccl-tests/build. ROCM_PATH / MPI_HOME come
-# from the environment (device-api.sbatch exports them) or, when run standalone,
-# from $WORKDIR/.ci-out/{rocm,ompi}.env.
+# projects/rccl/build/release, and rccl-tests/build. Build paths come from the
+# environment (device-api.sbatch exports them) or, when run standalone, from
+# $WORKDIR/.ci-out/{rocm,ompi,rocshmem}.env.
 #
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
@@ -17,7 +18,9 @@
 # debug_env to every run.
 #
 # Environment overrides:
-#   ROCM_PATH / MPI_HOME   Else read from .ci-out/{rocm,ompi}.env
+#   ROCM_PATH / MPI_HOME / ROCSHMEM_INSTALL_DIR
+#                          Else read from matching .ci-out/*.env fragments
+#   RCCL_TESTS_BIN_DIR     rccl-tests build directory (default: rccl-tests/build)
 #   NP                     MPI ranks per run         (default: 8)
 #   BENCH_ARGS             Common bench args         (default: from JSON bench_args)
 #   BENCH_TIMEOUT          Per-bench wall-clock cap  (default: 600s)
@@ -41,11 +44,12 @@ RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
 RCCL_TESTS_DIR="${WORKDIR}/projects/rccl-tests"
 CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 
-# Prefer the build stages' env fragments over any ambient ROCM_PATH / MPI_HOME.
-# shellcheck source=/dev/null  # runtime fragment written by the provision step
-[[ -f "${WORKDIR}/.ci-out/rocm.env" ]] && source "${WORKDIR}/.ci-out/rocm.env"
-# shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
-[[ -f "${WORKDIR}/.ci-out/ompi.env" ]] && source "${WORKDIR}/.ci-out/ompi.env"
+# Prefer the build stages' env fragments over ambient build paths.
+for frag in rocm ompi rocshmem; do
+  env_file="${WORKDIR}/.ci-out/${frag}.env"
+  # shellcheck source=/dev/null  # runtime fragment written by the build stages
+  [[ -f "${env_file}" ]] && source "${env_file}"
+done
 
 : "${ROCM_PATH:?run-device-api-ci.sh: ROCM_PATH unset (provisioned via rocm.env / sbatch)}"
 : "${MPI_HOME:?run-device-api-ci.sh: MPI_HOME unset (run build-ompi.sh / via sbatch)}"
@@ -72,14 +76,25 @@ fi
 cd "${RCCL_TESTS_DIR}"
 
 export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
-export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+if [[ -n "${ROCSHMEM_INSTALL_DIR:-}" ]]; then
+  export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${ROCSHMEM_INSTALL_DIR}/lib:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+else
+  export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+fi
 
-PERF_DIR=build
-if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_reduce_perf" ]]; then
+if [[ -n "${RCCL_TESTS_BIN_DIR:-}" ]]; then
+  PERF_DIR="${RCCL_TESTS_BIN_DIR}"
+else
+  PERF_DIR="${RCCL_TESTS_DIR}/build"
+fi
+# all_reduce_perf is not a valid sentinel here: it still fails to build under
+# ENABLE_ROCSHMEM_GIN. alltoall_perf is the binary this GIN job always needs.
+if [[ ! -d "${PERF_DIR}" || ! -x "${PERF_DIR}/alltoall_perf" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
-  ls -la
+  ls -la "${PERF_DIR}" 2>/dev/null || ls -la "${RCCL_TESTS_DIR}"
   exit 1
 fi
+echo "==> rccl-tests perf dir = ${PERF_DIR}"
 
 PARSER="${script_dir}/lib/parse_device_api_config.py"
 [[ -f "${CONFIG}" ]] || { echo "ERROR: test-matrix config not found: ${CONFIG}" >&2; exit 1; }
@@ -136,7 +151,7 @@ run_bench() {
   set +e
   timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \
     mpirun -np "${NP}" ${env_flags} -x LD_LIBRARY_PATH \
-      "./${PERF_DIR}/${bin}" ${BENCH_ARGS} ${extra_args}
+      "${PERF_DIR}/${bin}" ${BENCH_ARGS} ${extra_args}
   local rc=$?
   set -e
   if [[ ${rc} -ne 0 ]]; then
@@ -175,7 +190,7 @@ echo "All device-api benchmark runs succeeded."
 # Requires ENABLE_DEVICE_API=ON rccl-tests build (alltoall_perf with -B flags).
 run_devtime_smoke() {
   local pytest_dir="${RCCL_TESTS_DIR}/test"
-  local perf_bin="${RCCL_TESTS_DIR}/${PERF_DIR}/alltoall_perf"
+  local perf_bin="${PERF_DIR}/alltoall_perf"
   if [[ ! -x "${perf_bin}" ]]; then
     echo "WARN: skip devtime smoke: ${perf_bin} not found"
     return 0
