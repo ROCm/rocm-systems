@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 
 #include <gtest/gtest.h>
@@ -39,10 +40,12 @@ TEST(spm_queue_hooks, is_any_active_false_when_no_context_active)
 TEST(spm_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_spm_client_id)
 {
     rocprofiler::hsa::inst_pkt_t inst_pkt;
-    inst_pkt.emplace_back(std::make_pair(std::make_unique<rocprofiler::hsa::AQLPacket>(),
+    inst_pkt.emplace_back(std::make_pair(std::make_unique<rocprofiler::hsa::EmptyAQLPacket>(),
                                          rocprofiler::hsa::queue_hooks::COUNTERS_CLIENT_ID));
 
-    auto sess   = std::make_shared<rocprofiler::hsa::queue_info_session_t>();
+    // The hook returns before it dereferences the session, so a null one keeps this test free of
+    // any HSA runtime: queue_info_session_t holds a Queue& and cannot be default constructed.
+    auto sess   = std::shared_ptr<rocprofiler::hsa::queue_info_session_t>{};
     auto packet = rocprofiler::hsa::packet_data_t{};
     auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
