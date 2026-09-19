@@ -2183,7 +2183,9 @@ typedef struct {
  * ::amdsmi_gpu_metrics_t.apu_metrics when APU-specific metrics are available.
  *
  * **Version Support:**
- * - v2.4: format_revision == 2 && content_revision == 4
+ * - v2.x: format_revision == 2 && content_revision <= 4. Revisions below 2.4 are
+ *   byte-prefix subsets of the v2.4 layout, so they populate the fields their own
+ *   revision defines and leave the later ones at the sentinel described below.
  * - v3.0: format_revision == 3 && content_revision == 0
  * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
  * the fields.
@@ -2528,7 +2530,7 @@ typedef struct {
    * @brief APU metrics auxiliary data
    *
    * This pointer is non-null only when the queried device reports APU-specific
-   * metrics (currently APU metrics table versions 2.4 or 3.0). Callers must
+   * metrics (APU metrics table versions 2.0 through 2.4, or 3.0). Callers must
    * validate it before dereferencing. For GPU (discrete) devices, this pointer
    * will be nullptr.
    *
@@ -2546,13 +2548,15 @@ typedef struct {
    * **Version Detection:**
    * Use ::common_header.format_revision and ::common_header.content_revision to
    * determine which APU metrics version is active:
-   * - v2.4: format_revision == 2 && content_revision == 4
+   * - v2.x: format_revision == 2 && content_revision <= 4
    * - v3.0: format_revision == 3 && content_revision == 0
    *
    * **Field Validity:**
    * Not all fields are valid for all versions. Fields contain sentinel value
    * 0xFFFF (65535) when not populated for the current version. Refer to inline
-   * comments in ::amdsmi_apu_metrics_t for per-field version availability.
+   * comments in ::amdsmi_apu_metrics_t for per-field version availability; the
+   * `v2_4` annotation names the v2.x layout, and a device reporting an earlier
+   * v2 revision leaves the fields that revision omits at the sentinel.
    */
   amdsmi_apu_metrics_t* apu_metrics;
 
@@ -5051,7 +5055,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.4 or v3.0),
+ *  When APU-specific metrics are available (APU metrics table v2.x or v3.0),
  *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
  *  This pointer is invalidated by ANY subsequent call to
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
@@ -5084,7 +5088,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.4 or v3.0),
+ *  When APU-specific metrics are available (APU metrics table v2.x or v3.0),
  *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
  *  This pointer is invalidated by ANY subsequent call to
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
