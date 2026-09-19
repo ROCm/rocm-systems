@@ -20,6 +20,7 @@
 #include <hip/hip_runtime.h>
 
 #include "race_test_support.hpp"
+#include "vgpr_waitcnt_cases.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -27,6 +28,8 @@
 
 using rocjitsu::test::FindingCount;
 using rocjitsu::test::RaceExpectation;
+using rocjitsu::test::runVgprWaitcntHazard;
+using rocjitsu::test::runVgprWaitcntSafe;
 
 using Gfx950RaceTest = rocjitsu::test::RaceTestBase;
 
@@ -35,17 +38,6 @@ using Gfx950RaceTest = rocjitsu::test::RaceTestBase;
 // ============================================================
 
 // --- VGPR waitcnt ---
-
-__global__ void vgpr_no_race_kernel(const float *src, float *dst) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      "s_waitcnt vmcnt(0)\n"
-      : "=v"(val) : "v"(&src[tid])
-  );
-  dst[tid] = val;
-}
 
 static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
     .kernel = "vgpr_race_kernel",
@@ -57,29 +49,13 @@ static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
     .consumer = "global_store_dword",
 };
 
-__global__ void vgpr_race_kernel(const float *src, float *dst) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      // BUG: missing s_waitcnt vmcnt(0).
-      "s_nop 0\n"
-      : "=v"(val) : "v"(&src[tid])
-  );
-  dst[tid] = val;
-}
-
 TEST_F(Gfx950RaceTest, vgpr_waitcnt) {
-  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
-  vgpr_no_race_kernel<<<1, 64>>>(src, dst);
-  sync();
+  runVgprWaitcntSafe(*this, 64);
   ExpectNoRace();
 }
 
 TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
-  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
-  vgpr_race_kernel<<<1, 64>>>(src, dst);
-  sync();
+  runVgprWaitcntHazard(*this, 64);
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 

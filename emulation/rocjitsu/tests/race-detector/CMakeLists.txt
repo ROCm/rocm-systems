@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # --- Race detection HIP tests ---
-# Uses a lightweight config (race_test_config.json) with 1 XCD and 4 CUs
+# Uses a shared lightweight gfx950 test config with 1 XCD and 4 CUs
 # instead of the full MI350X topology (8 XCDs, 288 physical / 256 active CUs). Each race test
 # spawns a complete simulation engine, and with ctest -j the full config
 # causes OOM kills at moderate parallelism (~15+ concurrent tests). The
@@ -11,33 +11,36 @@
 # The gfx950 race detector cases include CDNA-specific inline assembly
 # sequences for LDS and waitcnt coverage. Keep that binary on gfx950 even when
 # generic HIP smoke tests are overridden for local validation on another ISA.
+set(RJ_HAZARD_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/tests/hazard)
 set(RJ_RACE_TEST_SUPPORT_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/race_log_expectation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/race_test_support.hpp
+    ${RJ_HAZARD_TEST_SOURCE_DIR}/hip_test_support.hpp
 )
 
-function(rj_add_hip_race_test TEST_NAME)
-    rj_add_hip_test(${TEST_NAME} ${ARGN})
-    # The race plugin is loaded at runtime, so no link dependency pulls its
-    # shared object into focused builds of the HIP race-test targets.
-    if(TARGET rocjitsu_plugin_race_so)
-        add_dependencies(${TEST_NAME}_target rocjitsu_plugin_race_so)
-    endif()
-endfunction()
-
-rj_add_hip_race_test(
+rj_add_hip_test(
     hip_race_tests_gfx950
     ARCH gfx950
     SOURCE hip_race_gfx950_test.hip
-    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+    EXTRA_SOURCES ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hip
+    DEPENDENCIES
+        ${RJ_RACE_TEST_SUPPORT_HEADERS}
+        ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hpp
+    INCLUDE_DIRS ${RJ_HAZARD_TEST_SOURCE_DIR}
+    PLUGIN_TARGETS rocjitsu_plugin_race_so
 )
-rj_add_hip_race_test(
+rj_add_hip_test(
     hip_race_tests_gfx1151
     ARCH gfx1151
     SOURCE hip_race_gfx1151_test.hip
-    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+    EXTRA_SOURCES ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hip
+    DEPENDENCIES
+        ${RJ_RACE_TEST_SUPPORT_HEADERS}
+        ${RJ_HAZARD_TEST_SOURCE_DIR}/vgpr_waitcnt_cases.hpp
+    INCLUDE_DIRS ${RJ_HAZARD_TEST_SOURCE_DIR}
+    PLUGIN_TARGETS rocjitsu_plugin_race_so
 )
-set(RJ_RACE_GFX950_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
+set(RJ_RACE_GFX950_CONFIG ${RJ_HAZARD_TEST_SOURCE_DIR}/gfx950_test_config.json)
 if(RJ_INSTALL_TESTS)
     install(
         FILES ${RJ_RACE_GFX950_CONFIG}
@@ -45,30 +48,6 @@ if(RJ_INSTALL_TESTS)
     )
 endif()
 set(RJ_RACE_GFX1151_CONFIG ${CMAKE_SOURCE_DIR}/configs/gfx1151.json)
-
-# Derive a per-case race-detector config from a base topology config. The
-# emulator reads plugin and sink selection exclusively from the config file
-# (there is no RJ_RACE / RJ_SINKS environment fallback), so inject the race
-# plugin and a file sink here, baking in this case's private output directory
-# so each case writes its own race.log. The test binary then locates that log
-# via the RJ_SINK_DIR environment variable set on the test.
-function(rj_write_race_config BASE_CONFIG SINK_DIR OUT_CONFIG)
-    file(READ ${BASE_CONFIG} _race_json)
-    string(JSON _race_json SET "${_race_json}" "plugins" "{\"race\": {}}")
-    string(
-        JSON _race_json
-        SET "${_race_json}"
-        "sinks"
-        "{\"types\": [\"file\"], \"dir\": \"${SINK_DIR}\"}"
-    )
-    file(WRITE ${OUT_CONFIG} "${_race_json}")
-    # Re-run configuration if the base topology config changes.
-    set_property(
-        DIRECTORY
-        APPEND
-        PROPERTY CMAKE_CONFIGURE_DEPENDS ${BASE_CONFIG}
-    )
-endfunction()
 
 function(rj_add_gfx950_race_test_case TEST_CASE)
     set(SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/racetest_gfx950_${TEST_CASE})
@@ -80,9 +59,12 @@ function(rj_add_gfx950_race_test_case TEST_CASE)
     file(MAKE_DIRECTORY ${SINK_DIR})
     file(MAKE_DIRECTORY ${RUNTIME_DIR})
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/install-configs)
-    rj_write_race_config(${RJ_RACE_GFX950_CONFIG} ${SINK_DIR} ${SINK_DIR}/config.json)
-    rj_write_race_config(
+    rj_write_plugin_test_config(
+        ${RJ_RACE_GFX950_CONFIG} race ${SINK_DIR} ${SINK_DIR}/config.json
+    )
+    rj_write_plugin_test_config(
         ${RJ_RACE_GFX950_CONFIG}
+        race
         runtime/racetest_gfx950_${TEST_CASE}
         ${INSTALLED_CONFIG}
     )
@@ -114,9 +96,12 @@ function(rj_add_gfx1151_race_test_case TEST_CASE)
     file(MAKE_DIRECTORY ${SINK_DIR})
     file(MAKE_DIRECTORY ${RUNTIME_DIR})
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/install-configs)
-    rj_write_race_config(${RJ_RACE_GFX1151_CONFIG} ${SINK_DIR} ${SINK_DIR}/config.json)
-    rj_write_race_config(
+    rj_write_plugin_test_config(
+        ${RJ_RACE_GFX1151_CONFIG} race ${SINK_DIR} ${SINK_DIR}/config.json
+    )
+    rj_write_plugin_test_config(
         ${RJ_RACE_GFX1151_CONFIG}
+        race
         runtime/racetest_gfx1151_${TEST_CASE}
         ${INSTALLED_CONFIG}
     )

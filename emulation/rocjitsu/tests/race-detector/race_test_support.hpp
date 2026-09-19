@@ -3,35 +3,15 @@
 
 #pragma once
 
-#include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
-
+#include "hip_test_support.hpp"
 #include "race_log_expectation.hpp"
 
 #include <cstdio>
-#include <vector>
 
 namespace rocjitsu::test {
 
-class RaceTestBase : public ::testing::Test {
+class RaceTestBase : public HipHazardTestBase {
 protected:
-  template <typename T> T *alloc(int count) {
-    T *pointer = nullptr;
-    (void)hipMalloc(&pointer, count * sizeof(T));
-    return pointer;
-  }
-
-  template <typename T> T *allocWithData(int count) {
-    T *pointer = alloc<T>(count);
-    std::vector<T> host(count);
-    for (int index = 0; index < count; ++index)
-      host[index] = static_cast<T>(index);
-    (void)hipMemcpy(pointer, host.data(), count * sizeof(T), hipMemcpyHostToDevice);
-    return pointer;
-  }
-
-  void sync() { (void)hipDeviceSynchronize(); }
-
   void ExpectNoRace() {
     const RaceLogParseResult parsed = parseRaceLogFromEnvironment();
     ASSERT_TRUE(parsed.ok()) << parsed.error;
