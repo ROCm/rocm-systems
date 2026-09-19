@@ -1,15 +1,11 @@
 name: RCCL coco run
 
 # Reusable launcher for the coco harness (ROCm/tRCCL). One call runs one coco
-# job to completion and reports its exit status. It holds no trigger-specific
-# logic: each trigger type gets its own caller workflow in this repo, and every
-# caller fans out into this file.
+# job to completion and reports its exit status.
 #
-# `runs_on` (where this job executes) and `job` (which coco job to run) are a
-# matched pair chosen by the caller: each job is bound internally to the
-# machine it expects, with no way to override that from here, so a job meant
-# for the ruby cluster must always be paired with a ruby runner label.
-# `mode` selects the coco subcommand: run (default) or pr.
+# `runs_on` and `job` are a matched pair: each coco job is bound in tRCCL to
+# the machine it expects and cannot be repointed from here, so a job meant for
+# the ruby cluster must be paired with a ruby runner label.
 on:
   workflow_call:
     inputs:
@@ -36,7 +32,7 @@ on:
         required: false
         default: 'main'
       trigger_kind:
-        description: 'coco --trigger-kind, recorded against the run. No default: every caller must state its own, so a caller that forgets to wire this through fails loudly instead of silently mislabeling its run.'
+        description: 'coco --trigger-kind, recorded against the run. Required, so a caller that does not wire it through fails rather than mislabelling its run.'
         type: string
         required: true
       coco_args:
@@ -64,23 +60,39 @@ on:
         type: string
         required: false
         default: 'rccl'
-      pr_stacks:
-        description: 'Optional stack keys, word-split (mode=pr).'
+      baseline_stack:
+        description: >-
+          Stack key to hold at its configured ref (mode=pr only), passed as
+          `coco pr --baseline-stack`. Under --skip-baselines every stack
+          otherwise builds the PR head, leaving a perf lane nothing unmoved to
+          measure against. Set it on the build half too, or smoke compiles that
+          stack itself instead of reading it from build's cache.
         type: string
         required: false
         default: ''
+      build_only:
+        description: >-
+          Pass --build-only to `coco pr` (mode=pr only): compile every stack in
+          the job config and run no tests. The paired smoke job runs as a
+          separate caller against the same per-run directory once this one has
+          finished, so it reads those stacks from coco's cache rather than
+          compiling them again.
+        type: boolean
+        required: false
+        default: false
       timeout_minutes:
         description: 'Job timeout in minutes.'
         type: number
         required: false
         default: 600
-      non_gating:
-        description: 'If true, failures do not fail the workflow.'
+      cleanup_pr_dir:
+        description: >-
+          After a successful smoke leg (mode=pr, not build_only), remove the
+          per-run directory under stage_dir so the cluster reclaims disk without
+          waiting for other matrix legs.
         type: boolean
         required: false
         default: false
-    # Declared explicitly rather than taking `secrets: inherit` from the caller,
-    # so this workflow's credential requirements are visible in its own contract.
     secrets:
       APP_ID:
         description: 'GitHub App ID, used to mint a read token for the coco harness repository.'
@@ -97,46 +109,35 @@ permissions:
 
 jobs:
   coco:
-    name: ${{ inputs.mode == 'pr' && format('{0} (PR {1})', inputs.job, inputs.pr_number) || inputs.job }}
-    # A reusable workflow can be invoked by full reference (owner/repo/path@ref)
-    # from any repository, not just this one -- workflow_call has no built-in
-    # allow-list of callers. github.repository reflects the caller's repository
-    # in that case, so this refuses to run anywhere except this repo, which
-    # keeps a fork or any outside repository from pointing at this file to run
-    # on these self-hosted runners. The relative-path call from this repo's own
-    # nightly caller always satisfies this.
+    # Must not vary per PR: this becomes the second half of the
+    # "<caller job> / <this job>" status-check name that branch protection
+    # matches on literally. The PR number is in the run summary instead.
+    name: ${{ inputs.job }}
+    # workflow_call has no allow-list of callers: any repository can invoke
+    # this by full reference and reach these self-hosted runners.
+    # github.repository is the caller's, so this confines it to this repo.
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
-    continue-on-error: ${{ inputs.non_gating }}
-    # The group is per-input so each caller can serialise its own jobs
-    # independently. cancel-in-progress is never true here, not just by
-    # default: killing this job would not cancel the cluster allocation coco
-    # submitted, so cancelling it would orphan an allocation that keeps
-    # holding cluster nodes. There's no legitimate reason for a caller of
-    # this workflow to override that.
+    # Queue rather than cancel: two runs in one group are distinct work, such
+    # as a nightly and a manual dispatch. Superseding an earlier run is a PR
+    # concern, handled by the caller's workflow-level concurrency.
     concurrency:
       group: ${{ inputs.concurrency_group }}
       cancel-in-progress: false
-    permissions:
-      contents: read
     defaults:
       run:
         shell: bash
     env:
       LOG_FILE: ${{ github.workspace }}/coco-${{ inputs.mode }}-${{ inputs.job }}-${{ github.run_id }}.log
       COCO_DIR: ${{ github.workspace }}/_coco-${{ github.run_id }}-${{ github.run_attempt }}
-      COCO_OUTPUT: ${{ inputs.mode == 'pr' && format('{0}/coco-results-pr-{1}-{2}-{3}', github.workspace, inputs.job, github.run_id, github.run_attempt) || '' }}
+      ARTIFACT_NAME: coco-${{ inputs.mode }}-${{ inputs.job }}${{ inputs.mode == 'pr' && format('-pr{0}', inputs.pr_number) || '' }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      # Limit the checkout to the composite action's own directory.
       - name: Checkout rocm-systems
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/actions/checkout-coco-harness
 
-      # The harness itself, cloned rather than vendored so a run can pin any
-      # coco ref without touching this repo. Mints its own scoped token; see
-      # .github/actions/checkout-coco-harness.
       - name: Checkout the coco harness
         uses: ./.github/actions/checkout-coco-harness
         with:
@@ -145,6 +146,8 @@ jobs:
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      # Ruby only: its system Python is 3.10, below what coco needs. OCI's is
+      # new enough, and the pip cache fails there.
       - name: Set up Python
         if: contains(inputs.runs_on, 'ruby')
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -161,12 +164,66 @@ jobs:
           set -euo pipefail
           # Never activated; invoked by absolute path.
           python3 -m venv "${COCO_VENV}"
-          "${COCO_VENV}/bin/python3" -m pip install --upgrade pip
-          "${COCO_VENV}/bin/python3" -m pip install -e ".[dev]"
-          # Exercise the exact entry point the launch step calls, so a
-          # packaging problem surfaces here rather than after the cluster queue.
+          "${COCO_VENV}/bin/python3" -m pip install -e .
+          # Surfaces a packaging problem here rather than after the queue.
           "${COCO_VENV}/bin/coco" --help > /dev/null
           echo "==> coco installed from $(git rev-parse HEAD)"
+
+      # Where coco writes build trees, logs and scripts, and what gets
+      # archived. Periodic runs use the job config's stage_dir as-is; a PR run
+      # appends a per-run subdirectory that the caller deletes once both halves
+      # finish.
+      #
+      # Both halves of one gate resolve the same path, since a cluster's build
+      # and smoke configs declare the same stage_dir, and coco's cache is keyed
+      # on (component, fingerprint, stage_dir) -- sharing it is what lets smoke
+      # reuse build's stacks. Keyed on run id, not run_attempt: "re-run failed
+      # jobs" bumps the attempt without re-running a build that passed, which
+      # would leave the retried smoke job nothing to reuse.
+      - name: Resolve coco artifact directory
+        id: artifact_dir
+        working-directory: ${{ env.COCO_DIR }}/tRCCL
+        env:
+          MODE: ${{ inputs.mode }}
+          JOB: ${{ inputs.job }}
+          COCO_VENV: ${{ env.COCO_DIR }}/venv
+          RUN_SUBDIR: pr-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # initialise_plugins() must run before load_job_config: the
+          # type-discriminated union over test configs is built from the
+          # plugin registry, and without it every job whose type comes from a
+          # plugin (rccl_test) fails validation.
+          stage_dir=$("${COCO_VENV}/bin/python3" -c '
+          import os
+          from coco.core.registry import initialise_plugins
+          initialise_plugins()
+          from coco.core.config import load_job_config
+          print(load_job_config(os.environ["JOB"]).advanced.stage_dir or "")
+          ')
+          if [[ "${MODE}" == 'pr' ]]; then
+            if [[ -z "${stage_dir}" ]]; then
+              echo "::error::Job ${JOB} has no advanced.stage_dir; mode=pr needs one to derive its per-run directory."
+              exit 1
+            fi
+            output_dir="${stage_dir%/}/${RUN_SUBDIR}"
+            mkdir -p "${output_dir}"
+            # The real bound on growth: the caller's cleanup job only gets a
+            # path when both halves published outputs, which a skipped, failed
+            # or cancelled call does not. The cutoff is far longer than any
+            # gate can take, so it cannot hit a live run. Errors stay visible,
+            # since a sweep that silently stopped working would let the tree
+            # grow until the filesystem filled, but must not fail the gate.
+            find "${stage_dir%/}" -mindepth 1 -maxdepth 1 -type d -name 'pr-*' \
+              -mtime +2 -print -exec rm -rf {} + || true
+            echo "COCO_OUTPUT=${output_dir}" >> "${GITHUB_ENV}"
+            echo "dir=${output_dir}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ -z "${stage_dir}" ]]; then
+            echo "::warning::Job ${JOB} has no advanced.stage_dir; artifact will contain console logs only."
+          fi
+          echo "dir=${stage_dir}" >> "${GITHUB_OUTPUT}"
 
       - name: Launch coco
         id: launch
@@ -174,20 +231,20 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
+          BUILD_ONLY: ${{ inputs.build_only }}
+          BASELINE_STACK: ${{ inputs.baseline_stack }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_ARGS: ${{ inputs.coco_args }}
           PR_NUMBER: ${{ inputs.pr_number }}
           PR_REPO: ${{ inputs.pr_repo }}
           PR_SHA: ${{ inputs.pr_sha }}
           SOFTWARE: ${{ inputs.software }}
-          PR_STACKS: ${{ inputs.pr_stacks }}
           COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           COCO_VENV: ${{ env.COCO_DIR }}/venv
-          COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
           set -euo pipefail
           unset VIRTUAL_ENV PYTHONHOME pythonLocation Python_ROOT_DIR Python3_ROOT_DIR
-          PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/' | paste -sd: -)"
+          PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/|/\.venv-' | paste -sd: -)"
           export PATH
           if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
@@ -202,14 +259,14 @@ jobs:
               echo "::error::mode=pr requires a full 40-hex pr_sha"
               exit 1
             fi
-            mkdir -p "${COCO_OUTPUT}"
-            stack_args=()
-            if [[ -n "${PR_STACKS}" ]]; then
-              for stack in ${PR_STACKS}; do
-                stack_args+=(--stack "${stack}")
-              done
+            pr_args=()
+            if [[ "${BUILD_ONLY}" == "true" ]]; then
+              pr_args+=(--build-only)
             fi
-            echo "==> coco pr --job ${JOB} -o ${COCO_OUTPUT} ..."
+            if [[ -n "${BASELINE_STACK}" ]]; then
+              pr_args+=(--baseline-stack "${BASELINE_STACK}")
+            fi
+            echo "==> coco pr --job ${JOB} -o ${COCO_OUTPUT} ${pr_args[*]-} ${COCO_ARGS}"
             "${COCO_VENV}/bin/coco" pr \
               --job "${JOB}" \
               --repo "${PR_REPO}" \
@@ -218,7 +275,7 @@ jobs:
               --software "${SOFTWARE}" \
               --trigger-kind "${TRIGGER_KIND}" \
               -o "${COCO_OUTPUT}" \
-              "${stack_args[@]}" \
+              ${pr_args[@]+"${pr_args[@]}"} \
               ${COCO_ARGS} > "${LOG_FILE}" 2>&1
           elif [[ "${MODE}" == 'run' ]]; then
             echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
@@ -231,12 +288,46 @@ jobs:
             exit 1
           fi
 
-      - name: Upload coco log
+      # coco exits 0 from a run that failed to compile, because its exit status
+      # counts only non-passing tests and a stack that did not build has its
+      # tests marked SKIPPED: --build-only marks them before building, and
+      # --skip-failed-builds marks them on a failure. Both halves of a PR gate
+      # are affected, so both are checked. The log line is the only signal
+      # (AICOMRCCL-2375); drop this step once coco reports it.
+      - name: Fail on a build failure coco did not report
+        if: inputs.mode == 'pr' && steps.launch.outcome == 'success'
+        run: |
+          set -uo pipefail
+          if [[ ! -s "${LOG_FILE}" ]]; then
+            echo "::error::${LOG_FILE} is missing or empty; cannot confirm the build succeeded."
+            exit 1
+          fi
+          if grep -nE 'Stack .+ build failed:|Fetch failed for shared software ' "${LOG_FILE}"; then
+            echo "::error::coco logged a build or fetch failure but exited 0, because --build-only classifies every test as skipped. Failing the job on the log instead."
+            exit 1
+          fi
+          echo "No build or fetch failures in $(basename "${LOG_FILE}")."
+
+      # Artifact names must be unique within a run: v4 artifacts are immutable,
+      # so a second upload under a name already used fails with a 409.
+      - name: Upload coco console logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coco-${{ inputs.mode }}-${{ inputs.job }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.LOG_FILE }}
+          name: ${{ env.ARTIFACT_NAME }}-console
+          path: ${{ github.workspace }}/coco-*-${{ github.run_id }}.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload coco output logs
+        if: always() && steps.artifact_dir.outputs.dir != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-output
+          path: |
+            ${{ steps.artifact_dir.outputs.dir }}/logs
+            ${{ steps.artifact_dir.outputs.dir }}/scripts
+            ${{ steps.artifact_dir.outputs.dir }}/harness_*.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -251,7 +342,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           PR_REPO: ${{ inputs.pr_repo }}
           PR_SHA: ${{ inputs.pr_sha }}
-          COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
+          ARTIFACT_DIR: ${{ steps.artifact_dir.outputs.dir }}
           LAUNCH_OUTCOME: ${{ steps.launch.outcome }}
         run: |
           title="${JOB}"
@@ -267,31 +358,53 @@ jobs:
             echo "| outcome | \`${LAUNCH_OUTCOME}\` |"
             echo "| trigger kind | \`${TRIGGER_KIND}\` |"
             echo "| coco ref | \`${COCO_REF}\` |"
+            echo "| artifact dir | \`${ARTIFACT_DIR:-(none)}\` |"
             if [[ "${MODE}" == 'pr' ]]; then
-              echo "| output dir | \`${COCO_OUTPUT}\` |"
               echo "| repo | \`${PR_REPO}\` |"
               echo "| head sha | \`${PR_SHA}\` |"
             fi
             echo "| extra flags | \`${COCO_ARGS:-(none)}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          # Only dumped on a non-success outcome: a healthy nightly run's -vv
-          # log is long, and there's no reason to pay to render/store 200
-          # lines of it in the summary every single night. The full file is
-          # always in the uploaded artifact regardless of outcome.
           if [[ "${LAUNCH_OUTCOME}" != "success" && -s "${LOG_FILE}" ]]; then
-            echo "::group::coco output (tail)"
+            echo "::group::$(basename "${LOG_FILE}") (tail)"
             tail -n 200 "${LOG_FILE}"
             echo "::endgroup::"
           fi
 
+      - name: Remove the shared per-run directory
+        if: >-
+          inputs.cleanup_pr_dir &&
+          inputs.mode == 'pr' &&
+          inputs.build_only != true &&
+          steps.launch.outcome == 'success'
+        env:
+          TARGET: ${{ env.COCO_OUTPUT }}
+          RUN_SUBDIR: pr-${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          if [[ -z "${TARGET:-}" || ! -d "${TARGET}" ]]; then
+            echo "Nothing to remove; the age-based sweep will collect any leftovers."
+            exit 0
+          fi
+          if [[ "$(basename "${TARGET}")" != "${RUN_SUBDIR}" ]]; then
+            echo "::warning::Refusing to remove ${TARGET}: not this run's directory."
+            exit 0
+          fi
+          rm -rf "${TARGET}" && echo "Removed ${TARGET}" || \
+            echo "::warning::Could not fully remove ${TARGET}."
+
+      # Build legs leave COCO_OUTPUT in place for smoke to reuse; smoke deletes
+      # it here when cleanup_pr_dir is set.
       - name: Clean up harness checkout
         if: always()
-        env:
-          COCO_OUTPUT: ${{ env.COCO_OUTPUT }}
         run: |
-          rm -rf "${COCO_DIR}"
-          if [[ -n "${COCO_OUTPUT}" ]]; then
-            rm -rf "${COCO_OUTPUT}"
+          set -uo pipefail
+          # The workspace is on NFS, where a file still held open is renamed to
+          # .nfsXXXX rather than unlinked, so rm -rf reports ENOTEMPTY while a
+          # coco child process is still exiting. Scratch space must not fail
+          # the job.
+          if ! rm -rf "${COCO_DIR}"; then
+            echo "::warning::Could not fully remove ${COCO_DIR}; leaving it for the next run to overwrite."
           fi
-          rm -f "${LOG_FILE}"
+          rm -f "${LOG_FILE}" || true

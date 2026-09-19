@@ -1,0 +1,97 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: RCCL cluster runner allowlist
+
+# Cluster scale runners may only appear in workflows listed in
+# .github/scripts/allowlist/cluster-runners.allowlist.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs PR-authored scripts, so it holds no write scope. Requesting the review
+  # needs pull-requests: write and is a separate job for that reason.
+  check-allowlist:
+    name: Check RCCL cluster runner allowlist
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      new_runner_lines: ${{ steps.check.outputs.new_runner_lines }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # The commit checked out for a PR is the merge commit, whose first
+          # parent is the tip of the base branch, so the diff needs two
+          # commits and no more.
+          fetch-depth: 2
+          sparse-checkout: |
+            .github/workflows
+            .github/scripts
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest
+
+      - name: Test the RCCL CI scripts
+        run: |
+          set -euo pipefail
+          python3 -m pytest \
+            .github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py \
+            .github/scripts/tests/rccl_detect_coco_changes_test.py \
+            .github/scripts/tests/rccl_coco_matrix_test.py \
+            .github/scripts/tests/rccl_resolve_coco_run_test.py
+
+      - name: Scan workflows for unallowlisted cluster runners
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -o pipefail
+          args=()
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            args+=(--base HEAD^ --head HEAD)
+          fi
+          python3 .github/scripts/check_rccl_cluster_runner_allowlist.py "${args[@]}"
+
+  request-rccl-ci-review:
+    name: Request @ROCm/rccl-ci review
+    needs: check-allowlist
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.check-allowlist.outputs.new_runner_lines == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Request rccl-ci review for new cluster runner usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if gh api \
+            --method POST \
+            "repos/${REPO}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -f "team_reviewers[]=rccl-ci" 2>/tmp/reviewer_err; then
+            echo "Requested review from @ROCm/rccl-ci."
+          else
+            # Already requested, or fork PR with a read-only token.
+            cat /tmp/reviewer_err >&2 || true
+          fi
