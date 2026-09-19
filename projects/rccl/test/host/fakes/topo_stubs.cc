@@ -183,6 +183,24 @@ ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int nranks, std::function<int(in
   return g_rcclCheckRomeTopoModelIdxConsensusResult;
 }
 
+// Controllable (was fail-loud). init.cc, right after the topology allgather and
+// the Rome consensus check it mirrors (RCCL_DDA_NRANKS_RELAX per-rank agreement).
+ncclResult_t g_ncclCheckDdaNranksRelaxConsensusResult = ncclSuccess;
+int g_ncclCheckDdaNranksRelaxConsensusCalls = 0;
+int g_ncclDdaNranksRelaxConsensusNranks = -1;
+bool g_ncclDdaNranksRelaxConsensusValue0 = false;
+std::string g_ncclDdaNranksRelaxConsensusHost0;
+ncclResult_t ncclCheckDdaNranksRelaxConsensus(int nranks, std::function<bool(int)> getDdaNranksRelax,
+                                              std::function<const char*(int)> getHostname) {
+  g_ncclCheckDdaNranksRelaxConsensusCalls++;
+  g_ncclDdaNranksRelaxConsensusNranks = nranks;
+  if (nranks > 0) {
+    g_ncclDdaNranksRelaxConsensusValue0 = getDdaNranksRelax(0);
+    g_ncclDdaNranksRelaxConsensusHost0 = getHostname(0);
+  }
+  return g_ncclCheckDdaNranksRelaxConsensusResult;
+}
+
 // Controllable (was fail-loud). src/graph/connect.cc; init.cc:2215, gated on comm->topo->treeDefined.
 ncclResult_t g_ncclTreeBasePostsetResult = ncclSuccess;
 int g_ncclTreeBasePostsetCalls = 0;
@@ -228,6 +246,11 @@ void ResetTopoStubs() {
   g_rcclRomeConsensusNranks = -1;
   g_rcclRomeConsensusIdx0 = -1;
   g_rcclRomeConsensusHost0.clear();
+  g_ncclCheckDdaNranksRelaxConsensusResult = ncclSuccess;
+  g_ncclCheckDdaNranksRelaxConsensusCalls = 0;
+  g_ncclDdaNranksRelaxConsensusNranks = -1;
+  g_ncclDdaNranksRelaxConsensusValue0 = false;
+  g_ncclDdaNranksRelaxConsensusHost0.clear();
   g_ncclTreeBasePostsetResult = ncclSuccess;
   g_ncclTreeBasePostsetCalls = 0;
   g_ncclTreeBasePostsetGraph = nullptr;
