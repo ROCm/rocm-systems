@@ -1685,11 +1685,14 @@ class AccumulateCommand : public Command {
     uint32_t queue_index;
     uint64_t start_ns;
     uint64_t end_ns;
+    //! Set for a BARRIER_AND/OR packet rather than a kernel dispatch, so the slot
+    //! is reported under the barrier operation id and named accordingly.
+    bool is_barrier;
   };
 
  private:
-  //! Graph kernel dispatches in AQL packet order. Non-dispatch packets are
-  //! omitted; an unprocessed or invalid signal leaves its slot timing at zero.
+  //! Graph dispatches and barriers in AQL packet order. An unprocessed or invalid
+  //! signal leaves its slot timing at zero.
   std::vector<KernelDispatch> kernel_dispatches_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1728,10 +1731,17 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Reserve one graph kernel dispatch slot and return its index. |name| must
-  //! not be nullptr — use "<unknown>" when it cannot be resolved.
+  //! Reserve one graph dispatch slot and return its index. |name| must not be
+  //! nullptr for a kernel — use "<unknown>" when it cannot be resolved.
   uint32_t addKernelDispatch(const char* name, uint32_t queue_index) {
-    kernel_dispatches_.push_back({name, queue_index, 0, 0});
+    kernel_dispatches_.push_back({name, queue_index, 0, 0, false});
+    return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
+  }
+
+  //! Reserve one slot for a barrier packet, which carries no kernel name and is
+  //! reported under OP_ID_BARRIER.
+  uint32_t addBarrierDispatch(uint32_t queue_index) {
+    kernel_dispatches_.push_back({nullptr, queue_index, 0, 0, true});
     return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
   }
 

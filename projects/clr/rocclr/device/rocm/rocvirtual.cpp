@@ -1870,6 +1870,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
          amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+    // A segmented graph's cross-stream dependencies are BARRIER_AND packets. They
+    // carry the timing of the wait they perform, so report them alongside the
+    // dispatches instead of dropping their signal.
+    const bool isBarrier = (pktType == HSA_PACKET_TYPE_BARRIER_AND) ||
+                           (pktType == HSA_PACKET_TYPE_BARRIER_OR);
     if (timestamp_ != nullptr) {
       // Read the pre-patched completion signal from the host-side flat buffer, not
       // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
@@ -1880,7 +1885,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       if (prePatchedHandle == 0) {
         pkt->completion_signal =
             Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
-        if (isKernelDispatch) {
+        if (isKernelDispatch || isBarrier) {
           if (isBaseKernelDispatch && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
             pkt->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
@@ -1897,7 +1902,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         auto it = prePatchedSignals.find(prePatchedHandle);
         if (it != prePatchedSignals.end()) {
           timestamp_->AddProfilingSignal(it->second);
-          return isKernelDispatch ? it->second : nullptr;
+          return (isKernelDispatch || isBarrier) ? it->second : nullptr;
         }
       }
     } else if (isLast && (attach_signal || blocking)) {
@@ -1960,6 +1965,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
               priority_);
         }
       }
+    } else if (needKernelNamesReported && packetSignal != nullptr &&
+               (pktType == HSA_PACKET_TYPE_BARRIER_AND ||
+                pktType == HSA_PACKET_TYPE_BARRIER_OR)) {
+      // Cross-stream sync in a segmented graph is a BARRIER_AND, so without a slot
+      // of its own the wait it performs never reaches the timeline.
+      packetSignal->dispatch_slot_ = vcmd->addBarrierDispatch(index());
     } else if (kLogBatch && pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
                amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
