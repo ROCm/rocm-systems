@@ -10,12 +10,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/**'
-      - '.github/scripts/allowlist/cluster-runners.allowlist'
-      - '.github/scripts/check_rccl_cluster_runner_allowlist.py'
-      - '.github/scripts/rccl_detect_coco_changes.py'
-      - '.github/scripts/ci_utils.py'
-      - '.github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py'
-      - '.github/scripts/tests/rccl_detect_coco_changes_test.py'
+      - '.github/scripts/**'
   workflow_dispatch:
 
 permissions:
@@ -28,7 +23,8 @@ concurrency:
 jobs:
   # Runs PR-authored scripts, so it holds no write scope. Requesting the review
   # needs pull-requests: write and is a separate job for that reason.
-  allowlist:
+  check-allowlist:
+    name: Check RCCL cluster runner allowlist
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -41,15 +37,27 @@ jobs:
           # parent is the tip of the base branch, so the diff needs two
           # commits and no more.
           fetch-depth: 2
+          sparse-checkout: |
+            .github/workflows
+            .github/scripts
 
-      # Stdlib unittest, so these need no dependency install.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest
+
       - name: Test the RCCL CI scripts
         run: |
           set -euo pipefail
-          python3 .github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py
-          python3 .github/scripts/tests/rccl_detect_coco_changes_test.py
+          python3 -m pytest \
+            .github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py \
+            .github/scripts/tests/rccl_detect_coco_changes_test.py \
+            .github/scripts/tests/rccl_coco_matrix_test.py \
+            .github/scripts/tests/rccl_resolve_coco_run_test.py
 
-      - name: Check RCCL cluster runner allowlist
+      - name: Scan workflows for unallowlisted cluster runners
         id: check
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -61,14 +69,13 @@ jobs:
           fi
           python3 .github/scripts/check_rccl_cluster_runner_allowlist.py "${args[@]}"
 
-  # always(): the guard above exits non-zero on disallowed usage, and that is
-  # exactly when the review is wanted. Step outputs are published regardless.
-  request-review:
-    needs: allowlist
+  request-rccl-ci-review:
+    name: Request @ROCm/rccl-ci review
+    needs: check-allowlist
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
-      needs.allowlist.outputs.new_runner_lines == 'true'
+      needs.check-allowlist.outputs.new_runner_lines == 'true'
     runs-on: ubuntu-24.04
     permissions:
       pull-requests: write
