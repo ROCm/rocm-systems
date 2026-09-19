@@ -177,13 +177,12 @@ TEST(counters_queue_hooks, is_any_active_false_when_no_context_active)
 TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_id)
 {
     hsa::inst_pkt_t inst_pkt;
-    inst_pkt.emplace_back(
-        std::make_pair(std::make_unique<rocprofiler::hsa::AQLPacket>(),
-                       rocprofiler::hsa::queue_hooks::THREAD_TRACE_CLIENT_ID));
+    inst_pkt.emplace_back(std::make_pair(std::make_unique<rocprofiler::hsa::AQLPacket>(),
+                                         rocprofiler::hsa::queue_hooks::THREAD_TRACE_CLIENT_ID));
 
-    auto sess    = std::make_shared<rocprofiler::hsa::queue_info_session_t>();
-    auto packet  = rocprofiler::hsa::packet_data_t{};
-    auto fq_pkt  = rocprofiler::hsa::rocprofiler_packet{};
+    auto sess   = std::make_shared<rocprofiler::hsa::queue_info_session_t>();
+    auto packet = rocprofiler::hsa::packet_data_t{};
+    auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
     // Must return without touching registered counter contexts (no init required).
     rocprofiler::counters::kernel_dispatch_phase_exit_hook(
