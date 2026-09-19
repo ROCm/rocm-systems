@@ -442,21 +442,34 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM)
   endif()
 
-  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
+  function(_rccl_test_add_rocshmem_includes target)
+    set(_rocshmem_test_includes "")
     if(ROCSHMEM_INCLUDE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_INCLUDE_DIR}")
     elseif(ROCSHMEM_INSTALL_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE
-        "${ROCSHMEM_INSTALL_DIR}/include")
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_INSTALL_DIR}/include")
     endif()
     if(ROCSHMEM_SOURCE_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+      list(APPEND _rocshmem_test_includes
         "${ROCSHMEM_SOURCE_DIR}/src"
         "${ROCSHMEM_SOURCE_DIR}/include")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/../rocshmem")
+      list(APPEND _rocshmem_test_includes
+        "${CMAKE_SOURCE_DIR}/../rocshmem/src"
+        "${CMAKE_SOURCE_DIR}/../rocshmem/include")
     endif()
     if(ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_BUILD_DIR})
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_BUILD_DIR}")
+    elseif(ROCSHMEM_SOURCE_DIR AND EXISTS "${ROCSHMEM_SOURCE_DIR}/build/include")
+      list(APPEND _rocshmem_test_includes "${ROCSHMEM_SOURCE_DIR}/build/include")
     endif()
+    if(_rocshmem_test_includes)
+      target_include_directories(${target} PRIVATE ${_rocshmem_test_includes})
+    endif()
+  endfunction()
+
+  if(ENABLE_ROCSHMEM_GIN OR GIN_ANVIL_UNIT_TESTS)
+    _rccl_test_add_rocshmem_includes(rccl-UnitTestsFixtures)
   endif()
 
   if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
@@ -570,7 +583,8 @@ if(BUILD_TESTS)
     # direct-LSA gather addressing (the pointer-arithmetic core of
     # AllGatherLsaDirect) on real hardware, self-contained (no librccl / GIN
     # comm). Requires a visible GPU at run time (skips cleanly otherwise), so it
-    # carries a "gpu" label alongside "unit".
+    # carries the "gpu" label only so `ctest -L unit` on CPU nodes does not
+    # count an all-skip binary as a passing unit test.
     add_executable(rccl-UnitTestsGinSdmaAllGatherGpu gin/gin_sdma_allgather_gpu_test.cpp)
     set_source_files_properties(gin/gin_sdma_allgather_gpu_test.cpp PROPERTIES LANGUAGE CXX)
     target_include_directories(rccl-UnitTestsGinSdmaAllGatherGpu PRIVATE
@@ -593,7 +607,10 @@ if(BUILD_TESTS)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
       CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     add_test(NAME rccl-UnitTestsGinSdmaAllGatherGpu COMMAND rccl-UnitTestsGinSdmaAllGatherGpu)
-    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "unit;gpu")
+    set_tests_properties(rccl-UnitTestsGinSdmaAllGatherGpu PROPERTIES LABELS "gpu")
+  else()
+    message(STATUS "Skipping GIN-SDMA AllGather policy/gpu unit tests: "
+                   "${_gin_sdma_ag_hdr_dir}/gin_sdma_allgather_policy.h not found")
   endif()
 
   # GIN Anvil-SDMA hybrid Broadcast (-D 3) policy host unit test (no GPU).
@@ -709,6 +726,11 @@ if(BUILD_TESTS)
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
+
+    # GIN-enabled Debug fixtures need the same rocSHMEM header layout as fixtures.
+    if(ENABLE_ROCSHMEM_GIN)
+      _rccl_test_add_rocshmem_includes(rccl-UnitTestsFixturesDebug)
+    endif()
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -972,10 +994,15 @@ if(BUILD_TESTS)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-    # RCCL_COMMON_COMPILE_DEFS inherits ENABLE_ROCSHMEM_GIN from rccl's COMPILE_DEFINITIONS,
-    # which defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1 and pulls in rocSHMEM's sdma headers.
-    if(ENABLE_ROCSHMEM_GIN AND NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
-      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+    # Belt-and-suspenders: Anvil-SDMA device headers are opt-in. Stub-backed
+    # tests need an explicit 1 now that gin_device_common.h defaults to 0;
+    # everything else stays explicitly opted out.
+    if(ENABLE_ROCSHMEM_GIN)
+      if("${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
+        target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=1)
+      else()
+        target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+      endif()
     endif()
     if(ENABLE_DEVICE_LINKER)
       # Mirror the rccl library define so device-linker-specific test expectations compile in.
@@ -1077,8 +1104,9 @@ if(BUILD_TESTS)
     # rocshmem::envvar::log_flags undefined at load time. Link host rocSHMEM
     # into the Fixtures binary so the executable satisfies those symbols when
     # the dynamic loader brings in librccl.so.
-    if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
-       AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsFixtures")
+    if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR
+       AND (("${test_executable}" STREQUAL "rccl-UnitTestsFixtures" AND GIN_ANVIL_UNIT_TESTS)
+            OR "${test_executable}" STREQUAL "rccl-UnitTestsFixturesDebug"))
       set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
@@ -1105,8 +1133,7 @@ if(BUILD_TESTS)
   endforeach()
 
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
-  # Gated on ENABLE_ROCSHMEM_GIN because that is what now turns on NCCL_GIN_ANVIL_SDMA_ENABLE,
-  # and these are the only two test targets that define it.
+  # These two targets opt into NCCL_GIN_ANVIL_SDMA_ENABLE=1; other tests keep it at 0.
   if(ENABLE_ROCSHMEM_GIN)
     if(ROCSHMEM_SOURCE_DIR)
       target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
