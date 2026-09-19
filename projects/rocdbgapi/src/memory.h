@@ -603,8 +603,9 @@ private:
     bool m_dirty{ false };
   };
 
-  /* The agent which this cache is for.  */
-  const agent_t &m_agent;
+  /* The agent which this cache is for.  nullptr only in unit tests that do not
+     need address-space clamping.  */
+  const agent_t *m_agent;
 
   std::map<agent_address_t, cache_line_t> m_cache_line_map;
   delegate_fn_type const m_xfer_agent_memory;
@@ -614,7 +615,13 @@ private:
 
 public:
   memory_cache_t (const agent_t &agent, delegate_fn_type xfer_agent_memory)
-    : m_agent (agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
+    : m_agent (&agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
+  {
+  }
+
+  /* Constructor for unit tests: no agent means no address-space clamping.  */
+  explicit memory_cache_t (delegate_fn_type xfer_agent_memory)
+    : m_agent (nullptr), m_xfer_agent_memory (std::move (xfer_agent_memory))
   {
   }
   ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }

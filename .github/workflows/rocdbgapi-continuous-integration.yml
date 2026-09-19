@@ -1,0 +1,144 @@
+name: rocdbgapi Continuous Integration
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocdbgapi/**'
+      - '.github/workflows/rocdbgapi-continuous-integration.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
+  pull_request:
+    paths:
+      - 'projects/rocdbgapi/**'
+      - '.github/workflows/rocdbgapi-continuous-integration.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Job layout, by CTest label:
+#
+#   ubuntu-unit-and-feature   unit + feature (any tier)
+#                             Runs on a stock ROCm container without
+#                             /dev/kfd.  Driver- and GPU-tier feature
+#                             tests are *expected* to be exercised
+#                             here too — they GTEST_SKIP cleanly when
+#                             prerequisites are missing, which is the
+#                             property we want CI to defend.
+#
+#   ubuntu-feature-kfd        Placeholder — needs a runner with
+#                             /dev/kfd exposed.  Will be enabled once
+#                             the labelled self-hosted runner lands.
+#
+#   windows-unit              Placeholder — needs the rocdbgapi
+#                             Windows port (depends on amd_comgr).
+#
+# feature-gpu / feature-gpu-<arch> coverage lives in the Azure
+# pipelines that already gate GPU-attached runners; this workflow
+# stays on the GitHub side and only owns the CPU- and skip-envelope
+# coverage.
+
+jobs:
+  ubuntu-unit-and-feature:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['gcc-12', 'clang-15']
+
+    runs-on: ubuntu-22.04
+    container:
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+
+    env:
+      BUILD_TYPE: RelWithDebInfo
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+    steps:
+      - name: Install Toolchain
+        shell: bash
+        run: |
+          apt-get update
+          CXX=$(echo ${{ matrix.compiler }} | sed 's/clang-/clang++-/1' | sed 's/gcc-/g++-/1')
+          apt-get install -y build-essential cmake git ${{ matrix.compiler }} ${CXX}
+          update-alternatives --install /usr/bin/cc cc /usr/bin/${{ matrix.compiler }} 100
+          update-alternatives --install /usr/bin/c++ c++ /usr/bin/${CXX} 100
+
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: projects/rocdbgapi
+          set-safe-directory: true
+
+      - name: Configure
+        shell: bash
+        working-directory: projects/rocdbgapi
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_COMPILER=/usr/bin/cc \
+            -DCMAKE_CXX_COMPILER=/usr/bin/c++ \
+            -DAMD_DBGAPI_BUILD_TESTS=ON
+
+      - name: Build Test Suite
+        shell: bash
+        working-directory: projects/rocdbgapi
+        run: cmake --build build --parallel 2
+
+      - name: Run Unit Tests
+        shell: bash
+        working-directory: projects/rocdbgapi/build
+        run: ctest -L unit --output-on-failure
+
+      # The whole feature tier is run here intentionally.  Tests that
+      # require /dev/kfd or a real GPU must skip cleanly (GTEST_SKIP)
+      # on a driver-less container — that's a load-bearing property of
+      # the suite, and the only place we exercise it is this job.  A
+      # FAIL here means either the skip envelope regressed or a probe
+      # is reporting the wrong capability.
+      - name: Run Feature Tests (skip-envelope coverage)
+        shell: bash
+        working-directory: projects/rocdbgapi/build
+        run: ctest -L feature --output-on-failure
+
+  # Driver-attached Linux feature-test job.  Scaffolded so the matrix
+  # entry exists and the rest of the workflow doesn't need to be
+  # re-shaped when the runner lands.  Needs a self-hosted runner with
+  # /dev/kfd exposed and the user in the render/video groups; the GPU-
+  # arch matrix will piggy-back on the existing `gfx<NNN>` label scheme
+  # already used by the Azure pipelines.
+  ubuntu-feature-kfd:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Placeholder
+        shell: bash
+        run: |
+          echo "ubuntu-feature-kfd job placeholder."
+          echo "Will run ctest -L feature-kfd on a /dev/kfd-attached"
+          echo "self-hosted runner once the runner pool is provisioned."
+
+  # Windows MSVC unit-test job.  Scaffolded so the matrix exists; the
+  # rocdbgapi library itself does not yet build on a stock GitHub
+  # windows-latest image because it depends on amd_comgr.  The job is
+  # restricted to building/running only the test sub-tree once the
+  # library's Windows port lands.  For now it runs cmake --version as a
+  # placeholder so the workflow stays green and the slot is reserved.
+  windows-unit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: projects/rocdbgapi
+          set-safe-directory: true
+
+      - name: Placeholder
+        shell: bash
+        run: |
+          echo "Windows unit-test job placeholder."
+          echo "Will be enabled when rocdbgapi's Windows port is testable."
+          cmake --version
