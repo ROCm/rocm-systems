@@ -1,3 +1,4 @@
+#!/bin/sh
 # Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,7 +21,8 @@
 
 HIP_FILE=$1
 
-if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
+case "$HIP_FILE" in
+  */src/device/*.h*)
   perl -pi -e 's/(template\s*<typename T, typename RedOp(?:, (?:typename|int) Proto)?)(, bool isNetOffload.*?)?>/\1, int USE_ACC, int COLL_UNROLL, int Pipeline\2>/g' "$HIP_FILE"
   perl -pi -e 's/(template\s*<typename T, typename RedOp(?:, (?:typename|int) Proto)?(?:, int RCCLMetadata)?)(, bool isNetOffload.*?)?>/\1, int USE_ACC, int COLL_UNROLL, int Pipeline\2>/g' "$HIP_FILE"
   perl -0777 -pi -e 's/(ProtoSimple<[^,]*?,[^,]+?)>/\1, USE_ACC, COLL_UNROLL>/g' "$HIP_FILE"
@@ -76,4 +78,5 @@ if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
   perl -pi -e 's/runARTreeLL128<T, RedOp>\(/runTreeSplit<T, RedOp, ProtoLL128, USE_ACC, COLL_UNROLL, 0, UserRegMode>(/g' "$HIP_FILE"
   perl -pi -e 's/runAGRingLL128<T, RedOp>\(/runRing<T, RedOp, ProtoLL128, USE_ACC, COLL_UNROLL, 0, false, UserRegMode>(/g' "$HIP_FILE"
   perl -pi -e 's/runBcastRingLL128<T, RedOp>\(/runRing<T, RedOp, ProtoLL128, USE_ACC, COLL_UNROLL, 0, UserRegMode>(/g' "$HIP_FILE"
-fi
+  ;;
+esac
