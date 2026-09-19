@@ -114,3 +114,18 @@ TEST(RmaSegmentMathTest, FailedHandleCallocDoesNotCopySegmentOffsets)
     EXPECT_TRUE(ncclRmaRegistrationHandleReady(&handle, 1));
     EXPECT_TRUE(ncclRmaRegistrationHandleReady(&handle, NCCL_RMA_MAX_SEGMENTS));
 }
+
+// nranks>64 cannot put the full registration record on the stack. Compact
+// have/status allGathers still overlay that unused slab so a heap failure
+// cannot skip the collective.
+TEST(RmaSegmentMathTest, CompactConsensusOverlaysRegistrationStackWhenHeapFails)
+{
+    char heap{};
+    char stack[64 * 128];
+    EXPECT_EQ(ncclRmaCompactConsensusRecv(&heap, stack, sizeof(stack), 65, sizeof(int)), &heap);
+    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 65, sizeof(int)), stack);
+    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 65, sizeof(ncclResult_t)), stack);
+    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, 64 * sizeof(int), 65, sizeof(int)), nullptr);
+    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 0, sizeof(int)), nullptr);
+    EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, nullptr, sizeof(stack), 65, sizeof(int)), nullptr);
+}
