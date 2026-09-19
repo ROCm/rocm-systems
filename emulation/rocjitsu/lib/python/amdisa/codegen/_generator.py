@@ -5345,7 +5345,9 @@ class CodeGenerator:
             };
 
             PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+              // CDNA5 ISA section 7.7.1: scalar sources supply one replicated DWORD.
+              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(
+                  operand, lane, amdgpu::ScalarPairMode::Replicate32);
               return {pair.lo, pair.hi};
             }
 
