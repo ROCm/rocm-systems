@@ -61,14 +61,6 @@ constexpr uint64_t kMsixEntryBytes = 16;
 /// of 64 bits rather than a byte per vector.
 constexpr uint64_t kMsixPendingWordBytes = 8;
 
-/// @brief Scatter-gather entries a transfer is attempted with before the
-/// library is asked how many it actually needs.
-constexpr std::size_t kInitialSgEntries = 8;
-
-/// @brief Upper bound on segments one transfer may span, so a pathologically
-/// fragmented guest cannot make the device allocate without limit.
-constexpr std::size_t kMaxSgEntries = 256;
-
 VfioDeviceHost &host_of(vfu_ctx_t *ctx) {
   return *static_cast<VfioDeviceHost *>(vfu_get_private(ctx));
 }
@@ -604,8 +596,8 @@ bool VfioDeviceHost::copy_guest_memory(uint64_t guest_phys, void *data, std::siz
   }
 
   const int prot = to_guest ? PROT_WRITE : PROT_READ;
-  std::vector<std::byte> sgl_storage(dma_sg_size() * kInitialSgEntries);
-  std::size_t capacity = kInitialSgEntries;
+  std::vector<std::byte> sgl_storage(dma_sg_size() * VfioDeviceHost::kInitialSgEntries);
+  std::size_t capacity = VfioDeviceHost::kInitialSgEntries;
 
   int nr_sgs = vfu_addr_to_sgl(ctx_, reinterpret_cast<vfu_dma_addr_t>(guest_phys), length,
                                reinterpret_cast<dma_sg_t *>(sgl_storage.data()), capacity, prot);
@@ -616,7 +608,7 @@ bool VfioDeviceHost::copy_guest_memory(uint64_t guest_phys, void *data, std::siz
     if (needed <= capacity) {
       return false;
     }
-    if (needed > kMaxSgEntries) {
+    if (needed > VfioDeviceHost::kMaxSgEntries) {
       // A heavily fragmented guest can need more entries than are worth holding
       // at once. That is a reason to stream the transfer, not to reject it: a
       // client-side IOMMU can legitimately reflect a large range as thousands of
