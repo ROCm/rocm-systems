@@ -2913,7 +2913,6 @@ hipError_t Graph::RunOneNode(Node node) {
         }
       }
     } else {
-      node->SetWait(false);
       // It should be a safe return,
       // since the last edge to this dependency has to submit the command
       return hipSuccess;
@@ -2964,8 +2963,10 @@ hipError_t Graph::RunOneNode(Node node) {
       releaseWaitOrderCommands();
       return status;
     }
-    // If a wait was requested, then process the list
-    if (node->GetWait() && !waitList.empty()) {
+    // The list holds the dependencies on other streams only, since a same-stream
+    // dependency is already covered by that stream's in-order execution, so
+    // whatever is left in it has to be waited on.
+    if (!waitList.empty()) {
       node->UpdateEventWaitLists(waitList);
     }
     // Start the execution
@@ -2980,14 +2981,8 @@ hipError_t Graph::RunOneNode(Node node) {
   // Assign the launch ID of the submitted node
   // This is also applied to childGraphs to prevent them from being reprocessed
   node->launch_id_ = current_id_++;
-  uint32_t i = 0;
   // Execute the nodes in the edges list
   for (auto edge : node->GetEdges()) {
-    // Don't wait in the nodes, executed on the same streams and if it has just one dependency
-    bool wait =
-        ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1)) ? true : false;
-    edge->SetWait(wait);
-    i++;
     // Retain the current node for all its outgoing edges.
     // Each edge will include this node in its waitlist and release it after their commands are
     // enqueued.
@@ -3008,7 +3003,6 @@ hipError_t Graph::RunOneNode(Node node) {
     }
   }
 
-  node->SetWait(false);
   return hipSuccess;
 }
 
