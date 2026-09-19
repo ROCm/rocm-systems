@@ -79,6 +79,10 @@ struct IpcObject {
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
 public:
+  /// Minimum backing descriptor requested when the process limit permits it.
+  /// Shared with the interposer so its early table growth covers this range.
+  static constexpr int kBackingFdMin = 4096;
+
   /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
   using DebugIdentityValidationHook = std::function<void()>;
 
