@@ -30,6 +30,10 @@ By default, ``rocprof-attach`` attaches to the target process and all of its des
 
    $ rocprof-attach -p 12345 -t path/to/your-tool-library.so --attach-children=false
 
+The PID specified with ``rocprof-attach -p`` (or ``rocprofv3 --attach``) is the root of the attachment operation and must have attachment support enabled. The process tree is snapshotted first, but the root is attached before any descendants are attempted. If any part of root attachment fails, the operation returns immediately without attempting the snapshotted descendants. Therefore, passing a non-attachable launcher as the root will not attach its child processes, even when those children support attachment.
+
+After the root attaches successfully, descendants without an attachment listener are skipped with a warning. This commonly applies to CPU-only workers created with ``fork()`` after the parent started its listener, because threads aren't inherited across ``fork()``. Skipped descendants aren't profiled. A fork-only child that performs GPU work must initialize its own attachment support before it can be attached.
+
 More information can be found by invoking ``rocprof-attach -h``
 
 Python functions
@@ -87,9 +91,11 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
 **Function Details:**
 
 - **rocattach_attach_tree(int pid)**: Attaches to a process and all of its descendants.
-   - Enumerates the full process tree rooted at ``pid`` via ``/proc`` before attaching.
-   - Attachment proceeds in breadth-first order from the root.
-   - If attachment to an individual child process fails, the error is logged and attachment continues with the remaining processes; the return status reflects the last error seen.
+   - Snapshots the full process tree rooted at ``pid`` via ``/proc`` before attaching.
+   - Attempts the root first and returns immediately if any part of root attachment fails.
+   - After the root succeeds, attachment proceeds through the snapshot in breadth-first order.
+   - A descendant without an attachment listener is skipped with a warning and doesn't affect the return status.
+   - Other descendant attachment failures are logged and attachment continues with the remaining processes; the return status reflects the last error seen.
    - The process tree is snapshotted at the time of the call; processes spawned after this point are not included.
 
 - **rocattach_attach(int pid)**: Attaches to a single process only.
@@ -97,11 +103,11 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
    - Doesn't attach to child processes.
    - When profiling applications that spawn child processes, use ``rocattach_attach_tree`` instead.
 
-- **rocattach_detach_tree(int pid)**: Detaches from a process and all of its descendants.
-   - Enumerates the process tree rooted at ``pid`` via ``/proc`` at the time of the call.
-   - Only processes with an active attachment session are detached; others are silently skipped.
+- **rocattach_detach_tree(int pid)**: Detaches the tree attachment rooted at ``pid``.
+   - Uses the process list recorded by the corresponding ``rocattach_attach_tree`` call; it doesn't rescan ``/proc``.
+   - Detaches only processes that attached successfully. Skipped or failed descendants aren't recorded.
+   - Processes created after the attachment snapshot aren't detached.
    - Symmetric counterpart to ``rocattach_attach_tree``; use these two together.
-   - Reentrant: the sessions lock is acquired and released per-process and isn't held across the ``/proc`` traversal, so concurrent calls from multiple threads are safe.
 
 - **rocattach_detach(int pid)**: Detaches from a single process.
    - Takes the target process ID as a parameter.

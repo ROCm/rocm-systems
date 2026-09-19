@@ -193,6 +193,10 @@ To attach only to the specified PID and skip its descendants, use ``--attach-chi
 
 The child process tree is enumerated once at attach time using ``/proc``. Processes that are spawned after the attachment has begun are not automatically profiled.
 
+The PID passed to ``--attach`` is the required root target and must have attachment support enabled. If attachment to this root fails, no descendants are attempted. A CPU-only launcher without an attachment listener cannot be used only as a traversal anchor for otherwise attachable descendants.
+
+After the root attaches successfully, descendants without attachment listeners are skipped with a warning. This commonly applies to CPU-only workers created with ``fork()``, because the child doesn't inherit the parent's listener thread. Skipped descendants aren't profiled.
+
 Key considerations
 -------------------
 
@@ -206,4 +210,4 @@ Here are some important points to be noted while using dynamic process attachmen
 
 - The profiler collects data for the entire remaining lifetime of the process or until the configured collection period expires. To learn how to configure the collection period, see :ref:`duration-specific`.
 
-- When attaching to a process tree, if attachment to an individual child process fails (for example, because it exited between enumeration and attach), the error is logged and attachment continues with the remaining processes.
+- After the root attaches, failures other than a missing listener on an individual descendant are logged and attachment continues with the remaining processes.
