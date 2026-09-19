@@ -43,7 +43,7 @@ struct recorded_sample
  * same decisions without a trace cache behind them.
  *
  * The real policy stores the whole per-GPU snapshot as one hipfile_pmc_sample and lets
- * the Perfetto and RocPD processors expand it over METRIC_TABLE. This stub expands
+ * the Perfetto and RocPD processors expand it over k_metric_table. This stub expands
  * eagerly instead, because these tests assert on individual metric values; the gating
  * decisions under test are the same either way.
  */
@@ -67,8 +67,8 @@ struct stub_cache
         metadata_gpus.push_back(gpu_id);
     }
 
-    // NOLINTNEXTLINE(readability-function-size) -- needs a refactor of every collector's
-    // store_sample
+    // needs a refactor of every collector's store_sample
+    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_cfg,
                              const enabled_metrics& supported, const metrics& values,
@@ -80,7 +80,7 @@ struct stub_cache
         }
 
         const std::uint32_t active = enabled_cfg.value & supported.value;
-        for(const auto& metric : METRIC_TABLE)
+        for(const auto& metric : k_metric_table)
         {
             if((active & (1U << metric.bit)) == 0U)
             {
@@ -125,7 +125,7 @@ struct stub_settings
         gpu_filter      = device_filter{};
         gpu_filter.mode = device_selection_mode::all;
         set_visible_identity(2);
-        hipfile_metrics.value = ALL_HIPFILE_METRICS;
+        hipfile_metrics.value = k_all_hipfile_metrics;
         perfetto_legacy       = false;
     }
 
@@ -162,16 +162,16 @@ struct stub_config
 
 using collector_t = collector<mock_provider, device_t, stub_config>;
 
-constexpr std::uint64_t NS_PER_SEC = 1'000'000'000;
-constexpr std::uint64_t TS_1       = 1 * NS_PER_SEC;
-constexpr std::uint64_t TS_2       = 2 * NS_PER_SEC;
+constexpr std::uint64_t k_ns_per_sec = 1'000'000'000;
+constexpr std::uint64_t k_ts_1       = 1 * k_ns_per_sec;
+constexpr std::uint64_t k_ts_2       = 2 * k_ns_per_sec;
 
 namespace test_bytes
 {
-constexpr std::uint64_t kb512 = 512;
-constexpr std::uint64_t kb4   = 4096;
-constexpr std::uint64_t b1000 = 1000;
-constexpr std::uint64_t b3000 = 3000;
+constexpr std::uint64_t k_kb512 = 512;
+constexpr std::uint64_t k_kb4   = 4096;
+constexpr std::uint64_t k_b1000 = 1000;
+constexpr std::uint64_t k_b3000 = 3000;
 }  // namespace test_bytes
 
 class HipFileCollectorTest : public ::testing::Test
@@ -226,9 +226,9 @@ TEST_F(HipFileCollectorTest, sample_emits_every_metric_for_every_gpu)
     stub_settings::set_visible_identity(2);
     setup_and_config();
 
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
-    EXPECT_EQ(stub_cache::samples.size(), 2U * METRIC_TABLE.size());
+    EXPECT_EQ(stub_cache::samples.size(), 2U * k_metric_table.size());
 }
 
 TEST_F(HipFileCollectorTest, shutdown_propagates_to_provider)
@@ -247,7 +247,7 @@ TEST_F(HipFileCollectorTest, every_track_is_gpu_indexed)
     stub_settings::set_visible_identity(2);
     setup_and_config();
 
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     // No sample may arrive without a GPU it belongs to. The process-scoped counters that
     // used to ride along on GPU 0 are gone entirely.
@@ -260,7 +260,7 @@ TEST_F(HipFileCollectorTest, every_track_is_gpu_indexed)
 TEST_F(HipFileCollectorTest, no_registration_tracks_are_emitted)
 {
     setup_and_config();
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     EXPECT_TRUE(stub_cache::for_metric("File Registrations").empty());
     EXPECT_TRUE(stub_cache::for_metric("Buffer Registrations").empty());
@@ -271,7 +271,7 @@ TEST_F(HipFileCollectorTest, gpu_zero_carries_no_extra_tracks)
     stub_settings::set_visible_identity(2);
     setup_and_config();
 
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     const auto count_for = [](std::size_t gpu) {
         return std::count_if(
@@ -290,7 +290,7 @@ TEST_F(HipFileCollectorTest, disabled_metrics_are_not_emitted)
     stub_settings::hipfile_metrics.value = metric_bit_mask("Read Bytes");
 
     setup_and_config();
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     ASSERT_EQ(stub_cache::samples.size(), 1U);
     EXPECT_EQ(stub_cache::samples.front().metric, "Read Bytes");
@@ -302,7 +302,7 @@ TEST_F(HipFileCollectorTest, selecting_a_group_emits_both_directions)
     stub_settings::hipfile_metrics.value = metric_group_mask("fastpath");
 
     setup_and_config();
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     ASSERT_EQ(stub_cache::samples.size(), 2U);
     EXPECT_EQ(stub_cache::for_metric("Fastpath Reads").size(), 1U);
@@ -311,13 +311,12 @@ TEST_F(HipFileCollectorTest, selecting_a_group_emits_both_directions)
 
 // ── Metric groups ───────────────────────────────────────────────────────────
 
-constexpr std::array<const char*, 7> ALL_GROUPS{ "bytes",    "ops",    "fastpath",
-                                                 "fallback", "errors", "unaligned",
-                                                 "bandwidth" };
+constexpr std::array k_all_groups{ "bytes",  "ops",       "fastpath", "fallback",
+                                   "errors", "unaligned", "bandwidth" };
 
 TEST(HipFileMetricGroups, each_group_covers_exactly_one_read_and_one_write)
 {
-    for(const auto* group : ALL_GROUPS)
+    for(const auto* group : k_all_groups)
     {
         EXPECT_EQ(std::popcount(metric_group_mask(group)), 2) << group;
     }
@@ -329,14 +328,14 @@ TEST(HipFileMetricGroups, groups_partition_the_metric_table)
     // unselectable) and none is claimed twice.
     std::uint32_t combined = 0;
     int           bits     = 0;
-    for(const auto* group : ALL_GROUPS)
+    for(const auto* group : k_all_groups)
     {
         combined |= metric_group_mask(group);
         bits += std::popcount(metric_group_mask(group));
     }
 
-    EXPECT_EQ(combined, ALL_HIPFILE_METRICS);
-    EXPECT_EQ(bits, static_cast<int>(METRIC_TABLE.size()));
+    EXPECT_EQ(combined, k_all_hipfile_metrics);
+    EXPECT_EQ(bits, static_cast<int>(k_metric_table.size()));
 }
 
 TEST(HipFileMetricGroups, unknown_group_selects_nothing)
@@ -352,7 +351,7 @@ TEST_F(HipFileCollectorTest, no_metrics_enabled_emits_nothing)
     stub_settings::hipfile_metrics.value = 0U;
 
     setup_and_config();
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     EXPECT_TRUE(stub_cache::samples.empty());
     EXPECT_EQ(backend().call_count, 0U);
@@ -365,16 +364,16 @@ TEST_F(HipFileCollectorTest, cumulative_values_reach_the_cache)
     stub_settings::set_visible_identity(1);
     setup_and_config();
 
-    backend().gpu(0).read_bytes = test_bytes::b1000;
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    backend().gpu(0).read_bytes = test_bytes::k_b1000;
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
-    backend().gpu(0).read_bytes = test_bytes::b3000;
-    m_collector->sample(static_cast<std::int64_t>(TS_2));
+    backend().gpu(0).read_bytes = test_bytes::k_b3000;
+    m_collector->sample(static_cast<std::int64_t>(k_ts_2));
 
     const auto read_bytes = stub_cache::for_metric("Read Bytes");
     ASSERT_EQ(read_bytes.size(), 2U);
-    EXPECT_DOUBLE_EQ(read_bytes[0].value, static_cast<double>(test_bytes::b1000));
-    EXPECT_DOUBLE_EQ(read_bytes[1].value, static_cast<double>(test_bytes::b3000));
+    EXPECT_DOUBLE_EQ(read_bytes[0].value, static_cast<double>(test_bytes::k_b1000));
+    EXPECT_DOUBLE_EQ(read_bytes[1].value, static_cast<double>(test_bytes::k_b3000));
 }
 
 TEST_F(HipFileCollectorTest, bandwidth_reaches_the_cache_wall_clock_normalised)
@@ -383,15 +382,15 @@ TEST_F(HipFileCollectorTest, bandwidth_reaches_the_cache_wall_clock_normalised)
     setup_and_config();
 
     backend().gpu(0).read_bytes = 0;
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
-    backend().gpu(0).read_bytes = test_bytes::kb4;
-    m_collector->sample(static_cast<std::int64_t>(TS_2));
+    backend().gpu(0).read_bytes = test_bytes::k_kb4;
+    m_collector->sample(static_cast<std::int64_t>(k_ts_2));
 
     const auto bandwidth = stub_cache::for_metric("Read Bandwidth");
     ASSERT_EQ(bandwidth.size(), 2U);
     EXPECT_DOUBLE_EQ(bandwidth[0].value, 0.0);
-    EXPECT_DOUBLE_EQ(bandwidth[1].value, static_cast<double>(test_bytes::kb4));
+    EXPECT_DOUBLE_EQ(bandwidth[1].value, static_cast<double>(test_bytes::k_kb4));
 }
 
 // ── Unavailable backend ─────────────────────────────────────────────────────
@@ -401,7 +400,7 @@ TEST_F(HipFileCollectorTest, unavailable_backend_emits_nothing)
     setup_and_config();
     backend().available = false;
 
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     // hipFile is simply not in use in this process. Writing zeros would claim a
     // measurement that was never taken.
@@ -414,15 +413,15 @@ TEST_F(HipFileCollectorTest, devices_survive_an_unavailable_interval)
     const auto before = m_collector->get_device_count();
 
     backend().available = false;
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     // hipFile stats commonly become readable only after the target's first I/O, so an
     // unavailable interval must not permanently disable the devices.
     EXPECT_EQ(m_collector->get_device_count(), before);
 
     backend().available         = true;
-    backend().gpu(0).read_bytes = test_bytes::kb512;
-    m_collector->sample(static_cast<std::int64_t>(TS_2));
+    backend().gpu(0).read_bytes = test_bytes::k_kb512;
+    m_collector->sample(static_cast<std::int64_t>(k_ts_2));
 
     EXPECT_FALSE(stub_cache::samples.empty());
 }
@@ -435,14 +434,14 @@ TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
     stub_settings::perfetto_legacy = true;
     setup_and_config();
 
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
     // base::collector routes to PerfettoApi once per device whenever the legacy path is
     // on. hipFile plugs a no-op in there (perfetto_policy), because its tracks already
     // reach Perfetto as PMC records; a real writer would put two producers on every
     // track. What must hold either way is that the PMC output is unchanged.
     EXPECT_EQ(stub_perfetto::store_count, 1U);
-    EXPECT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
+    EXPECT_EQ(stub_cache::samples.size(), k_metric_table.size());
 }
 
 // ── Pause ───────────────────────────────────────────────────────────────────
@@ -452,13 +451,13 @@ TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
     stub_settings::set_visible_identity(1);
     setup_and_config();
 
-    backend().gpu(0).read_bytes = test_bytes::kb4;
-    m_collector->sample(static_cast<std::int64_t>(TS_1));
+    backend().gpu(0).read_bytes = test_bytes::k_kb4;
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
     stub_cache::reset();
 
-    m_collector->pause(static_cast<std::int64_t>(TS_2));
+    m_collector->pause(static_cast<std::int64_t>(k_ts_2));
 
-    ASSERT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
+    ASSERT_EQ(stub_cache::samples.size(), k_metric_table.size());
     for(const auto& sample : stub_cache::samples)
     {
         EXPECT_DOUBLE_EQ(sample.value, 0.0) << sample.metric;
@@ -470,7 +469,7 @@ TEST_F(HipFileCollectorTest, pause_is_not_suppressed_as_a_failed_query)
     setup_and_config();
     backend().available = false;
 
-    m_collector->pause(static_cast<std::int64_t>(TS_1));
+    m_collector->pause(static_cast<std::int64_t>(k_ts_1));
 
     // Pause writes a value-initialized metrics, which must not be mistaken for the
     // unavailable path regardless of what the backend currently reports.

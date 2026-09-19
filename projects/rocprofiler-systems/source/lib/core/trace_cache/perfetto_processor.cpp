@@ -1448,33 +1448,34 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-perfetto_processor_t::handle(const hipfile_pmc_sample& _hipfile_sample)
+// NOLINTNEXTLINE(readability-function-size)
+perfetto_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 {
     using hipfile_track = core::perfetto::counter_track<category::hipfile>;
     namespace collector = pmc::collectors::hipfile;
 
-    const auto _ts        = _hipfile_sample.timestamp;
-    const auto _device_id = _hipfile_sample.device_id;
-    const auto _enabled   = _hipfile_sample.enabled_metric.value;
+    const auto timestamp = hipfile_sample.timestamp;
+    const auto device_id = hipfile_sample.device_id;
+    const auto enabled   = hipfile_sample.enabled_metric.value;
 
-    for(const auto& _metric : collector::METRIC_TABLE)
+    for(const auto& metric : collector::k_metric_table)
     {
-        if((_enabled & (1U << _metric.bit)) == 0U)
+        if((enabled & (1U << metric.bit)) == 0U)
         {
             continue;
         }
 
-        auto       _name      = collector::track_name(_device_id, _metric.suffix);
-        const auto _track_key = std::hash<std::string>{}(_name);
+        auto       name      = collector::track_name(device_id, metric.suffix);
+        const auto track_key = std::hash<std::string>{}(name);
 
-        if(!hipfile_track::exists(_track_key))
+        if(!hipfile_track::exists(track_key))
         {
-            hipfile_track::emplace(_track_key, _name, _metric.unit);
+            hipfile_track::emplace(track_key, name, metric.unit);
         }
 
         TRACE_COUNTER(trait::name<category::hipfile>::value,
-                      hipfile_track::at(_track_key, 0), _ts,
-                      _metric.value(_hipfile_sample.metric_values));
+                      hipfile_track::at(track_key, 0), timestamp,
+                      metric.value(hipfile_sample.metric_values));
     }
 }
 

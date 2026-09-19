@@ -88,15 +88,15 @@ namespace
 int&
 verbose_value()
 {
-    static int value = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
-    return value;
+    static int s_value = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
+    return s_value;
 }
 
 bool&
 debug_value()
 {
-    static bool value = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
-    return value;
+    static bool s_value = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
+    return s_value;
 }
 
 auto configure_once = std::once_flag{};
