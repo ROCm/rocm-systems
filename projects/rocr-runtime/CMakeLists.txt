@@ -40,6 +40,7 @@
 ##
 ################################################################################
 
+# Temporary no-op change on rocr-runtime to exercise TheRock Multi-arch CI
 
 cmake_minimum_required(VERSION 3.25)
 
