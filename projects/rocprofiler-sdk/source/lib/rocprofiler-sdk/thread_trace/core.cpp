@@ -517,7 +517,7 @@ DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
 }
 
 void
-DispatchThreadTracer::start_context()
+DispatchThreadTracer::start_context() const
 {
     // Thread trace no longer registers a per-queue callback with the queue controller; the
     // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
@@ -528,7 +528,7 @@ DispatchThreadTracer::start_context()
 }
 
 void
-DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
+DispatchThreadTracer::stop_context() const
 {
     auto* controller = hsa::get_queue_controller();
     if(!controller) return;
