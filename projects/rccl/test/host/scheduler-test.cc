@@ -50,13 +50,13 @@ uint64_t ConvertSymTaskDevOp_ExpectedReciprocalScalar(int nRanks) {
 // Minimal ncclComm/ncclKernelPlan/planner.peers scaffold; ranks and bcast peers are the same set (numPeers).
 class ScheduleBcastTasksToPlan_Scene {
  public:
-  explicit ScheduleBcastTasksToPlan_Scene(int numPeers)
+  explicit ScheduleBcastTasksToPlan_Scene(int numPeers, int nChannels = 1)
       : comm(new ncclComm{}),
         plan(new ncclKernelPlan{}),
         peers(new ncclKernelPlanner::Peer[numPeers]{}),
         ringTasks(new ncclTaskBcast*[numPeers]{}),
         rankToIndex(new int[numPeers]{}) {
-    comm->nChannels = 1;
+    comm->nChannels = nChannels;
     comm->nRanks = numPeers;
     comm->rank = 0;
     comm->planner.nTasksBcast = 1;
@@ -460,6 +460,35 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_BudgetDeniesFirstPeer_StopsB
   EXPECT_EQ(budgetHook.calls, 1);
   EXPECT_EQ(recordedNWorkBatches, 1);
   EXPECT_EQ(recordedNWorkBytes, static_cast<ssize_t>(sizeof(ncclDevWorkBcast)));
+}
+
+// nChannels=1/numPeers<=64 (every test above) cannot distinguish the real formula from either
+// dropping the nChannels factor or replacing DIVUP with a raw count: all three collapse to the
+// same value there. 65 peers past a 2-channel scene forces 3 distinct wrong answers apart from
+// the correct one (see below).
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_MultiChannelPast64Tasks_BudgetArgsScaleByChannelsAndCeilDiv) {
+  constexpr int kNumPeers = 65;
+  ScheduleBcastTasksToPlan_Scene scene(kNumPeers, /*nChannels=*/2);
+  std::vector<ncclTaskBcast> tasks(kNumPeers);
+  for (int peer = 0; peer < kNumPeers; ++peer) {
+    tasks[peer].count = 1;
+    scene.peers[peer].bcastQueue.head = &tasks[peer];
+  }
+
+  int recordedNWorkBatches = -1;
+  ssize_t recordedNWorkBytes = -1;
+  ScopedHook budgetHook(g_testBudget, [&](struct ncclKernelPlanBudget*, int nWorkBatches, ssize_t nWorkBytes) {
+    recordedNWorkBatches = nWorkBatches;
+    recordedNWorkBytes = nWorkBytes;
+    return true;  // accept everything so the loop runs to completion over all 65 peers
+  });
+
+  ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr);
+  EXPECT_EQ(budgetHook.calls, kNumPeers);
+  // Last call: batchTasks==64 pre-increment (65th peer). Correct: 2*DIVUP(65,64)==4 and 2*65*sizeof(..).
+  // A dropped-nChannels mutant would give 2; a DIVUP-replaced-by-raw-count mutant would give 130.
+  EXPECT_EQ(recordedNWorkBatches, 4);
+  EXPECT_EQ(recordedNWorkBytes, static_cast<ssize_t>(2 * kNumPeers * sizeof(ncclDevWorkBcast)));
 }
 
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TwoPeersAccumulate_ProceedsPastBatchCheck) {
@@ -2802,6 +2831,12 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ContinuingTask_FitsSharedChann
   task2.isSymLast = 1;
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  // Poison so line 407's assignment (not the calloc'd default) is what the assertion below actually pins.
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork* outDevWork) {
+                               outDevWork->sChannelId = 0xffff;
+                               return ncclSuccess;
+                             });
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
   ASSERT_NE(argsBuf, nullptr);
