@@ -115,7 +115,8 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     rocprof_trace_decoder_isa_callback_t isa_callback,
-    void* cbdata
+    void* cbdata,
+    uint64_t analysis_flags = 0
 )
 {
     uint8_t* buffer = nullptr;
@@ -130,14 +131,40 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
     auto _isa = std::make_shared<CodeService>(isa_callback, cbdata);
     Stitcher stitcher{_isa, trace_callback, cbdata};
 
+    // Analyses see every wave of every buffer, so they are finalized once the loop ends. On a
+    // malformed buffer we still emit what the waves already reported, so the record stream
+    // stays consistent with the waves the caller received.
+    HiddenLatencyAnalysis hidden_latency{};
+    const bool analyze_hidden_latency = (analysis_flags & ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY) != 0;
+    if (analyze_hidden_latency) stitcher.set_hidden_latency_analysis(&hidden_latency);
+
+    auto Finalize = [&]() {
+        if (analyze_hidden_latency) hidden_latency.finalize(trace_callback, cbdata);
+    };
+
+    // An analysis scopes concurrency to (shader engine, SIMD), and SIMD ids repeat in every
+    // shader engine. Every buffer is a complete capture with its own header, so consuming more
+    // than one merges waves that were never concurrent, whatever the architecture.
+    uint64_t analysis_buffer_count = 0;
+    std::once_flag multiple_buffers_flag{};
+
     while (remaining && buffer_size && buffer)
     {
         CppReturnInfo ret{};
 
         auto parser = AnalyseBinary_internal(ret, buffer, buffer_size, -1, stitcher);
-        if (!parser) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
+        if (!parser)
+        {
+            Finalize();
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
+        }
 
         if (ret.bPacketLost) EmitWarning(ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST);
+
+        if (analyze_hidden_latency && ++analysis_buffer_count > 1)
+            std::call_once(
+                multiple_buffers_flag, EmitWarning, ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS
+            );
 
         auto& perf = ret.perfevents;
 
@@ -150,6 +177,7 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
         remaining = se_data_callback(&buffer, &buffer_size, cbdata);
     }
 
+    Finalize();
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
@@ -332,6 +360,20 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_set_analysis(rocprof_trace_decoder_handle_t handle, uint64_t flags)
+{
+    constexpr uint64_t known_flags = ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY;
+    if (flags & ~known_flags) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto hd = HandleData::get_write_handle(handle);
+    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    hd->analysis_flags = flags;
+
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
 // COMGR-dependent functions
 
 // V1 API: stateless 4-arg parse, no handle management
@@ -454,7 +496,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     try
     {
-        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx);
+        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx, hd->analysis_flags);
     }
     catch (...)
     {
@@ -516,7 +558,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     try
     {
-        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx);
+        return parse_data_impl(se_adapter, parse_trace_adapter, parse_isa_adapter, &ctx, hd->analysis_flags);
     }
     catch (...)
     {
@@ -533,13 +575,17 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_info_string(rocp
         "Stitch Incomplete: The parser could not fully match a trace token to the underlying disassembly.";
     static const char* datalost = "Data Lost: The profiler dropped part of the trace due to bandwidth limitations.";
     static const char* incomplete = "Wave incomplete: The trace was cutoff before all waves ended.";
+    static const char* multiple_buffers =
+        "Analysis scope: The parse covered more than one capture, so analysis results treat waves "
+        "that were never concurrent as overlapping. Parse one shader engine capture per call.";
 
     const std::map<int, const char*> map = {
-        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE,              "NONE"     },
-        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,         datalost   },
-        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE, stitch     },
-        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,   incomplete },
-        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST,              "INFO_LAST"},
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE,                      "NONE"          },
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,                 datalost        },
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE,         stitch          },
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,           incomplete      },
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS, multiple_buffers},
+        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST,                      "INFO_LAST"     },
     };
 
     try

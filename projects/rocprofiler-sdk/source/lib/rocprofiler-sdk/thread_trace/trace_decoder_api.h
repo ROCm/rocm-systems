@@ -104,6 +104,70 @@ rocprof_trace_decoder_parse_data(rocprof_trace_decoder_se_data_callback_t se_dat
                                  rocprof_trace_decoder_isa_callback_t     isa_callback,
                                  void*                                    userdata);
 
+typedef struct
+{
+    uint64_t handle;
+} rocprof_trace_decoder_handle_t;
+
+/**
+ * @brief Creates a decoder handle.
+ * @param[out] handle The handle to create.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle);
+
+/**
+ * @brief Destroys a handle created by rocprof_trace_decoder_create_handle.
+ * @param[in] handle The handle to destroy.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle);
+
+/**
+ * @brief Sets the ISA callback used while parsing on this handle.
+ * @param[in] handle The decoder handle.
+ * @param[in] callback Callback to return ISA lines.
+ * @param[in] userdata Userdata passed back to caller via callback.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_set_isa_callback(rocprof_trace_decoder_handle_t       handle,
+                                       rocprof_trace_decoder_isa_callback_t callback,
+                                       void*                                userdata);
+
+/**
+ * @brief Sets the shader engine data callback used while parsing on this handle.
+ * @param[in] handle The decoder handle.
+ * @param[in] callback Callback to return shader engine data from.
+ * @param[in] userdata Userdata passed back to caller via callback.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_set_se_data_callback(rocprof_trace_decoder_handle_t           handle,
+                                           rocprof_trace_decoder_se_data_callback_t callback,
+                                           void*                                    userdata);
+
+/**
+ * @brief Requests optional analyses for subsequent parses on this handle.
+ * @param[in] handle The decoder handle.
+ * @param[in] flags Bitmask of ::rocprofiler_thread_trace_decoder_analysis_flags_t.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_set_analysis(rocprof_trace_decoder_handle_t handle, uint64_t flags);
+
+/**
+ * @brief Parses thread trace data using a handle.
+ * @param[in] handle The decoder handle.
+ * @param[in] data Trace data, or NULL when a shader engine data callback is set.
+ * @param[in] data_size Size of the trace data, or 0 when a callback is set.
+ * @param[in] trace_callback Callback where the trace data is returned to.
+ * @param[in] userdata Userdata passed back to caller via callback.
+ */
+rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_parse(rocprof_trace_decoder_handle_t         handle,
+                            const void*                            data,
+                            uint64_t                               data_size,
+                            rocprof_trace_decoder_trace_callback_t trace_callback,
+                            void*                                  userdata);
+
 /**
  * @brief Returns the description of a rocprofiler_thread_trace_decoder_info_t record.
  * @param[in] info The decoder info received

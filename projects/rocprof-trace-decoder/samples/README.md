@@ -26,6 +26,17 @@ PYTHONPATH=python python3 samples/isa_hotspots.py \
   captures/*_code_object_id_*.out
 ```
 
+## Hidden Latency Hotspots
+
+Print the top 30 instructions by non-hidden latency, including total and hidden
+cycles:
+
+```bash
+PYTHONPATH=python python3 samples/hidden_latency_hotspots.py \
+  captures/*.att \
+  captures/*_code_object_id_*.out
+```
+
 ## Occupancy And Registers
 
 Write `occupancy_resources.png` with active wave count plus active SGPR/VGPR

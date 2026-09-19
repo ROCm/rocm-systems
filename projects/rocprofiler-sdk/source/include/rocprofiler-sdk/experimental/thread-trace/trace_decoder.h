@@ -104,6 +104,29 @@ rocprofiler_thread_trace_decoder_codeobj_unload(rocprofiler_thread_trace_decoder
                                                 uint64_t load_id) ROCPROFILER_API;
 
 /**
+ * @brief Requests optional analyses for subsequent ::rocprofiler_trace_decode calls.
+ *
+ * Analyses are off by default because the decoder has to retain each shader engine's
+ * instruction-pipe activity across wave callbacks, which costs memory and time. Results
+ * arrive through the same callback as every other record, after the rest of the records.
+ *
+ * Each ::rocprofiler_trace_decode call must cover exactly one capture from one shader
+ * engine. Concurrency is scoped to (shader engine, SIMD) and SIMD ids repeat in every
+ * shader engine, so merging captures would treat unrelated waves as competing for the same
+ * instruction pipe. Decode each shader engine separately and aggregate the results.
+ *
+ * @param[in] handle Handle to decoder instance.
+ * @param[in] flags Bitmask of ::rocprofiler_thread_trace_decoder_analysis_flags_t, or 0.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Invalid handle or unknown flag bit.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Decoder library predates 0.2.3.
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Analyses requested.
+ */
+rocprofiler_status_t
+rocprofiler_thread_trace_decoder_set_analysis(rocprofiler_thread_trace_decoder_id_t handle,
+                                              uint64_t flags) ROCPROFILER_API;
+
+/**
  * @brief Callback for rocprof-trace-decoder to return decoder traces back to user.
  * @param[in] record_type_id One of ::rocprofiler_thread_trace_decoder_record_type_t
  * @param[in] trace_events A pointer to sequence of events, of size trace_size.

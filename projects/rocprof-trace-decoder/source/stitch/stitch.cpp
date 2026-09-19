@@ -415,6 +415,10 @@ void Stitcher::stitch(WaveDataInternal& wave)
     if (!wave.bIsComplete)
         for (auto& inst : wave.instructions) wave.end_time = std::max(wave.end_time, inst.time + inst.duration + 4);
 
+    // The wave's storage may be released as soon as this callback returns, so anything that
+    // needs the instruction list later has to take a copy now.
+    if (hidden_latency) hidden_latency->add_wave(wave, *pctranslator);
+
     callback(RADT(WAVE), (void*) &wave, 1, cbdata);
 }
 
