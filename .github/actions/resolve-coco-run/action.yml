@@ -98,7 +98,7 @@ runs:
           # Which cron fired, not the wall clock: GitHub delays scheduled runs
           # routinely, and a Saturday run that starts after midnight reads as
           # Sunday and would record the weekly sweep as that night's nightly.
-          # These must stay in step with the cron entries in rccl-coco.yml.
+          # These must stay in step with the cron entries in rccl-coco-scheduled.yml.
           case "${SCHEDULE}" in
             '47 3 * * 1-5')
               mode=nightly
@@ -114,7 +114,7 @@ runs:
               fi
               ;;
             *)
-              echo "::error::Unrecognised schedule '${SCHEDULE}'. Add it here alongside the cron entry in rccl-coco.yml."
+              echo "::error::Unrecognised schedule '${SCHEDULE}'. Add it here alongside the cron entry in rccl-coco-scheduled.yml."
               exit 1
               ;;
           esac

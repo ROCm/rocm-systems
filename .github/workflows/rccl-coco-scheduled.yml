@@ -1,0 +1,106 @@
+name: RCCL coco scheduled
+
+# Scheduled coco launches on the Ruby and OCI clusters: nightly, weekly, and
+# monthly. `setup` resolves the mode from the cron that fired and pins the coco
+# harness to one commit; `run` fans out over that mode's jobs via the shared
+# launcher, rccl-coco-run.yml.
+#
+# These jobs run only against the refs configured below, never against a pull
+# request: this workflow has no pull_request trigger, and workflow_dispatch
+# requires write access to this repository, so a fork cannot reach it.
+#
+# Cron is UTC and ignores DST, so a fixed entry drifts an hour across the year.
+# 03:47 UTC is 21:47 CST in winter and 22:47 CDT in summer, both after the
+# 21:00 CST window in which the runner's node may be restarted. Neither entry
+# may move earlier than 03:00 UTC, which is when that window opens.
+on:
+  schedule:
+    - cron: '47 3 * * 1-5'
+    - cron: '47 3 * * 6'
+  workflow_dispatch:
+    inputs:
+      coco_ref:
+        description: 'ROCm/tRCCL ref for the coco harness.'
+        type: string
+        required: false
+        default: 'main'
+      dry_run:
+        description: 'Resolve stacks and submissions without building or running anything.'
+        type: boolean
+        required: false
+        default: false
+      periodic_mode:
+        description: 'Which periodic run to drive by hand.'
+        type: choice
+        options:
+          - nightly
+          - weekly
+          - monthly
+        required: false
+        default: 'nightly'
+
+permissions:
+  contents: read
+
+# Keyed on run_id so a scheduled run is never cancelled by a later one.
+concurrency:
+  group: rccl-coco-scheduled-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      coco_ref: ${{ steps.resolve.outputs.coco_ref }}
+      coco_args: ${{ steps.resolve.outputs.coco_args }}
+      trigger_kind: ${{ steps.resolve.outputs.trigger_kind }}
+      runs: ${{ steps.plan.outputs.matrix }}
+      has_runs: ${{ steps.plan.outputs.has_runs }}
+    steps:
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .github/actions/checkout-coco-harness
+            .github/actions/resolve-coco-run
+            .github/scripts
+
+      - name: Resolve coco run parameters
+        id: resolve
+        uses: ./.github/actions/resolve-coco-run
+        with:
+          coco_ref: ${{ inputs.coco_ref || 'main' }}
+          dry_run: ${{ inputs.dry_run || false }}
+          periodic_mode: ${{ inputs.periodic_mode || 'nightly' }}
+          schedule: ${{ github.event.schedule }}
+          client-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # Filtered here rather than by a per-job `if`: a job's `if` is evaluated
+      # once before its matrix expands and so cannot vary by leg.
+      - name: Plan this mode's runs
+        id: plan
+        env:
+          MODE: ${{ steps.resolve.outputs.mode }}
+        run: python3 .github/scripts/rccl_coco_matrix.py scheduled-runs --mode "${MODE}"
+
+  run:
+    name: Run CoCo (${{ matrix.job }})
+    needs: setup
+    # An empty include list is a matrix error, not an empty run.
+    if: needs.setup.outputs.has_runs == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.runs) }}
+    uses: ./.github/workflows/rccl-coco-run.yml
+    secrets: inherit
+    with:
+      job: ${{ matrix.job }}
+      runs_on: ${{ matrix.runner }}
+      coco_ref: ${{ needs.setup.outputs.coco_ref }}
+      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
+      coco_args: ${{ needs.setup.outputs.coco_args }}
+      timeout_minutes: ${{ matrix.timeout }}
+      concurrency_group: ${{ matrix.group }}

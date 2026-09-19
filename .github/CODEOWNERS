@@ -3,7 +3,8 @@
 /.github/                                                             @ROCm/rocm-systems-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
-/.github/workflows/rccl-coco.yml                                      @ROCm/rccl-ci
+/.github/workflows/rccl-coco-pr.yml                                   @ROCm/rccl-ci
+/.github/workflows/rccl-coco-scheduled.yml                            @ROCm/rccl-ci
 /.github/workflows/rccl-ci.yml                                        @ROCm/rccl-ci
 /.github/workflows/rccl-suite.yml                                     @ROCm/rccl-ci
 /.github/workflows/rccl-coco-run.yml                                  @ROCm/rccl-ci
@@ -15,6 +16,8 @@
 /.github/scripts/allowlist/cluster-runners.allowlist                  @ROCm/rccl-ci
 /.github/scripts/check_rccl_cluster_runner_allowlist.py               @ROCm/rccl-ci
 /.github/scripts/rccl_detect_coco_changes.py                          @ROCm/rccl-ci
+/.github/scripts/rccl_coco_matrix.py                                    @ROCm/rccl-ci
+/.github/scripts/tests/rccl_coco_matrix_test.py                         @ROCm/rccl-ci
 /.github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py    @ROCm/rccl-ci
 /.github/scripts/tests/rccl_detect_coco_changes_test.py               @ROCm/rccl-ci
 

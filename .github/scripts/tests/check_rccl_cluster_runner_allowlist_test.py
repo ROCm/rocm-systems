@@ -89,7 +89,8 @@ class LoadAllowlistTest(unittest.TestCase):
             "\n"
             "ruby-linux-slurm-scale-runner\n"
             "oci-linux-slurm-scale-runner  # trailing comment\n"
-            ".github/workflows/rccl-coco.yml\n"
+            ".github/workflows/rccl-coco-pr.yml\n"
+            ".github/workflows/rccl-coco-scheduled.yml\n"
             ".github/workflows/rccl-coco-run.yml\n"
         )
         self.assertEqual(
@@ -99,7 +100,8 @@ class LoadAllowlistTest(unittest.TestCase):
         self.assertEqual(
             workflows,
             {
-                ".github/workflows/rccl-coco.yml",
+                ".github/workflows/rccl-coco-pr.yml",
+                ".github/workflows/rccl-coco-scheduled.yml",
                 ".github/workflows/rccl-coco-run.yml",
             },
         )

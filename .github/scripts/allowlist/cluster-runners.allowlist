@@ -11,7 +11,8 @@ ruby-linux-slurm-scale-runner
 oci-linux-slurm-scale-runner
 tw-gfx950-ainic-ROCm-scale-runner
 
-.github/workflows/rccl-coco.yml
+.github/workflows/rccl-coco-pr.yml
+.github/workflows/rccl-coco-scheduled.yml
 .github/workflows/rccl-ci.yml
 .github/workflows/rccl-suite.yml
 .github/workflows/rccl-ainic-tw-gfx950-runner.yml

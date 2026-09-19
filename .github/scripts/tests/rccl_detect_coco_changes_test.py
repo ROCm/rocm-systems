@@ -3,7 +3,7 @@
 
 """Tests for rccl_detect_coco_changes.py.
 
-A false from this script lets rccl-coco.yml's gate pass a PR without running
+A false from this script lets rccl-coco-pr.yml's gate pass a PR without running
 anything on the clusters, so the paths that must resolve true are the ones
 worth pinning.
 """
@@ -35,8 +35,10 @@ class CocoPathsTest(unittest.TestCase):
         # A change to any of these can alter the gate's own verdict, so it has
         # to be tested by the PR making it.
         for path in [
-            ".github/workflows/rccl-coco.yml",
+            ".github/workflows/rccl-coco-pr.yml",
+            ".github/workflows/rccl-coco-scheduled.yml",
             ".github/workflows/rccl-coco-run.yml",
+            ".github/scripts/rccl_coco_matrix.py",
             ".github/actions/resolve-coco-run/action.yml",
             ".github/actions/checkout-coco-harness/action.yml",
             ".github/scripts/rccl_detect_coco_changes.py",
