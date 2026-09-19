@@ -112,6 +112,7 @@ set(SRC_FILES
   algorithms/dda/fabric/fabric_init.cu
   algorithms/dda/fabric/fabric_mem_handler.cc
   gin/gin_host.cc
+  gin/gin_fabric_a2a_lane.cc
   gin/gin_host_proxy.cc
   gin/proxy_gpucontext/gpucontext.cc
   gin/proxy_gpucontext/gpucontext.h
@@ -214,6 +215,8 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/gin/gin_fabric_a2a_host.h
+  include/gin/gin_bootstrap_agree.h
   include/git_version.h
   include/graph.h
   include/group.h
@@ -266,6 +269,12 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_a2a_lane.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_ll_device_prims.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_a2a_device.h
   include/nccl_device/gin_barrier.h
   include/nccl_device/impl/barrier__funcs.h
   include/nccl_device/impl/barrier__types.h
@@ -590,7 +599,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
-    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
 endif()
 

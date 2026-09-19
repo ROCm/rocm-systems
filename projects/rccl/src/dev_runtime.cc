@@ -1624,6 +1624,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   struct ncclTeam world = ncclTeamWorld(comm);
   struct ncclTeam lsa = ncclTeamInnerFactor(world, devr->lsaSize);
   bool ginActivated = false;
+  bool ginDevCommReady = false;
   struct ncclDevrTeam* tmLsa;
   ncclTeam_t ucTeam, mcTeam;
   size_t bufSizeTotal;
@@ -1854,6 +1855,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     reqs->ginSignalCount = ginSignalTotal;
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECKGOTO(ncclGinDevCommSetup(comm, reqs, outDevComm, deviceCodeVersion), ret, fail);
+    ginDevCommReady = true;
     // SDMA signal binding is deferred until the resource window is created
     // (see ncclGinAnvilBindResourceWindowSignals call below).
   }
@@ -1948,6 +1950,14 @@ fail_stream_mem:
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
+  if (ginDevCommReady) {
+    (void)ncclGinDevCommFree(comm, outDevComm);
+    outDevComm->ginContextCount = 0;
+    memset(outDevComm->ginHandles, 0, sizeof(outDevComm->ginHandles));
+    memset(outDevComm->ginNetDeviceTypes, 0, sizeof(outDevComm->ginNetDeviceTypes));
+    outDevComm->resourceWindow = nullptr;
+    outDevComm->resourceWindow_inlined = {};
+  }
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
 }

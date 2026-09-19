@@ -685,7 +685,8 @@ struct ncclComm {
   ncclIpcMemHandler* ddaIpcMemHandler; /* IPC path only */
   ncclFabricMemHandler* ddaFabricMemHandler; /* fabric path only */
   void* ddaScratch;
-  size_t ddaScratchBytes;
+  size_t ddaScratchBytes;      // DDA-visible head; GIN LL uses the allocation tail
+  size_t ddaScratchAllocBytes; // full VMM allocation (head + GIN tail)
   void* ddaPeerPtrsDev;
   nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
   nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */

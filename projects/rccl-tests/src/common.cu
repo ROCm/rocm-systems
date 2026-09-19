@@ -2597,26 +2597,9 @@ testResult_t run() {
     //if parallel init is not selected, use main thread to initialize NCCL
     TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
 
-    {
-      extern int ncclCuMemRuntimeSupported();
-      if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !ncclCuMemRuntimeSupported()) {
-        if (ncclProc == 0) {
-          printf("# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n");
-        }
-        for (int i = 0; i < nGpus * nThreads; ++i) {
-          NCCLCHECK(ncclCommDestroy(comms[i]));
-        }
-        free(initFreeGpuMem);
-        free(comms);
-#ifdef MPI_SUPPORT
-        MPI_Barrier(mpi_comm);
-        MPI_Comm_free(&mpi_comm);
-        MPI_Finalize();
-#endif
-        cudaDeviceReset();
-        return testSuccess;
-      }
-    }
+    // NCCL 2.31 probes ncclCuMemRuntimeSupported() here, but that symbol is not
+    // in the installed librccl ABI (-fvisibility=hidden after hipify). Device-API
+    // Test#5 continues; window register fails if the cuMem stack is unusable.
 
      // Capture the memory used by the GPUs after initializing the NCCL communicators
      for (int g = 0; g < nGpus; ++g) {
