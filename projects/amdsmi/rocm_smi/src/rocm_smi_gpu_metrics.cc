@@ -346,14 +346,13 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricTempXcd, "TempXcd"}, /* v1.9+ */
 };
 
-AMDGpuMetricVersionFlags_t translate_header_to_flag_version(
-    const AMDGpuMetricsHeader_v1_t& metrics_header, bool is_partition_metrics,
-    const std::string& file_path) {
-  std::ostringstream ss;
-  auto version_id(AMDGpuMetricVersionFlags_t::kGpuMetricNone);
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-  LOG_TRACE(ss);
-
+// Resolve a metrics header to its version flag without logging. Minor revisions
+// are byte-prefix supersets of the newest struct we model, so an APU exposing
+// gpu_metrics v2.0-v2.3 is read with the v2.4 layout (its extra trailing fields
+// report as not-applicable). Returns kGpuMetricNone when the version cannot be
+// modeled.
+AMDGpuMetricVersionFlags_t lookup_header_flag_version(
+    const AMDGpuMetricsHeader_v1_t& metrics_header, bool is_partition_metrics) {
   const auto flag_version = join_metrics_version(metrics_header);
   if (!is_partition_metrics) {
     if (auto it = amdgpu_metric_version_translation_table.find(flag_version);
@@ -362,6 +361,9 @@ AMDGpuMetricVersionFlags_t translate_header_to_flag_version(
     }
     if (metrics_header.m_format_revision == 1 && metrics_header.m_content_revision >= 9) {
       return AMDGpuMetricVersionFlags_t::kGpuMetricDynV19Plus;
+    }
+    if (metrics_header.m_format_revision == 2 && metrics_header.m_content_revision <= 4) {
+      return AMDGpuMetricVersionFlags_t::kApuMetricV24;
     }
   } else {
     if (auto it = amdgpu_partition_metric_version_translation_table.find(flag_version);
@@ -372,10 +374,24 @@ AMDGpuMetricVersionFlags_t translate_header_to_flag_version(
       return AMDGpuMetricVersionFlags_t::kGpuXcpMetricDynV11Plus;
     }
   }
+  return AMDGpuMetricVersionFlags_t::kGpuMetricNone;
+}
+
+AMDGpuMetricVersionFlags_t translate_header_to_flag_version(
+    const AMDGpuMetricsHeader_v1_t& metrics_header, bool is_partition_metrics,
+    const std::string& file_path) {
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+
+  const auto version_id = lookup_header_flag_version(metrics_header, is_partition_metrics);
+  if (version_id != AMDGpuMetricVersionFlags_t::kGpuMetricNone) {
+    return version_id;
+  }
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
      << " | Fail "
-     << " | Translation Tbl: " << flag_version << " | Metric Version: "
+     << " | Translation Tbl: " << join_metrics_version(metrics_header) << " | Metric Version: "
      << stringfy_metrics_header(metrics_header, is_partition_metrics, file_path)
      << " | Returning = " << static_cast<AMDGpuMetricVersionFlagId_t>(version_id) << " |";
   LOG_ERROR(ss);
@@ -416,9 +432,11 @@ uint16_t translate_flag_to_metric_version(AMDGpuMetricVersionFlags_t version_fla
 // - std::string: file path of the metrics header file
 rsmi_status_t is_gpu_metrics_version_supported(const AMDGpuMetricsHeader_v1_t& metrics_header,
                                                bool is_partition_metrics) {
-  (void)is_partition_metrics;  // unused
-  const auto flag_version = join_metrics_version(metrics_header);
-  if (flag_version == static_cast<uint16_t>(AMDGpuMetricVersionFlags_t::kGpuMetricNone)) {
+  // A version we cannot model maps to kGpuMetricNone; report it as unsupported
+  // (rather than corrupt data) using the same non-logging lookup the factory
+  // path relies on.
+  if (lookup_header_flag_version(metrics_header, is_partition_metrics) ==
+      AMDGpuMetricVersionFlags_t::kGpuMetricNone) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   return RSMI_STATUS_SUCCESS;
@@ -5038,8 +5056,20 @@ auto Device::dev_read_gpu_metrics_all_data(DevInfoTypes type) -> rsmi_status_t {
     }
 
   } else {
-    op_result = readDevInfo(type, m_gpu_metrics_header.m_structure_size,
-                            m_gpu_metrics_ptr->get_metrics_table().get());
+    // Metric tables are versioned supersets: a device may report an older,
+    // shorter revision than the newest struct we model (e.g. an APU exposing
+    // gpu_metrics v2.1 into the v2.4 layout). Pre-fill the destination with the
+    // not-applicable sentinel and never read past our own buffer, so trailing
+    // fields absent from the reported revision read back as max-value (N/A)
+    // instead of indeterminate data.
+    auto* metrics_table = m_gpu_metrics_ptr->get_metrics_table().get();
+    const auto table_size = m_gpu_metrics_ptr->sizeof_metric_table();
+    if (metrics_table != nullptr && table_size != 0) {
+      std::memset(metrics_table, 0xFF, table_size);
+    }
+    const auto read_size =
+        std::min(static_cast<std::size_t>(m_gpu_metrics_header.m_structure_size), table_size);
+    op_result = readDevInfo(type, read_size, metrics_table);
 
     if ((status_code = ErrnoToRsmiStatus(op_result)) != rsmi_status_t::RSMI_STATUS_SUCCESS) {
       ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -5236,8 +5266,12 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
   //  the environment first.
   status_code = setup_gpu_metrics_reading(type);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
-    // At this point we should have a valid gpu_metrics pointer.
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    // Keep NOT_SUPPORTED intact: it means the device reports a metrics revision
+    // we cannot model, which callers must be able to tell apart from data that
+    // is present but unusable.
+    if (status_code != rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
        << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)
@@ -5288,7 +5322,8 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
     for (const auto& [metric_class, metric_data] : gpu_metrics_tbl) {
       tmp_outstream_metrics << "\n";
       tmp_outstream_metrics << "[ " << amdgpu_metrics_class_id_translation_table.at(metric_class)
-                            << " ]" << "\n";
+                            << " ]"
+                            << "\n";
 
       for (const auto& [metric_unit, metric_values] : metric_data) {
         auto tmp_metric_info =
@@ -5358,7 +5393,9 @@ auto Device::dev_copy_internal_to_external_metrics(DevInfoTypes type)
   std::string gpu_metrics_path = get_sys_file_path_by_type(type, true);
 
   if (!m_gpu_metrics_ptr) {
-    // At this point we should have a valid gpu_metrics pointer.
+    // Callers stop on the NOT_SUPPORTED reported while reading the header, so a
+    // missing object here means a recognized version produced no table -- a
+    // genuine data inconsistency rather than an unsupported revision.
     status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
@@ -5632,7 +5669,19 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
     return status_code;
   }
 
-  dev->dev_log_gpu_metrics(ostrstream);
+  // An unsupported metrics revision has no table to copy, so stop here and let
+  // the caller see NOT_SUPPORTED instead of the unexpected-data result the copy
+  // stage would report.
+  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream);
+  if (setup_status == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Cause: Metric version found is not supported"
+       << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
+       << " | File: " << file_name << " | Returning = " << getRSMIStatusString(setup_status, false)
+       << " |";
+    LOG_ERROR(ss);
+    return setup_status;
+  }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -5705,7 +5754,19 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind, rsmi_gpu_
     return status_code;
   }
 
-  dev->dev_log_gpu_metrics(ostrstream, type);
+  // An unsupported metrics revision has no table to copy, so stop here and let
+  // the caller see NOT_SUPPORTED instead of the unexpected-data result the copy
+  // stage would report.
+  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream, type);
+  if (setup_status == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Cause: Metric version found is not supported"
+       << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
+       << " | File: " << file_name << " | Returning = " << getRSMIStatusString(setup_status, false)
+       << " |";
+    LOG_ERROR(ss);
+    return setup_status;
+  }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics(type);
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
