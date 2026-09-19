@@ -16,7 +16,7 @@ from _code_object_paths import code_objects_from_paths
 from rocprof_trace_decoder.att import AttTrace, generate_att_outputs
 from rocprof_trace_decoder.code_index import CodeIndex
 from rocprof_trace_decoder.codegen import generate_code_artifacts
-from rocprof_trace_decoder.rcv import (
+from rocprof_trace_decoder.analysis.rcv import (
     copy_source_snapshots,
     write_code_json,
     write_source_snapshots,
