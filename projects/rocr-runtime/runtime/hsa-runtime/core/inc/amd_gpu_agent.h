@@ -472,20 +472,14 @@ class GpuAgent : public GpuAgentInt {
   uint32_t NextSdmaUserQueueEngineId();
 
   /// @brief Can a signal's ABI block be placed in this agent's local memory?
-  /// The agent side of hsa_amd_signal_create_v2()'s gate, and the answer
-  /// HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED reports.  The caller side
-  /// clauses -- one named consumer, no IPC -- are not agent properties and are
-  /// checked at the entry point.
+  /// The agent side of hsa_amd_signal_create_v2()'s gate; the caller side clauses
+  /// are not agent properties and are checked at the entry point.
   bool SupportsOrderingEdgeSignal() const { return OrderingEdgeSignalRegion() != nullptr; }
 
   /// @brief The device local memory region an ordering edge signal's ABI block
-  /// is allocated from, or nullptr if this agent has none.
-  ///
-  /// One definition, three callers: the allocator, the gate on
-  /// hsa_amd_signal_create_v2(), and the
-  /// HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED query.  Do not add a
-  /// second expression of this test -- one that is not the allocator's own can
-  /// report support where the allocation fails, and refuse where it would work.
+  /// is allocated from, or nullptr if this agent has none.  Do not add a second
+  /// expression of this test: one that is not the allocator's own can report
+  /// support where the allocation fails, and refuse where it would work.
   const core::MemoryRegion* OrderingEdgeSignalRegion() const;
 
   // ---- Ordering edge signal slab -------------------------------------------
@@ -497,44 +491,26 @@ class GpuAgent : public GpuAgentInt {
   /// so a smaller block reserves exactly as much and holds less.
   static constexpr size_t kOrderingEdgeBlockSize = 2 * 1024 * 1024;
 
-  /// @brief Slot stride in bytes.  128 == sizeof(SharedSignal), so the block
-  /// packs 16,384 slots with no padding -- the same geometry SharedSignalPool_t
-  /// already uses for this object in host memory (32 per 4 KiB page,
-  /// 512 * 32 = 16,384, 2 MiB).  signal.cpp asserts the three conditions any
-  /// other value must satisfy.
-  ///
-  /// The stride is this line and nothing else: no other line in this runtime,
-  /// and no line in any caller, changes with it.
+  /// @brief Slot stride in bytes.  128 == sizeof(SharedSignal), so a block packs
+  /// 16,384 slots with no padding; signal.cpp asserts the conditions any other
+  /// value must satisfy.  Nothing else in this runtime changes with it.
   static constexpr size_t kOrderingEdgeDefaultStride = 128;
 
   /// @brief Take one ordering edge signal slot -- storage for one SharedSignal
-  /// ABI block -- from this agent's slab.  Returns nullptr on failure and, if
-  /// @p why is non-null, writes HSA_STATUS_ERROR_INVALID_AGENT when this agent
-  /// has no region such a block can live in (a clean opt out) or
-  /// HSA_STATUS_ERROR_OUT_OF_RESOURCES when it has one and the allocation
-  /// failed.  Distinguished here so the caller need not re-derive the region
-  /// predicate to tell them apart.
-  ///
-  /// The storage is NOT constructed; the caller placement news into it, which is
-  /// what keeps construction lazy -- a block is mapped when it is allocated, but
-  /// its slots are written only as they are handed out.
-  ///
-  /// core::SharedSignalPool_t is structurally this object and is deliberately
-  /// not reused: it is process global and cuts its blocks from BaseShared's
-  /// host allocator, so making it serve device memory means a per-agent
-  /// instance and an allocator parameter on a class every signal in the runtime
-  /// is constructed through.  Parameterising it is the right long term shape and
-  /// belongs in its own change.
+  /// ABI block -- from this agent's slab.  Returns nullptr on failure, writing
+  /// HSA_STATUS_ERROR_INVALID_AGENT through @p why when this agent has no region
+  /// such a block can live in and HSA_STATUS_ERROR_OUT_OF_RESOURCES when the
+  /// allocation failed.  The storage is NOT constructed; the caller placement
+  /// news into it, so slots are written only as they are handed out.
+  /// core::SharedSignalPool_t is structurally this object but is process global
+  /// and host allocated, so it is deliberately not reused.
   void* AcquireOrderingEdgeSlot(hsa_status_t* why);
 
   /// @brief Return a slot taken by AcquireOrderingEdgeSlot() to the free list.
-  /// The storage stays mapped and is reused; it is not handed back to the driver
-  /// while the agent lives, so a command processor still polling a retired value
-  /// word reads a mapped page rather than an unmapped one.  The cost is that a
-  /// stale HANDLE aliases a live slot instead of faulting -- the same trade
-  /// core::SharedSignalPool_t already makes for every host resident signal.
+  /// The storage stays mapped while the agent lives, so a command processor still
+  /// polling a retired value word reads a mapped page.  The cost is that a stale
+  /// handle aliases a live slot instead of faulting.
   void ReleaseOrderingEdgeSlot(void* slot);
-
 
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {

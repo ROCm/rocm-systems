@@ -1004,17 +1004,7 @@ typedef enum hsa_amd_agent_info_s {
    * reflected here.  The type of this attribute is bool.
    *
    * A runtime that predates the feature answers this query with
-   * ::HSA_STATUS_ERROR_INVALID_ARGUMENT, which is a usable negative -- but only
-   * while this numeric value remains unallocated.  A bit in an existing
-   * properties word would not have that property, which is why this is a new
-   * enumerant.
-   *
-   * THE NUMERIC VALUE IS PROVISIONAL AND MUST BE REALLOCATED BEFORE MERGE, and
-   * re-verified immediately before merge rather than once: this range is
-   * allocated continuously, and a caller probing a value some runtime has
-   * already spent on another bool attribute receives that attribute's answer
-   * with HSA_STATUS_SUCCESS and cannot tell the difference.  The value must be
-   * identical on every branch, because a caller passes the enumerant.
+   * ::HSA_STATUS_ERROR_INVALID_ARGUMENT, which is a usable negative.
    */
   HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED = 0xA125,
 } hsa_amd_agent_info_t;
@@ -1517,14 +1507,12 @@ typedef struct hsa_amd_signal_create_desc_s {
  * each poll is a read across the host bus.  With the device memory flag the
  * word lives in @c consumers[0]'s local memory, so the poll is local.
  *
- * The descriptor is versioned so that later additions - further placements,
- * further fields - do not need a further entry point.  @c version is validated
- * strictly: a runtime that does not recognise the value rejects the descriptor
- * with ::HSA_STATUS_ERROR_INVALID_ARGUMENT rather than silently ignoring what
- * it does not understand.  For the same reason undefined bits of @c flags and
- * of @c attributes are rejected rather than ignored, so a caller that sets a
- * flag this runtime predates receives an error instead of a signal that
- * quietly lacks the requested property.
+ * @c version is validated strictly: a runtime that does not recognise the value
+ * rejects the descriptor with ::HSA_STATUS_ERROR_INVALID_ARGUMENT rather than
+ * silently ignoring what it does not understand.  Undefined bits of @c flags and
+ * of @c attributes are likewise rejected, so a caller that sets a flag this
+ * runtime predates receives an error instead of a signal that quietly lacks the
+ * requested property.
  *
  * A signal created with ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD is
  * restricted, and the restrictions are enforced:
@@ -1564,11 +1552,8 @@ typedef struct hsa_amd_signal_create_desc_s {
  * the descriptor fails; query ::HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED
  * on the intended consumer first.  On a runtime that predates this feature
  * that query returns ::HSA_STATUS_ERROR_INVALID_ARGUMENT, which is
- * distinguishable from a machine that is merely unsuitable.  Refusing rather
- * than substituting a host resident signal is deliberate: a caller that
- * silently received one would believe it had taken the fast path forever.
- * Callers must check the returned status and the per descriptor @c signal
- * handle.
+ * distinguishable from a machine that is merely unsuitable.  Callers must check
+ * the returned status and the per descriptor @c signal handle.
  *
  * On partial failure, signals that were successfully created remain valid and
  * are the caller's to destroy.  The caller should inspect each

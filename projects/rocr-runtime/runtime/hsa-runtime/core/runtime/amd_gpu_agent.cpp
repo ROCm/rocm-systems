@@ -3661,33 +3661,11 @@ void GpuAgent::InitAllocators() {
 // The region an ordering edge signal's ABI block -- and so its value word -- is
 // placed in.  Named by property, never by position in regions():
 // InitRegionList() pushes up to three regions per frame buffer heap and that
-// order has already changed once (the extended scope fine grain region is
-// skipped on gfx12.0), so "the first local region" is not a stable statement
-// and a reorder would silently move every ordering edge signal.
-//
-//  IsLocalMemory()              device memory rather than host memory.
-//  IsPublic()                   FRAME_BUFFER_PUBLIC and not _PRIVATE.
-//                               IsLocalMemory() is true of both and
-//                               InitRegionList() builds them under the same
-//                               case label, so without this clause a walk can
-//                               hand out VRAM the CPU cannot see.  It is also
-//                               the portable form of the large BAR question:
-//                               it asks the topology whether the frame buffer
-//                               is host visible, instead of consulting a flag
-//                               whose meaning differs between releases.
-//  !fine_grain()                the coarse grain local region, which is what
-//  !extended_scope_fine_grain() InitAllocators() binds coarsegrain_allocator_
-//                               to.  The fine grain one is declared
-//                               NEVER_ALLOWED to a CPU by
-//                               MemoryRegion::GetAccessInfo(), is
-//                               conditionally hidden from the region list, and
-//                               is the more expensive of the two to read from
-//                               the host.
-//
-// Grain and host visibility are orthogonal: both local regions come from the
-// same HsaMemoryProperties entry and share a HeapType, so IsPublic() does not
-// discriminate grain.  Cacheability is a third axis, set on the allocation --
-// see AllocateDeviceSignalBlock() in core/runtime/signal.cpp.
+// order has already changed once, so "the first local region" is not a stable
+// statement and a reorder would silently move every ordering edge signal.
+// IsPublic() is the portable form of the large BAR question -- it asks the
+// topology whether the frame buffer is host visible.  Cacheability is a third
+// axis, set on the allocation; see AllocateDeviceSignalBlock() in signal.cpp.
 //
 // Do not add a HSA_AMD_REGION_INFO_HOST_ACCESSIBLE clause here.  That attribute
 // reads 0 for every device local region on parts where the host can in fact
@@ -3699,19 +3677,10 @@ static bool IsOrderingEdgeSignalRegion(const AMD::MemoryRegion* region) {
 
 const core::MemoryRegion* GpuAgent::OrderingEdgeSignalRegion() const {
   // DO NOT ADD A HsaNodeProperties::LocalMemSize CLAUSE HERE.  It is the obvious
-  // extra guard to reach for and it is WRONG in this runtime: the field is not
-  // populated for discrete GPUs.  On gfx950, KFD topology reports
-  // local_mem_size = 0 on every GPU node while the same nodes report a
-  // FRAME_BUFFER_PUBLIC bank of 309,220,868,096 bytes.  A build carrying the
-  // clause refused every agent with HSA_STATUS_ERROR_INVALID_AGENT, on hardware
-  // holding 288 GiB of local memory each.
-  //
-  // The condition it reaches for is already expressed in a field the driver
-  // does fill: IsLocalMemory() && IsPublic() selects a
-  // HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC bank, and InitRegionList() never constructs
-  // a MemoryRegion for a bank reporting SizeInBytes == 0.  So an agent with no
-  // host visible local memory has no region here to return, and the gate, the
-  // capability attribute and the allocator all answer "not this agent" together.
+  // extra guard to reach for and it is WRONG: the field is not populated for
+  // discrete GPUs, so it refuses every such agent.  The condition it reaches for
+  // is already expressed -- InitRegionList() constructs no MemoryRegion for a
+  // bank reporting SizeInBytes == 0.
   for (const auto& region : regions()) {
     const core::MemoryRegion* r = &*region;
     if (IsOrderingEdgeSignalRegion(static_cast<const AMD::MemoryRegion*>(r))) return r;
@@ -3724,10 +3693,8 @@ const core::MemoryRegion* GpuAgent::OrderingEdgeSignalRegion() const {
 // carved into fixed stride slots addressed by index, with a free index list.
 
 hsa_status_t GpuAgent::GrowOrderingEdgeSlab() {
-  // Two failures, two answers.  "No region on this agent" is a clean opt out and
-  // the same answer the gate and the capability attribute give, since all three
-  // ask OrderingEdgeSignalRegion().  A bool would force the caller to re-derive
-  // the predicate to tell them apart.
+  // Two failures, two answers: a bool would force the caller to re-derive the
+  // region predicate to tell "not this agent" from "out of memory".
   const core::MemoryRegion* local = OrderingEdgeSignalRegion();
   if (local == nullptr) return HSA_STATUS_ERROR_INVALID_AGENT;
 
@@ -3738,9 +3705,8 @@ hsa_status_t GpuAgent::GrowOrderingEdgeSlab() {
           &ptr) != HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Deliberately NOT constructed here: the block is mapped but nothing is
-  // written to it until a slot is handed out, so the pages a process touches
-  // track the edges it uses rather than the configured pool size.
+  // Deliberately NOT constructed here: the pages a process touches track the
+  // edges it uses rather than the configured pool size.
   constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
   const size_t base_index = edge_slab_.blocks.size() * slots;
   edge_slab_.blocks.push_back(static_cast<char*>(ptr));
