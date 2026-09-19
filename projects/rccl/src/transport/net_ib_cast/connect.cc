@@ -71,11 +71,15 @@ static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
 
 static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   // Order matters here:
-  // BY_ORDER -> ctsoffload
-  // BY_ID -> failover
+  // BY_ORDER -> ctsoffload (forced), or explicitly requested, or AINIC default
+  // BY_ID -> failover / OOO RQ
   // BY_INDEX -> default or user requested
 
   if (useCtsOffload) {
+    return BY_ORDER;
+  }
+
+  if (ncclParamIbCastReceiverSideMatchingScheme() == BY_ORDER) {
     return BY_ORDER;
   }
 
@@ -84,11 +88,29 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   }
 
   int64_t requested = ncclParamIbCastReceiverSideMatchingScheme();
-  if (requested == -2 || requested == BY_ORDER) {
-    return BY_INDEX;
+  if (requested == -2) {
+    return IbCastAinicRoce ? BY_ORDER : BY_INDEX;
   }
   return requested;
 }
+
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
+static int IBCastUsedMatchingScheme = -1;
+bool IbCastByOrderRequested() {
+  if (IBCastUsedMatchingScheme < 0) {
+    IBCastUsedMatchingScheme = IbCastResolveRecvMatchingScheme(IbCastOffloadEnabled);
+  }
+  return IBCastUsedMatchingScheme == BY_ORDER;
+}
+
+void IbCastReportMatchingScheme()
+{
+  INFO(NCCL_NET, "NET/IB-CAST: collectives communicators: CTS Offload: %s   RecvMatchingScheme: %d",
+       IbCastIsCtsOffloadEnabled(0)? "ON":"OFF" , IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(0)));
+  INFO(NCCL_NET, "NET/IB-CAST: P2P communicators: CTS Offload: %s   RecvMatchingScheme: %d",
+       IbCastIsCtsOffloadEnabled(1)? "ON":"OFF" , IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(1)));
+}
+
 
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
