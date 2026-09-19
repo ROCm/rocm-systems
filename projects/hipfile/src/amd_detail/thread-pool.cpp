@@ -17,10 +17,16 @@ namespace hipFile {
 
 namespace {
 
+    std::mutex &taskPublicationMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
     class TaskflowTaskGroup final : public ITaskGroup {
     public:
         explicit TaskflowTaskGroup(std::shared_ptr<tf::Executor> _executor)
-            : executor{std::move(_executor)}, state{std::make_shared<State>()}
+            : executor{std::move(_executor)}
         {
         }
 
@@ -33,7 +39,8 @@ namespace {
         void run(std::function<void()> task) override
         {
             uint64_t task_generation = 0;
-            auto     task_state      = state;
+            auto task_state       = &state;
+            auto publication_lock = std::unique_lock<std::mutex>{taskPublicationMutex()};
 
             {
                 std::lock_guard<std::mutex> lock{task_state->mutex};
@@ -44,6 +51,9 @@ namespace {
 
             try {
                 executor->silent_async([task_state, task_generation, work = std::move(task)]() mutable {
+                    {
+                        std::lock_guard<std::mutex> lock{taskPublicationMutex()};
+                    }
                     Completion            completion{task_state};
                     std::function<void()> local_work;
                     local_work.swap(work);
@@ -57,6 +67,7 @@ namespace {
 
                     local_work();
                 });
+                publication_lock.unlock();
             }
             catch (...) {
                 finish(task_state);
@@ -66,16 +77,16 @@ namespace {
 
         void cancel() override
         {
-            std::lock_guard<std::mutex> lock{state->mutex};
+            std::lock_guard<std::mutex> lock{state.mutex};
 
-            state->generation++;
+            state.generation++;
         }
 
         void wait() override
         {
-            std::unique_lock<std::mutex> lock{state->mutex};
+            std::unique_lock<std::mutex> lock{state.mutex};
 
-            state->cv.wait(lock, [this]() { return state->outstanding == 0; });
+            state.cv.wait(lock, [this]() { return state.outstanding == 0; });
         }
 
     private:
@@ -88,7 +99,7 @@ namespace {
 
         class Completion {
         public:
-            explicit Completion(std::shared_ptr<State> _state) : state{std::move(_state)}
+            explicit Completion(State *_state) : state{_state}
             {
             }
 
@@ -104,21 +115,21 @@ namespace {
             Completion &operator=(Completion &&) = delete;
 
         private:
-            std::shared_ptr<State> state;
+            State *state;
         };
 
-        static void finish(const std::shared_ptr<State> &state)
+        static void finish(State *state)
         {
             {
                 std::lock_guard<std::mutex> lock{state->mutex};
 
                 state->outstanding--;
+                state->cv.notify_all();
             }
-            state->cv.notify_all();
         }
 
         std::shared_ptr<tf::Executor> executor;
-        std::shared_ptr<State>        state;
+        State                         state;
     };
 
 }
