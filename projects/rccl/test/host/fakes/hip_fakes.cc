@@ -41,6 +41,13 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocation
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemImportFromShareableHandle, hipMemImportFromShareableHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,          hipMemAddressReserve);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
+ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -200,6 +207,7 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 // Defined with the plain HIP stubs below, where the attribute switch lives.
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
+static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
 {
@@ -501,6 +509,7 @@ void ResetHipFakes()
     g_hipDeviceSetLimit             = DefaultHipDeviceSetLimit;
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
+    g_hipDeviceGetPCIBusId          = DefaultHipDeviceGetPCIBusId;
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
@@ -604,7 +613,12 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     return g_hipDeviceGetAttribute(pi, attr, device);
 }
 
-hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
+// Default preserves the historical behaviour: a fixed bus-id string gated on
+// the g_hipDeviceGetPCIBusIdResult flag. Tests that need a device-distinct
+// bus id (so busIdToCudaDev resolves distinct cudaDev indices -- the
+// p2pCanConnect device-selection branches) install a hook that encodes the
+// device index into the string.
+static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int)
 {
     if (pciBusId && len > 0) {
         if (g_hipDeviceGetPCIBusIdResult == hipSuccess)
@@ -614,16 +628,25 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
     }
     return g_hipDeviceGetPCIBusIdResult;
 }
+std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId =
+    DefaultHipDeviceGetPCIBusId;
+
+hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
+{
+    return g_hipDeviceGetPCIBusId(pciBusId, len, device);
+}
 
 hipError_t hipEventCreate(hipEvent_t* event)
 {
-    if (event) *event = nullptr;
-    return hipErrorInvalidValue;
+    if (event) {
+        *event = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
+    }
+    return g_hipEventCreateResult;
 }
 
 hipError_t hipEventDestroy(hipEvent_t)      { return hipSuccess; }  // benign teardown (commFree)
-hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
-hipError_t hipEventRecord(hipEvent_t, hipStream_t) { return hipErrorInvalidValue; }
+hipError_t hipEventQuery(hipEvent_t)        { return g_hipAsyncOpsResult; }
+hipError_t hipEventRecord(hipEvent_t, hipStream_t) { return g_hipAsyncOpsResult; }
 
 hipError_t hipExtMallocWithFlags(void** ptr, size_t size, unsigned int flags)
 {
