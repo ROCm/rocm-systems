@@ -153,8 +153,8 @@ public:
     ~DispatchThreadTracer() = default;
 
     /// Initializes shared resources needed by dispatch-based tracing.
-    void start_context();
-    void stop_context();
+    void start_context() const;
+    void stop_context() const;
     void resource_init();
     void resource_deinit();
 
