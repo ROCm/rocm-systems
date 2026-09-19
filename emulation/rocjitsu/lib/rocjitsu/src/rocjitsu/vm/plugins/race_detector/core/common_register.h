@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
+#include <cassert>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -12,10 +13,10 @@ namespace rocjitsu::plugins::race_detector {
 
 /// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
-  GLOBAL_TO_VGPR = 0, ///< Load from global memory to VGPR (counted by vmcnt).
-  VGPR_TO_GLOBAL,     ///< Store from VGPR to global memory (counted by vmcnt).
-  LDS_TO_VGPR,        ///< Load from LDS to VGPR (counted by lgkmcnt).
-  VGPR_TO_LDS,        ///< Store from VGPR to LDS (counted by lgkmcnt).
+  GLOBAL_TO_VGPR = 0, ///< Load from global memory to VGPR.
+  VGPR_TO_GLOBAL,     ///< Store from VGPR to global memory.
+  LDS_TO_VGPR,        ///< Load from LDS to VGPR.
+  VGPR_TO_LDS,        ///< Store from VGPR to LDS.
 
   /// Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
   /// global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
@@ -34,6 +35,9 @@ enum class MemoryEventType {
 
   N
 };
+
+/// Race-detector name for the decoded hardware completion-order classification.
+using MemoryOrderClass = amdgpu::MemoryCompletionClass;
 
 /// Event direction helpers: "to VGPR" means a load writing into a VGPR,
 /// "from VGPR" means a store reading out of a VGPR.
@@ -63,13 +67,47 @@ inline bool isFromVgpr(MemoryEventType t) {
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
 inline bool isWaveLocal(MemoryEventType t) { return !isLdsInvolved(t); }
 
-/// Legacy wait-counter assignment for core callers without dynamic
+/// Default combined-counter assignment for core callers without dynamic
 /// instruction state. Runtime integration passes the exact counter explicitly.
 inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
-  if (t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::VGPR_TO_GLOBAL ||
-      t == MemoryEventType::GLOBAL_TO_LDS)
+  switch (t) {
+  case MemoryEventType::GLOBAL_TO_VGPR:
+  case MemoryEventType::VGPR_TO_GLOBAL:
+  case MemoryEventType::GLOBAL_TO_LDS:
     return amdgpu::WaitCounterType::VMCNT;
-  return amdgpu::WaitCounterType::LGKMCNT;
+  case MemoryEventType::LDS_TO_VGPR:
+  case MemoryEventType::VGPR_TO_LDS:
+  case MemoryEventType::GLOBAL_TO_SGPR:
+  case MemoryEventType::GLOBAL_TO_TTMP:
+  case MemoryEventType::SCALAR_TO_GLOBAL:
+    return amdgpu::WaitCounterType::LGKMCNT;
+  case MemoryEventType::N:
+    break;
+  }
+  assert(false && "invalid memory event type");
+  return amdgpu::WaitCounterType::VMCNT;
+}
+
+/// Ordering used by architecture-neutral unit-test helpers. Runtime callers
+/// pass instruction-specific ordering explicitly.
+inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
+  switch (t) {
+  case MemoryEventType::GLOBAL_TO_VGPR:
+  case MemoryEventType::VGPR_TO_GLOBAL:
+  case MemoryEventType::GLOBAL_TO_LDS:
+    return MemoryOrderClass::VMEM;
+  case MemoryEventType::LDS_TO_VGPR:
+  case MemoryEventType::VGPR_TO_LDS:
+    return MemoryOrderClass::LDS;
+  case MemoryEventType::GLOBAL_TO_SGPR:
+  case MemoryEventType::GLOBAL_TO_TTMP:
+  case MemoryEventType::SCALAR_TO_GLOBAL:
+    return MemoryOrderClass::UNORDERED;
+  case MemoryEventType::N:
+    break;
+  }
+  assert(false && "invalid memory event type");
+  return MemoryOrderClass::UNORDERED;
 }
 
 /// A register reference (type + index).
