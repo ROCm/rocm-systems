@@ -857,11 +857,15 @@ enable_queue_intercept()
         bool has_hip_event_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
 
+        // Range replay records the dispatches inside a range from WriteInterceptor and re-submits
+        // them through it, so it needs the interceptor for the same reason.
+        bool has_range_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
            itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
-           has_hip_event_tracing)
+           has_hip_event_tracing || has_range_replay)
             return true;
     }
     return false;
