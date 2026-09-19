@@ -143,8 +143,13 @@ namespace QueuePairOption {
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
                  update_cq_tag<update_cq>> {
-    /* empty constructor for type deduction from tags */
-    template <typename... Options> __host__ __device__ constexpr PostOpt(Options...) { }
+    /* explicitly-defaulted default constructor */
+    __host__ __device__ constexpr PostOpt() = default;
+    /* constructor for type deduction from tags */
+    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+                                          thread_safe_tag<thread_safe>,
+                                          check_sq_tag<check_sq>,
+                                          update_cq_tag<update_cq>) { }
 
     /* static constexpr data members to simplify option access */
     static constexpr auto RingDB     = ring_db;
@@ -181,7 +186,8 @@ namespace QueuePairOption {
 
   /* Extraneous parameters,
    * else matches PostOpt<ring_db_tag, thread_safe_tag, check_sq_tag, update_cq_tag> */
-  template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq, typename... Options>
+  template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq,
+            typename... Options>
   struct PostOpt<ring_db_tag<ring_db>,
                  thread_safe_tag<thread_safe>,
                  check_sq_tag<check_sq>,
@@ -202,6 +208,10 @@ namespace QueuePairOption {
                  check_sq_tag<check_sq>,
                  default_option_t<update_cq_tag>,
                  Options...> {
+    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+                                          thread_safe_tag<thread_safe>,
+                                          check_sq_tag<check_sq>,
+                                          Options...) { }
     /* inherit constructor */
     using PostOpt<ring_db_tag<ring_db>,
                   thread_safe_tag<thread_safe>,
@@ -221,6 +231,9 @@ namespace QueuePairOption {
                  thread_safe_tag<thread_safe>,
                  default_option_t<check_sq_tag>,
                  Options...> {
+    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+                                          thread_safe_tag<thread_safe>,
+                                          Options...) { }
     /* inherit constructor */
     using PostOpt<ring_db_tag<ring_db>,
                   thread_safe_tag<thread_safe>,
@@ -237,6 +250,8 @@ namespace QueuePairOption {
        : PostOpt<ring_db_tag<ring_db>,
                  default_option_t<thread_safe_tag>,
                  Options...> {
+    __host__ __device__ constexpr PostOpt(ring_db_tag<ring_db>,
+                                          Options...) { }
     /* inherit constructor */
     using PostOpt<ring_db_tag<ring_db>,
                   default_option_t<thread_safe_tag>,
@@ -250,6 +265,7 @@ namespace QueuePairOption {
   struct PostOpt
        : PostOpt<default_option_t<ring_db_tag>,
                  Options...> {
+    __host__ __device__ constexpr PostOpt(Options...) { }
     /* inherit constructor */
     using PostOpt<default_option_t<ring_db_tag>,
                   Options...
