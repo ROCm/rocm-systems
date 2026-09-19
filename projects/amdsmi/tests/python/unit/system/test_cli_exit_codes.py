@@ -1,0 +1,2279 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""Driver-free unit tests for the amd-smi CLI exit-code model.
+
+Ported from the pre-migration ``tests/python_unittest/unit_tests.py`` monolith
+into the ``tests/python/unit/`` tree. Exercises the record-then-finalize error
+model (``AmdSmiErrorCollector``, the library-status -> POSIX-byte mapping, severity
+split, and the reserved 193-253 CLI-only code band) without needing a
+GPU/CPU/Core or elevated permissions.
+"""
+
+import os
+import pathlib
+import sys
+import unittest
+from typing import Any
+
+from common.common import (
+    amdsmi,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    generated_version_stub,
+    stub_modules_at_import,
+)
+
+# Locate the CLI dir and add it to sys.path. cli_search_order() decides whether
+# the install or this checkout wins; None -> setUpModule() skips.
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+if _CLI_DIR and _CLI_DIR not in sys.path:
+    sys.path.append(_CLI_DIR)
+
+
+def _find_amdsmi_header(*start_dirs):
+    """Return the path to amdsmi.h, or None.
+
+    Walks up rather than indexing a fixed depth, because the header sits one
+    level above the CLI in a checkout and two in an install. Feed it
+    cli_search_order() so install-vs-source stays decided in that one place.
+    """
+    for start in start_dirs:
+        if not start:
+            continue
+        start_path = pathlib.Path(os.path.abspath(start))
+        for directory in (start_path, *start_path.parents):
+            candidate = directory / "include" / "amd_smi" / "amdsmi.h"
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+# Required for when the amdgpu driver is not loaded. We are required to
+# fake the initialization module so the set/reset gpu CLI commands can be ran.
+# Installed at import because amdsmi_helpers does ``from amdsmi_init import *``
+# at load; tearDownModule puts the originals back.
+_stubs = {}
+if "amdsmi_init" not in sys.modules:
+    from amdsmi import amdsmi_exception as _amdsmi_exception
+    from amdsmi import amdsmi_interface as _amdsmi_interface
+
+    _stubs["amdsmi_init"] = fake_module(
+        "amdsmi_init",
+        AMDSMI_INIT_FLAG=0,
+        AMDSMI_INITIALIZED=True,
+        amdsmi_interface=_amdsmi_interface,
+        amdsmi_exception=_amdsmi_exception,
+    )
+
+_stubs.update(generated_version_stub())
+
+_restore_stubs = stub_modules_at_import(_stubs) if _stubs else None
+
+# CLI absent (rare package-only layout) or too old -> record the reason and skip
+# in setUpModule() instead of failing collection. The alias is declared Any
+# and bound separately from the import: the None only exists to defer that skip,
+# so no test ever sees it, and typing it Any keeps that out of every call site.
+cli_exc: Any = None
+_CLI_IMPORT_ERROR = None
+try:
+    import amdsmi_cli_exceptions as _cli_exc_module  # noqa: E402
+
+    cli_exc = _cli_exc_module
+except ImportError as _cli_import_error:
+    _CLI_IMPORT_ERROR = _cli_import_error
+else:
+    # A CLI predating exit codes imports cleanly, so guarding ImportError alone
+    # lets collection reach cli_exc.AmdSmiExitCode and die on AttributeError.
+    if not hasattr(cli_exc, "AmdSmiExitCode"):
+        _CLI_IMPORT_ERROR = AttributeError(
+            "amdsmi_cli_exceptions has no AmdSmiExitCode; this CLI predates exit-code support"
+        )
+        cli_exc = None
+
+from amdsmi import amdsmi_wrapper  # noqa: E402
+
+# The set-dispatch and parser tests below drive real CLI subcommand/parser
+# modules. Resolve them from the same env-var-discovered CLI dir (find_cli_dir,
+# which honors AMDSMI_PATH/ROCM_HOME/ROCM_PATH via common.py) and import them
+# guarded, so a missing or unimportable CLI SKIPS those tests with a message --
+# mirroring the metric-partition tests -- instead of erroring mid-test.
+_SUBCOMMANDS_DIR = os.path.join(_CLI_DIR, "subcommands") if _CLI_DIR else None
+if _SUBCOMMANDS_DIR and _SUBCOMMANDS_DIR not in sys.path:
+    sys.path.append(_SUBCOMMANDS_DIR)
+cli_set_value: Any = None
+AMDSMIParser: Any = None
+_CLI_DRIVE_SKIP = None
+try:
+    import set_value as _set_value_module  # noqa: E402
+    from amdsmi_parser import AMDSMIParser as _AMDSMIParser  # noqa: E402
+
+    cli_set_value = _set_value_module
+    AMDSMIParser = _AMDSMIParser
+except ImportError as _cli_drive_import_error:
+    _CLI_DRIVE_SKIP = (
+        f"amd-smi CLI drive modules not importable ({_CLI_DIR}): {_cli_drive_import_error}"
+    )
+
+
+def setUpModule():
+    """Skip the suite when the amd-smi CLI is missing or too old to carry exit codes."""
+    if _CLI_IMPORT_ERROR is not None:
+        raise unittest.SkipTest(f"amd-smi CLI at {_CLI_DIR} unusable: {_CLI_IMPORT_ERROR}")
+
+
+def tearDownModule():
+    if _restore_stubs is not None:
+        _restore_stubs()
+
+
+class TestAmdSmiCliExitCodes(unittest.TestCase):
+    """Pure-logic tests for the amd-smi CLI exit-code model.
+
+    Exercises the record-then-finalize error model in amdsmi_cli_exceptions
+    without needing a GPU/CPU/Core or elevated permissions:
+    the AmdSmiErrorCollector, the library-status -> POSIX-byte mapping, exit codes surfaced by
+    AmdSmiLibraryErrorException, the FATAL vs DEVICE severity split, and the
+    reserved 193-253 CLI-only code band.
+    """
+
+    ExitCode: Any = cli_exc.AmdSmiExitCode if cli_exc is not None else None
+    Severity: Any = cli_exc.AmdSmiErrorSeverity if cli_exc is not None else None
+
+    # ---- AmdSmiErrorCollector / finalize ----
+    def test_no_failures_resolve_to_success(self):
+        collector = cli_exc.AmdSmiErrorCollector()
+        self.assertEqual(collector.resolve_exit_code(), int(self.ExitCode.SUCCESS))
+        self.assertFalse(collector.has_errors)
+
+    def test_all_same_code_resolves_to_that_code(self):
+        collector = cli_exc.AmdSmiErrorCollector()
+        collector.record(self.ExitCode.INVALID_PARAMETER_VALUE)
+        collector.record(self.ExitCode.INVALID_PARAMETER_VALUE)
+        self.assertTrue(collector.has_errors)
+        self.assertEqual(collector.resolve_exit_code(), int(self.ExitCode.INVALID_PARAMETER_VALUE))
+
+    def test_mixed_codes_resolve_to_mixed(self):
+        collector = cli_exc.AmdSmiErrorCollector()
+        collector.record(self.ExitCode.INVALID_PARAMETER_VALUE)
+        collector.record(self.ExitCode.DEVICE_NOT_FOUND)
+        self.assertEqual(collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS))
+
+    def test_reset_clears_recorded_codes(self):
+        collector = cli_exc.AmdSmiErrorCollector()
+        collector.record(self.ExitCode.DEVICE_NOT_FOUND)
+        collector.reset()
+        self.assertFalse(collector.has_errors)
+        self.assertEqual(collector.resolve_exit_code(), int(self.ExitCode.SUCCESS))
+
+    def test_record_library_error_uses_status_value(self):
+        collector = cli_exc.AmdSmiErrorCollector()
+        collector.record_library_error(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+        self.assertEqual(
+            collector.resolve_exit_code(), int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+        )
+
+    # ---- library_code_to_exit_code ----
+    def test_real_status_passes_through_as_exit_code(self):
+        # Real statuses (0-56) fit in a byte, so the exit code is the status.
+        for status in (
+            amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+            amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            amdsmi_wrapper.AMDSMI_STATUS_NO_PERM,
+            amdsmi_wrapper.AMDSMI_STATUS_CORRUPTED_EEPROM,
+        ):
+            self.assertEqual(cli_exc.library_code_to_exit_code(status), int(status))
+
+    def test_sentinel_statuses_fold_to_low_byte(self):
+        self.assertEqual(
+            cli_exc.library_code_to_exit_code(amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR), 255
+        )
+        self.assertEqual(
+            cli_exc.library_code_to_exit_code(amdsmi_wrapper.AMDSMI_STATUS_MAP_ERROR), 254
+        )
+
+    def test_library_exception_surfaces_status(self):
+        exc = cli_exc.AmdSmiLibraryErrorException("", amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+        self.assertEqual(exc.value, int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED))
+
+    def test_every_library_status_has_a_friendly_message(self):
+        """Every AMDSMI_STATUS_* the wrapper defines must have its own entry in
+        AMDSMI_ERROR_MESSAGES.
+
+        Guard: if a new status is added to the library but the message table
+        isn't updated, this test fails and names the missing codes. That forces
+        the author to either map the new code here, give it a CLI exit code, or
+        deliberately alias it to an existing message -- a "generic"/unrecognized
+        fallback is never an acceptable resting state for a defined status.
+        """
+        missing = [
+            f"{name} ({code})"
+            for code, name in amdsmi_wrapper.amdsmi_status_t__enumvalues.items()
+            if abs(code) not in cli_exc.AMDSMI_ERROR_MESSAGES
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            f"AMDSMI_ERROR_MESSAGES is missing friendly messages for: {', '.join(missing)}",
+        )
+
+    def test_cli_command_not_supported_is_distinct_from_library(self):
+        # The CLI's parse-time "command not supported" must use its own CLI code,
+        # NOT the library status AMDSMI_STATUS_NOT_SUPPORTED (2), so callers can
+        # tell a CLI rejection apart from a device/driver "not supported" result.
+        exc = cli_exc.AmdSmiCommandNotSupportedException("static", "")
+        self.assertEqual(exc.value, int(self.ExitCode.COMMAND_NOT_SUPPORTED))
+        self.assertNotEqual(exc.value, int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED))
+
+    def test_import_failure_exits_with_import_error_code(self):
+        """A failed ``import amdsmi`` must exit with AmdSmiExitCode.IMPORT_ERROR,
+        pulled from the enum (no stale hardcoded number).
+
+        Runs in a subprocess because the failure path calls ``sys.exit`` at
+        import time; a meta_path finder forces ``import amdsmi`` to fail
+        hermetically without touching the real install.
+        """
+        import subprocess
+
+        cli_dir = os.path.dirname(os.path.abspath(cli_exc.__file__))
+        child = (
+            "import sys\n"
+            "class _Block:\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'amdsmi' or name.startswith('amdsmi.'):\n"
+            "            raise ImportError('amdsmi blocked for test')\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, _Block())\n"
+            f"sys.path.insert(0, {cli_dir!r})\n"
+            "import amdsmi_init\n"
+        )
+        result = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True)
+        self.assertEqual(
+            result.returncode,
+            int(self.ExitCode.IMPORT_ERROR),
+            msg=f"stdout={result.stdout!r} stderr={result.stderr!r}",
+        )
+
+    # ---- severity classification ----
+    def test_library_error_is_device_severity(self):
+        # A per-device library failure must be recorded (not abort the command).
+        self.assertEqual(cli_exc.AmdSmiLibraryErrorException.severity, self.Severity.DEVICE)
+
+    def test_cli_errors_default_to_fatal_severity(self):
+        # Anything not explicitly per-device stops the whole command.
+        self.assertEqual(cli_exc.AmdSmiException.severity, self.Severity.FATAL)
+        self.assertEqual(cli_exc.AmdSmiRequiredCommandException.severity, self.Severity.FATAL)
+
+    # ---- CLI-only exit-code band ----
+    def test_cli_only_codes_live_above_library_range(self):
+        # CLI-invented codes sit above the library status range (max 56) so they
+        # can never be mistaken for / collide with a real status. The band
+        # bounds come from amdsmi_cli_exceptions, not hardcoded here.
+        band_start = cli_exc.CLI_EXIT_CODE_BAND_START
+        band_end = cli_exc.CLI_EXIT_CODE_BAND_END
+        for code in self.ExitCode:
+            if code is self.ExitCode.SUCCESS:
+                continue
+            self.assertGreaterEqual(
+                int(code), band_start, f"{code.name} not in {band_start}-{band_end} band"
+            )
+            self.assertLessEqual(
+                int(code), band_end, f"{code.name} not in {band_start}-{band_end} band"
+            )
+
+    def test_cli_band_sits_clear_of_signal_exit_codes(self):
+        """A signalled process is reported by the shell as 128 + signal number,
+        so 129-192 (SIGRTMAX = 64) can never be a CLI code: a caller reading 139 (128 + SIGSEGV(11))
+        has to be able to conclude a segfault and nothing else.
+        """
+        import signal
+
+        signal_exit_codes = {128 + int(sig) for sig in signal.Signals}
+        for code in self.ExitCode:
+            self.assertNotIn(
+                int(code),
+                signal_exit_codes,
+                f"{code.name} ({int(code)}) collides with a 128+signal exit code",
+            )
+        self.assertGreater(cli_exc.CLI_EXIT_CODE_BAND_START, max(signal_exit_codes))
+
+    def test_library_status_outside_its_range_reports_unrepresentable(self):
+        """The library owns 0-128 plus its two 32-bit sentinels. A value outside
+        that cannot survive being squeezed into a byte -- 256 would report
+        success and 300 would report status 44, a real but unrelated failure --
+        so it reports UNREPRESENTABLE_LIBRARY_STATUS rather than a plausible
+        wrong answer.
+        """
+        to_exit = cli_exc.library_code_to_exit_code
+        unrepresentable = int(self.ExitCode.UNREPRESENTABLE_LIBRARY_STATUS)
+
+        self.assertEqual(to_exit(cli_exc.AMDSMI_STATUS_MAP_ERROR), 254)
+        self.assertEqual(to_exit(cli_exc.AMDSMI_STATUS_UNKNOWN_ERROR), 255)
+
+        # Every real status still passes through as itself; the rule change is
+        # only visible for values the library has never used.
+        sentinels = (cli_exc.AMDSMI_STATUS_MAP_ERROR, cli_exc.AMDSMI_STATUS_UNKNOWN_ERROR)
+        real_statuses = [
+            abs(int(status))
+            for status in amdsmi_wrapper.amdsmi_status_t__enumvalues
+            if abs(int(status)) not in sentinels
+        ]
+        self.assertTrue(real_statuses, "walked zero library statuses -- the wrapper enum is empty")
+        for value in real_statuses:
+            self.assertEqual(to_exit(value), value)
+
+        # The boundary itself is not a defined status, so the loop cannot reach it.
+        self.assertEqual(to_exit(cli_exc.LIBRARY_STATUS_MAX), cli_exc.LIBRARY_STATUS_MAX)
+
+        for status in (
+            cli_exc.LIBRARY_STATUS_MAX + 1,  # first value past the library's half of the byte
+            cli_exc.CLI_EXIT_CODE_BAND_START - 1,  # last signal code, just below the CLI band
+            256,  # folds to 0 -- would report success
+            300,  # folds to 44 -- a real but unrelated status
+            0x10000,  # 32-bit, but not one of the known sentinels
+        ):
+            with self.subTest(status=status):
+                self.assertEqual(to_exit(status), unrepresentable)
+
+    def test_unrepresentable_library_status_stays_unreachable(self):
+        """UNREPRESENTABLE_LIBRARY_STATUS is a guard, not a code to emit.
+
+        Reaching it means the library outgrew the byte: every status past
+        LIBRARY_STATUS_MAX collapses onto that one value, so callers can no
+        longer tell those failures apart from the exit code. The guard keeps
+        that from being silent, and this keeps it from being permanent.
+
+        The passthrough loop above would also fail in that case, but only with a
+        bare value mismatch. This names the offending statuses and what to do.
+        """
+        sentinels = (cli_exc.AMDSMI_STATUS_MAP_ERROR, cli_exc.AMDSMI_STATUS_UNKNOWN_ERROR)
+        too_large = sorted(
+            f"{name} ({abs(int(code))})"
+            for code, name in amdsmi_wrapper.amdsmi_status_t__enumvalues.items()
+            if abs(int(code)) not in sentinels and abs(int(code)) > cli_exc.LIBRARY_STATUS_MAX
+        )
+        self.assertEqual(
+            too_large,
+            [],
+            f"these statuses no longer fit the library's 0-{cli_exc.LIBRARY_STATUS_MAX} range "
+            f"and would all report {int(self.ExitCode.UNREPRESENTABLE_LIBRARY_STATUS)}: "
+            f"{', '.join(too_large)}. The exit-code map in amdsmi_cli_exceptions needs "
+            "revisiting -- a byte can no longer carry a status one-to-one.",
+        )
+
+    def test_python_wrapper_matches_amdsmi_status_t_in_the_header(self):
+        """amdsmi.h is the source of truth for AMDSMI_STATUS_*; the Python
+        wrapper is generated from it.
+
+        Nothing else can catch a stale wrapper: every other test reads the
+        wrapper, so a wrapper that is missing a status the library already
+        returns is perfectly self-consistent and therefore invisible. This is
+        the one place that compares the two, so adding a status in C without
+        regenerating fails here instead of surfacing later as an unrecognized
+        code at runtime.
+        """
+        import re
+
+        header = _find_amdsmi_header(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+        if header is None:
+            self.skipTest("amdsmi.h not found in the source tree or the ROCm install")
+
+        with open(header, encoding="utf-8") as handle:
+            source = handle.read()
+        block = re.search(r"typedef enum\s*\{(.*?)\}\s*amdsmi_status_t", source, re.S)
+        self.assertIsNotNone(block, f"could not locate amdsmi_status_t in {header}")
+
+        in_header = {
+            name: int(value, 0)
+            for name, value in re.findall(
+                r"(AMDSMI_STATUS_\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)", block.group(1)
+            )
+        }
+        self.assertTrue(in_header, f"parsed no statuses out of {header}")
+        in_wrapper = {
+            name: abs(int(code))
+            for code, name in amdsmi_wrapper.amdsmi_status_t__enumvalues.items()
+        }
+
+        self.assertEqual(
+            sorted(set(in_header) - set(in_wrapper)),
+            [],
+            "in amdsmi.h but missing from the Python wrapper -- regenerate it",
+        )
+        self.assertEqual(
+            sorted(set(in_wrapper) - set(in_header)),
+            [],
+            "in the Python wrapper but not in amdsmi.h -- the wrapper is ahead of the header",
+        )
+        self.assertEqual(
+            {
+                name: (in_header[name], in_wrapper[name])
+                for name in set(in_header) & set(in_wrapper)
+                if in_header[name] != in_wrapper[name]
+            },
+            {},
+            "status value differs between amdsmi.h and the Python wrapper (header, wrapper)",
+        )
+
+    def test_exit_codes_are_unique(self):
+        """Two members sharing a value is a silent bug: the second becomes an
+        alias of the first and vanishes from enum iteration, so iterating
+        self.ExitCode can never see the duplicate. __members__ keeps alias
+        names, so it is the only view that can catch this.
+        """
+        by_value = {}
+        for name, code in self.ExitCode.__members__.items():
+            by_value.setdefault(int(code), []).append(name)
+        collisions = {value: names for value, names in by_value.items() if len(names) > 1}
+        self.assertEqual(
+            collisions,
+            {},
+            "exit-code values must be unique: "
+            + "; ".join(
+                f"{value} shared by {', '.join(names)}" for value, names in collisions.items()
+            ),
+        )
+
+    def test_cli_codes_never_collide_with_library_exit_codes(self):
+        """Every exit code must mean exactly one thing: either a library status
+        or a CLI-invented code, never both.
+
+        A band check alone isn't enough, because the two library sentinels also
+        land above the CLI's 193-253 band (AMDSMI_STATUS_MAP_ERROR -> 254,
+        AMDSMI_STATUS_UNKNOWN_ERROR -> 255). So this asserts directly that no CLI
+        code equals any exit code a library status can produce -- otherwise a
+        caller couldn't tell a library failure from a CLI one by exit code alone.
+        SUCCESS (0) is shared with the library's success status by design and is
+        exempt.
+
+        Because it checks every CLI code, this also covers the normalized init
+        codes: INIT_TIMEOUT, DRIVERS_NOT_LOADED and DEVICE_NOT_FOUND are proven
+        distinct from the library statuses they map (TIMEOUT, NOT_INIT,
+        DRIVER_NOT_LOADED), so no separate per-code test is needed.
+        """
+        library_exit_codes = {
+            cli_exc.library_code_to_exit_code(code)
+            for code in amdsmi_wrapper.amdsmi_status_t__enumvalues
+        }
+        for code in self.ExitCode:
+            if code is self.ExitCode.SUCCESS:
+                continue
+            self.assertNotIn(
+                int(code),
+                library_exit_codes,
+                f"CLI code {code.name} ({int(code)}) collides with a library status exit code",
+            )
+
+    # ---- store_device_error choke point (regression guard) ----
+    def test_store_device_error_shows_and_records_failure(self):
+        """A device failure routed through store_device_error must both display
+        the message AND record the code, so the process exit stays non-zero.
+
+        This guards the record-then-finalize fix for set/reset: forgetting the
+        record (the original `set -M` bug) would leave resolve_exit_code() at 0.
+        """
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def __init__(self):
+                self.stored = []
+
+            def store_output(self, device, key, value):
+                self.stored.append((device, key, value))
+
+        class _FakeLibErr(Exception):
+            def get_error_code(self):
+                return amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+
+        helpers = AMDSMIHelpers()
+        logger = _FakeLogger()
+        helpers.store_device_error(
+            logger,
+            0,
+            "memory_partition",
+            "[AMDSMI_STATUS_NOT_SUPPORTED] ...",
+            exception=_FakeLibErr(),
+        )
+        # Shown to the user...
+        self.assertEqual(logger.stored[-1][1], "memory_partition")
+        # ...and counted, so the exit code reflects the failure.
+        self.assertTrue(helpers.error_collector.has_errors)
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(),
+            int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED),
+        )
+
+    def test_store_device_error_cli_code_path(self):
+        """A CLI-level (non-library) failure records the given CLI exit code."""
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def store_output(self, device, key, value):
+                pass
+
+        helpers = AMDSMIHelpers()
+        helpers.store_device_error(
+            _FakeLogger(),
+            0,
+            "clk_limit",
+            "Invalid clock type",
+            code=int(self.ExitCode.INVALID_PARAMETER_VALUE),
+        )
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(), int(self.ExitCode.INVALID_PARAMETER_VALUE)
+        )
+
+    def test_store_device_error_requires_exception_or_code(self):
+        """Calling store_device_error with neither exception= nor code= must
+        raise TypeError, not silently show the message and record nothing.
+
+        Guards the guard: showing a per-device error without recording it would
+        leave resolve_exit_code() at 0 (the original silent exit-0 bug). This
+        locks the fail-fast behavior in so it can't be quietly removed.
+        """
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def store_output(self, device, key, value):
+                pass
+
+        helpers = AMDSMIHelpers()
+        with self.assertRaises(TypeError):
+            helpers.store_device_error(_FakeLogger(), 0, "key", "msg")
+        # Nothing should have been recorded when the guard fires.
+        self.assertFalse(helpers.error_collector.has_errors)
+
+    # ---- multi-field CPU/core set aggregation ----
+    def test_set_core_records_each_failed_field_to_mixed(self):
+        """Drive the real set_core path: two fields fail with DIFFERENT library
+        statuses. set_core must record BOTH (not collapse to the first) and the
+        collector must finalize to MIXED_DEVICE_ERRORS. This exercises the
+        actual per-field record-then-finalize code in set_core, not just the
+        collector in isolation.
+
+        handle_cores short-circuits on a non-list handle, and the id lookup and
+        the two library set calls are replaced with stand-ins that raise the two
+        errors under test.
+        """
+        import argparse
+        from unittest import mock
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        set_value = _load_set_value()
+
+        class _FakeLogger:
+            format = "human"
+
+            def store_core_output(self, device, key, value):
+                pass
+
+            def print_output(self, multiple_device_enabled=False):
+                pass
+
+            def store_multiple_device_output(self):
+                pass
+
+        # A library exception that needs no driver: subclass the real type (so
+        # set_core's `except amdsmi_exception.AmdSmiLibraryException` catches it)
+        # but skip its C-backed __init__.
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+            def get_error_info(self, detailed=True):
+                return f"status {self._code}"
+
+        def _raise(code):
+            def _inner(*args, **kwargs):
+                raise _FakeLibErr(code)
+
+            return _inner
+
+        cmd: Any = set_value.SetValueCommands()
+        cmd.helpers = AMDSMIHelpers()
+        cmd.logger = _FakeLogger()
+        # Avoid the driver-backed core-id lookup.
+        cmd.helpers.get_core_id_from_device_handle = lambda input_device_handle: 0
+
+        args = argparse.Namespace(
+            core="fake-core-handle",  # non-list, non-None -> handle_cores returns (False, handle)
+            core_boost_limit=[[100]],
+            core_floor_limit=[[100]],
+            core_msr_floor_limit=None,
+        )
+
+        patch_boost = mock.patch.object(
+            set_value.amdsmi_interface,
+            "amdsmi_set_cpu_core_boostlimit",
+            _raise(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED),
+        )
+        patch_floor = mock.patch.object(
+            set_value.amdsmi_interface,
+            "amdsmi_set_cpu_core_floor_freq_limit",
+            _raise(amdsmi_wrapper.AMDSMI_STATUS_INVAL),
+        )
+        with patch_boost, patch_floor:
+            cmd.set_core(args)
+
+        self.assertTrue(cmd.helpers.error_collector.has_errors)
+        self.assertEqual(
+            cmd.helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
+        )
+
+    # ---- multi-DEVICE aggregation (drives handle_cores/run_device_subcommand) ----
+    def test_handle_cores_aggregates_multiple_device_failures_to_mixed(self):
+        """Two cores each fail with a DIFFERENT library status. handle_cores
+        routes each through run_device_subcommand, which records per device and
+        keeps going; the collector finalizes to MIXED_DEVICE_ERRORS. Covers the
+        multi-DEVICE record-then-continue path (the set_core test covers the
+        multi-FIELD path).
+        """
+        import argparse
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def print_output(self, multiple_device_enabled=False):
+                pass
+
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+        codes = {
+            "core-0": amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            "core-1": amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+        }
+
+        def fake_subcommand(args, multiple_devices=False, core=""):
+            raise _FakeLibErr(codes[core])
+
+        helpers = AMDSMIHelpers()
+        args = argparse.Namespace(core=["core-0", "core-1"])
+        handled, _ = helpers.handle_cores(args, _FakeLogger(), fake_subcommand)
+        self.assertTrue(handled)
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
+        )
+
+    def test_handle_gpus_aggregates_multiple_device_failures_to_mixed(self):
+        """`-g all` counterpart of the handle_cores test above. Guards
+        handle_gpus' own gating arithmetic: only a list of length > 1 enters the
+        loop, so an off-by-one there would silently skip every device.
+        """
+        import argparse
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def __init__(self):
+                self.printed_multiple = False
+
+            def print_output(self, multiple_device_enabled=False):
+                self.printed_multiple = multiple_device_enabled
+
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+        codes = {
+            "gpu-0": amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            "gpu-1": amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+        }
+        visited = []
+
+        def fake_subcommand(args, multiple_devices=False, gpu=""):
+            visited.append(gpu)
+            raise _FakeLibErr(codes[gpu])
+
+        helpers = AMDSMIHelpers()
+        logger = _FakeLogger()
+        args = argparse.Namespace(gpu=["gpu-0", "gpu-1"])
+        handled, _ = helpers.handle_gpus(args, logger, fake_subcommand)
+        self.assertTrue(handled)
+        self.assertEqual(visited, ["gpu-0", "gpu-1"], "loop did not visit every device")
+        self.assertTrue(logger.printed_multiple)
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
+        )
+
+    def test_nic_and_switch_loops_record_device_failures_like_gpus(self):
+        """NIC and switch counterpart of the handle_gpus test above. These three
+        loops called the subcommand directly, so the first device-scoped failure
+        escaped: later devices were never visited, and the output already
+        buffered for the healthy ones died with the unreached final print.
+        """
+        import argparse
+        from unittest import mock
+
+        import amdsmi_helpers
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def __init__(self):
+                self.printed_multiple = False
+
+            def print_output(self, multiple_device_enabled=False):
+                self.printed_multiple = multiple_device_enabled
+
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+        interface = amdsmi_helpers.amdsmi_interface
+        # Two devices with different codes: one is too few to enter the loop at
+        # all, and differing codes are what resolve to MIXED_DEVICE_ERRORS.
+        device_failures = {
+            "dev-0": amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            "dev-1": amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+        }
+        devices = list(device_failures)
+
+        for handler, device_arg, processor_type in (
+            (
+                AMDSMIHelpers.handle_switchs,
+                "switch",
+                amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH,
+            ),
+            (AMDSMIHelpers.handle_brcm_nics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC),
+            (AMDSMIHelpers.handle_ainics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC),
+        ):
+            with self.subTest(handler=handler.__name__):
+                calls = []
+
+                def fake_subcommand(args, multiple_devices=False, **device_kwarg):
+                    (device,) = device_kwarg.values()
+                    calls.append((multiple_devices, dict(device_kwarg)))
+                    raise _FakeLibErr(device_failures[device])
+
+                helpers = AMDSMIHelpers()
+                logger = _FakeLogger()
+                args = argparse.Namespace(**{device_arg: devices})
+                type_name = interface.AmdSmiProcessorType(processor_type).name
+
+                with mock.patch.object(
+                    interface,
+                    "amdsmi_get_processor_type",
+                    return_value={"processor_type": type_name},
+                ):
+                    handled, _ = handler(helpers, args, logger, fake_subcommand)
+
+                self.assertTrue(handled)
+                self.assertEqual(
+                    [kwargs for _, kwargs in calls],
+                    [{device_arg: device} for device in devices],
+                    f"loop did not visit every device as {device_arg}=<handle>",
+                )
+                self.assertEqual(
+                    [flag for flag, _ in calls],
+                    [True] * len(devices),
+                    "subcommand lost multiple_devices=True",
+                )
+                self.assertTrue(
+                    logger.printed_multiple,
+                    "final print_output was skipped, so buffered device output is dropped",
+                )
+                self.assertEqual(
+                    helpers.error_collector.resolve_exit_code(),
+                    int(self.ExitCode.MIXED_DEVICE_ERRORS),
+                )
+
+    def test_device_not_found_call_sites_name_their_device_kind(self):
+        """The parser builds this exception in five places and none of them runs
+        in any suite, so a bad signature ships silently: the NIC and switch sites
+        passed two arguments and raised TypeError instead of exiting
+        DEVICE_NOT_FOUND. Checked by reading the source, not running it.
+        """
+        import ast
+        import pathlib
+
+        def dotted_name(node):
+            """Rebuild "pkg.Class.MEMBER" from an AST attribute chain."""
+            parts = []
+            while isinstance(node, ast.Attribute):
+                parts.append(node.attr)
+                node = node.value
+            if isinstance(node, ast.Name):
+                parts.append(node.id)
+            return ".".join(reversed(parts))
+
+        parser_source = pathlib.Path(_CLI_DIR) / "amdsmi_parser.py"
+        self.assertTrue(parser_source.is_file(), f"cannot read {parser_source}")
+
+        raise_sites = [
+            node
+            for node in ast.walk(ast.parse(parser_source.read_text()))
+            if isinstance(node, ast.Call)
+            and dotted_name(node.func).endswith("AmdSmiDeviceNotFoundException")
+        ]
+        self.assertTrue(raise_sites, "matched no call sites -- this check would pass vacuously")
+
+        known_kinds = [f"AmdSmiDeviceKind.{name}" for name in cli_exc.AmdSmiDeviceKind.__members__]
+        for call in raise_sites:
+            with self.subTest(line=call.lineno):
+                self.assertEqual(
+                    len(call.args), 3, "expected (handles, output_format, device_kind)"
+                )
+                device_kind = dotted_name(call.args[2])
+                self.assertTrue(
+                    any(device_kind.endswith(kind) for kind in known_kinds),
+                    f"device_kind is {device_kind or ast.dump(call.args[2])!r}, "
+                    f"expected one of {known_kinds}",
+                )
+
+    def test_power_cap_out_of_range_records_invalid_parameter_value(self):
+        """validate_and_set_power_cap owns its recording; the set_gpu handler
+        does none. Out of range must record and return a message rather than
+        raise, so a multi-GPU loop still tries devices with a different range.
+        """
+        from unittest import mock
+
+        import amdsmi_helpers
+
+        class _FakeLogger:
+            def is_json_format(self):
+                return False
+
+            def is_csv_format(self):
+                return False
+
+        helpers = amdsmi_helpers.AMDSMIHelpers()
+        helpers.get_gpu_id_from_device_handle = lambda *a, **k: 0
+        min_w, max_w, current_w = 200, 300, 250  # _PCAP_REQUEST_W sits below min_w
+        info = {
+            "min_power_cap": _watts(min_w),
+            "max_power_cap": _watts(max_w),
+            "power_cap": _watts(current_w),
+        }
+        with mock.patch.object(
+            amdsmi_helpers.amdsmi_interface, "amdsmi_get_power_cap_info", lambda *a, **k: info
+        ):
+            result = helpers.validate_and_set_power_cap(
+                "fake-gpu-handle", 0, "PPT0", _PCAP_REQUEST_W, _FakeLogger()
+            )
+
+        self.assertIn(f"must be between {min_w}W and {max_w}W", result)
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(), int(self.ExitCode.INVALID_PARAMETER_VALUE)
+        )
+
+    # ---- rocm-smi compat exit-code contract ----
+    def test_rocm_smi_compat_exit_codes_stay_binary(self):
+        """The --rocm-smi shim intentionally follows rocm-smi's BINARY 0/1 exit
+        convention, not amd-smi's 193+ band. Guards against someone 'upgrading'
+        it to AmdSmiExitCode values, which would break scripts targeting
+        rocm-smi's contract.
+        """
+        import amdsmi_rocm_smi_compat as compat
+
+        self.assertEqual(int(compat.RocmSmiCompatExitCode.SUCCESS), 0)
+        self.assertEqual(int(compat.RocmSmiCompatExitCode.ERROR), 1)
+        self.assertEqual({int(c) for c in compat.RocmSmiCompatExitCode}, {0, 1})
+
+    # ---- CLI arg guard (drives real set_value) ----
+    def test_gtt_with_gpu_raises_invalid_parameter(self):
+        """`set --gtt` combined with `--gpu` must raise
+        AmdSmiInvalidParameterException (CLI code INVALID_PARAMETER), NOT
+        sys.exit(2) which aliases library NOT_SUPPORTED. Drives the real
+        set_value guard, which runs before any device dispatch.
+        """
+        import argparse
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        set_value = _load_set_value()
+
+        cmd: Any = set_value.SetValueCommands()
+        cmd.helpers = AMDSMIHelpers()
+
+        args = argparse.Namespace(gtt=8.0, gpu=["fake-gpu-handle"])
+        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+            cmd.set_value(args)
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
+
+    # ---- interactive confirmation decline (drives confirm_out_of_spec_warning) ----
+    def test_confirmation_decline_exits_user_aborted(self):
+        """Declining an interactive confirmation prompt must exit with
+        USER_ABORTED, not a raw sys.exit(1)/sys.exit(str) (which aliases library
+        INVAL). Drives the real confirm_out_of_spec_warning with a 'no' response;
+        auto_respond bypasses the input() prompt so it doesn't block on a TTY.
+        """
+        import contextlib
+        import io
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        helpers = AMDSMIHelpers()
+        silence_out = contextlib.redirect_stdout(io.StringIO())
+        silence_err = contextlib.redirect_stderr(io.StringIO())
+        with self.assertRaises(SystemExit) as ctx, silence_out, silence_err:
+            helpers.confirm_out_of_spec_warning(auto_respond="n")
+        self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
+    # ---- NO_PERM is fatal (drives set_core) ----
+    def test_set_core_no_perm_raises_and_does_not_record(self):
+        """A permission error is not a per-device failure -- it means the user
+        needs sudo, which affects the whole command. So when a set call returns
+        NO_PERM, set_core should stop immediately by raising PermissionError,
+        instead of recording the error and continuing to the next field/device.
+
+        This checks both halves: PermissionError is raised, and nothing was
+        recorded in the collector. Uses the same fakes as the multi-field test
+        above.
+        """
+        import argparse
+        from unittest import mock
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        set_value = _load_set_value()
+
+        class _FakeLogger:
+            format = "human"
+
+            def store_core_output(self, device, key, value):
+                pass
+
+            def print_output(self, multiple_device_enabled=False):
+                pass
+
+            def store_multiple_device_output(self):
+                pass
+
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+            def get_error_info(self, detailed=True):
+                return f"status {self._code}"
+
+        cmd: Any = set_value.SetValueCommands()
+        cmd.helpers = AMDSMIHelpers()
+        cmd.logger = _FakeLogger()
+        cmd.helpers.get_core_id_from_device_handle = lambda input_device_handle: 0
+
+        args = argparse.Namespace(
+            core="fake-core-handle",
+            core_boost_limit=[[100]],
+            core_floor_limit=None,
+            core_msr_floor_limit=None,
+        )
+
+        def _raise_no_perm(*a, **k):
+            raise _FakeLibErr(amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
+
+        with mock.patch.object(
+            set_value.amdsmi_interface, "amdsmi_set_cpu_core_boostlimit", _raise_no_perm
+        ):
+            with self.assertRaises(PermissionError):
+                cmd.set_core(args)
+
+        # NO_PERM aborts the command; it must NOT be recorded as a device error.
+        self.assertFalse(cmd.helpers.error_collector.has_errors)
+
+    # ---- combined device-class args guard (drives real set_value) ----
+    def test_set_value_combined_device_args_raise_invalid_parameter(self):
+        """Passing arguments for two device classes at once (e.g. a GPU arg and
+        a CPU arg) must raise AmdSmiInvalidParameterException (INVALID_PARAMETER
+        / 194), NOT a bare ValueError (which would exit 1). Drives the real
+        set_value combined-args guard, which runs before any device dispatch.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _NoneArgs(argparse.Namespace):
+            # argparse populates every dest; mirror that so set_value's attribute
+            # scans see None (not AttributeError) for options we didn't set.
+            def __getattr__(self, name):
+                return None
+
+        class _FakeLogger:
+            format = "human"
+
+        cmd: Any = cli_set_value.SetValueCommands()
+        cmd.helpers = AMDSMIHelpers()
+        cmd.logger = _FakeLogger()
+
+        args = _NoneArgs()
+        args.power_cap = 100  # a GPU set arg
+        args.cpu_pwr_limit = [[100]]  # a CPU set arg
+        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+            cmd.set_value(args)
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
+
+    # ---- parser: invalid --clk-level clock type (drives _level_select action) ----
+    def test_clk_level_invalid_clock_type_is_invalid_parameter_with_hint(self):
+        """An invalid --clk-level clock type must raise
+        AmdSmiInvalidParameterException (INVALID_PARAMETER / 194) and its message
+        must list the valid options (the hint). Exercises the real parser action
+        directly, without building the whole driver-backed parser.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        class _Host:
+            class helpers:
+                @staticmethod
+                def get_output_format():
+                    return "human"
+
+        # Stand-ins for the parser: _level_select only reads helpers off its host,
+        # and the action never touches the parser argument on this path.
+        host: Any = _Host()
+        parser: Any = None
+        action_cls = AMDSMIParser._level_select(host)
+        action = action_cls(option_strings=["-c", "--clk-level"], dest="clk_level")
+        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+            action(parser, argparse.Namespace(), ["badclk", "0"])
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
+        message = str(ctx.exception)
+        self.assertIn("badclk", message)
+        for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
+            self.assertIn(valid, message)
+
+    def test_unsupported_value_hint_does_not_precede_the_payload(self):
+        """The valid-input hint must travel inside the error, not ahead of it.
+
+        It used to be printed straight to stdout before the exception was
+        raised, so `amd-smi set -C 0 --json` emitted a bare line first and
+        json.loads failed on it.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import contextlib
+        import io
+        import json as json_mod
+        from unittest import mock
+
+        class _Host:
+            class helpers:
+                @staticmethod
+                def get_output_format():
+                    return "json"
+
+        host: Any = _Host()
+        hint = "Valid inputs are: SPX, DPX. Use `sudo amd-smi partition --accelerator` to find acceptable values."
+        printed = io.StringIO()
+        with mock.patch.object(sys, "argv", ["amd-smi", "set"]):
+            with contextlib.redirect_stdout(printed):
+                with self.assertRaises(cli_exc.AmdSmiInvalidParameterValueException) as ctx:
+                    AMDSMIParser._is_command_supported(host, "0", ["SPX", "DPX"], hint=hint)
+
+        self.assertEqual(printed.getvalue(), "", "hint was written to stdout")
+        payload = json_mod.loads(str(ctx.exception))
+        self.assertIn(hint, payload["error"])
+        self.assertEqual(payload["code"], int(self.ExitCode.INVALID_PARAMETER_VALUE))
+
+    # ---- CSV error rows must stay parseable ----
+    # A message that breaks naive CSV building three ways: the comma splits the
+    # row into extra columns, the newline splits it into an extra row, and the
+    # quote has to be escaped rather than emitted raw.
+    HOSTILE_MESSAGE = 'comma, quote " and\nnewline'
+
+    def _csv_exceptions(self):
+        """Every CLI exception, built so HOSTILE_MESSAGE reaches its message."""
+        text = self.HOSTILE_MESSAGE
+        return [
+            cli_exc.AmdSmiCommandNotSupportedException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiDeviceNotFoundException(
+                command=text, outputformat="csv", device_kind=cli_exc.AmdSmiDeviceKind.GPU
+            ),
+            cli_exc.AmdSmiInvalidCommandException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiInvalidFilePathException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiInvalidParameterException(command="set", arg=text, outputformat="csv"),
+            cli_exc.AmdSmiInvalidParameterValueException(
+                command="set", arg=text, outputformat="csv"
+            ),
+            cli_exc.AmdSmiInvalidSubcommandException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiLibraryErrorException(
+                outputformat="csv",
+                error_code=amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                detail=text,
+            ),
+            cli_exc.AmdSmiMissingParameterValueException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiPermissionDeniedException(command=text, outputformat="csv"),
+            cli_exc.AmdSmiRequiredCommandException(command=text, outputformat="csv"),
+        ]
+
+    def test_csv_error_output_round_trips(self):
+        """--csv errors must survive a CSV reader unchanged.
+
+        The hint strings list valid options comma-separated, so an unquoted row
+        splits: the reader then takes a fragment of the message as the exit
+        code. Reading it back must yield the same message and code the JSON
+        format reports.
+        """
+        import csv
+        import io
+
+        for exc in self._csv_exceptions():
+            with self.subTest(exception=type(exc).__name__):
+                payload = str(exc)
+                parsed = list(csv.DictReader(io.StringIO(payload)))
+                self.assertEqual(len(parsed), 1, "message split across rows")
+                self.assertEqual(
+                    len(payload.splitlines()), 2, "layout newlines reached the csv payload"
+                )
+                self.assertEqual(
+                    dict(parsed[0]), {"error": exc.json_message["error"], "code": str(exc.value)}
+                )
+
+    def test_every_exception_is_covered_by_the_csv_round_trip(self):
+        """A new exception class must be added to _csv_exceptions."""
+        import inspect
+
+        declared = {
+            obj
+            for obj in vars(cli_exc).values()
+            if inspect.isclass(obj)
+            and issubclass(obj, cli_exc.AmdSmiException)
+            and obj is not cli_exc.AmdSmiException
+        }
+        self.assertEqual(declared, {type(exc) for exc in self._csv_exceptions()})
+
+    # ---- device-init failure reporting (drives amdsmi_commands._exit_on_init_error) ----
+    def test_init_error_reports_in_the_requested_format_without_a_traceback(self):
+        """Device init runs before argv is parsed, so it cannot reach the
+        top-level handler. It must still print the formatted library error and
+        exit with the status code -- not a raw log line plus a traceback.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import contextlib
+        import io
+        import json as json_mod
+
+        import amdsmi_commands
+
+        code = amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED
+
+        class _FakeLibErr(Exception):
+            err_code = code
+
+        for fmt in ("human_readable", "json", "csv"):
+            with self.subTest(output_format=fmt):
+                out = io.StringIO()
+                err = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    with self.assertRaises(SystemExit) as ctx:
+                        amdsmi_commands._exit_on_init_error(
+                            fmt, _FakeLibErr(), cli_exc.AmdSmiDeviceKind.GPU
+                        )
+
+                printed = out.getvalue().strip()
+                self.assertEqual(ctx.exception.code, cli_exc.library_code_to_exit_code(code))
+                self.assertIn("AMDSMI_STATUS_DRIVER_NOT_LOADED", printed)
+                self.assertNotIn("Traceback", printed + err.getvalue())
+                if fmt == "json":
+                    self.assertEqual(
+                        json_mod.loads(printed)["code"], cli_exc.library_code_to_exit_code(code)
+                    )
+                elif fmt == "csv":
+                    self.assertEqual(printed.splitlines()[0], "error,code")
+
+    # ---- --file overwrite prompt: both ways of declining -> USER_ABORTED ----
+    def test_output_file_prompt_declined_exits_user_aborted(self):
+        """Both exits from the --file overwrite prompt are user aborts: typing
+        the advertised Cancel (or anything unrecognized), and EOF on stdin.
+        Neither may reuse INVALID_FILE_PATH or a bare exit 1 -- the path was
+        valid, the user just said no.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+        import builtins
+        import contextlib
+        import io
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        class _Host:
+            class helpers:
+                @staticmethod
+                def get_output_format():
+                    return "human"
+
+        host: Any = _Host()
+        action_cls = AMDSMIParser._check_output_file_path(host)
+        action = action_cls(option_strings=["--file"], dest="file")
+
+        # "" is a bare Enter, which the [o/a/N] default sends down the same branch.
+        for response in ("n", "no", "", "typo"):
+            with self.subTest(response=response):
+                with tempfile.TemporaryDirectory() as folder:
+                    existing = Path(folder) / "out.json"
+                    existing.touch()
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(mock.patch.object(sys, "stdin", io.StringIO()))
+                        stack.enter_context(mock.patch.object(sys.stdin, "isatty", lambda: True))
+                        stack.enter_context(
+                            mock.patch.object(builtins, "input", lambda *a: response)
+                        )
+                        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                        with self.assertRaises(SystemExit) as ctx:
+                            action(None, argparse.Namespace(), str(existing))
+                self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
+        # EOF at the prompt (Ctrl-D) takes the except branch, not the else.
+        with tempfile.TemporaryDirectory() as folder:
+            existing = Path(folder) / "out.json"
+            existing.touch()
+
+            def _eof(*args):
+                raise EOFError
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(mock.patch.object(sys, "stdin", io.StringIO()))
+                stack.enter_context(mock.patch.object(sys.stdin, "isatty", lambda: True))
+                stack.enter_context(mock.patch.object(builtins, "input", _eof))
+                stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                with self.assertRaises(SystemExit) as ctx:
+                    action(None, argparse.Namespace(), str(existing))
+        self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
+    # ---- warning prompts: declining or closed stdin -> USER_ABORTED ----
+    def test_warning_prompts_declined_exit_user_aborted(self):
+        """The out-of-spec and memory-partition warnings exit USER_ABORTED
+        whether the user types no or stdin is closed. Before EOF was handled,
+        piping into one of these commands died on an uncaught EOFError and a
+        bare exit 1.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import builtins
+        import contextlib
+        import io
+        from unittest import mock
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        def _eof(*args):
+            raise EOFError
+
+        helpers = AMDSMIHelpers()
+        prompts = (
+            helpers.confirm_out_of_spec_warning,
+            helpers.confirm_changing_memory_partition_gpu_reload_warning,
+        )
+
+        for prompt in prompts:
+            for stdin_state, responder in (("declined", lambda *a: "n"), ("closed", _eof)):
+                with self.subTest(prompt=prompt.__name__, stdin=stdin_state):
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(mock.patch.object(builtins, "input", responder))
+                        stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                        with self.assertRaises(SystemExit) as ctx:
+                            prompt()
+                    self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
+        # auto_respond answers on the user's behalf, so stdin must stay untouched.
+        for prompt in prompts:
+            with self.subTest(prompt=prompt.__name__, stdin="auto_respond"):
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(builtins, "input", _eof))
+                    stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                    prompt(auto_respond="y")
+
+    # ---- direct-call guards: no target -> REQUIRED_COMMAND ----
+    def test_set_cpu_without_target_raises_required_command(self):
+        """set_cpu with no CPU target raises AmdSmiRequiredCommandException
+        (REQUIRED_COMMAND / 201). Reachable only via a direct/programmatic call
+        (the dispatcher fills the target first), so this locks in the guard.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        class _FakeLogger:
+            format = "human"
+
+        cmd: Any = cli_set_value.SetValueCommands()
+        cmd.logger = _FakeLogger()
+        with self.assertRaises(cli_exc.AmdSmiRequiredCommandException) as ctx:
+            cmd.set_cpu(argparse.Namespace(cpu=None))
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.REQUIRED_COMMAND))
+
+    def test_set_core_without_target_raises_required_command(self):
+        """set_core with no core target raises AmdSmiRequiredCommandException
+        (REQUIRED_COMMAND / 201). Same direct-call rationale as set_cpu.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+
+        class _FakeLogger:
+            format = "human"
+
+        cmd: Any = cli_set_value.SetValueCommands()
+        cmd.logger = _FakeLogger()
+        with self.assertRaises(cli_exc.AmdSmiRequiredCommandException) as ctx:
+            cmd.set_core(argparse.Namespace(core=None))
+        self.assertEqual(ctx.exception.value, int(self.ExitCode.REQUIRED_COMMAND))
+
+
+# ---------------------------------------------------------------------------
+# Generic "-g all" set-failure guards
+#
+# Lock in the record-then-finalize contract for the per-device GPU `set`
+# handlers: a per-device library failure must be RECORDED and the command must
+# keep going -- never an unhandled crash. This is the class of bug that broke
+# `amd-smi set -M/-C ... -g all` (a handler raising instead of recording). The
+# completeness test forces every GPU `set` option to have a guard here.
+# ---------------------------------------------------------------------------
+
+
+class _DriverlessLibErr(amdsmi.AmdSmiLibraryException):
+    """AmdSmiLibraryException stand-in needing no driver.
+
+    Subclasses the real type so a handler's ``except
+    amdsmi_exception.AmdSmiLibraryException`` catches it, but skips the C-backed
+    __init__.
+    """
+
+    def __init__(self, code):
+        self._code = code
+        # The real type's __str__ reads these, so anything that logs the
+        # exception (rather than its status) would raise AttributeError.
+        self.err_code = code
+        self.err_info = f"status {code}"
+
+    def get_error_code(self):
+        return self._code
+
+    def get_error_info(self, detailed=True):
+        return f"status {self._code}"
+
+
+class _FakeGpuLogger:
+    """Minimal logger covering the calls set_gpu makes on a failure path."""
+
+    format = "human"
+
+    def __init__(self):
+        self.stored = []
+
+    def store_output(self, device, key, value):
+        self.stored.append((device, key, value))
+
+    def is_json_format(self):
+        return self.format == "json"
+
+    def is_csv_format(self):
+        return self.format == "csv"
+
+    def print_output(self, multiple_device_enabled=False):
+        pass
+
+    def clear_multiple_devices_output(self):
+        pass
+
+    def store_multiple_device_output(self):
+        pass
+
+
+def _load_set_value():
+    """Import the set_value subcommand standalone. It uses only absolute imports,
+    so this triggers no driver-backed package init.
+    """
+    if _CLI_DRIVE_SKIP:
+        raise unittest.SkipTest(_CLI_DRIVE_SKIP)
+    sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
+    if sub_dir not in sys.path:
+        sys.path.append(sub_dir)
+    import set_value
+
+    return set_value
+
+
+def _patch_amdsmi_interface(set_value, **overrides):
+    """Context manager patching one or more amdsmi_interface functions.
+
+    The driverless tests feed a fake (str) device handle, so every real
+    amdsmi_interface call that dereferences it as a ``c_void_p`` must be
+    stubbed -- including the handle-consuming reads set_gpu runs before the
+    handler (e.g. ``amdsmi_get_gpu_device_bdf``).
+    """
+    import contextlib
+    from unittest import mock
+
+    stack = contextlib.ExitStack()
+    for name, fn in overrides.items():
+        stack.enter_context(mock.patch.object(set_value.amdsmi_interface, name, fn))
+    return stack
+
+
+def _raise_not_supported(*args, **kwargs):
+    raise _DriverlessLibErr(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+
+
+def _fake_bdf(handle):
+    return "0000:00:00.0"
+
+
+def _noop(*args, **kwargs):
+    """Success-path stand-in: a patched amdsmi call that returns cleanly."""
+    return None
+
+
+def _watts(value):
+    """Power caps cross the library boundary in micro-watts."""
+    return value * 1_000_000
+
+
+# Power-cap fixture: the request sits inside the range and differs from the
+# current cap, so the handler runs all the way to the set call.
+_PCAP_MIN_W = 50
+_PCAP_MAX_W = 300
+_PCAP_CURRENT_W = 200
+_PCAP_REQUEST_W = 100
+_PCAP_DEFAULT_W = 250
+
+# Too short to be a CPER record, so the library rejects it rather than decoding.
+_JUNK_CPER_BYTES = b"\x00" * 64
+
+
+def _gpu_set_options(set_value):
+    """Authoritative GPU ``set`` option dests, sourced from set_gpu's own
+    required-arg check (the ``getattr(args, "X")`` list). Auto-updates when a
+    new option is added -- that is what makes the completeness test a real
+    forcing function.
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(set_value.SetValueCommands.set_gpu)
+    return set(re.findall(r'getattr\(args,\s*"(\w+)"', src))
+
+
+def _make_set_gpu_cmd(set_value):
+    from amdsmi_helpers import AMDSMIHelpers
+
+    cmd = set_value.SetValueCommands()
+    cmd.helpers = AMDSMIHelpers()
+    cmd.logger = _FakeGpuLogger()
+    cmd.device_handles = []
+    cmd.group_check_printed = True
+    cmd.helpers.is_baremetal = lambda: True
+    cmd.helpers.get_gpu_id_from_device_handle = lambda input_device_handle: 0
+    return cmd
+
+
+def _gpu_set_args(set_value, **option):
+    """Namespace with every arg set_gpu references defaulted to None, plus a
+    single-device gpu handle and the one option under test."""
+    import argparse
+    import inspect
+    import re
+
+    src = inspect.getsource(set_value.SetValueCommands.set_gpu)
+    names = set(re.findall(r"args\.(\w+)", src))
+    ns = argparse.Namespace(**{n: None for n in names})
+    # Deliberately non-list: the single-device path has no run_device_subcommand
+    # wrapper, so it is the only place a handler that raises is still detectable.
+    ns.gpu = "fake-gpu-handle"
+    for key, value in option.items():
+        setattr(ns, key, value)
+    return ns
+
+
+def _build_set_specs(set_value):
+    """Per-option drivers for the generic GPU ``set`` exercisers.
+
+    Each entry is ``name -> configure(cmd, mode)`` where ``mode`` is ``"fail"``
+    or ``"success"``. ``configure`` installs any helper stubs the handler needs
+    on a driverless box and returns ``(arg_value, amdsmi_patches)``:
+
+      * ``arg_value``      -- value placed on ``args.<name>`` to enter the handler.
+      * ``amdsmi_patches`` -- ``{amdsmi_interface_fn: replacement}``:
+          - mode="fail":    the earliest handle-consuming call raises
+            NOT_SUPPORTED (must be *recorded*, not raised past the handler).
+          - mode="success": every call returns a valid value, so the handler
+            finishes clean -- nothing recorded, exit 0.
+
+    ``amdsmi_get_gpu_device_bdf`` is patched by the caller for every option
+    (set_gpu reads it up front to build the error string).
+
+    The registry keys are the single source of truth for the completeness test,
+    so adding a new GPU ``set`` option without a spec here fails the suite.
+    """
+    import collections
+
+    ai = set_value.amdsmi_interface
+
+    def first_member(enum):
+        return next(n for n in enum.__members__ if n != "INVALID")
+
+    ClkLevel = collections.namedtuple("ClkLevel", "clk_type perf_levels")
+    ClkLimit = collections.namedtuple("ClkLimit", "clk_type lim_type val")
+    PowerCap = collections.namedtuple("PowerCap", "pwr_type watts")
+
+    class _Fmt:  # PTL format element: only .name is read on the failure path.
+        def __init__(self, name):
+            self.name = name
+
+    def fan(cmd, mode):
+        cmd.helpers.detect_gpu_od = lambda bdf: (False, None)  # legacy hwmon path
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return (50, True), {"amdsmi_set_gpu_fan_speed": setfn}
+
+    def perf_level(cmd, mode):
+        if mode == "fail":
+            cmd.helpers.get_perf_levels = lambda: (["AUTO", "LOW"],)
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return first_member(ai.AmdSmiDevPerfLevel), {"amdsmi_set_gpu_perf_level": setfn}
+
+    def profile(cmd, mode):
+        cmd.helpers.get_power_profile_name_mapping = lambda: {"CUSTOM": 1}
+        if mode == "fail":
+            return "CUSTOM", {
+                "amdsmi_set_gpu_power_profile": _raise_not_supported,
+                "amdsmi_get_gpu_power_profile_presets": _raise_not_supported,
+            }
+        return "CUSTOM", {"amdsmi_set_gpu_power_profile": _noop}
+
+    def perf_determinism(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 800, {"amdsmi_set_gpu_perf_determinism_mode": setfn}
+
+    def compute_partition(cmd, mode):
+        name = first_member(ai.AmdSmiComputePartitionType)
+        # Force the "profiles not enumerable" fallback so a valid TYPE name is
+        # attempted and the driver's status is what surfaces.
+        cmd.helpers.get_accelerator_choices_types_indices = lambda: (
+            [name],
+            {"profile_types": [], "profile_indices": []},
+        )
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return name, {"amdsmi_set_gpu_compute_partition": setfn}
+
+    def memory_partition(cmd, mode):
+        cmd.helpers.confirm_changing_memory_partition_gpu_reload_warning = lambda *a, **k: None
+        arg = first_member(ai.AmdSmiMemoryPartitionType)
+        if mode == "fail":
+            return arg, {
+                "amdsmi_get_gpu_memory_partition_config": _raise_not_supported,
+                "amdsmi_set_gpu_memory_partition_mode": _raise_not_supported,
+            }
+        return arg, {
+            "amdsmi_get_gpu_memory_partition_config": lambda *a, **k: {
+                "partition_caps": [arg],
+                "mp_mode": arg,
+            },
+            "amdsmi_set_gpu_memory_partition_mode": _noop,
+        }
+
+    def soc_pstate(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 0, {"amdsmi_set_soc_pstate": setfn}
+
+    def xgmi_plpd(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 0, {"amdsmi_set_xgmi_plpd": setfn}
+
+    def clk_level(cmd, mode):
+        if mode == "fail":
+            # Fails at the first step (set perf level -> MANUAL), which is recorded.
+            return ClkLevel("sclk", [0]), {"amdsmi_set_gpu_perf_level": _raise_not_supported}
+        return ClkLevel("sclk", [0]), {
+            "amdsmi_set_gpu_perf_level": _noop,
+            "amdsmi_get_clk_freq": lambda *a, **k: {"num_supported": 8},
+            "amdsmi_set_clk_freq": _noop,
+        }
+
+    def ptl_status(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 1, {"amdsmi_set_gpu_ptl_state": setfn}
+
+    def ptl_format(cmd, mode):
+        arg = (_Fmt("NC"), _Fmt("NC"))
+        if mode == "fail":
+            return arg, {"amdsmi_get_gpu_ptl_formats": _raise_not_supported}
+        ptl_val = list(ai.AmdSmiPtlData)[0].value
+        return arg, {
+            "amdsmi_get_gpu_ptl_formats": lambda *a, **k: (ptl_val, ptl_val),
+            "amdsmi_set_gpu_ptl_formats": _noop,
+        }
+
+    def power_cap(cmd, mode):
+        # get_gpu_id_from_device_handle dereferences the handle as a c_void_p;
+        # incidental plumbing, not the validation logic under test.
+        cmd.helpers.get_gpu_id_from_device_handle = lambda *a, **k: 0
+        requested = PowerCap("ppt0", _PCAP_REQUEST_W)
+        if mode == "fail":
+            return requested, {"amdsmi_get_power_cap_info": _raise_not_supported}
+        return requested, {
+            "amdsmi_get_power_cap_info": lambda *a, **k: {
+                "min_power_cap": _watts(_PCAP_MIN_W),
+                "max_power_cap": _watts(_PCAP_MAX_W),
+                "power_cap": _watts(_PCAP_CURRENT_W),
+            },
+            "amdsmi_set_power_cap": _noop,
+        }
+
+    def clk_limit(cmd, mode):
+        if mode == "fail":
+            return ClkLimit("sclk", "min", 100), {"amdsmi_get_clock_info": _raise_not_supported}
+        return ClkLimit("sclk", "min", 1000), {
+            "amdsmi_get_clock_info": lambda *a, **k: {"max_clk": 2000, "min_clk": 500},
+            "amdsmi_set_gpu_clk_limit": _noop,
+        }
+
+    def process_isolation(cmd, mode):
+        if mode == "fail":
+            return 1, {"amdsmi_get_gpu_process_isolation": _raise_not_supported}
+        return 1, {
+            "amdsmi_get_gpu_process_isolation": lambda *a, **k: 0,
+            "amdsmi_set_gpu_process_isolation": _noop,
+        }
+
+    def mem_carveout(cmd, mode):
+        cmd.helpers.prompt_reboot = lambda *a, **k: None
+        if mode == "fail":
+            return 0, {"amdsmi_get_gpu_uma_carveout_info": _raise_not_supported}
+        return 0, {
+            "amdsmi_get_gpu_uma_carveout_info": lambda *a, **k: {
+                "options": [{"description": "default"}],
+                "current_index": -1,
+            },
+            "amdsmi_set_gpu_uma_carveout": _noop,
+        }
+
+    def compute_partition_mem_alloc_mode(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return first_member(ai.AmdSmiAcceleratorPartitionMemAllocModeType), {
+            "amdsmi_set_gpu_accelerator_partition_mem_alloc_mode": setfn
+        }
+
+    return {
+        "fan": fan,
+        "perf_level": perf_level,
+        "profile": profile,
+        "perf_determinism": perf_determinism,
+        "compute_partition": compute_partition,
+        "memory_partition": memory_partition,
+        "soc_pstate": soc_pstate,
+        "xgmi_plpd": xgmi_plpd,
+        "clk_level": clk_level,
+        "ptl_status": ptl_status,
+        "ptl_format": ptl_format,
+        "power_cap": power_cap,
+        "clk_limit": clk_limit,
+        "process_isolation": process_isolation,
+        "mem_carveout": mem_carveout,
+        "compute_partition_mem_alloc_mode": compute_partition_mem_alloc_mode,
+    }
+
+
+class TestSetGpuGAllFailureGuards(unittest.TestCase):
+    """A per-device GPU `set` failure must be recorded and must NOT crash."""
+
+    def test_every_gpu_set_option_is_driven(self):
+        """Forcing function: every GPU `set` option must have a driver in
+        _build_set_specs. Adding a new option without a spec fails here, which
+        is what blocks a future `-g all` regression from shipping untested."""
+        set_value = _load_set_value()
+        options = _gpu_set_options(set_value)
+        self.assertTrue(
+            options,
+            "Test Regex issue: scraped zero GPU set options -- _gpu_set_options regex is stale",
+        )
+        specced = set(_build_set_specs(set_value))
+        self.assertEqual(
+            options,
+            specced,
+            "GPU set options and their -g all failure drivers are out of sync.\n"
+            f"  unspecced (add a _build_set_specs entry): {sorted(options - specced)}\n"
+            f"  stale (spec exists but no longer an option): {sorted(specced - options)}",
+        )
+
+    def test_every_gpu_set_option_records_on_failure_not_crashes(self):
+        """Generic exerciser: drive each GPU `set` option through set_gpu with a
+        per-device library failure injected, and assert the record-then-finalize
+        contract holds -- the failure is recorded (exit != 0) and the handler
+        returns instead of raising. This is the single-device (`-g 0`) contract;
+        `test_handle_gpus_aggregates_multiple_device_failures_to_mixed` covers
+        the `-g all` loop. Both stem from the bug that broke -M/-C in #862."""
+        set_value = _load_set_value()
+        specs = _build_set_specs(set_value)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_set_gpu_cmd(set_value)
+                arg_value, patches = specs[name](cmd, "fail")
+                args = _gpu_set_args(set_value, **{name: arg_value})
+                with _patch_amdsmi_interface(
+                    set_value, amdsmi_get_gpu_device_bdf=_fake_bdf, **patches
+                ):
+                    cmd.set_gpu(args)  # must NOT raise
+                self.assertTrue(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: per-device failure was not recorded (would exit 0)",
+                )
+                self.assertNotEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: exit code resolved to 0 despite a recorded failure",
+                )
+
+    def test_every_gpu_set_option_succeeds_cleanly(self):
+        """Mirror contract: a successful per-device `set` records NOTHING and
+        finalizes to exit 0. Guards the opposite regression from #862 -- a
+        success path that wrongly records an error, crashes, or resolves to a
+        non-zero exit code."""
+        set_value = _load_set_value()
+        specs = _build_set_specs(set_value)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_set_gpu_cmd(set_value)
+                arg_value, patches = specs[name](cmd, "success")
+                args = _gpu_set_args(set_value, **{name: arg_value})
+                with _patch_amdsmi_interface(
+                    set_value, amdsmi_get_gpu_device_bdf=_fake_bdf, **patches
+                ):
+                    cmd.set_gpu(args)  # must NOT raise
+                self.assertFalse(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: success path wrongly recorded an error",
+                )
+                self.assertEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: success path did not resolve to exit 0",
+                )
+
+    def test_g_all_memory_partition_failure_records_not_crashes(self):
+        """`set -M ... -g all`: a per-device NOT_SUPPORTED is recorded and the
+        handler returns (must not raise/crash)."""
+        set_value = _load_set_value()
+        cmd = _make_set_gpu_cmd(set_value)
+        # memory_partition prompts a reload confirmation on the first set.
+        cmd.helpers.confirm_changing_memory_partition_gpu_reload_warning = lambda *a, **k: None
+        mp_name = next(
+            n
+            for n in set_value.amdsmi_interface.AmdSmiMemoryPartitionType.__members__
+            if n != "INVALID"
+        )
+        args = _gpu_set_args(set_value, memory_partition=mp_name)
+
+        with _patch_amdsmi_interface(
+            set_value,
+            amdsmi_get_gpu_device_bdf=_fake_bdf,
+            amdsmi_get_gpu_memory_partition_config=_raise_not_supported,
+            amdsmi_set_gpu_memory_partition_mode=_raise_not_supported,
+        ):
+            cmd.set_gpu(args)  # must NOT raise
+
+        self.assertTrue(
+            cmd.helpers.error_collector.has_errors,
+            "memory_partition per-device failure was not recorded (would exit 0)",
+        )
+        self.assertEqual(
+            cmd.helpers.error_collector.resolve_exit_code(),
+            int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED),
+            "memory_partition failure did not finalize to the library exit code",
+        )
+        messages = [v for (_d, key, v) in cmd.logger.stored if key == "memory_partition"]
+        self.assertTrue(
+            messages and "memory partition" in messages[-1].lower(),
+            f"memory_partition error message not surfaced to the user: {messages}",
+        )
+
+    def test_g_all_compute_partition_failure_records_not_crashes(self):
+        """`set -C ... -g all`: a per-device NOT_SUPPORTED is recorded and the
+        handler returns (must not raise/crash)."""
+        set_value = _load_set_value()
+        cmd = _make_set_gpu_cmd(set_value)
+        cp_name = next(
+            n
+            for n in set_value.amdsmi_interface.AmdSmiComputePartitionType.__members__
+            if n != "INVALID"
+        )
+        # Force the "profiles not enumerable" fallback so a valid TYPE name is
+        # attempted and the driver's status is what surfaces.
+        cmd.helpers.get_accelerator_choices_types_indices = lambda: (
+            [cp_name],
+            {"profile_types": [], "profile_indices": []},
+        )
+        args = _gpu_set_args(set_value, compute_partition=cp_name)
+
+        with _patch_amdsmi_interface(
+            set_value,
+            amdsmi_get_gpu_device_bdf=_fake_bdf,
+            amdsmi_set_gpu_compute_partition=_raise_not_supported,
+        ):
+            cmd.set_gpu(args)  # must NOT raise
+
+        self.assertTrue(
+            cmd.helpers.error_collector.has_errors,
+            "compute_partition per-device failure was not recorded (would exit 0)",
+        )
+        self.assertEqual(
+            cmd.helpers.error_collector.resolve_exit_code(),
+            int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED),
+            "compute_partition failure did not finalize to the library exit code",
+        )
+        messages = [v for (_d, key, v) in cmd.logger.stored if key == "accelerator_partition"]
+        self.assertTrue(
+            messages and "accelerator partition" in messages[-1].lower(),
+            f"compute_partition error message not surfaced to the user: {messages}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Generic "-g all" reset-failure guards
+#
+# Same record-then-finalize contract as the set guards above, applied to the
+# per-device GPU `reset` handlers: a per-device library failure must be
+# RECORDED and the command must keep going -- never an unhandled crash. `gtt`
+# is intentionally excluded (it is a system-wide reset, rejected with --gpu and
+# dispatched before the per-device loop).
+# ---------------------------------------------------------------------------
+
+
+def _load_reset():
+    if _CLI_DRIVE_SKIP:
+        raise unittest.SkipTest(_CLI_DRIVE_SKIP)
+    sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
+    if sub_dir not in sys.path:
+        sys.path.append(sub_dir)
+    import reset
+
+    return reset
+
+
+def _reset_gpu_options(reset):
+    """Authoritative per-device GPU ``reset`` option dests, sourced from
+    reset_gpu's own required-arg ``any([...])`` gate. Auto-updates when a new
+    option is added -- that is what makes the completeness test a forcing
+    function. ``gtt``/``mem_carveout`` are not in the gate (system-wide / no
+    per-device handler) and are correctly excluded.
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(reset.ResetCommands.reset)
+    names = set()
+    for group in re.findall(r"if not any\(\s*\[(.*?)\]\s*\)", src, re.DOTALL):
+        names |= set(re.findall(r"args\.(\w+)", group))
+    return names
+
+
+def _make_reset_cmd(reset):
+    from amdsmi_helpers import AMDSMIHelpers
+
+    cmd = reset.ResetCommands()
+    cmd.helpers = AMDSMIHelpers()
+    cmd.logger = _FakeGpuLogger()
+    cmd.device_handles = []
+    cmd.group_check_printed = True
+    cmd.helpers.is_baremetal = lambda: True
+    cmd.helpers.get_gpu_id_from_device_handle = lambda input_device_handle: 0
+    return cmd
+
+
+def _reset_args(reset, **option):
+    """Namespace with every arg reset references defaulted to None, plus a
+    single-device gpu handle and the one option under test set truthy."""
+    import argparse
+    import inspect
+    import re
+
+    src = inspect.getsource(reset.ResetCommands.reset)
+    names = set(re.findall(r"args\.(\w+)", src))
+    ns = argparse.Namespace(**{n: None for n in names})
+    # Deliberately non-list: the single-device path has no run_device_subcommand
+    # wrapper, so it is the only place a handler that raises is still detectable.
+    ns.gpu = "fake-gpu-handle"
+    for key, value in option.items():
+        setattr(ns, key, value)
+    return ns
+
+
+_RESET_POWER_CAP_SENSORS = [0, 1]
+
+
+def _reset_power_cap_success_patches(reset, on_set=None):
+    """Patches letting reset's per-sensor power-cap loop run to completion.
+
+    sensor_inds/sensor_types are parallel lists, as amdsmi_get_supported_power_cap
+    returns them -- not the empty containers that used to make the loop a no-op.
+    """
+    ai = reset.amdsmi_interface
+    return {
+        "amdsmi_get_supported_power_cap": lambda *a, **k: {
+            "sensor_inds": list(_RESET_POWER_CAP_SENSORS),
+            "sensor_types": [ai.AmdSmiPowerCapType.PPT0, ai.AmdSmiPowerCapType.PPT1],
+        },
+        "amdsmi_get_power_cap_info": lambda *a, **k: {
+            "default_power_cap": _watts(_PCAP_DEFAULT_W),
+            "power_cap": _watts(_PCAP_CURRENT_W),
+        },
+        "amdsmi_set_power_cap": on_set or _noop,
+    }
+
+
+def _build_reset_specs(reset):
+    """Per-option drivers for the generic GPU ``reset`` exercisers.
+
+    Each entry is ``name -> configure(cmd, mode)`` where ``mode`` is ``"fail"``
+    or ``"success"``. ``configure`` installs any helper stubs the handler needs
+    and returns the ``{amdsmi_interface_fn: replacement}`` map:
+
+      * mode="fail":    the failure path raises NOT_SUPPORTED (must be recorded).
+      * mode="success": every call returns cleanly (nothing recorded, exit 0).
+
+    Every reset option is a boolean flag, so the exerciser sets
+    ``args.<name> = True``; there is no per-option value to build.
+
+    The registry keys are the single source of truth for the completeness test,
+    so adding a new per-device ``reset`` option without a spec here fails the
+    suite.
+    """
+
+    def gpureset(cmd, mode):
+        cmd.helpers.is_amd_device = lambda gpu: True
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_reset_gpu": fn}
+
+    def clocks(cmd, mode):
+        # Overdrive is reset first, then perf level (twice) with the same
+        # handle; both must be stubbed so a fake handle never reaches hardware.
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_set_gpu_overdrive_level": fn, "amdsmi_set_gpu_perf_level": fn}
+
+    def fans(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_reset_gpu_fan": fn}
+
+    def profile(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_set_gpu_power_profile": fn}
+
+    def xgmierr(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_reset_gpu_xgmi_error": fn}
+
+    def perf_determinism(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_set_gpu_perf_level": fn}
+
+    def power_cap(cmd, mode):
+        if mode == "fail":
+            return {"amdsmi_get_supported_power_cap": _raise_not_supported}
+        return _reset_power_cap_success_patches(reset)
+
+    def clean_local_data(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_clean_gpu_local_data": fn}
+
+    return {
+        "gpureset": gpureset,
+        "clocks": clocks,
+        "fans": fans,
+        "profile": profile,
+        "xgmierr": xgmierr,
+        "perf_determinism": perf_determinism,
+        "power_cap": power_cap,
+        "clean_local_data": clean_local_data,
+    }
+
+
+class _CperLogger:
+    """Logger stand-in for dump_cper_entries: only the format probes are used."""
+
+    def __init__(self, fmt):
+        self.format = fmt
+
+    def is_json_format(self):
+        return self.format == "json"
+
+    def is_human_readable_format(self):
+        return self.format == "human"
+
+    def is_csv_format(self):
+        return self.format == "csv"
+
+
+class TestRasCperAfidExitCodes(unittest.TestCase):
+    """A ``ras --cper`` AFID decode failure must record, not just print.
+
+    The --afid paths record the library status; dump_cper_entries caught the same
+    AmdSmiLibraryException with a bare ``except Exception`` and only logged it,
+    so the decode failure never reached the exit code.
+    """
+
+    ROW = ("2026-01-01 00:00:00", 0, "fatal", "fatal-1.cper", b"\x00\x01")
+    AFIDS = [11, 22, 33]
+
+    def setUp(self):
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        from amdsmi_helpers import AMDSMIHelpers
+
+        self.helpers = AMDSMIHelpers()
+        self.printed = []
+        self.helpers.cper_print = lambda text, logger=None: self.printed.append(text)
+        self.helpers._write_cper_files = lambda *a, **k: {"/tmp/fatal-1.cper": self.ROW}
+
+    def _drive(self, fmt, afids=None, fail_code=None):
+        if fail_code is None:
+            self.helpers.cper_dump_afids = lambda raw: list(afids or [])
+        else:
+
+            def _boom(raw):
+                raise _DriverlessLibErr(fail_code)
+
+            self.helpers.cper_dump_afids = _boom
+        rows = self.helpers.dump_cper_entries(
+            "/tmp", {}, [], "gpu-handle", logger=_CperLogger(fmt), emit_inline=False
+        )
+        return rows
+
+    def test_decode_failure_records_the_library_status(self):
+        """A decode failure must resolve to the library status, not 0."""
+        self._drive("json", fail_code=amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA)
+        self.assertTrue(self.helpers.error_collector.has_errors)
+        self.assertEqual(
+            self.helpers.error_collector.resolve_exit_code(),
+            amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA,
+        )
+
+    def test_decode_failure_json_row_carries_the_status_fields(self):
+        """The row keeps afids/decode_failed and gains status/message/code."""
+        rows = self._drive("json", fail_code=amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["afids"], [])
+        self.assertTrue(row["decode_failed"])
+        self.assertEqual(row["status"], "AMDSMI_STATUS_UNEXPECTED_DATA")
+        self.assertNotEqual(row["code"], 0)
+
+    def test_successful_decode_keeps_afids_a_list_and_records_nothing(self):
+        """Control: afids stays a list so len() counts AFIDs, not characters."""
+        rows = self._drive("json", afids=self.AFIDS)
+        self.assertEqual(rows[0]["afids"], self.AFIDS)
+        self.assertFalse(rows[0]["decode_failed"])
+        self.assertFalse(self.helpers.error_collector.has_errors)
+
+    def test_real_decode_failure_through_the_file_write_path(self):
+        """End-to-end minus the driver read: real files, real library decode.
+
+        The other tests stub _write_cper_files and cper_dump_afids. This one
+        stubs neither -- it hands dump_cper_entries the entries/bytes the driver
+        would have returned, lets it write the .cper/.json pair and call the real
+        amdsmi_get_afids_from_cper, and checks the resulting status reaches the
+        exit code. Only amdsmi_get_gpu_cper_entries() is unexercised, and that
+        needs a GPU with logged RAS records.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        helpers = AMDSMIHelpers()
+        raw = _JUNK_CPER_BYTES
+        entries = {0: {"error_severity": "fatal", "notify_type": "", "timestamp": "2026-01-01"}}
+        cper_data = [{"bytes": raw, "size": len(raw)}]
+        with tempfile.TemporaryDirectory() as folder:
+            rows = helpers.dump_cper_entries(
+                folder,
+                entries,
+                cper_data,
+                Path(folder),  # a Path device handle keeps gpu_id off the driver
+                logger=_CperLogger("json"),
+                emit_inline=False,
+            )
+            written = sorted(p.name for p in Path(folder).glob("*"))
+        # The dump itself succeeded: both files exist even though decoding failed.
+        self.assertEqual(written, ["fatal-1.cper", "fatal-1.json"])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertTrue(row["decode_failed"])
+        self.assertEqual(row["afids"], [])
+        # The exact status depends on how the library rejects these bytes, so
+        # pin the contract (a real status reached the exit code), not the value.
+        self.assertTrue(row["status"].startswith("AMDSMI_STATUS_"))
+        self.assertNotEqual(row["code"], 0)
+        self.assertTrue(helpers.error_collector.has_errors)
+        self.assertEqual(helpers.error_collector.resolve_exit_code(), row["code"])
+
+    def test_human_table_shows_the_status_instead_of_a_generic_message(self):
+        """Human output names the failure, replacing 'Error fetching AFIDs'."""
+        self._drive("human", fail_code=amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA)
+        self.assertTrue(self.printed)
+        self.assertIn("[AMDSMI_STATUS_UNEXPECTED_DATA]", self.printed[-1])
+        self.assertTrue(self.helpers.error_collector.has_errors)
+
+
+class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
+    """The gpu_od ``--fan`` error branches must record, not just print.
+
+    _build_set_specs drives --fan down the legacy hwmon path (detect_gpu_od ->
+    False), so these two branches are reached nowhere else: both printed an
+    error and left the exit code at 0, while their hwmon sibling recorded.
+    """
+
+    OD_RANGE = (0, 100)  # (min, max) percent, as parse_gpu_od_fan_range returns
+    OD_RANGE_UNREADABLE = (None, None)
+    IN_RANGE_PERCENT = (50, True)  # (value, is_percentage)
+    ABOVE_RANGE_RAW = (250, False)
+
+    def setUp(self):
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        self.set_value = _load_set_value()
+
+    def _drive_fan(self, od_range, fan_arg):
+        cmd = _make_set_gpu_cmd(self.set_value)
+        cmd.helpers.detect_gpu_od = lambda bdf: (True, "/fake/gpu_od")
+        cmd.helpers.parse_gpu_od_fan_range = lambda path: od_range
+        args = _gpu_set_args(self.set_value, fan=fan_arg)
+        with _patch_amdsmi_interface(
+            self.set_value, amdsmi_get_gpu_device_bdf=_fake_bdf, amdsmi_set_gpu_fan_speed=_noop
+        ):
+            cmd.set_gpu(args)
+        return cmd.helpers.error_collector
+
+    def test_unreadable_od_range_records_device_interface_unavailable(self):
+        """OD_RANGE unreadable: parse_gpu_od_fan_range swallows the OSError and
+        returns (None, None), so there is no library status -- the CLI records
+        DEVICE_INTERFACE_UNAVAILABLE rather than exiting 0."""
+        collector = self._drive_fan(self.OD_RANGE_UNREADABLE, self.IN_RANGE_PERCENT)
+        self.assertTrue(collector.has_errors)
+        self.assertEqual(
+            collector.resolve_exit_code(), int(cli_exc.AmdSmiExitCode.DEVICE_INTERFACE_UNAVAILABLE)
+        )
+
+    def test_value_outside_od_range_records_invalid_parameter_value(self):
+        """Out-of-range value on gpu_od must resolve to the same code its legacy
+        hwmon sibling records; the fan interface a GPU exposes must not change
+        the exit code for identical user input."""
+        collector = self._drive_fan(self.OD_RANGE, self.ABOVE_RANGE_RAW)
+        self.assertTrue(collector.has_errors)
+        self.assertEqual(
+            collector.resolve_exit_code(), int(cli_exc.AmdSmiExitCode.INVALID_PARAMETER_VALUE)
+        )
+
+    def test_gpu_od_success_records_nothing(self):
+        """Control: a value inside OD_RANGE still exits 0."""
+        collector = self._drive_fan(self.OD_RANGE, self.IN_RANGE_PERCENT)
+        self.assertFalse(collector.has_errors)
+
+
+class TestResetGpuGAllFailureGuards(unittest.TestCase):
+    """A per-device GPU `reset` failure must be recorded and must NOT crash."""
+
+    def test_every_reset_option_is_driven(self):
+        """Forcing function: every per-device GPU `reset` option must have a
+        driver in _build_reset_specs. Adding a new option without a spec fails
+        here, blocking a future `-g all` reset regression from shipping."""
+        reset = _load_reset()
+        options = _reset_gpu_options(reset)
+        self.assertTrue(
+            options,
+            "Test Regex issue: scraped zero GPU reset options -- _reset_gpu_options regex is stale",
+        )
+        specced = set(_build_reset_specs(reset))
+        self.assertEqual(
+            options,
+            specced,
+            "GPU reset options and their -g all failure drivers are out of sync.\n"
+            f"  unspecced (add a _build_reset_specs entry): {sorted(options - specced)}\n"
+            f"  stale (spec exists but no longer an option): {sorted(specced - options)}",
+        )
+
+    def test_every_reset_option_records_on_failure_not_crashes(self):
+        """Generic exerciser: drive each GPU `reset` option through reset with a
+        per-device library failure injected, and assert the record-then-finalize
+        contract holds -- the failure is recorded (exit != 0) and the handler
+        returns instead of raising."""
+        reset = _load_reset()
+        specs = _build_reset_specs(reset)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_reset_cmd(reset)
+                patches = specs[name](cmd, "fail")
+                args = _reset_args(reset, **{name: True})
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(args)  # must NOT raise
+                self.assertTrue(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: per-device failure was not recorded (would exit 0)",
+                )
+                self.assertNotEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: exit code resolved to 0 despite a recorded failure",
+                )
+
+    def test_every_reset_option_succeeds_cleanly(self):
+        """Mirror contract: a successful per-device `reset` records NOTHING and
+        finalizes to exit 0. Guards against a success path that wrongly records
+        an error, crashes, or resolves to a non-zero exit code."""
+        reset = _load_reset()
+        specs = _build_reset_specs(reset)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_reset_cmd(reset)
+                patches = specs[name](cmd, "success")
+                args = _reset_args(reset, **{name: True})
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(args)  # must NOT raise
+                self.assertFalse(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: success path wrongly recorded an error",
+                )
+                self.assertEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: success path did not resolve to exit 0",
+                )
+
+    def test_reset_power_cap_writes_the_default_back_for_every_sensor(self):
+        """`reset --power_cap` must write the default cap back for every sensor
+        the GPU reports. The generic success exerciser only checks that nothing
+        was recorded, which stays true even if the loop never runs.
+        """
+        reset = _load_reset()
+        cmd = _make_reset_cmd(reset)
+        set_calls = []
+
+        def _record_set(handle, sensor, value):
+            set_calls.append((sensor, value))
+
+        patches = _reset_power_cap_success_patches(reset, on_set=_record_set)
+        args = _reset_args(reset, power_cap=True)
+        with _patch_amdsmi_interface(reset, **patches):
+            cmd.reset(args)
+
+        self.assertEqual(
+            [sensor for sensor, _ in set_calls],
+            [0, 1],
+            "per-sensor loop did not visit every supported sensor",
+        )
+        for _, value in set_calls:
+            self.assertEqual(value, _watts(_PCAP_DEFAULT_W), "did not write the default cap back")
+        self.assertFalse(cmd.helpers.error_collector.has_errors)
