@@ -265,6 +265,47 @@
       ]
     },
 
+    "cast_by_order_no_cts": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "Software BY_ORDER receive matching with CTS offload forced off (the no-offload arm). QP scheduler off so TX fan-out stays at base nqps. QPS=4 / splitData=0 covers FIFO matching across QPs.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        {
+          "name": "A18_ByOrder_NoCts_SimpleSendRecv",
+          "description": "Basic send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleSizes",
+          "description": "Size ladder on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_LargeTransfer",
+          "description": "Large transfer on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleOutstanding",
+          "description": "Multiple in-flight send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecv",
+          "description": "irecv batching matched by posted WR identity (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecv"
+        }
+      ]
+    },
+
     "bootstrap_socket_poll": {
       "extends": "gtest_base",
       "binary": "rccl-UnitTestsFixturesDebug",
@@ -484,6 +525,7 @@
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
     { "config": "cast_fault_injection",  "enabled": true, "smoke": true },
+    { "config": "cast_by_order_no_cts",  "enabled": true, "smoke": true },
     { "config": "gin_proxy",             "enabled": true, "smoke": true },
     { "config": "gin_enable_gate",       "enabled": true },
     { "config": "gin_ainic_backend",     "enabled": true },
