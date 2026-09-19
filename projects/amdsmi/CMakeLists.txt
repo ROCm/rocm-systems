@@ -6,6 +6,136 @@
 #
 cmake_minimum_required(VERSION 3.20)
 
+#
+# --- Compiler detection (Clang family only) ---
+# Default: amdclang++ > clang++ (strict ROCm vs system separation)
+# GCC is not auto-selected. To build with GCC, use a toolchain file:
+#   cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
+#
+# ROCm discovery:
+#   Uses hipconfig --path for tool-based discovery (per TheRock #3976)
+#   No hardcoded paths or ROCM_PATH fallback
+#
+# If ROCm installed (hipconfig found):
+#   Searches ONLY in ROCm paths (NO system PATH fallback):
+#     1. <rocm-path>/lib/llvm/bin/amdclang++  (current standard)
+#     2. <rocm-path>/llvm/bin/amdclang++      (legacy)
+#     3. <rocm-path>/lib/llvm/bin/clang++     (ROCm clang++)
+#     4. <rocm-path>/llvm/bin/clang++         (ROCm clang++ legacy)
+#
+# If ROCm NOT installed (hipconfig not found):
+#   Searches ONLY in system PATH:
+#     - /usr/bin/clang++ (or wherever system clang++ is)
+#
+# Build fails if no suitable compiler found.
+#
+# See: cmake/toolchains/amdsmi-gcc-toolchain.cmake
+# See also: https://github.com/ROCm/TheRock/issues/3976
+#
+if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER)
+    # Determine ROCm installation path using tool-based discovery
+    # Uses hipconfig --path (per https://github.com/ROCm/TheRock/issues/3976)
+    set(ROCM_DIR "")
+
+    find_program(HIPCONFIG_EXECUTABLE hipconfig)
+    if(HIPCONFIG_EXECUTABLE)
+        execute_process(
+            COMMAND "${HIPCONFIG_EXECUTABLE}" --path
+            OUTPUT_VARIABLE HIPCONFIG_PATH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(HIPCONFIG_PATH)
+            set(ROCM_DIR "${HIPCONFIG_PATH}")
+            message(STATUS "Found ROCm via hipconfig: ${ROCM_DIR}")
+        endif()
+    endif()
+
+    # Search for amdclang++ in ROCm installation
+    # Prefer lib/llvm/bin (current) over llvm/bin (legacy)
+    set(_AMDCLANG_HINTS "")
+    if(ROCM_DIR)
+        list(APPEND _AMDCLANG_HINTS "${ROCM_DIR}/lib/llvm/bin" "${ROCM_DIR}/llvm/bin")
+    endif()
+
+    find_program(AMDCLANG_CXX_COMPILER NAMES amdclang++ HINTS ${_AMDCLANG_HINTS} NO_DEFAULT_PATH)
+    find_program(AMDCLANG_C_COMPILER NAMES amdclang HINTS ${_AMDCLANG_HINTS} NO_DEFAULT_PATH)
+
+    # Helper function to validate compiler executability
+    function(validate_compiler COMPILER_PATH RESULT_VAR)
+        execute_process(COMMAND "${COMPILER_PATH}" --version RESULT_VARIABLE TEST_RESULT OUTPUT_QUIET ERROR_QUIET)
+        if(TEST_RESULT EQUAL 0)
+            set(${RESULT_VAR} TRUE PARENT_SCOPE)
+        else()
+            set(${RESULT_VAR} FALSE PARENT_SCOPE)
+        endif()
+    endfunction()
+
+    # Try compilers in priority order: amdclang++ > clang++
+    if(AMDCLANG_CXX_COMPILER AND AMDCLANG_C_COMPILER)
+        validate_compiler("${AMDCLANG_CXX_COMPILER}" AMDCLANG_CXX_VALID)
+        validate_compiler("${AMDCLANG_C_COMPILER}" AMDCLANG_C_VALID)
+        if(NOT AMDCLANG_CXX_VALID OR NOT AMDCLANG_C_VALID)
+            message(WARNING "Found amdclang compilers but one or both are not executable, trying clang")
+            unset(AMDCLANG_CXX_COMPILER CACHE)
+            unset(AMDCLANG_C_COMPILER CACHE)
+        endif()
+    endif()
+
+    if(AMDCLANG_CXX_COMPILER AND AMDCLANG_C_COMPILER)
+        set(CMAKE_CXX_COMPILER "${AMDCLANG_CXX_COMPILER}" CACHE FILEPATH "C++ compiler")
+        set(CMAKE_C_COMPILER "${AMDCLANG_C_COMPILER}" CACHE FILEPATH "C compiler")
+        message(STATUS "Using AMD Clang compiler: ${AMDCLANG_CXX_COMPILER}")
+    else()
+        # Search for clang++ - prefer ROCm paths, fall back to system
+        # HINTS are checked first, then system PATH
+        find_program(CLANG_CXX_COMPILER NAMES clang++ HINTS ${_AMDCLANG_HINTS})
+        find_program(CLANG_C_COMPILER NAMES clang HINTS ${_AMDCLANG_HINTS})
+
+        if(CLANG_CXX_COMPILER AND CLANG_C_COMPILER)
+            validate_compiler("${CLANG_CXX_COMPILER}" CLANG_CXX_VALID)
+            validate_compiler("${CLANG_C_COMPILER}" CLANG_C_VALID)
+            if(NOT CLANG_CXX_VALID OR NOT CLANG_C_VALID)
+                message(WARNING "Found clang compilers but one or both are not executable")
+                unset(CLANG_CXX_COMPILER CACHE)
+                unset(CLANG_C_COMPILER CACHE)
+            endif()
+        endif()
+
+        if(CLANG_CXX_COMPILER AND CLANG_C_COMPILER)
+            set(CMAKE_CXX_COMPILER "${CLANG_CXX_COMPILER}" CACHE FILEPATH "C++ compiler")
+            set(CMAKE_C_COMPILER "${CLANG_C_COMPILER}" CACHE FILEPATH "C compiler")
+            # Detect if compiler is from ROCm or system by checking path
+            if(ROCM_DIR AND "${CLANG_CXX_COMPILER}" MATCHES "${ROCM_DIR}")
+                message(STATUS "Using ROCm Clang compiler: ${CLANG_CXX_COMPILER}")
+            else()
+                message(STATUS "Using system Clang compiler: ${CLANG_CXX_COMPILER}")
+            endif()
+        else()
+            # No clang++ found anywhere (ROCm or system)
+            message(
+                FATAL_ERROR
+                "No suitable C++ compiler found (amdclang++ or clang++).\n"
+                "\n"
+                "Current search status:\n"
+                "  hipconfig found: ${HIPCONFIG_EXECUTABLE}\n"
+                "  ROCM_DIR: ${ROCM_DIR}\n"
+                "  ROCm search paths: ${_AMDCLANG_HINTS}\n"
+                "\n"
+                "To fix this:\n"
+                "  1. Install clang: sudo apt install clang (Ubuntu/Debian)\n"
+                "  2. Or install ROCm from https://rocm.docs.amd.com/\n"
+                "\n"
+                "Alternative compiler options:\n"
+                "  - To build with GCC, use toolchain file:\n"
+                "      cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake\n"
+                "  - Or explicitly specify compiler:\n"
+                "      cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc"
+            )
+        endif()
+    endif()
+endif()
+
 set(AMD_SMI "amd_smi")
 set(AMD_SMI_LIBS_TARGET "${AMD_SMI}_lib")
 set(CPACK_PACKAGE_NAME amd-smi-lib CACHE STRING "")
