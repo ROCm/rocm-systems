@@ -138,6 +138,7 @@ set(TEST_SRC
   hipGraphPerf.cc
   hipGraphKernelNodeGetAttribute.cc
   hipGraphKernelNodeSetAttribute.cc
+  hipGraphKernelNodePriority.cc
   hipGraphMemAllocNodeGetParams.cc
   hipGraphAddMemAllocNode.cc
   hipGraphAddMemFreeNode.cc
