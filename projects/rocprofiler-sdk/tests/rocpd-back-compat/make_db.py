@@ -71,6 +71,7 @@ _EVT_GRAPH_1 = 6
 _EVT_GRAPH_2 = 7
 _EVT_GRAPH_3 = 8
 _EVT_HIP_EVENT_1 = 9
+_EVT_KERNEL_1_PASS_1 = 10
 
 _PMC_NO_SPM_ID = 1
 _PMC_SPM_ID = 2
@@ -542,6 +543,64 @@ def insert_minimal_data(
                 _EVT_HIP_EVENT_1,
                 "{}",
             ),
+        )
+
+    # Kernel replay pass identity was introduced in schema 3.0.5. Replay executes a dispatch once
+    # per counter group, so the run this simulates has dispatch 1 executed twice and the counters
+    # of each pass attached to that pass's own event.
+    if ver >= (3, 0, 5):
+        conn.execute(
+            f"UPDATE {tbl('rocpd_kernel_dispatch')} SET replay_pass = 0 WHERE guid = ?",
+            (guid,),
+        )
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_event')} "
+            "(id, guid, category_id, stack_id, parent_stack_id, correlation_id) "
+            "VALUES (?,?,?,?,?,?)",
+            (_EVT_KERNEL_1_PASS_1, guid, _STR_CATEGORY, _EVT_KERNEL_1_PASS_1, 0, 0),
+        )
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_kernel_dispatch')} "
+            "(id, guid, nid, pid, tid, agent_id, kernel_id, dispatch_id, replay_pass, "
+            "queue_id, stream_id, start, end, workgroup_size_x, workgroup_size_y, "
+            "workgroup_size_z, grid_size_x, grid_size_y, grid_size_z, graph_exec_id, "
+            "graph_node_id, region_name_id, event_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                3,
+                guid,
+                _NID,
+                _PID,
+                _TID,
+                _AGENT_ID,
+                _KERNEL_SYM_ID,
+                1,  # same dispatch_id as the first pass
+                1,  # replay_pass
+                _QUEUE_ID,
+                _STREAM_ID,
+                _T_START + 400_000,
+                _T_START + 500_000,
+                256,
+                1,
+                1,
+                1024,
+                1,
+                1,
+                1,
+                1,
+                _STR_EMPTY,
+                _EVT_KERNEL_1_PASS_1,
+            ),
+        )
+        # sample_id is NULL so these reach counters_collection, unlike the SPM rows above.
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_pmc_event')} "
+            "(id, guid, event_id, sample_id, pmc_id, value) "
+            "VALUES (?,?,?,?,?,?)",
+            [
+                (3, guid, _EVT_KERNEL_1, None, _PMC_NO_SPM_ID, 512.0),
+                (4, guid, _EVT_KERNEL_1_PASS_1, None, _PMC_NO_SPM_ID, 512.0),
+            ],
         )
 
 
