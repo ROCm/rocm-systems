@@ -8,10 +8,6 @@
 leak:Dyninst::
 leak:dyninst
 
-# TBB - Intel Threading Building Blocks
-leak:tbb::
-leak:libtbb
-
 # OpenMP runtime (libgomp): worker threads, internal allocators
 leak:libgomp
 leak:gomp_

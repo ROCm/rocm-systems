@@ -461,7 +461,7 @@
             "name": "Ubuntu 22.04 \u2022 g++ \u2022 system deps",
             "python_envs_glob": "py3.{8,9,10,11}",
             "sanity_check_rocm": true,
-            "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
+            "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "OFF"
         },
         {
@@ -477,7 +477,7 @@
             "name": "Ubuntu 22.04 \u2022 amdclang++ \u2022 system deps",
             "python_envs_glob": "py3.{8,9,10,11}",
             "sanity_check_rocm": true,
-            "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
+            "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "ON"
         },
         {
@@ -493,7 +493,7 @@
             "name": "Ubuntu 24.04 \u2022 g++ \u2022 system deps",
             "python_envs_glob": "py3.{8,9,10,11,12,13}",
             "sanity_check_rocm": true,
-            "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
+            "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "OFF"
         },
         {
@@ -509,7 +509,7 @@
             "name": "Ubuntu 24.04 \u2022 amdclang++ \u2022 system deps",
             "python_envs_glob": "py3.{8,9,10,11,12,13}",
             "sanity_check_rocm": true,
-            "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
+            "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "ON"
         },
         {
@@ -525,7 +525,7 @@
             "name": "Debian 12 \u2022 g++ \u2022 system deps",
             "python_envs_glob": "py3.{8,9,10,11,12,13}",
             "sanity_check_rocm": true,
-            "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
+            "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "OFF"
         },
         {
@@ -541,7 +541,7 @@
             "name": "Debian 12 \u2022 amdclang++ \u2022 system deps",
             "python_envs_glob": "py3.{8,9,10,11,12,13}",
             "sanity_check_rocm": true,
-            "system_deps_apt": "g++ binutils-dev libboost-all-dev libtbb-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
+            "system_deps_apt": "g++ binutils-dev libboost-all-dev libdw-dev libdwarf-dev libelf-dev libiberty-dev libspdlog-dev libfmt-dev",
             "use_clang_omp": "ON"
         },
         {
