@@ -93,6 +93,73 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find NUMA library
+if(UNIX)
+  set(NUMA_FOUND FALSE)
+
+  # Try pkg-config first (for TheRock builds which may use rocm_sysdeps_numa)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(NUMA_PC numa)
+    if(NUMA_PC_FOUND)
+      # Resolve actual library file using LIBRARY_DIRS as hints
+      find_library(NUMA_LIBRARY_FILE
+        NAMES numa rocm_sysdeps_numa
+        HINTS ${NUMA_PC_LIBRARY_DIRS}
+        NO_DEFAULT_PATH
+      )
+
+      if(NUMA_LIBRARY_FILE)
+        # Create SHARED IMPORTED target with resolved path
+        add_library(numa SHARED IMPORTED GLOBAL)
+        set_target_properties(numa PROPERTIES
+          IMPORTED_LOCATION "${NUMA_LIBRARY_FILE}"
+          INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+        )
+        set(NUMA_FOUND TRUE)
+        message(STATUS "Found NUMA via pkg-config (SHARED): ${NUMA_LIBRARY_FILE}")
+      else()
+        # Fallback to INTERFACE target if we only have link flags
+        add_library(numa INTERFACE IMPORTED GLOBAL)
+        set_target_properties(numa PROPERTIES
+          INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+          INTERFACE_LINK_LIBRARIES "${NUMA_PC_LIBRARIES}"
+          INTERFACE_LINK_DIRECTORIES "${NUMA_PC_LIBRARY_DIRS}"
+        )
+        set(NUMA_FOUND TRUE)
+        message(STATUS "Found NUMA via pkg-config (INTERFACE): ${NUMA_PC_LIBRARIES}")
+      endif()
+    endif()
+  endif()
+
+  # Try CMake package config
+  if(NOT NUMA_FOUND)
+    find_package(NUMA QUIET)
+    if(NUMA_FOUND)
+      message(STATUS "Found NUMA via CMake package")
+    endif()
+  endif()
+
+  # Manual detection as fallback
+  if(NOT NUMA_FOUND)
+    find_library(NUMA_LIBRARY NAMES numa rocm_sysdeps_numa)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+
+    if(NUMA_LIBRARY AND NUMA_INCLUDE_DIR)
+      add_library(numa SHARED IMPORTED GLOBAL)
+      set_target_properties(numa PROPERTIES
+        IMPORTED_LOCATION "${NUMA_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIR}")
+      set(NUMA_FOUND TRUE)
+      message(STATUS "Found NUMA via manual search: ${NUMA_LIBRARY}")
+    endif()
+  endif()
+
+  if(NOT NUMA_FOUND)
+    message(FATAL_ERROR "NUMA library not found. This is required for Linux builds.")
+  endif()
+endif()
+
+
 ## Find AMD CUID library.
 set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
 find_library(AMDCUID_LIB
@@ -380,7 +447,12 @@ if(${IMAGE_SUPPORT})
 endif()
 
 if (UNIX)
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  if(NUMA_FOUND)
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt numa )
+  else()
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  endif()
+
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
@@ -445,7 +517,11 @@ if( NOT ${BUILD_SHARED_LIBS} )
   ## Add external link requirements.
   target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE hsakmt-staticdrm::hsakmt-staticdrm )
   if (UNIX)
-    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
+    if(NUMA_FOUND)
+      target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt numa )
+    else()
+      target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
+    endif()
   else()
     target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE Ws2_32 )
   endif()
