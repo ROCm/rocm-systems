@@ -56,3 +56,13 @@ repos:
     rev: 0.25.1
     hooks:
       - id: gersemi
+
+  - repo: local
+    hooks:
+      - id: rocm-merge-gate-config
+        name: ROCm Merge Gate config
+        entry: python .github/scripts/rocm_merge_gate.py validate
+        language: python
+        additional_dependencies: [pyyaml]
+        files: ^\.github/(workflows/rocm-merge-gate\.yml|scripts/rocm_merge_gate\.py)$
+        pass_filenames: false
