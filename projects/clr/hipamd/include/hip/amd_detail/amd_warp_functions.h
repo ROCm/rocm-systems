@@ -519,7 +519,7 @@ __device__ inline unsigned long long __shfl_down(MAYBE_UNDEF unsigned long long 
 }
 
 __device__ inline int __shfl_xor(MAYBE_UNDEF int var, int lane_mask, int width = warpSize) {
-  int self = __lane_id();
+  int self = __lane_id() & (warpSize - 1);
   int index = self ^ lane_mask;
   index = index >= ((self + width) & ~(width - 1)) ? self : index;
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_bpermute)) {
