@@ -250,6 +250,73 @@ typedef struct {
 	uint32_t alignment_order;
 } svm_t;
 
+/* An SVM registration made on behalf of a pin (HsaMemFlags.AlwaysMapped).
+ *
+ * The SVM registration path does not create a vm_object, so there is nothing
+ * for hsakmt_fmm_deregister_memory() to look up.  Clearing
+ * HSA_SVM_FLAG_GPU_ALWAYS_MAPPED needs an explicit start and size, and the
+ * deregister API only supplies an address, so record the range here at
+ * registration time and consume it at deregistration.
+ *
+ * @regs holds the aligned start address of every pin the record covers, rather
+ * than a plain count.  hsakmt_fmm_deregister_memory() cannot tell a pinning
+ * registration from a plain one -- it takes only an address -- so a count would
+ * be decremented by plain registrations that merely fall inside a pinned union,
+ * clearing the flag while the pin is still live.  Matching the address against
+ * @regs makes a deregistration a no-op unless it really is releasing a pin.
+ *
+ * A small record whose last pin has been released is not cleared immediately;
+ * it is kept, with @nregs == 0, on the idle list threaded through @idle_prev
+ * and @idle_next.  See svm_always_mapped_idle_push().
+ *
+ * @nregs == 0 does not imply membership of that list, though -- a record whose
+ * CLR_FLAGS failed is also unpinned, and is deliberately kept off it.  Use
+ * svm_always_mapped_is_idle() to ask.
+ */
+typedef struct svm_always_mapped_range {
+	rbtree_node_t node;
+	HSAuint64 start;	/* page-aligned */
+	HSAuint64 size;		/* page-aligned, widest ever registered */
+	HSAuint64 *regs;	/* aligned start address of each live pin */
+	HSAuint32 nregs;	/* entries used in @regs */
+	HSAuint32 nalloc;	/* entries allocated in @regs */
+	struct svm_always_mapped_range *idle_prev;
+	struct svm_always_mapped_range *idle_next;
+} svm_always_mapped_range_t;
+
+/* Bounds on the deferred-clear cache.  A range that is unpinned keeps
+ * GPU_ALWAYS_MAPPED until it is evicted from the idle list, so these cap how
+ * much memory can be held GPU-resident on behalf of pins that are already gone.
+ *
+ * Only small ranges are worth deferring.  The two ioctls a pin/unpin pair costs
+ * are fixed, so they only dominate when the range is small; a large transfer
+ * amortizes them and is exactly the case where holding residency is expensive.
+ *
+ * MAX_BYTES is the bound that matters: it caps residency directly, whatever mix
+ * of sizes produces it.  MAX_RECORDS only bounds the length of the list, and it
+ * can only bind before MAX_BYTES does for ranges well under MAX_SIZE -- which
+ * are exactly the ones deferring helps most.  Keep it high enough that it is
+ * the byte cap doing the work: a record is 96 bytes plus a small pin list, so
+ * a full list at this limit is a few tens of KB.
+ */
+#define SVM_ALWAYS_MAPPED_DEFER_MAX_SIZE	(2ULL << 20)
+#define SVM_ALWAYS_MAPPED_DEFER_MAX_RECORDS	256
+#define SVM_ALWAYS_MAPPED_DEFER_MAX_BYTES	(32ULL << 20)
+
+/* Backing store for the SET_ATTR callers whose attribute count is bounded at
+ * compile time, so they need not malloc one per call -- a pin/unpin pair is now
+ * down to a single ioctl, and an allocator round trip is a visible fraction of
+ * what is left.  kfd_ioctl_svm_args ends in a flexible array member and so
+ * cannot be embedded before one; a union sizes and aligns the storage without
+ * that.
+ */
+#define SVM_ATTRS_INLINE_MAX	3
+typedef union {
+	struct kfd_ioctl_svm_args args;
+	char storage[sizeof(struct kfd_ioctl_svm_args) +
+		     SVM_ATTRS_INLINE_MAX * sizeof(struct kfd_ioctl_svm_attribute)];
+} svm_inline_args_t;
+
 struct hsa_kfd_fmm_context
 {
 	/* The other apertures are specific to each GPU. gpu_mem_t manages GPU
@@ -267,6 +334,27 @@ struct hsa_kfd_fmm_context
 	void *dgpu_shared_aperture_limit;
 
 	svm_t svm;
+
+	/* Ranges registered with AlwaysMapped, keyed by aligned start address.
+	 * See svm_always_mapped_range_t.
+	 */
+	rbtree_t always_mapped_tree;
+	pthread_mutex_t always_mapped_mutex;
+
+	/* Number of records in always_mapped_tree.  Written under
+	 * @always_mapped_mutex, but read without it so that a process which
+	 * never pins anything does not take a process-wide lock on every
+	 * deregistration.  See svm_always_mapped_tracking_any().
+	 */
+	HSAuint32 always_mapped_nrecords;
+
+	/* Records in always_mapped_tree that are flagged but no longer pinned,
+	 * oldest first.  Bounded by SVM_ALWAYS_MAPPED_DEFER_MAX_*.
+	 */
+	svm_always_mapped_range_t *idle_head;
+	svm_always_mapped_range_t *idle_tail;
+	HSAuint32 idle_count;
+	HSAuint64 idle_bytes;
 
 	/* On APU, for memory allocated on the system memory that GPU doesn't
 	 * access via GPU driver, they are not managed by GPUVM. cpuvm_aperture
@@ -323,6 +411,10 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
+
+	/* Initialize the AlwaysMapped registration tracker */
+	rbtree_init(&ctx->fmm_context->always_mapped_tree);
+	pthread_mutex_init(&ctx->fmm_context->always_mapped_mutex, NULL);
 
 	/* Initialize cpuvm_aperture */
 	ctx->fmm_context->cpuvm_aperture = init_aperture;
@@ -1102,50 +1194,704 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 	return mflags;
 }
 
+/* Whether any range is being tracked at all.
+ *
+ * Every deregistration has to ask whether it is releasing a pin, and the only
+ * way to know is to look in the tree -- which means taking a process-wide lock
+ * on a path that all SVM deregistrations share, including the vast majority
+ * that belong to processes which never call hsa_amd_memory_lock() at all.
+ * Checking the count first keeps that cost off them entirely, and stops the
+ * lock from serializing deregistrations across threads.
+ *
+ * Reading the count unlocked is safe because it leaves zero only under the
+ * mutex, and only for a record inserted by a registration.  So a stale zero can
+ * be observed only while a registration of the very first tracked range is
+ * still in flight -- and a deregistration that races the registration it is
+ * meant to pair with is already the caller's bug, not one this could cause.
+ * Once the count is non-zero it stays so until the last record is freed, so no
+ * later deregistration can miss a record that already exists.
+ */
+static bool svm_always_mapped_tracking_any(struct hsa_kfd_fmm_context *fmm_ctx)
+{
+	return __atomic_load_n(&fmm_ctx->always_mapped_nrecords,
+			       __ATOMIC_ACQUIRE) != 0;
+}
+
+/* Add/remove a record, keeping @always_mapped_nrecords in step.  The count is
+ * published with release ordering so a reader that sees it non-zero also sees
+ * the tree the record was linked into.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static void svm_always_mapped_tree_insert(struct hsa_kfd_fmm_context *fmm_ctx,
+					  svm_always_mapped_range_t *r)
+{
+	hsakmt_rbtree_insert(&fmm_ctx->always_mapped_tree, &r->node);
+	__atomic_add_fetch(&fmm_ctx->always_mapped_nrecords, 1,
+			   __ATOMIC_RELEASE);
+}
+
+/* Caller must hold fmm_ctx->always_mapped_mutex. */
+static void svm_always_mapped_tree_delete(struct hsa_kfd_fmm_context *fmm_ctx,
+					  svm_always_mapped_range_t *r)
+{
+	hsakmt_rbtree_delete(&fmm_ctx->always_mapped_tree, &r->node);
+	__atomic_sub_fetch(&fmm_ctx->always_mapped_nrecords, 1,
+			   __ATOMIC_RELEASE);
+}
+
+/* Find the record covering @addr, or NULL.  Records in the tree are kept
+ * pairwise disjoint by svm_always_mapped_record_locked(), so at most one can
+ * match and no record earlier than the one returned here can reach @addr.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static svm_always_mapped_range_t *
+svm_always_mapped_find(struct hsa_kfd_fmm_context *fmm_ctx, HSAuint64 addr)
+{
+	rbtree_key_t key = rbtree_key(addr, 0);
+	svm_always_mapped_range_t *r;
+	rbtree_node_t *n;
+
+	/* Greatest record starting at or before @addr. */
+	n = rbtree_lookup_nearest(&fmm_ctx->always_mapped_tree, &key, LKP_ADDR,
+				  LEFT);
+	if (!n)
+		return NULL;
+
+	r = rb_entry(n, svm_always_mapped_range_t, node);
+
+	return addr < r->start + r->size ? r : NULL;
+}
+
+/* Caller must hold fmm_ctx->always_mapped_mutex. */
+static svm_always_mapped_range_t *
+svm_always_mapped_first_at_or_after(struct hsa_kfd_fmm_context *fmm_ctx,
+				    HSAuint64 addr)
+{
+	rbtree_key_t key = rbtree_key(addr, 0);
+	rbtree_node_t *n;
+
+	n = rbtree_lookup_nearest(&fmm_ctx->always_mapped_tree, &key, LKP_ADDR,
+				  RIGHT);
+
+	return n ? rb_entry(n, svm_always_mapped_range_t, node) : NULL;
+}
+
+static void svm_always_mapped_free(svm_always_mapped_range_t *r)
+{
+	free(r->regs);
+	free(r);
+}
+
+/* Append @addr to @r's pin list.  False on allocation failure, with @r
+ * unmodified.
+ */
+static bool svm_always_mapped_add_reg(svm_always_mapped_range_t *r,
+				      HSAuint64 addr)
+{
+	if (r->nregs == r->nalloc) {
+		HSAuint32 n = r->nalloc ? r->nalloc * 2 : 4;
+		HSAuint64 *regs = realloc(r->regs, n * sizeof(*regs));
+
+		if (!regs)
+			return false;
+		r->regs = regs;
+		r->nalloc = n;
+	}
+
+	r->regs[r->nregs++] = addr;
+	return true;
+}
+
+/* Remove one occurrence of @addr from @r's pin list.  False if @addr is not a
+ * pin this record is holding the flag for.  Order does not matter, so the hole
+ * is filled from the end.
+ */
+static bool svm_always_mapped_del_reg(svm_always_mapped_range_t *r,
+				      HSAuint64 addr)
+{
+	HSAuint32 i;
+
+	for (i = 0; i < r->nregs; i++) {
+		if (r->regs[i] == addr) {
+			r->regs[i] = r->regs[--r->nregs];
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/* Whether @r is on the idle list.  Losing its last pin is what normally puts a
+ * record there, but the two are not the same thing: an unpinned record whose
+ * CLR_FLAGS failed is deliberately kept off the list, so that a later pin can
+ * merge in and retry the clear.  Testing @nregs instead would take that record
+ * for a list member and unlink it, dropping idle_head and underflowing the
+ * counters.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static bool svm_always_mapped_is_idle(struct hsa_kfd_fmm_context *fmm_ctx,
+				      svm_always_mapped_range_t *r)
+{
+	return r->idle_prev || r->idle_next || fmm_ctx->idle_head == r;
+}
+
+/* Take @r off the idle list.  A no-op unless @r is on it.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static void svm_always_mapped_idle_unlink(struct hsa_kfd_fmm_context *fmm_ctx,
+					  svm_always_mapped_range_t *r)
+{
+	if (!svm_always_mapped_is_idle(fmm_ctx, r))
+		return;
+
+	if (r->idle_prev)
+		r->idle_prev->idle_next = r->idle_next;
+	else
+		fmm_ctx->idle_head = r->idle_next;
+
+	if (r->idle_next)
+		r->idle_next->idle_prev = r->idle_prev;
+	else
+		fmm_ctx->idle_tail = r->idle_prev;
+
+	r->idle_prev = NULL;
+	r->idle_next = NULL;
+	fmm_ctx->idle_count--;
+	fmm_ctx->idle_bytes -= r->size;
+}
+
+/* Park @r, whose last pin has just been released, on the idle list instead of
+ * clearing GPU_ALWAYS_MAPPED right away.
+ *
+ * A pin/unpin pair on the same range is the common case -- an OpenMP reduction
+ * copies its accumulator back through hsa_amd_memory_lock() once per iteration,
+ * always at the same address.  Clearing the flag lets KFD merge the range back
+ * into its neighbours, so the next pin has to split it out and re-map it again,
+ * which costs a page table update and a TLB flush on every GPU.  Leaving the
+ * flag set keeps that split range intact, and the next SET_ATTR on it matches
+ * an existing range with identical attributes and does no mapping work at all.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static void svm_always_mapped_idle_push(struct hsa_kfd_fmm_context *fmm_ctx,
+					svm_always_mapped_range_t *r)
+{
+	r->idle_prev = fmm_ctx->idle_tail;
+	r->idle_next = NULL;
+
+	if (fmm_ctx->idle_tail)
+		fmm_ctx->idle_tail->idle_next = r;
+	else
+		fmm_ctx->idle_head = r;
+
+	fmm_ctx->idle_tail = r;
+	fmm_ctx->idle_count++;
+	fmm_ctx->idle_bytes += r->size;
+}
+
+/* True if every page of [@addr, @addr + @size) is still mapped in this process.
+ *
+ * A record's @size is a high-water mark -- only ever widened, never trimmed --
+ * and nothing tells libhsakmt about munmap(), so a record with no live pin can
+ * outlive the mapping it describes.  Its span then covers VA the application
+ * has freed and the allocator has handed back to something else.
+ *
+ * That matters because KFD validates a span end to end: svm_range_is_valid()
+ * walks the VMAs and returns EFAULT at the first hole, and svm_range_set_attr()
+ * checks it before touching anything.  A span with a hole therefore does not
+ * clear the flag on the parts that are still mapped -- the whole ioctl is a
+ * no-op.  There is no partial progress to salvage, so the only fix is to not
+ * build such a span.
+ *
+ * mincore() is the cheapest question the kernel will answer here: it fails
+ * ENOMEM when the range contains unmapped pages, which is exactly the test.
+ * The residency bits it fills in are not used.
+ */
+static bool svm_always_mapped_still_mapped(HSAuint64 addr, HSAuint64 size)
+{
+	unsigned char vec[512];		/* 512 pages, so 2 MB per call */
+	const HSAuint64 chunk = sizeof(vec) * PAGE_SIZE;
+	HSAuint64 off;
+
+	for (off = 0; off < size; off += chunk) {
+		HSAuint64 len = size - off < chunk ? size - off : chunk;
+
+		if (!mincore((void *)(addr + off), len, vec))
+			continue;
+
+		if (errno == ENOMEM)
+			return false;
+
+		/* Any other errno means the question could not be asked, not
+		 * that the range is gone.  Assume it is still there: keeping a
+		 * record we no longer need is recoverable, dropping one that is
+		 * still flagged is not.
+		 */
+		return true;
+	}
+
+	return true;
+}
+
+/* Evict every record overlapping [@start, @end) that has no live pin and whose
+ * mapping is gone.
+ *
+ * svm_always_mapped_record_locked() unions a new pin with every record it
+ * overlaps, to keep the flag set until the last overlapping pin is released.
+ * That invariant is about pins that are live at the same instant.  A record
+ * with @nregs == 0 has none: it contributes no pin to the union, only its
+ * geometry, and if the application has since freed that VA the geometry is a
+ * claim about memory that is no longer there.  Absorbing it is what produces a
+ * union spanning a hole, which the kernel then refuses wholesale.
+ *
+ * Nothing has to be cleared on the way out.  munmap() tears the KFD range down
+ * through the MMU notifier (svm_range_unmap_from_cpu() queues SVM_OP_UNMAP_RANGE)
+ * and GPU_ALWAYS_MAPPED lives on that range, so it is already gone.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static void svm_always_mapped_evict_stale(struct hsa_kfd_fmm_context *fmm_ctx,
+					  HSAuint64 start, HSAuint64 end)
+{
+	bool widened = true;
+
+	/* A surviving record widens the span the union will cover, which can
+	 * bring further records into scope.  Widening to the right is picked up
+	 * by the loop condition as it goes; widening to the left needs another
+	 * sweep, so repeat until the bounds settle.
+	 */
+	while (widened) {
+		svm_always_mapped_range_t *p;
+
+		widened = false;
+
+		p = svm_always_mapped_find(fmm_ctx, start);
+		if (!p)
+			p = svm_always_mapped_first_at_or_after(fmm_ctx, start);
+
+		while (p && p->start < end) {
+			rbtree_node_t *n = hsakmt_rbtree_next(
+					&fmm_ctx->always_mapped_tree, &p->node);
+			svm_always_mapped_range_t *next =
+				n ? rb_entry(n, svm_always_mapped_range_t, node)
+				  : NULL;
+
+			if (p->start + p->size <= start) {
+				p = next;
+				continue;
+			}
+
+			if (!p->nregs &&
+			    !svm_always_mapped_still_mapped(p->start, p->size)) {
+				pr_debug("Dropping stale AlwaysMapped range %p size %lu\n",
+					 (void *)p->start, p->size);
+				svm_always_mapped_idle_unlink(fmm_ctx, p);
+				svm_always_mapped_tree_delete(fmm_ctx, p);
+				svm_always_mapped_free(p);
+				p = next;
+				continue;
+			}
+
+			if (p->start < start) {
+				start = p->start;
+				widened = true;
+			}
+			if (p->start + p->size > end) {
+				end = p->start + p->size;
+				widened = true;
+			}
+			p = next;
+		}
+	}
+}
+
+/* Track [@start, @start + @size) as flagged, merging it with every record it
+ * overlaps into a single union record holding all of their pins.
+ *
+ * Overlapping pins have to share one record.  Tracking them separately would
+ * let the first deregistration clear GPU_ALWAYS_MAPPED across pages that
+ * another live pin still covers, silently unpinning them.  Merging keeps the
+ * flag set until the last overlapping pin is released, at the cost of holding
+ * it on the whole union until then -- the conservative direction.
+ *
+ * False on allocation failure, with the tree unchanged.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static bool svm_always_mapped_record_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+					    HSAuint64 start, HSAuint64 size)
+{
+	HSAuint64 end = start + size;
+	HSAuint64 reg = start;
+	svm_always_mapped_range_t *r, *merged, *p;
+	HSAuint32 nabsorbed = 0, i;
+
+	r = svm_always_mapped_find(fmm_ctx, start);
+	if (r && end <= r->start + r->size) {
+		/* Already covered -- the same range pinned again, or a
+		 * subrange of one that is.  Nothing to merge, but a record that
+		 * was idle is live again and comes off the idle list.  The flag
+		 * is still set on it, so the caller's SET_ATTR was a no-op in
+		 * the kernel; that is the point of deferring the clear.
+		 *
+		 * That reasoning needs the record to still describe live
+		 * memory.  One with no pin left does not necessarily: the
+		 * application can have freed the range behind our back.
+		 * Re-pinning exactly the span it covers re-establishes it
+		 * whatever happened in between, because the caller's SET_ATTR
+		 * has just flagged that exact span -- so the repeat-pin case
+		 * the idle list exists for keeps its fast path, with no syscall
+		 * added.  A strict subrange is different: the record claims
+		 * pages the caller did not just flag, and the new pin would
+		 * inherit that claim, so check it before letting it.
+		 */
+		bool exact = start == r->start && size == r->size;
+
+		if (r->nregs || exact ||
+		    svm_always_mapped_still_mapped(r->start, r->size)) {
+			bool was_idle = svm_always_mapped_is_idle(fmm_ctx, r);
+
+			svm_always_mapped_idle_unlink(fmm_ctx, r);
+			if (svm_always_mapped_add_reg(r, reg))
+				return true;
+
+			if (was_idle)
+				svm_always_mapped_idle_push(fmm_ctx, r);
+			return false;
+		}
+	}
+
+	/* Drop anything the application has unmapped before unioning with what
+	 * is left, so the union spans only memory that is really there.
+	 */
+	svm_always_mapped_evict_stale(fmm_ctx, start, end);
+
+	/* Pass one: find the bounds of the union and how many pins it absorbs.
+	 * @r is the record covering @start if there is one, otherwise the first
+	 * starting after it.  Widening @end can bring further records into
+	 * range, which the loop condition picks up on the next pass.  Nothing
+	 * is mutated here, so an allocation failure below leaves the tree
+	 * intact.
+	 */
+	r = svm_always_mapped_find(fmm_ctx, start);
+	if (!r)
+		r = svm_always_mapped_first_at_or_after(fmm_ctx, start);
+
+	for (p = r; p && p->start < end; ) {
+		rbtree_node_t *n = hsakmt_rbtree_next(
+				&fmm_ctx->always_mapped_tree, &p->node);
+
+		if (p->start + p->size > start) {
+			if (p->start < start)
+				start = p->start;
+			if (p->start + p->size > end)
+				end = p->start + p->size;
+			nabsorbed += p->nregs;
+		}
+		p = n ? rb_entry(n, svm_always_mapped_range_t, node) : NULL;
+	}
+
+	merged = calloc(1, sizeof(*merged));
+	if (!merged)
+		goto no_mem;
+
+	/* Size the pin list up front: growing it while absorbing would leave
+	 * records already deleted on failure.
+	 */
+	merged->regs = calloc(nabsorbed + 1, sizeof(*merged->regs));
+	if (!merged->regs) {
+		free(merged);
+		goto no_mem;
+	}
+	merged->nalloc = nabsorbed + 1;
+	merged->regs[merged->nregs++] = reg;
+
+	/* Pass two: absorb.  @start may have moved down, so re-find the
+	 * leftmost overlapping record.
+	 */
+	r = svm_always_mapped_find(fmm_ctx, start);
+	if (!r)
+		r = svm_always_mapped_first_at_or_after(fmm_ctx, start);
+
+	while (r && r->start < end) {
+		rbtree_node_t *n = hsakmt_rbtree_next(
+				&fmm_ctx->always_mapped_tree, &r->node);
+		svm_always_mapped_range_t *next =
+			n ? rb_entry(n, svm_always_mapped_range_t, node) : NULL;
+
+		if (r->start + r->size > start) {
+			for (i = 0; i < r->nregs; i++)
+				merged->regs[merged->nregs++] = r->regs[i];
+			/* An absorbed record may be idle; its accounting has to
+			 * go with it.  The union takes over its flagged pages
+			 * and is live, so it is not pushed back on.
+			 */
+			svm_always_mapped_idle_unlink(fmm_ctx, r);
+			svm_always_mapped_tree_delete(fmm_ctx, r);
+			svm_always_mapped_free(r);
+		}
+		r = next;
+	}
+
+	merged->start = start;
+	merged->size = end - start;
+	merged->node.key = rbtree_key(start, end - start);
+	svm_always_mapped_tree_insert(fmm_ctx, merged);
+	return true;
+
+no_mem:
+	/* @start may already have been widened by pass one; report what the
+	 * caller actually asked for.
+	 */
+	pr_warn("Failed to track AlwaysMapped range %p size %lu\n",
+		(void *)reg, size);
+	return false;
+}
+
+/* Release the pin registered at @addr.  Returns the size to clear when the last
+ * pin the record covers goes away, and 0 otherwise -- including when @addr is
+ * not a recorded pin at all, which is the ordinary case for the plain
+ * registrations that share this deregistration path.  On a non-zero return
+ * @start_out receives the start of the record, which merging may have pushed
+ * below @addr, and @r_out the record itself, which stays in the tree until the
+ * caller has confirmed the flag is actually gone.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static HSAuint64 svm_always_mapped_take_locked(
+					struct hsa_kfd_fmm_context *fmm_ctx,
+					HSAuint64 addr, HSAuint64 *start_out,
+					svm_always_mapped_range_t **r_out)
+{
+	svm_always_mapped_range_t *r = svm_always_mapped_find(fmm_ctx, addr);
+
+	if (!r || !svm_always_mapped_del_reg(r, addr) || r->nregs)
+		return 0;
+
+	*start_out = r->start;
+	*r_out = r;
+	return r->size;
+}
+
+/* Drop GPU_ALWAYS_MAPPED from a range that is no longer pinned, so it can
+ * migrate under XNACK again.
+ */
+static HSAKMT_STATUS svm_always_mapped_clear(HsaKFDContext *ctx,
+					     HSAuint64 start, HSAuint64 size)
+{
+	svm_inline_args_t buf;
+	struct kfd_ioctl_svm_args *args = &buf.args;
+	size_t s_attr = sizeof(struct kfd_ioctl_svm_attribute);
+	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+
+	args->start_addr = start;
+	args->size = size;
+	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+	args->nattr = 1;
+	args->attrs[0].type = HSA_SVM_ATTR_CLR_FLAGS;
+	args->attrs[0].value = HSA_SVM_FLAG_GPU_ALWAYS_MAPPED;
+
+	pr_debug("Clearing GPU_ALWAYS_MAPPED on %p size: %lu\n",
+		 (void *)start, size);
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT),
+			 args)) {
+		/* KFD validates a span end to end -- svm_range_is_valid() walks
+		 * the VMAs and svm_range_set_attr() checks it before touching
+		 * anything -- so if the application has unmapped any part of
+		 * @start..@size the whole SET_ATTR fails and clears nothing.
+		 *
+		 * There is nothing left to clear in that case: munmap() tore
+		 * the KFD range down through the MMU notifier and
+		 * GPU_ALWAYS_MAPPED went with it.  Say so, and let the caller
+		 * drop the record rather than keep it to retry an ioctl that
+		 * can only fail the same way however often it runs.  Asking
+		 * only once the ioctl has failed keeps the check off the path
+		 * every successful clear takes.
+		 */
+		if (!svm_always_mapped_still_mapped(start, size)) {
+			pr_debug("AlwaysMapped range %p size %lu already unmapped\n",
+				 (void *)start, size);
+			return HSAKMT_STATUS_SUCCESS;
+		}
+
+		pr_debug("op clear always-mapped failed %s\n", strerror(errno));
+		ret = HSAKMT_STATUS_ERROR;
+	}
+
+	return ret;
+}
+
+/* Bring the idle list back within its bounds, clearing GPU_ALWAYS_MAPPED on the
+ * least recently unpinned records until it fits.
+ *
+ * A record that fails to clear is kept in the tree, unlisted, exactly as the
+ * deregistration path keeps it: dropping it would lose the only handle on a
+ * range that is still flagged, while keeping it lets a later pin of the same
+ * range merge in and retry.  It stops counting against the caps either way,
+ * having already come off the list, so it cannot hold the list above its bound.
+ *
+ * A record whose range the application has unmapped does not reach that path.
+ * Its flag died with the mapping, so svm_always_mapped_clear() reports success
+ * once it has established that, and it is deleted here like any other.
+ *
+ * Caller must hold fmm_ctx->always_mapped_mutex.
+ */
+static void svm_always_mapped_idle_trim(HsaKFDContext *ctx,
+					struct hsa_kfd_fmm_context *fmm_ctx)
+{
+	while (fmm_ctx->idle_head &&
+	       (fmm_ctx->idle_count > SVM_ALWAYS_MAPPED_DEFER_MAX_RECORDS ||
+		fmm_ctx->idle_bytes > SVM_ALWAYS_MAPPED_DEFER_MAX_BYTES)) {
+		svm_always_mapped_range_t *r = fmm_ctx->idle_head;
+
+		svm_always_mapped_idle_unlink(fmm_ctx, r);
+
+		if (svm_always_mapped_clear(ctx, r->start, r->size) !=
+		    HSAKMT_STATUS_SUCCESS) {
+			pr_debug("Keeping unclearable AlwaysMapped range %p size %lu\n",
+				 (void *)r->start, r->size);
+			continue;
+		}
+
+		svm_always_mapped_tree_delete(fmm_ctx, r);
+		svm_always_mapped_free(r);
+	}
+}
+
+/* Free the AlwaysMapped tracker at context teardown.  The address space is
+ * going away with the context, so there is no flag left to clear in the kernel
+ * -- this only reclaims the records themselves.
+ */
+void hsakmt_fmm_destroy_always_mapped_tracker(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx;
+	rbtree_t *tree;
+
+	if (!ctx || !ctx->fmm_context)
+		return;
+
+	fmm_ctx = ctx->fmm_context;
+	tree = &fmm_ctx->always_mapped_tree;
+
+	pthread_mutex_lock(&fmm_ctx->always_mapped_mutex);
+	while (tree->root != &tree->sentinel) {
+		rbtree_node_t *n = rbtree_min(tree->root, &tree->sentinel);
+		svm_always_mapped_range_t *r =
+			rb_entry(n, svm_always_mapped_range_t, node);
+
+		svm_always_mapped_tree_delete(fmm_ctx, r);
+		svm_always_mapped_free(r);
+	}
+	/* The idle list only threads records that were in the tree, all of
+	 * which are gone now.
+	 */
+	fmm_ctx->idle_head = NULL;
+	fmm_ctx->idle_tail = NULL;
+	fmm_ctx->idle_count = 0;
+	fmm_ctx->idle_bytes = 0;
+	pthread_mutex_unlock(&fmm_ctx->always_mapped_mutex);
+
+	pthread_mutex_destroy(&fmm_ctx->always_mapped_mutex);
+}
+
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 						  void *address,
 					      uint64_t size, HsaMemFlags flags)
 {
-	struct kfd_ioctl_svm_args *args;
+	svm_inline_args_t buf;
+	struct kfd_ioctl_svm_args *args = &buf.args;
 	size_t s_attr;
 	HSAuint32 page_offset = (HSAuint64)address & (PAGE_SIZE-1);
 	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	HSAKMT_STATUS ret;
+	HSAuint32 nattr = 2;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
-	/* s_attr is a compile-time constant (16 bytes); no overflow possible */
-	s_attr = 2 * sizeof(struct kfd_ioctl_svm_attribute);
-	args = malloc(sizeof(*args) + s_attr);
-	if (!args)
-		return HSAKMT_STATUS_NO_MEMORY;
+	/* A caller that is pinning this range (hsa_amd_memory_lock) needs the
+	 * GPU mapping to survive MMU invalidations.  Without
+	 * GPU_ALWAYS_MAPPED, svm_range_evict() takes its xnack_enabled branch
+	 * and unmaps the range from the GPU while a transfer may still be
+	 * reading it; if the resulting retry fault then fails to restore, the
+	 * PTE is poisoned with AMDGPU_VM_NORETRY_FLAGS and the fault becomes
+	 * fatal.  The userptr BO path below is durable already, so this only
+	 * matters here.
+	 */
+	if (flags.ui32.AlwaysMapped &&
+	    hsakmt_kfd_version_info.KernelInterfaceMinorVersion >= 11)
+		nattr = 3;
 
+	/* s_attr is at most 24 bytes; no overflow possible, and @buf is sized
+	 * for SVM_ATTRS_INLINE_MAX of them.
+	 */
+	s_attr = nattr * sizeof(struct kfd_ioctl_svm_attribute);
 	args->start_addr = aligned_addr;
 	args->size = aligned_size;
 	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
-	args->nattr = 2;
+	args->nattr = nattr;
 	args->attrs[0].type = flags.ui32.CoarseGrain ?
 			      HSA_SVM_ATTR_CLR_FLAGS : HSA_SVM_ATTR_SET_FLAGS;
 	args->attrs[0].value = HSA_SVM_FLAG_COHERENT;
 	args->attrs[1].type = flags.ui32.ExtendedCoherent ?
 							HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS;
 	args->attrs[1].value = HSA_SVM_FLAG_EXT_COHERENT;
-	pr_debug("Registering to SVM %p size: %ld\n", (void*)aligned_addr,
-		 aligned_size);
+	if (nattr == 3) {
+		args->attrs[2].type = HSA_SVM_ATTR_SET_FLAGS;
+		args->attrs[2].value = HSA_SVM_FLAG_GPU_ALWAYS_MAPPED;
+	}
+	pr_debug("Registering to SVM %p size: %ld nattr %u\n", (void*)aligned_addr,
+		 aligned_size, nattr);
+
+	/* Setting the flag and recording the range have to look atomic to a
+	 * concurrent deregistration, or one slipping between them would find
+	 * nothing to take, return success, and leave this pin flagged but
+	 * untracked -- or worse, take an overlapping record and clear the flag
+	 * back off the range we just set it on.
+	 */
+	if (nattr == 3)
+		pthread_mutex_lock(&fmm_ctx->always_mapped_mutex);
+
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
 		ret = HSAKMT_STATUS_ERROR;
-		goto out;
+		goto unlock;
+	}
+
+	/* Remember the range so deregister can clear the flag again */
+	if (nattr == 3 &&
+	    !svm_always_mapped_record_locked(fmm_ctx, aligned_addr, aligned_size)) {
+		/* Undo the flag rather than report success: an untracked
+		 * flagged range would stay resident for the life of the
+		 * mapping, with nothing left that could clear it.
+		 *
+		 * If that undo also fails there is nothing further to try --
+		 * the record this would have been retried from is precisely
+		 * what could not be allocated -- so the range is left flagged
+		 * and untracked.  Say so, since it is the residency leak this
+		 * tracker exists to prevent and the log is the only trace of
+		 * it.
+		 */
+		if (svm_always_mapped_clear(ctx, aligned_addr, aligned_size) !=
+		    HSAKMT_STATUS_SUCCESS)
+			pr_warn("Failed to clear AlwaysMapped on %p size %lu\n",
+				(void *)aligned_addr, aligned_size);
+		ret = HSAKMT_STATUS_NO_MEMORY;
+		goto unlock;
 	}
 
 	ret = HSAKMT_STATUS_SUCCESS;
 
-out:
-	free(args);
+unlock:
+	if (nattr == 3)
+		pthread_mutex_unlock(&fmm_ctx->always_mapped_mutex);
 	return ret;
 }
 
@@ -4429,6 +5175,57 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 	manageable_aperture_t *aperture;
 	vm_object_t *object;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	svm_always_mapped_range_t *always_mapped_rec = NULL;
+	HSAuint64 always_mapped_start = 0;
+	HSAuint64 always_mapped_size = 0;
+
+	/* SVM-API registrations leave no vm_object behind, so undo the
+	 * GPU_ALWAYS_MAPPED we may have set in fmm_register_mem_svm_api()
+	 * before falling into the no-op return below.  The record is looked up
+	 * by the page-aligned address that was registered, but it may span more
+	 * than that if overlapping pins were merged, so clear what it reports.
+	 * A plain registration that merely falls inside a pinned range is not
+	 * one of the record's pins and takes nothing.
+	 *
+	 * The lock is dropped before vm_find_object(), which takes an
+	 * aperture's fmm_mutex, so the two are never held nested.  It is not
+	 * taken at all while nothing is tracked, which is every deregistration
+	 * in a process that never pins; see svm_always_mapped_tracking_any().
+	 */
+	if (svm_always_mapped_tracking_any(fmm_ctx)) {
+		pthread_mutex_lock(&fmm_ctx->always_mapped_mutex);
+		always_mapped_size = svm_always_mapped_take_locked(fmm_ctx,
+						(HSAuint64)address & ~(HSAuint64)(PAGE_SIZE - 1),
+						&always_mapped_start, &always_mapped_rec);
+		if (always_mapped_size &&
+		    always_mapped_size <= SVM_ALWAYS_MAPPED_DEFER_MAX_SIZE) {
+			/* Small enough to be worth keeping flagged in case the
+			 * same range is pinned again; see
+			 * svm_always_mapped_idle_push().
+			 */
+			svm_always_mapped_idle_push(fmm_ctx, always_mapped_rec);
+			svm_always_mapped_idle_trim(ctx, fmm_ctx);
+		} else if (always_mapped_size) {
+			/* Drop the record only once the kernel has really
+			 * cleared the flag.  Discarding it on a failed ioctl
+			 * would lose the only handle on a still-flagged range;
+			 * keeping it lets a later pin of the same range merge
+			 * in and retry the clear on release.
+			 */
+			if (svm_always_mapped_clear(ctx, always_mapped_start,
+						    always_mapped_size) ==
+			    HSAKMT_STATUS_SUCCESS) {
+				svm_always_mapped_tree_delete(fmm_ctx,
+							      always_mapped_rec);
+				svm_always_mapped_free(always_mapped_rec);
+			} else {
+				pr_warn("Failed to clear AlwaysMapped on %p size %lu\n",
+					(void *)always_mapped_start,
+					always_mapped_size);
+			}
+		}
+		pthread_mutex_unlock(&fmm_ctx->always_mapped_mutex);
+	}
 
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);
 	if (!object)
