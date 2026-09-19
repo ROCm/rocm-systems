@@ -4694,7 +4694,10 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr) {
+      drm_owner(nullptr),
+      imported_region(nullptr),
+      imported_alloc_flag(MemoryRegion::AllocateNoFlags),
+      imported_size(0) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4706,7 +4709,10 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr),
+      imported_region(nullptr),
+      imported_alloc_flag(MemoryRegion::AllocateNoFlags),
+      imported_size(0) {}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4716,7 +4722,10 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {}
+      drm_owner(nullptr),
+      imported_region(nullptr),
+      imported_alloc_flag(MemoryRegion::AllocateNoFlags),
+      imported_size(0) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -4959,6 +4968,27 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                  ShareType::DMABUF_FD, dmabuf_fd);
 }
 
+/* Map a driver-reported placement onto a region ROCr can name. Returns nullptr
+ * when no suitable region exists, leaving the handle's properties unresolved. */
+const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo& info) {
+  if (info.is_device_memory) {
+    core::Agent* owner = agent_by_gpuid(info.node_id);
+    if (owner == nullptr) return nullptr;
+
+    /* Device VMM allocations come from the coarse-grained local pool. */
+    for (const auto& region : owner->regions()) {
+      const auto* amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
+      if (amd_region->IsLocalMemory() && !region->fine_grain()) return region.get();
+    }
+    return nullptr;
+  }
+
+  /* Host memory. The driver query reports no NUMA node, so the default
+   * fine-grained system region is used. */
+  if (system_regions_fine_.empty()) return nullptr;
+  return system_regions_fine_[0].get();
+}
+
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -4968,8 +4998,28 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
+  /* Recover placement and size while we still have an fd. Ask each agent driver
+   * in turn and take the first that recognizes it; AgentDriver(KFD) is not used
+   * because it throws when no KFD driver is present. */
+  core::DmaBufInfo info = {};
+  bool have_info = false;
+  for (auto& driver : AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(owned_fd, &info) == HSA_STATUS_SUCCESS) {
+      have_info = true;
+      break;
+    }
+  }
+
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
+  if (have_info) {
+    memoryHandle->imported_region = ResolveImportedRegion(info);
+    /* Every allocation reachable through this path was created with
+     * MEMORY_TYPE_PINNED; the driver query cannot confirm it, so this is an
+     * assumption rather than a recovered value. */
+    memoryHandle->imported_alloc_flag = MemoryRegion::AllocatePinned;
+    memoryHandle->imported_size = info.size;
+  }
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;
@@ -5032,14 +5082,28 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if (!memoryHandle->imported) {
-    *mem_region = memoryHandle->region;
-    *type = (memoryHandle->alloc_flag & core::MemoryRegion::AllocatePinned) ? MEMORY_TYPE_PINNED
-                                                                            : MEMORY_TYPE_NONE;
-  } else {
-    *mem_region = nullptr;
-    *type = MEMORY_TYPE_NONE;
-  }
+  /* Imported handles own no region; report the placement recovered at import
+   * time instead. Unresolved imports keep reporting nothing. */
+  const MemoryRegion* region =
+      memoryHandle->imported ? memoryHandle->imported_region : memoryHandle->region;
+  const MemoryRegion::AllocateFlags alloc_flag =
+      memoryHandle->imported ? memoryHandle->imported_alloc_flag : memoryHandle->alloc_flag;
+
+  *mem_region = region;
+  *type = (region != nullptr && (alloc_flag & core::MemoryRegion::AllocatePinned))
+              ? MEMORY_TYPE_PINNED
+              : MEMORY_TYPE_NONE;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t Runtime::VMemoryGetAllocSizeFromHandle(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                                    size_t* size) {
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
+  if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  *size = memoryHandle->imported ? memoryHandle->imported_size
+                                 : memoryHandle->driver_handle.size;
   return HSA_STATUS_SUCCESS;
 }
 

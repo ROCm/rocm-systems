@@ -84,9 +84,10 @@
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_vmem_get_alloc_size_from_handle
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 32
+#define HSA_AMD_INTERFACE_VERSION_MINOR 33
 
 #ifdef __cplusplus
 extern "C" {
@@ -4802,6 +4803,21 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_memory_pool_t* pool,
     hsa_amd_memory_type_t* type);
+
+/**
+ * @brief Returns the size of an allocation handle
+ *
+ * Works for both locally created and imported handles.
+ *
+ * @param[in] memory_handle memory handle to be queried
+ * @param[out] size allocation size in bytes
+ *
+ * @retval ::HSA_STATUS_SUCCESS
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid memory_handle
+ */
+hsa_status_t hsa_amd_vmem_get_alloc_size_from_handle(
+    hsa_amd_vmem_alloc_handle_t memory_handle, size_t* size);
 
 /**
  * @brief 128-bit globally unique identifier for a ROCr shared memory

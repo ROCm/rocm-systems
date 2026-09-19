@@ -359,6 +359,8 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaHandleImportDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueryDmaBufInfo))(int DMABufFd, \
+                                      HsaDmaBufInfo* Info);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtImportExternalSemaphore))(HSAuint32 NodeId, \
                                       void* NtHandle, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
@@ -554,6 +556,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
 #endif
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
+    HSAKMT_DEF(hsaKmtQueryDmaBufInfo)* HSAKMT_PFN(hsaKmtQueryDmaBufInfo);
     HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
     HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);

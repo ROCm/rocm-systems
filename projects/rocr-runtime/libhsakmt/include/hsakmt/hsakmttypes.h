@@ -1575,6 +1575,12 @@ typedef struct _HsaHandleImportFlags {
     } ui32;
 } HsaHandleImportFlags;
 
+typedef struct _HsaDmaBufInfo {
+    HSAuint64 Size;    // allocation size in bytes
+    HSAuint32 GpuId;   // KFD id of the node owning the buffer object
+    HSAuint32 Flags;   // KFD_IOC_ALLOC_MEM_FLAGS_*
+} HsaDmaBufInfo;
+
 typedef struct _HsaStructureSizes {
   HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow
   HSAuint16 SizeOfHsaNodeProperties;  // sizeof(HsaNodeProperties)
