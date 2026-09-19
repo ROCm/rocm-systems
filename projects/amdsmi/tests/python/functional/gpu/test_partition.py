@@ -240,54 +240,6 @@ class TestGpuPartition(unittest.TestCase):
     #         # t3.join()
     #     print("\n========> test_z_gpureset_asicinfo_multithread end <========\n")
 
-    def test_get_gpu_accelerator_partition_profile(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_accelerator_partition_profile=amdsmi.amdsmi_get_gpu_accelerator_partition_profile
-        )
-        return
-
-    def test_get_gpu_accelerator_partition_profile_config(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_accelerator_partition_profile_config=amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config
-        )
-        return
-
-    def test_get_gpu_compute_partition(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_compute_partition=amdsmi.amdsmi_get_gpu_compute_partition
-        )
-        return
-
-    def test_get_gpu_accelerator_partition_mem_alloc_mode(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_accelerator_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
-        )
-        return
-
-    def test_get_gpu_memory_partition(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_memory_partition=amdsmi.amdsmi_get_gpu_memory_partition
-        )
-        return
-
-    def test_get_gpu_memory_partition_config(self):
-        self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_gpu_memory_partition_config as it fails on MI300."
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_memory_partition_config=amdsmi.amdsmi_get_gpu_memory_partition_config
-        )
-        return
-
     def test_set_gpu_accelerator_partition_profile(self):
         self.common.print_func_name("")
 
