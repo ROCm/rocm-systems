@@ -20,6 +20,8 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
+# Temporary no-op change on roctracer to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.18.0)
 
 include( utils.cmake )
