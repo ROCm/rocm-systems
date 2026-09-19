@@ -1072,6 +1072,9 @@
     },
     "host_api_custom_gin_plugin": {
       "extends": "host_api_tests_symmem",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
       "env_variables": {
         "NCCL_GIN_PLUGIN": "example",
         "NCCL_GIN_ENABLE": "1"
@@ -1079,7 +1082,7 @@
       "tests": [
         {
           "name": "HostApi_CustomGinPluginPutSignal",
-          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression)",
+          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression). Single-node only: 2n hangs on the RMA IB proxy path (AICOMRCCL-2331).",
           "test_filter": "HostApiCustomGinPluginTest.PutSignalWithExternalGinPlugin"
         }
       ]
@@ -4992,8 +4995,11 @@
     },
     {
       "name": "Host API Tests - Custom GIN Plugin",
-      "description": "Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs",
+      "description": "Single-node Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs (excluded from multi-node; AICOMRCCL-2331)",
       "config": "host_api_custom_gin_plugin",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
       "enabled": true
     },
     {
