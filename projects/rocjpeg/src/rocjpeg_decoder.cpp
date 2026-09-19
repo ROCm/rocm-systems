@@ -317,6 +317,11 @@ RocJpegStatus RocJpegDecoder::FinalizeDecode(VASurfaceID current_surface_id, con
  */
 RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params,
                                                      const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size) {
+    // Serialize batched finalization: callers (e.g. DecodeBatchedSync) reach here without
+    // holding mutex_, and this touches shared state (the per-kernel param buffers and
+    // hip_stream_). A dedicated lock keeps two concurrent finalizations from interleaving
+    // without holding mutex_ across the GPU work, so async submits can still proceed.
+    std::lock_guard<std::mutex> finalize_lock(finalize_mutex_);
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
     for (int i = 0; i < batch_size; i += current_vcn_jpeg_spec.num_jpeg_cores) {
         int sub_batch_end = std::min(i + static_cast<int>(current_vcn_jpeg_spec.num_jpeg_cores), batch_size);
