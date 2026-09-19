@@ -18,6 +18,10 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
+// Selection marker for the hierarchical CE path. Defined once because the
+// scale-out MPI tests assert on this exact text.
+#define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
+
 // Largest message eligible for the unregistered forced CE AllReduce path.
 #define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
 
@@ -164,6 +168,11 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
 
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                          ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
+
+// True when an admitted CE task must run on the hierarchical path. The launch
+// site and the selection marker share this so they cannot disagree about which
+// algorithm a task got.
+bool ncclHierCeDispatch(struct ncclComm* comm);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
