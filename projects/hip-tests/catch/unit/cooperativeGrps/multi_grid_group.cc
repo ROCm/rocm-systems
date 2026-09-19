@@ -11,6 +11,8 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#include <unordered_set>
+
 /**
  * @addtogroup multi_grid_group multi_grid_group
  * @{
