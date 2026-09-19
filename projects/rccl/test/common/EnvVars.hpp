@@ -36,6 +36,7 @@ namespace RcclUnitTesting
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
     bool isGfx12;        // Detects if architecture is gfx12
+    bool isGfx1250;      // Detects if architecture is exactly gfx1250
     bool isGfx90;        // Detects if architecture is gfx90
 
     // Constructor that parses and collects environment variables
