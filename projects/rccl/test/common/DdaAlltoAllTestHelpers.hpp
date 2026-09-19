@@ -27,16 +27,25 @@ inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t da
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
 }
 
+// minRanks defaults to rcclDdaEnabled()'s own default (the full 8-rank clique),
+// matching every pre-existing caller's behavior unchanged. Pass a lower value
+// to exercise the relaxed floor rcclAlltoAllShouldTakeDdaPath() applies in
+// collectives.cc when RCCL_DDA_NRANKS_RELAX=1 -- otherwise this mirror always
+// tracked the unconditional 8-rank floor regardless of what that call site
+// actually passed. RcclAlltoAllDdaDecision.Gfx950_FourRanks_RelaxOn_TakesDda
+// (RcclWrapTests.cpp) additionally exercises that real call site directly.
 inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,
-    ncclDataType_t datatype) {
+    ncclDataType_t datatype,
+    int minRanks = nccl_dda_detail::kDdaNranks) {
   return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
       kDdaAlltoAllGfx942ThresholdBytes,
       kDdaAlltoAllGfx950ThresholdBytes,
-      kDdaAlltoAllGfx1250ThresholdBytes);
+      kDdaAlltoAllGfx1250ThresholdBytes,
+      minRanks);
 }
 
 // Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.

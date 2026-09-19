@@ -1256,6 +1256,21 @@
           "test_filter": "Rcclwrap.*"
         },
         {
+          "name": "RcclAllReduceDdaDecision",
+          "description": "DDA-vs-ring AllReduce decision unit tests, including the RCCL_DDA_NRANKS_RELAX minRanks floor",
+          "test_filter": "RcclAllReduceDdaDecision.*"
+        },
+        {
+          "name": "RcclAlltoAllDdaDecision",
+          "description": "DDA-vs-CE AlltoAll decision unit tests, including the RCCL_DDA_NRANKS_RELAX minRanks floor",
+          "test_filter": "RcclAlltoAllDdaDecision.*"
+        },
+        {
+          "name": "DdaAllReduceIpcTreeEligibleTest",
+          "description": "ncclAllReduceDdaIpcTreeEligible() divisibility/16-byte-alignment predicate, shared by AllReduce IPC eligibility and launch dispatch",
+          "test_filter": "DdaAllReduceIpcTreeEligibleTest.*"
+        },
+        {
           "name": "TransportTest",
           "description": "Transport layer tests",
           "test_filter": "TransportTest.*"
@@ -1269,6 +1284,21 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllReduce eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaNranksRelaxTest.*:DdaNranksRelaxIsolatedTest.*"
+        },
+        {
+          "name": "DdaCollectivesNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllGather/ReduceScatter/AllToAll eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaCollectivesNranksRelaxTest.*:DdaCollectivesNranksRelaxIsolatedTest.*"
+        },
+        {
+          "name": "DdaNranksRelaxConsensusTest",
+          "description": "RCCL_DDA_NRANKS_RELAX per-rank agreement check (hang-prevention gate)",
+          "test_filter": "DdaNranksRelaxConsensus.*"
         },
         {
           "name": "DdaAlltoAllThresholdTest",

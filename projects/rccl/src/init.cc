@@ -45,6 +45,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include "graph/topo.h"
+#include "algorithms/dda/ipc/dda_nranks_relax_consensus.h"
 #include "graph/rome_topo_consensus.h"
 #include "graph/xml.h"
 #include "archinfo.h"
@@ -1570,6 +1571,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int localCollNetCount;
     int isAllNvlink;
     bool nicFused;
+    bool ddaNranksRelax;
   };
 
   int nChannelsOrig;
@@ -2109,6 +2111,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  allGather3Data[rank].ddaNranksRelax = ncclDdaNranksRelaxEnabled();
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
@@ -2138,6 +2141,27 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                     nranks, [&](int r) { return allGather3Data[r].romeTopoModelIdx; },
                     [&](int r) { return allGather3Data[r].hostname; },
                     [&](int r) { return comm->peerInfo[r].hostHash; }),
+                  ret, fail);
+  }
+
+  // RCCL_DDA_NRANKS_RELAX is read per process, so it is not guaranteed uniform
+  // across ranks the way comm->nRanks is. Check it here, against data every
+  // rank already populated above and just exchanged, rather than inside
+  // ncclDdaIpcCommInit(): that function is only entered on the branch it
+  // itself gates, so a mismatch there would mean only some ranks reach its
+  // bootstrap allgather -- exactly the hang this check exists to prevent.
+  //
+  // Gated to communicators the knob can actually affect: multi-node comms
+  // never take the DDA IPC path regardless of the env var (nNodes == 1 is
+  // required everywhere it is consulted), and a comm of exactly kDdaNranks
+  // ranks gets the same eligible answer whether or not relax is set. Outside
+  // that range, ranks cannot disagree on the decision no matter what the env
+  // var says, so failing communicator init over a mismatch there would only
+  // ever be a false positive.
+  if (nNodes == 1 && ncclDdaNranksRelaxConsensusMatters(nranks)) {
+    NCCLCHECKGOTO(ncclCheckDdaNranksRelaxConsensus(
+                    nranks, [&](int r) { return allGather3Data[r].ddaNranksRelax; },
+                    [&](int r) { return allGather3Data[r].hostname; }),
                   ret, fail);
   }
 
@@ -3010,7 +3034,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   if (!job->parent && !job->isGrow) {
     if (ncclDdaUseFabricPath(comm)) {
       NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
-    } else if (comm->nNodes == 1 && comm->nRanks == 8) {
+    } else if (comm->nNodes == 1 && ncclDdaIpcNranksSupported(comm->nRanks)) {
       NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
     }
   }

@@ -207,6 +207,17 @@ bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, n
   return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, ceAllReduceAllowed);
 }
 
+// ncclDdaNranksRelaxEnabled: real body lives in ipc_init.cu, a .cu that is not
+// in this host-only binary's link closure. rcclSelectAllGather /
+// rcclSelectReduceScatter call it to pick the DDA participant-count floor
+// (RCCL_DDA_NRANKS_RELAX). Default false = the stock 8-rank floor, which is the
+// behaviour every existing wrap-test case assumes; flip g_ddaNranksRelaxEnabled
+// to exercise the relaxed floor.
+bool g_ddaNranksRelaxEnabled = false;
+bool ncclDdaNranksRelaxEnabled() {
+  return g_ddaNranksRelaxEnabled;
+}
+
 // getAlgoInfo / rcclKernelPackedChannels: rccl_wrap.cc `extern`-declares both
 // itself (their real definitions live in enqueue.cc / device-side tuning,
 // outside this TU's link closure), so no separate declaration is needed here.

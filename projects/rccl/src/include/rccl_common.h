@@ -248,8 +248,13 @@ constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
 // Returns true when the DDA fast path should be attempted for a collective.
 // Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
 // the user-configurable RCCL_DDA_THRESHOLD env var.
+// minRanks is the participant-count floor. It defaults to 8, the full single-node
+// clique. All four DDA IPC collectives (AllReduce / AllGather / ReduceScatter /
+// AllToAll) pass a relaxed floor of 2 when RCCL_DDA_NRANKS_RELAX=1, and the
+// default 8 otherwise. This is the authoritative description of the rule -- the
+// call sites reference it rather than restating it.
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0,
-                    size_t gfx1250Default = 0);
+                    size_t gfx1250Default = 0, int minRanks = 8);
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
