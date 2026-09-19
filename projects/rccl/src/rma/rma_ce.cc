@@ -106,7 +106,18 @@ fail:
 }
 
 ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
+  if (!comm) {
+    return ncclSuccess;
+  }
+
   ncclResult_t ret = ncclSuccess;
+  auto recordCudaError = [&ret](cudaError_t const cudaResult) {
+    if (cudaResult != cudaSuccess) {
+      ncclResult_t const cleanupResult = rcclCudaErrorHandler(cudaResult);
+      if (ret == ncclSuccess) ret = cleanupResult;
+      (void)cudaGetLastError();
+    }
+  };
 
   // Clean up rmaCeInitTaskQueue
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
@@ -116,37 +127,40 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
 
   // Destroy CE stream and event
   if (comm->rmaState.rmaCeState.ceStream != NULL) {
-    CUDACHECKGOTO(cudaStreamDestroy(comm->rmaState.rmaCeState.ceStream), ret, fail);
+    recordCudaError(cudaStreamDestroy(comm->rmaState.rmaCeState.ceStream));
     comm->rmaState.rmaCeState.ceStream = NULL;
   }
 
   if (comm->rmaState.rmaCeState.ceEvent != NULL) {
-    CUDACHECKGOTO(cudaEventDestroy(comm->rmaState.rmaCeState.ceEvent), ret, fail);
+    recordCudaError(cudaEventDestroy(comm->rmaState.rmaCeState.ceEvent));
     comm->rmaState.rmaCeState.ceEvent = NULL;
   }
 
-  for (int i = 0; i < comm->rmaState.rmaCeState.rmaCeCtxCount; i++) {
-    struct ncclRmaCeCtx* ceCtx = (struct ncclRmaCeCtx*)comm->rmaState.rmaCeState.rmaCeCtxs[i];
+  if (comm->rmaState.rmaCeState.rmaCeCtxs != nullptr) {
+    for (int i = 0; i < comm->rmaState.rmaCeState.rmaCeCtxCount; i++) {
+      struct ncclRmaCeCtx* ceCtx = (struct ncclRmaCeCtx*)comm->rmaState.rmaCeState.rmaCeCtxs[i];
+      if (ceCtx == nullptr) continue;
 
-    // Free per-rank operation sequence counters
-    if (ceCtx->signalOpSeqs) free(ceCtx->signalOpSeqs);
-    if (ceCtx->signalOpSeqsDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalOpSeqsDev, comm->memManager), ret, fail);
+      // Free per-rank operation sequence counters
+      if (ceCtx->signalOpSeqs) free(ceCtx->signalOpSeqs);
+      if (ceCtx->signalOpSeqsDev) NCCLCHECKIGNORE(ncclCudaFree(ceCtx->signalOpSeqsDev, comm->memManager), ret);
 
-    // Free host signals buffer
-    if (ceCtx->signalsHost) free(ceCtx->signalsHost);
+      // Free host signals buffer
+      if (ceCtx->signalsHost) free(ceCtx->signalsHost);
 
-    // Free device-resident constants
-    if (ceCtx->signalConstDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalConstDev, comm->memManager), ret, fail);
+      // Free device-resident constants
+      if (ceCtx->signalConstDev) NCCLCHECKIGNORE(ncclCudaFree(ceCtx->signalConstDev, comm->memManager), ret);
 
-    // Deregister and free signal window
-    if (ceCtx->signalsWin) NCCLCHECKGOTO(ncclCommWindowDeregister(comm, ceCtx->signalsWin->vidmem), ret, fail);
+      // Deregister and free signal window
+      if (ceCtx->signalsWin) NCCLCHECKIGNORE(ncclCommWindowDeregister(comm, ceCtx->signalsWin->vidmem), ret);
 
-    // Free signal device memory
-    if (ceCtx->signalsDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalsDev, comm->memManager), ret, fail);
+      // Free signal device memory
+      if (ceCtx->signalsDev) NCCLCHECKIGNORE(ncclCudaFree(ceCtx->signalsDev, comm->memManager), ret);
 
-    // Free the context itself
-    free(ceCtx);
-    comm->rmaState.rmaCeState.rmaCeCtxs[i] = NULL;
+      // Free the context itself
+      free(ceCtx);
+      comm->rmaState.rmaCeState.rmaCeCtxs[i] = NULL;
+    }
   }
 
   // Reset the number of contexts and initialized flag
@@ -156,10 +170,7 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
   free(comm->rmaState.rmaCeState.rmaCeCtxs);
   comm->rmaState.rmaCeState.rmaCeCtxs = NULL;
 
-exit:
   return ret;
-fail:
-  goto exit;
 }
 
 static ncclResult_t ncclRmaCePutLaunchPersist(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {

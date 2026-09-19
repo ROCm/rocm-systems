@@ -84,10 +84,17 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
         accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         accessDesc.location.id = i;
         accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-        CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
+        CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1), ret, vmm_fail);
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }
+    goto exit;
+
+vmm_fail:
+    (void)cuMemUnmap((CUdeviceptr)*ptr, handleSize);
+    (void)cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
+    (void)cuMemRelease(handle);
+    *ptr = NULL;
     goto exit;
   }
 

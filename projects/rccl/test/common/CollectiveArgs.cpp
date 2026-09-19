@@ -19,14 +19,13 @@ namespace RcclUnitTesting
                                   int             const  streamIdx,
                                   OptionalColArgs const  &optionalColArgs)
   {
-    // Free scalar based on previous scalarMode
-    if (optionalColArgs.scalarMode != -1)
+    // Free scalar based on the previous scalarMode, including when the new
+    // arguments disable scalar mode.
+    if (this->localScalar.ptr != nullptr)
     {
-      if (this->localScalar.ptr != nullptr)
-      {
-        if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
-        if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
-      }
+      if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
+      if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
+      this->localScalar.Attach(nullptr);
     }
 
     this->globalRank        = globalRank;
@@ -36,6 +35,10 @@ namespace RcclUnitTesting
     this->dataType          = dataType;
     this->numInputElements  = numInputElements;
     this->numOutputElements = numOutputElements;
+    if (this->inputGpu.ptr != nullptr || this->outputGpu.ptr != nullptr)
+    {
+      CHECK_CALL(this->AttachMem());
+    }
     this->streamIdx         = streamIdx;
     this->options           = optionalColArgs;
 
@@ -57,6 +60,35 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  ErrCode CollectiveArgs::AttachMem()
+  {
+    // Calculate the current active bytes based on this iteration's element count
+    size_t currentInputBytes = this->numInputElements * DataTypeToBytes(this->dataType);
+    size_t currentOutputBytes = this->numOutputElements * DataTypeToBytes(this->dataType);
+
+    // For out-of-place, both pointers remain at the start of their respective base allocations.
+    // No attachment/offsetting is necessary.
+    if (this->inPlace)
+    {
+      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+      {
+        // inputGpu holds the base pointer. Offset outputGpu.
+        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * currentOutputBytes));
+      }
+      else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+      {
+        // outputGpu holds the base pointer. Offset inputGpu.
+        this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * currentInputBytes));
+      }
+      else
+      {
+        // Both buffers share the exact same base pointer
+        this->outputGpu.Attach(this->inputGpu.ptr);
+      }
+    }
+    return TEST_SUCCESS;
+  }
+
   ErrCode CollectiveArgs::AllocateMem(bool   const inPlace,
                                       bool   const useManagedMem,
                                       bool   const userRegistered)
@@ -73,31 +105,35 @@ namespace RcclUnitTesting
 
     if (inPlace)
     {
-      if (this->funcType == ncclCollScatter)
+      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
       {
         CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
       }
       else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
       {
         CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-        this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
       }
       else
       {
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.ptr);
       }
-      CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
+      CHECK_CALL(this->AttachMem());
     }
     else
     {
       CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-      CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
+    CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
+    bool const isFp8Reduction =
+      (this->dataType == ncclFloat8e4m3 || this->dataType == ncclFloat8e5m2)
+      && CollectiveArgs::UsesReduce(this->funcType);
+    if (isFp8Reduction)
+    {
+      CHECK_CALL(this->fp8AlternativeExpected.AllocateCpuMem(this->numOutputBytesAllocated));
+    }
 
     // Device-data mode: a device-resident expected buffer for device-side validate.
     // Allocated only for collectives whose prep func builds expected on the GPU
@@ -108,7 +144,16 @@ namespace RcclUnitTesting
         (this->funcType == ncclCollAlltoAll || this->funcType == ncclCollAllReduce
          || this->funcType == ncclCollReduceScatter))
     {
+      // userRegistered must be passed, otherwise in the case of symmetric memory,
+      // data validation failures show up with UT_DEVICE_DATA=1 but not with 0
+      // it is verified that even expected [CPU data] !=  expectedGpu .
+      // ncclMemAlloc() +  hipMallocManaged/hipMalloc is not compatible.
       CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+      if (isFp8Reduction)
+      {
+        CHECK_CALL(this->fp8AlternativeExpectedGpu.AllocateGpuMem(
+          this->numOutputBytesAllocated, useManagedMem, userRegistered));
+      }
     }
 
     // Allocate bias buffers if bias is enabled
@@ -131,6 +176,7 @@ namespace RcclUnitTesting
     // sub-case (which would validate against a stale expectedGpu). Device prep funcs set
     // it true only when they actually build expectedGpu.
     this->expectedOnDevice = false;
+    this->hasFp8AlternativeExpected = false;
     CollFuncPtr prepFunc = (prepareDataFunc == nullptr ? DefaultPrepareDataFunc : prepareDataFunc);
     return prepFunc(*this);
   }
@@ -151,11 +197,14 @@ namespace RcclUnitTesting
     // (no D2H copy, no host element loop), using the same per-type tolerances as IsEqual.
     if (UtDeviceDataEnabled() && this->expectedOnDevice)
     {
+      CHECK_HIP(hipSetDevice(this->deviceId));
       size_t mismatches = 0;
       CHECK_CALL(PtrUnion::IsEqualDevice(this->dataType,
                                          this->numOutputElements,
                                          this->outputGpu.ptr,
                                          this->expectedGpu.ptr,
+                                         this->hasFp8AlternativeExpected
+                                           ? this->fp8AlternativeExpectedGpu.ptr : nullptr,
                                          mismatches));
       isMatch = (mismatches == 0);
       if (!isMatch)
@@ -170,6 +219,8 @@ namespace RcclUnitTesting
     CHECK_CALL(this->outputCpu.IsEqual(this->dataType,
                                        this->numOutputElements,
                                        this->expected,
+                                       this->hasFp8AlternativeExpected
+                                         ? &this->fp8AlternativeExpected : nullptr,
                                        true,
                                        isMatch));
     if (!isMatch) TEST_ERROR("Mismatch for %s", this->GetDescription().c_str());
@@ -181,8 +232,8 @@ namespace RcclUnitTesting
     // If in-place, either only inputGpu or outputGpu was allocated
     if (this->inPlace)
     {
-      if (this->funcType == ncclCollGather)
-        this->outputGpu.FreeGpuMem();
+      if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+        this->outputGpu.FreeGpuMem(this->userRegistered);
       else
         this->inputGpu.FreeGpuMem(this->userRegistered);
     }
@@ -194,9 +245,17 @@ namespace RcclUnitTesting
 
     this->outputCpu.FreeCpuMem();
     this->expected.FreeCpuMem();
+    if (this->fp8AlternativeExpected.ptr != nullptr)
+    {
+      this->fp8AlternativeExpected.FreeCpuMem();
+    }
     if (this->expectedGpu.ptr != nullptr)
     {
       this->expectedGpu.FreeGpuMem(this->userRegistered);
+    }
+    if (this->fp8AlternativeExpectedGpu.ptr != nullptr)
+    {
+      this->fp8AlternativeExpectedGpu.FreeGpuMem(this->userRegistered);
     }
 
     if (this->localScalar.ptr != nullptr)

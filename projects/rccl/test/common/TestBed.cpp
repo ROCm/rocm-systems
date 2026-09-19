@@ -3,20 +3,24 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include <fcntl.h>
+#include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <cstring>
 #include <unistd.h>
 #include "TestBed.hpp"
+#include "PipeUtils.hpp"
 #include <rccl/rccl.h>
 
 #define PIPE_WRITE(childId, val)                                        \
-  ASSERT_EQ(write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
+  ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
 
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
-    ssize_t retval = read(childList[childId]->parentReadFd, &val, sizeof(val)); \
+    ssize_t retval = RcclUnitTesting::detail::safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
@@ -96,13 +100,115 @@ namespace RcclUnitTesting
     this->configUsedPool = false;
   }
 
+  bool TestBed::SpawnChildProcess(TestBedChild* child, MemAllocType const memAllocType)
+  {
+    if (child == nullptr)
+      return false;
+
+    auto closePipes = [child]()
+    {
+      if (child->parentWriteFd >= 0) close(child->parentWriteFd);
+      if (child->parentReadFd >= 0) close(child->parentReadFd);
+      if (child->childWriteFd >= 0) close(child->childWriteFd);
+      if (child->childReadFd >= 0) close(child->childReadFd);
+      child->parentWriteFd = -1;
+      child->parentReadFd = -1;
+      child->childWriteFd = -1;
+      child->childReadFd = -1;
+    };
+
+    if (child->InitPipes() != TEST_SUCCESS)
+    {
+      closePipes();
+      return false;
+    }
+
+    // Parent-side descriptors must not leak into subsequently exec'd workers.
+    // Child-side descriptors are the only descriptors preserved across exec.
+    if (fcntl(child->parentWriteFd, F_SETFD, FD_CLOEXEC) == -1 ||
+        fcntl(child->parentReadFd, F_SETFD, FD_CLOEXEC) == -1 ||
+        fcntl(child->childWriteFd, F_SETFD, 0) == -1 ||
+        fcntl(child->childReadFd, F_SETFD, 0) == -1)
+    {
+      TEST_ERROR("Unable to configure pipe descriptors for child %d: %s",
+                 child->childId, strerror(errno));
+      closePipes();
+      return false;
+    }
+
+    // Construct all arguments before fork. A HIP-initialized parent can have
+    // background threads holding libc locks, so the child must do only
+    // async-signal-safe work before replacing its process image.
+    std::string const sChildId      = std::to_string(child->childId);
+    std::string const sChildReadFd  = std::to_string(child->childReadFd);
+    std::string const sChildWriteFd = std::to_string(child->childWriteFd);
+    std::string const sVerbose      = std::to_string(ev.verbose ? 1 : 0);
+    std::string const sPrintVal     = std::to_string(ev.printValues);
+    std::string const sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
+    std::string const sMemAllocType = std::to_string(static_cast<int>(memAllocType));
+
+    fflush(nullptr);
+    pid_t const pid = fork();
+    if (pid == 0)
+    {
+      close(child->parentWriteFd);
+      close(child->parentReadFd);
+      execl("/proc/self/exe", "rccl_unit_test",
+            "--child",
+            sChildId.c_str(),
+            sChildReadFd.c_str(),
+            sChildWriteFd.c_str(),
+            sVerbose.c_str(),
+            sPrintVal.c_str(),
+            sThreading.c_str(),
+            sMemAllocType.c_str(),
+            static_cast<char*>(nullptr));
+      _exit(127);
+    }
+    if (pid < 0)
+    {
+      TEST_ERROR("fork() failed for child %d: %s", child->childId, strerror(errno));
+      closePipes();
+      return false;
+    }
+
+    child->pid = pid;
+    close(child->childWriteFd);
+    close(child->childReadFd);
+    child->childWriteFd = -1;
+    child->childReadFd = -1;
+    return true;
+  }
+
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
                           std::vector<int>              const& numCollectivesInGroup,
                           std::vector<int>              const& numStreamsPerGroup,
                           int                           const  numGroupCalls,
-                          bool                          const  useBlocking)
+                          bool                          const  useBlocking,
+                          MemAllocType                  const  memAllocType)
   {
     InteractiveWait("Starting InitComms");
+
+    #ifndef ENABLE_OPENMP
+    if (ev.useMultithreading)
+    {
+      FAIL() << "UT_MULTITHREAD=1 requires a unit-test build with OPENMP_TESTS_ENABLED=ON";
+    }
+    #endif
+
+    // If children/comms from a previous test mode (e.g. SP) are still active,
+    // ensure they are cleanly stopped before creating new ones for MP mode
+    if (this->numActiveChildren > 0)
+    {
+      this->DestroyComms();
+    }
+
+    // DestroyComms() owns teardown for both pool and fork-fresh paths. A
+    // non-empty childList here means teardown failed to restore the invariant.
+    if (!childList.empty())
+    {
+      FAIL() << "DestroyComms failed to clear childList before InitComms";
+    }
 
     // Count up the total number of GPUs to use and track child/deviceId per rank
     this->numActiveChildren = deviceIdsPerProcess.size();
@@ -125,24 +231,15 @@ namespace RcclUnitTesting
       }
     }
 
-    // Guards both paths: the pool-reuse branch below would silently overwrite
-    // a non-empty childList.
-    if (childList.size() > 0)
-    {
-      FAIL() << "DestroyComms must be called prior to subsequent call to InitComms";
-    }
-
     // Comm pool (UT_COMM_POOL): worker d is pinned to device d and keeps its
     // device-code object resident, so reuse skips the ~15-30s load per config.
     this->configUsedPool = false;
     if (this->poolMode)
     {
-      // Each worker snapshots env at fork and NCCL_PARAM caches it; a test that
-      // changes env must call Finalize() to re-fork the pool.
+      // Each worker snapshots env at exec and NCCL_PARAM caches it; a test that
+      // changes env must call Finalize() to re-exec the pool.
       if (this->poolChildren.empty())
       {
-        // CRITICAL: no HIP call in the parent before fork -- HIP state does not
-        // survive fork() and workers SEGV. Use ev.GetNumDetectedGpus() instead.
         int poolSize = this->numDevicesAvailable;
         int const detectedGpus = ev.GetNumDetectedGpus();
         if (detectedGpus > 0 && detectedGpus < poolSize)
@@ -153,31 +250,18 @@ namespace RcclUnitTesting
         for (int d = 0; d < poolSize; ++d)
         {
           this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
-          if (this->poolChildren[d]->InitPipes() != TEST_SUCCESS)
+          if (!SpawnChildProcess(this->poolChildren[d], memAllocType))
           {
             // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
             // stops instead of indexing an empty childList -> SEGV.
             TeardownPool();
-            FAIL() << "Unable to create pipes to pool child process " << d;
+            FAIL() << "Unable to start pool child process " << d;
           }
-          pid_t pid = fork();
-          if (pid == 0)
-          {
-            this->poolChildren[d]->StartExecutionLoop();
-            return;
-          }
-          if (pid < 0)
-          {
-            TeardownPool();
-            FAIL() << "fork() failed for pool child process " << d;
-          }
-          this->poolChildren[d]->pid = pid;
-          close(this->poolChildren[d]->childWriteFd);
-          close(this->poolChildren[d]->childReadFd);
         }
         // Do NOT pre-warm workers: under the runner's --jobs N it storms
         // ncclCommInitAll across all GPUs and fails intermittently.
       }
+
 
       // Map this config's children onto distinct pool workers by representative device.
       bool mappable = true;
@@ -207,30 +291,20 @@ namespace RcclUnitTesting
     if (!this->configUsedPool)
     {
       // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
-      // (The "DestroyComms must precede InitComms" guard is hoisted above, covering both paths.)
+      // The childList invariant was checked above after any prior teardown.
       childList.resize(this->numActiveChildren);
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
         childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
-        if (childList[childId]->InitPipes() != TEST_SUCCESS)
+        if (!SpawnChildProcess(childList[childId], memAllocType))
         {
-          TEST_ERROR("Unable to create pipes to child process");
-          return;
-        }
-
-        pid_t pid = fork();
-        if (pid == 0)
-        {
-          // Child process enters execution loop
-          childList[childId]->StartExecutionLoop();
-          return;
-        }
-        else
-        {
-          // Parent records child process ID and closes unused ends of pipe
-          childList[childId]->pid = pid;
-          close(childList[childId]->childWriteFd);
-          close(childList[childId]->childReadFd);
+          // SpawnChildProcess already closed the failed child's pipe descriptors.
+          // Remove the never-started child so teardown does not write to or wait on it.
+          TestBedChild* failedChild = childList[childId];
+          delete failedChild;
+          childList.resize(childId);
+          this->numActiveChildren = childId;
+          FAIL() << "Unable to start child process " << childId;
         }
       }
     }
@@ -283,28 +357,34 @@ namespace RcclUnitTesting
       // Send the total number of group calls for this child process
       PIPE_WRITE(childId, numGroupCalls);
 
-      // Serialize by value: a vector's heap pointer is stale in a pool worker.
-      int const numColls = (int)numCollectivesInGroup.size();
-      PIPE_WRITE(childId, numColls);
-      for (int i = 0; i < numColls; ++i)
-      {
-        int const value = numCollectivesInGroup[i];
-        PIPE_WRITE(childId, value);
+      // Send the number of collectives to be run per group call
+      int const numCollSize = this->numCollectivesInGroup.size();
+      PIPE_WRITE(childId, numCollSize);
+      if (numCollSize > 0) {
+        ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
+                                                           this->numCollectivesInGroup.data(),
+                                                           numCollSize * sizeof(int)),
+                  numCollSize * sizeof(int));
       }
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
 
+      // Send memAllocType to child process
+      int const memAllocTypeVal = static_cast<int>(memAllocType);
+      PIPE_WRITE(childId, memAllocTypeVal);
+
       // Send whether to use MultiRank interfaces or not.
       PIPE_WRITE(childId, useMulti);
 
-      // Send how many streams to use per group call (by value: size + elements, see above).
-      int const numStreams = (int)numStreamsPerGroup.size();
-      PIPE_WRITE(childId, numStreams);
-      for (int i = 0; i < numStreams; ++i)
-      {
-        int const value = numStreamsPerGroup[i];
-        PIPE_WRITE(childId, value);
+      // Send how many streams to use per group call
+      int const numStreamsSize = this->numStreamsPerGroup.size();
+      PIPE_WRITE(childId, numStreamsSize);
+      if (numStreamsSize > 0) {
+        ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
+                                                           this->numStreamsPerGroup.data(),
+                                                           numStreamsSize * sizeof(int)),
+                  numStreamsSize * sizeof(int));
       }
 
       // Send the GPUs this child uses
@@ -326,15 +406,15 @@ namespace RcclUnitTesting
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
-                          int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking)
+                          int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking, MemAllocType const memAllocType)
   {
-    InitComms(deviceIdsPerProcess, TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking);
+    InitComms(deviceIdsPerProcess, TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking, memAllocType);
   }
 
-  void TestBed::InitComms(int const numGpus, int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking)
+  void TestBed::InitComms(int const numGpus, int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking, MemAllocType const memAllocType)
   {
      const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
-     InitComms(GetDeviceIdsList(1, numGpus, gpuPriorityOrder), TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking);
+     InitComms(GetDeviceIdsList(1, numGpus, gpuPriorityOrder), TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking, memAllocType);
   }
 
   void TestBed::SetCollectiveArgs(ncclFunc_t      const funcType,
@@ -379,14 +459,14 @@ namespace RcclUnitTesting
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::AllocateMem(bool   const inPlace,
-                            bool   const useManagedMem,
-                            int    const groupId,
-                            int    const collId,
-                            int    const rank,
-                            bool   const userRegistered)
+  void TestBed::AllocateMemInternal(bool   const inPlace,
+                                    bool   const useManagedMem,
+                                    int    const groupId,
+                                    int    const collId,
+                                    int    const rank,
+                                    bool   const userRegistered)
   {
-    InteractiveWait("Starting AllocateMem");
+    InteractiveWait("Starting AllocateMemInternal");
 
     // Build list of ranks this applies to (-1 for rank means to set for all)
     std::vector<int> rankList;
@@ -400,6 +480,7 @@ namespace RcclUnitTesting
 
     // Loop over all ranks and send allocation command to appropriate child process
     int const cmd = TestBedChild::CHILD_ALLOCATE_MEM;
+    std::vector<int> ackChildIds;
     for (auto currGroup : groupList) {
       for (auto currRank : rankList)
       {
@@ -411,10 +492,67 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, useManagedMem);
         PIPE_WRITE(childId, userRegistered);
         PIPE_WRITE(childId, currGroup);
-        PIPE_CHECK(childId);
+        ackChildIds.push_back(childId);
       }
     }
-    InteractiveWait("Finishing AllocateMem");
+    // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
+    // acknowledgement from the child that received that command.
+    for (int childId : ackChildIds) PIPE_CHECK(childId);
+    InteractiveWait("Finishing AllocateMemInternal");
+  }
+
+  void TestBed::RegisterMemInternal(int    const groupId,
+                                    int    const collId,
+                                    int    const rank)
+  {
+    InteractiveWait("Starting RegisterMemInternal");
+    // Build list of ranks this applies to (-1 for rank means to set for all)
+    std::vector<int> rankList;
+    for (int i = 0; i < this->numActiveRanks; ++i)
+      if (rank == -1 || rank == i) rankList.push_back(i);
+
+    // Build list of groups this applies to (-1 for groupId means to set for all)
+    std::vector<int> groupList;
+    for (int i = 0; i < this->numGroupCalls; ++i)
+      if (groupId == -1 || groupId == i) groupList.push_back(i);
+
+    // Group selected ranks by child so each child can register all of its
+    // selected local ranks in one grouped RCCL call.
+    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
+    for (int currRank : rankList)
+      ranksPerChild[rankToChildMap[currRank]].push_back(currRank);
+
+    int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
+    for (auto currGroup : groupList) {
+      // Send to all participating children before waiting so collective
+      // symmetric-window registration can make progress across processes.
+      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+        if (ranksPerChild[childId].empty()) continue;
+        PIPE_WRITE(childId, regCmd);
+        PIPE_WRITE(childId, currGroup);
+        PIPE_WRITE(childId, collId);
+        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
+        PIPE_WRITE(childId, numRanks);
+        for (int currRank : ranksPerChild[childId])
+          PIPE_WRITE(childId, currRank);
+      }
+
+      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+        if (!ranksPerChild[childId].empty()) PIPE_CHECK(childId);
+      }
+    }
+    InteractiveWait("Finishing RegisterMemInternal");
+  }
+
+  void TestBed::AllocateMem(bool   const inPlace,
+                            bool   const useManagedMem,
+                            int    const groupId,
+                            int    const collId,
+                            int    const rank,
+                            bool   const userRegistered)
+  {
+    this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,userRegistered);
+    this->RegisterMemInternal(groupId,collId,rank);
   }
 
   void TestBed::PrepareData(int         const groupId,
@@ -488,12 +626,11 @@ namespace RcclUnitTesting
           }
         }
       }
-    }
 
-    // Wait for child acknowledgement
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
-    {
-      if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
+      }
     }
 
     InteractiveWait("Finishing ExecuteCollectives");
@@ -578,20 +715,22 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
-    int const cmd = TestBedChild::CHILD_DEALLOCATE_MEM;
-
-    for (auto currGroup : groupList)
-    {
+    int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
+    std::vector<int> ackChildIds;
+    for (auto currGroup : groupList) {
       for (auto currRank : rankList)
       {
         int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
+        PIPE_WRITE(childId, deallocCmd);
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        PIPE_CHECK(childId);
+        ackChildIds.push_back(childId);
       }
     }
+
+    // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
+    for (int childId : ackChildIds) PIPE_CHECK(childId);
 
     InteractiveWait("Finishing DeallocateMem");
   }
@@ -697,27 +836,51 @@ namespace RcclUnitTesting
 
     InteractiveWait("Starting Finalize");
 
-    // Send Stop to all child processes
+    // Stop is best-effort: a worker may already have exited after reporting a
+    // HIP/RCCL failure. Teardown must still close every pipe, reap every child,
+    // and restore the empty-childList invariant.
     int const cmd = TestBedChild::CHILD_STOP;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
-      PIPE_WRITE(childId, cmd);
-
-      // Close pipes to child process
-      close(childList[childId]->parentWriteFd);
-      close(childList[childId]->parentReadFd);
+      TestBedChild* child = childList[childId];
+      if (child == nullptr)
+        continue;
+      if (child->pid > 0 && child->parentWriteFd >= 0)
+        (void)RcclUnitTesting::detail::safe_pipe_write(child->parentWriteFd, &cmd, sizeof(cmd));
+      if (child->parentWriteFd >= 0)
+      {
+        close(child->parentWriteFd);
+        child->parentWriteFd = -1;
+      }
     }
 
     // Wait for processes to stop
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
+      TestBedChild* child = childList[childId];
+      if (child == nullptr)
+        continue;
       int returnVal = 0;
-      waitpid(childList[childId]->pid, &returnVal, 0);
-      if (returnVal != 0)
+      pid_t waitResult = -1;
+      if (child->pid > 0)
       {
-        TEST_ERROR("Child process %d exited with code %d", childId, returnVal);
+        do
+        {
+          waitResult = waitpid(child->pid, &returnVal, 0);
+        } while (waitResult == -1 && errno == EINTR);
       }
-      delete(childList[childId]);
+      if (waitResult > 0 && WIFSIGNALED(returnVal))
+      {
+        TEST_ERROR("Child process %d killed by signal %d", childId, WTERMSIG(returnVal));
+      }
+      else if (waitResult > 0 && WIFEXITED(returnVal) && WEXITSTATUS(returnVal) != 0)
+      {
+        TEST_ERROR("Child process %d exited with code %d", childId, WEXITSTATUS(returnVal));
+      }
+      // Only close the read end AFTER the child process is dead
+      if (child->parentReadFd >= 0)
+        close(child->parentReadFd);
+      delete child;
     }
 
     childList.clear();
@@ -894,7 +1057,8 @@ namespace RcclUnitTesting
                                std::vector<bool>           const& inPlaceList,
                                std::vector<bool>           const& managedMemList,
                                std::vector<bool>           const& useHipGraphList,
-                               bool                        const& enableSweep)
+                               bool                        const& enableSweep,
+                               MemAllocType                memAllocType)
   {
     // Sort numElements in descending order to cut down on # of allocations
     std::vector<int> sortedN = numElements;
@@ -926,7 +1090,7 @@ namespace RcclUnitTesting
         continue;
       }
       const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
-      this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder));
+      this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder),1,1,1,true,memAllocType);
       if (testing::Test::HasFailure())
       {
         isCorrect = false;
@@ -949,6 +1113,11 @@ namespace RcclUnitTesting
       for (int ipIdx = 0; ipIdx < inPlaceList.size()    && isCorrect; ++ipIdx)
       for (int mmIdx = 0; mmIdx < managedMemList.size() && isCorrect; ++mmIdx)
       {
+        //  GUARD: Symmetric Memory is incompatible with Managed memory
+        if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN && managedMemList[mmIdx])
+        {
+          continue;
+        }
         for (int neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
         {
           int numInputElements, numOutputElements;
@@ -978,7 +1147,7 @@ namespace RcclUnitTesting
           // Only allocate once for largest size
           if (neIdx == 0)
           {
-            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx]);
+            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx],-1,-1,-1, (memAllocType == MEM_ALLOC_SYMMETRIC_WIN));
             if (testing::Test::HasFailure())
             {
               isCorrect = false;
@@ -1052,6 +1221,27 @@ namespace RcclUnitTesting
     static int numTestsRun = 0;
     return numTestsRun;
   }
+
+  void TestBed::StopChild(int const childId)
+  {
+    if (childId < 0 || childId >= this->childList.size()) return;
+    TestBedChild* child = this->childList[childId];
+    if (child != nullptr)
+     {
+      // 1. Send CHILD_STOP command to the child
+       int const cmd = TestBedChild::CHILD_STOP;
+       PIPE_WRITE(childId, cmd);
+       // 2. Wait for child process to exit cleanly before closing pipes
+       int status;
+       waitpid(child->pid, &status, 0);
+       // 3. Close pipes and delete object
+       close(child->parentWriteFd);
+       close(child->parentReadFd);
+       delete child;
+       this->childList[childId] = nullptr;
+     }
+  }
+
 }
 
 #undef PIPE_WRITE

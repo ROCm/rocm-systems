@@ -8,12 +8,55 @@
 #include "PrepDataFuncs.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 #include <hip/hip_runtime.h>
 
 namespace RcclUnitTesting
 {
+
+  class ScopedDevice {
+  public:
+    explicit ScopedDevice(int targetDeviceId) {
+      // Save the caller's current device
+      if (hipGetDevice(&savedDeviceId_) != hipSuccess) {
+        savedDeviceId_ = 0;
+      }
+      // Only switch context if target is different from current
+      if (savedDeviceId_ != targetDeviceId) {
+        hipSetDevice(targetDeviceId);
+      }
+    }
+
+    ~ScopedDevice() {
+      // Automatically restore caller's original device on scope exit
+      hipSetDevice(savedDeviceId_);
+    }
+
+    // Prevent copying/moving
+    ScopedDevice(const ScopedDevice&) = delete;
+    ScopedDevice& operator=(const ScopedDevice&) = delete;
+
+  private:
+    int savedDeviceId_ = 0;
+  };
   // Byte written into expectedGpu[0] by the UT_DEVICE_DATA_FAULT negative control.
   static constexpr int kDeviceDataFaultByte = 0xFF;
+
+  static bool IsFp8(ncclDataType_t const dataType)
+  {
+    return dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2;
+  }
+
+  static float GetFp8(PtrUnion const& values, ncclDataType_t const dataType, size_t const idx)
+  {
+    return dataType == ncclFloat8e4m3 ? (float)values.F1[idx] : (float)values.B1[idx];
+  }
+
+  static ErrCode StoreFp8(PtrUnion& values, ncclDataType_t const dataType,
+                          size_t const idx, float const value)
+  {
+    return values.Set(dataType, idx, 0, (double)value);
+  }
 
   // Negative control: when UT_DEVICE_DATA_FAULT is set to a non-zero value, corrupt one
   // expected element so a correct collective output must mismatch (proves device validate
@@ -25,6 +68,11 @@ namespace RcclUnitTesting
     {
       CHECK_HIP(hipMemset(collArgs.expectedGpu.ptr, kDeviceDataFaultByte,
                           DataTypeToBytes(collArgs.dataType)));
+      if (collArgs.hasFp8AlternativeExpected)
+      {
+        CHECK_HIP(hipMemset(collArgs.fp8AlternativeExpectedGpu.ptr, kDeviceDataFaultByte,
+                            DataTypeToBytes(collArgs.dataType)));
+      }
       fprintf(stdout, "[UT][device-data] FAULT injected into expectedGpu[0] (rank %d)\n",
               collArgs.globalRank);
       fflush(stdout);
@@ -34,6 +82,7 @@ namespace RcclUnitTesting
 
   ErrCode DefaultPrepareDataFunc(CollectiveArgs &collArgs)
   {
+    ScopedDevice dev(collArgs.deviceId);
     switch (collArgs.funcType)
     {
     case ncclCollBroadcast:     return DefaultPrepData_Broadcast(collArgs);
@@ -139,7 +188,10 @@ namespace RcclUnitTesting
       CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType, collArgs.numInputElements,
                                                      collArgs.globalRank, 0));
       CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numInputElements,
-                                                               collArgs.totalRanks, collArgs.options.redOp));
+                                                               collArgs.totalRanks, collArgs.options.redOp, 0,
+                                                               IsFp8(collArgs.dataType)
+                                                                 ? collArgs.fp8AlternativeExpectedGpu.ptr : nullptr));
+      collArgs.hasFp8AlternativeExpected = IsFp8(collArgs.dataType);
       CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
       collArgs.expectedOnDevice = true;
       return TEST_SUCCESS;
@@ -162,6 +214,9 @@ namespace RcclUnitTesting
 
     PtrUnion tempInputCpu;
     CHECK_CALL(tempInputCpu.Attach(collArgs.outputCpu));
+    bool const buildFp8Alternative =
+      IsFp8(collArgs.dataType) && (isAllReduce || collArgs.options.root == collArgs.globalRank);
+    std::vector<float> fp32Result(buildFp8Alternative ? collArgs.numInputElements : 0);
     for (int rank = 0; rank < collArgs.totalRanks; ++rank)
     {
       // Generate temporary input for this rank
@@ -208,6 +263,14 @@ namespace RcclUnitTesting
           CHECK_CALL(result.Reduce(collArgs.dataType, collArgs.numInputElements,
                                    tempInputCpu, tempOp));
         }
+        if (buildFp8Alternative)
+        {
+          for (size_t i = 0; i < collArgs.numInputElements; ++i)
+          {
+            float const input = GetFp8(tempInputCpu, collArgs.dataType, i);
+            fp32Result[i] = rank == 0 ? input : ReduceOp(tempOp, fp32Result[i], input);
+          }
+        }
       }
     }
 
@@ -215,6 +278,10 @@ namespace RcclUnitTesting
     if (collArgs.options.redOp == ncclAvg && (isAllReduce || collArgs.options.root == collArgs.globalRank))
     {
       CHECK_CALL(result.DivideByInt(collArgs.dataType, collArgs.numInputElements, collArgs.totalRanks));
+      if (buildFp8Alternative)
+      {
+        for (float& value : fp32Result) value /= collArgs.totalRanks;
+      }
     }
 
     // Add bias to expected output if bias is enabled
@@ -243,9 +310,22 @@ namespace RcclUnitTesting
 
       // Apply bias to expected output using the SAME reduction operation as AllReduce
       CHECK_CALL(result.Reduce(collArgs.dataType, collArgs.numInputElements, collArgs.biasCpu, tempOp));
+      if (buildFp8Alternative)
+      {
+        for (size_t i = 0; i < collArgs.numInputElements; ++i)
+          fp32Result[i] = ReduceOp(tempOp, fp32Result[i],
+                                   GetFp8(collArgs.biasCpu, collArgs.dataType, i));
+      }
 
       // Update the biasPtr in options to point to the GPU buffer
       collArgs.options.biasPtr = collArgs.biasGpu.ptr;
+    }
+
+    if (buildFp8Alternative)
+    {
+      for (size_t i = 0; i < collArgs.numInputElements; ++i)
+        CHECK_CALL(StoreFp8(collArgs.fp8AlternativeExpected, collArgs.dataType, i, fp32Result[i]));
+      collArgs.hasFp8AlternativeExpected = true;
     }
 
     return TEST_SUCCESS;
@@ -317,7 +397,10 @@ namespace RcclUnitTesting
                                                      collArgs.globalRank, 0));
       CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numOutputElements,
                                                                collArgs.totalRanks, collArgs.options.redOp,
-                                                               (size_t)collArgs.globalRank * collArgs.numOutputElements));
+                                                               (size_t)collArgs.globalRank * collArgs.numOutputElements,
+                                                               IsFp8(collArgs.dataType)
+                                                                 ? collArgs.fp8AlternativeExpectedGpu.ptr : nullptr));
+      collArgs.hasFp8AlternativeExpected = IsFp8(collArgs.dataType);
       CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
       collArgs.expectedOnDevice = true;
       return TEST_SUCCESS;
@@ -339,6 +422,8 @@ namespace RcclUnitTesting
     // Loop over each rank and generate the input / scale / reduce
     PtrUnion scalarsPerRank;
     scalarsPerRank.Attach(collArgs.options.scalarTransport.ptr);
+    bool const buildFp8Alternative = IsFp8(collArgs.dataType);
+    std::vector<float> fp32Result(buildFp8Alternative ? collArgs.numInputElements : 0);
     for (int rank = 0; rank < collArgs.totalRanks; ++rank)
     {
       CHECK_CALL(tempInputCpu.FillPattern(collArgs.dataType, collArgs.numInputElements, rank, false));
@@ -371,18 +456,38 @@ namespace RcclUnitTesting
         CHECK_CALL(tempResultCpu.Reduce(collArgs.dataType, collArgs.numInputElements,
                                         tempInputCpu, tempOp));
       }
+      if (buildFp8Alternative)
+      {
+        for (size_t i = 0; i < collArgs.numInputElements; ++i)
+        {
+          float const input = GetFp8(tempInputCpu, collArgs.dataType, i);
+          fp32Result[i] = rank == 0 ? input : ReduceOp(tempOp, fp32Result[i], input);
+        }
+      }
     }
 
     // Perform averaging if necessary
     if (collArgs.options.redOp == ncclAvg)
     {
       CHECK_CALL(tempResultCpu.DivideByInt(collArgs.dataType, collArgs.numInputElements, collArgs.totalRanks));
+      if (buildFp8Alternative)
+      {
+        for (float& value : fp32Result) value /= collArgs.totalRanks;
+      }
     }
 
     // Copy over portion of result
     memcpy(collArgs.expected.I1,
            tempResultCpu.I1 + collArgs.globalRank * numOutputBytes,
            numOutputBytes);
+    if (buildFp8Alternative)
+    {
+      size_t const offset = (size_t)collArgs.globalRank * collArgs.numOutputElements;
+      for (size_t i = 0; i < collArgs.numOutputElements; ++i)
+        CHECK_CALL(StoreFp8(collArgs.fp8AlternativeExpected, collArgs.dataType, i,
+                            fp32Result[offset + i]));
+      collArgs.hasFp8AlternativeExpected = true;
+    }
     CHECK_CALL(tempInputCpu.FreeCpuMem());
     CHECK_CALL(tempResultCpu.FreeCpuMem());
     return TEST_SUCCESS;

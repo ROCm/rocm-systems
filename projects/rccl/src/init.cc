@@ -25,6 +25,7 @@
 #include "diagnostics.h"
 #include "enqueue.h"
 #include "graph.h"
+#include "rccl_graph_gen.h"
 #include "graph/topo.h"
 #include "argcheck.h"
 #include "device.h"
@@ -3996,6 +3997,7 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t proxyStopResult = ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
 
@@ -4047,8 +4049,14 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     }
   }
 
-  if ((ret = ncclProxyStop(comm)) != ncclSuccess) {
-    INFO(NCCL_DESTROY | NCCL_PROXY, "commDestroySync: comm %p (rank = %d) proxy stop error %d", comm, comm->rank, ret);
+  // Finalization is null-safe and also releases partially initialized state.
+  NCCLCHECKIGNORE(ncclRmaCeFinalize(comm), ret);
+
+  proxyStopResult = ncclProxyStop(comm);
+  if (proxyStopResult != ncclSuccess) {
+    INFO(NCCL_DESTROY | NCCL_PROXY, "commDestroySync: comm %p (rank = %d) proxy stop error %d", comm, comm->rank,
+         proxyStopResult);
+    if (ret == ncclSuccess) ret = proxyStopResult;
   } else if (comm->finalizeCalled) {
     TRACE_CALL("ncclCommFinalize(%p)", comm);
     INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx commId 0x%" PRIx64 " - Finalize COMPLETE", comm,
