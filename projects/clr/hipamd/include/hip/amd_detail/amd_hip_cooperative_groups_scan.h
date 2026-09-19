@@ -67,10 +67,13 @@ namespace impl {
   };
 
   // all the arithmetic operations accept the same types, so we just based it on the overload being
-  // present for scan_add
+  // present for scan_add. We require the overload picked for T to return T exactly (rather than just
+  // being callable with a T), otherwise an unsupported type could sneak in via an implicit promotion/
+  // conversion to one of the supported types (e.g. bool -> int) and silently produce the wrong result.
   template <typename T>
   struct has_arithmetic_scan<T,
-                 __hip_internal::void_t<decltype(scan_add<false>(T {}))>
+                 typename __hip_internal::enable_if<__hip_internal::is_same<
+                     decltype(scan_add<false>(__hip_internal::declval<T>())), T>::value>::type
     > : __hip_internal::true_type {
   };
 
@@ -79,10 +82,11 @@ namespace impl {
   };
 
   // all the arithmetic operations accept the same types, so we just based it on the overload being
-  // present for scan_and
+  // present for scan_and. See has_arithmetic_scan above for why we require an exact return type match.
   template <typename T>
   struct has_boolean_scan<T,
-                 __hip_internal::void_t<decltype(scan_and<false>(T {}))>
+                 typename __hip_internal::enable_if<__hip_internal::is_same<
+                     decltype(scan_and<false>(__hip_internal::declval<T>())), T>::value>::type
     > : __hip_internal::true_type {
   };
 
@@ -114,13 +118,14 @@ namespace impl {
     using Op = typename __hip_internal::remove_cvref<TyFn>::type;
     using Val = typename __hip_internal::remove_cvref<TyVal>::type;
 
-    constexpr bool isPrimitiveType = impl::has_arithmetic_scan<Val>::value;
-    using permuteType = typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), Val, unsigned int>::type;
-
-    // the number of backward permutes will be: size(Val) / 4 rounded up
+    static constexpr bool isPrimitiveType = impl::has_arithmetic_scan<Val>::value ||
+                                            __hip_internal::is_same<Val, bool>::value;
+    // the amount of backward permutes a type requires to be transferred from one lane to another:
+    // size(Val) / 4 rounded up
     static constexpr int kNumOfPermutes = (sizeof(Val) <= 4)?
                                           1 :
                                           (sizeof(Val) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
+    using permuteType = typename __hip_internal::conditional<isPrimitiveType && kNumOfPermutes == 1, Val, unsigned int>::type;
     static_assert(cooperative_groups::impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
     static_assert(__hip_internal::is_trivially_copyable<Val>::value, "val must be trivially copyable");
     static_assert(sizeof(Val) <= 32, "scan only operate on values of size up to 32 bytes");
@@ -170,13 +175,13 @@ namespace impl {
 
     // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
     using ResultType = typename __hip_internal::conditional<
-                         isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
+                         isPrimitiveType && kNumOfPermutes == 1, permuteType,
                          permuteType[kNumOfPermutes]>::type;
     static constexpr int alignment = alignof(Val) <= 4? 4 : alignof(Val);
     alignas(alignment) ResultType result;
     alignas(alignment) ResultType permuteResult;
 
-    if constexpr (isPrimitiveType && (sizeof(Val) == 2 || sizeof(Val) == 4)) {
+    if constexpr (isPrimitiveType && kNumOfPermutes == 1) {
       result = val;
     } else {
       __builtin_memcpy(result, &val, sizeof(Val));
@@ -225,7 +230,7 @@ namespace impl {
           Val toReturn;
           toReturn = op(*reinterpret_cast<Val*>(permuteResult), *reinterpret_cast<Val*>(result));
         __builtin_memcpy(result, &toReturn, sizeof(Val));
-        } else if constexpr (sizeof(Val) == 4 || sizeof(Val) == 2) {
+        } else if constexpr (kNumOfPermutes == 1) {
           result = op(permuteResult, result);
         } else if constexpr (sizeof(Val) == 8) {
           Val tmp;

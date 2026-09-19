@@ -199,6 +199,10 @@ struct DistributionType<double> {
   using type = std::uniform_real_distribution<double>;
 };
 
+template <>
+struct DistributionType<bool> {
+  using type = std::uniform_int_distribution<unsigned short>;
+};
 
 template <class T>
 struct MinOp {
@@ -394,6 +398,11 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
     for (int i = 0; i < numItems; i++) {
       buf.ptr()[i] = genRandomHalf(dist, gen, exponent);
     }
+  } else if constexpr (std::is_same<T, bool>::value) {
+    for (int i = 0; i < numItems; i++) {
+      auto val = dist(gen);
+      buf.ptr()[i] = val == 1;
+    }
   } else {
     for (int i = 0; i < numItems; i++) {
       buf.ptr()[i] = dist(gen);
@@ -483,7 +492,11 @@ void scanIdentity(T& id)
       result = std::numeric_limits<T>::lowest();
     }
   } else if constexpr (std::is_same<Op, std::bit_and<T>>::value) {
-    result = ~result;
+    if constexpr(std::is_same<T, bool>::value) {
+      result = true;
+    } else {
+      result = ~result;
+    }
   } else if constexpr (std::is_same<Op, std::bit_or<T>>::value) {
   } else {
     std::memset(&result, 0, sizeof(T));
@@ -693,6 +706,43 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
   }
 }
 
+// To test scans/reduces we use a very reduce range of numbers to avoid overflows
+template <typename T, typename = void>
+struct TestRange  {
+};
+
+template <typename T>
+struct TestRange<T, std::enable_if_t<std::is_same_v<T, half>>> {
+  // for float16, we generate any random unsigned short, but cap the exponent later on
+  // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
+  static inline unsigned short minimum = std::numeric_limits<unsigned short>::lowest();
+  static inline unsigned short maximum = std::numeric_limits<unsigned short>::max();
+};
+
+template <typename T>
+struct TestRange<T, std::enable_if_t<std::is_same_v<T, bool>>> {
+  static inline int minimum = 0;
+  static inline int maximum = 1;
+};
+
+template <typename T>
+struct TestRange<T, std::enable_if_t<std::is_same_v<T, unsigned char>>> {
+  static inline unsigned char minimum = 0;
+  static inline unsigned char maximum = 255;
+};
+
+template <typename T>
+struct TestRange<T, std::enable_if_t<std::is_signed_v<T> && sizeof(T) >= 4>> {
+  static inline T minimum = -1023;
+  static inline T maximum = 1023;
+};
+
+template <typename T>
+struct TestRange<T, std::enable_if_t<!std::is_signed_v<T> && sizeof(T) >= 4>> {
+  static inline T minimum = 0;
+  static inline T maximum = 1023;
+};
+
 // @tparam Reduce a functor; abstracts away kernel dispatching
 //         (via hiprtc or normal execution)
 template <class T, class Reduce, template <typename> class Op>
@@ -705,12 +755,8 @@ void runTestReduce(int iteration, Reduce reduce)
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, kNumReduces * wavefrontSize * sizeof(T));
   LinearAllocGuard<T> output(LinearAllocs::malloc, kNumReduces * wavefrontSize * sizeof(T));
   std::mt19937_64 gen(iteration);
-  // for float16, we generate any random unsigned short, but cap the exponent later on
-  // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
-  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                      (std::is_signed<T>::value? -1023 : 0);
-  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
-                                      1023;
+  typename distribution::result_type a = TestRange<T>::minimum;
+  typename distribution::result_type b = TestRange<T>::maximum;
   distribution dist(a, b);
   LinearAllocGuard<T> input, d_input;
   LinearAllocGuard<unsigned long long> masks, d_masks;
