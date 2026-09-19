@@ -27,6 +27,7 @@
 #include <optional>
 #include <stop_token>
 #include <thread>
+#include <unistd.h>
 
 namespace rocjitsu {
 namespace {
@@ -67,6 +68,38 @@ constexpr long kSignalPollNanoseconds = 100'000'000;
 constexpr uint8_t kRequestedInterruptClient = 0x1a;
 constexpr uint8_t kRequestedInterruptSource = 0x00;
 
+/// @brief Own the launcher's readiness descriptor until startup succeeds.
+class ReadinessPipe {
+public:
+  explicit ReadinessPipe(int fd) : fd_(fd) {}
+  ~ReadinessPipe() {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+
+  ReadinessPipe(const ReadinessPipe &) = delete;
+  ReadinessPipe &operator=(const ReadinessPipe &) = delete;
+
+  [[nodiscard]] bool signal() {
+    if (fd_ < 0) {
+      return true;
+    }
+
+    constexpr uint8_t ready = 1;
+    ssize_t written = 0;
+    do {
+      written = write(fd_, &ready, sizeof(ready));
+    } while (written < 0 && errno == EINTR);
+    close(fd_);
+    fd_ = -1;
+    return written == static_cast<ssize_t>(sizeof(ready));
+  }
+
+private:
+  int fd_;
+};
+
 } // namespace
 
 ServerSignalAction action_for_signal(int signal) {
@@ -82,7 +115,8 @@ ServerSignalAction action_for_signal(int signal) {
 namespace {
 
 int run_vfio_server_impl(const std::string &config_path, const std::string &socket_path,
-                         std::optional<int> engine_exit_code_for_test) {
+                         int ready_fd, std::optional<int> engine_exit_code_for_test) {
+  ReadinessPipe readiness(ready_fd);
   config::LoadedConfig loaded;
   try {
     loaded = config::load_config(config_path, kEmbeddedSchema);
@@ -266,6 +300,15 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
       return 1;
     }
 
+    // build() has bound and started listening on the AF_UNIX socket. Publish
+    // that state directly instead of making the launcher infer it by polling a
+    // path against a guessed deadline. Closing the pipe without this byte is
+    // the corresponding startup-failure notification.
+    if (!readiness.signal()) {
+      util::Logger::warn("vfu: cannot report server readiness to the launcher");
+      drain_and_restore(handled_signals, previous_signals);
+      return 1;
+    }
     if (engine_exit_code_for_test.has_value()) {
       engine.request_exit("test-requested simulation failure", *engine_exit_code_for_test);
     }
@@ -284,11 +327,13 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
       serving_finished = true;
     });
 
-    // Waiting only for a signal would leave the process alive but serving
-    // nothing if the transport failed on its own: a supervisor would see a
-    // healthy process in front of a dead socket.
+    // A clean client disconnect does not own the server process lifetime. The
+    // launcher observes QEMU itself and sends the shutdown signal after QEMU
+    // exits, avoiding a timing-dependent grace period between disconnect and
+    // waitpid. A transport failure still ends the process immediately.
     bool engine_ended_while_serving = false;
-    while (!serving_finished.load() && !engine_finished.load(std::memory_order_acquire)) {
+    while ((!serving_finished.load() || !serving_failed.load()) &&
+           !engine_finished.load(std::memory_order_acquire)) {
       const timespec timeout{.tv_sec = 0, .tv_nsec = kSignalPollNanoseconds};
       const int signal = sigtimedwait(&handled_signals, nullptr, &timeout);
       const ServerSignalAction action = action_for_signal(signal);
@@ -361,13 +406,14 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
 
 } // namespace
 
-int run_vfio_server(const std::string &config_path, const std::string &socket_path) {
-  return run_vfio_server_impl(config_path, socket_path, std::nullopt);
+int run_vfio_server(const std::string &config_path, const std::string &socket_path, int ready_fd) {
+  return run_vfio_server_impl(config_path, socket_path, ready_fd, std::nullopt);
 }
 
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
-                                              const std::string &socket_path, int exit_code) {
-  return run_vfio_server_impl(config_path, socket_path, exit_code);
+                                              const std::string &socket_path, int ready_fd,
+                                              int exit_code) {
+  return run_vfio_server_impl(config_path, socket_path, ready_fd, exit_code);
 }
 
 } // namespace rocjitsu
