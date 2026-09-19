@@ -1,0 +1,44 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Requested metric: GPU busy is sampled",
+                    "error_message": "--gpu=busy collected no device_busy_gfx samples",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_gfx'",
+                    "requires": "busy"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Unrequested metric: GPU memory usage is not sampled",
+                    "error_message": "OVER-COLLECTION: device_memory_usage sampled though --gpu=busy did not request it",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Unrequested metric: GPU temperature is not sampled",
+                    "error_message": "OVER-COLLECTION: device_temp sampled though --gpu=busy did not request it",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_temp'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Unrequested metric: GPU power is not sampled",
+                    "error_message": "OVER-COLLECTION: device_power sampled though --gpu=busy did not request it",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_power'"
+                }
+            ]
+        }
+    ]
+}
