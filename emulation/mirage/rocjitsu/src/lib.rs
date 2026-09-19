@@ -330,7 +330,7 @@ pub fn describe() -> EmulatorDescription {
         options_schema: [
             (
                 "cpu_thread_budget",
-                "Execution-thread ceiling; 0 uses affinity capped at 32.",
+                "Execution-thread ceiling; 0 uses affinity with up to 32 CPU workers plus preset helpers.",
             ),
             (
                 "num_threads",
@@ -339,6 +339,10 @@ pub fn describe() -> EmulatorDescription {
             (
                 "cpu_dispatch_threads",
                 "Inclusive dispatch width per GPU; 0 selects from the target table.",
+            ),
+            (
+                "async_helper_threads",
+                "Shared async MMA helpers; -1 selects the target default, 0 disables.",
             ),
         ]
         .into_iter()
@@ -698,9 +702,22 @@ pub const MAX_GPUS_PER_NODE: u32 = 64;
 struct ExecutionThreadChoice {
     num_threads: u32,
     cpu_dispatch_threads: u32,
+    #[serde(default)]
+    async_helper_threads: u32,
 }
 
 include!(concat!(env!("OUT_DIR"), "/thread_allocations.rs"));
+
+// Exact native multi-GPU presets retain their measured opt-in dispatch tables.
+// Other GPU counts divide the single-GPU budget with helpers disabled for RCCL.
+fn target_thread_allocations(gfx_target_version: u32, gpus: u32) -> Vec<ExecutionThreadChoice> {
+    preset_thread_allocations(gfx_target_version, gpus.max(1)).unwrap_or_else(|| {
+        spread_thread_allocations_over_gpus(
+            preset_thread_allocations(gfx_target_version, 1).unwrap_or_default(),
+            gpus,
+        )
+    })
+}
 
 // Preserve each single-GPU granule's total budget while keeping one engine
 // across the VM. Divide its remaining threads among the per-GPU dispatch pools.
@@ -714,9 +731,11 @@ fn spread_thread_allocations_over_gpus(
             if choice.num_threads == 0 || choice.cpu_dispatch_threads == 0 {
                 continue;
             }
-            let workers =
-                u64::from(choice.num_threads - 1) + u64::from(choice.cpu_dispatch_threads - 1);
+            let workers = u64::from(choice.num_threads - 1)
+                + u64::from(choice.cpu_dispatch_threads - 1)
+                + u64::from(choice.async_helper_threads);
             choice.num_threads = 1;
+            choice.async_helper_threads = 0;
             choice.cpu_dispatch_threads = 1 + (workers / u64::from(gpus)) as u32;
         }
         choices.dedup();
@@ -802,8 +821,8 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // (deriving per-GPU identities from the single `device` template).
     // Each node's host process emulates the GPUs local to that node, so
     // the per-node `gpus_per_node` is what the config requests.
-    let thread_allocations = spread_thread_allocations_over_gpus(
-        target_thread_allocations(agent.vm.gpu.device.gfx_target_version),
+    let thread_allocations = target_thread_allocations(
+        agent.vm.gpu.device.gfx_target_version,
         topology.gpus_per_node,
     );
     let mut vm = agent.vm;
@@ -821,18 +840,23 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     if topology.gpus_per_node > 1 {
         sim["num_threads"] = serde_json::Value::from(1);
         sim["cpu_dispatch_threads"] = serde_json::Value::from(1);
+        sim["async_helper_threads"] = serde_json::Value::from(0);
     }
     // Leave allocation to the native target-aware policy unless overridden.
     for (key, min, max) in [
         ("cpu_thread_budget", 0, i64::from(u32::MAX)),
         ("num_threads", 0, i64::from(u32::MAX)),
         ("cpu_dispatch_threads", 0, i64::from(u32::MAX)),
+        ("async_helper_threads", -1, 128),
     ] {
         if let Some(value) = def.options.get(key) {
             match value {
                 SimpleValue::Number(n) if (min..=max).contains(n) => {
                     // Zero asks for the default, including the multi-GPU pin.
-                    if key == "num_threads" && *n == 0 && topology.gpus_per_node > 1 {
+                    if topology.gpus_per_node > 1
+                        && ((key == "num_threads" && *n == 0)
+                            || (key == "async_helper_threads" && *n == -1))
+                    {
                         continue;
                     }
                     sim[key] = serde_json::Value::from(*n);
@@ -1163,7 +1187,12 @@ mod tests {
     fn thread_overrides_are_registered_as_numeric_options() {
         let description = describe();
         assert_eq!(Rocjitsu.options(), description.options_schema);
-        for key in ["cpu_thread_budget", "num_threads", "cpu_dispatch_threads"] {
+        for key in [
+            "cpu_thread_budget",
+            "num_threads",
+            "cpu_dispatch_threads",
+            "async_helper_threads",
+        ] {
             let option = description
                 .options_schema
                 .iter()
@@ -1187,12 +1216,12 @@ mod tests {
         assert_eq!(
             json["thread_allocations"],
             serde_json::json!([
-                {"num_threads":1,"cpu_dispatch_threads":1},
-                {"num_threads":1,"cpu_dispatch_threads":2},
-                {"num_threads":1,"cpu_dispatch_threads":4},
-                {"num_threads":1,"cpu_dispatch_threads":8},
-                {"num_threads":1,"cpu_dispatch_threads":12},
-                {"num_threads":1,"cpu_dispatch_threads":16}
+                {"num_threads":1,"cpu_dispatch_threads":1,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":2,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":4,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":8,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":12,"async_helper_threads":0},
+                {"num_threads":1,"cpu_dispatch_threads":16,"async_helper_threads":0}
             ])
         );
         assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
@@ -1212,9 +1241,19 @@ mod tests {
     fn multi_gpu_granules_match_native_presets() {
         let configs =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rocjitsu/configs");
-        for (single, multi, gpus) in [
-            ("gfx950_mi355x.json", "gfx950_mi355x_kmd_2gpu.json", 2),
-            ("gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json", 4),
+        for (single, multi, target, gpus) in [
+            (
+                "gfx950_mi355x.json",
+                "gfx950_mi355x_kmd_2gpu.json",
+                90500,
+                2,
+            ),
+            (
+                "gfx1250_mi455x.json",
+                "gfx1250_mi455x_kmd_4gpu.json",
+                120500,
+                4,
+            ),
         ] {
             let read = |name| {
                 let json: serde_json::Value =
@@ -1225,14 +1264,12 @@ mod tests {
                 .unwrap()
             };
             let choices = read(single);
+            assert_eq!(target_thread_allocations(target, 1), choices);
             assert_eq!(
                 spread_thread_allocations_over_gpus(choices.clone(), 1),
                 choices
             );
-            assert_eq!(
-                spread_thread_allocations_over_gpus(choices, gpus),
-                read(multi)
-            );
+            assert_eq!(target_thread_allocations(target, gpus), read(multi));
         }
     }
 
@@ -1248,6 +1285,37 @@ mod tests {
             let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(json["num_threads"], expected);
             assert_eq!(json["cpu_dispatch_threads"], 1);
+        }
+    }
+
+    #[test]
+    fn multi_gpu_helpers_default_to_zero_and_accept_explicit_overrides() {
+        for gpus in [2, 4] {
+            for (requested, expected) in [(-1, 0), (0, 0), (4, 4)] {
+                let mut def = def_with_gpus(gpus);
+                def.options.insert(
+                    "async_helper_threads".into(),
+                    SimpleValue::Number(requested),
+                );
+                let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                    panic!("expected generated config");
+                };
+                let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(json["async_helper_threads"], expected);
+            }
+        }
+    }
+
+    #[test]
+    fn helper_options_reject_invalid_values() {
+        for value in [
+            SimpleValue::Number(-2),
+            SimpleValue::Number(129),
+            SimpleValue::Boolean(true),
+        ] {
+            let mut def = def_with_gpus(1);
+            def.options.insert("async_helper_threads".into(), value);
+            assert!(resolve_sim_config(&def).is_err());
         }
     }
 
@@ -1280,13 +1348,19 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
         };
         let default = decode(&def);
-        for key in ["num_threads", "cpu_dispatch_threads", "cpu_thread_budget"] {
+        for key in [
+            "num_threads",
+            "cpu_dispatch_threads",
+            "cpu_thread_budget",
+            "async_helper_threads",
+        ] {
             assert!(default.get(key).is_none());
         }
         for (key, value) in [
             ("cpu_thread_budget", 64),
             ("num_threads", 8),
             ("cpu_dispatch_threads", 17),
+            ("async_helper_threads", 8),
         ] {
             def.options
                 .insert(key.to_owned(), SimpleValue::Number(value));
@@ -1295,6 +1369,7 @@ mod tests {
         assert_eq!(explicit["cpu_thread_budget"], 64);
         assert_eq!(explicit["num_threads"], 8);
         assert_eq!(explicit["cpu_dispatch_threads"], 17);
+        assert_eq!(explicit["async_helper_threads"], 8);
         def.options
             .insert("cpu_dispatch_threads".to_owned(), SimpleValue::Number(-2));
         assert!(resolve_sim_config(&def).is_err());

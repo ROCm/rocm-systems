@@ -165,9 +165,10 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision);
-// Single source of truth for AllGather selection: DDA -> hierarchical -> CE ->
-// direct -> ring. query=true fills protocol/nMaxChannels for reporting. CE dispatch
-// lives in taskAppend(), so live returns RCCL_CE_REGISTERED but enqueues normally.
+// Single source of truth for AllGather selection: DDA -> hierarchical kernel ->
+// CE (single-node or hierarchical CE) -> direct -> ring. query=true fills
+// protocol/nMaxChannels for reporting. CE dispatch lives in taskAppend(), so live
+// returns RCCL_CE_REGISTERED but enqueues normally.
 // graphCapturingHint (query only) suppresses the graph-unsafe CE branch under capture.
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, bool query, bool graphCapturingHint,
@@ -286,6 +287,8 @@ RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);

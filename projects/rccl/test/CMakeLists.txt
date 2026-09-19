@@ -881,6 +881,7 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
+      MaxP2pPeersMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
