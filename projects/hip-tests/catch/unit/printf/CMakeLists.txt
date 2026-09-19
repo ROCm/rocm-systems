@@ -20,6 +20,7 @@ endif()
 if(UNIX)
   set(AMD_TEST_SRC
     hostcallStackSize.cc
+    hostcallShutdown.cc
     printfNonHost.cc
     hipPrintfManyDevices.cc
     hipPrintfStar.cc
@@ -90,5 +91,14 @@ if(UNIX AND HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(hostcallStackSize_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hostcallStackSize_exe)
   add_dependencies(build_tests hostcallStackSize_exe)
+endif()
+
+# Exercises process teardown itself, so it needs a process that is allowed to finish exiting.
+if(UNIX AND HIP_PLATFORM MATCHES "amd")
+  add_executable(hostcallShutdown_exe EXCLUDE_FROM_ALL hostcallShutdown_exe.cc)
+  set_source_files_properties(hostcallShutdown_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hostcallShutdown_exe pthread)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hostcallShutdown_exe)
+  add_dependencies(build_tests hostcallShutdown_exe)
 endif()
 
