@@ -59,6 +59,8 @@
 # Doxygen (optional)
 # Threads (on request, see THE_ROCK_BUILD)
 
+# [Do not Merge] Temporary no-op change on rocdbgapi to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.21)
 
 project(amd-dbgapi VERSION 0.80.0 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
