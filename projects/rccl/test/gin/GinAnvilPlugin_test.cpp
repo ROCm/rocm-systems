@@ -330,6 +330,47 @@ TEST_F(GinAnvilPluginTest, BindSignals_Success) {
   plugin_.finalize(ictx);
 }
 
+// AICOMRCCL-2339: logical contexts on one Anvil connection share SDMA
+// queues, but each context must bind a distinct signal stripe.
+TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) {
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  cfg.nCounters = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[8192] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 3, 4), ncclSuccess);
+  ASSERT_EQ(devHandle->size, 3 * sizeof(ncclGinAnvilSdmaGPUContext));
+
+  ncclGinAnvilSdmaGPUContext hostCtx[3]{};
+  ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  ASSERT_NE(hostCtx[0].signals, nullptr);
+  ASSERT_NE(hostCtx[1].signals, nullptr);
+  ASSERT_NE(hostCtx[2].signals, nullptr);
+  EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 4);
+  EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 4);
+  EXPECT_NE(hostCtx[0].signal_remote_addrs, hostCtx[1].signal_remote_addrs);
+
+  // Queue ownership remains at the connection level by design.
+  EXPECT_EQ(hostCtx[0].queueHandles, hostCtx[1].queueHandles);
+  EXPECT_EQ(hostCtx[0].sdmaDirty, hostCtx[1].sdmaDirty);
+  EXPECT_NE(hostCtx[0].counters, nullptr);
+  EXPECT_NE(hostCtx[1].counters, nullptr);
+  EXPECT_EQ(hostCtx[1].counters - hostCtx[0].counters, 2);
+  EXPECT_EQ(hostCtx[2].counters - hostCtx[1].counters, 2);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G15: dereg null, progress, queryLastError.
 TEST_F(GinAnvilPluginTest, Misc_NoOpPaths) {
   EXPECT_EQ(plugin_.deregMrSym(nullptr, nullptr), ncclSuccess);

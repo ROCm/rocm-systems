@@ -29,6 +29,12 @@ NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
 
+// Logical contexts index distinct GPU-context slots. Counters are sliced per
+// context (countersDev + contextId * nCounters), matching proxy/gdaki.
+NCCL_DEVICE_INLINE ncclGinAnvilSdmaGPUContext* anvilGpuCtx(ncclGinCtx ctx) {
+  return &reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(ctx.handle)[ctx.contextId];
+}
+
 NCCL_DEVICE_INLINE void* resolveRemotePeerVa(ncclGinAnvilSdmaGPUContext* rsCtx, ncclGinAnvilSdmaMemHandle* mh, int peer,
                                              size_t off) {
   ptrdiff_t stride = loadConst(&mh->vmmStride);
@@ -179,7 +185,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
     if (coop.thread_rank() != 0) return;
 
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     if (!anvilCtxValid(rsCtx)) return;
     const int blockId = blockIdx.x + blockIdx.y * gridDim.x;
 
@@ -289,7 +295,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 
     if (coop.thread_rank() != 0) return;
 
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     if (!anvilCtxValid(rsCtx)) return;
     const int blockId = blockIdx.x + blockIdx.y * gridDim.x;
     ncclGinAnvilSdmaMemHandle* dstMh = (ncclGinAnvilSdmaMemHandle*)dstWin;
@@ -355,7 +361,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) return {nullptr, 0};
     return {nccl::utility::loadConst(&rsCtx->counters) + counterId, 0};
   }
@@ -364,7 +370,7 @@ struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) return;
     uint64_t* counters = nccl::utility::loadConst(&rsCtx->counters);
     if (counters != nullptr) counters[counterId] = 0;
@@ -376,7 +382,7 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     using nccl::gin::anvil::detail::anvilCtxValid;
     using nccl::utility::loadConst;
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     assert(anvilCtxValid(rsCtx));
     uint64_t* signals = loadConst(&rsCtx->signals);
     assert(signals != nullptr);
@@ -387,7 +393,7 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignalDescriptor signal) {
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) return;
     if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
       uint64_t* signals = nccl::utility::loadConst(&rsCtx->signals);
@@ -406,7 +412,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     (void)ord;
     (void)abortFlag;
     using nccl::utility::loadConst;
-    ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)ctx.handle;
+    ncclGinAnvilSdmaGPUContext* rsCtx = nccl::gin::anvil::detail::anvilGpuCtx(ctx);
     if (!nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) {
       __threadfence_system();
       return;
