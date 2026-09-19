@@ -93,6 +93,17 @@ static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
   return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
 }
 
+// Recv buffer for a compact have/status allGather. Prefer the registrations
+// heap; otherwise overlay the unused 64-record stack slab so a heap failure
+// cannot skip the collective. Overflow-safe: nranks * elemBytes is not formed.
+static inline void* ncclRmaCompactConsensusRecv(void* heapRegs, void* stackRegs, size_t stackBytes, int nranks,
+                                                size_t elemBytes) {
+  if (heapRegs != NULL) return heapRegs;
+  if (stackRegs == NULL || nranks < 1 || elemBytes == 0) return NULL;
+  if ((size_t)nranks > stackBytes / elemBytes) return NULL;
+  return stackRegs;
+}
+
 // After a prefix post, keep the request and return success so Test() drains.
 // Callers NCCLCHECK the complete helper and never reach test() on error.
 static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
