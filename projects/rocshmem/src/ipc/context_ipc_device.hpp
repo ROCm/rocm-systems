@@ -47,6 +47,14 @@ class IPCContext : public Context {
   __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
+  // Byte-size-dispatched scalar RMA path backing p()/g(); see memcpy_lane_scalar
+  // (util.hpp) for why this bypasses the general putmem/getmem memcpy engine.
+  __device__ void putmem_scalar(void *dest, const void *source, size_t nelems,
+                                int pe);
+
+  __device__ void getmem_scalar(void *dest, const void *source, size_t nelems,
+                                int pe);
+
   __device__ void fence();
 
   __device__ void fence(int pe);
