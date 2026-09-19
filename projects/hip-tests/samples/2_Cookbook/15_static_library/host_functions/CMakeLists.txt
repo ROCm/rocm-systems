@@ -18,6 +18,11 @@ endif()
 
 project(static_lib LANGUAGES CXX HIP)
 
+if(UNIX)
+  find_package(amd_comgr REQUIRED)
+  find_package(hsa-runtime64 REQUIRED)
+endif()
+
 # For windows, AR is MS Librarian and that is picked by Visual Studio's command prompt.
 # If using LLVM/Clang toolchain, use llvm-ar instead.
 if(WIN32)
@@ -137,7 +142,7 @@ if(WIN32)
     "${AMD_COMGR_LIB}"
   )
 else()
-  target_link_libraries(test_opt_static PRIVATE amdhip64 amd_comgr hsa-runtime64)
+  target_link_libraries(test_opt_static PRIVATE amdhip64 amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
 
 # Set RPATH so executable can find HIP libraries at runtime
