@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <mutex>
 #include <system_error>
@@ -48,6 +49,16 @@ public:
         {
             LOG_WARNING("clock_gettime failed for clock id {}: {}", m_clock_id,
                         std::system_category().message(errno));
+        }
+        return clock_time_point{ clock_duration{ to_nanoseconds(specs) } };
+    }
+
+    [[nodiscard]] static clock_time_point get_time(clockid_t clock_id) noexcept
+    {
+        struct timespec specs = {};
+        if(clock_gettime(clock_id, &specs) != 0)
+        {
+            std::abort();
         }
         return clock_time_point{ clock_duration{ to_nanoseconds(specs) } };
     }
@@ -135,4 +146,17 @@ private:
     std::mutex m_mutex;
     bool       m_interrupted{ false };
 };
+
+[[nodiscard]] inline clock_time_point
+timeline_now() noexcept
+{
+    return posix::get_time(CLOCK_BOOTTIME);
+}
+
+template <typename Tp = std::uint64_t>
+[[nodiscard]] inline Tp
+timeline_ns() noexcept
+{
+    return static_cast<Tp>(timeline_now().time_since_epoch().count());
+}
 }  // namespace rocprofsys::control::clocks

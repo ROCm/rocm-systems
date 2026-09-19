@@ -986,7 +986,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         if(state::process::get() == state::process::Active) rocprofsys_finalize_hidden();
     });
 
-    set_metadata_process_start_timestamp(comp::wall_clock::record());
+    set_metadata_process_start_timestamp(control::clocks::timeline_ns<std::int64_t>());
 
     if(get_debug_env() || get_verbose_env() > 2)
     {
@@ -1054,7 +1054,7 @@ rocprofsys_finalize_hidden(void)
         return;
     }
 
-    set_metadata_process_end_timestamp(comp::wall_clock::record());
+    set_metadata_process_end_timestamp(control::clocks::timeline_ns<std::int64_t>());
 
     if(_is_child)
     {
@@ -1085,7 +1085,7 @@ rocprofsys_finalize_hidden(void)
 
     sampling::block_samples();
 
-    thread_info::set_stop(comp::wall_clock::record());
+    thread_info::set_stop(control::clocks::timeline_ns());
 
     tim::signals::block_signals(get_sampling_signals(),
                                 tim::signals::sigmask_scope::process);
