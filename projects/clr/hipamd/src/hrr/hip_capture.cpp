@@ -276,6 +276,15 @@ static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
   hip::tls.last_error_         = saved_err;
 }
 
+// api_id selects the event type the launch is written under. It is
+// HRR_API_HIPMODULELAUNCHKERNEL for the plain launches, and the API's own id
+// for the extensible spellings, whose events must appear under their own name
+// so that a replay of them is attributable to the API the program called.
+//
+// attrs / num_attrs carry the launch-attribute list of an extensible launch.
+// It is a second pointer hanging off the descriptor, so recording the
+// descriptor alone would still leave replay with a capture-time address; the
+// list is appended to the payload instead.
 static void serialize_kernel_launch(
     const char*                 kernel_name,
     const void*                 func_key,
@@ -287,7 +296,10 @@ static void serialize_kernel_launch(
     void**                      kernel_params,
     const void*                 kbuf,
     size_t                      ksz,
-    hrr_cap::Hash128            co_hash)
+    hrr_cap::Hash128            co_hash,
+    uint16_t                    api_id = HRR_API_HIPMODULELAUNCHKERNEL,
+    const hipLaunchAttribute*   attrs = nullptr,
+    uint32_t                    num_attrs = 0)
 {
   // Reserve space for hrr_event_header at front; payload body follows.
   std::vector<uint8_t> payload(sizeof(hrr_event_header), 0);
@@ -419,6 +431,15 @@ static void serialize_kernel_launch(
     }
   }
 
+  // Launch-attribute tail. Written for every launch so the payload has one
+  // shape: a plain launch records a count of zero. The stride lets replay
+  // reject a recording made against a different hipLaunchAttribute layout
+  // rather than reinterpreting its bytes.
+  push_u32(num_attrs);
+  push_u32(num_attrs ? static_cast<uint32_t>(sizeof(hipLaunchAttribute)) : 0u);
+  if (attrs && num_attrs)
+    push_bytes(attrs, static_cast<size_t>(num_attrs) * sizeof(hipLaunchAttribute));
+
   // payload_length is a uint32_t (wire v4), so the practical ceiling is ~4 GiB —
   // a real launch never approaches it. A per-arg size that exceeds the uint16_t
   // arg-size field (arg_oversized) is the genuine remaining limit. In either
@@ -436,12 +457,122 @@ static void serialize_kernel_launch(
         "kernel launch payload exceeds wire-format limits");
     return;
   }
-  hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHKERNEL,
+  hrr_cap::writer::write_event_raw(api_id,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint32_t>(payload.size()));
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
+
+// ---------------------------------------------------------------------------
+// Graph kernel nodes
+//
+// hipKernelNodeParams names its kernel by a host function address and points
+// at a void** argument array — exactly the two things a launch records by
+// name and by value instead. So a kernel node event is its ordinary
+// hrr_args_* struct followed by this tail, which is the launch encoding minus
+// the parts a node does not have (no stream, and grid/block/shared are
+// already fields of the struct).
+//
+// Tail layout: u16 name_len, name bytes, u64 co_hash_lo, u64 co_hash_hi,
+// u16 num_args, then per argument: u8 kind, u16 size, size bytes, and for
+// kind 3 a u16 count of embedded-pointer offsets followed by that many u16.
+// Kinds match the launch encoding (0 scalar, 1 whole-arg pointer, 3 scalar
+// with embedded pointers) so replay can decode both with one decoder.
+// ---------------------------------------------------------------------------
+static void append_kernel_node_tail(std::vector<uint8_t>& payload,
+                                    const void* host_func,
+                                    void** kernel_params, void** extra) {
+  auto push_u8  = [&](uint8_t v)  { payload.push_back(v); };
+  auto push_u16 = [&](uint16_t v) {
+    payload.push_back(static_cast<uint8_t>(v));
+    payload.push_back(static_cast<uint8_t>(v >> 8));
+  };
+  auto push_u64 = [&](uint64_t v) {
+    for (int i = 0; i < 8; i++) payload.push_back(static_cast<uint8_t>(v >> (i*8)));
+  };
+  auto push_bytes = [&](const void* d, size_t n) {
+    const auto* q = static_cast<const uint8_t*>(d);
+    payload.insert(payload.end(), q, q + n);
+  };
+
+  // A node names its kernel the way hipLaunchKernel does — a host stub — so
+  // it needs the same resolution to reach the signature and the real name.
+  hipFunction_t f = nullptr;
+  amd::Kernel*  kernel = nullptr;
+  if (host_func && g_real_table.hipGetFuncBySymbol_fn &&
+      g_real_table.hipGetFuncBySymbol_fn(&f, host_func) == hipSuccess && f)
+    kernel = hip::asKernel(f);
+
+  if (!kernel) {
+    // Nothing to name the kernel by. Write an empty tail; replay reports the
+    // node as unreconstructable and marks its graph incomplete rather than
+    // building a node that points at nothing.
+    push_u16(0);
+    push_u64(0); push_u64(0);
+    push_u16(0);
+    return;
+  }
+
+  const amd::KernelSignature& sig = kernel->signature();
+  const std::string& name = kernel->name();
+  push_u16(static_cast<uint16_t>(name.size()));
+  push_bytes(name.data(), name.size());
+  const hrr_cap::Hash128 co = kernel_code_object_hash(kernel);
+  push_u64(co.lo); push_u64(co.hi);
+
+  const void* kbuf = nullptr;
+  size_t      ksz  = 0;
+  if (!kernel_params && extra) parse_kernel_extra(extra, kbuf, ksz);
+
+  const uint32_t n_all = sig.numParametersAll();
+  uint16_t num_args = 0;
+  if (kbuf || kernel_params)
+    for (uint32_t i = 0; i < n_all; i++)
+      if (!sig.at(i).info_.hidden_) num_args++;
+  push_u16(num_args);
+
+  auto emit_arg = [&](uint32_t idx, bool is_ptr, const uint8_t* bytes,
+                      uint16_t sz) {
+    if (is_ptr) {
+      push_u8(1); push_u16(sz);
+      if (bytes) push_bytes(bytes, sz);
+      else for (uint16_t j = 0; j < sz; j++) push_u8(0);
+      return;
+    }
+    std::vector<uint16_t> offs;
+    scan_embedded_ptr_offsets(kernel, idx, bytes, sz, offs);
+    push_u8(offs.empty() ? 0 : 3); push_u16(sz);
+    if (bytes) push_bytes(bytes, sz);
+    else for (uint16_t j = 0; j < sz; j++) push_u8(0);
+    if (!offs.empty()) {
+      push_u16(static_cast<uint16_t>(offs.size()));
+      for (uint16_t o : offs) push_u16(o);
+    }
+  };
+
+  if (kbuf && ksz > 0) {
+    const auto* buf_bytes = static_cast<const uint8_t*>(kbuf);
+    for (uint32_t i = 0; i < n_all; i++) {
+      const auto& desc = sig.at(i);
+      if (desc.info_.hidden_ || desc.size_ > UINT16_MAX) continue;
+      uint16_t sz = static_cast<uint16_t>(desc.size_);
+      const uint8_t* bytes =
+          (desc.offset_ + sz <= ksz) ? buf_bytes + desc.offset_ : nullptr;
+      emit_arg(i, desc.type_ == T_POINTER, bytes, sz);
+    }
+  } else if (kernel_params) {
+    uint32_t param_idx = 0;
+    for (uint32_t i = 0; i < n_all; i++) {
+      const auto& desc = sig.at(i);
+      if (desc.info_.hidden_ || desc.size_ > UINT16_MAX) continue;
+      emit_arg(i, desc.type_ == T_POINTER,
+               static_cast<const uint8_t*>(kernel_params[param_idx]),
+               static_cast<uint16_t>(desc.size_));
+      param_idx++;
+    }
+  }
+}
 
 static void record_launch(
     hipFunction_t f,
@@ -449,7 +580,10 @@ static void record_launch(
     unsigned bx, unsigned by, unsigned bz,
     unsigned shared_mem,
     hipStream_t stream,
-    void** kernel_params, void** extra)
+    void** kernel_params, void** extra,
+    uint16_t api_id = HRR_API_HIPMODULELAUNCHKERNEL,
+    const hipLaunchAttribute* attrs = nullptr,
+    uint32_t num_attrs = 0)
 {
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) return;
@@ -467,7 +601,8 @@ static void record_launch(
       gx, gy, gz, bx, by, bz,
       static_cast<uint32_t>(shared_mem),
       stream, sig, kernel_params, kbuf, ksz,
-      kernel_code_object_hash(kernel));
+      kernel_code_object_hash(kernel),
+      api_id, attrs, num_attrs);
 }
 
 // ---------------------------------------------------------------------------
@@ -800,6 +935,28 @@ hipError_t capture_hipModuleLaunchKernel(
   return r;
 }
 
+// A cooperative launch carries the same payload as any other module launch —
+// the only thing that makes it cooperative is which entry point runs it, and
+// that is what the event id records.
+hipError_t capture_hipModuleLaunchCooperativeKernel(
+    hipFunction_t f,
+    unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+    unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
+    unsigned int sharedMemBytes, hipStream_t stream,
+    void** kernelParams) {
+  hipError_t r = g_real_table.hipModuleLaunchCooperativeKernel_fn(
+      f, gridDimX, gridDimY, gridDimZ,
+         blockDimX, blockDimY, blockDimZ,
+      sharedMemBytes, stream, kernelParams);
+  if (r == hipSuccess) {
+    record_launch(f, gridDimX, gridDimY, gridDimZ,
+                     blockDimX, blockDimY, blockDimZ,
+                  sharedMemBytes, stream, kernelParams, nullptr,
+                  HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL);
+  }
+  return r;
+}
+
 hipError_t capture_hipExtModuleLaunchKernel(
     hipFunction_t f,
     uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
@@ -847,6 +1004,123 @@ hipError_t capture_hipLaunchKernel(const void* function_address,
                     numBlocks.x, numBlocks.y, numBlocks.z,
                     dimBlocks.x, dimBlocks.y, dimBlocks.z,
                     static_cast<unsigned>(sharedMemBytes), stream, args, nullptr);
+    }
+  }
+  return r;
+}
+
+// The stream-per-thread spelling of the same launch. Any translation unit
+// compiled with -fgpu-default-stream=per-thread calls this instead of
+// hipLaunchKernel, and the generated shim recorded the host stub address, which
+// replay then handed to the runtime — a segfault, not an error. It gets the
+// same encoding as the plain spelling under its own event id, so a recording
+// still says which entry point the program used.
+hipError_t capture_hipLaunchKernel_spt(const void* function_address,
+                                       dim3 numBlocks, dim3 dimBlocks,
+                                       void** args, size_t sharedMemBytes,
+                                       hipStream_t stream) {
+  hipError_t r = g_real_table.hipLaunchKernel_spt_fn(
+      function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
+  if (r == hipSuccess) {
+    hipFunction_t f = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&f, function_address) == hipSuccess && f) {
+      record_launch(f,
+                    numBlocks.x, numBlocks.y, numBlocks.z,
+                    dimBlocks.x, dimBlocks.y, dimBlocks.z,
+                    static_cast<unsigned>(sharedMemBytes), stream, args, nullptr,
+                    HRR_API_HIPLAUNCHKERNEL_SPT);
+    }
+  }
+  return r;
+}
+
+// The cooperative launches by host stub, plain and stream-per-thread. Both
+// carry the module-launch payload; the event id is what tells replay to go
+// back through the cooperative entry point rather than the ordinary one.
+hipError_t capture_hipLaunchCooperativeKernel(const void* f,
+                                              dim3 gridDim, dim3 blockDimX,
+                                              void** kernelParams,
+                                              unsigned int sharedMemBytes,
+                                              hipStream_t stream) {
+  hipError_t r = g_real_table.hipLaunchCooperativeKernel_fn(
+      f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
+  if (r == hipSuccess) {
+    hipFunction_t fn = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn) {
+      record_launch(fn,
+                    gridDim.x, gridDim.y, gridDim.z,
+                    blockDimX.x, blockDimX.y, blockDimX.z,
+                    sharedMemBytes, stream, kernelParams, nullptr,
+                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL);
+    }
+  }
+  return r;
+}
+
+hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
+                                                  dim3 gridDim, dim3 blockDim,
+                                                  void** kernelParams,
+                                                  uint32_t sharedMemBytes,
+                                                  hipStream_t hStream) {
+  hipError_t r = g_real_table.hipLaunchCooperativeKernel_spt_fn(
+      f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
+  if (r == hipSuccess) {
+    hipFunction_t fn = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&fn, f) == hipSuccess && fn) {
+      record_launch(fn,
+                    gridDim.x, gridDim.y, gridDim.z,
+                    blockDim.x, blockDim.y, blockDim.z,
+                    sharedMemBytes, hStream, kernelParams, nullptr,
+                    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT);
+    }
+  }
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// Extensible launches (hipDrvLaunchKernelEx / hipLaunchKernelExC)
+//
+// The descriptor is a const struct pointer and its attribute list is a second
+// pointer hanging off it, so the generated shim recorded two capture-time host
+// addresses and nothing else — Triton's and CK's default launch path replayed
+// as an invalid resource handle. Both spellings record the same
+// variable-length launch payload as every other launch, under their own event
+// id, with the attribute list appended.
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
+                                        hipFunction_t f, void** params,
+                                        void** extra) {
+  hipError_t r = g_real_table.hipDrvLaunchKernelEx_fn(config, f, params, extra);
+  if (r == hipSuccess && config) {
+    record_launch(f,
+                  config->gridDimX, config->gridDimY, config->gridDimZ,
+                  config->blockDimX, config->blockDimY, config->blockDimZ,
+                  config->sharedMemBytes, config->hStream, params, extra,
+                  HRR_API_HIPDRVLAUNCHKERNELEX, config->attrs, config->numAttrs);
+  }
+  return r;
+}
+
+hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config,
+                                      const void* fPtr, void** args) {
+  hipError_t r = g_real_table.hipLaunchKernelExC_fn(config, fPtr, args);
+  if (r == hipSuccess && config) {
+    // fPtr is a host stub address, not a hipFunction_t: the same resolution
+    // hipLaunchKernel needs, and the same reason replay cannot use the
+    // recorded value directly.
+    hipFunction_t f = nullptr;
+    if (g_real_table.hipGetFuncBySymbol_fn &&
+        g_real_table.hipGetFuncBySymbol_fn(&f, fPtr) == hipSuccess && f) {
+      record_launch(f,
+                    config->gridDim.x, config->gridDim.y, config->gridDim.z,
+                    config->blockDim.x, config->blockDim.y, config->blockDim.z,
+                    static_cast<unsigned>(config->dynamicSmemBytes),
+                    config->stream, args, nullptr,
+                    HRR_API_HIPLAUNCHKERNELEXC, config->attrs, config->numAttrs);
     }
   }
   return r;
@@ -1333,6 +1607,32 @@ hipError_t capture_hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
   return r;
 }
 
+// The same descriptor under the runtime-API spellings. Both were recording the
+// pointer and nothing behind it, which is why they were no-ops at replay.
+hipError_t capture_hipMemcpyParam2D(const hip_Memcpy2D* pCopy) {
+  hipError_t r = g_real_table.hipMemcpyParam2D_fn(pCopy);
+  if (r != hipSuccess) return r;
+  hrr_args_hipMemcpyParam2D a{};
+  a.ret = static_cast<int32_t>(r);
+  capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2D, pCopy);
+  return r;
+}
+
+hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
+                                         hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpyParam2DAsync_fn(pCopy, stream);
+  if (r != hipSuccess) return r;
+  hrr_args_hipMemcpyParam2DAsync a{};
+  a.ret = static_cast<int32_t>(r);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  // A D2H blob taken before the copy lands would record a stale expected
+  // output, the same reason the async 3D spelling synchronises first.
+  if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost && stream)
+    (void)g_real_table.hipStreamSynchronize_fn(stream);
+  capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2DASYNC, pCopy);
+  return r;
+}
+
 // ---------------------------------------------------------------------------
 // hipMemcpy2D / hipMemcpy2DAsync — pitched H2D blob + D2H expected blob
 //
@@ -1517,6 +1817,365 @@ hipError_t capture_hipMemSetAccess(void* ptr, size_t size,
 }
 
 // ---------------------------------------------------------------------------
+// Graph kernel nodes — struct fields plus the kernel tail
+//
+// The generated shim already carries the dependency array and the 64 bytes of
+// hipKernelNodeParams (DEREF_FIELDS), which is enough for the dimensions and
+// the shared-memory size. What it cannot carry is `func` (a host address) and
+// `kernelParams` (a host array of pointers to argument values); those are the
+// tail, written the same way a launch writes them.
+// ---------------------------------------------------------------------------
+
+template <typename A>
+static void write_kernel_node_event(A& a, hrr_api_id_t api_id,
+                                    const hipKernelNodeParams* p) {
+  std::vector<uint8_t> payload(sizeof(A));
+  std::memcpy(payload.data(), &a, sizeof(A));
+  append_kernel_node_tail(payload, p ? p->func : nullptr,
+                          p ? p->kernelParams : nullptr, p ? p->extra : nullptr);
+  hrr_cap::writer::write_event_raw(
+      api_id, reinterpret_cast<hrr_event_header*>(payload.data()),
+      static_cast<uint32_t>(payload.size()));
+}
+
+hipError_t capture_hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
+                                         hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies,
+                                         const hipKernelNodeParams* pNodeParams) {
+  hipError_t r = g_real_table.hipGraphAddKernelNode_fn(
+      pGraphNode, graph, pDependencies, numDependencies, pNodeParams);
+  hrr_args_hipGraphAddKernelNode a{};
+  a.ret              = static_cast<int32_t>(r);
+  a.graph            = reinterpret_cast<uint64_t>(graph);
+  a.numDependencies  = static_cast<uint64_t>(numDependencies);
+  a.pGraphNode       = reinterpret_cast<uint64_t>(
+      (r == hipSuccess && pGraphNode) ? *pGraphNode : nullptr);
+  if (pDependencies && numDependencies > 0) {
+    uint32_t n = static_cast<uint32_t>(numDependencies);
+    const uint32_t cap = sizeof(a.pDependencies_bytes) / sizeof(hipGraphNode_t);
+    if (n > cap) n = cap;
+    std::memcpy(a.pDependencies_bytes, pDependencies, n * sizeof(hipGraphNode_t));
+    a.pDependencies_n       = n;
+    a.pDependencies_present = 1;
+  }
+  if (pNodeParams) {
+    std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipKernelNodeParams));
+    a.pNodeParams_present = 1;
+  }
+  write_kernel_node_event(a, HRR_API_HIPGRAPHADDKERNELNODE, pNodeParams);
+  return r;
+}
+
+// A copy naming a __device__ global. The symbol is a host shadow address the
+// replay cannot use, but the symbol sweep records its name, so all this shim
+// has to add is the host buffer on the other side of the copy — which exists
+// only when the copy is to the symbol from host memory.
+static bool memcpy_src_is_host(const void* src, hipMemcpyKind kind) {
+  if (kind == hipMemcpyHostToDevice || kind == hipMemcpyHostToHost) return true;
+  if (kind != hipMemcpyDefault) return false;
+  if (!src || !g_real_table.hipPointerGetAttributes_fn) return false;
+  hipPointerAttribute_t attr{};
+  if (g_real_table.hipPointerGetAttributes_fn(&attr, src) != hipSuccess)
+    return true;  // unregistered memory is ordinary host memory
+  return attr.type != hipMemoryTypeDevice && attr.type != hipMemoryTypeUnified;
+}
+
+template <typename A>
+static void fill_node_deps(A& a, const hipGraphNode_t* deps, size_t n_deps) {
+  if (!deps || n_deps == 0) return;
+  uint32_t n = static_cast<uint32_t>(n_deps);
+  const uint32_t cap = sizeof(a.pDependencies_bytes) / sizeof(hipGraphNode_t);
+  if (n > cap) n = cap;
+  std::memcpy(a.pDependencies_bytes, deps, n * sizeof(hipGraphNode_t));
+  a.pDependencies_n       = n;
+  a.pDependencies_present = 1;
+}
+
+hipError_t capture_hipGraphAddMemcpyNodeToSymbol(
+    hipGraphNode_t* pGraphNode, hipGraph_t graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies,
+    const void* symbol, const void* src, size_t count, size_t offset,
+    hipMemcpyKind kind) {
+  hipError_t r = g_real_table.hipGraphAddMemcpyNodeToSymbol_fn(
+      pGraphNode, graph, pDependencies, numDependencies, symbol, src, count,
+      offset, kind);
+  hrr_args_hipGraphAddMemcpyNodeToSymbol a{};
+  a.ret             = static_cast<int32_t>(r);
+  a.graph           = reinterpret_cast<uint64_t>(graph);
+  a.numDependencies = static_cast<uint64_t>(numDependencies);
+  a.symbol          = reinterpret_cast<uint64_t>(symbol);
+  a.src             = reinterpret_cast<uint64_t>(src);
+  a.count           = static_cast<uint64_t>(count);
+  a.offset          = static_cast<uint64_t>(offset);
+  a.kind            = static_cast<int32_t>(kind);
+  a.pGraphNode      = reinterpret_cast<uint64_t>(
+      (r == hipSuccess && pGraphNode) ? *pGraphNode : nullptr);
+  fill_node_deps(a, pDependencies, numDependencies);
+  if (src && count && memcpy_src_is_host(src, kind)) {
+    auto h = hrr_cap::writer::write_blob(src, count);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMCPYNODETOSYMBOL,
+                                   &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipGraphAddMemcpyNodeFromSymbol(
+    hipGraphNode_t* pGraphNode, hipGraph_t graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst,
+    const void* symbol, size_t count, size_t offset, hipMemcpyKind kind) {
+  hipError_t r = g_real_table.hipGraphAddMemcpyNodeFromSymbol_fn(
+      pGraphNode, graph, pDependencies, numDependencies, dst, symbol, count,
+      offset, kind);
+  hrr_args_hipGraphAddMemcpyNodeFromSymbol a{};
+  a.ret             = static_cast<int32_t>(r);
+  a.graph           = reinterpret_cast<uint64_t>(graph);
+  a.numDependencies = static_cast<uint64_t>(numDependencies);
+  a.dst             = reinterpret_cast<uint64_t>(dst);
+  a.symbol          = reinterpret_cast<uint64_t>(symbol);
+  a.count           = static_cast<uint64_t>(count);
+  a.offset          = static_cast<uint64_t>(offset);
+  a.kind            = static_cast<int32_t>(kind);
+  a.pGraphNode      = reinterpret_cast<uint64_t>(
+      (r == hipSuccess && pGraphNode) ? *pGraphNode : nullptr);
+  fill_node_deps(a, pDependencies, numDependencies);
+  hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHADDMEMCPYNODEFROMSYMBOL,
+                                   &a.hdr, sizeof(a));
+  return r;
+}
+
+// A JIT linker input. The image is the whole point of the call and was
+// recorded as an address, so replay had nothing to link even once the linker
+// state itself was tracked.
+hipError_t capture_hipLinkAddData(hipLinkState_t state, hipJitInputType type,
+                                  void* data, size_t size, const char* name,
+                                  unsigned int numOptions,
+                                  hipJitOption* options, void** optionValues) {
+  hipError_t r = g_real_table.hipLinkAddData_fn(state, type, data, size, name,
+                                                numOptions, options,
+                                                optionValues);
+  hrr_args_hipLinkAddData a{};
+  a.ret        = static_cast<int32_t>(r);
+  a.state      = reinterpret_cast<uint64_t>(state);
+  a.type       = static_cast<int32_t>(type);
+  a.data       = reinterpret_cast<uint64_t>(data);
+  a.size       = static_cast<uint64_t>(size);
+  a.name       = reinterpret_cast<uint64_t>(name);
+  a.numOptions = static_cast<uint32_t>(numOptions);
+  a.options    = reinterpret_cast<uint64_t>(options);
+  a.optionValues = reinterpret_cast<uint64_t>(optionValues);
+  if (name) {
+    size_t n = std::strlen(name);
+    if (n > 255u) n = 255u;
+    std::memcpy(a.name_bytes, name, n);
+    a.name_bytes[n] = '\0';
+    a.name_present = 1;
+  }
+  if (options && numOptions) {
+    uint32_t n = numOptions > 32u ? 32u : numOptions;
+    std::memcpy(a.options_bytes, options, n * sizeof(hipJitOption));
+    a.options_n = n;
+    a.options_present = 1;
+  }
+  if (optionValues && numOptions) {
+    uint32_t n = numOptions > 32u ? 32u : numOptions;
+    std::memcpy(a.optionValues_bytes, optionValues, n * sizeof(void*));
+    a.optionValues_n = n;
+    a.optionValues_present = 1;
+  }
+  if (data && size) {
+    auto h = hrr_cap::writer::write_blob(data, size);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(HRR_API_HIPLINKADDDATA, &a.hdr, sizeof(a));
+  return r;
+}
+
+// The mutation spellings of the same copy, node-level and exec-level. Only the
+// to-symbol direction has a host buffer worth recording.
+hipError_t capture_hipGraphMemcpyNodeSetParamsToSymbol(
+    hipGraphNode_t node, const void* symbol, const void* src, size_t count,
+    size_t offset, hipMemcpyKind kind) {
+  hipError_t r = g_real_table.hipGraphMemcpyNodeSetParamsToSymbol_fn(
+      node, symbol, src, count, offset, kind);
+  hrr_args_hipGraphMemcpyNodeSetParamsToSymbol a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.node   = reinterpret_cast<uint64_t>(node);
+  a.symbol = reinterpret_cast<uint64_t>(symbol);
+  a.src    = reinterpret_cast<uint64_t>(src);
+  a.count  = static_cast<uint64_t>(count);
+  a.offset = static_cast<uint64_t>(offset);
+  a.kind   = static_cast<int32_t>(kind);
+  if (src && count && memcpy_src_is_host(src, kind)) {
+    auto h = hrr_cap::writer::write_blob(src, count);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(
+      HRR_API_HIPGRAPHMEMCPYNODESETPARAMSTOSYMBOL, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipGraphExecMemcpyNodeSetParamsToSymbol(
+    hipGraphExec_t hGraphExec, hipGraphNode_t node, const void* symbol,
+    const void* src, size_t count, size_t offset, hipMemcpyKind kind) {
+  hipError_t r = g_real_table.hipGraphExecMemcpyNodeSetParamsToSymbol_fn(
+      hGraphExec, node, symbol, src, count, offset, kind);
+  hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol a{};
+  a.ret        = static_cast<int32_t>(r);
+  a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
+  a.node       = reinterpret_cast<uint64_t>(node);
+  a.symbol     = reinterpret_cast<uint64_t>(symbol);
+  a.src        = reinterpret_cast<uint64_t>(src);
+  a.count      = static_cast<uint64_t>(count);
+  a.offset     = static_cast<uint64_t>(offset);
+  a.kind       = static_cast<int32_t>(kind);
+  if (src && count && memcpy_src_is_host(src, kind)) {
+    auto h = hrr_cap::writer::write_blob(src, count);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(
+      HRR_API_HIPGRAPHEXECMEMCPYNODESETPARAMSTOSYMBOL, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipGraphKernelNodeSetParams(
+    hipGraphNode_t node, const hipKernelNodeParams* pNodeParams) {
+  hipError_t r = g_real_table.hipGraphKernelNodeSetParams_fn(node, pNodeParams);
+  hrr_args_hipGraphKernelNodeSetParams a{};
+  a.ret  = static_cast<int32_t>(r);
+  a.node = reinterpret_cast<uint64_t>(node);
+  if (pNodeParams) {
+    std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipKernelNodeParams));
+    a.pNodeParams_present = 1;
+  }
+  write_kernel_node_event(a, HRR_API_HIPGRAPHKERNELNODESETPARAMS, pNodeParams);
+  return r;
+}
+
+hipError_t capture_hipGraphExecKernelNodeSetParams(
+    hipGraphExec_t hGraphExec, hipGraphNode_t node,
+    const hipKernelNodeParams* pNodeParams) {
+  hipError_t r = g_real_table.hipGraphExecKernelNodeSetParams_fn(
+      hGraphExec, node, pNodeParams);
+  hrr_args_hipGraphExecKernelNodeSetParams a{};
+  a.ret        = static_cast<int32_t>(r);
+  a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
+  a.node       = reinterpret_cast<uint64_t>(node);
+  if (pNodeParams) {
+    std::memcpy(a.pNodeParams_bytes, pNodeParams, sizeof(hipKernelNodeParams));
+    a.pNodeParams_present = 1;
+  }
+  write_kernel_node_event(a, HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS,
+                          pNodeParams);
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// Graph batch-memory-operation nodes — struct fields plus the op-array tail
+//
+// hipBatchMemOpNodeParams is {ctx, count, paramArray, flags}: the operations
+// are a second pointer hop, so the 32 bytes DEREF_FIELDS carries name an array
+// in the capturing process and nothing else. The array follows the struct as
+// a tail: u32 count, u32 stride, then count entries.
+// ---------------------------------------------------------------------------
+
+template <typename A>
+static void write_batch_memop_node_event(A& a, hrr_api_id_t api_id,
+                                         const hipBatchMemOpNodeParams* p) {
+  std::vector<uint8_t> payload(sizeof(A));
+  std::memcpy(payload.data(), &a, sizeof(A));
+  const uint32_t n = (p && p->paramArray) ? p->count : 0u;
+  const uint32_t stride =
+      n ? static_cast<uint32_t>(sizeof(hipStreamBatchMemOpParams)) : 0u;
+  const auto push_u32 = [&](uint32_t v) {
+    for (int i = 0; i < 4; i++) payload.push_back(static_cast<uint8_t>(v >> (i*8)));
+  };
+  push_u32(n);
+  push_u32(stride);
+  if (n) {
+    const auto* q = reinterpret_cast<const uint8_t*>(p->paramArray);
+    payload.insert(payload.end(), q, q + static_cast<size_t>(n) * stride);
+  }
+  hrr_cap::writer::write_event_raw(
+      api_id, reinterpret_cast<hrr_event_header*>(payload.data()),
+      static_cast<uint32_t>(payload.size()));
+}
+
+// The dependency array is the same shape in every hipGraphAdd*Node, so the
+// hand-written shims fill it the same way the generated ones do.
+template <typename A>
+static void fill_node_dependencies(A& a, const hipGraphNode_t* deps,
+                                   size_t num_deps) {
+  if (!deps || num_deps == 0) return;
+  uint32_t n = static_cast<uint32_t>(num_deps);
+  const uint32_t cap = sizeof(a.dependencies_bytes) / sizeof(hipGraphNode_t);
+  if (n > cap) n = cap;
+  std::memcpy(a.dependencies_bytes, deps, n * sizeof(hipGraphNode_t));
+  a.dependencies_n       = n;
+  a.dependencies_present = 1;
+}
+
+hipError_t capture_hipGraphAddBatchMemOpNode(
+    hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
+    const hipGraphNode_t* dependencies, size_t numDependencies,
+    const hipBatchMemOpNodeParams* nodeParams) {
+  hipError_t r = g_real_table.hipGraphAddBatchMemOpNode_fn(
+      phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
+  hrr_args_hipGraphAddBatchMemOpNode a{};
+  a.ret             = static_cast<int32_t>(r);
+  a.hGraph          = reinterpret_cast<uint64_t>(hGraph);
+  a.numDependencies = static_cast<uint64_t>(numDependencies);
+  a.phGraphNode     = reinterpret_cast<uint64_t>(
+      (r == hipSuccess && phGraphNode) ? *phGraphNode : nullptr);
+  fill_node_dependencies(a, dependencies, numDependencies);
+  if (nodeParams) {
+    std::memcpy(a.nodeParams_bytes, nodeParams, sizeof(hipBatchMemOpNodeParams));
+    a.nodeParams_present = 1;
+  }
+  write_batch_memop_node_event(a, HRR_API_HIPGRAPHADDBATCHMEMOPNODE, nodeParams);
+  return r;
+}
+
+hipError_t capture_hipGraphBatchMemOpNodeSetParams(
+    hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams) {
+  hipError_t r =
+      g_real_table.hipGraphBatchMemOpNodeSetParams_fn(hNode, nodeParams);
+  hrr_args_hipGraphBatchMemOpNodeSetParams a{};
+  a.ret   = static_cast<int32_t>(r);
+  a.hNode = reinterpret_cast<uint64_t>(hNode);
+  if (nodeParams) {
+    std::memcpy(a.nodeParams_bytes, nodeParams, sizeof(hipBatchMemOpNodeParams));
+    a.nodeParams_present = 1;
+  }
+  write_batch_memop_node_event(
+      a, HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS, nodeParams);
+  return r;
+}
+
+hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
+    hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+    const hipBatchMemOpNodeParams* nodeParams) {
+  hipError_t r = g_real_table.hipGraphExecBatchMemOpNodeSetParams_fn(
+      hGraphExec, hNode, nodeParams);
+  hrr_args_hipGraphExecBatchMemOpNodeSetParams a{};
+  a.ret        = static_cast<int32_t>(r);
+  a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
+  a.hNode      = reinterpret_cast<uint64_t>(hNode);
+  if (nodeParams) {
+    std::memcpy(a.nodeParams_bytes, nodeParams, sizeof(hipBatchMemOpNodeParams));
+    a.nodeParams_present = 1;
+  }
+  write_batch_memop_node_event(
+      a, HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS, nodeParams);
+  return r;
+}
+
+// ---------------------------------------------------------------------------
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
@@ -1550,6 +2209,34 @@ static void record_fat_binary_blob(const void* blob_ptr) {
   a.blob_hash_lo = h.lo;
   a.blob_hash_hi = h.hi;
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
+}
+
+// Record one registered __device__ global as a HRR_API_HIPREGISTERVAR event.
+//
+// The name is what survives the process boundary; the host shadow address and
+// the capture-time device address are recorded beside it so replay can map
+// both onto the global it resolves by name. Without the device address a
+// recorded hipMemcpy reading the symbol has a source that translates to
+// nothing, which is what made hipMemcpyFromSymbolAsync fail as an inner copy.
+static void record_registered_var(const void* host_var, const char* name,
+                                  size_t size, const void* dev_ptr) {
+  if (!host_var || !name || !*name) return;
+
+  hrr_args___hipRegisterVar a{};
+  a.var       = reinterpret_cast<uint64_t>(host_var);
+  a.hostVar   = reinterpret_cast<uint64_t>(host_var);
+  a.deviceVar = reinterpret_cast<uint64_t>(name);
+  a.size      = static_cast<uint64_t>(size);
+  a.global    = 1;
+  a.dev_addr  = reinterpret_cast<uint64_t>(dev_ptr);
+
+  size_t n = std::strlen(name);
+  if (n > 255u) n = 255u;
+  std::memcpy(a.deviceVar_bytes, name, n);
+  a.deviceVar_bytes[n] = '\0';
+  a.deviceVar_present = 1;
+
+  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
 }
 
 // Runtime dispatch-table capture is installed only from hip_capture_init()
@@ -1629,6 +2316,11 @@ void hip_capture_init() {
   // Retroactively record fat binaries that fired before our shims were live.
   // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
   hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
+
+  // And the __device__ globals registered against them, for the same reason
+  // and in this order: the fat binaries have to be in the archive before the
+  // symbols that live inside them.
+  hip::PlatformState::Instance().StatCO().ForEachGlobalVar(record_registered_var);
 
   std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
 }
