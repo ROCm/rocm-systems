@@ -459,10 +459,10 @@ namespace RcclUnitTesting
   // P2P send/recv protocol-selection matrix (host gate in enqueue.cc). LL128 is selected only when
   // ALL of the following hold; otherwise the legacy LL kernel is used (SIMPLE above threshold):
   //
-  //     useLL128SendRecv = defined(ENABLE_LL128)          // compile-time (HIP >= 6.1.33591)
-  //                        && comm->topo->ll128Enabled    // comm LL128 gate (RCCL_LL128_FORCE_ENABLE)
-  //                        && comm->allocP2pNetLLBuffers  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
-  //                        && (cudaArch == 940 || 950);   // gfx942 / gfx950 only
+  //     useLL128SendRecv = defined(ENABLE_LL128)
+  //                        && comm->topo->ll128Enabled
+  //                        && ( (cudaArch == 940 || 950) && allocP2pNetLLBuffers   // gfx942/gfx950
+  //                           || (cudaArch == 1250 && NCCL_P2P_LL128_ENABLE=1) );   // gfx1250 opt-in
   //
   // ll128Enabled is required so P2P stays consistent with the comm's collective protocol choice: if
   // LL128 is not enabled for the comm, send/recv must not use it even with the opt-in flag set. For
