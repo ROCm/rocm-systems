@@ -100,4 +100,4 @@ set_tests_properties(
         TIMEOUT
         30
         FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|signal timeout")
