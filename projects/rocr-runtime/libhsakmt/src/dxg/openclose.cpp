@@ -436,6 +436,10 @@ ErrorCode hsakmtRuntime::ReserveIPCSysMem(gpusize size,
         int &memfd, bool lock) {
     gpusize gpu_addr = 0;
     ErrorCode code = ErrorCode::Success;
+    if (!system_heap_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfMemory;
+    }
     gpu_addr = system_heap_mgr_->Alloc(size, alignment, 0);
     if (gpu_addr == 0)
         return ErrorCode::OutOfMemory;
@@ -453,8 +457,9 @@ ErrorCode hsakmtRuntime::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memf
     auto code = ErrorCode::Success;
 
     DecommitSystemHeapSpaceIPC((void *)gpu_addr, size, memfd);
-
-    system_heap_mgr_->Free(gpu_addr);
+    if (system_heap_mgr_) {
+        system_heap_mgr_->Free(gpu_addr);
+    }
     return code;
 }
 
