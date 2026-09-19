@@ -147,7 +147,7 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
             pr_err("fail to unmap right %lx with size %llx\n", (local_va + size), right_size);
 #endif
     } else {
-        pr_err("fail to reserve Local Heap Space!\n");
+        pr_err("fail to reserve Heap Space!\n");
         base = 0;
         size = 0;
     }
@@ -190,13 +190,19 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
    * resource, so oversize the pool and shrink only if the range can't be reserved.
    */
   for (uint64_t scale : {8ull, 4ull, 2ull}) {
-    local_heap_space_start_ = 0;
     local_heap_space_size_ = total_local_size * scale;
-    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align))
-      return true;
 
-    pr_warn("fail to reserve %" PRIu64 "x VRAM (%" PRIu64 " MB) of local heap VA, retry smaller\n",
-            scale, (total_local_size * scale) >> 20);
+    pr_info("try to reserve %" PRIu64 " MB (%" PRIu64 "x VRAM) of local heap VA\n",
+      (total_local_size * scale) >> 20, scale);
+
+    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align)) {
+      pr_info("successfully reserved %" PRIu64 " MB of local heap VA at 0x%" PRIx64 "\n",
+        (total_local_size * scale) >> 20, local_heap_space_start_);
+      return true;
+    }
+
+    pr_warn("failed to reserve %" PRIu64 " MB of local heap VA\n",
+      (total_local_size * scale) >> 20);
   }
 
   return false;
@@ -240,8 +246,31 @@ bool hsakmtRuntime::ReserveSystemHeapSpace() {
   uint64_t total_ram = rocr::os::HostTotalPhysicalMemory();
   // minimum of reserve size is 8G, maximum of reserve size is 1T.
   total_ram = rocr::AlignUp(total_ram, static_cast<size_t>(alignment) * 2);
-  system_heap_space_size_ = (total_ram > max_ram) ? max_ram : total_ram;
-  return ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment);
+  total_ram = (total_ram > max_ram) ? max_ram : total_ram;
+
+  for (uint64_t divisor : {1ull, 2ull, 4ull}) {
+    system_heap_space_size_ = total_ram / divisor;
+
+    pr_info("try to reserve %" PRIu64 " MB (1/%" PRIu64 " RAM) of system heap VA\n",
+      (total_ram / divisor) >> 20, divisor);
+
+    if (divisor > 1 && system_heap_space_size_ < alignment * 2) {
+      pr_err("System heap reserve size would shrink below 8G minimum. "
+        "Not enough heap space to reserve.\n");
+      return false;
+    }
+
+    if (ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment)) {
+      pr_info("successfully reserved %" PRIu64 " MB of system heap VA at 0x%" PRIx64 "\n",
+        (total_ram / divisor) >> 20, system_heap_space_start_);
+      return true;
+    }
+
+    pr_warn("failed to reserve %" PRIu64 " MB of system heap VA\n",
+      (total_ram / divisor) >> 20);
+  }
+
+  return false;
 }
 
 bool hsakmtRuntime::FreeSystemHeapSpace(void) {
@@ -436,6 +465,10 @@ ErrorCode hsakmtRuntime::ReserveIPCSysMem(gpusize size,
         int &memfd, bool lock) {
     gpusize gpu_addr = 0;
     ErrorCode code = ErrorCode::Success;
+    if (!system_heap_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfMemory;
+    }
     gpu_addr = system_heap_mgr_->Alloc(size, alignment, 0);
     if (gpu_addr == 0)
         return ErrorCode::OutOfMemory;
@@ -453,8 +486,9 @@ ErrorCode hsakmtRuntime::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memf
     auto code = ErrorCode::Success;
 
     DecommitSystemHeapSpaceIPC((void *)gpu_addr, size, memfd);
-
-    system_heap_mgr_->Free(gpu_addr);
+    if (system_heap_mgr_) {
+        system_heap_mgr_->Free(gpu_addr);
+    }
     return code;
 }
 
