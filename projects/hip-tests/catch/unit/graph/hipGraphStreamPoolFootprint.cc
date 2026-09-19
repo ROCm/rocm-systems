@@ -25,6 +25,10 @@ __global__ void bumpKernel(int* out, int n) {
   if (i < n) out[i] += 1;
 }
 
+__global__ void writeValueKernel(int* out, int value) {
+  if (blockIdx.x == 0 && threadIdx.x == 0) *out = value;
+}
+
 // Build chains of kernel nodes.
 void buildChainedGraph(hipGraph_t* graph, int* buf, int chains, int depth) {
   HIP_CHECK(hipGraphCreate(graph, 0));
@@ -117,5 +121,83 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   INFO("device memory retained after destroy: " << retained << " bytes");
   REQUIRE(retained <= kMaxBytesPerGraph);
 
+  HIP_CHECK(hipFree(buf));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Repeated whole-graph updates must reuse kernarg storage owned by obsolete
+ *    packets instead of growing device memory for the lifetime of the GraphExec.
+ *  - Launch after the updates and verify that the final kernel arguments are used.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphStreamPoolFootprint.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_KernargFootprint) {
+  constexpr int kUpdates = 8192;
+  constexpr int kWarmupUpdates = 8;
+  constexpr size_t kMaxUpdateGrowth = 4 * 1024 * 1024;
+
+  int* buf = nullptr;
+  HIP_CHECK(hipMalloc(&buf, sizeof(int)));
+  HIP_CHECK(hipMemset(buf, 0, sizeof(int)));
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  int value = 0;
+  void* args[] = {&buf, &value};
+  hipKernelNodeParams params = {};
+  params.func = reinterpret_cast<void*>(writeValueKernel);
+  params.gridDim = dim3(1);
+  params.blockDim = dim3(1);
+  params.kernelParams = args;
+
+  hipGraphNode_t node = nullptr;
+  HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  auto updateExec = [&](int updated_value) {
+    void* updated_args[] = {&buf, &updated_value};
+    hipKernelNodeParams updated_params = params;
+    updated_params.kernelParams = updated_args;
+    HIP_CHECK(hipGraphKernelNodeSetParams(node, &updated_params));
+
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult update_result = hipGraphExecUpdateError;
+    HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &update_result));
+    REQUIRE(update_result == hipGraphExecUpdateSuccess);
+    REQUIRE(error_node == nullptr);
+  };
+
+  for (int i = 0; i < kWarmupUpdates; ++i) {
+    updateExec(i);
+  }
+
+  const size_t free_before = freeDeviceMemory();
+  for (int i = 1; i <= kUpdates; ++i) {
+    updateExec(i);
+  }
+  const size_t free_after = freeDeviceMemory();
+  const size_t update_growth = free_before > free_after ? free_before - free_after : 0;
+  INFO("device memory growth over " << kUpdates << " graph updates: " << update_growth
+                                    << " bytes");
+  REQUIRE(update_growth <= kMaxUpdateGrowth);
+
+  HIP_CHECK(hipGraphLaunch(exec, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, buf, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(result == kUpdates);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipFree(buf));
 }
