@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+# Temporary no-op change on rocprofiler-compute to exercise TheRock Multi-arch CI
+
 #Add a name for the rocm-systems location
 set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
