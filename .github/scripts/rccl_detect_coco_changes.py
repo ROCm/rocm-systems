@@ -4,7 +4,7 @@
 
 """Decide whether a pull request touches anything the RCCL coco suites test.
 
-Emits ``rccl=true|false`` for the `changes` job in rccl-coco.yml. A false lets
+Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml. A false lets
 that workflow's gate pass a PR without running anything on the clusters.
 """
 
@@ -26,8 +26,10 @@ from ci_utils import get_modified_paths, matches_paths, set_github_output
 COCO_PATH_PATTERNS = [
     "projects/rccl/*",
     "projects/rccl-tests/*",
-    ".github/workflows/rccl-coco.yml",
+    ".github/workflows/rccl-coco-pr.yml",
+    ".github/workflows/rccl-coco-scheduled.yml",
     ".github/workflows/rccl-coco-run.yml",
+    ".github/scripts/rccl_coco_matrix.py",
     ".github/actions/resolve-coco-run/*",
     ".github/actions/checkout-coco-harness/*",
     ".github/scripts/rccl_detect_coco_changes.py",

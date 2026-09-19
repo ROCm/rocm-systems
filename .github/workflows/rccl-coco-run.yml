@@ -60,6 +60,16 @@ on:
         type: string
         required: false
         default: 'rccl'
+      baseline_stack:
+        description: >-
+          Stack key to hold at its configured ref (mode=pr only), passed as
+          `coco pr --baseline-stack`. Under --skip-baselines every stack
+          otherwise builds the PR head, leaving a perf lane nothing unmoved to
+          measure against. Set it on the build half too, or smoke compiles that
+          stack itself instead of reading it from build's cache.
+        type: string
+        required: false
+        default: ''
       build_only:
         description: >-
           Pass --build-only to `coco pr` (mode=pr only): compile every stack in
@@ -75,6 +85,14 @@ on:
         type: number
         required: false
         default: 600
+      cleanup_pr_dir:
+        description: >-
+          After a successful smoke leg (mode=pr, not build_only), remove the
+          per-run directory under stage_dir so the cluster reclaims disk without
+          waiting for other matrix legs.
+        type: boolean
+        required: false
+        default: false
     secrets:
       APP_ID:
         description: 'GitHub App ID, used to mint a read token for the coco harness repository.'
@@ -85,15 +103,6 @@ on:
       RCCL_COCO_DB_URL:
         description: 'coco database URL for result ingest. Omit to run without publishing.'
         required: false
-    outputs:
-      ephemeral_dir:
-        description: >-
-          The per-run directory this job built into, set for mode=pr only and
-          empty otherwise. Both halves of a PR gate report the same path, and
-          it stays on disk after the job ends so the other half can still be
-          using it; the caller is responsible for deleting it once both have
-          finished.
-        value: ${{ jobs.coco.outputs.ephemeral_dir }}
 
 permissions:
   contents: read
@@ -110,8 +119,6 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
-    outputs:
-      ephemeral_dir: ${{ steps.artifact_dir.outputs.ephemeral }}
     # Queue rather than cancel: two runs in one group are distinct work, such
     # as a nightly and a manual dispatch. Superseding an earlier run is a PR
     # concern, handled by the caller's workflow-level concurrency.
@@ -211,7 +218,6 @@ jobs:
               -mtime +2 -print -exec rm -rf {} + || true
             echo "COCO_OUTPUT=${output_dir}" >> "${GITHUB_ENV}"
             echo "dir=${output_dir}" >> "${GITHUB_OUTPUT}"
-            echo "ephemeral=${output_dir}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           if [[ -z "${stage_dir}" ]]; then
@@ -226,6 +232,7 @@ jobs:
           MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
           BUILD_ONLY: ${{ inputs.build_only }}
+          BASELINE_STACK: ${{ inputs.baseline_stack }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_ARGS: ${{ inputs.coco_args }}
           PR_NUMBER: ${{ inputs.pr_number }}
@@ -237,7 +244,7 @@ jobs:
         run: |
           set -euo pipefail
           unset VIRTUAL_ENV PYTHONHOME pythonLocation Python_ROOT_DIR Python3_ROOT_DIR
-          PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/' | paste -sd: -)"
+          PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/|/\.venv-' | paste -sd: -)"
           export PATH
           if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
@@ -255,6 +262,9 @@ jobs:
             pr_args=()
             if [[ "${BUILD_ONLY}" == "true" ]]; then
               pr_args+=(--build-only)
+            fi
+            if [[ -n "${BASELINE_STACK}" ]]; then
+              pr_args+=(--baseline-stack "${BASELINE_STACK}")
             fi
             echo "==> coco pr --job ${JOB} -o ${COCO_OUTPUT} ${pr_args[*]-} ${COCO_ARGS}"
             "${COCO_VENV}/bin/coco" pr \
@@ -302,7 +312,7 @@ jobs:
       # so a second upload under a name already used fails with a 409.
       - name: Upload coco console logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.ARTIFACT_NAME }}-console
           path: ${{ github.workspace }}/coco-*-${{ github.run_id }}.log
@@ -311,7 +321,7 @@ jobs:
 
       - name: Upload coco output logs
         if: always() && steps.artifact_dir.outputs.dir != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.ARTIFACT_NAME }}-output
           path: |
@@ -362,10 +372,39 @@ jobs:
             echo "::endgroup::"
           fi
 
-      # COCO_OUTPUT deliberately survives: on a PR run the sibling half shares
-      # that directory and may still be using it. The caller deletes it.
+      - name: Remove the shared per-run directory
+        if: >-
+          inputs.cleanup_pr_dir &&
+          inputs.mode == 'pr' &&
+          inputs.build_only != true &&
+          steps.launch.outcome == 'success'
+        env:
+          TARGET: ${{ env.COCO_OUTPUT }}
+          RUN_SUBDIR: pr-${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          if [[ -z "${TARGET:-}" || ! -d "${TARGET}" ]]; then
+            echo "Nothing to remove; the age-based sweep will collect any leftovers."
+            exit 0
+          fi
+          if [[ "$(basename "${TARGET}")" != "${RUN_SUBDIR}" ]]; then
+            echo "::warning::Refusing to remove ${TARGET}: not this run's directory."
+            exit 0
+          fi
+          rm -rf "${TARGET}" && echo "Removed ${TARGET}" || \
+            echo "::warning::Could not fully remove ${TARGET}."
+
+      # Build legs leave COCO_OUTPUT in place for smoke to reuse; smoke deletes
+      # it here when cleanup_pr_dir is set.
       - name: Clean up harness checkout
         if: always()
         run: |
-          rm -rf "${COCO_DIR}"
-          rm -f "${LOG_FILE}"
+          set -uo pipefail
+          # The workspace is on NFS, where a file still held open is renamed to
+          # .nfsXXXX rather than unlinked, so rm -rf reports ENOTEMPTY while a
+          # coco child process is still exiting. Scratch space must not fail
+          # the job.
+          if ! rm -rf "${COCO_DIR}"; then
+            echo "::warning::Could not fully remove ${COCO_DIR}; leaving it for the next run to overwrite."
+          fi
+          rm -f "${LOG_FILE}" || true

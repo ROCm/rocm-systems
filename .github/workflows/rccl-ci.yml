@@ -5,14 +5,14 @@ name: RCCL cluster CI
 # TheRock CI artifacts, builds rocSHMEM/RCCL/rccl-tests from the PR sources, and runs.
 # ROCm tracks TheRock automatically (latest main run); pass artifact_run_id to pin one.
 #
-# Nightly and on demand, not PR-triggered. rccl-coco.yml covers RCCL and
+# Nightly and on demand, not PR-triggered. rccl-coco-pr.yml covers RCCL and
 # rccl-tests PRs; these suites rejoin it once the device-api tests are restored
 # there. Until then, changes under projects/rocshmem are covered only by this
 # nightly, not by any PR check.
 
 on:
   schedule:
-    # Weekday nightly, offset from rccl-coco.yml's 03:47 nightly and from
+    # Weekday nightly, offset from rccl-coco-scheduled.yml's 03:47 nightly and from
     # rccl-ainic-tw-gfx950-runner.yml's 02:00 so the three do not contend for
     # the ruby and tw runners. The longest leg here is 5h.
     - cron: '47 12 * * 1-5'
