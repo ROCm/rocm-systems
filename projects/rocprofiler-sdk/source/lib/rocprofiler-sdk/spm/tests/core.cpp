@@ -1100,7 +1100,7 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
             inst_pkt.emplace_back(
                 std::make_pair(std::move(ret_pkt.packet), hsa::queue_hooks::SPM_CLIENT_ID));
 
-            spm::signal_completion_hook(fq,
+            spm::signal_completion_hook(&fq,
                                         pkt,
                                         sess,
                                         sess->packet_data.emplace_back(),
