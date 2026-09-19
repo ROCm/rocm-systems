@@ -25,6 +25,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -344,8 +345,10 @@ public:
           std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
       auto page = page_table_.find(mapped_va >> kPageShift);
       if (page != page_table_.end()) {
-        erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
-        if (page->second.host_extents.empty())
+        // Avoid building a temporary extent vector for a page being discarded.
+        if (chunk != kPageSize)
+          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
+        if (chunk == kPageSize || page->second.host_extents.empty())
           page_table_.erase(page);
       }
       mapped_va += chunk;
@@ -424,7 +427,12 @@ public:
   }
 
   mutable std::shared_mutex page_table_mutex_;
-  PageTable page_table_;
+  /// @brief Pool for page-table nodes and buckets.
+  /// @details Writers serialize allocation under page_table_mutex_. Declaration
+  /// order keeps the pool alive until the table is destroyed; capacity is
+  /// retained for reuse until this process is destroyed.
+  std::pmr::unsynchronized_pool_resource page_table_pool_;
+  PageTable page_table_{&page_table_pool_};
 
   // -- Per-process state --
 
