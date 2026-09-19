@@ -183,6 +183,7 @@ jobs:
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/various-mem-rw \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/subregion-write \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/roundtrip-verify \
+            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/batch/batch-roundtrip \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-nonblocking-stream \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream \
