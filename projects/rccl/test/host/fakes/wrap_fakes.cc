@@ -55,6 +55,7 @@ ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion)
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
 ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
+ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
 
 // getAlgoInfo, rcclKernelPackedChannels, and the four ReduceScatter *Blocks
 // hooks are link-closure symbols with no production header declaration, so
@@ -153,6 +154,10 @@ static ncclResult_t DefaultCommCount(const ncclComm_t comm, int* count) {
 }
 std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount = DefaultCommCount;
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCount(comm, count); }
+
+static ncclResult_t DefaultEnsureHierarchicalComms(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms = DefaultEnsureHierarchicalComms;
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) { return g_ensureHierarchicalComms(comm); }
 
 // ---------------------------------------------------------------------------
 // Controllable seams for the top-level dispatchers (rcclSelectAllReduce/

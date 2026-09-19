@@ -1420,6 +1420,26 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         {"Enabled_64Nodes_AtFull",       64, true,  FULL,        true,  {}},
         // env var forces off --> disabled
         {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+
+        // ROCM-29579: per-rank lower bound, default 1 KB/rank.
+        //
+        // CreateMockComm below sets nRanks = 8 * nNodes, so the total gathered
+        // size for a given per-rank contribution scales with the job. These
+        // startup-sized cases pin the bound to per-rank semantics rather than
+        // total bytes.
+        {"Bootstrap_8Nodes_8BPerRank",      8,  true, 8ULL * 64,           false, {}},
+        {"Bootstrap_16Nodes_8BPerRank",     16, true, 8ULL * 128,          false, {}},
+        {"Bootstrap_32Nodes_8BPerRank",     32, true, 8ULL * 256,          false, {}},
+        // Boundary, 16 nodes = 128 ranks: 128 KB gathered is exactly 1 KB/rank.
+        {"Enabled_16Nodes_At1KBPerRank",    16, true, 1024ULL * 128,       true,  {}},
+        {"Disabled_16Nodes_Under1KBPerRank",16, true, 1024ULL * 128 - 128, false, {}},
+        // The floor is tunable, and 0 restores the previous upper-bound-only gate.
+        {"MinBytesPerRankZeroRestoresOldGate", 16, true, 8ULL * 128,       true,
+         {{"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", "0"}}},
+        // Raising it past a size that would otherwise pass disables that size:
+        // 1 MB gathered over 128 ranks is 8 KB/rank, under a 1 MB/rank floor.
+        {"MinBytesPerRankRaised",           16, true, 1ULL << 20,          false,
+         {{"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", "1048576"}}},
     };
 
     // Base environment shared by every case
