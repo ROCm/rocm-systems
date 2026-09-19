@@ -398,6 +398,15 @@ deviceLib:
   Unit_ocp_fp4_from_double_full_range_device:
     <<: *level_2
     tags: [types]
+  Unit_ocp_fp4_to_halfraw_signed_zero_host:
+    <<: *level_2
+    tags: [types]
+  Unit_ocp_fp4_to_bfloat16raw_signed_zero_host:
+    <<: *level_2
+    tags: [types]
+  Unit_ocp_fp6_to_halfraw_signed_zero_host:
+    <<: *level_2
+    tags: [types]
   Unit_ext_ocp_fp8_roundtrip_host:
     <<: *level_2
     # Sources compiled only on non-Windows (see unit/deviceLib/CMakeLists.txt)
@@ -448,6 +457,10 @@ deviceLib:
     disabled: [amd_windows, amd_wsl]
     tags: [types]
   Unit_ext_ocp_fp4_device_matches_host:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [types]
+  Unit_ext_ocp_fp4_nan_inf_bits_host:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
     tags: [types]
