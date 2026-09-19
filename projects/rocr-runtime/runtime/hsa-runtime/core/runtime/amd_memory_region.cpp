@@ -152,7 +152,9 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
   const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
-  if (IsSystem() && (size > max_sysmem_alloc_size_)) {
+  const size_t max_alloc_size =
+      IsDeviceSVM() ? max_single_alloc_size_ : max_sysmem_alloc_size_;
+  if (IsSystem() && (size > max_alloc_size)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
   if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
@@ -231,8 +233,10 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
     case HSA_REGION_INFO_ALLOC_MAX_SIZE:
       switch (mem_props_.HeapType) {
         case HSA_HEAPTYPE_SYSTEM:
-        case HSA_HEAPTYPE_DEVICE_SVM:
           *((size_t*)value) = max_sysmem_alloc_size_;
+          break;
+        case HSA_HEAPTYPE_DEVICE_SVM:
+          *((size_t*)value) = max_single_alloc_size_;
           break;
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
