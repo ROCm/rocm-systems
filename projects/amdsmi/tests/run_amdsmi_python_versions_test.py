@@ -65,6 +65,7 @@ def _run_unit_tests(interp: str) -> None:
         "test_cpack_path_guard.py",
         "test_upgrade_downgrade_guard.py",
         "test_packaging_scriptlets.py",
+        "test_python_package_staging.py",
     ):
         subprocess.run([interp, str(TEST_DIR / test)], check=True)
 

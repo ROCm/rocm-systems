@@ -604,6 +604,47 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_is_gpu_apu
+
+Description: Returns whether the given GPU is the integrated GPU of an APU. Identification comes from the amdgpu driver's fusion flag, so it needs no HIP context and does not compare memory sizes.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: `True` for the integrated GPU of an APU, `False` for a discrete GPU
+
+**Note:** An APU's GPU keeps `AmdSmiProcessorType.AMD_GPU`, so `amdsmi_get_processor_handles_by_type(socket, AmdSmiProcessorType.AMD_APU)` returns an empty `processor_handles` list with a `processor_count` of `0`; `UNKNOWN` is not a wildcard either. This query is also distinct from the `is_apu` key of `amdsmi_get_gpu_metrics_info()`, which reports only whether the metrics table carries APU fields. An APU can still have a BIOS VRAM carveout, so this query says nothing about the size of its shared memory pool.
+
+Exceptions that can be thrown by `amdsmi_is_gpu_apu` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_FOUND` - Handle is not a registered processor
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Identification unavailable, including on WSL and on libraries that predate this API. Do not read it as `False`.
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Is APU: ", amdsmi.amdsmi_is_gpu_apu(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_asic_info
 
 Description: Returns asic information for the given GPU
@@ -629,6 +670,7 @@ Field | Content
 `num_of_compute_units` | number of compute units on asic
 `target_graphics_version` | hardware graphics version
 `subsystem_id` |  subsystem id
+`flags` | Backend-specific chip flags; on Linux the amdgpu `ids_flags`. Use `amdsmi_is_gpu_apu()` to identify an APU.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 

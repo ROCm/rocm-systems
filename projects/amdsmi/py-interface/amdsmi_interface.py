@@ -2865,6 +2865,20 @@ def amdsmi_get_cpu_affinity_with_scope(
     return cpu_set
 
 
+def amdsmi_is_gpu_apu(processor_handle: processor_handle_t) -> bool:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    # New APIs used by the CLI report NOT_SUPPORTED when an older library lacks the symbol.
+    query = getattr(amdsmi_wrapper, "amdsmi_is_gpu_apu", None)
+    if query is None:
+        raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+
+    is_apu = ctypes.c_bool()
+    _check_res(query(processor_handle, ctypes.byref(is_apu)))
+    return is_apu.value
+
+
 def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

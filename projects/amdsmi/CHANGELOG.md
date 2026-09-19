@@ -8,6 +8,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amdsmi_is_gpu_apu()` in C and Python**.  
+  - Identifies integrated GPUs using the native Linux amdgpu fusion flag, without memory-size heuristics or a HIP context. GPU handles retain the `AMD_GPU` processor type.
+  - Unavailable identification, including on WSL, reports `AMDSMI_STATUS_NOT_SUPPORTED` rather than classifying the GPU as discrete. Existing structure layouts and ASIC flags are unchanged.
+  - `amd-smi` now uses it to pick the memory pool it reports for an APU, replacing its own copy of the flag test.
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
 
@@ -59,6 +64,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed processor cleanup during AMD SMI shutdown**.  
+  - Releases AI-NIC processors and sockets in NIC-only sessions, clears processor tracking, and resets NIC context state so reinitialization does not retain stale handles.
+
+- **Fixed incremental builds leaving staged Python files out of date**.  
+  - Refreshes the staged package after source edits, preventing stale exports or implementations from causing import errors after an API rename.
+
+- **Fixed typed processor enumeration returning GPUs for unhandled processor types**.  
+  - Types with no processors, including `AMD_APU`, now return an empty list. Out-of-range types are rejected. Use `amdsmi_is_gpu_apu()` on `AMD_GPU` handles to identify APUs ([#8476](https://github.com/ROCm/rocm-systems/issues/8476)).
+  - Migration: callers that passed `UNKNOWN` as a wildcard now get zero handles instead of the GPU list, and must pass `AMD_GPU`.
 
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.

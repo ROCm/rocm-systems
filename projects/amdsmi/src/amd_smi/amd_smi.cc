@@ -557,7 +557,7 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors();
+  const auto& processors = socket->get_processors();
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -591,8 +591,7 @@ amdsmi_status_t amdsmi_get_nic_processor_handles(amdsmi_socket_handle socket_han
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  std::vector<amd::smi::AMDSmiProcessor*>& processors =
-      socket->get_processors(AMDSMI_PROCESSOR_TYPE_BRCM_NIC);
+  const auto& processors = socket->get_processors(AMDSMI_PROCESSOR_TYPE_BRCM_NIC);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -628,7 +627,7 @@ amdsmi_status_t amdsmi_get_switch_processor_handles(amdsmi_socket_handle socket_
 
   amdsmi_processor_type_t processor_type =
       static_cast<amdsmi_processor_type_t>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH);
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
+  const auto& processors = socket->get_processors(processor_type);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -766,8 +765,11 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
   amdsmi_status_t r =
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
-  uint32_t processor_size = static_cast<uint32_t>(processors.size());
+  uint32_t ignored_count = 0;
+  r = socket->get_processor_count(processor_type, &ignored_count);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  const auto& processors = socket->get_processors(processor_type);
+  const auto processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
     *processor_count = processor_size;
@@ -797,6 +799,32 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
   *processor_type = processor->get_processor_type();
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+static amdsmi_status_t get_native_gpu_asic_info(amd::smi::AMDSmiGPUDevice* gpu_device,
+                                                amdsmi_asic_info_t* info);
+
+// Callers validate the GPU and output pointers before entering this path.
+static amdsmi_status_t smi_gpu_device_is_apu(amd::smi::AMDSmiGPUDevice* gpu_device, bool* is_apu) {
+#ifdef ENABLE_WSL_BACKEND
+  // WSL reports a family ID in asic_info.flags, not AMDGPU ids_flags.
+  if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+
+  amdsmi_asic_info_t info = {};
+  amdsmi_status_t status = get_native_gpu_asic_info(gpu_device, &info);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  return smi_amdgpu_is_apu(info.flags, is_apu);
+}
+
+amdsmi_status_t amdsmi_is_gpu_apu(amdsmi_processor_handle processor_handle, bool* is_apu) {
+  AMDSMI_CHECK_INIT();
+  if (is_apu == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  return smi_gpu_device_is_apu(gpu_device, is_apu);
 }
 
 amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle,
@@ -2442,6 +2470,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
     return AMDSMI_STATUS_INVAL;
   }
 
+  return get_native_gpu_asic_info(gpu_device, info);
+}
+
+static amdsmi_status_t get_native_gpu_asic_info(amd::smi::AMDSmiGPUDevice* gpu_device,
+                                                amdsmi_asic_info_t* info) {
+  const auto processor_handle = reinterpret_cast<amdsmi_processor_handle>(gpu_device);
   struct drm_amdgpu_info_device dev_info = {};
   uint16_t vendor_id = 0;
   uint16_t subvendor_id = 0;
@@ -8467,17 +8501,6 @@ static bool is_dry_run() {
   return (dry_run != nullptr && std::string(dry_run) == "1");
 }
 
-// The fwupd UMA carveout is a platform-wide APU BIOS setting, so it must only be
-// consulted for the integrated (FUSION) GPU -- never a discrete GPU that merely
-// lacks the amdgpu sysfs node. Uses the ASIC AMDGPU_IDS_FLAGS_FUSION flag.
-static bool gpu_handle_is_apu(amdsmi_processor_handle processor_handle) {
-  amdsmi_asic_info_t asic_info = {};
-  if (amdsmi_get_gpu_asic_info(processor_handle, &asic_info) != AMDSMI_STATUS_SUCCESS) {
-    return false;
-  }
-  return (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
-}
-
 static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDevice* gpu_device,
                                                           amdsmi_uma_carveout_info_t* info) {
   if (gpu_device == nullptr || info == nullptr) {
@@ -8593,7 +8616,8 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
 
   // Prefer the fwupd path; the amdgpu sysfs node is the fallback when fwupd is
   // unavailable or when fwupd redacts it for an unprivileged caller (below).
-  if (gpu_handle_is_apu(processor_handle)) {
+  bool is_apu = false;
+  if (smi_gpu_device_is_apu(gpu_device, &is_apu) == AMDSMI_STATUS_SUCCESS && is_apu) {
     amdsmi_status_t fwupd_ret = amd::smi::fwupd_get_carveout_info(info);
     if (fwupd_ret == AMDSMI_STATUS_SUCCESS) {
       // fill current_index from it so an unprivileged `static`
@@ -8630,7 +8654,8 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
   // fwupd brokers PolicyKit auth (no root needed) instead of the root-only
   // sysfs node; falls back to sysfs on NOT_SUPPORTED. Runs before the mutex
   // since it never touches gpu_device.
-  if (gpu_handle_is_apu(processor_handle)) {
+  bool is_apu = false;
+  if (smi_gpu_device_is_apu(gpu_device, &is_apu) == AMDSMI_STATUS_SUCCESS && is_apu) {
     amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
     if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
       return fwupd_ret;

@@ -18,6 +18,10 @@ AMDSmiSocket::~AMDSmiSocket() {
     delete cpu_core_processors_[i];
   }
   cpu_core_processors_.clear();
+  for (uint32_t i = 0; i < ainic_processors_.size(); i++) {
+    delete ainic_processors_[i];
+  }
+  ainic_processors_.clear();
   for (uint32_t i = 0; i < nic_processors_.size(); i++) {
     delete nic_processors_[i];
   }
@@ -27,6 +31,10 @@ AMDSmiSocket::~AMDSmiSocket() {
     delete switch_processors_[i];
   }
   switch_processors_.clear();
+  for (auto* processor : unreported_processors_) {
+    delete processor;
+  }
+  unreported_processors_.clear();
 }
 
 amdsmi_status_t AMDSmiSocket::get_processor_count(uint32_t* processor_count) const {
@@ -55,6 +63,12 @@ amdsmi_status_t AMDSmiSocket::get_processor_count(amdsmi_processor_type_t type,
       break;
     case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
       *processor_count = static_cast<uint32_t>(switch_processors_.size());
+      break;
+    case AMDSMI_PROCESSOR_TYPE_UNKNOWN:
+    case AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU:
+    case AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_APU:
+      *processor_count = 0;
       break;
     default:
       *processor_count = 0;
