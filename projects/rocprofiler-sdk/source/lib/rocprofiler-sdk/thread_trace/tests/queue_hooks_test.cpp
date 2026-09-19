@@ -136,6 +136,11 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     ASSERT_TRUE(ctx_p && ctx_p->dispatch_thread_trace);
     auto& tracer = *ctx_p->dispatch_thread_trace;
 
+    // thread_trace::initialize() only calls resource_init() on contexts that already exist when
+    // the HSA runtime registers. This context is created afterwards, so its agent map is still
+    // empty and pre_kernel_call would bail out before building a packet.
+    tracer.resource_init();
+
     hsa::HookTestFakeQueue  fq(*att_agent, {.handle = 901});
     hsa::rocprofiler_packet pkt{};
     context::correlation_id corr_id{};
