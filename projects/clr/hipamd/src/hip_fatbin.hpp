@@ -35,6 +35,15 @@ class FatBinaryInfo {
   hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
                            amd::Os::FileDesc fdesc);
+
+  // Translates a SPIR-V code object blob to a device ELF executable via COMGR,
+  // targeting the given device's ISA. On success returns hipSuccess and stores a
+  // newly heap-allocated (new char[]) executable in *out_co / *out_size, tracked
+  // in heap_code_objects_ and owned by this object. Used to lower portable
+  // amdgcnspirv device code (from a fat binary or a kpack archive) to the
+  // runner's real GPU ISA at load time.
+  hipError_t TranslateSpirvToExecutable(hip::Device* device, const void* spirv_blob,
+                                        size_t spirv_size, char** out_co, size_t* out_size);
   hipError_t BuildProgram(const int device_id);
 
   // Device Id bounds check
@@ -84,8 +93,15 @@ class FatBinaryInfo {
 
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 
-  std::recursive_mutex fb_lock_;                          //!< Lock for the fat binary access
-  std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
+  std::recursive_mutex fb_lock_;  //!< Lock for the fat binary access
+
+  // Tracked code-object allocations, split by how they must be freed. kpack
+  // loader buffers are freed via kpack_free_code_object(); heap buffers created
+  // with new char[] (COMGR-translated executables, and per-device COMGR fat-bin
+  // outputs) are freed via delete[]. Keeping these separate avoids a
+  // free/delete mismatch when a kpack binary yields a COMGR-translated object.
+  std::unordered_set<const void*> kpack_code_objects_;  //!< kpack_free_code_object()
+  std::unordered_set<const void*> heap_code_objects_;   //!< delete[]
 };
 
 };  // namespace hip
