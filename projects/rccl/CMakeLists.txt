@@ -5,6 +5,8 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+#Temporary no-op change on rccl to exercise TheRock Multi-arch CI
+
 # Locate the shared rocm-systems tree so standalone RCCL builds can pick up
 # shared/ctest/TestCategories.cmake (the test-categories block in test/CMakeLists.txt
 # is gated on ROCM_SYSTEMS_ROOT and is otherwise silently skipped).
