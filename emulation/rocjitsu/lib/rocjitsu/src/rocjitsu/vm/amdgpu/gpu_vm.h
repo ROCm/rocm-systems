@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -254,6 +255,30 @@ public:
   }
 };
 
+/// @brief Copied page policy with an optional retained mutation token.
+/// @details A translator may cache a range only when it invalidates the token
+/// before every policy mutation. Capture the policy and token under the same
+/// lease that excludes those mutations. No backing pointer is retained.
+struct VmMtypeSnapshot {
+  std::optional<Mtype> mtype;
+  uint64_t begin = 0;
+  uint64_t size = 0;
+  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  uint64_t captured_epoch = 0;
+
+  [[nodiscard]] bool unchanged(uint64_t address) const {
+    return address >= begin && address - begin < size && mutation_epoch &&
+           captured_epoch == mutation_epoch->load(std::memory_order_acquire);
+  }
+};
+
+/// @brief Request-local policy cache, including the binding that owns it.
+class VmMtypeCache {
+  friend class GpuVmAccess;
+  std::shared_ptr<GpuVmAccessState> access_state_;
+  VmMtypeSnapshot snapshot_;
+};
+
 /// @brief Address-space policy separated from the physical backing transport.
 class AddressSpaceTranslator {
 public:
@@ -269,6 +294,14 @@ public:
   [[nodiscard]] virtual std::optional<Mtype> query_mtype(uint64_t address) const {
     const VmTranslationResult translated = translate(address, 1, VmAccessKind::Read);
     return translated ? std::optional<Mtype>(translated.translation.mtype) : std::nullopt;
+  }
+
+  /// @brief Optionally retain a mutation-checked copy of page policy.
+  /// @details Cacheable snapshots capture the policy and token under the same
+  /// lease and invalidate that token before every policy mutation. Retain only
+  /// copied policy, never a backing pointer. The default remains uncached.
+  [[nodiscard]] virtual VmMtypeSnapshot snapshot_mtype(uint64_t address) const {
+    return {.mtype = query_mtype(address)};
   }
 
   /// @brief Translate one span for a non-mutating address-validity probe.
@@ -426,6 +459,8 @@ public:
                                               VmAccessKind access) const;
   /// @brief Query cache policy without exposing physical backing metadata.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const;
+  /// @brief Reuse a copied policy while both its binding and mutation token are valid.
+  [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address, VmMtypeCache &cache) const;
   /// @brief Query whether a complete virtual range currently permits an access.
   /// @details This side-effect-free query is for provisioning and routing decisions
   /// where an absent mapping is expected and must not be delivered as a GPU fault.
