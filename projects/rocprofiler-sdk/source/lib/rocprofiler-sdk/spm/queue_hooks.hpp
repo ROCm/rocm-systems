@@ -53,8 +53,10 @@ write_hook(const hsa::Queue&                                        queue,
 // dispatch_spm contexts (not only active ones) and calls each callback's
 // post_kernel_call; post_kernel_call self-filters via packet_return_map so
 // in-flight dispatches still complete after stop_context.
+// queue is nullable: the hook never dereferences it, and tests exercise the
+// early-return path without an HSA runtime to build a queue from.
 void
-signal_completion_hook(const hsa::Queue&                           queue,
+signal_completion_hook(const hsa::Queue*                           queue,
                        const hsa::rocprofiler_packet&              kernel_packet,
                        std::shared_ptr<hsa::queue_info_session_t>& session,
                        hsa::packet_data_t&                         packet,

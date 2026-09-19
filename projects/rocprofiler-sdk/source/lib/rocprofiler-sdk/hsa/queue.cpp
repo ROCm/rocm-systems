@@ -171,7 +171,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
         // it explicitly here.
-        spm::signal_completion_hook(queue_info_session.queue,
+        spm::signal_completion_hook(&queue_info_session.queue,
                                     packet.kernel_packet,
                                     _session,
                                     packet,

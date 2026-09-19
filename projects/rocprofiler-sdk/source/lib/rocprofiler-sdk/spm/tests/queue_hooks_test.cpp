@@ -46,12 +46,8 @@ TEST(spm_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_spm_client_id)
     auto packet = rocprofiler::hsa::packet_data_t{};
     auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
-    rocprofiler::spm::signal_completion_hook(*reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
-                                             fq_pkt,
-                                             sess,
-                                             packet,
-                                             inst_pkt,
-                                             rocprofiler::kernel_dispatch::profiling_time{});
+    rocprofiler::spm::signal_completion_hook(
+        nullptr, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
     SUCCEED();
 }
 }  // namespace
