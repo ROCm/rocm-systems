@@ -10,3 +10,9 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(ROCclr)
+
+option(BUILD_TESTS "Enable building ROCclr unit tests" OFF)
+if(BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests/unit)
+endif()
