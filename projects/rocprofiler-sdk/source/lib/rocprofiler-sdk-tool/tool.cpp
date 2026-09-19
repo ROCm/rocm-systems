@@ -4301,9 +4301,11 @@ get_sigaction_function()
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
-// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
-int signal_abort_flush_timeout_sec =
-    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+// Bounds the blocking waits during signal finalization: the SIGABRT flush wait and the
+// child-reap poll. Read once here because getenv() is not async-signal-safe; <= 0 waits
+// indefinitely.
+int signal_finalize_wait_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS", 10);
 
 }  // namespace
 
@@ -4327,10 +4329,29 @@ wait_pid(pid_t _pid, int _opts = 0)
     int   _status = 0;
     pid_t _pid_v  = -1;
     _opts |= WUNTRACED;
+
+    // Bound the WNOHANG poll: a child that never exits (e.g. a signal-ignoring compile-worker
+    // pool) must not wedge finalization forever. A blocking wait (no WNOHANG) is the caller's
+    // explicit choice and is left unbounded.
+    const bool _bounded = (_opts & WNOHANG) > 0 && signal_finalize_wait_timeout_sec > 0;
+    const auto _deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{signal_finalize_wait_timeout_sec};
     do
     {
         if((_opts & WNOHANG) > 0)
         {
+            if(_bounded && std::chrono::steady_clock::now() >= _deadline)
+            {
+                ROCP_WARNING << fmt::format(
+                    "[PPID={}][PID={}][TID={}][{}] gave up waiting for child {} after {}s",
+                    this_ppid,
+                    this_pid,
+                    this_tid,
+                    this_func,
+                    _pid,
+                    signal_finalize_wait_timeout_sec);
+                return std::nullopt;
+            }
             std::this_thread::yield();
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
         }
@@ -4596,9 +4617,16 @@ signal_finalization_worker()
     }
 
     // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
-    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
-    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
-    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    // that returns). We do NOT signal the children. That is the app's/OS's job. A child that
+    // received the signal finalizes via its own worker.
+    //
+    // signo == 0 is the normal-exit wake (finalize_rocprofv3 then join): no signal was
+    // delivered, so a child the app left running is the app's own business. Reaping it would
+    // block on a child that may never exit, so skip it.
+    if(sw.signo != 0)
+    {
+        wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    }
 
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
@@ -4662,7 +4690,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // So wait for the flush here, then return into abort(). Unlike the async signals, this can
     // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
     // paths, e.g. heap-corruption detection. Bound the wait with
-    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
     // beats a hung process. <= 0 waits forever.
     if(signo == SIGABRT)
     {
@@ -4670,12 +4698,12 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         {
             // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
             // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
-            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            const auto bounded  = (signal_finalize_wait_timeout_sec > 0);
             auto       deadline = timespec{};
             if(bounded)
             {
                 clock_gettime(CLOCK_MONOTONIC, &deadline);
-                deadline.tv_sec += signal_abort_flush_timeout_sec;
+                deadline.tv_sec += signal_finalize_wait_timeout_sec;
             }
 
             while(sw.finalize_done.load(std::memory_order_acquire) == 0)
