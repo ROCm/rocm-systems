@@ -13,9 +13,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
-#include <functional>
-#include <queue>
-#include <utility>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -25,41 +22,21 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
-enum class [[nodiscard]] MemoryAccessCompletion {
-  Complete,
-  Deferred,
-};
-
-using MemoryAccessDeferredCompletion = std::function<void()>;
-
 /// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
-/// @details Models the memory access pipeline as two FIFO queues:
-/// - issued_: instructions that need initiate_access() called
-/// - returned_: instructions whose memory response has arrived, awaiting
-///   register writeback via complete_access().
-///
-/// In functional mode, L1/L2/HBM accesses are synchronous and produce an
-/// immediate response, so instructions move from issued_ to returned_
-/// in a single tick() and then complete on the next tick().
+/// @details Functional memory accesses complete synchronously during issue:
+/// initiate the access, perform architectural writeback, then release ownership.
 class MemoryPipeline {
 public:
   explicit MemoryPipeline(WaitCounterType type) : counter_type_(type) {}
-  virtual ~MemoryPipeline() = default;
 
-  struct PipelineEntry {
-    Instruction *inst;
-    Wavefront *wf;
-  };
-
-  /// @brief Issue a memory instruction to this pipeline.
+protected:
+  /// @brief Issue a memory instruction through its concrete pipeline.
   ///
-  /// In functional mode, memory accesses normally complete synchronously:
-  /// the load or store is initiated and completed within this call, and the
-  /// wait counter is released only after complete_access() finishes all
-  /// writeback work.  A timing backend may return Deferred and release the
-  /// counter later through finish_completed_access().
-  void issue(Instruction *inst, Wavefront &wf) {
+  /// Memory accesses complete synchronously: initiate the access, perform
+  /// architectural writeback, then release the wait counter and instruction.
+  template <typename Pipeline>
+  void issue_impl(Pipeline &pipeline, Instruction *inst, Wavefront &wf) {
     WaitCounterType issue_counter = counter_type_;
     if (auto *state = inst->data()) {
       switch (state->tag()) {
@@ -75,40 +52,21 @@ public:
       }
     }
     wf.wait_counters().increment(issue_counter);
-    initiate_access(*inst, wf);
-    // The wait counter pins wf/inst ownership until this callback releases it.
-    // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
-    // so a deferred backend must invoke this exactly once while that counter is held.
-    MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counter]() {
-      finish_completed_access(inst, wf, issue_counter);
-    };
-    MemoryAccessCompletion completion = complete_access(*inst, wf, std::move(deferred_completion));
-    if (completion == MemoryAccessCompletion::Complete)
-      finish_completed_access(inst, wf, issue_counter);
+    pipeline.initiate_access(*inst, wf);
+    pipeline.complete_access(*inst, wf);
+    finish_completed_access(inst, wf, issue_counter);
   }
 
-  /// @brief Advance the pipeline by one cycle (no-op in functional mode).
-  void tick() {}
-
-  bool empty() const { return true; }
-
+public:
   WaitCounterType counter_type() const { return counter_type_; }
 
 protected:
-  virtual void initiate_access(Instruction &inst, Wavefront &wf) = 0;
-  /// Return Complete and do not call complete, or return Deferred and call it
-  /// exactly once after the memory response is ready for architectural writeback.
-  virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                                 MemoryAccessDeferredCompletion complete) = 0;
-
   void finish_completed_access(Instruction *inst, Wavefront &wf, WaitCounterType counter) {
     wf.release_wait_counter(counter);
     delete inst;
   }
 
   WaitCounterType counter_type_;
-  std::queue<PipelineEntry> issued_;
-  std::queue<PipelineEntry> returned_;
 };
 
 /// @brief Scalar memory pipeline for SMEM instructions.
@@ -121,10 +79,13 @@ public:
   explicit ScalarMemPipeline(L1ScalarCache *l1)
       : MemoryPipeline(WaitCounterType::LGKMCNT), l1_(l1) {}
 
+  void issue(Instruction *inst, Wavefront &wf) { issue_impl(*this, inst, wf); }
+
 protected:
-  void initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  friend class MemoryPipeline;
+
+  void initiate_access(Instruction &inst, Wavefront &wf);
+  void complete_access(Instruction &inst, Wavefront &wf);
 
 private:
   L1ScalarCache *l1_;
@@ -138,10 +99,13 @@ public:
 
   void set_l2(L2Cache *l2) { l2_ = l2; }
 
+  void issue(Instruction *inst, Wavefront &wf) { issue_impl(*this, inst, wf); }
+
 protected:
-  void initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  friend class MemoryPipeline;
+
+  void initiate_access(Instruction &inst, Wavefront &wf);
+  void complete_access(Instruction &inst, Wavefront &wf);
 
 private:
   L1VectorCache *l1_;
@@ -153,10 +117,13 @@ class LocalMemPipeline : public MemoryPipeline {
 public:
   LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
 
+  void issue(Instruction *inst, Wavefront &wf) { issue_impl(*this, inst, wf); }
+
 protected:
-  void initiate_access(Instruction &inst, Wavefront &wf) override;
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete) override;
+  friend class MemoryPipeline;
+
+  void initiate_access(Instruction &inst, Wavefront &wf);
+  void complete_access(Instruction &inst, Wavefront &wf);
 };
 
 } // namespace amdgpu

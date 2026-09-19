@@ -18,20 +18,6 @@ public:
   }
 };
 
-class DeferredClusterLdsMulticastEngine : public amdgpu::ClusterLdsMulticastEngine {
-public:
-  amdgpu::ClusterLdsMulticastResult
-  submit(amdgpu::ClusterLdsMulticastTransaction submitted,
-         amdgpu::ClusterLdsMulticastCompletion submitted_completion) override {
-    txn = std::move(submitted);
-    completion = std::move(submitted_completion);
-    return amdgpu::ClusterLdsMulticastResult::Deferred;
-  }
-
-  amdgpu::ClusterLdsMulticastTransaction txn;
-  amdgpu::ClusterLdsMulticastCompletion completion;
-};
-
 std::string make_single_se_gfx1250_config(uint32_t num_cus) {
   std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
   std::string links;
@@ -607,16 +593,11 @@ TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
                                                     /*cluster_rank=*/3}};
   auto txn = amdgpu::make_cluster_lds_multicast_transaction(state, *wf, std::move(targets));
 
-  EXPECT_EQ(txn.dispatch_id, 7u);
   EXPECT_EQ(txn.source_wg_id, 9u);
   EXPECT_EQ(txn.source_cluster_rank, 1u);
   EXPECT_EQ(txn.source_lds_base, 0x100u);
   EXPECT_EQ(txn.mcast_mask, 0xau);
-  EXPECT_EQ(txn.wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
   EXPECT_EQ(txn.bytes_per_lane, 8u);
-  // Retained for deferred/timing backends that model global request coalescing.
-  EXPECT_EQ(txn.per_lane_global_addr[0], 0x8000u);
-  EXPECT_EQ(txn.per_lane_global_addr[1], 0x8020u);
   ASSERT_EQ(txn.targets.size(), 1u);
   EXPECT_EQ(txn.targets[0].wg_id, 11u);
   EXPECT_EQ(amdgpu::cluster_lds_lane_addr(txn, 0, txn.targets[0].lds_base), 0x410u);
@@ -638,7 +619,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsSourceRankSelectionCoversDefaultAndMasks) {
   EXPECT_FALSE(amdgpu::cluster_lds_source_rank_selected(txn));
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineWritesOnlyIssuingParticipant) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastWritesOnlyIssuingParticipant) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   cu->clear_lds();
@@ -662,11 +643,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineWritesOnlyIssuingPa
   txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0},
                  {cu, /*wg_id=*/1, /*lds_base=*/0x300, /*cluster_rank=*/1}};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  bool deferred_callback_called = false;
-  EXPECT_EQ(engine.submit(std::move(txn), [&]() { deferred_callback_called = true; }),
-            amdgpu::ClusterLdsMulticastResult::Complete);
-  EXPECT_FALSE(deferred_callback_called);
+  amdgpu::write_cluster_lds_multicast(txn);
   EXPECT_EQ(cu->lds().read32(0x204), 0u);
   EXPECT_EQ(cu->lds().read32(0x20c), 0u);
   EXPECT_EQ(cu->lds().read32(0x304), lane0);
@@ -674,7 +651,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineWritesOnlyIssuingPa
   EXPECT_EQ(cu->lds().read32(0x208), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineSkipsUnissuedSelectedPeer) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastSkipsUnissuedSelectedPeer) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   cu->clear_lds();
@@ -694,13 +671,12 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineSkipsUnissuedSelect
   std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
   txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0}};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  amdgpu::write_cluster_lds_multicast(txn);
   EXPECT_EQ(cu->lds().read32(0x210), 0u);
   EXPECT_EQ(cu->lds().read32(0x310), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineUsesRecipientOwnedDestinations) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastUsesRecipientOwnedDestinations) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   cu->clear_lds();
@@ -727,15 +703,12 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineUsesRecipientOwnedD
     return txn;
   };
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_EQ(engine.submit(make_txn(/*wg_id=*/0, /*rank=*/0, /*lds_base=*/0x100,
-                                   /*lds_offset=*/0x10, kWg0Value),
-                          []() {}),
-            amdgpu::ClusterLdsMulticastResult::Complete);
-  EXPECT_EQ(engine.submit(make_txn(/*wg_id=*/1, /*rank=*/1, /*lds_base=*/0x200,
-                                   /*lds_offset=*/0x30, kWg1Value),
-                          []() {}),
-            amdgpu::ClusterLdsMulticastResult::Complete);
+  auto wg0_txn = make_txn(/*wg_id=*/0, /*rank=*/0, /*lds_base=*/0x100,
+                          /*lds_offset=*/0x10, kWg0Value);
+  amdgpu::write_cluster_lds_multicast(wg0_txn);
+  auto wg1_txn = make_txn(/*wg_id=*/1, /*rank=*/1, /*lds_base=*/0x200,
+                          /*lds_offset=*/0x30, kWg1Value);
+  amdgpu::write_cluster_lds_multicast(wg1_txn);
 
   EXPECT_EQ(cu->lds().read32(0x110), kWg0Value);
   EXPECT_EQ(cu->lds().read32(0x230), kWg1Value);
@@ -743,7 +716,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineUsesRecipientOwnedD
   EXPECT_EQ(cu->lds().read32(0x130), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPayload) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastRejectsUndersizedPayload) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
 
@@ -754,11 +727,10 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPa
   txn.payload.resize(4);
   txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0}};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+  EXPECT_THROW(amdgpu::write_cluster_lds_multicast(txn), std::runtime_error);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsOutOfRangeTarget) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastDropsOutOfRangeTarget) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
 
@@ -773,11 +745,10 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsOutOfRangeTarg
   txn.targets = {{cu, /*wg_id=*/0, static_cast<uint32_t>(cu->lds().size_bytes()) - 2,
                   /*cluster_rank=*/0}};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  amdgpu::write_cluster_lds_multicast(txn);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsStridedOutOfRangeTarget) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastRejectsStridedOutOfRangeTarget) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
 
@@ -790,11 +761,10 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsStridedOutOf
   txn.targets = {{cu, /*wg_id=*/0, static_cast<uint32_t>(cu->lds().size_bytes()) - 2,
                   /*cluster_rank=*/0}};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+  EXPECT_THROW(amdgpu::write_cluster_lds_multicast(txn), std::runtime_error);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsWidenedRemapOverflow) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastDropsWidenedRemapOverflow) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   constexpr uint32_t kSentinel = 0xa5a5a5a5u;
@@ -811,12 +781,11 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsWidenedRemapOv
   txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0}};
 
   EXPECT_EQ(amdgpu::cluster_lds_lane_addr(txn, 0, txn.targets[0].lds_base), 0x100000000ULL);
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  amdgpu::write_cluster_lds_multicast(txn);
   EXPECT_EQ(cu->lds().read32(0), kSentinel);
 }
 
-TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsInvalidSignedOffsetAddress) {
+TEST(Gfx1250ExecutionTest, ClusterLdsMulticastDropsInvalidSignedOffsetAddress) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   cu->clear_lds();
@@ -834,8 +803,7 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsInvalidSignedO
   std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
   txn.targets = {{cu, /*wg_id=*/0, kLdsBase, /*cluster_rank=*/0}};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  amdgpu::write_cluster_lds_multicast(txn);
   EXPECT_EQ(cu->lds().read32(kLdsBase), 0u);
 }
 
@@ -884,15 +852,11 @@ TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCoun
   state->per_lane_addr[0] = kGlobalAddr;
   state->per_lane_lds_addr[0] = wf->lds_base() + 0x20;
 
-  DeferredClusterLdsMulticastEngine deferred_engine;
-  cu->set_cluster_lds_multicast_engine(&deferred_engine);
   amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
   pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
-  EXPECT_FALSE(static_cast<bool>(deferred_engine.completion));
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x20), kLoadedValue);
-  cu->set_cluster_lds_multicast_engine(nullptr);
 }
 
 TEST(Gfx1250ExecutionTest, NonClusterClusterLdsLoadDowngradesToOrdinaryAsyncToLds) {
@@ -926,15 +890,11 @@ TEST(Gfx1250ExecutionTest, NonClusterClusterLdsLoadDowngradesToOrdinaryAsyncToLd
   state->per_lane_addr[0] = kGlobalAddr;
   state->per_lane_lds_addr[0] = wf->lds_base() + 0x24;
 
-  DeferredClusterLdsMulticastEngine deferred_engine;
-  cu->set_cluster_lds_multicast_engine(&deferred_engine);
   amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
   pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
 
   EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
-  EXPECT_FALSE(static_cast<bool>(deferred_engine.completion));
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x24), kLoadedValue);
-  cu->set_cluster_lds_multicast_engine(nullptr);
 }
 
 TEST(Gfx1250ExecutionTest, ClusterLoadRequestBypassesStaleL1VectorLine) {
@@ -1033,18 +993,11 @@ TEST(Gfx1250ExecutionTest, ClusterLdsFallbackSkipsSelfWhenMaskExcludesSource) {
   state->per_lane_addr[0] = kGlobalAddr;
   state->per_lane_lds_addr[0] = wf->lds_base() + 0x20;
 
-  DeferredClusterLdsMulticastEngine deferred_engine;
-  cu->set_cluster_lds_multicast_engine(&deferred_engine);
   amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
   pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
 
-  EXPECT_EQ(wf->wait_counters().asynccnt, 1u);
-  ASSERT_TRUE(static_cast<bool>(deferred_engine.completion));
-  EXPECT_TRUE(deferred_engine.txn.targets.empty());
-
-  deferred_engine.completion();
   EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
-  cu->set_cluster_lds_multicast_engine(nullptr);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0x20), 0u);
 }
 
 TEST(Gfx1250SimulationTest, ClusterLdsTargetsCoversMasksAndLifetime) {
@@ -1162,11 +1115,7 @@ TEST(Gfx1250SimulationTest, ClusterLdsTargetsUseMultiDimensionalClusterPlacement
   std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
   txn.targets = source;
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  bool deferred_callback_called = false;
-  EXPECT_EQ(engine.submit(std::move(txn), [&]() { deferred_callback_called = true; }),
-            amdgpu::ClusterLdsMulticastResult::Complete);
-  EXPECT_FALSE(deferred_callback_called);
+  amdgpu::write_cluster_lds_multicast(txn);
   EXPECT_EQ(targets[0].cu->lds().read32(targets[0].lds_base + 0x10), 0u);
   EXPECT_EQ(targets[1].cu->lds().read32(targets[1].lds_base + 0x10), 0u);
   EXPECT_EQ(source[0].cu->lds().read32(source[0].lds_base + 0x10), kValue);
@@ -1230,8 +1179,7 @@ TEST(Gfx1250SimulationTest, ClusterLdsDoesNotRemapIntoNonParticipatingPeerLdsBas
   std::memcpy(txn.payload.data(), &kValue, sizeof(kValue));
   txn.targets = {target};
 
-  amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_EQ(engine.submit(std::move(txn), []() {}), amdgpu::ClusterLdsMulticastResult::Complete);
+  amdgpu::write_cluster_lds_multicast(txn);
   EXPECT_EQ(target.cu->lds().read32(target.lds_base + 0x20), 0u);
   EXPECT_EQ(source.cu->lds().read32(source.lds_base + 0x20), 0u);
 
