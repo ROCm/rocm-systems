@@ -15,20 +15,17 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from ci_utils import set_github_output
 
-# prefix names the coco jobs (<prefix>-rccl-pr-{build,smoke}); stage_dir must
-# match advanced.stage_dir in those tRCCL job configs.
+# prefix names the coco jobs (<prefix>-rccl-pr-{build,smoke}).
 PR_CLUSTERS = [
     {
         "name": "Ruby",
         "prefix": "ruby64",
         "runner": "ruby-linux-slurm-scale-runner",
-        "stage_dir": "/apps/metadrop/trccl/ruby64-rccl-pr-smoke",
     },
     {
         "name": "OCI",
         "prefix": "oci",
         "runner": "oci-linux-slurm-scale-runner",
-        "stage_dir": "/shared_inference/rccl-ci/pr/oci-rccl-pr-smoke",
     },
 ]
 
@@ -90,7 +87,7 @@ def main() -> None:
 
     sub.add_parser(
         "pr-clusters",
-        help="Emit the PR build/smoke/cleanup cluster matrix.",
+        help="Emit the PR build/smoke cluster matrix.",
     )
 
     scheduled = sub.add_parser(

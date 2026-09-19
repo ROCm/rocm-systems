@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import subprocess
 import sys
@@ -43,8 +42,7 @@ def schedule_to_mode(schedule: str, day_of_month: int) -> str:
     if schedule == WEEKDAY_NIGHTLY_CRON:
         return "nightly"
     if schedule == SATURDAY_CRON:
-        # Saturday drives both weekly and monthly; cron has no nth-weekday syntax,
-        # so "3rd Saturday" is a day-of-month check instead.
+        # cron has no nth-weekday syntax, so "3rd Saturday" is a day-of-month range.
         if 15 <= day_of_month <= 21:
             return "monthly"
         return "weekly"
@@ -75,8 +73,8 @@ def resolve_mode_and_trigger(
 def build_coco_args(*, mode: str, dry_run: bool) -> str:
     args = "-vv --skip-failed-builds"
     if mode == "pr":
-        # --prune-build must not run on PR gates: build and smoke share one
-        # directory, and prune deletes trees the sibling half still needs.
+        # No --prune-build: the build and test phases share a directory and
+        # prune would delete trees the later phase still needs.
         args += " --skip-baselines"
     else:
         args += " --prune-build"
@@ -127,22 +125,6 @@ def resolve_run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Resolve coco run parameters and write GitHub Actions outputs."
-    )
-    parser.add_argument(
-        "--day-of-month",
-        type=int,
-        default=None,
-        help="UTC day for Saturday cron mode selection (default: today).",
-    )
-    parser.add_argument(
-        "--coco-sha",
-        default=None,
-        help="Pinned harness commit (default: git rev-parse HEAD).",
-    )
-    args = parser.parse_args()
-
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
     try:
         resolved = resolve_run(
@@ -153,8 +135,6 @@ def main() -> None:
             schedule=os.environ.get("SCHEDULE", ""),
             periodic_mode=os.environ.get("PERIODIC_MODE", "nightly"),
             dry_run=dry_run,
-            day_of_month=args.day_of_month,
-            coco_sha=args.coco_sha,
         )
     except ValueError as exc:
         print(f"::error::{exc}")

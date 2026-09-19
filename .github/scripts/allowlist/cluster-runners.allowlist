@@ -3,7 +3,7 @@
 # Runners: one label per line (anything not starting with .github/).
 # Workflows: one repo-relative path per line (must start with .github/workflows/).
 # Every runner above may only appear in workflows listed below.
-# # starts a comment. Changes require @ROCm/rccl-ci review.
+# Changes require @ROCm/rccl-ci review.
 #
 # Prefer coco (rccl-coco*.yml) for new RCCL cluster jobs.
 

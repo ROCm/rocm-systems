@@ -1,26 +1,16 @@
 name: RCCL coco PR
 
-# PR build/smoke via `coco pr` on Ruby and OCI. Same-repo PRs auto-run on
-# pull_request. Fork PRs are skipped (no secrets on fork-triggered runs); a
-# maintainer must run this workflow manually via workflow_dispatch, supplying
-# pr_number and pr_sha from the fork PR.
+# PR build/smoke via `coco pr` on Ruby and OCI.
+# Fork PRs get no secrets, so a maintainer must dispatch this with pr_number and pr_sha.
 #
-# Every fan-out job calls the shared launcher, rccl-coco-run.yml. Build compiles
-# a superset of smoke's stacks; smoke waits on it and shares the per-run output
-# directory, so coco's cache serves what build compiled.
+# One job per cluster: `needs` on a matrix waits for every leg, so sharing a
+# job would let a slow cluster hold up the others.
 #
-# Build, smoke and cleanup fan out over a matrix; adding a cluster is one entry
-# in .github/scripts/rccl_coco_matrix.py. Keep coco job keys as
-# <prefix>-rccl-pr-{build,smoke}; tRCCL config validation enforces that shape.
-#
-# The run is --skip-baselines, so every stack builds the PR head except the one
-# named by baseline_stack, which the regression-perf lane measures against.
-#
-# "RCCL PR gate" is the check to mark required on the protected branches.
+# tRCCL config validation requires coco job keys of the form
+# <prefix>-rccl-pr-{build,smoke}. Adding a cluster is one entry in
+# .github/scripts/rccl_coco_matrix.py.
 on:
-  # Unfiltered by path: a workflow skipped by `paths` never reports its checks,
-  # so a required check would block every PR that does not touch RCCL. The path
-  # test is the `changes` job.
+  # No `paths:` filter: a path-skipped workflow reports no checks, so a required check would never pass.
   pull_request:
     branches: [develop, main, rccl-develop, rccl_develop]
   workflow_dispatch:
@@ -52,24 +42,19 @@ on:
 permissions:
   contents: read
 
-# One in-flight run per PR. Cancelling is safe: coco traps SIGINT/SIGTERM and
-# cancels its allocations before exiting.
+# Cancelling is safe: coco traps SIGINT/SIGTERM and releases its allocations.
 concurrency:
-  group: rccl-coco-pr-${{ github.event.pull_request.number || github.run_id }}
+  # inputs.pr_number covers workflow_dispatch, where there is no pull_request context.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  # Whether a PR touches anything this workflow tests. The path list lives in
-  # .github/scripts/rccl_detect_coco_changes.py.
   changes:
     name: Detect RCCL changes
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: read
     outputs:
-      # A skipped step publishes no output, so non-PR events fall through to
-      # true. Both 'true' and 'false' are non-empty, so a real verdict stands.
+      # The filter step is skipped on non-PR events, leaving no output; default to running.
       rccl: ${{ steps.filter.outputs.rccl || 'true' }}
     steps:
       - name: Checkout scripts
@@ -77,8 +62,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: .github/scripts
-          # The commit checked out for a PR is the merge commit, whose first
-          # parent is the tip of the base branch.
+          # HEAD^ on a PR merge commit is the base branch tip.
           fetch-depth: 2
 
       - name: Check for RCCL changes
@@ -86,9 +70,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: python3 .github/scripts/rccl_detect_coco_changes.py --base-ref HEAD^
 
-  # Resolves once for both clusters. Must not be split per cluster: each would
-  # clone the harness ref separately and the two could pin different coco
-  # commits if that ref moved in between.
+  # Must resolve once for all clusters, or a moving coco_ref pins a different commit per cluster.
   setup:
     name: Setup
     needs: changes
@@ -122,16 +104,14 @@ jobs:
         with:
           coco_ref: ${{ inputs.coco_ref || 'main' }}
           dry_run: ${{ inputs.dry_run || false }}
-          # resolve-coco-run reads github.event.pull_request on pull_request
-          # events when these inputs are empty.
           pr_number: ${{ inputs.pr_number }}
           pr_sha: ${{ inputs.pr_sha }}
           pr_repo: ${{ inputs.pr_repo }}
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-  build:
-    name: ${{ matrix.name }} build
+  gate:
+    name: ${{ matrix.name }}
     needs: setup
     strategy:
       fail-fast: false
@@ -140,32 +120,7 @@ jobs:
     secrets: inherit
     with:
       mode: pr
-      build_only: true
-      job: ${{ matrix.prefix }}-rccl-pr-build
-      baseline_stack: rocm-10.0-ga_rccl-develop-perf
-      runs_on: ${{ matrix.runner }}
-      pr_number: ${{ needs.setup.outputs.pr_number }}
-      pr_sha: ${{ needs.setup.outputs.pr_sha }}
-      pr_repo: ${{ needs.setup.outputs.pr_repo }}
-      software: rccl
-      trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
-      coco_ref: ${{ needs.setup.outputs.coco_ref }}
-      coco_args: ${{ needs.setup.outputs.coco_args }}
-      timeout_minutes: 30
-      concurrency_group: rccl-coco-pr-${{ needs.setup.outputs.pr_number }}-${{ matrix.prefix }}-build
-
-  smoke:
-    name: ${{ matrix.name }} smoke
-    # Reusable-workflow matrix jobs wait for every build leg before any smoke
-    # leg starts. With two clusters that adds at most the slower build's slack.
-    needs: [setup, build]
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.clusters) }}
-    uses: ./.github/workflows/rccl-coco-run.yml
-    secrets: inherit
-    with:
-      mode: pr
+      build_job: ${{ matrix.prefix }}-rccl-pr-build
       job: ${{ matrix.prefix }}-rccl-pr-smoke
       baseline_stack: rocm-10.0-ga_rccl-develop-perf
       runs_on: ${{ matrix.runner }}
@@ -176,29 +131,25 @@ jobs:
       trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
       coco_ref: ${{ needs.setup.outputs.coco_ref }}
       coco_args: ${{ needs.setup.outputs.coco_args }}
-      timeout_minutes: 40
-      concurrency_group: rccl-coco-pr-${{ needs.setup.outputs.pr_number }}-${{ matrix.prefix }}-smoke
-      cleanup_pr_dir: true
+      timeout_minutes: 100
+      concurrency_group: rccl-coco-pr-${{ needs.setup.outputs.pr_number }}-${{ matrix.prefix }}
 
-  # The one status check to mark required on the protected branches. It runs
-  # on every PR regardless of what the PR touches, so it always reports a
-  # result; the smoke jobs cannot be required directly because a skipped
-  # `uses:` job never publishes its "<caller> / <callee>" check name at all.
+  # The check to mark required on protected branches. The cluster jobs cannot be
+  # required directly: a skipped `uses:` job never publishes its "<caller> / <callee>" name.
   pr-gate:
     name: RCCL PR gate
     if: always() && github.event_name == 'pull_request'
-    needs: [changes, setup, build, smoke]
+    needs: [changes, setup, gate]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Require build and smoke to have passed
+      - name: Require every cluster to have passed
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
           SETUP_RESULT: ${{ needs.setup.result }}
           RCCL_CHANGED: ${{ needs.changes.outputs.rccl }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
-          BUILD_RESULT: ${{ needs.build.result }}
-          SMOKE_RESULT: ${{ needs.smoke.result }}
+          GATE_RESULT: ${{ needs.gate.result }}
         run: |
           set -euo pipefail
           if [[ "${CHANGES_RESULT}" != "success" ]]; then
@@ -217,12 +168,8 @@ jobs:
             echo "::error::Setup did not complete (${SETUP_RESULT}); no coco run was dispatched."
             exit 1
           fi
-          status=0
-          for entry in "build:${BUILD_RESULT}" "smoke:${SMOKE_RESULT}"; do
-            echo "${entry%%:*}: ${entry#*:}"
-            [[ "${entry#*:}" == "success" ]] || status=1
-          done
-          if (( status )); then
-            echo "::error::coco build or smoke did not pass on every cluster. See the per-cluster '<cluster> build' / '<cluster> smoke' checks for which."
+          echo "clusters: ${GATE_RESULT}"
+          if [[ "${GATE_RESULT}" != "success" ]]; then
+            echo "::error::coco did not pass on every cluster. See the per-cluster checks for which."
+            exit 1
           fi
-          exit "${status}"

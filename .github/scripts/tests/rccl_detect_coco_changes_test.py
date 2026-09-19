@@ -1,12 +1,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for rccl_detect_coco_changes.py.
-
-A false from this script lets rccl-coco-pr.yml's gate pass a PR without running
-anything on the clusters, so the paths that must resolve true are the ones
-worth pinning.
-"""
+"""Tests for rccl_detect_coco_changes.py."""
 
 import os
 import sys

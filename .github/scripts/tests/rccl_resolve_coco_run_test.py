@@ -4,12 +4,28 @@
 """Tests for rccl_resolve_coco_run.py."""
 
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import rccl_resolve_coco_run as resolve
+
+SCHEDULED_WORKFLOW = (
+    Path(__file__).resolve().parents[2] / "workflows" / "rccl-coco-scheduled.yml"
+)
+
+
+class CronConsistencyTest(unittest.TestCase):
+    def test_workflow_crons_are_all_recognised(self):
+        """schedule_to_mode raises on an unknown cron, failing every scheduled run."""
+        text = SCHEDULED_WORKFLOW.read_text(encoding="utf-8")
+        crons = set(re.findall(r"^\s*-\s*cron:\s*'([^']+)'", text, re.MULTILINE))
+        self.assertTrue(crons, f"no cron entries found in {SCHEDULED_WORKFLOW}")
+        self.assertEqual(
+            crons, {resolve.WEEKDAY_NIGHTLY_CRON, resolve.SATURDAY_CRON}
+        )
 
 
 class ScheduleToModeTest(unittest.TestCase):

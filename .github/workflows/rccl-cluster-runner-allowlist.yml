@@ -21,8 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Runs PR-authored scripts, so it holds no write scope. Requesting the review
-  # needs pull-requests: write and is a separate job for that reason.
+  # Runs PR-authored code, so no write scope; the review request is a separate job.
   check-allowlist:
     name: Check RCCL cluster runner allowlist
     runs-on: ubuntu-24.04
@@ -33,9 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          # The commit checked out for a PR is the merge commit, whose first
-          # parent is the tip of the base branch, so the diff needs two
-          # commits and no more.
+          # HEAD^ on a PR merge commit is the base branch tip.
           fetch-depth: 2
           sparse-checkout: |
             .github/workflows
@@ -51,11 +48,9 @@ jobs:
       - name: Test the RCCL CI scripts
         run: |
           set -euo pipefail
-          python3 -m pytest \
-            .github/scripts/tests/check_rccl_cluster_runner_allowlist_test.py \
-            .github/scripts/tests/rccl_detect_coco_changes_test.py \
-            .github/scripts/tests/rccl_coco_matrix_test.py \
-            .github/scripts/tests/rccl_resolve_coco_run_test.py
+          # Glob, so a new rccl test file is picked up without editing this list.
+          # -k rccl would also match rccl-named tests in TheRock's test module.
+          python3 -m pytest .github/scripts/tests/*rccl*_test.py
 
       - name: Scan workflows for unallowlisted cluster runners
         id: check
@@ -92,6 +87,7 @@ jobs:
             -f "team_reviewers[]=rccl-ci" 2>/tmp/reviewer_err; then
             echo "Requested review from @ROCm/rccl-ci."
           else
-            # Already requested, or fork PR with a read-only token.
-            cat /tmp/reviewer_err >&2 || true
+            # Usually already requested, or a fork PR with a read-only token.
+            # Not fatal, but a real failure here silently skips the review.
+            echo "::warning::Could not request @ROCm/rccl-ci review: $(cat /tmp/reviewer_err)"
           fi

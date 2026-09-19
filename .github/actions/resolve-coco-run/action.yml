@@ -88,9 +88,10 @@ runs:
         SCHEDULE: ${{ inputs.schedule }}
       run: python3 "${GITHUB_WORKSPACE}/.github/scripts/rccl_resolve_coco_run.py"
 
-    # Harmless on an ephemeral runner, required on a self-hosted one, whose
-    # workspace survives between runs.
+    # Self-hosted runners reuse the workspace between runs.
     - name: Clean up harness checkout
       if: always()
       shell: bash
-      run: rm -rf _coco
+      # On NFS an open file becomes .nfsXXXX rather than unlinking, so rm -rf
+      # hits ENOTEMPTY while a child exits. Scratch must not fail the job.
+      run: rm -rf _coco || echo "::warning::Could not fully remove _coco."

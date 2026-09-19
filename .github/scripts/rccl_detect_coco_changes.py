@@ -4,8 +4,7 @@
 
 """Decide whether a pull request touches anything the RCCL coco suites test.
 
-Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml. A false lets
-that workflow's gate pass a PR without running anything on the clusters.
+Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml.
 """
 
 import argparse
@@ -20,9 +19,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from ci_utils import get_modified_paths, matches_paths, set_github_output
 
-# fnmatch patterns, in which `*` also spans `/`. The CI files that decide how
-# the gate runs are included, so a change to one is exercised by the PR making
-# it.
+# fnmatch patterns: `*` also spans `/`.
 COCO_PATH_PATTERNS = [
     "projects/rccl/*",
     "projects/rccl-tests/*",
@@ -37,9 +34,8 @@ COCO_PATH_PATTERNS = [
     ".github/scripts/ci_utils.py",
 ]
 
-# Doc-only paths cannot change a build or a test result. This is the subset of
-# get_changed_projects.py's SKIPPABLE_PATH_PATTERNS that can overlap the
-# patterns above; that module is not imported because it pulls in pydantic.
+# Subset of get_changed_projects.py's SKIPPABLE_PATH_PATTERNS, duplicated rather
+# than imported because that module pulls in pydantic.
 SKIPPABLE_PATH_PATTERNS = [
     "*.md",
     "*.rst",

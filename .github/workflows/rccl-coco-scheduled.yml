@@ -1,22 +1,14 @@
 name: RCCL coco scheduled
 
-# Scheduled coco launches on the Ruby and OCI clusters: nightly, weekly, and
-# monthly. `setup` resolves the mode from the cron that fired and pins the coco
-# harness to one commit; `run` fans out over that mode's jobs via the shared
-# launcher, rccl-coco-run.yml.
-#
-# These jobs run only against the refs configured below, never against a pull
-# request: this workflow has no pull_request trigger, and workflow_dispatch
-# requires write access to this repository, so a fork cannot reach it.
-#
-# Cron is UTC and ignores DST, so a fixed entry drifts an hour across the year.
-# 03:47 UTC is 21:47 CST in winter and 22:47 CDT in summer, both after the
-# 21:00 CST window in which the runner's node may be restarted. Neither entry
-# may move earlier than 03:00 UTC, which is when that window opens.
+# Nightly, weekly, and monthly coco launches on Ruby and OCI. The mode comes from
+# the cron that fired; the coco harness is pinned to one commit for the whole fan-out.
 on:
   schedule:
-    - cron: '47 3 * * 1-5'
-    - cron: '47 3 * * 6'
+    # Must stay at or after 03:00 UTC: the runner nodes may restart from 21:00 CST,
+    # and cron is UTC so a fixed entry drifts an hour across DST.
+    # Both expressions are matched literally in rccl_resolve_coco_run.py.
+    - cron: '47 3 * * 1-5'  # nightly
+    - cron: '47 3 * * 6'    # weekly, or monthly on the 3rd Saturday
   workflow_dispatch:
     inputs:
       coco_ref:
@@ -41,11 +33,6 @@ on:
 
 permissions:
   contents: read
-
-# Keyed on run_id so a scheduled run is never cancelled by a later one.
-concurrency:
-  group: rccl-coco-scheduled-${{ github.run_id }}
-  cancel-in-progress: false
 
 jobs:
   setup:
@@ -78,8 +65,7 @@ jobs:
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      # Filtered here rather than by a per-job `if`: a job's `if` is evaluated
-      # once before its matrix expands and so cannot vary by leg.
+      # A job's `if` is evaluated before its matrix expands, so filtering must happen here.
       - name: Plan this mode's runs
         id: plan
         env:

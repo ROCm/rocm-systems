@@ -3,13 +3,12 @@
 
 """Tests for check_rccl_cluster_runner_allowlist.py.
 
-The guard's value is entirely in what its string matching catches, and a guard
-that has stopped matching is indistinguishable from one that found nothing. The
-reference matrix below therefore enumerates the YAML shapes that reach a runner
-label: block-sequence items, matrix values and input defaults as well as
-`runs-on:`.
+Covers the YAML shapes that can carry a runner label, and the exit status
+main() reports for each verdict.
 """
 
+import contextlib
+import io
 import os
 import subprocess
 import sys
@@ -22,6 +21,8 @@ sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import check_rccl_cluster_runner_allowlist as guard
 
 RUNNER = "ruby-linux-slurm-scale-runner"
+# A workflow whose only interesting property is that it names RUNNER.
+WORKFLOW = f"jobs:\n  build:\n    runs-on: {RUNNER}\n"
 
 
 class LineAssignsRunnerTest(unittest.TestCase):
@@ -29,8 +30,6 @@ class LineAssignsRunnerTest(unittest.TestCase):
         for line in [
             "runs-on: ruby-linux-slurm-scale-runner",
             "    runs_on: ruby-linux-slurm-scale-runner",
-            # A block sequence and a matrix entry assign a runner just as much
-            # as `runs-on:` does, and carry no key of their own.
             "    - ruby-linux-slurm-scale-runner",
             "      runner: [ruby-linux-slurm-scale-runner]",
             "        - {os: ruby-linux-slurm-scale-runner}",
@@ -41,8 +40,6 @@ class LineAssignsRunnerTest(unittest.TestCase):
                 self.assertTrue(guard.line_assigns_runner(line, RUNNER))
 
     def test_case_insensitive(self):
-        # Runner labels are case-insensitive, and one allowlisted label is
-        # mixed case.
         mixed = "tw-gfx950-ainic-ROCm-scale-runner"
         self.assertTrue(
             guard.line_assigns_runner(
@@ -150,17 +147,202 @@ diff --git a/.github/workflows/other.yml b/.github/workflows/other.yml
         self.assertEqual(self._run("")[RUNNER], [])
 
 
+class GuardRepoMixin:
+    """Runs main() against a throwaway repo.
+
+    Allowlist entries and the paths the guard prints are both repo-relative, so
+    these build a repo and run from its root. Patching the module's path
+    constants to absolute temp paths would make every scanned path compare
+    unequal to its allowlist entry.
+    """
+
+    def _repo(self, root, *, allowlist, workflows, matrix=None):
+        (root / guard.ALLOWLIST_PATH.parent).mkdir(parents=True, exist_ok=True)
+        (root / guard.ALLOWLIST_PATH).write_text(allowlist, encoding="utf-8")
+        (root / guard.WORKFLOWS_DIR).mkdir(parents=True, exist_ok=True)
+        for name, body in workflows.items():
+            (root / guard.WORKFLOWS_DIR / name).write_text(body, encoding="utf-8")
+        if matrix is not None:
+            path, body = matrix
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(body, encoding="utf-8")
+
+    def _run(self, root, argv=()):
+        """Returns (exit code, stderr, GITHUB_OUTPUT contents)."""
+        output = root / "github_output"
+        stderr = io.StringIO()
+        with contextlib.chdir(root), patch.dict(
+            os.environ, {"GITHUB_OUTPUT": os.fspath(output)}
+        ):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with contextlib.redirect_stderr(stderr):
+                    code = guard.main(list(argv))
+        written = output.read_text(encoding="utf-8") if output.is_file() else ""
+        return code, stderr.getvalue(), written
+
+
+class MainVerdictTest(GuardRepoMixin, unittest.TestCase):
+    """The exit status main() reports, which is the guard's reason to exist."""
+
+    def test_runner_in_unallowlisted_workflow_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo(
+                root,
+                allowlist=f"{RUNNER}\n.github/workflows/allowed.yml\n",
+                workflows={"allowed.yml": WORKFLOW, "rogue.yml": WORKFLOW},
+            )
+            code, stderr, _ = self._run(root)
+        self.assertEqual(code, 1)
+        self.assertIn(".github/workflows/rogue.yml", stderr)
+        self.assertNotIn(".github/workflows/allowed.yml", stderr)
+
+    def test_runner_only_in_allowlisted_workflows_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo(
+                root,
+                allowlist=f"{RUNNER}\n.github/workflows/allowed.yml\n",
+                workflows={
+                    "allowed.yml": WORKFLOW,
+                    "other.yml": "runs-on: ubuntu-24.04\n",
+                },
+            )
+            code, stderr, _ = self._run(root)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(stderr, "")
+
+    def test_matrix_source_passes_when_every_consumer_is_allowlisted(self):
+        for source, consumers in guard.MATRIX_SOURCES.items():
+            with self.subTest(source=source.as_posix()):
+                allowlist = f"{RUNNER}\n" + "".join(f"{c}\n" for c in sorted(consumers))
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self._repo(
+                        root,
+                        allowlist=allowlist,
+                        workflows={},
+                        matrix=(source, f'RUNNER = "{RUNNER}"\n'),
+                    )
+                    code, stderr, _ = self._run(root)
+                self.assertEqual(code, 0, stderr)
+
+    def test_matrix_source_fails_when_a_consumer_is_not_allowlisted(self):
+        for source, consumers in guard.MATRIX_SOURCES.items():
+            with self.subTest(source=source.as_posix()):
+                # Hold back one consumer. The spare keeps the workflow set
+                # non-empty, so a failure here cannot come from that check.
+                kept = sorted(consumers)[1:]
+                allowlist = (
+                    f"{RUNNER}\n.github/workflows/allowed.yml\n"
+                    + "".join(f"{c}\n" for c in kept)
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self._repo(
+                        root,
+                        allowlist=allowlist,
+                        workflows={},
+                        matrix=(source, f'RUNNER = "{RUNNER}"\n'),
+                    )
+                    code, stderr, _ = self._run(root)
+                self.assertEqual(code, 1)
+                self.assertIn(source.as_posix(), stderr)
+
+    def test_missing_allowlist_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, stderr, _ = self._run(Path(tmp))
+        self.assertEqual(code, 1)
+        self.assertIn(guard.ALLOWLIST_PATH.as_posix(), stderr)
+
+    def test_allowlist_without_runners_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo(
+                root,
+                allowlist=".github/workflows/allowed.yml\n",
+                workflows={"allowed.yml": WORKFLOW},
+            )
+            code, stderr, _ = self._run(root)
+        self.assertEqual(code, 1)
+        self.assertIn("No runners", stderr)
+
+    def test_allowlist_without_workflows_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo(root, allowlist=f"{RUNNER}\n", workflows={})
+            code, stderr, _ = self._run(root)
+        self.assertEqual(code, 1)
+        self.assertIn("No workflows", stderr)
+
+
+class MainNewReferenceTest(GuardRepoMixin, unittest.TestCase):
+    """The PR diff half of main(): the review flag and the added-line verdict.
+
+    The diff names a workflow that is absent from the tree on purpose, so the
+    full-tree scan stays silent and only the new-reference branch can fail.
+    """
+
+    @staticmethod
+    def _diff(path):
+        return (
+            f"diff --git a/{path} b/{path}\n"
+            f"--- a/{path}\n"
+            f"+++ b/{path}\n"
+            "@@ -0,0 +1 @@\n"
+            f"+    runs-on: {RUNNER}\n"
+        )
+
+    def _run_with_diff(self, root, stdout):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout)
+        with patch.object(guard.subprocess, "run", return_value=completed):
+            return self._run(root, ["--base", "base", "--head", "head"])
+
+    def _clean_repo(self, root):
+        self._repo(
+            root,
+            allowlist=f"{RUNNER}\n.github/workflows/allowed.yml\n",
+            workflows={"allowed.yml": WORKFLOW},
+        )
+
+    def test_new_reference_in_unallowlisted_workflow_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._clean_repo(root)
+            code, stderr, written = self._run_with_diff(
+                root, self._diff(".github/workflows/rogue.yml")
+            )
+        self.assertEqual(code, 1)
+        self.assertIn(".github/workflows/rogue.yml", stderr)
+        self.assertIn("new_runner_lines=true", written)
+
+    def test_new_reference_in_allowlisted_workflow_only_asks_for_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._clean_repo(root)
+            code, stderr, written = self._run_with_diff(
+                root, self._diff(".github/workflows/allowed.yml")
+            )
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("new_runner_lines=true", written)
+
+    def test_no_new_references_leaves_the_review_flag_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._clean_repo(root)
+            code, stderr, written = self._run_with_diff(root, "")
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("new_runner_lines=false", written)
+
+
 class ArgumentPairingTest(unittest.TestCase):
     def test_base_without_head_is_an_error(self):
-        # Silently skipping the new-reference check would report a pass.
         for argv in [
             ["--base", "abc"],
             ["--head", "def"],
         ]:
             with self.subTest(argv=argv):
-                # Redirected so that a regression here scans the tree and
-                # writes its verdict to a scratch file rather than to the real
-                # step output.
+                # Keep a regression here off the real step output.
                 with tempfile.TemporaryDirectory() as tmp:
                     output = os.path.join(tmp, "github_output")
                     with patch.dict(os.environ, {"GITHUB_OUTPUT": output}):

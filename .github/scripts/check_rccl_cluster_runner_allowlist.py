@@ -5,9 +5,8 @@
 """Guard RCCL cluster scale-runner usage in GitHub Actions workflows.
 
 Runners and permitted workflows live in .github/scripts/allowlist/
-cluster-runners.allowlist. The same workflow list applies to every listed
-runner. On pull requests, newly added references are flagged so CI can request
-@ROCm/rccl-ci review.
+cluster-runners.allowlist. On pull requests, newly added references are flagged
+so CI can request @ROCm/rccl-ci review.
 """
 
 import argparse
@@ -20,12 +19,11 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from ci_utils import set_github_output
+from ci_utils import retry, set_github_output
 
 ALLOWLIST_PATH = Path(".github/scripts/allowlist/cluster-runners.allowlist")
 WORKFLOWS_DIR = Path(".github/workflows")
-# Runner labels also live here; usage is allowed when every workflow that
-# reads the matrix output is on the allowlist.
+# Scripts holding runner labels, mapped to the workflows that consume them.
 MATRIX_SOURCES = {
     Path(".github/scripts/rccl_coco_matrix.py"): {
         ".github/workflows/rccl-coco-pr.yml",
@@ -44,8 +42,7 @@ def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
         if line.startswith(".github/workflows/"):
             workflows.add(line)
         elif line.startswith(".github/"):
-            # Anything else under .github/ is scanned as a path, never matched
-            # as one, so it would sit in the file doing nothing.
+            # Only workflow paths are ever matched, so any other .github/ path is inert.
             raise ValueError(
                 f"{path}: only .github/workflows/ paths are allowed: {line}"
             )
@@ -55,13 +52,10 @@ def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
 
 
 def line_assigns_runner(line: str, runner: str) -> bool:
-    """Whether this line references ``runner`` anywhere, not only under a key.
+    """Whether ``line`` references ``runner``, in any YAML position.
 
-    A label reaches a job through ``runs-on:``, a YAML block-sequence item, a
-    matrix entry and a workflow_call input default, so any line may carry one.
-    The boundaries stop an allowlisted label from vouching for a longer one,
-    so `...-scale-runner` does not permit `...-scale-runner-v2`. Runner labels
-    are case-insensitive, so this comparison is too.
+    Matching is case-insensitive and boundary-anchored, so an allowlisted label
+    does not vouch for a longer one.
     """
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
@@ -104,6 +98,7 @@ def matrix_source_allowed(
     return consumers.issubset(allowed_workflows)
 
 
+@retry(max_attempts=3, delay_seconds=2, exceptions=(subprocess.TimeoutExpired,))
 def git_diff_new_runner_usage(
     base: str, head: str, runners: set[str]
 ) -> dict[str, list[tuple[str, str]]]:
@@ -114,12 +109,13 @@ def git_diff_new_runner_usage(
             "--unified=0",
             f"{base}..{head}",
             "--",
-            ".github/workflows",
-            ".github/scripts/rccl_coco_matrix.py",
+            str(WORKFLOWS_DIR),
+            *(path.as_posix() for path in sorted(MATRIX_SOURCES)),
         ],
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     )
     additions: dict[str, list[tuple[str, str]]] = {runner: [] for runner in runners}
     current_file: str | None = None
@@ -148,9 +144,6 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    # The pair drives the new-reference check. Supplying one alone falls
-    # through to a full-tree scan only, which reports no new references and
-    # exits 0.
     if bool(args.base) != bool(args.head):
         parser.error("--base and --head must be given together, or both omitted.")
 
