@@ -381,6 +381,9 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
+  //! Whether the CPU agent exposes a fine-grained memory pool
+  bool hasHostFineGrainPool() const { return cpu_agent_info_->fine_grain_pool.handle != 0; }
+
   //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
   //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
   //! Returns -1 if the agent is not one of the enumerated agents.
