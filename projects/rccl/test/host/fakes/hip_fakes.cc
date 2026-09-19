@@ -222,6 +222,8 @@ int        g_hipWarpSize                 = 64;
 int        g_hipDirectManagedMemAccess   = 1;
 int        g_hipMemcpyAsyncCalls         = 0;
 std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
+hipError_t g_hipEventRecordResult        = hipErrorInvalidValue;
+std::vector<HipEventRecordCall> g_hipEventRecordArgs;
 
 
 // --- VMM / IPC / stream seams -------------------------------------------
@@ -509,6 +511,8 @@ void ResetHipFakes()
     g_hipDirectManagedMemAccess     = 1;
     g_hipMemcpyAsyncCalls           = 0;
     g_hipMemcpyAsyncArgs.clear();
+    g_hipEventRecordResult          = hipErrorInvalidValue;
+    g_hipEventRecordArgs.clear();
     // VMM / IPC / stream seams (undoes InstallHipVmmEmulator too)
     g_hipMemAddressReserve          = DefaultHipMemAddressReserve;
     g_hipMemAddressFree             = DefaultHipMemAddressFree;
@@ -623,7 +627,12 @@ hipError_t hipEventCreate(hipEvent_t* event)
 
 hipError_t hipEventDestroy(hipEvent_t)      { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
-hipError_t hipEventRecord(hipEvent_t, hipStream_t) { return hipErrorInvalidValue; }
+
+hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream)
+{
+    g_hipEventRecordArgs.push_back({event, stream});
+    return g_hipEventRecordResult;
+}
 
 hipError_t hipExtMallocWithFlags(void** ptr, size_t size, unsigned int flags)
 {

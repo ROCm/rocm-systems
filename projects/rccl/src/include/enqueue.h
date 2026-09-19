@@ -46,6 +46,33 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
+
+// Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
+// makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
+//
+// The prologue also offers comm->doneEvent on the communicator, for the launch's last kernel to carry as its
+// stopEvent via rcclTakeAddonStopEvent() instead of paying for a standalone record. A launch that never takes
+// it, because its last stream operation is not a kernel or because it returned early, gets the record from the
+// epilogue.
+struct rcclAddonLaunchState {
+  int savedDev;
+  // Whether the prologue offered the stop event, which is what lets the epilogue tell a taken event from one
+  // that was never on offer. False while capturing, where a fused stop event is not bound.
+  bool eventOffered;
+};
+
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state);
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
+                                const struct rcclAddonLaunchState& state, ncclResult_t launchRes);
+
+template <typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {
+  struct rcclAddonLaunchState state = {-1, false};
+  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, &state);
+  if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, state, result);
+  return rcclAddonLaunchEnd(comm, stream, state, launch());
+}
+
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
