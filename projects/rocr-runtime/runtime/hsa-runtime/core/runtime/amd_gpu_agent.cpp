@@ -69,6 +69,7 @@
 #include "core/inc/runtime.h"
 #include "core/util/os.h"
 #include "core/util/atomic_helpers.h"
+#include "core/util/doorbell_type.h"
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "inc/hsa_ven_amd_pc_sampling.h"
@@ -144,25 +145,18 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   //
   // NOTE: DoorbellType is currently a 2-bit field (bits 12-13 of capability).
   // As AMD adds new GPU generations, this field may be widened or new values
-  // added. When that happens, update this switch to accept the new type(s).
-  // The default case ensures unrecognized future types are skipped gracefully
+  // added. When that happens, update the shared helper to accept the new type(s).
+  // The rejection path ensures unrecognized future types are skipped gracefully
   // rather than aborting HSA initialization for all devices in the system.
-  switch (node_props.Capability.ui32.DoorbellType) {
-    case 2: // HSA_CAP_DOORBELL_TYPE_2_0 — supported
-      break;
-    case 0: // HSA_CAP_DOORBELL_TYPE_PRE_1_0 — deprecated (Kaveri, Hawaii, Tonga)
-    case 1: // HSA_CAP_DOORBELL_TYPE_1_0 — deprecated (Fiji, Polaris, Vegam)
-    default: {
-      // Fall through to default for any unrecognized future doorbell types.
-      // This prevents a single unsupported/new GPU from killing initialization
-      // for all devices. DiscoverGpu will catch this and skip the device.
-      std::ostringstream msg;
-      msg << "Agent creation failed.\nThe GPU node uses unsupported doorbell type "
-          << node_props.Capability.ui32.DoorbellType
-          << " (only type 2 is currently supported).\n";
-      const std::string msg_str = msg.str();
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA, msg_str.c_str());
-    }
+  if (!IsDoorbellTypeSupported(node_props.Capability.ui32.DoorbellType)) {
+    // This prevents a single unsupported/new GPU from killing initialization
+    // for all devices. DiscoverGpu will catch this and skip the device.
+    std::ostringstream msg;
+    msg << "Agent creation failed.\nThe GPU node uses unsupported doorbell type "
+        << node_props.Capability.ui32.DoorbellType
+        << " (only type 2 is currently supported).\n";
+    const std::string msg_str = msg.str();
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA, msg_str.c_str());
   }
 
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
