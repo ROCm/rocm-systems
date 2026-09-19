@@ -1,6 +1,26 @@
 import { expect, test } from '@playwright/test';
 import { readChart } from './helpers/chart.js';
 
+test('metric captions use the card width beneath their icons', async ({ page }) => {
+  await page.goto('/');
+
+  const cards = page.getByTestId(/^metric-card-/);
+  await expect(cards).toHaveCount(4);
+
+  for (let index = 0; index < 4; index += 1) {
+    const card = cards.nth(index);
+    const [cardBox, iconBox, captionBox] = await Promise.all([
+      card.boundingBox(),
+      card.getByTestId('metric-icon').boundingBox(),
+      card.getByTestId('metric-caption').boundingBox(),
+    ]);
+
+    expect(captionBox.x).toBeGreaterThan(cardBox.x + 12);
+    expect(captionBox.x + captionBox.width).toBeGreaterThanOrEqual(iconBox.x + iconBox.width);
+    expect(captionBox.x + captionBox.width).toBeLessThan(cardBox.x + cardBox.width - 12);
+  }
+});
+
 test('performance trend fills the row beside largest changes', async ({ page }) => {
   await page.goto('/');
 

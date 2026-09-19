@@ -11,23 +11,24 @@ import { changeTone, classifyDurationChange } from '../../utils/performance';
 
 function MetricCard({ label, value, caption, icon, tone = 'primary', badge }) {
   const toneColor = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
+  const testId = `metric-card-${label.toLowerCase().replaceAll(' ', '-')}`;
   return (
-    <Card sx={{ position: 'relative', overflow: 'hidden' }}>
+    <Card data-testid={testId} sx={{ position: 'relative', overflow: 'hidden' }}>
       <Box sx={{ position: 'absolute', inset: '0 auto 0 0', width: 3, bgcolor: toneColor }} />
       <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
-          <Box>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="overline" sx={{ color: 'text.secondary' }}>{label}</Typography>
             <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1, mt: 0.65 }}>
               <Typography sx={{ fontSize: { xs: 25, xl: 29 }, lineHeight: 1.1, fontWeight: 770, letterSpacing: '-.035em' }}>{value}</Typography>
               {badge}
             </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.9 }}>{caption}</Typography>
           </Box>
-          <Box sx={{ width: 38, height: 38, borderRadius: 2.3, display: 'grid', placeItems: 'center', color: toneColor, bgcolor: 'action.hover' }}>
+          <Box data-testid="metric-icon" sx={{ width: 38, height: 38, flexShrink: 0, borderRadius: 2.3, display: 'grid', placeItems: 'center', color: toneColor, bgcolor: 'action.hover' }}>
             {icon}
           </Box>
         </Stack>
+        <Typography data-testid="metric-caption" variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.9 }}>{caption}</Typography>
       </CardContent>
     </Card>
   );
