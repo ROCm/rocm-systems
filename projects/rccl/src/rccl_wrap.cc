@@ -1666,6 +1666,22 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       if (!query) INFO(NCCL_TUNING, "AG CE-registered disqualified: ceAvailable=%d hasSysmem=%d symEligible=%d ceRegWindow=%d",
            (int)ceAvailable, (int)hasSysmemSegment, (int)symEligible,
            (int)rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing));
+      // Branch #3.5: Hierarchical CE (multi-node, both buffers registered).
+      // ceCollTaskAppend routes to ncclHierCeAllGather via ncclHierCeDispatch(comm),
+      // so RCCL_CE_REGISTERED is correct here — same as rcclSelectAlltoAll Branch #5.
+      const bool hierCeAvailable =
+        !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
+      if (hierCeAvailable && !hasSysmemSegment &&
+          (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+        decision->algo = RCCL_CE_REGISTERED;
+        if (query) {
+          int a, p, ch;
+          NCCLCHECK(rcclHierarchicalAlgoInfo(comm, ncclFuncAllGather, sendcount, datatype, &a, &p, &ch));
+          decision->protocol = p;
+          decision->nMaxChannels = ch;
+        }
+        return ncclSuccess;
+      }
     }
 
   }
