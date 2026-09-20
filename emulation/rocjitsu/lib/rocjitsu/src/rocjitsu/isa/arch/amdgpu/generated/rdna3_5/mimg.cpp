@@ -83,6 +83,7 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -110,6 +111,7 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -138,6 +140,7 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -166,6 +169,7 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -194,6 +198,7 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -222,6 +227,7 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -250,6 +256,7 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -277,6 +284,7 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -305,6 +313,7 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -333,6 +342,7 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -366,6 +376,7 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -399,6 +410,7 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -432,6 +444,7 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -465,6 +478,7 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -498,6 +512,7 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -531,6 +546,7 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -564,6 +580,7 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -597,6 +614,7 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -630,6 +648,7 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -663,6 +682,7 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -696,6 +716,7 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -729,6 +750,7 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -762,6 +784,7 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -790,6 +813,7 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -818,6 +842,7 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -845,6 +870,7 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -872,6 +898,7 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -902,6 +929,7 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -932,6 +960,7 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -962,6 +991,7 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -992,6 +1022,7 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1022,6 +1053,7 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1052,6 +1084,7 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1082,6 +1115,7 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1112,6 +1146,7 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1142,6 +1177,7 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1172,6 +1208,7 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1202,6 +1239,7 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1232,6 +1270,7 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1262,6 +1301,7 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1292,6 +1332,7 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1322,6 +1363,7 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1352,6 +1394,7 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1382,6 +1425,7 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1412,6 +1456,7 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1442,6 +1487,7 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1472,6 +1518,7 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1502,6 +1549,7 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1532,6 +1580,7 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1562,6 +1611,7 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1592,6 +1642,7 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1622,6 +1673,7 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1652,6 +1704,7 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1682,6 +1735,7 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1712,6 +1766,7 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1742,6 +1797,7 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1772,6 +1828,7 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1802,6 +1859,7 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1832,6 +1890,7 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1862,6 +1921,7 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1892,6 +1952,7 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1922,6 +1983,7 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1952,6 +2014,7 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1982,6 +2045,7 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2012,6 +2076,7 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2042,6 +2107,7 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2072,6 +2138,7 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2102,6 +2169,7 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2132,6 +2200,7 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2162,6 +2231,7 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2192,6 +2262,7 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2222,6 +2293,7 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2252,6 +2324,7 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2282,6 +2355,7 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2312,6 +2386,7 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2343,6 +2418,7 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2373,6 +2449,7 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2403,6 +2480,7 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2433,6 +2511,7 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2463,6 +2542,7 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2493,6 +2573,7 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2523,6 +2604,7 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2553,6 +2635,7 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2583,6 +2666,7 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   capture_nsa_words(inst, &vaddr);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

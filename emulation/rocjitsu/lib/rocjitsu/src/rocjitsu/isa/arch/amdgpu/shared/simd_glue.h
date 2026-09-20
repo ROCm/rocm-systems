@@ -1052,7 +1052,7 @@ SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
 /// carry-in ignore it. The result is masked-stored to vdst and the carry mask
 /// is returned through `write_result`, which owns the architectural VCC commit
 /// after any DPP source-validity merge. Inactive-lane bits remain zero.
-template <typename Inst, typename CarryOp, typename WriteResult>
+template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
                                                              CarryOp carry_op,
@@ -1066,7 +1066,7 @@ template <typename Inst, typename CarryOp, typename WriteResult>
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   // Carry-in reads the incoming VCC; the result accumulates from zero so that
   // inactive lanes are zeroed (matching hardware and the scalar bodies).
-  const uint64_t vcc_in = wf.vcc();
+  const uint64_t vcc_in = ReadCarry ? wf.vcc_mask(exec) : 0;
   uint64_t vcc_out = 0;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -1551,7 +1551,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc();
+  const uint64_t vcc = wf.vcc_mask(exec);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.vsrc1, exec);
@@ -3279,7 +3279,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc();
+  const uint64_t vcc = wf.vcc_mask(exec);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -3321,7 +3321,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc();
+  const uint64_t vcc = wf.vcc_mask(exec);
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand64(inst.src0, exec);
   auto src1 = regs.read_operand64(inst.src1, exec);
@@ -4630,8 +4630,9 @@ template <bool Vop3, typename Inst>
 
 /// Carry-VOP2 counterpart. The wrapper-owned writer merges DPP-suppressed
 /// lanes and applies the target wave-width policy before the VCC commit.
-#define ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(WRITE_RESULT, ...)                                     \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd(inst, wf, __VA_ARGS__, WRITE_RESULT)) \
+#define ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(WRITE_RESULT, READ_CARRY, ...)                         \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd<READ_CARRY>(inst, wf, __VA_ARGS__,    \
+                                                                         WRITE_RESULT))            \
   return
 
 /// Literal FMA/MAD VOP2 counterpart. `KEXPR` is the inline-literal bits

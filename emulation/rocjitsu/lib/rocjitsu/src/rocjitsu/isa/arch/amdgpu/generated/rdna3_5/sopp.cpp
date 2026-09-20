@@ -689,6 +689,7 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -711,6 +712,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

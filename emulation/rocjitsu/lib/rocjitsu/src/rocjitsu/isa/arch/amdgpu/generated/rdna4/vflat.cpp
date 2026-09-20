@@ -36,6 +36,7 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -66,6 +67,7 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -96,6 +98,7 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -126,6 +129,7 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -156,6 +160,7 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -186,6 +191,7 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -216,6 +222,7 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -246,6 +253,7 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -276,6 +284,7 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -306,6 +315,7 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -336,6 +346,7 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -366,6 +377,7 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -396,6 +408,7 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -426,6 +439,7 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -456,6 +470,7 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -492,6 +507,7 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -528,6 +544,7 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -564,6 +581,7 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -600,6 +618,7 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -636,6 +655,7 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::VMEM},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -672,6 +692,7 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -702,6 +723,7 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED},
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -741,6 +763,7 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -780,6 +803,7 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -819,6 +843,7 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -858,6 +883,7 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -897,6 +923,7 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -936,6 +963,7 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -975,6 +1003,7 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1014,6 +1043,7 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1053,6 +1083,7 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1092,6 +1123,7 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1131,6 +1163,7 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1170,6 +1203,7 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1209,6 +1243,7 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1248,6 +1283,7 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1287,6 +1323,7 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1326,6 +1363,7 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1365,6 +1403,7 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1404,6 +1443,7 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1443,6 +1483,7 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1482,6 +1523,7 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1521,6 +1563,7 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1560,6 +1603,7 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1599,6 +1643,7 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1638,6 +1683,7 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1677,6 +1723,7 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1716,6 +1763,7 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1755,6 +1803,7 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1794,6 +1843,7 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1833,6 +1883,7 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1872,6 +1923,7 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1911,6 +1963,7 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1950,6 +2003,7 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1989,6 +2043,7 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
                                                    : amdgpu::MemoryCompletionClass::UNORDERED)},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                        amdgpu::MemoryCompletionClass::LDS}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

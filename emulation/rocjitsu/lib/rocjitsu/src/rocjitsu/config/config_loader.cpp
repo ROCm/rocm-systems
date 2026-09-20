@@ -569,6 +569,12 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
       cc.functional_quantum =
           config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+      if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
+        if (it->second == "off")
+          cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+        else if (it->second != "warn")
+          throw std::invalid_argument("memory_wait_diagnostics must be warn or off");
+      }
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }

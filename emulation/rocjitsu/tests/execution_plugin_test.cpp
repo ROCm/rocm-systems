@@ -200,8 +200,11 @@ public:
 
   explicit TestMemoryInstruction(
       std::unique_ptr<DynamicInstState> state, std::string_view mnemonic = "test_mem",
-      std::optional<WaitCounterType> additional_wait_counter_type = std::nullopt)
+      std::optional<WaitCounterType> additional_wait_counter_type = std::nullopt,
+      bool memory_wait_producer = false)
       : Instruction(mnemonic, nullptr) {
+    if (memory_wait_producer)
+      flags_ |= MEMORY_WAIT_PRODUCER;
     if (state->tag() == SCALAR_MEM) {
       const auto &memory = *static_cast<const ScalarMemState *>(state.get());
       if (additional_wait_counter_type) {
@@ -1261,7 +1264,9 @@ struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
-  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5)
+  explicit Wave32PluginFixture(
+      rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5,
+      amdgpu::MemoryWaitDiagnostics wait_checks = amdgpu::MemoryWaitDiagnostics::Warn)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -1270,6 +1275,7 @@ struct Wave32PluginFixture {
     cfg.sgprs_per_wf = 104;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
+    cfg.memory_wait_diagnostics = wait_checks;
     cu = amdgpu::ComputeUnitCore::create("wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
   }
 
@@ -1477,6 +1483,140 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
       }
     }
   }
+}
+
+TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPluginReplacement) {
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_CDNA5, amdgpu::MemoryWaitDiagnostics::Off);
+  auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  const amdgpu::RegisterAccess regs(*wf);
+  const uint32_t vbase = wf->vgpr_alloc().base + 4;
+  const uint32_t sbase = wf->sgpr_alloc().base + 2;
+  auto access = [&](uint32_t value) {
+    auto write = regs.write_vgpr_region(vbase, 2, 1);
+    write.set_lane(0, 0, value);
+    write.set_lane(1, 0, value + 1);
+    auto read = regs.read_vgpr_region(vbase, 2, 1);
+    EXPECT_EQ(read.lane(0, 0), value);
+    EXPECT_EQ(read.lane(1, 0), value + 1);
+    const uint64_t pair = uint64_t{value} | (uint64_t{value + 1} << 32);
+    regs.write_sgpr64(sbase, pair);
+    EXPECT_EQ(regs.read_sgpr64(sbase), pair);
+  };
+  access(3);
+  auto *plugin = f.attach_ordering_plugin();
+  for (bool attached : {true, false, true}) {
+    SCOPED_TRACE(attached);
+    f.cu->set_plugin_group(attached ? f.plugin_group : nullptr);
+    plugin->events.clear();
+    access(7);
+    if (!attached) {
+      EXPECT_TRUE(plugin->events.empty());
+      continue;
+    }
+    for (auto kind :
+         {HookEvent::READ_VGPR, HookEvent::WRITE_VGPR, HookEvent::READ_SGPR, HookEvent::WRITE_SGPR})
+      EXPECT_EQ(std::ranges::count(plugin->events, kind, &HookEvent::kind), 2);
+  }
+}
+
+TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
+  class SnapshotPlugin : public ExecutionPlugin {
+  public:
+    SnapshotPlugin() : ExecutionPlugin("register_snapshot") {}
+    void snapshot(const Wavefront *wf) {
+      (void)wf->read_scc();
+      ++snapshots;
+    }
+    void onAmdgpuReadScalarRegister(const Wavefront *wf, RegisterRef) override { snapshot(wf); }
+    void onAmdgpuWriteScalarRegister(const Wavefront *wf, RegisterRef) override { snapshot(wf); }
+    void onAmdgpuReadVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+      snapshot(wf);
+    }
+    void onAmdgpuWriteVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
+      snapshot(wf);
+    }
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
+      snapshot(tensor_wave);
+    }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    const Wavefront *tensor_wave = nullptr;
+    unsigned snapshots = 0;
+  };
+  Wave32PluginFixture f;
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<SnapshotPlugin>();
+  auto *snapshots = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  f.cu->set_plugin_group(group);
+  auto *wf = f.cu->dispatch_wf(0, 0x200, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  snapshots->tensor_wave = wf;
+  const amdgpu::RegisterAccess regs(*wf);
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  f.cu->write_sgpr(sbase, 0);
+  f.cu->write_vgpr(vbase, 0, 0);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  state.bind(wf->pc, &hazards, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+  for (unsigned hook = 0; hook < 6; ++hook) {
+    SCOPED_TRACE(hook);
+    state.clear();
+    hazards = snapshots->snapshots = 0;
+    state.add({state.issue(WaitCounterKind::Km),
+               0x100,
+               ~uint64_t{0},
+               {RegClass::SCC, 0, 1},
+               WaitCounterKind::Km,
+               0xf});
+    amdgpu::ScopedMemoryWaitCheck scope(&state);
+    switch (hook) {
+    case 0:
+      (void)regs.read_sgpr(sbase);
+      break;
+    case 1:
+      regs.write_sgpr(sbase, 7);
+      break;
+    case 2:
+      (void)regs.read_vgpr_region(vbase, 1, 1).lane(0, 0);
+      break;
+    case 3:
+      regs.write_vgpr_region(vbase, 1, 1).set_lane(0, 0, 7);
+      break;
+    case 4:
+      f.cu->notify_scalar_lane_vgpr_write(wf, vbase, 1);
+      break;
+    case 5:
+      wf->cu().report_tensor_dma_memory_access({});
+      break;
+    }
+    EXPECT_EQ(snapshots->snapshots, 1u);
+    EXPECT_EQ(hazards, 0u);
+    EXPECT_FALSE(state.empty());
+    (void)wf->read_scc();
+    EXPECT_EQ(hazards, 1u); // The instruction's actual SCC use still diagnoses.
+  }
+}
+
+TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
+  Wave32PluginFixture f;
+  auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
+  ASSERT_NE(wf, nullptr);
+  const amdgpu::RegisterAccess regs(*wf);
+  const cdna5::Operand operand(64, cdna5::OperandType::OPR_VCC, 0);
+  ASSERT_FALSE(operand.to_register_ref());
+  const auto destination = regs.destination_register(operand);
+  ASSERT_TRUE(destination);
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  state.bind(0x200, &hazards, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+  state.add({state.issue(WaitCounterKind::Ds), 0x100, ~uint64_t{0}, *destination,
+             WaitCounterKind::Ds, 0xf});
+  state.access({RegClass::VCC, 1, 1}, ~uint64_t{0}, 0xf, false);
+  EXPECT_EQ(hazards, 1u);
 }
 
 TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) {
@@ -6799,13 +6939,14 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->elem_size = 4;
   state->num_elems = 1;
   state->is_load = true;
+  state->dst_reg_base = wave->vgpr_alloc().base + 2;
   state->exec_mask = 0b111;
   state->lane_mask = 0b111;
   state->per_lane_addr[0] = kDdsAddress;
   state->per_lane_addr[1] = kLdsAddress;
   state->per_lane_addr[2] = 0x2000;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -6820,6 +6961,16 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.pre_routing_addresses[0], kDdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[1], kLdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[2], 0x2000u);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  scoreboard->wait(WaitCounterKind::Load, 0);
+  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLaneIsGlobal) {
@@ -6838,13 +6989,14 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   state->elem_size = 4;
   state->num_elems = 1;
   state->is_load = true;
+  state->dst_reg_base = wave->vgpr_alloc().base + 2;
   state->exec_mask = 0b1111;
   state->lane_mask = 0b0111;
   state->per_lane_addr[0] = 0x2000;
   state->per_lane_addr[1] = kSharedBase + 0x20;
   state->per_lane_addr[2] = kSharedBase + 0x28;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32"), *wave);
+      *cu, new TestMemoryInstruction(std::move(state), "flat_load_b32", std::nullopt, true), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -6856,6 +7008,16 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
   EXPECT_EQ(access.addresses[0], 0x2000u);
   EXPECT_EQ(access.addresses[1], kSharedBase + 0x20);
   EXPECT_EQ(access.addresses[2], kSharedBase + 0x28);
+  auto *scoreboard = wave->memory_wait_scoreboard();
+  ASSERT_NE(scoreboard, nullptr);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+  scoreboard->wait(WaitCounterKind::Load, 0);
+  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {

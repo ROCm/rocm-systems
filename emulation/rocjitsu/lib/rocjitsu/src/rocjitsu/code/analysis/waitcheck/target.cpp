@@ -129,10 +129,7 @@ WaitcheckTarget::maximum_dependency_wait(rj_code_arch_t arch, WaitCounterKind co
   case WaitCounterKind::Store:
     return 62;
   case WaitCounterKind::Ds:
-    return uses_legacy_waitcnt(model.value()) && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-                   arch != ROCJITSU_CODE_ARCH_RDNA3_5
-               ? 14
-               : 62;
+    return model.value() == WaitcntModel::LegacyNoVscnt ? 14 : 62;
   case WaitCounterKind::Km:
     return 30;
   case WaitCounterKind::Sample:
@@ -166,7 +163,7 @@ WaitcheckTarget::counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind coun
     case WaitCounterKind::Store:
       return has_legacy_vscnt(model.value()) ? std::optional<uint32_t>{0x3fu} : std::nullopt;
     case WaitCounterKind::Ds:
-      return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 0x3fu : 0x0fu;
+      return has_legacy_vscnt(model.value()) ? 0x3fu : 0x0fu;
     case WaitCounterKind::Exp:
       return 0x07u;
     case WaitCounterKind::VmVsrc:
@@ -220,7 +217,8 @@ WaitcheckTarget::explicit_wait_fields(const Instruction &inst, rj_code_arch_t ar
   };
 
   const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic == "s_wait_idle") {
+  if (mnemonic == "s_wait_idle" || (arch == ROCJITSU_CODE_ARCH_RDNA4 && mnemonic == "s_waitcnt")) {
+    // RDNA4's compatibility S_WAITCNT is S_WAIT_IDLE regardless of SIMM16.
     for (size_t counter_idx = 0; counter_idx < kCounterCount; ++counter_idx) {
       const auto counter = static_cast<WaitCounterKind>(counter_idx);
       if (counter_no_wait_value(arch, counter).value())
@@ -310,7 +308,11 @@ WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rj_code_arch_t ar
     return util::Result::failure();
   WaitFields fields;
   bool has_wait = false;
-  if (const auto wait_exp = vinterp_wait_exp(inst); wait_exp && *wait_exp < 0x7u) {
+  const bool has_vinterp_wait = arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                                arch == ROCJITSU_CODE_ARCH_RDNA4;
+  if (const auto wait_exp = vinterp_wait_exp(inst);
+      has_vinterp_wait && wait_exp && *wait_exp < 0x7u) {
     fields[counter_index(WaitCounterKind::Exp)] = *wait_exp;
     has_wait = true;
   }
@@ -324,6 +326,11 @@ WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rj_code_arch_t ar
     has_wait = true;
   }
   return has_wait ? std::optional{fields} : std::nullopt;
+}
+
+bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
+  return inst.flags() &
+         (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | XCNT_DRAIN);
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_xcnt_vmem_kind(WaitEventKind kind) {
@@ -395,12 +402,11 @@ WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rj_code_arch_t ar
 [[nodiscard]] bool WaitcheckTarget::is_scalar_memory_op(std::string_view mnemonic) {
   return mnemonic.starts_with("s_load") || mnemonic.starts_with("s_buffer_load") ||
          mnemonic.starts_with("s_store") || mnemonic.starts_with("s_buffer_store") ||
-         mnemonic.starts_with("s_prefetch_") || mnemonic.starts_with("s_atc_probe") ||
-         mnemonic.starts_with("s_atomic_") || mnemonic.starts_with("s_buffer_atomic_") ||
-         mnemonic.starts_with("s_scratch_load") || mnemonic.starts_with("s_scratch_store") ||
-         mnemonic.starts_with("s_buffer_prefetch_") || mnemonic.starts_with("s_dcache_") ||
+         mnemonic.starts_with("s_atc_probe") || mnemonic.starts_with("s_atomic_") ||
+         mnemonic.starts_with("s_buffer_atomic_") || mnemonic.starts_with("s_scratch_load") ||
+         mnemonic.starts_with("s_scratch_store") || mnemonic.starts_with("s_dcache_") ||
          mnemonic == "s_gl1_inv" || mnemonic == "s_memtime" || mnemonic == "s_memrealtime" ||
-         mnemonic == "s_get_barrier_state";
+         mnemonic == "s_get_barrier_state" || mnemonic == "s_get_waveid_in_workgroup";
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_vmem_store(std::string_view mnemonic) {
@@ -519,7 +525,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     return events;
   }
 
-  if (mnemonic == "global_inv") {
+  if (mnemonic == "global_inv" || mnemonic == "buffer_inv" || mnemonic == "buffer_wbl2") {
     // LLVM tracks this in LOAD_CNT so it changes the wait threshold for an
     // older load.  It has no result and does not by itself make the next
     // memory instruction a wait consumer.
@@ -546,7 +552,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
 
   if (mnemonic.starts_with("global_load") || mnemonic.starts_with("scratch_load") ||
       mnemonic.starts_with("buffer_load") || mnemonic.starts_with("tbuffer_load") ||
-      mnemonic.starts_with("image_load")) {
+      mnemonic.starts_with("image_load") || mnemonic == "image_get_resinfo") {
     events.push_back({WaitCounterKind::Load, WaitEventKind::VmemNoSamplerLoad});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
@@ -558,11 +564,14 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
   if (is_image_atomic(mnemonic)) {
     // Image models expose vdata as a destination even for no-return forms.
     // Read the return control until that distinction is available as metadata:
-    // gfx11 GLC is bit 14; gfx12 TH's low bit is bit 20 of the second word.
+    // GFX9/10 GLC is bit 13, GFX11 GLC is bit 14, and GFX12 TH's
+    // low bit is bit 20 of the second word.
     bool returns_value = has_register_result();
     if (inst.raw_encoding() != nullptr && inst.size() >= 8) {
+      const unsigned glc_bit =
+          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 14u : 13u;
       returns_value = uses_legacy_waitcnt(model.value())
-                          ? (inst.raw_encoding()[0] & (1u << 14u)) != 0
+                          ? (inst.raw_encoding()[0] & (1u << glc_bit)) != 0
                           : (inst.raw_encoding()[1] & (1u << 20u)) != 0;
     }
     const WaitCounterKind counter =
@@ -572,9 +581,6 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     events.emplace_back(counter, kind,
                         returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                         /*check_uses=*/returns_value, /*check_defs=*/returns_value);
-    if (!uses_legacy_waitcnt(model.value()))
-      events.push_back({WaitCounterKind::Exp, WaitEventKind::VmemStore,
-                        TrackedRegisterSource::StoreDataUses, false, true});
     if (expert)
       events.push_back(
           {WaitCounterKind::VmVsrc, kind, TrackedRegisterSource::VectorUses, false, true});
@@ -627,8 +633,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
   }
 
   if (uses_ds_wait_counter(mnemonic)) {
-    const uint32_t gds_bit =
-        arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 16u : 17u;
+    const uint32_t gds_bit = model.value() == WaitcntModel::LegacyNoVscnt ? 16u : 17u;
     const bool gds = uses_legacy_waitcnt(model.value()) &&
                      (mnemonic == "ds_ordered_count" || mnemonic == "ds_add_gs_reg_rtn" ||
                       mnemonic == "ds_sub_gs_reg_rtn" || mnemonic.starts_with("ds_gws_") ||
@@ -657,7 +662,8 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
                         /*check_uses=*/produces_result, /*check_defs=*/produces_result);
     // Timestamp and barrier-state SOP operations account as SMEM_ACCESS,
     // but unlike SMRD instructions they do not translate a scalar address.
-    if (mnemonic != "s_memtime" && mnemonic != "s_memrealtime" && mnemonic != "s_get_barrier_state")
+    if (mnemonic != "s_memtime" && mnemonic != "s_memrealtime" &&
+        mnemonic != "s_get_barrier_state" && mnemonic != "s_get_waveid_in_workgroup")
       add_xcnt_event(WaitEventKind::Smem);
     return events;
   }
@@ -671,8 +677,8 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     return events;
   }
 
-  if (mnemonic == "image_msaa_load" || mnemonic.starts_with("image_sample") ||
-      mnemonic.starts_with("image_gather")) {
+  if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
+      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather")) {
     events.push_back({image_sample_wait_counter(model.value()), WaitEventKind::Sample});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,

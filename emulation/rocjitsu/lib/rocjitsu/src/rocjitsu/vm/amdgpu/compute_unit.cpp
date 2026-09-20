@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/mma_admission.h"
@@ -20,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -64,6 +66,28 @@ void Wavefront::debug_write_sgpr(uint32_t reg, uint32_t value) {
 
 void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
   cu_.write_vgpr(vgpr_alloc_.base + reg, lane, value);
+}
+
+void ComputeUnitCore::observe_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
+  SuspendedMemoryWaitCheck observer_scope;
+  plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
+}
+
+void ComputeUnitCore::observe_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
+  SuspendedMemoryWaitCheck observer_scope;
+  plugin_group_->onAmdgpuWriteScalarRegister(&wf, reg);
+}
+
+void ComputeUnitCore::observe_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+                                        uint8_t byte_mask) const {
+  SuspendedMemoryWaitCheck observer_scope;
+  plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
+}
+
+void ComputeUnitCore::observe_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
+                                         uint8_t byte_mask) const {
+  SuspendedMemoryWaitCheck observer_scope;
+  plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
 }
 
 namespace {
@@ -553,8 +577,10 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
 }
 
 void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
-  if (!members.empty())
+  if (!members.empty()) {
+    SuspendedMemoryWaitCheck observer_scope;
     plugin_group_->onAmdgpuBarrierResolved(members);
+  }
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -835,6 +861,12 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
 
+  // Resolved FLAT lanes determine which pipeline produces each register result.
+  // Keep both architectural counter entries, including the counter-only one.
+  if (config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off &&
+      inst->is_memory_wait_producer())
+    track_memory_wait(*inst, wf, flat_local_lane_mask | flat_dds_lane_mask);
+
   switch (route_tag) {
   case SCALAR_MEM:
     return scalar_mem_pipeline_.issue_deferred(inst, wf);
@@ -845,6 +877,273 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   default:
     delete inst;
     return VmAccessOutcome::Malformed;
+  }
+}
+
+void ComputeUnitCore::report_memory_wait(void *context,
+                                         const MemoryWaitScoreboard::Hazard &hazard) {
+  auto &wf = *static_cast<Wavefront *>(context);
+  auto &cu = wf.raw_cu();
+  const bool replay = hazard.producer.counter == WaitCounterKind::X;
+  const auto count = replay ? ++cu.xcnt_diagnostic_count_ : ++cu.memory_wait_diagnostic_count_;
+  if (count > kMaxMemoryWaitDiagnostics)
+    return;
+  auto counter_name = wait_counter_name(hazard.producer.counter);
+  const auto model = waitcheck_detail::waitcnt_model(cu.arch());
+  if (model.succeeded() && waitcheck_detail::uses_legacy_waitcnt(model.value())) {
+    if (hazard.producer.counter == WaitCounterKind::Load)
+      counter_name = "vmcnt";
+    else if (hazard.producer.counter == WaitCounterKind::Store)
+      counter_name = "vscnt";
+    else if (hazard.producer.counter == WaitCounterKind::Ds)
+      counter_name = "lgkmcnt";
+  }
+  const auto max_wait = waitcheck_detail::WaitcheckTarget::maximum_dependency_wait(
+      cu.arch(), hazard.producer.counter);
+  const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
+                                             : hazard.required_wait;
+  const auto register_name = [&] {
+    switch (hazard.reg.cls) {
+    case RegClass::VGPR:
+      return std::format("v{}", hazard.reg.index);
+    case RegClass::SGPR:
+      return std::format("s{}", hazard.reg.index);
+    case RegClass::TTMP:
+      return std::format("ttmp{}", hazard.reg.index);
+    case RegClass::ACC_VGPR:
+      return std::format("acc{}", hazard.reg.index);
+    case RegClass::EXEC:
+      return std::string("exec");
+    case RegClass::VCC:
+      return std::string("vcc");
+    case RegClass::SCC:
+      return std::string("scc");
+    case RegClass::M0:
+      return std::string("m0");
+    case RegClass::FLAT_SCRATCH:
+      return std::string("flat_scratch");
+    case RegClass::PC:
+      return std::string("pc");
+    }
+    return std::string("unknown register");
+  }();
+  if (replay) {
+    util::Logger::warn(std::format(
+        "xcnt-wait: {} wg={} wave={} pc={:#x}: overwrite of {} before the replay source from "
+        "pc={:#x} is known safe to reuse. XNACK replay may need the original value. "
+        "s_wait_xcnt <= {} is required; memory_wait_diagnostics=off silences this diagnostic.",
+        cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc, register_name,
+        hazard.producer.pc, required));
+  } else {
+    util::Logger::warn(std::format(
+        "memory-wait: {} wg={} wave={} pc={:#x}: {} of {} before memory result from pc={:#x} is "
+        "known ready ({}). A wait threshold <= {} is required; memory_wait_diagnostics=off "
+        "silences "
+        "this "
+        "diagnostic.",
+        cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc,
+        hazard.write ? "overwrite" : "read", register_name, hazard.producer.pc, counter_name,
+        required));
+  }
+  if (count == kMaxMemoryWaitDiagnostics)
+    util::Logger::warn(replay ? "xcnt-wait: further diagnostics on this CU are suppressed"
+                              : "memory-wait: further diagnostics on this CU are suppressed");
+}
+
+void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
+                                        uint64_t flat_shared_lanes) {
+  using namespace waitcheck_detail;
+  const auto model = waitcnt_model(config_.arch);
+  if (model.failed())
+    return;
+  auto classified = WaitcheckTarget::classify_events(inst, config_.arch);
+  if (classified.failed() || classified.value().empty())
+    return;
+  const bool legacy = uses_legacy_waitcnt(model.value());
+  auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+  scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
+  const auto xevent =
+      config_.arch == ROCJITSU_CODE_ARCH_CDNA5
+          ? std::ranges::find(classified.value(), WaitCounterKind::X, &ClassifiedEvent::counter)
+          : classified.value().end();
+  const bool xscalar = xevent != classified.value().end() && xevent->kind == WaitEventKind::Smem;
+  // The qualified VMEM policy is LLVM's multi-group replay mode. MODE[25]
+  // selects VMEM grouping, not whether XNACK is enabled. SMEM is independent.
+  const bool track_xcnt =
+      xevent != classified.value().end() && (xscalar || (wf.mode_raw() & (1u << 25)));
+  // Even a single-group VMEM instruction drains preceding SMEM translations.
+  if (xevent != classified.value().end())
+    scoreboard.xcnt_group(xscalar);
+  // Transpose operations can execute all lanes even when architectural EXEC is
+  // zero. Use the resolved payload mask for completion and replay tracking.
+  const uint64_t vector_lanes =
+      inst.data() && (inst.data()->tag() == GLOBAL_MEM || inst.data()->tag() == LOCAL_MEM)
+          ? inst.data_as<VectorMemState>()->exec_mask
+          : wf.exec();
+
+  struct Destination {
+    RegisterRef reg;
+    uint64_t lanes;
+    uint8_t bytes;
+  };
+  // Instruction has at most three explicit destinations, plus a special result.
+  std::array<Destination, 4> destinations;
+  size_t num_destinations = 0;
+  auto append = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes) {
+    assert(num_destinations < destinations.size());
+    destinations[num_destinations++] = {reg, lanes, bytes};
+  };
+  // Static liveness deliberately omits some named scalar registers. Resolve
+  // scalar completion destinations from the executed payload or scalar selector
+  // so SMEM/message results in VCC and FLAT_SCRATCH are still tracked.
+  std::optional<RegisterRef> scalar_result;
+  auto scalar_event = std::ranges::find_if(classified.value(), [](const auto &event) {
+    return event.kind == WaitEventKind::Smem || event.kind == WaitEventKind::SqMessage;
+  });
+  if (scalar_event != classified.value().end()) {
+    if (inst.data() && inst.data()->tag() == SCALAR_MEM) {
+      const auto &data = *inst.data_as<ScalarMemState>();
+      if (data.is_load)
+        scalar_result = data.dst_register.register_ref();
+    } else if (!inst.is_memory_op() && inst.num_dst_operands() == 1) {
+      const auto *operand = inst.dst_operand(0);
+      if (const auto range = resolve_scalar_register_range(wf, operand->encoding_value(),
+                                                           std::max(1, operand->size_bits() / 32)))
+        scalar_result = range->register_ref();
+    }
+    if (scalar_result)
+      scalar_event->registers = TrackedRegisterSource::Defs;
+  }
+  const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
+                                      &ClassifiedEvent::registers);
+  if (defs != classified.value().end()) {
+    if (scalar_result) {
+      append(*scalar_result, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask);
+    } else if (inst.data() && inst.data()->tag() == SCALAR_MEM) {
+      const auto &d = *inst.data_as<ScalarMemState>();
+      if (d.is_load)
+        if (const auto reg = d.dst_register.register_ref())
+          append(*reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask);
+    } else if (inst.data() &&
+               (inst.data()->tag() == GLOBAL_MEM || inst.data()->tag() == LOCAL_MEM)) {
+      const auto &d = *inst.data_as<VectorMemState>();
+      if (d.is_load && !d.lds_dst) {
+        const unsigned count = std::max(
+            1u,
+            ((d.atomic_op != AtomicOp::NONE ? d.elem_size : d.num_elems * d.elem_size) + 3) / 4);
+        const uint8_t bytes = !sram_ecc() && d.d16_hi   ? 0xc
+                              : !sram_ecc() && d.d16_lo ? 0x3
+                                                        : MemoryWaitScoreboard::kFullDwordByteMask;
+        auto add_vector = [&](uint32_t base) {
+          if (owns_vgpr_range(wf, base, count))
+            append({RegClass::VGPR, static_cast<uint16_t>(base - wf.vgpr_alloc().base),
+                    static_cast<uint8_t>(count)},
+                   d.exec_mask, bytes);
+        };
+        add_vector(d.dst_reg_base);
+        if (d.ds2_active)
+          add_vector(d.ds2_dst_reg_base);
+      }
+    } else {
+      // Inline producers have already populated their result; resolve the same
+      // dynamic register bank as execution without retaining a payload.
+      for (int i = 0; i < inst.num_dst_operands(); ++i)
+        if (const auto *operand = inst.dst_operand(i))
+          if (auto reg = RegisterAccess(wf).destination_register(*operand))
+            append(*reg, reg->cls == RegClass::VGPR ? wf.vgpr_write_mask() : ~uint64_t{0},
+                   MemoryWaitScoreboard::kFullDwordByteMask);
+    }
+  }
+  // Check all writes before adding any new dependencies. FLAT has the same
+  // destination on two counters; those entries are not writes racing each other.
+  const bool flat_result =
+      defs != classified.value().end() && defs->kind == WaitEventKind::FlatLoad;
+  const bool unordered_flat_result = flat_result && model.value() == WaitcntModel::LegacyNoVscnt;
+  for (size_t i = 0; i < num_destinations; ++i) {
+    const auto &d = destinations[i];
+    if (track_xcnt && !xscalar)
+      scoreboard.xcnt_ordered_write(d.reg, d.lanes, d.bytes);
+    // The incoming producer must also support ordered VMEM writeback. In
+    // particular, CDNA FLAT makes a previously ordered queue unordered, and
+    // shared FLAT lanes are written by DS rather than the VMEM pipeline.
+    const auto ordered_counter =
+        legacy && defs->counter == WaitCounterKind::Load && !unordered_flat_result
+            ? WaitCounterKind::Load
+            : WaitCounterKind::Count;
+    const uint64_t shared_lanes = flat_result ? d.lanes & flat_shared_lanes : 0;
+    scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, ordered_counter);
+    scoreboard.access(d.reg, shared_lanes, d.bytes, true);
+  }
+  for (const auto &event : classified.value()) {
+    const auto counter = event.counter;
+    if (counter == WaitCounterKind::X) {
+      if (track_xcnt && (xscalar || vector_lanes || scoreboard.outstanding(counter))) {
+        // FLAT's actual route determines which completion proves translation.
+        const auto completion = inst.data() && inst.data()->tag() == LOCAL_MEM
+                                    ? WaitCounterKind::Ds
+                                    : classified.value().front().counter;
+        const auto sequence = scoreboard.issue_xcnt(completion, xscalar);
+        const RegisterAccess registers(wf);
+        auto add_source = [&](RegisterRef reg) {
+          scoreboard.add({sequence, wf.pc, reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0},
+                          reg, counter, MemoryWaitScoreboard::kFullDwordByteMask});
+        };
+        // Zero-EXEC VMEM still occupies a queue entry but has no data sources.
+        // EXEC itself must survive until the instruction can no longer replay.
+        if (xscalar || vector_lanes) {
+          for (int i = 0; i < inst.num_src_operands(); ++i)
+            if (const auto *operand = inst.src_operand(i))
+              if (auto reg = registers.source_register(*operand))
+                add_source(*reg);
+          RegisterSet implicit;
+          inst.implicit_uses(implicit);
+          if (!implicit.none())
+            implicit.for_each(add_source);
+        }
+        if (!xscalar)
+          add_source({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)});
+      }
+      continue;
+    }
+    // Expert scheduling dependencies are independent of completion and replay.
+    if (counter == WaitCounterKind::VmVsrc || counter == WaitCounterKind::VaVdst ||
+        counter == WaitCounterKind::Depctr)
+      continue;
+    const bool scalar = event.kind == WaitEventKind::Smem ||
+                        event.kind == WaitEventKind::SqMessage ||
+                        event.kind == WaitEventKind::SccWrite;
+    // Zero-EXEC instructions still occupy positions behind pending requests.
+    if (!scalar && !vector_lanes && !scoreboard.outstanding(counter))
+      continue;
+    const bool legacy_flat =
+        model.value() == WaitcntModel::LegacyNoVscnt &&
+        (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);
+    uint32_t ordering_kind = 0;
+    if (!(model.value() == WaitcntModel::LegacyNoVscnt && counter == WaitCounterKind::Load))
+      if (auto kind =
+              WaitcheckTarget::normalized_hardware_event_kind(counter, event.kind, model.value()))
+        ordering_kind = uint32_t{1} << static_cast<unsigned>(*kind);
+    // Message returns have separate send and return completions. Larger SMEM
+    // accesses use two units, but unordered SMEM results always need zero.
+    uint32_t units = inst.mnemonic().starts_with("s_sendmsg_rtn_") ? 2 : 1;
+    if (event.kind == WaitEventKind::Smem && inst.data() && inst.data()->tag() == SCALAR_MEM)
+      units = inst.data_as<ScalarMemState>()->num_dwords > 1 ? 2 : 1;
+    const auto sequence = scoreboard.issue(
+        counter, event.kind == WaitEventKind::Smem || legacy_flat, ordering_kind, units);
+    if (event.special_reg && inst.memory_wait_result_written()) {
+      scoreboard.access(*event.special_reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask,
+                        true);
+      scoreboard.add({sequence, wf.pc, ~uint64_t{0}, *event.special_reg, counter,
+                      MemoryWaitScoreboard::kFullDwordByteMask});
+    }
+    if (event.registers == TrackedRegisterSource::Defs)
+      for (size_t i = 0; i < num_destinations; ++i) {
+        const auto &d = destinations[i];
+        uint64_t lanes = d.lanes;
+        if (event.kind == WaitEventKind::FlatLoad)
+          lanes &= counter == WaitCounterKind::Ds ? flat_shared_lanes : ~flat_shared_lanes;
+        scoreboard.add({sequence, wf.pc, lanes, d.reg, counter, d.bytes});
+      }
   }
 }
 
@@ -1006,7 +1305,7 @@ void ComputeUnitCore::update_wf_states() {
             w2->state() == WfState::BARRIER &&
             w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(w2.get());
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      notify_barrier_complete(barrier_wfs);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -1190,6 +1489,16 @@ template <bool EnableAsync>
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
+  auto *wait_state = config_.memory_wait_diagnostics == MemoryWaitDiagnostics::Off
+                         ? nullptr
+                         : active->memory_wait_scoreboard();
+  if (wait_state) {
+    if (inst->is_waitcnt() || inst->has_embedded_memory_wait() ||
+        (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+         waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst)))
+      wait_state->before(*inst, config_.arch);
+    wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
+  }
 
   if constexpr (EnableAsync) {
     bool may_submit = true;
@@ -1217,7 +1526,11 @@ template <bool EnableAsync>
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       window->before(*inst);
-      if (may_submit && window->submit_mma(decoded.value())) {
+      const bool submitted = [&] {
+        ScopedMemoryWaitCheck wait_check(wait_state);
+        return may_submit && window->submit_mma(decoded.value());
+      }();
+      if (submitted) {
         if (issuer)
           window->reserve_issuer(*issuer);
         // Async execution bypasses execute_instruction(), but the submitted
@@ -1352,6 +1665,7 @@ template <bool EnableAsync>
         mn.find("s_swappc") != std::string_view::npos) {
       const Operand *target_operand = inst->src_operand(0);
       assert(target_operand && "indirect PC instruction must have a target operand");
+      ScopedMemoryWaitCheck wait_check(wait_state);
       uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
@@ -1364,7 +1678,10 @@ template <bool EnableAsync>
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
-  const util::Result execution_result = execute_instruction(inst, *active);
+  const util::Result execution_result = [&] {
+    ScopedMemoryWaitCheck wait_check(wait_state);
+    return execute_instruction(inst, *active);
+  }();
 
   if (execution_result.failed()) [[unlikely]] {
     if constexpr (EnableAsync) {
@@ -1399,6 +1716,10 @@ template <bool EnableAsync>
   if (active->is_halted()) {
     return;
   }
+
+  if (config_.memory_wait_diagnostics != MemoryWaitDiagnostics::Off &&
+      inst->is_memory_wait_producer() && !(inst->is_memory_op() && inst->data()))
+    track_memory_wait(*inst, *active);
 
   plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 

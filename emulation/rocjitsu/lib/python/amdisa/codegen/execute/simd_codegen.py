@@ -2655,7 +2655,10 @@ def _simd_probe_line(
     if specc is not None:
         writer_arg = f'{result_writer}, ' if result_writer is not None else ''
         suffix = '_RESULT' if result_writer is not None else ''
-        return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY{suffix}({writer_arg}{specc});'
+        reads_carry = str(
+            template_name.replace('_vop2', '') in _VOP3_CARRY_CIN_NAMES
+        ).lower()
+        return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY{suffix}({writer_arg}{reads_carry}, {specc});'
     fma_f16_macro = SIMD_VOP2_FMA_F16.get(template_name)
     if fma_f16_macro is not None:
         if template_name == 'v_fmac_f16_vop2':

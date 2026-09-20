@@ -111,16 +111,19 @@ read_scalar_register(const Wavefront &wf, const ScalarRegisterRange &range, uint
   case ScalarRegisterStorage::SGPR:
     return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + index);
   case ScalarRegisterStorage::FLAT_SCRATCH:
+    wf.check_scalar_memory_wait({RegClass::FLAT_SCRATCH, static_cast<uint16_t>(index), 1});
     return index == 0 ? static_cast<uint32_t>(wf.scratch_base())
                       : static_cast<uint32_t>(wf.scratch_base() >> 32);
   case ScalarRegisterStorage::VCC:
+    wf.check_scalar_memory_wait({RegClass::VCC, static_cast<uint16_t>(index), 1});
     return index == 0 ? static_cast<uint32_t>(wf.vcc()) : static_cast<uint32_t>(wf.vcc() >> 32);
   case ScalarRegisterStorage::TTMP:
     return RegisterAccess(wf).read_ttmp(index);
   case ScalarRegisterStorage::M0:
     return wf.m0();
   case ScalarRegisterStorage::EXEC:
-    return index == 0 ? static_cast<uint32_t>(wf.exec())
+    wf.check_scalar_memory_wait({RegClass::EXEC, static_cast<uint16_t>(index), 1});
+    return index == 0 ? static_cast<uint32_t>(wf.exec_raw())
                       : static_cast<uint32_t>(wf.exec_raw() >> 32);
   case ScalarRegisterStorage::DISCARD:
     return 0;

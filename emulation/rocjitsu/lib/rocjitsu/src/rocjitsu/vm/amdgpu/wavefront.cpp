@@ -12,6 +12,15 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size,
+                     uint32_t max_wf_size, uint32_t max_sgprs, uint32_t max_vgprs,
+                     bool mode_has_gpr_idx_en)
+    : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
+      default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
+      max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
+      memory_wait_checks_enabled_(cu.config().memory_wait_diagnostics !=
+                                  MemoryWaitDiagnostics::Off) {}
+
 Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
 const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
@@ -88,6 +97,8 @@ bool Wavefront::fail_pm4_submission() {
 }
 
 void Wavefront::halt(CpCompletionNotice notice) {
+  // Observer snapshots are not instruction-side register consumers.
+  SuspendedMemoryWaitCheck disable_wait_check;
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot

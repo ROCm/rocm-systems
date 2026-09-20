@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
@@ -371,7 +372,16 @@ public:
 
   /// @brief Return the EXEC mask.
   /// @returns EXEC mask (one bit per lane, 1 = active).
-  uint64_t exec() const { return exec_ & lane_mask(); }
+  uint64_t exec() const {
+    check_mask_memory_wait(RegClass::EXEC, lane_mask(), false);
+    return exec_ & lane_mask();
+  }
+
+  /// @brief Read selected scalar words of EXEC, preserving the raw pair value.
+  uint64_t read_exec(uint16_t index = 0, uint8_t width = 2) const {
+    check_scalar_memory_wait({RegClass::EXEC, index, width});
+    return exec_;
+  }
 
   /// @brief Return the raw architectural EXEC register pair.
   ///
@@ -385,7 +395,16 @@ public:
   ///
   /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
   /// that update the execution mask must therefore preserve the non-lane bits.
-  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_exec(uint64_t val) {
+    check_mask_memory_wait(RegClass::EXEC, lane_mask(), true);
+    exec_ = (exec_ & ~lane_mask()) | (val & lane_mask());
+  }
+
+  /// @brief Write both architectural EXEC words as a scalar instruction result.
+  void write_exec(uint64_t val) {
+    check_scalar_memory_wait({RegClass::EXEC, 0, 2}, true);
+    exec_ = val;
+  }
 
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
@@ -404,16 +423,28 @@ public:
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
 
+  /// @brief Read selected scalar words of VCC, preserving the raw pair value.
+  uint64_t read_vcc(uint16_t index = 0, uint8_t width = 2) const {
+    check_scalar_memory_wait({RegClass::VCC, index, width});
+    return vcc_;
+  }
+
   /// @brief Return the active-lane portion of the VCC register pair.
   /// @returns VCC mask with non-lane bits cleared.
-  uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
+  uint64_t vcc_mask(uint64_t read_lanes = ~uint64_t{0}) const {
+    check_mask_memory_wait(RegClass::VCC, read_lanes, false);
+    return vcc_ & lane_mask();
+  }
 
   /// @brief Set the active-lane portion of the VCC register pair.
   /// @param val New VCC mask value.
   ///
   /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
   /// must therefore preserve the non-lane bits, matching set_exec().
-  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_vcc(uint64_t val) {
+    check_mask_memory_wait(RegClass::VCC, lane_mask(), true);
+    vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask());
+  }
 
   /// @brief Set the raw architectural VCC register pair.
   void set_vcc_raw(uint64_t val) { vcc_ = val; }
@@ -428,11 +459,17 @@ public:
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
-  uint32_t m0() const { return m0_; }
+  uint32_t m0() const {
+    check_scalar_memory_wait({RegClass::M0, 0, 1});
+    return m0_;
+  }
 
   /// @brief Set the M0 special register.
   /// @param val New M0 value.
-  void set_m0(uint32_t val) { m0_ = val; }
+  void set_m0(uint32_t val) {
+    check_scalar_memory_wait({RegClass::M0, 0, 1}, true);
+    m0_ = val;
+  }
 
   static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t IEEE_BIT = 1u << 9;
@@ -451,12 +488,18 @@ public:
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
   uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
-  uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
-  uint32_t gpr_idx_mode() const { return (m0_ >> 12) & 0xF; }
+  uint32_t gpr_idx_offset() const { return m0() & 0xFF; }
+  uint32_t gpr_idx_mode() const { return (m0() >> 12) & 0xF; }
 
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
   uint64_t scratch_base() const { return scratch_base_; }
+
+  /// @brief Read FLAT_SCRATCH as an instruction's address input.
+  uint64_t read_scratch_base(uint16_t index = 0, uint8_t width = 2) const {
+    check_scalar_memory_wait({RegClass::FLAT_SCRATCH, index, width});
+    return scratch_base_;
+  }
 
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
@@ -493,6 +536,23 @@ public:
     private_aperture_limit_ = pl;
   }
 
+  /// @brief Observe an instruction's access to logical scalar register words.
+  void check_scalar_memory_wait(RegisterRef reg, bool write = false) const {
+    if (memory_wait_checks_enabled_ && memory_wait_shadow_.pending(reg, write))
+      check_active_memory_wait(reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask, write);
+  }
+
+  /// Diagnostic readiness is independent of eager functional writeback.
+  bool memory_wait_checks_enabled() const { return memory_wait_checks_enabled_; }
+  const MemoryWaitShadow &memory_wait_shadow() const { return memory_wait_shadow_; }
+  MemoryWaitScoreboard *memory_wait_scoreboard() const { return memory_wait_scoreboard_.get(); }
+  MemoryWaitScoreboard &ensure_memory_wait_scoreboard() {
+    assert(memory_wait_checks_enabled_ && "memory wait checking is disabled");
+    if (!memory_wait_scoreboard_)
+      memory_wait_scoreboard_ = std::make_unique<MemoryWaitScoreboard>(memory_wait_shadow_);
+    return *memory_wait_scoreboard_;
+  }
+
   /// @brief Return the wait counters for outstanding memory operations.
   /// @returns Reference to the wait counters.
   WaitCounters &wait_counters() { return wait_counters_; }
@@ -513,6 +573,13 @@ public:
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
   const WaitTarget &wait_target() const { return wait_target_; }
+
+  /// Wait for every modeled memory pipeline, including stores and async DMA.
+  void set_wait_all() {
+    wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
 
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
     wait_target_.vmcnt = vmcnt;
@@ -632,11 +699,15 @@ public:
   /// @brief Read the Scalar Condition Code (SCC) from the status register.
   /// @retval true SCC bit is set.
   /// @retval false SCC bit is clear.
-  bool read_scc() const { return status_raw() & 1u; }
+  bool read_scc() const {
+    check_scalar_memory_wait({RegClass::SCC, 0, 1});
+    return status_raw() & 1u;
+  }
 
   /// @brief Write the Scalar Condition Code (SCC) in the status register.
   /// @param val New SCC value.
   void write_scc(bool val) {
+    check_scalar_memory_wait({RegClass::SCC, 0, 1}, true);
     uint32_t s = status_raw();
     set_status_raw(val ? (s | 1u) : (s & ~1u));
   }
@@ -964,6 +1035,8 @@ public:
     named_barrier_id_ = 0;
     barrier_complete_.fill(false);
     waiting_barrier_bit_ = kNoBarrierWait;
+    if (memory_wait_scoreboard_)
+      memory_wait_scoreboard_->clear();
     wait_counters_ = {};
     wait_target_ = {};
     ready_cycle_ = 0;
@@ -1000,10 +1073,7 @@ protected:
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
-            uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en)
-      : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
-        default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
-        max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
+            uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en);
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
@@ -1044,6 +1114,21 @@ private:
   ComputeUnitCore &raw_cu() { return cu_; }
   const ComputeUnitCore &raw_cu() const { return cu_; }
 
+  /// @brief Check only the scalar words consumed by a wave mask operation.
+  /// Raw access remains available for preserving the other half and observers.
+  void check_mask_memory_wait(RegClass reg_class, uint64_t lanes, bool write) const {
+    // Special-register halves share one shadow byte; records retain word indices.
+    if (!memory_wait_checks_enabled_ || !memory_wait_shadow_.pending({reg_class, 0, 1}, write))
+      return;
+    lanes &= lane_mask();
+    if (lanes & 0xffffffffu)
+      check_active_memory_wait({reg_class, 0, 1}, ~uint64_t{0},
+                               MemoryWaitScoreboard::kFullDwordByteMask, write);
+    if (lanes >> 32)
+      check_active_memory_wait({reg_class, 1, 1}, ~uint64_t{0},
+                               MemoryWaitScoreboard::kFullDwordByteMask, write);
+  }
+
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
   uint64_t exec_ = ~0ULL;               ///< EXEC mask -- one bit per lane (1 = active).
@@ -1053,6 +1138,9 @@ private:
   uint32_t status_raw_ = 0;             ///< STATUS register state.
   uint32_t mode_raw_ = 0;               ///< MODE register state.
   bool mode_has_gpr_idx_en_ = false;    ///< True when MODE[27] is GPR_IDX_EN.
+  // Immutable across wave reuse and helper execution. Disabled accesses skip
+  // register indexing and shadow loads before consulting diagnostic state.
+  const bool memory_wait_checks_enabled_;
   uint8_t vgpr_msb_mode_ = 0;           ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
   bool setreg_vgpr_msb_hazard_ = false; ///< Drop an immediately following S_SET_VGPR_MSB.
   uint32_t wave_sched_mode_raw_ = 0;    ///< WAVE_SCHED_MODE register state.
@@ -1075,7 +1163,9 @@ private:
   std::array<bool, 5> barrier_complete_{};
   uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
   WfState state_ = WfState::HALTED;              ///< Current execution state.
-  WaitCounters wait_counters_;                   ///< Outstanding memory operation counters.
+  MemoryWaitShadow memory_wait_shadow_;
+  std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
+  WaitCounters wait_counters_; ///< Outstanding memory operation counters.
 
   uint32_t ttmp_[16] = {};                     ///< Trap temporary registers (TTMP0-15).
   uint32_t trapsts_ = 0;                       ///< Trap status register (EXCP flags).

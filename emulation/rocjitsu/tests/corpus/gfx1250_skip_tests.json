@@ -18,6 +18,7 @@
     "cts.gfx1250.int_isa.int_isa_gfx1250_swmmac_i32_16x16x128_iu8_test"
   ],
   "kernels": [
-    "rocblas_sgemm::large_2048x2048"
+    "rocblas_sgemm::large_2048x2048",
+    "rocblas_sgemm::square_64x64"
   ]
 }

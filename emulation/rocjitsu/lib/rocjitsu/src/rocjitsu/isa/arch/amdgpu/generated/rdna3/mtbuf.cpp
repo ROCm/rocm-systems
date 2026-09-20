@@ -42,6 +42,7 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -75,6 +76,7 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -108,6 +110,7 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -141,6 +144,7 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -177,6 +181,7 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -213,6 +218,7 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -249,6 +255,7 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -285,6 +292,7 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -318,6 +326,7 @@ TbufferLoadD16FormatXMtbuf::TbufferLoadD16FormatXMtbuf(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -357,6 +366,7 @@ TbufferLoadD16FormatXyMtbuf::TbufferLoadD16FormatXyMtbuf(const MachineInst *inst
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -391,6 +401,7 @@ TbufferLoadD16FormatXyzMtbuf::TbufferLoadD16FormatXyzMtbuf(const MachineInst *in
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -431,6 +442,7 @@ TbufferLoadD16FormatXyzwMtbuf::TbufferLoadD16FormatXyzwMtbuf(const MachineInst *
   gpumem.apply_fieldless_caps(false, false, false);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -468,6 +480,7 @@ TbufferStoreD16FormatXMtbuf::TbufferStoreD16FormatXMtbuf(const MachineInst *inst
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -505,6 +518,7 @@ TbufferStoreD16FormatXyMtbuf::TbufferStoreD16FormatXyMtbuf(const MachineInst *in
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -542,6 +556,7 @@ TbufferStoreD16FormatXyzMtbuf::TbufferStoreD16FormatXyzMtbuf(const MachineInst *
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -579,6 +594,7 @@ TbufferStoreD16FormatXyzwMtbuf::TbufferStoreD16FormatXyzwMtbuf(const MachineInst
                                        amdgpu::MemoryCompletionClass::UNORDERED},
        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
                                        amdgpu::MemoryCompletionClass::UNORDERED}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

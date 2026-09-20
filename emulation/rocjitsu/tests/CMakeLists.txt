@@ -586,6 +586,7 @@ add_executable(
     sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
+    memory_wait_scoreboard_test.cpp
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
@@ -1719,6 +1720,29 @@ target_compile_definitions(
 )
 
 # --- Interposer loader initialization regression tests ---
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Keep inline register accessors in a separate DSO without linking core
+    # objects into it, so missing exports cannot be hidden by static linkage.
+    add_library(register_observer_probe MODULE register_observer_probe.cpp)
+    target_link_libraries(register_observer_probe PRIVATE util simdojo_headers)
+    rj_configure_target(register_observer_probe LIB)
+
+    add_executable(register_observer_abi_test register_observer_abi_test.cpp)
+    target_link_libraries(register_observer_abi_test PRIVATE ${CMAKE_DL_LIBS})
+    rj_configure_target(register_observer_abi_test TEST)
+    add_dependencies(
+        register_observer_abi_test
+        register_observer_probe
+        rocjitsu_shared
+    )
+    add_test(
+        NAME ExecutionPluginAbi.RegisterAccessModuleLoads
+        COMMAND
+            register_observer_abi_test $<TARGET_FILE:rocjitsu_shared>
+            $<TARGET_FILE:register_observer_probe>
+    )
+endif()
 
 add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
 rj_configure_target(early_mmap_preload TEST)
