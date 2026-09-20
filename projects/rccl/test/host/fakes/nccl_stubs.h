@@ -39,11 +39,6 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 
-// src/symmetric.cc: commFree tears down symmetric-memory resources here.
-#ifndef RCCL_STUBS_OMIT_ncclSymkFinalize
-extern std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize;
-#endif
-
 // The public entry point commFree recurses through for hierarchical sub-communicators.
 extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
 

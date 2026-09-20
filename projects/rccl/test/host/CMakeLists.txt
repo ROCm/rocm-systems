@@ -512,12 +512,12 @@ if(BUILD_TESTS)
   #
   # Its own binary, not shared with rccl-UnitTestsMicro: fakes/sym_kernels_fakes.cc (needed
   # there by dev_runtime.cc/wrap-test.cc callers) fakes the exact symbols (ncclSymkAvailable,
-  # ncclSymkInitOnce, ncclGetSymRegType, rcclSymkKernelIdIsLL) the real sym_kernels.cc also
-  # defines -- a duplicate-symbol error if compiled into the same binary.
+  # ncclSymkInitOnce, ncclSymkFinalize, ncclGetSymRegType, rcclSymkKernelIdIsLL) the real
+  # sym_kernels.cc also defines -- a duplicate-symbol error if compiled into the same binary.
   #
-  # ncclSymkInitOnce/ncclSymkFinalize/getRequirements_gin pull in a large comm-setup/tuning/GIN
-  # dependency surface this suite never calls; -ffunction-sections + --gc-sections drop that
-  # unreached code so none of it needs a fake (same technique as rccl-UnitTestsMicroEnqueue).
+  # getRequirements_gin pulls in a large tuning/GIN dependency surface this suite never calls;
+  # -ffunction-sections + --gc-sections drop that unreached code so it needs no fake
+  # (same technique as rccl-UnitTestsMicroEnqueue).
   #
   # Gated on GENERATE_SYM_KERNELS: it #includes the generated sym_kernels_host.cc, ON-only.
   # ---------------------------------------------------------------------------
@@ -552,7 +552,6 @@ if(BUILD_TESTS)
       ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
       GENERATE_SYM_KERNELS
-      RCCL_STUBS_OMIT_ncclSymkFinalize
       SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
       SYM_KERNELS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/sym_kernels.cc")
     if(ENABLE_ROCSHMEM_GIN)
@@ -1189,7 +1188,6 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     GENERATE_SYM_KERNELS
-    RCCL_STUBS_OMIT_ncclSymkFinalize
     SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
     SYM_KERNELS_CC_PATH="${RCCL_HIPIFY_DIR}/src/sym_kernels.cc"
   )
