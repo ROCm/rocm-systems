@@ -12,6 +12,21 @@
 
 #include "../src/transport/net_ib/gin.h"
 
+namespace {
+
+void FillUniformOffsets(size_t* off, int nSeg, size_t segBytes)
+{
+    for (int i = 0; i <= nSeg; ++i) off[i] = static_cast<size_t>(i) * segBytes;
+}
+
+int CountLayout(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote, int maxWr)
+{
+    const size_t size = localOff[nLocal] < remoteOff[nRemote] ? localOff[nLocal] : remoteOff[nRemote];
+    return ncclRmaCountLayoutDataWrs(localOff, nLocal, remoteOff, nRemote, 0, 0, size, maxWr);
+}
+
+} // namespace
+
 TEST(RmaSegmentMathTest, SplitsAtVerbsLengthLimitWithoutLargeAllocation)
 {
     ASSERT_GT(SIZE_MAX, static_cast<size_t>(UINT32_MAX));
@@ -40,6 +55,32 @@ TEST(RmaSegmentMathTest, FixedDataWrBudgetRejectsUnrepresentableChain)
     EXPECT_EQ(ncclRmaCountPairedDataWrs(exact, NCCL_RMA_MAX_DATA_WRS), NCCL_RMA_MAX_DATA_WRS);
     EXPECT_EQ(ncclRmaCountPairedDataWrs(oversize, NCCL_RMA_MAX_DATA_WRS),
               NCCL_RMA_MAX_DATA_WRS + 1);
+}
+
+// Aligned 4/8/16-segment 8 GiB windows on matching peers. 16x8 GiB needs 48 WRs.
+TEST(RmaSegmentMathTest, HomogeneousSameKindNodesFitDataWrBudget)
+{
+    ASSERT_GT(SIZE_MAX, static_cast<size_t>(UINT32_MAX));
+    const size_t eightGiB = size_t{8} << 30;
+    const size_t twoMiB = size_t{2} << 20;
+    const int oldBudget = 2 * NCCL_RMA_MAX_SEGMENTS;
+    size_t segOff[NCCL_RMA_MAX_SEGMENTS + 1];
+
+    for (int nSeg : {4, 8, NCCL_RMA_MAX_SEGMENTS}) {
+        FillUniformOffsets(segOff, nSeg, eightGiB);
+        const int wrs = CountLayout(segOff, nSeg, segOff, nSeg, NCCL_RMA_MAX_DATA_WRS);
+        EXPECT_EQ(wrs, nSeg * 3) << "aligned 8 GiB same-kind, nSeg=" << nSeg;
+        EXPECT_LE(wrs, NCCL_RMA_MAX_DATA_WRS);
+        if (nSeg <= 8) {
+            EXPECT_LE(wrs, oldBudget) << "4/8 GPU same-kind 8 GiB windows fit 32 WRs";
+        } else {
+            EXPECT_EQ(CountLayout(segOff, nSeg, segOff, nSeg, oldBudget), oldBudget + 1);
+            EXPECT_EQ(wrs, 48);
+        }
+
+        FillUniformOffsets(segOff, nSeg, twoMiB);
+        EXPECT_EQ(CountLayout(segOff, nSeg, segOff, nSeg, NCCL_RMA_MAX_DATA_WRS), nSeg);
+    }
 }
 
 TEST(RmaSegmentMathTest, OnlyFinalWrIsSignaled)
@@ -115,9 +156,7 @@ TEST(RmaSegmentMathTest, FailedHandleCallocDoesNotCopySegmentOffsets)
     EXPECT_TRUE(ncclRmaRegistrationHandleReady(&handle, NCCL_RMA_MAX_SEGMENTS));
 }
 
-// nranks>64 cannot put the full registration record on the stack. Compact
-// have/status allGathers still overlay that unused slab so a heap failure
-// cannot skip the collective.
+// nranks>64 overlays compact consensus on the unused registration stack.
 TEST(RmaSegmentMathTest, CompactConsensusOverlaysRegistrationStackWhenHeapFails)
 {
     char heap{};
