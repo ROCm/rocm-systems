@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Dict
 
 from perf_cost_model import max_launch_scaling_ratio, model_max_ms
 from run_and_validate import parse_marker, run_case
@@ -25,7 +26,7 @@ def main() -> int:
     ap.add_argument("--slack", type=float, default=2.0)
     args = ap.parse_args()
 
-    wall: dict[int, float] = {}
+    wall: Dict[int, float] = {}
     for n in args.launches:
         out = run_case(args.testapp, args.preload, args.ballast_mb, n)
         wall[n] = parse_marker(out)["wall_ms"]
