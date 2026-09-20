@@ -3131,9 +3131,11 @@ TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
-    // No fabric resources needed: rcclDdaEnabled exits before any eligibility
-    // predicate is reached.
-    InitDdaDecisionComm(*comm, "gfx90a", 8, /*nNodes=*/1, /*symmetricSupport=*/false);
+    // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
+    // predicate, so a topo is required. InitA2ADecisionComm attaches a zero-
+    // initialised ncclTopoSystem (pivotA2AEnabled=false) and the DDA sentinels;
+    // gfx90a exits rcclDdaEnabled early, so the sentinels are never dereferenced.
+    InitA2ADecisionComm(*comm, "gfx90a", 8);
 
     rcclCollDecision dec{};
     ASSERT_EQ(rcclSelectAlltoAll(comm.get(), nullptr, nullptr, /*count=*/1024,
