@@ -455,3 +455,10 @@ TEST(NetIbCtsLayout, AcceptsLastDeviceIndex) {
     const uint32_t rkeys[] = {1u, 2u};
     EXPECT_TRUE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/1, /*maxDevs=*/2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
 }
+
+TEST(NetIbMultiSeg, HostVmmBaseZeroDoesNotWrapRemaining)
+{
+    const size_t segSize = kSeg;
+    EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase, 0, segSize), segSize);
+    EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase + 4096, kBase, segSize), segSize - 4096);
+}
