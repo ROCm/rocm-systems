@@ -184,6 +184,7 @@ static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-
 #define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_CGA_CLUSTER_SIZE 8
+// Raised from 72 to 144 to support 72 physical GPUs in DPX mode (2 logical partitions/GPU).
 #define NCCL_MAX_LOCAL_RANKS 144
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
 #define NCCL_SIMPLE_MAX_NTHREADS NCCL_MAX_NTHREADS
