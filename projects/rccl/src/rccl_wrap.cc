@@ -95,7 +95,7 @@ RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
-RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 0);
+RCCL_PARAM(IgnoreArchTable, "IGNORE_ARCH_TABLE", 1);
 // Returns true when the user has restricted the algorithm set via NCCL_ALGO.
 // When true, CE / DDA / Symmetric dispatch is skipped so getAlgoInfo() reaches
 // Ring/Tree exactly as the user requested.  Cached to avoid repeated getenv().
@@ -770,7 +770,8 @@ namespace {
 // by hand (unit tests) so they resolve exactly like production ones.
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm) {
   if (comm == nullptr) return nullptr;
-  if (rcclParamIgnoreArchTable()) return nullptr;
+  if (rcclParamIgnoreArchTable() && !IsArchMatch(comm->archName, "gfx942")
+                                 && !IsArchMatch(comm->archName, "gfx950")) return nullptr;
   return comm->archThresholds != nullptr ? comm->archThresholds : rcclGetArchThresholds(comm->archName);
 }
 
@@ -807,7 +808,7 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
   if (param >= 0) return (size_t)param;
-  if (table == nullptr) return kThreshUnlimited;
+  if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
 
@@ -832,7 +833,8 @@ size_t rcclCeAr2ShotMax(const ncclComm* comm) {
 // ceNonRegMax[AR] = 256 MiB) would let unregistered 2-shot, and -- via force --
 // registered CE, service AllReduce on arches that were never measured for it.
 static inline bool rcclCeAllReduceArchDefault(const ncclComm* comm) {
-  return comm != nullptr && IsArchMatch(comm->archName, "gfx1250");
+  if (comm == nullptr || !IsArchMatch(comm->archName, "gfx1250")) return false;
+  return extAlgoArchTable(comm) != nullptr;
 }
 
 inline bool rcclCeAllReduceEnabledDef(bool archDefault) {

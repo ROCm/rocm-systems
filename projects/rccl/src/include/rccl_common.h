@@ -304,8 +304,8 @@ extern int64_t ncclParamP2pDisable();
 // unset needs a value of its own for the arch tables to act as defaults.
 constexpr int64_t kDdaThresholdUnset  = -1;
 // Pre-arch-table env var defaults, used as fallbacks when RCCL_IGNORE_ARCH_TABLE=1.
-constexpr size_t  kDdaLLBaseDefault   =    32768;  // 32 KiB
-constexpr size_t  kDdaLL128BaseDefault = 33554432;  // 32 MiB
+constexpr size_t  kDdaLLBaseDefault   =    65536;  // 64 KiB  (develop default)
+constexpr size_t  kDdaLL128BaseDefault =        0;  // off     (develop default: DDA_LL128=0)
 constexpr size_t  kDdaVmmBaseDefault  = 134217728;  // 128 MiB
 
 // Per-tier DDA size caps for this collective: env var (when set) else arch table.
