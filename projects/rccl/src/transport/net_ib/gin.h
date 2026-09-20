@@ -20,15 +20,13 @@
 #define NCCL_RMA_MAX_SEGMENTS 16
 #endif
 
-// A paired data transfer can split at every local and remote boundary. Each
-// slice also splits at the 32-bit SGE limit, so a window larger than
-// NCCL_RMA_MAX_DATA_WRS * UINT32_MAX bytes is rejected before posting.
-#define NCCL_RMA_MAX_DATA_WRS (2 * NCCL_RMA_MAX_SEGMENTS)
+// 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
+#define NCCL_RMA_MAX_DATA_WRS (4 * NCCL_RMA_MAX_SEGMENTS)
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
 
-static_assert(NCCL_RMA_MAX_DATA_WRS == 2 * NCCL_RMA_MAX_SEGMENTS,
-              "data WR budget must cover a split on every local and remote boundary");
+static_assert(NCCL_RMA_MAX_DATA_WRS == 4 * NCCL_RMA_MAX_SEGMENTS,
+              "data WR budget must cover boundary splits plus UINT32_MAX SGE splits");
 static_assert(NCCL_RMA_MAX_SIGNAL_WRS == NCCL_RMA_MAX_DATA_WRS + 1,
               "signal WR budget must cover the data chain plus the atomic");
 static_assert(NCCL_RMA_MAX_FLUSH_WRS == NCCL_RMA_MAX_SEGMENTS,
@@ -56,6 +54,32 @@ static inline int ncclRmaCountPairedDataWrs(size_t size, int maxWr) {
       return maxWr + 1;
     }
     rem -= ncclRmaSegmentSliceBytes(rem, rem, rem);
+    n++;
+  }
+  return n;
+}
+
+// Count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
+static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off) {
+  for (int s = 0; s < nSeg; s++) {
+    if (off < segOff[s + 1]) return s;
+  }
+  return nSeg - 1;
+}
+
+static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
+                                            uint64_t lOff, uint64_t rOff, size_t size, int maxWr) {
+  int n = 0;
+  size_t rem = size;
+  while (rem > 0) {
+    if (ncclRmaDataWrBudgetFull(n, maxWr)) return maxWr + 1;
+    int ls = ncclRmaSegIndexOf(localOff, nLocal, lOff);
+    int rs = ncclRmaSegIndexOf(remoteOff, nRemote, rOff);
+    size_t chunk = ncclRmaSegmentSliceBytes(rem, localOff[ls + 1] - lOff, remoteOff[rs + 1] - rOff);
+    if (chunk == 0) return maxWr + 1;
+    lOff += chunk;
+    rOff += chunk;
+    rem -= chunk;
     n++;
   }
   return n;
@@ -93,9 +117,7 @@ static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
   return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-// Recv buffer for a compact have/status allGather. Prefer the registrations
-// heap; otherwise overlay the unused 64-record stack slab so a heap failure
-// cannot skip the collective. Overflow-safe: nranks * elemBytes is not formed.
+// Compact have/status recv: heap registrations, else the unused 64-record stack.
 static inline void* ncclRmaCompactConsensusRecv(void* heapRegs, void* stackRegs, size_t stackBytes, int nranks,
                                                 size_t elemBytes) {
   if (heapRegs != NULL) return heapRegs;

@@ -730,8 +730,7 @@ reconcile:
   if (ncclRmaRegistrationHandleReady(rmaMrHandle, nSeg)) {
     memcpy(localRegistration.segOff, rmaMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   }
-  // Full-record heap recv is only used for nranks>64. Compact have/status
-  // allGathers overlay the unused stack slab so a heap failure still gathers.
+  // nranks>64: compact have/status recvs overlay the unused stack slab.
   {
     int allHaveRegs = (registrations != NULL);
     if (cComm->nranks > (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
