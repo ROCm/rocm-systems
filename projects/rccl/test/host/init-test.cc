@@ -6513,7 +6513,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesA
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=6")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_P2P_MAX_PEERS=6")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
@@ -6521,7 +6521,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
@@ -6529,7 +6529,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTo
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {

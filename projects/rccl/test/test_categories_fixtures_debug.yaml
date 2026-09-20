@@ -45,6 +45,7 @@ test_categories:
       - "TopoTest.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
+      - "ChannelDefaults.*"
     exclude_windows:
       - "*"
     labels:
