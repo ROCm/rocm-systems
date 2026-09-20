@@ -111,13 +111,6 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
   }
 
   ncclResult_t ret = ncclSuccess;
-  auto recordCudaError = [&ret](cudaError_t const cudaResult) {
-    if (cudaResult != cudaSuccess) {
-      ncclResult_t const cleanupResult = rcclCudaErrorHandler(cudaResult);
-      if (ret == ncclSuccess) ret = cleanupResult;
-      (void)cudaGetLastError();
-    }
-  };
 
   // Clean up rmaCeInitTaskQueue
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
@@ -127,12 +120,12 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
 
   // Destroy CE stream and event
   if (comm->rmaState.rmaCeState.ceStream != NULL) {
-    recordCudaError(cudaStreamDestroy(comm->rmaState.rmaCeState.ceStream));
+    CUDACHECKIGNORE(cudaStreamDestroy(comm->rmaState.rmaCeState.ceStream));
     comm->rmaState.rmaCeState.ceStream = NULL;
   }
 
   if (comm->rmaState.rmaCeState.ceEvent != NULL) {
-    recordCudaError(cudaEventDestroy(comm->rmaState.rmaCeState.ceEvent));
+    CUDACHECKIGNORE(cudaEventDestroy(comm->rmaState.rmaCeState.ceEvent));
     comm->rmaState.rmaCeState.ceEvent = NULL;
   }
 

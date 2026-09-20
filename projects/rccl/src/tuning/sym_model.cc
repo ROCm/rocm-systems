@@ -384,7 +384,7 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // ncclSymkMaxThreads is the kernel's LL slot/iteration width. Convert it
   // using the runtime wave size instead of inheriting CUDA's 16-warp launch.
-  tuning->nWarps = std::max(1, ncclSymkMaxThreads / inputs->comm->WarpSize);
+  tuning->nWarps = ncclSymkMaxThreads / inputs->comm->WarpSize;
 #else
   tuning->nWarps = 16;
 #endif

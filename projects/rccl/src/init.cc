@@ -25,7 +25,6 @@
 #include "diagnostics.h"
 #include "enqueue.h"
 #include "graph.h"
-#include "rccl_graph_gen.h"
 #include "graph/topo.h"
 #include "argcheck.h"
 #include "device.h"
@@ -488,6 +487,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm == NULL) return ncclSuccess;
 
   NCCLCHECK(ncclCeFinalize(comm));
+  NCCLCHECK(ncclRmaCeFinalize(comm));
 
   if (comm->nNodes == 1) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
@@ -4048,9 +4048,6 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
       free(hostRanks);
     }
   }
-
-  // Finalization is null-safe and also releases partially initialized state.
-  NCCLCHECKIGNORE(ncclRmaCeFinalize(comm), ret);
 
   proxyStopResult = ncclProxyStop(comm);
   if (proxyStopResult != ncclSuccess) {
