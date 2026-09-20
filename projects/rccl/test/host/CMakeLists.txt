@@ -960,6 +960,8 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
   target_sources(rccl-UnitTestsMicro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/sym-kernels-index-test.cc)
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
+else()
+  message(WARNING "Skipping sym-kernels-index-test.cc for rccl-UnitTestsMicro: missing ${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
 endif()
 
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored

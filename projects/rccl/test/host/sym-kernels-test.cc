@@ -143,6 +143,13 @@ TEST_F(SymKernelMaskTest, At2GB_LLKernelCleared) {
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLL_R));
 }
 
+TEST_F(SymKernelMaskTest, JustBelow2GBUnaligned_AlignUpRoundsUpToLLKernelCleared) {
+  // ncclTypeSize(f32) short of 2GB, not 1024-aligned like the case above; only clears if alignUp rounds up.
+  size_t nElts = NEltsForBytes((size_t(2) << 30) - ncclTypeSize(kTy));
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, nElts);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_AGxLL_R));
+}
+
 TEST_F(SymKernelMaskTest, JustBelow64GB_NonLLKernelSurvives) {
   comm_->minCompCap = 100;
   ScopedHook loadParam(g_loadParam, SymTmaEnable(1));
@@ -293,6 +300,42 @@ TEST_F(SymKernelMaskTest, HasLDMC_F32Type_MinMaxRed_Cleared) {
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevMinMax, ncclFloat32, /*nElts=*/1024);
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC));
 }
+
+// ncclDevSumPostDiv (avg) is a real shipping combination (generate.py emits ReduceScatter-avg kernels)
+// but was otherwise untested through hasLDMC; one case per type group, reusing the f8 compCap gate.
+struct HasLDMCPostDivCase {
+  std::string name;
+  ncclDataType_t ty;
+  int compCap;
+  bool expectLDMC;
+};
+
+std::ostream& operator<<(std::ostream& os, const HasLDMCPostDivCase& c) { return os << c.name; }
+
+class SymKernelHasLDMCPostDivTest : public SymKernelMicrotest,
+                                    public ::testing::WithParamInterface<HasLDMCPostDivCase> {};
+
+TEST_P(SymKernelHasLDMCPostDivTest, MatchesExpectedLDMCBit) {
+  const HasLDMCPostDivCase& c = GetParam();
+  comm_->symkState.hasLsaMultimem = true;
+  comm_->compCap = c.compCap;
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSumPostDiv, c.ty, /*nElts=*/1024);
+  EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC), c.expectLDMC);
+}
+
+const std::vector<HasLDMCPostDivCase>& HasLDMCPostDivCases() {
+  static const std::vector<HasLDMCPostDivCase> kCases = {
+      {"IntF16Bf16Group_Survives", ncclFloat16, /*compCap=*/0, true},
+      {"F8Group_CompCapAtBoundary_Survives", ncclFloat8e4m3, /*compCap=*/100, true},
+      {"F8Group_CompCapBelowBoundary_Cleared", ncclFloat8e4m3, /*compCap=*/99, false},
+      {"FloatDoubleGroup_Survives", ncclFloat32, /*compCap=*/0, true},
+  };
+  return kCases;
+}
+
+INSTANTIATE_TEST_SUITE_P(SymHasLDMCPostDivCases, SymKernelHasLDMCPostDivTest,
+                         ::testing::ValuesIn(HasLDMCPostDivCases()),
+                         [](const ::testing::TestParamInfo<HasLDMCPostDivCase>& info) { return info.param.name; });
 
 TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
