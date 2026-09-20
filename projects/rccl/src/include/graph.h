@@ -129,7 +129,7 @@ enum netDevsPolicy {
 };
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
-// Allows for up to 144 GPUs in scale-up domain (72 GPUs in DPX mode).
+// Allows for up to 144 GPUs in scale-up domain (72 physical GPUs in DPX mode).
 // [RCCL] Not raised to upstream's 640: ncclTopoGraph's RCCL-specific treeBase array is
 // O(NCCL_TOPO_MAX_NODES^2), so 640 would blow sizeof(ncclComm) up to ~17.6 MiB. TODO: decouple.
 #define NCCL_TOPO_MAX_NODES 144
