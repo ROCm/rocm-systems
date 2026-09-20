@@ -46,8 +46,9 @@ def run_case(testapp: Path, preload: Path, ballast_mb: int, launches: int) -> st
     proc = subprocess.run(
         [str(testapp.resolve()), str(ballast_mb), str(launches)],
         env=env,
-        capture_output=True,
-        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
         check=False,
     )
     out = proc.stdout + proc.stderr
