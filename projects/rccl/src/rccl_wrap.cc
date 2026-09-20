@@ -1684,21 +1684,21 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       }
     }
 
-  }
-
-  // (4) Symmetric kernel. Live path dispatches symk via the downstream extraction.
-  // Placed after CE so CE-registered wins for sizes above the symk/CE crossover
-  // (symSuppressedBySize), mirroring rcclSelectAllReduce and rcclSelectReduceScatter.
-  if (symEligible) {
-    decision->algo = RCCL_SYMMETRIC;
-    if (query) {
-      int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-        decision->protocol = p;
-        decision->nMaxChannels = ch;
+    // (4) Symmetric kernel. Live path dispatches symk via the downstream extraction.
+    // Placed after CE so CE-registered wins for sizes above the symk/CE crossover
+    // (symSuppressedBySize), mirroring rcclSelectAllReduce and rcclSelectReduceScatter.
+    if (symEligible) {
+      decision->algo = RCCL_SYMMETRIC;
+      if (query) {
+        int a, p, ch;
+        if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
+          decision->protocol = p;
+          decision->nMaxChannels = ch;
+        }
       }
+      return ncclSuccess;
     }
-    return ncclSuccess;
+
   }
 
   // (5) Direct AllGather (per-peer Send/Recv).
