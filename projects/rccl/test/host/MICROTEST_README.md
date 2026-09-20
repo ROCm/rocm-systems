@@ -98,12 +98,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
   pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
   `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
-  symbols the real file also defines, which would duplicate-symbol together.
-  `ncclSymkInitOnce`/`ncclSymkFinalize`/`getRequirements_gin`'s large
-  comm-setup/tuning/GIN dependency surface is never called by these tests, so
-  `-ffunction-sections`/`--gc-sections` drop it before any fake would be
-  needed; `fakes/nccl_stubs.cc`'s `ncclSymkFinalize` stub is omitted via
-  `RCCL_STUBS_OMIT_ncclSymkFinalize` since the real one is linked instead.
+  symbols the real file also defines, which would duplicate-symbol together;
+  this binary simply does not link that file, so no guard is needed.
+  `getRequirements_gin`'s large tuning/GIN dependency surface is never called
+  by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
+  fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
