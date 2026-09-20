@@ -46,6 +46,7 @@ struct ncclReg {
   uint32_t state;
   // net reg
   struct ncclRegNetHandles* netHandleHead;
+  int netNSegments; // 0 = unset; cached after a successful full-range NET register
   // nvls reg
   // Committed arena registration, owned here: NVLS_REG_COMPLETE implies non-NULL.
   struct ncclMcArenaReg* nvlsUbReg;
