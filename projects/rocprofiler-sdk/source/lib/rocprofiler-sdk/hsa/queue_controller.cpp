@@ -486,8 +486,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
                     bool now_enabled = state.enabled(agent_id);
-                    if(itr->second != now_enabled)
-                        transitioned.emplace_back(agent_id, now_enabled);
+                    if(itr->second != now_enabled) transitioned.emplace_back(agent_id, now_enabled);
                 }
             });
 
@@ -499,8 +498,13 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
         if(transitioned.empty()) return;
 
         _profiler_serializer.wlock([&](auto& m) {
-            for(const auto& [agent_id, now_enabled] : transitioned)
+            // Deliberately not a structured binding: the serializer lambda below captures
+            // now_enabled, and capturing a structured binding is a C++20 extension.
+            for(const auto& transition : transitioned)
             {
+                const auto agent_id    = transition.first;
+                const bool now_enabled = transition.second;
+
                 auto itr = m.find(agent_id);
                 if(itr == m.end() || !itr->second) continue;
 

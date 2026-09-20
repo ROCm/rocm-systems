@@ -56,7 +56,7 @@ write_hook(const hsa::Queue& queue,
     const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
 
     auto active = context::get_active_contexts(thread_trace_contexts_filter());
-    for(auto* ctx : active)
+    for(const auto* ctx : active)
     {
         auto& tracer = *ctx->dispatch_thread_trace;
         if(!tracer.collects_on(agent_id)) continue;
