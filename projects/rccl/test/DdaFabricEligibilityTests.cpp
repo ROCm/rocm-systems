@@ -1221,12 +1221,13 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
 }
 
-// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap
-// via the resolved threshold (rcclDdaLL128Threshold). With
-// comm->archThresholds == nullptr the resolver falls back to kDdaLL128BaseDefault (32 MiB).
+// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap.
+// These call the shape-eligibility function directly (which uses rcclParamDdaLL128OneShotThreshold /
+// TwoShotThreshold, not the arch table), so they are independent of archName.
+// The 32 MiB cap matches gfx1250 ddaLL128Max[AllReduce] from the arch table.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
 {
-    // kDdaLL128BaseDefault = 32 MiB; 32 MiB / 4 bytes = 8388608 float32
+    // gfx1250 ddaLL128Max[AllReduce] = 32 MiB; 32 MiB / 4 bytes = 8388608 float32
     EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
 }
@@ -1489,8 +1490,8 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 {
-    // archThresholds == nullptr -> resolved threshold falls back to kDdaLL128BaseDefault (32 MiB)
-    constexpr size_t totalCap = kDdaLL128BaseDefault;
+    // fixture sets archName="gfx1250"; resolved threshold = ddaLL128Max[AG] = 64 MiB
+    constexpr size_t totalCap = 64u * 1024u * 1024u;
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
@@ -1498,7 +1499,7 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
 {
-    constexpr size_t totalCap = kDdaLL128BaseDefault;
+    constexpr size_t totalCap = 64u * 1024u * 1024u;
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
