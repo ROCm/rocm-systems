@@ -2478,7 +2478,7 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
       CUdeviceptr segBase = 0;
       size_t segSize = 0;
       CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, fail);
-      size_t inSeg = segSize - (segPtr - (uintptr_t)segBase);
+      size_t inSeg = ncclIbBytesRemainingInSegment(segPtr, (uintptr_t)segBase, segSize);
       size_t thisLen = remaining < inSeg ? remaining : inSeg;
       int fd = -1;
       // Export this segment alone: one physical allocation, so its fd is complete.
