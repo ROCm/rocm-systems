@@ -346,9 +346,8 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, 65536, /*tag=*/300, /*seed=*/0x77);
 }
 
-// iflush after a recv into a non-zero segment must use that segment's MR, not
-// segment 0. With GDR flush off, iflush still succeeds (no request) without a
-// boundary error.
+// iflush after a recv into a non-zero segment must use that segment's MR.
+// GDR flush is required, so iflush must return a request.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
     if (SyncSkip(!directGdrFlushEnabled()))
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
@@ -376,11 +375,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
         void* freq      = nullptr;
         EXPECT_EQ(FlushRecv(pair.recvComm, 1, fbufs, fsizes, fhs, &freq), ncclSuccess)
             << "iflush must handle a multi-segment handle (segment 2) without a boundary error";
-        if (freq != nullptr) {
-            int fsz = 0;
-            EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
-                << "flush RDMA read did not complete";
-        }
+        EXPECT_NE(freq, nullptr) << "GDR flush is enabled; iflush must return a request";
+        int fsz = 0;
+        EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
+            << "flush RDMA read did not complete";
         EXPECT_TRUE(VerifyDevice(rbuf, chunk, 0xC0)) << "data mismatch after flush";
     } else {
         void* sbuf = static_cast<uint8_t*>(lastBuf_->ptr) + off;
@@ -421,11 +419,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
         void* freq      = nullptr;
         EXPECT_EQ(FlushRecv(pair.recvComm, 1, fbufs, fsizes, fhs, &freq), ncclSuccess)
             << "iflush must fence every segment of a whole-buffer receive";
-        if (freq != nullptr) {
-            int fsz = 0;
-            EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
-                << "whole-buffer flush RDMA read did not complete";
-        }
+        EXPECT_NE(freq, nullptr) << "GDR flush is enabled; iflush must return a request";
+        int fsz = 0;
+        EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
+            << "whole-buffer flush RDMA read did not complete";
         EXPECT_TRUE(VerifyDevice(rbuf, total, 0xA5))
             << "whole-buffer payload mismatch after flush";
     } else {
@@ -476,10 +473,9 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
         int flushSizes[2] = {static_cast<int>(chunk), static_cast<int>(chunk)};
         void* flushReq = nullptr;
         EXPECT_EQ(FlushRecv(pair.recvComm, 2, bufs, flushSizes, handles, &flushReq), ncclSuccess);
-        if (flushReq != nullptr) {
-            int flushSize = 0;
-            EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
-        }
+        EXPECT_NE(flushReq, nullptr) << "GDR flush is enabled; iflush must return a request";
+        int flushSize = 0;
+        EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
         EXPECT_TRUE(VerifyDevice(bufs[0], chunk, 0x62));
         EXPECT_TRUE(VerifyDevice(bufs[1], chunk, 0x63));
     } else {
