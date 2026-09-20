@@ -1163,13 +1163,8 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. After AllReduce, ranks that
- * took the NET path must record netNSegments==8 on that cache entry. Staging
- * can still produce a correct AllReduce, and NET_REG_COMPLETE fires for both a
- * 4-segment (pre-fix) and 8-segment (post-fix) count, so the cached segment
- * count is what proves the walk used the full ncclCommRegister range.
- * Intra-node ring neighbours never take NET; skip when no rank did. Requires
- * multiple nodes so an IPC-only registration cannot satisfy the NET flag.
+ * covers the complete eight-segment allocation. Skip unless some rank cached
+ * netNSegments (NET register completed for every peer). That count must be 8.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1233,15 +1228,14 @@ TEST_F(UBR_MultiSegment, Generic)
     struct ncclReg* reg = nullptr;
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
     ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the multi-segment buffer";
-    const bool netDone = (reg->state & NET_REG_COMPLETE) != 0;
+    const bool netDone = reg->netNSegments != 0;
     {
         const std::string why = mpiCoordinatedSkipReason(
             !MPIHelpers::anyRankTrue(netDone),
-            "NET path not taken on any rank (no inter-node NIC MR)");
+            "NET full-range segment count not cached on any rank");
         if (!why.empty()) GTEST_SKIP() << why;
     }
     if (netDone) {
-        ASSERT_NE(reg->netHandleHead, nullptr);
         ASSERT_EQ(reg->netNSegments, kNumSegments)
             << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
     }

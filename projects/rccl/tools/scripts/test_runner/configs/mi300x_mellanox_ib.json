@@ -210,11 +210,6 @@
       },
       "tests": [
         {
-          "name": "UBR_MultiSegment_Generic",
-          "description": "Out-of-place AllReduce on a buffer spanning multiple VMM segments (multi-segment registration branch on Ring AllReduce)",
-          "test_filter": "UBR_MultiSegment.Generic"
-        },
-        {
           "name": "UBR_MultiSegment_Generic_Reuse",
           "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse"
@@ -262,6 +257,11 @@
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts NET cache netNSegments",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
@@ -4480,6 +4480,18 @@
       "name": "UBR Concurrent Registration Hang Tests",
       "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
       "config": "ubr_concurrent_reg_hang",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "description": "Single-node UBR multi-segment registration tests",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "description": "Two-node UBR multi-segment tests including Generic netNSegments",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {
