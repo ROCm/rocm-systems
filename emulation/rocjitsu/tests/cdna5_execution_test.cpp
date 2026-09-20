@@ -4030,21 +4030,27 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   }
 }
 
-TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
+TEST(Gfx1251PackedU64ExecutionTest, ReadsVectorShiftPairsAndReplicatesScalarShifts) {
   struct SpecialSourceCase {
     std::string_view name;
     std::array<uint32_t, 2> words;
     PackedU64Pair expected;
   };
-  // LLVM's VSrc_b64 class and 64-bit special-register decoder define these
-  // selectors at this permanent revision:
-  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
-  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2215-L2259
+  // LLVM classifies this instruction as a single-SGPR-read operation: 32-bit
+  // scalar elements replicate one word, even when the operand names a pair.
+  // VCC and TTMP are scalar register classes in LLVM as well as ordinary SGPRs.
+  // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.h#L1707-L1717
+  // https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp#L3695-L3712
+  // Each scalar source supplies shift 1 to both elements: (2 << 1) + 7 = 11,
+  // (3 << 1) + 11 = 17. The vector control supplies shifts (1, 2) instead.
   constexpr std::array kCases{
-      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 23u}},
-      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 23u}},
-      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 23u}},
+      SpecialSourceCase{"sgpr", {0xcc7e4004u, 0x1c401908u}, {11u, 17u}},
+      SpecialSourceCase{"ttmp", {0xcc7e4004u, 0x1c40d908u}, {11u, 17u}},
+      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 17u}},
+      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 17u}},
+      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 17u}},
       SpecialSourceCase{"scc", {0xcc7e4004u, 0x1c41fb08u}, {11u, 17u}},
+      SpecialSourceCase{"vgpr", {0xcc7e4004u, 0x1c421908u}, {11u, 23u}},
   };
 
   auto decoder =
@@ -4057,20 +4063,28 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
-    constexpr uint64_t kShiftPair = 0x0000000200000001ULL;
-    wf->set_exec_raw(kShiftPair);
-    wf->set_vcc_raw(kShiftPair);
-    wf->set_scratch_base(kShiftPair);
-    wf->write_scc(true);
-    write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
-    write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
-    write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
+    for (const uint32_t high_word : {2u, 0xffffffffu}) {
+      SCOPED_TRACE(high_word);
+      const uint64_t scalar_pair = (static_cast<uint64_t>(high_word) << 32) | 1u;
+      write_wave_sgpr(*cu, *wf, 12, 1u);
+      write_wave_sgpr(*cu, *wf, 13, high_word);
+      wf->set_ttmp(0, 1u);
+      wf->set_ttmp(1, high_word);
+      wf->set_exec_raw(scalar_pair);
+      wf->set_vcc_raw(scalar_pair);
+      wf->set_scratch_base(scalar_pair);
+      wf->write_scc(true);
+      write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
+      write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});
+      write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
+      write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
 
-    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
-    ASSERT_NE(decoded, nullptr);
-    ASSERT_NE(decoded->execute, nullptr);
-    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
-    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
+      ASSERT_NE(decoded, nullptr);
+      ASSERT_NE(decoded->execute, nullptr);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
+      EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+    }
   }
 }
 
@@ -4195,7 +4209,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
   }
 }
 
-TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBackToScalar) {
+TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorUsesSimd) {
   ForceScalarGuard force_scalar_guard;
   util::set_force_scalar_for_testing(false);
   constexpr uint32_t kLiteral = 0x40000000u; // 2.0f
@@ -4218,8 +4232,14 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBack
   cu->write_vgpr(vgpr_base + 2, 0, std::bit_cast<uint32_t>(5.0f));
   cu->write_vgpr(vgpr_base + 3, 0, std::bit_cast<uint32_t>(6.0f));
 
-  EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 2u,
-                                                            [](auto a, auto b) { return a + b; }));
+  if constexpr (util::has_stdx_simd) {
+    EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(*typed, *wf, 0u, 2u,
+                                                             [](auto a, auto b) { return a + b; }));
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
+    cu->write_vgpr(vgpr_base + 4, 0, 0u);
+    cu->write_vgpr(vgpr_base + 5, 0, 0u);
+  }
   EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), std::bit_cast<uint32_t>(7.0f));
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), std::bit_cast<uint32_t>(8.0f));
@@ -4322,21 +4342,25 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
+TEST(Gfx1250ExecutionTest, PkF32NondefaultSelectorsUseSimd) {
   ForceScalarGuard force_scalar_guard;
+  enum class Operation { Add, Mul, Fma };
   struct TestCase {
     const char *name;
-    bool ternary;
+    Operation operation;
     uint32_t op_sel;
     uint32_t op_sel_hi;
     uint32_t op_sel_hi_2;
   };
   constexpr std::array test_cases{
-      TestCase{"binary-opsel", false, 1u, 3u, 0u},
-      TestCase{"binary-opsel-hi", false, 0u, 2u, 0u},
-      TestCase{"ternary-opsel", true, 1u, 3u, 1u},
-      TestCase{"ternary-opsel-hi", true, 0u, 2u, 1u},
-      TestCase{"ternary-opsel-hi-2", true, 0u, 3u, 0u},
+      TestCase{"add-opsel", Operation::Add, 1u, 3u, 0u},
+      TestCase{"add-opsel-hi", Operation::Add, 0u, 2u, 0u},
+      TestCase{"mul-opsel", Operation::Mul, 1u, 3u, 0u},
+      TestCase{"mul-opsel-hi", Operation::Mul, 0u, 2u, 0u},
+      TestCase{"ternary-opsel", Operation::Fma, 1u, 3u, 1u},
+      TestCase{"ternary-opsel-src2", Operation::Fma, 4u, 3u, 1u},
+      TestCase{"ternary-opsel-hi", Operation::Fma, 0u, 2u, 1u},
+      TestCase{"ternary-opsel-hi-2", Operation::Fma, 0u, 3u, 0u},
   };
   constexpr uint32_t kExec = 0x5a5a5a5au;
   constexpr uint32_t kDstLoSeed = 0xdeadbeefu;
@@ -4345,7 +4369,7 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
   for (const TestCase &test_case : test_cases) {
     SCOPED_TRACE(test_case.name);
     std::array<uint32_t, 64> scalar_result{};
-    std::array<uint32_t, 64> fallback_result{};
+    std::array<uint32_t, 64> simd_result{};
     const auto run_case = [&](bool force_scalar, std::array<uint32_t, 64> &result) {
       util::set_force_scalar_for_testing(force_scalar);
       cdna5::Vop3pBuilderFields fields;
@@ -4355,8 +4379,11 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
       fields.src1 = 258;
       fields.src2 = 260;
       fields.opsel_hi = static_cast<uint8_t>(test_case.op_sel_hi);
-      auto words = cdna5::build_vop3p(
-          test_case.ternary ? cdna5::kVPkFmaF32Vop3p : cdna5::kVPkAddF32Vop3p, fields);
+      auto words =
+          cdna5::build_vop3p(test_case.operation == Operation::Fma   ? cdna5::kVPkFmaF32Vop3p
+                             : test_case.operation == Operation::Mul ? cdna5::kVPkMulF32Vop3p
+                                                                     : cdna5::kVPkAddF32Vop3p,
+                             fields);
       if (test_case.op_sel_hi_2 != 0u)
         words[0] |= uint32_t{1} << 14;
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
@@ -4383,18 +4410,30 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
       }
 
       if (!force_scalar) {
-        if (test_case.ternary) {
+        if (test_case.operation == Operation::Fma) {
           auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
           ASSERT_NE(typed, nullptr);
-          EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
+          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_ternary_f32_simd(
               *typed, *wf, test_case.op_sel, test_case.op_sel_hi, test_case.op_sel_hi_2,
               [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }));
+        } else if (test_case.operation == Operation::Mul) {
+          auto *typed = dynamic_cast<cdna5::VPkMulF32Vop3p *>(instruction.get());
+          ASSERT_NE(typed, nullptr);
+          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
+              *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
+              [](auto a, auto b) { return a * b; }));
         } else {
           auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
           ASSERT_NE(typed, nullptr);
-          EXPECT_FALSE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
+          EXPECT_TRUE(amdgpu::try_execute_vop3p_pk_binary_f32_simd(
               *typed, *wf, test_case.op_sel, test_case.op_sel_hi,
               [](auto a, auto b) { return a + b; }));
+        }
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(cu->read_vgpr(vgpr_base + 6, lane), scalar_result[lane * 2]);
+          EXPECT_EQ(cu->read_vgpr(vgpr_base + 7, lane), scalar_result[lane * 2 + 1]);
+          cu->write_vgpr(vgpr_base + 6, lane, kDstLoSeed);
+          cu->write_vgpr(vgpr_base + 7, lane, kDstHiSeed);
         }
       }
       EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
@@ -4410,8 +4449,8 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
 
     run_case(true, scalar_result);
     if constexpr (util::has_stdx_simd) {
-      run_case(false, fallback_result);
-      EXPECT_EQ(fallback_result, scalar_result);
+      run_case(false, simd_result);
+      EXPECT_EQ(simd_result, scalar_result);
     }
   }
 }

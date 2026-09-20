@@ -566,6 +566,8 @@ add_executable(
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_f32_selection_test.cpp
+    simd_correctness/vop3p_pk_f32_scalar_sources_test.cpp
     simd_correctness/vop3p_pk_inline_constant_correctness_test.cpp
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
@@ -717,6 +719,7 @@ add_executable(
     rocjitsu_analysis_tests
     analysis/decoder_window_test.cpp
     analysis/free_registers_test.cpp
+    analysis/reachable_cfg_test.cpp
     code/amdgpu_code_object_test.cpp
     code/kernel_descriptor_scan_test.cpp
     code/kernel_scope_test.cpp
@@ -762,8 +765,29 @@ target_link_libraries(
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
 
-# Exercise the Linux-only model ISA contract in a decoder-only final link.
+# Linux-only tests for allocator interception and model ISA contracts.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Isolate allocator fault injection from the simulator test executable.
+    add_executable(
+        cache_allocation_failure_test
+        cache_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        cache_allocation_failure_test
+        PRIVATE simdojo_headers GTest::gtest_main
+    )
+    target_compile_options(
+        cache_allocation_failure_test
+        PRIVATE -fno-builtin-calloc
+    )
+    target_link_options(
+        cache_allocation_failure_test
+        PRIVATE "LINKER:--wrap=calloc"
+    )
+    rj_configure_target(cache_allocation_failure_test WARNINGS)
+    rj_add_gtest_tests(cache_allocation_failure_test)
+
+    # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
     target_include_directories(
         rocjitsu_model_only_test
