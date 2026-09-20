@@ -224,4 +224,7 @@ static inline int ncclIbSplitTransfer(int nLocal, const uint64_t* localSegVA, co
                                       len, out, maxSlices);
 }
 
-#endif // NCCL_NET_IB_MULTISEG_H_
+// Host VMM can report base 0; subtracting then wraps the remaining length.
+static inline size_t ncclIbBytesRemainingInSegment(uintptr_t segPtr, uintptr_t segBase, size_t segSize) {
+  return (segBase == 0) ? segSize : segSize - (segPtr - segBase);
+}
