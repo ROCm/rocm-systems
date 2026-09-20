@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
@@ -76,6 +77,10 @@ test_init()
     HsaApiTable table;
     table.amd_ext_ = &get_ext_table();
     table.core_    = &get_api_table();
+    // ThreadTracerAgent reads these globals when resource_init() builds its agent map, so they
+    // have to be populated the same way att_packet_test does.
+    hsa::copy_table(table.core_, 0);
+    hsa::copy_table(table.amd_ext_, 0);
     agent::construct_agent_cache(&table);
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
     hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
