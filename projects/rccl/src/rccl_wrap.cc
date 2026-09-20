@@ -1701,6 +1701,14 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
+  // (5) Direct AllGather (per-peer Send/Recv).
+  if (rcclUseAllGatherDirect(comm, msgSize)) {
+    decision->algo = RCCL_DIRECT_ALLGATHER;
+    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return ncclSuccess;
+  }
+
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllGather, sendcount, datatype, query, decision);
 }
 
