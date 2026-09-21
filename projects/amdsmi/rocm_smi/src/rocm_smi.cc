@@ -200,6 +200,7 @@ static rsmi_power_profile_preset_masks_t power_prof_name_to_mask(const std::stri
       {"VR", RSMI_PWR_PROF_PRST_VR_MASK},
       {"COMPUTE", RSMI_PWR_PROF_PRST_COMPUTE_MASK},
       {"CUSTOM", RSMI_PWR_PROF_PRST_CUSTOM_MASK},
+      {"WINDOW_3D", RSMI_PWR_PROF_PRST_WINDOW_3D_MASK},
   };
   const auto mode_iter = mode_map.find(mode);
   return mode_iter == mode_map.end() ? RSMI_PWR_PROF_PRST_INVALID : mode_iter->second;

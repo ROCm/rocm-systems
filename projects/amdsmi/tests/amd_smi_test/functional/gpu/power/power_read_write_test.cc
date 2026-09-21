@@ -56,6 +56,8 @@ static const char* power_profile_string(amdsmi_power_profile_preset_masks_t prof
       return "3D FULL SCREEN";
     case AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT:
       return "BOOTUP DEFAULT";
+    case AMDSMI_PWR_PROF_PRST_WINDOW_3D_MASK:
+      return "WINDOW 3D";
     default:
       return "UNKNOWN";
   }

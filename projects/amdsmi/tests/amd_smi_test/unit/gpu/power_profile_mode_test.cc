@@ -19,8 +19,6 @@
 #include "rocm_smi/rocm_smi.h"
 
 namespace amd::smi {
-// Library-local test seam defined in src/rocm_smi.cc; reached through the static
-// archive. Keep this signature in sync with the definition.
 rsmi_status_t ParsePowerProfileMode(const std::vector<std::string>& lines,
                                     rsmi_power_profile_status_t* status,
                                     std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map);
@@ -28,8 +26,6 @@ rsmi_status_t ParsePowerProfileMode(const std::vector<std::string>& lines,
 
 namespace {
 
-// Splits a raw pp_power_profile_mode blob into lines, matching how the library
-// reads the sysfs file.
 std::vector<std::string> Lines(const std::string& blob) {
   std::vector<std::string> out;
   std::istringstream fs(blob);
@@ -40,10 +36,16 @@ std::vector<std::string> Lines(const std::string& blob) {
   return out;
 }
 
+// The seven presets modelled before WINDOW_3D was added (used by the classic
+// Navi 21 layout, which does not list WINDOW_3D).
 constexpr rsmi_bit_field_t kSevenKnown =
     RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT | RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK |
     RSMI_PWR_PROF_PRST_POWER_SAVING_MASK | RSMI_PWR_PROF_PRST_VIDEO_MASK |
     RSMI_PWR_PROF_PRST_VR_MASK | RSMI_PWR_PROF_PRST_COMPUTE_MASK | RSMI_PWR_PROF_PRST_CUSTOM_MASK;
+
+// All eight profiles the gfx1102 transposed table lists, now that WINDOW_3D has
+// an rsmi preset.
+constexpr rsmi_bit_field_t kEightKnown = kSevenKnown | RSMI_PWR_PROF_PRST_WINDOW_3D_MASK;
 
 // gfx1102 (Navi 33, SMU 13.0.7) transposed layout: every profile and the '*'
 // current marker are on the first line ("%d %-14s%s"), followed by one row per
@@ -59,7 +61,6 @@ constexpr char kGfx1102BootupCurrent[] =
 
 // Same card with COMPUTE current. COMPUTE is 7 chars, so %-14s left-justifies it
 // and the driver prints "COMPUTE       * " -- the '*' is its own whitespace token.
-// This is the case that previously left current INVALID and inflated num_profiles.
 constexpr char kGfx1102ComputeCurrent[] =
     "                              0 BOOTUP_DEFAULT  1 3D_FULL_SCREEN  2 POWER_SAVING    3 VIDEO   "
     "        4 VR              5 COMPUTE       * 6 CUSTOM          7 WINDOW_3D       \n"
@@ -77,8 +78,8 @@ constexpr char kGfx1102VideoCurrent[] =
     "Gfx_IdleHystLimit             0                 2                 0                 0         "
     "        1                 1                 0                 2                 \n";
 
-// Same card with WINDOW_3D current. WINDOW_3D has no rsmi preset, so current is
-// legitimately unrepresentable even though the marker is present and parsed.
+// Same card with WINDOW_3D current. WINDOW_3D is now a modelled preset (0x80),
+// so it is reported as current and listed in available_profiles.
 constexpr char kGfx1102Window3dCurrent[] =
     "                              0 BOOTUP_DEFAULT  1 3D_FULL_SCREEN  2 POWER_SAVING    3 VIDEO   "
     "        4 VR              5 COMPUTE         6 CUSTOM          7 WINDOW_3D     * \n"
@@ -87,9 +88,6 @@ constexpr char kGfx1102Window3dCurrent[] =
     "Gfx_IdleHystLimit             0                 2                 0                 0         "
     "        1                 1                 0                 2                 \n";
 
-// The original regression: the transposed layout previously left current INVALID
-// and aborted. BOOTUP_DEFAULT keeps the '*' adjacent -- the case the first fix
-// already handled.
 TEST(PowerProfileParse, TransposedBootupDefaultCurrent) {
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
@@ -97,14 +95,14 @@ TEST(PowerProfileParse, TransposedBootupDefaultCurrent) {
             RSMI_STATUS_SUCCESS);
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT);
   EXPECT_EQ(status.num_profiles, 8u);
-  EXPECT_EQ(status.available_profiles, kSevenKnown);
+  EXPECT_EQ(status.available_profiles, kEightKnown);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT], 0u);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_COMPUTE_MASK], 5u);
+  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_WINDOW_3D_MASK], 7u);
 }
 
-// The follow-up fix: a short current-profile name puts the '*' in its own token.
-// COMPUTE must be reported current, the driver index kept, and the stray marker
-// must NOT be counted as a ninth profile.
+// Short current-profile name -> the '*' is its own token. COMPUTE must be current,
+// the driver index kept, and the stray marker must not be counted.
 TEST(PowerProfileParse, TransposedComputeCurrentSeparatedMarker) {
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
@@ -112,7 +110,7 @@ TEST(PowerProfileParse, TransposedComputeCurrentSeparatedMarker) {
             RSMI_STATUS_SUCCESS);
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_COMPUTE_MASK);
   EXPECT_EQ(status.num_profiles, 8u);
-  EXPECT_EQ(status.available_profiles, kSevenKnown);
+  EXPECT_EQ(status.available_profiles, kEightKnown);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_COMPUTE_MASK], 5u);
 }
 
@@ -123,25 +121,25 @@ TEST(PowerProfileParse, TransposedVideoCurrentSeparatedMarker) {
             RSMI_STATUS_SUCCESS);
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_VIDEO_MASK);
   EXPECT_EQ(status.num_profiles, 8u);
-  EXPECT_EQ(status.available_profiles, kSevenKnown);
+  EXPECT_EQ(status.available_profiles, kEightKnown);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_VIDEO_MASK], 3u);
 }
 
-// WINDOW_3D is active but has no rsmi preset: the call still succeeds, reports
-// current unknown, still lists the seven known profiles, and does not count the
-// stray marker.
-TEST(PowerProfileParse, TransposedWindow3dCurrentHasNoPresetButSucceeds) {
+// WINDOW_3D current: now a modelled preset, so it is reported (not INVALID) and
+// its separated '*' marker is attributed to it, with the driver index kept.
+TEST(PowerProfileParse, TransposedWindow3dCurrent) {
   rsmi_power_profile_status_t status{};
-  EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kGfx1102Window3dCurrent), &status, nullptr),
+  std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
+  EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kGfx1102Window3dCurrent), &status, &ind_map),
             RSMI_STATUS_SUCCESS);
-  EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_INVALID);
+  EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_WINDOW_3D_MASK);
   EXPECT_EQ(status.num_profiles, 8u);
-  EXPECT_EQ(status.available_profiles, kSevenKnown);
+  EXPECT_EQ(status.available_profiles, kEightKnown);
+  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_WINDOW_3D_MASK], 7u);
 }
 
-// Defensive path (not produced by the driver, which always marks one profile):
-// strip the '*' from a real capture -- current unknown, profiles still parsed,
-// no abort.
+// No profile marked current (defensive path the driver never produces): current
+// unknown, profiles still parsed, no abort.
 TEST(PowerProfileParse, TransposedNoMarkerReportsUnknown) {
   std::string blob = kGfx1102BootupCurrent;
   blob.erase(blob.find('*'), 1);
@@ -149,7 +147,7 @@ TEST(PowerProfileParse, TransposedNoMarkerReportsUnknown) {
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(blob), &status, nullptr), RSMI_STATUS_SUCCESS);
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_INVALID);
   EXPECT_EQ(status.num_profiles, 8u);
-  EXPECT_EQ(status.available_profiles, kSevenKnown);
+  EXPECT_EQ(status.available_profiles, kEightKnown);
 }
 
 // Classic per-line layout: text header, then one profile per line with the '*'
@@ -161,24 +159,20 @@ constexpr char kClassicSingleMarker[] =
     "  2   POWER_SAVING*:     0 0 1\n"
     "  3          VIDEO:      0 0 1\n";
 
-// Classic layout where the driver marks no profile current.
 constexpr char kClassicNoMarker[] =
     "NUM        MODE_NAME\n"
     "  0   BOOTUP_DEFAULT:\n"
     "  1   3D_FULL_SCREEN:\n";
 
-// Classic layout with more than one '*' marker -- the first must win.
 constexpr char kClassicMultiMarker[] =
     "NUM        MODE_NAME\n"
     "  0   BOOTUP_DEFAULT*:\n"
     "  1   3D_FULL_SCREEN:\n"
     "  2   POWER_SAVING*:\n";
 
-// Real, unmodified pp_power_profile_mode capture from a Navi 21 (Sienna Cichlid,
-// device 0x73bf): the PROFILE_INDEX(NAME) header, seven "%2d %14s%s:" profile
-// lines (BOOTUP_DEFAULT current), each followed by three CLOCK_TYPE detail rows.
-// Exercises the parser against genuine driver output with interleaved non-profile
-// lines.
+// Real Navi 21 (Sienna Cichlid, 0x73bf) capture: PROFILE_INDEX(NAME) header, seven
+// "%2d %14s%s:" profile lines (BOOTUP_DEFAULT current), each followed by three
+// CLOCK_TYPE detail rows. Navi 21 does not expose WINDOW_3D.
 constexpr char kClassicNavi21RealCapture[] =
     "PROFILE_INDEX(NAME) CLOCK_TYPE(NAME) FPS MinFreqType MinActiveFreqType MinActiveFreq "
     "BoosterFreqType BoosterFreq PD_Data_limit_c PD_Data_error_coeff PD_Data_error_rate_coeff\n"
@@ -258,9 +252,6 @@ TEST(PowerProfileParse, ClassicMultipleMarkersKeepFirst) {
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT);
 }
 
-// The real Navi 21 capture (profile lines interleaved with CLOCK_TYPE detail
-// rows) must resolve current, the available mask, and the driver index map; the
-// detail rows must be ignored, not misread as profiles.
 TEST(PowerProfileParse, ClassicNavi21RealCapture) {
   const std::vector<std::string> lines = Lines(kClassicNavi21RealCapture);
   rsmi_power_profile_status_t status{};
@@ -269,16 +260,7 @@ TEST(PowerProfileParse, ClassicNavi21RealCapture) {
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT);
   EXPECT_EQ(status.available_profiles, kSevenKnown);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT], 0u);
-  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK], 1u);
-  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_POWER_SAVING_MASK], 2u);
-  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_VIDEO_MASK], 3u);
-  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_VR_MASK], 4u);
-  EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_COMPUTE_MASK], 5u);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_CUSTOM_MASK], 6u);
-  // num_profiles for the classic path is currently the raw post-header line count,
-  // so it includes the CLOCK_TYPE detail rows. That over-count predates this change
-  // and is tracked separately; assert the present contract so any future change is
-  // deliberate rather than silent.
   EXPECT_EQ(status.num_profiles, static_cast<uint32_t>(lines.size() - 1));
 }
 

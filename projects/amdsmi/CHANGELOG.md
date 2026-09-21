@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added the `WINDOW_3D` power profile preset**.
+  - `rsmi_power_profile_preset_masks_t` / `amdsmi_power_profile_preset_masks_t` now define `*_PWR_PROF_PRST_WINDOW_3D_MASK` (`0x80`), so the SMU 13.0.x WINDOW_3D profile reported by gfx1101/gfx1102 is enumerable and can be reported as the current profile instead of `INVALID`.
+
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
 

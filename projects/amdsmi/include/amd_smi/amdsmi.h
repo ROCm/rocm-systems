@@ -1747,7 +1747,8 @@ typedef enum {
   // 3D Full Screen Power Profile
   AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,  //!< 3D Full Screen Profile
   AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,    //!< Default Boot Up Profile
-  AMDSMI_PWR_PROF_PRST_LAST = AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
+  AMDSMI_PWR_PROF_PRST_WINDOW_3D_MASK = 0x80,    //!< Window 3D Profile
+  AMDSMI_PWR_PROF_PRST_LAST = AMDSMI_PWR_PROF_PRST_WINDOW_3D_MASK,
 
   // Invalid power profile
   AMDSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF  //!< Invalid Power Profile
