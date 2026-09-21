@@ -6541,6 +6541,13 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_ReleaseFails_PropagatesButSt
     EXPECT_EQ(QueueHead(conn_), nullptr);        // record already removed
 }
 
+// Coverage gap (AICOMRCCL-2417): the no-match deregister path is not exercised
+// here because it currently crashes. When a request matches no queued record,
+// ncclIntruQueueDelete returns nullptr (src/include/utils.h) and
+// p2pProxyDeregister dereferences it unguarded (src/transport/p2p.cc), so a
+// fifth case that enqueues nothing segfaults rather than asserting. Add that
+// case once the production null-guard from AICOMRCCL-2417 lands.
+
 // ===========================================================================
 // Proxy-thread buffer lifecycle: the four proxy-side vtable slots that a
 // proxy connection drives to allocate and release its transport buffer, plus
