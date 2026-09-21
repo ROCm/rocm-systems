@@ -37,7 +37,7 @@ if(NUMA_FOUND)
 endif()
 
 if(NUMA_FOUND AND NOT TARGET NUMA::NUMA)
-    add_library(NUMA::NUMA UNKNOWN IMPORTED)
+    add_library(NUMA::NUMA SHARED IMPORTED)
     set_target_properties(
         NUMA::NUMA
         PROPERTIES IMPORTED_LOCATION "${NUMA_LIBRARY}")
