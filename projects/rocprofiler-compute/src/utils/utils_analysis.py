@@ -271,26 +271,10 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
     }
 
 
-_PARSED_FUNCTION_COLUMNS = (
-    "Operator_Name",
-    "File_Name",
-    "Line_Number",
-    "Backend",
-    "seqNr",
-    "T_Tid",
-    "F_Tid",
-    "scope",
-    "args",
-)
-
-
 def _apply_parsed_function_columns(trace_df: pd.DataFrame) -> pd.DataFrame:
     """Add parse_marker_function columns, keeping Function and Thread_Id."""
     if trace_df.empty:
-        parsed = trace_df.copy()
-        for column in _PARSED_FUNCTION_COLUMNS:
-            parsed[column] = pd.Series(dtype=object)
-        return parsed
+        return trace_df
     parsed_rows = trace_df["Function"].map(parse_marker_function)
     parsed_df = pd.DataFrame(list(parsed_rows), index=trace_df.index)
     return pd.concat([trace_df, parsed_df], axis=1)
