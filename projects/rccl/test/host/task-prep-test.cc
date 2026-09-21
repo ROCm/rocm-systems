@@ -8,34 +8,13 @@
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory>
 #include <typeinfo>
 #include <vector>
 
 #include "ScopedHook.h"
-#include "ce_coll.h"
-#include "channel.h"
-#include "fakes/ce_fakes.h"
-#include "fakes/comm_fakes.h"
-#include "fakes/dev_runtime_fakes.h"
-#include "fakes/enqueue_fakes.h"
-#include "fakes/env_fakes.h"
-#include "fakes/group_fakes.h"
-#include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"
-#include "fakes/nccl_stubs.h"
-#include "fakes/proxy_fakes.h"
-#include "fakes/rccl_wrap_fakes.h"
-#include "fakes/recorder_fakes.h"
-#include "fakes/register_stubs.h"
-#include "fakes/rma_fakes.h"
-#include "fakes/sym_kernels_fakes.h"
-#include "fakes/transport_stubs.h"
-#include "fakes/tuning_fakes.h"
-#include "transport.h"
+#include "TaskPrepScene.h"
 
 #include TASK_PREP_CC_PATH
 
@@ -46,119 +25,6 @@ int64_t ncclParamNvlsChannels();
 int64_t ncclParamCGAClusterSize();
 
 namespace {
-
-constexpr int kRanks = 4;
-constexpr size_t kCount = 100;
-
-// ncclComm carries channels[MAXCHANNELS] inline, so it lives on the heap; a stack instance overflows.
-class TaskPrepScene {
- public:
-  explicit TaskPrepScene(int nRanks = kRanks, int rank = 0) : comm_(new ncclComm{}) {
-    comm_->nRanks = nRanks;
-    comm_->rank = rank;
-    comm_->nNodes = 1;
-    comm_->nChannels = 1;
-    comm_->config.minCTAs = NCCL_CONFIG_UNDEF_INT;
-    comm_->config.maxCTAs = NCCL_CONFIG_UNDEF_INT;
-    comm_->config.nvlsCTAs = NCCL_CONFIG_UNDEF_INT;
-    comm_->config.cgaClusterSize = NCCL_CONFIG_UNDEF_INT;
-    // new ncclComm{} zeroes graphId, which ncclCudaGraphValid reads as capturing; start not-capturing.
-    comm_->planner.capturingGraph = ncclCudaGraphNone(kNoGraphUsageMode);
-    ncclMemoryStackConstruct(&comm_->memScoped);
-    ncclMemoryStackConstruct(&comm_->memPermanent);
-    ncclMemoryPoolConstruct(&comm_->memPool_ncclRawTask);
-    ncclIntruQueueConstruct(&comm_->rawTaskQueue.genericQueue);
-    ncclIntruQueueConstruct(&comm_->rawTaskQueue.bcastQueue);
-  }
-
-  ~TaskPrepScene() {
-    ncclMemoryStackDestruct(&comm_->memScoped);
-    ncclMemoryStackDestruct(&comm_->memPermanent);
-  }
-
-  struct ncclComm* comm() { return comm_.get(); }
-
-  // Raw tasks are pool-allocated out of the comm, matching how enqueue.cc:4304-4314 builds them.
-  struct ncclRawTask* NewRaw(ncclTaskKind kind) {
-    struct ncclRawTask* raw =
-      ncclMemoryPoolAlloc<struct ncclRawTask>(&comm_->memPool_ncclRawTask, &comm_->memPermanent);
-    raw->kind = kind;
-    return raw;
-  }
-
-  struct ncclRawTask* NewColl(ncclFunc_t func, ncclDataType_t datatype = ncclFloat32) {
-    struct ncclRawTask* raw = NewRaw(ncclTaskKindColl);
-    raw->coll = {};
-    raw->coll.func = func;
-    raw->coll.sendbuff = sendBuf_.data();
-    raw->coll.recvbuff = recvBuf_.data();
-    raw->coll.count = kCount;
-    raw->coll.datatype = datatype;
-    raw->coll.collConfig.minCTAs = NCCL_CONFIG_UNDEF_INT;
-    raw->coll.collConfig.maxCTAs = NCCL_CONFIG_UNDEF_INT;
-    return raw;
-  }
-
-  struct ncclRawTask* NewSendRecv(ncclFunc_t func, int peer) {
-    struct ncclRawTask* raw = NewRaw(ncclTaskKindSendRecv);
-    raw->sendRecv = {};
-    raw->sendRecv.func = func;
-    raw->sendRecv.collAPI = func;
-    raw->sendRecv.buff = sendBuf_.data();
-    raw->sendRecv.count = kCount;
-    raw->sendRecv.datatype = ncclFloat32;
-    raw->sendRecv.peer = peer;
-    raw->sendRecv.bytes = kCount * sizeof(float);
-    return raw;
-  }
-
-  struct ncclRawTask* NewRma(ncclFunc_t func) {
-    struct ncclRawTask* raw = NewRaw(ncclTaskKindRma);
-    raw->rma = {};
-    raw->rma.func = func;
-    raw->rma.rmaOp.putSignal.localbuff = sendBuf_.data();
-    raw->rma.rmaOp.putSignal.count = kCount;
-    raw->rma.rmaOp.putSignal.datatype = ncclFloat32;
-    return raw;
-  }
-
-  // recvbuff/counts are nRanks-long, as preTuningInitAllGatherVRaw (task_pretuning.cc:149-150) builds them.
-  struct ncclRawTask* NewAllGatherV() {
-    struct ncclRawTask* raw = NewRaw(ncclTaskKindAllGatherV);
-    raw->allGatherV = {};
-    raw->allGatherV.func = ncclFuncAllGatherV;
-    raw->allGatherV.nRanks = comm_->nRanks;
-    raw->allGatherV.recvbuff = ncclMemoryStackAlloc<void*>(&comm_->memScoped, comm_->nRanks);
-    raw->allGatherV.counts = ncclMemoryStackAlloc<size_t>(&comm_->memScoped, comm_->nRanks);
-    raw->allGatherV.maxCount = kCount;
-    raw->allGatherV.datatype = ncclInt8;
-    return raw;
-  }
-
-  void EnqueueGeneric(struct ncclRawTask* raw) {
-    ncclIntruQueueEnqueue(&comm_->rawTaskQueue.genericQueue, raw);
-  }
-
-  void EnqueueBcast(struct ncclRawTask* raw) {
-    ncclIntruQueueEnqueue(&comm_->rawTaskQueue.bcastQueue, raw);
-  }
-
- private:
-  static constexpr int kNoGraphUsageMode = 0;
-
-  std::unique_ptr<ncclComm> comm_;
-  std::vector<float> sendBuf_ = std::vector<float>(kCount * kRanks);
-  std::vector<float> recvBuf_ = std::vector<float>(kCount * kRanks);
-};
-
-// Counts the tasks a tuning-info queue holds, the observable output of the pre-tuning stage.
-size_t TuningQueueLength(struct ncclTaskTuningInfoQueue* tiq) {
-  size_t n = 0;
-  for (struct ncclTaskTuningInfo* t = ncclIntruQueueHead(&tiq->queue); t != nullptr; t = t->next) {
-    ++n;
-  }
-  return n;
-}
 
 // ncclRawTask is a union, so the entry count alone cannot tell which fill function ran; the mask can.
 std::vector<uint64_t> TuningMasks(struct ncclTaskTuningInfoQueue* tiq) {
@@ -172,42 +38,8 @@ std::vector<uint64_t> TuningMasks(struct ncclTaskTuningInfoQueue* tiq) {
 // task_pretuning.cc:37 for the coll path; :89/:106/:130 use NCCL_TUNING_MASK_ALL for the other three.
 constexpr uint64_t kCollTuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
 
-using TaskTuningInfoQueue = struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>;
-
-std::vector<struct ncclTaskTuningInfo*> QueueTasks(TaskTuningInfoQueue* queue) {
-  std::vector<struct ncclTaskTuningInfo*> tasks;
-  for (struct ncclTaskTuningInfo* t = ncclIntruQueueHead(queue); t != nullptr; t = t->next) {
-    tasks.push_back(t);
-  }
-  return tasks;
-}
-
-constexpr float kTunedTimeUs = 12.5f;
-constexpr float kUnwrittenEstimate = -777.0f;
-constexpr int kTunedValid = 1;
-
 // At rank == root: AlltoAll lowers 2 per rank, Gather 1 send plus nRanks recvs, Scatter the mirror of that.
 constexpr size_t kLoweredP2pTasks = 2 * kRanks + (1 + kRanks) + (kRanks + 1);
-
-::testing::AssertionResult CarriesNoTuningEstimate(const struct ncclTuningResult_t& out) {
-  if (out.valid != NCCL_TUNING_ENTRY_INIT_VALUE) {
-    return ::testing::AssertionFailure() << "tuningOut.valid = " << out.valid;
-  }
-  if (out.timeUs != NCCL_TUNING_IGNORE) {
-    return ::testing::AssertionFailure() << "tuningOut.timeUs = " << out.timeUs;
-  }
-  return ::testing::AssertionSuccess();
-}
-
-::testing::AssertionResult CarriesTuningEstimate(const struct ncclTuningResult_t& out) {
-  if (out.valid != kTunedValid) {
-    return ::testing::AssertionFailure() << "tuningOut.valid = " << out.valid;
-  }
-  if (out.timeUs != kTunedTimeUs) {
-    return ::testing::AssertionFailure() << "tuningOut.timeUs = " << out.timeUs;
-  }
-  return ::testing::AssertionSuccess();
-}
 
 // Records the func of every tuning call and writes a result distinct from NCCL_TUNING_RESULT_INIT.
 class TaskPrep_TuningSpy {
@@ -234,37 +66,7 @@ class TaskPrep_TuningSpy {
   ScopedHook<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> hook_;
 };
 
-ncclSimInfo_t PoisonedSimInfo() {
-  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
-  sim.estimatedTime = kUnwrittenEstimate;
-  return sim;
-}
-
-class TaskPrepMicrotest : public ::testing::Test {
- protected:
-  void SetUp() override { ResetTaskPrepFakes(); }
-  void TearDown() override { ResetTaskPrepFakes(); }
-
-  static void ResetTaskPrepFakes() {
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetNcclStubs();
-    ResetCeFakes();
-    ResetCommFakes();
-    ResetDevRuntimeFakes();
-    ResetEnqueueFakes();
-    ResetGroupFakes();
-    ResetProxyFakes();
-    ResetRcclWrapFakes();
-    ResetRecorderFakes();
-    ResetRegisterStubs();
-    ResetRmaFakes();
-    ResetSymKernelsFakes();
-    ResetTransportStubs();
-    ResetTuningFakes();
-    ResetEnvFakes();
-  }
-};
+class TaskPrepMicrotest : public TaskPrepFakesFixture {};
 
 TEST_F(TaskPrepMicrotest, SceneBuildsAWellFormedComm) {
   TaskPrepScene scene;
@@ -300,7 +102,7 @@ TEST_F(TaskPrepMicrotest, PreTuningDrainsEveryRawTaskKind) {
   ncclIntruQueueConstruct(&tiq.queue);
   ASSERT_EQ(ncclSuccess, ncclTaskPreTuning(scene.comm(), &scene.comm()->rawTaskQueue, &tiq));
 
-  EXPECT_EQ(5u, TuningQueueLength(&tiq));
+  EXPECT_EQ(5u, QueueTasks(&tiq.queue).size());
   // The bcast is last: preTuningBcastFallsBack always returns true, so it stays a coll.
   EXPECT_EQ((std::vector<uint64_t>{kCollTuningMask, NCCL_TUNING_MASK_ALL, NCCL_TUNING_MASK_ALL,
                                    NCCL_TUNING_MASK_ALL, kCollTuningMask}),
