@@ -932,24 +932,31 @@ hipError_t Graph::CreateSegmentsFromPaths(
     }
 
     // Cache declared priority from kernel nodes and child graph segments.
+    // Accumulate from Low upward so all-Low segments stay Low; unset kernel
+    // nodes return Normal (0) which pulls the accumulator up via std::min.
+    // Non-kernel nodes (memcpy, event, …) are skipped — if no kernel or
+    // child-graph node is found the segment keeps its Normal default.
+    int seg_prio = hip::Stream::Priority::Low;
+    bool has_priority_node = false;
     for (const auto& node : segment.nodes) {
       if (node == nullptr) continue;
-      int node_priority = hip::Stream::Priority::Normal;
+      int node_priority;
       if (node->GetType() == hipGraphNodeTypeKernel) {
-        const auto* kn = static_cast<const GraphKernelNode*>(node);
-        node_priority = kn->GetDeclaredPriority();
-        if (node_priority == hip::Stream::Priority::Normal) continue;
+        node_priority = static_cast<const GraphKernelNode*>(node)->GetDeclaredPriority();
       } else if (node->GetType() == hipGraphNodeTypeGraph) {
         Graph* child = node->GetChildGraph();
         if (child == nullptr) continue;
+        node_priority = hip::Stream::Priority::Low;
         for (const auto& child_seg : child->segments_)
           node_priority = std::min(node_priority, child_seg.declared_priority);
-        if (node_priority == hip::Stream::Priority::Normal) continue;
       } else {
         continue;
       }
-      segment.declared_priority = std::min(segment.declared_priority, node_priority);
+      seg_prio = std::min(seg_prio, node_priority);
+      has_priority_node = true;
     }
+    if (has_priority_node)
+      segment.declared_priority = seg_prio;
 
     segments_.push_back(segment);
 
