@@ -153,7 +153,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -283,7 +283,7 @@ TEST(Vop3UnarySimdCorrectness, MovB32_PreservesBits) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       fx.cu->write_vgpr(vb + 0, lane, s.in);
     fx.wf->set_exec(~0ULL);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     EXPECT_EQ(fx.cu->read_vgpr(vb + kDstVgpr, 0), s.expect)
         << "v_mov_b32 abs=" << s.abs << " neg=" << s.neg << " in=0x" << std::hex << s.in;
     delete inst;
