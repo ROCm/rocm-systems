@@ -662,6 +662,69 @@ int ddaInitRunReduceScatterCheck(int rank, int nranks, ncclComm* comm)
     DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
     return kDdaInitChildOk;
 }
+// AllToAll: rank r sends (r+1)*10 + (d+1) to destination d, so the chunk rank r
+// receives from source s must hold (s+1)*10 + (r+1). Encoding both endpoints is
+// what makes this catch a transposed exchange -- a payload keyed on the sender
+// alone would look identical whether the kernel read row r or column r. At 4
+// ranks the largest value is 44, exactly representable in float.
+int ddaInitRunAllToAllCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    const size_t count = kDdaInitCollectiveCount;  // elements per rank pair
+    const size_t bytes = count * sizeof(float) * static_cast<size_t>(nranks);
+
+    void* sendbuff = nullptr;
+    void* recvbuff = nullptr;
+    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, bytes));
+    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, bytes));
+
+    std::vector<float> host(count * static_cast<size_t>(nranks), 0.0f);
+    for (int d = 0; d < nranks; ++d)
+    {
+        const float v = static_cast<float>((rank + 1) * 10 + (d + 1));
+        for (size_t k = 0; k < count; ++k)
+        {
+            host[static_cast<size_t>(d) * count + k] = v;
+        }
+    }
+    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), bytes, hipMemcpyHostToDevice));
+    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, bytes));
+
+    const ncclResult_t a2a =
+        ncclAllToAllDdaIpc(sendbuff, recvbuff, count, ncclFloat32, comm, stream);
+    if (a2a != ncclSuccess)
+    {
+        printf("[rank %d] ncclAllToAllDdaIpc(count=%zu) failed: %d (%s)\n", rank, count, a2a,
+               ncclGetErrorString(a2a));
+        return kDdaInitChildFail;
+    }
+    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+    std::vector<float> out(count * static_cast<size_t>(nranks), 0.0f);
+    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, bytes, hipMemcpyDeviceToHost));
+
+    for (int src = 0; src < nranks; ++src)
+    {
+        const float expected = static_cast<float>((src + 1) * 10 + (rank + 1));
+        for (size_t k = 0; k < count; ++k)
+        {
+            const size_t i = static_cast<size_t>(src) * count + k;
+            if (out[i] != expected)
+            {
+                printf("[rank %d] alltoall chunk-from-%d element %zu: expected %.1f, got %.1f\n",
+                       rank, src, k, expected, out[i]);
+                return kDdaInitChildFail;
+            }
+        }
+    }
+
+    DDA_INIT_CHILD_HC(hipFree(sendbuff));
+    DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
 // Runs entirely inside a forked child: the first HIP/RCCL call happens here.
 int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
 {
@@ -737,6 +800,10 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
     if (rc == kDdaInitChildOk && expectResources)
     {
         rc = ddaInitRunReduceScatterCheck(rank, nranks, c);
+    }
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunAllToAllCheck(rank, nranks, c);
     }
 
     DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
