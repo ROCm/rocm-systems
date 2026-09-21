@@ -63,13 +63,6 @@ void init_sha2_logging() {
   std::call_once(once, [] { rocm::sha2::set_log_handler(&sha2_log_handler); });
 }
 
-// Used when no secret is provisioned. Byte-identical to CUID_DEFAULT_SEED in
-// the kernel's amdgpu_cuid.c, so sysfs and this library agree on an
-// unprovisioned machine. Not a substitute for provisioning; callers can check
-// is_using_default_key().
-constexpr char kDefaultSeed[] = "AMD-CUID-DEFAULT-SEED-v1";
-constexpr size_t kDefaultSeedLen = sizeof(kDefaultSeed) - 1;
-
 // The only digest CUID uses. A wider one would overrun the caller's 32-byte
 // output buffer, so set_hmac_algorithm() rejects everything else.
 bool is_sha256_name(const char* name) {
