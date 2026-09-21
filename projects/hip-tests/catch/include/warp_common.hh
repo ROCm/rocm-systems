@@ -182,6 +182,13 @@ struct DistributionType {
   using type = std::uniform_int_distribution<T>;
 };
 
+template <>
+struct DistributionType<unsigned char> {
+  // there is not std::uniform_int_distribution<unsigned char> on MSVC; we need to define an
+  // specialization
+  using type = std::uniform_int_distribution<unsigned short>;
+};
+
 // there is no std::uniform_real_distribution for 'half' type, so we cast from
 // unsigned short, avoiding Nan and Infinity
 template <>
