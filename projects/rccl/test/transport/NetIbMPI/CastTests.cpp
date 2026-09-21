@@ -1490,7 +1490,7 @@ TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
     ncclNetProperties_t props;
     memset(&props, 0, sizeof(props));
     ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
-    int skipFlag = (props.name && !HasRoutableGid(props.name)) ? 1 : 0;
+    int skipFlag = (props.name && !CanRouteCrossNode(props.name)) ? 1 : 0;
     MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     if (skipFlag) {
         GTEST_SKIP() << "dev 0 has no routable GID (link-local only) on at least one rank";
