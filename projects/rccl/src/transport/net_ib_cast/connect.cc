@@ -69,15 +69,12 @@ static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
 
 static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   // Order matters here:
-  // BY_ORDER -> ctsoffload (forced), or explicitly requested, or AINIC default
-  // BY_ID -> failover / OOO RQ
-  // BY_INDEX -> default or user requested
+  // BY_ORDER -> CTS offload (forced), else AINIC/user request after remaps
+  // BY_ID    -> failover / OOO RQ (beats explicit or default BY_ORDER)
+  // BY_INDEX -> default (non-AINIC) or user requested
+  // Explicit SCHEME=BY_ORDER is not a hard force: same as AINIC default.
 
   if (useCtsOffload) {
-    return BY_ORDER;
-  }
-
-  if (ncclParamIbCastReceiverSideMatchingScheme() == BY_ORDER) {
     return BY_ORDER;
   }
 
@@ -93,12 +90,11 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
 }
 
 extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
-static int IBCastUsedMatchingScheme = -1;
+// Resolve live: IbCastOffloadEnabled is still mutated after the first call
+// (PORT_FAILOVER clears it in IbCastInitDevices). Caching BY_ORDER from the
+// pre-failover value would disable resiliency on comms that actually run BY_ID.
 bool IbCastByOrderRequested() {
-  if (IBCastUsedMatchingScheme < 0) {
-    IBCastUsedMatchingScheme = IbCastResolveRecvMatchingScheme(IbCastOffloadEnabled);
-  }
-  return IBCastUsedMatchingScheme == BY_ORDER;
+  return IbCastResolveRecvMatchingScheme(IbCastOffloadEnabled) == BY_ORDER;
 }
 
 void IbCastReportMatchingScheme()
