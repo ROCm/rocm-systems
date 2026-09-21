@@ -99,6 +99,17 @@ static inline int ncclRmaSignalOffsetValid(size_t signalOff, size_t segmentEnd) 
          sizeof(uint64_t) <= segmentEnd - signalOff;
 }
 
+// Equal nSegments in [1, NCCL_RMA_MAX_SEGMENTS]. Terminal sizes may differ.
+static inline int ncclRmaSegmentCountsMatch(int lhsSegments, int rhsSegments) {
+  return lhsSegments == rhsSegments && lhsSegments >= 1 && lhsSegments <= NCCL_RMA_MAX_SEGMENTS;
+}
+
+// Per-rank segOff table from registration allgather; falls back to the local map.
+static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const size_t* localSegOff, int rank) {
+  if (rankSegOff == NULL || rank < 0) return localSegOff;
+  return rankSegOff + (size_t)rank * (NCCL_RMA_MAX_SEGMENTS + 1);
+}
+
 // Count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a
 // next-linked chain of nWr entries. badWr == NULL counts the whole chain.
 static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badWr, size_t nextOffset) {
