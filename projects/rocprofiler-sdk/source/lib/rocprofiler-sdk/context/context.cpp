@@ -608,8 +608,9 @@ stop_context(rocprofiler_context_id_t idx)
 
         if(!slot->compare_exchange_strong(_expected, nullptr))
         {
-            // deactivate_client_contexts() cleared the slot while phase two ran; the services are
-            // already stopped, so there is nothing left to retire.
+            // Not reachable as written: deactivate_client_contexts() is the only other writer of
+            // this slot and the stopping marker holds it off until phase four returns. Kept
+            // because the pre-phasing code bailed out the same way on a lost exchange.
             return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
         }
 
