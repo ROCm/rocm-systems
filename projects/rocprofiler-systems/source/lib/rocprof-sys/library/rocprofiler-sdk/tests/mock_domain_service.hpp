@@ -164,11 +164,47 @@ struct kfd_queue_record
 };
 struct kernel_dispatch_record_t
 {
-    std::uint32_t operation = 0;
-    std::int32_t  pid       = 0;
-    agent_id_t    agent_id{};
-    std::uint64_t start_timestamp = 0;
-    std::uint64_t end_timestamp   = 0;
+    struct queue_id_t
+    {
+        std::uint64_t handle = 0;
+    };
+    struct dim3_t
+    {
+        std::uint32_t x = 0;
+        std::uint32_t y = 0;
+        std::uint32_t z = 0;
+    };
+    struct dispatch_info_t
+    {
+        agent_id_t    agent_id{};
+        std::uint64_t kernel_id   = 0;
+        std::uint64_t dispatch_id = 0;
+        queue_id_t    queue_id{};
+        std::uint32_t private_segment_size = 0;
+        std::uint32_t group_segment_size   = 0;
+        dim3_t        workgroup_size{};
+        dim3_t        grid_size{};
+    };
+    struct correlation_id_t
+    {
+        struct external_t
+        {
+            void*         ptr   = nullptr;
+            std::uint64_t value = 0;
+        };
+
+        std::uint64_t internal = 0;
+        external_t    external{};
+    };
+
+    std::uint32_t    operation = 0;
+    std::int32_t     pid       = 0;
+    agent_id_t       agent_id{};
+    std::uint64_t    start_timestamp = 0;
+    std::uint64_t    end_timestamp   = 0;
+    std::uint64_t    thread_id       = 0;
+    dispatch_info_t  dispatch_info{};
+    correlation_id_t correlation_id{};
 };
 struct memory_copy_record_t
 {
@@ -406,6 +442,22 @@ struct mock_sdk
         callback_tracing_operation_args_cb_t /*callback*/, std::int32_t /*max_deref*/,
         void* /*data*/)
     {}
+    // ── kernel_dispatch buffered-domain support ──────────────────────────────
+    struct stream_id_t
+    {
+        std::uint64_t handle = 0;
+    };
+
+    static stream_id_t get_stream_id(kernel_dispatch_record_t* /*record*/)
+    {
+        return stream_id_t{};
+    }
+
+    static std::uint64_t get_parent_stack_id(
+        const kernel_dispatch_record_t::correlation_id_t& /*correlation_id*/)
+    {
+        return 0;
+    }
 };
 
 // Stand-in for the agent/trace_cache::info shapes every on_kfd_*<...> touches through
@@ -490,6 +542,80 @@ struct gmock_externals
 
 inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
 
+// Hoisted to namespace scope (rather than nested in `externals`) so
+// gmock_metadata_registry and gmock_buffer_storage below can reference them in
+// MOCK_METHOD signatures; `externals` re-exposes each as a member alias, matching the
+// agent_t/pmc_info_data_t pattern above.
+struct thread_info_data_t
+{
+    std::int32_t  parent_process_id = 0;
+    std::int32_t  process_id        = 0;
+    std::uint64_t thread_id         = 0;
+    std::uint32_t start             = 0;
+    std::uint32_t end               = 0;
+    std::string   extdata;
+
+    bool operator==(const thread_info_data_t&) const = default;
+};
+
+struct track_data_t
+{
+    std::string   track_name;
+    std::uint64_t thread_id = 0;
+    std::string   extdata;
+
+    bool operator==(const track_data_t&) const = default;
+};
+
+// Mirrors the field layout of trace_cache::kernel_dispatch_sample's constructor
+// (9 std::uint64_t, 8 std::uint32_t, 1 std::uint64_t) as a plain aggregate -- tests
+// verify calls via gmock_buffer_storage, not by reading fields back.
+struct kernel_dispatch_sample_data_t
+{
+    std::uint64_t start_timestamp         = 0;
+    std::uint64_t end_timestamp           = 0;
+    std::uint64_t thread_id               = 0;
+    std::uint64_t agent_id_handle         = 0;
+    std::uint64_t kernel_id               = 0;
+    std::uint64_t dispatch_id             = 0;
+    std::uint64_t queue_id_handle         = 0;
+    std::uint64_t correlation_id_internal = 0;
+    std::uint64_t correlation_id_ancestor = 0;
+    std::uint32_t private_segment_size    = 0;
+    std::uint32_t group_segment_size      = 0;
+    std::uint32_t workgroup_size_x        = 0;
+    std::uint32_t workgroup_size_y        = 0;
+    std::uint32_t workgroup_size_z        = 0;
+    std::uint32_t grid_size_x             = 0;
+    std::uint32_t grid_size_y             = 0;
+    std::uint32_t grid_size_z             = 0;
+    std::uint64_t stream_handle           = 0;
+
+    bool operator==(const kernel_dispatch_sample_data_t&) const = default;
+};
+
+// Every production on_kernel_dispatch() body calls these members unconditionally on
+// every record; mocked so tests can verify they ran correctly instead of just not
+// crashing (mirrors gmock_externals above).
+struct gmock_metadata_registry
+{
+    MOCK_METHOD(void, add_string, (std::string_view value));
+    MOCK_METHOD(void, add_thread_info, (const thread_info_data_t& info));
+    MOCK_METHOD(void, add_track, (const track_data_t& info));
+    MOCK_METHOD(void, add_queue, (std::uint64_t queue_handle));
+    MOCK_METHOD(void, add_stream, (std::uint64_t stream_handle));
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_metadata_registry>>
+    g_metadata_registry_mock;
+
+struct gmock_buffer_storage
+{
+    MOCK_METHOD(void, store, (const kernel_dispatch_sample_data_t& sample));
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_buffer_storage>> g_buffer_storage_mock;
+
 // Externals mirrors the real ExternalDeps policy surface used by every on_kfd_* and
 // on_kfd_*_configure, plus domain_service<>/registry<>. The on_records-only members
 // (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
@@ -503,22 +629,8 @@ struct externals
     using pmc_info_t   = pmc_info_data_t;
     using agent_type_t = int;
 
-    struct thread_info_t
-    {
-        std::int32_t  parent_process_id = 0;
-        std::int32_t  process_id        = 0;
-        std::uint64_t thread_id         = 0;
-        std::uint32_t start             = 0;
-        std::uint32_t end               = 0;
-        std::string   extdata;
-    };
-
-    struct track_t
-    {
-        std::string   track_name;
-        std::uint64_t thread_id = 0;
-        std::string   extdata;
-    };
+    using thread_info_t = test_support::thread_info_data_t;
+    using track_t       = test_support::track_data_t;
 
     struct kfd_sample_t
     {
@@ -754,6 +866,69 @@ struct externals
     static constexpr std::string_view k_kfd_queue_category_name = "rocm_kfd_queue";
     static constexpr std::string_view k_kfd_queue_category_description =
         "KFD Queue Events";
+
+    // ── kernel_dispatch buffered-domain support ──────────────────────────────
+    using kernel_dispatch_sample_t = test_support::kernel_dispatch_sample_data_t;
+
+    static constexpr std::string_view kernel_dispatch_category_name =
+        "rocm_kernel_dispatch";
+
+    // Forward to gmock_metadata_registry/gmock_buffer_storage (defined at namespace
+    // scope above, alongside gmock_externals) so tests can EXPECT_CALL every member
+    // on_kernel_dispatch() touches, instead of only asserting it doesn't crash.
+    struct metadata_registry_t
+    {
+        void add_string(std::string_view value)
+        {
+            g_metadata_registry_mock->add_string(value);
+        }
+        void add_thread_info(const thread_info_t& info)
+        {
+            g_metadata_registry_mock->add_thread_info(info);
+        }
+        void add_track(const track_t& info) { g_metadata_registry_mock->add_track(info); }
+        void add_queue(std::uint64_t queue_handle)
+        {
+            g_metadata_registry_mock->add_queue(queue_handle);
+        }
+        void add_stream(std::uint64_t stream_handle)
+        {
+            g_metadata_registry_mock->add_stream(stream_handle);
+        }
+    };
+
+    struct buffer_storage_t
+    {
+        void store(kernel_dispatch_sample_t&& sample)
+        {
+            g_buffer_storage_mock->store(sample);
+        }
+    };
+
+    static metadata_registry_t& get_metadata_registry()
+    {
+        static metadata_registry_t s_registry;
+        return s_registry;
+    }
+
+    static buffer_storage_t& get_buffer_storage()
+    {
+        static buffer_storage_t s_storage;
+        return s_storage;
+    }
+
+    static std::string_view get_kernel_symbol_name(std::uint64_t /*kernel_id*/)
+    {
+        return {};
+    }
+
+    static std::uint64_t get_thread_info_sequent_tid(std::uint64_t /*tid*/) { return 0; }
+
+    static bool get_use_timemory() { return false; }
+
+    static void write_timemory_bundle(std::string_view /*name*/, std::uint64_t /*tid*/,
+                                      std::uint64_t /*elapsed_ns*/)
+    {}
 };
 
 // Every SdkBackend member on_tracing_api_enter/exit

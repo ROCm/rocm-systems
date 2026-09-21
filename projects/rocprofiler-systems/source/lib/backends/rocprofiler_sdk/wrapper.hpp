@@ -116,7 +116,8 @@ struct wrapper
 #endif
 
     // ─── Correlation types ────────────────────────────────────────────────────────
-    using correlation_id_t = rocprofiler_correlation_id_t;
+    using correlation_id_t       = rocprofiler_correlation_id_t;
+    using async_correlation_id_t = rocprofiler_async_correlation_id_t;
 
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;

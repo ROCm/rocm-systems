@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include "core/demangler.hpp"
+
 #include "library/rocprofiler-sdk/types.hpp"
+
 #include "logger/debug.hpp"
+
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
@@ -22,13 +26,66 @@ namespace rocprofsys::domains::buffered
 template <policies::domain_service::externals Externals>
 inline void
 on_kernel_dispatch_configure()
-{}
+{
+    Externals::get_metadata_registry().add_string(
+        Externals::kernel_dispatch_category_name);
+}
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
 on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record, void* data)
-{}
+{
+    (void) data;
+
+    auto name = rocprofsys::utility::demangle(
+        Externals::get_kernel_symbol_name(record->dispatch_info.kernel_id));
+    auto        beg_timestamp_ns = record->start_timestamp;
+    auto        end_timestamp_ns = record->end_timestamp;
+    auto        queue_id         = record->dispatch_info.queue_id;
+    const auto& agent            = Externals::get_agent_manager().get_agent_by_handle(
+        record->dispatch_info.agent_id.handle);
+
+    std::uint64_t stream_id = SdkBackend::get_stream_id(record).handle;
+
+    {
+        Externals::get_metadata_registry().add_thread_info(
+            { Externals::get_ppid(), Externals::get_pid(), record->thread_id, 0, 0,
+              "{}" });
+
+        Externals::get_metadata_registry().add_track(
+            { fmt::format("GPU Kernel Dispatch [{}] Queue {}", agent.device_id,
+                          queue_id.handle),
+              record->thread_id, "{}" });
+
+        Externals::get_metadata_registry().add_queue(queue_id.handle);
+        Externals::get_metadata_registry().add_stream(stream_id);
+
+        Externals::get_buffer_storage().store(
+            typename Externals::kernel_dispatch_sample_t{
+                record->start_timestamp, record->end_timestamp, record->thread_id,
+                record->dispatch_info.agent_id.handle, record->dispatch_info.kernel_id,
+                record->dispatch_info.dispatch_id, record->dispatch_info.queue_id.handle,
+                record->correlation_id.internal,
+                SdkBackend::get_parent_stack_id(record->correlation_id),
+                record->dispatch_info.private_segment_size,
+                record->dispatch_info.group_segment_size,
+                record->dispatch_info.workgroup_size.x,
+                record->dispatch_info.workgroup_size.y,
+                record->dispatch_info.workgroup_size.z, record->dispatch_info.grid_size.x,
+                record->dispatch_info.grid_size.y, record->dispatch_info.grid_size.z,
+                stream_id });
+    }
+
+    if(Externals::get_use_timemory())
+    {
+        const auto sequent_tid =
+            Externals::get_thread_info_sequent_tid(record->thread_id);
+
+        Externals::write_timemory_bundle(name, sequent_tid,
+                                         end_timestamp_ns - beg_timestamp_ns);
+    }
+}
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>

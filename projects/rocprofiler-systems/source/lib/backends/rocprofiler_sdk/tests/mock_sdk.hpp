@@ -178,6 +178,24 @@ struct kfd_event_page_migrate_record
 struct kfd_event_page_fault_record
 {};
 
+// ─── kernel_dispatch stand-ins ──────────────────────────────────────────────
+//
+// backend<Sdk> unconditionally re-exports these three as type aliases, so
+// every Sdk stand-in must supply them even when a given test never exercises
+// kernel-dispatch behavior. Field-level detail is added only as tests need it.
+struct async_correlation_id_t
+{
+    std::uint64_t internal{};
+};
+struct kernel_dispatch_record
+{
+    async_correlation_id_t correlation_id{};
+};
+struct stream_id
+{
+    std::uint64_t handle{};
+};
+
 // ─── Tracing-name table stub ────────────────────────────────────────────────
 //
 // Minimal stand-in for rocprofiler::sdk::utility::name_info. callback/buffer
@@ -413,6 +431,9 @@ struct mock_sdk
     using kfd_event_dropped_record             = testing::kfd_event_dropped_record;
     using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
     using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
+    using kernel_dispatch_record               = testing::kernel_dispatch_record;
+    using async_correlation_id_t               = testing::async_correlation_id_t;
+    using stream_id                            = testing::stream_id;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
     static constexpr std::uint32_t compile_time_version = 10100u;
