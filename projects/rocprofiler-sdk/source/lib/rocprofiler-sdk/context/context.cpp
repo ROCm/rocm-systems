@@ -221,15 +221,16 @@ get_contexts_cv()
     return _v;
 }
 
-// _lk must own get_contexts_mutex(). Waits until no context is mid-stop, which restores the
-// property the old single-lock stop_context() had: no other lifecycle operation ever observes a
-// context whose services have been torn down but whose active slot is still populated.
+}  // namespace
+
+// Waits until no context is mid-stop, which restores the property the old single-lock
+// stop_context() had: no other lifecycle operation ever observes a context whose services have
+// been torn down but whose active slot is still populated.
 void
-wait_for_pending_stops(std::unique_lock<std::mutex>& _lk)
+wait_for_stopping_contexts(std::unique_lock<std::mutex>& _lk)
 {
     get_contexts_cv().wait(_lk, []() { return get_stopping_contexts().empty(); });
 }
-}  // namespace
 
 std::mutex&
 get_contexts_mutex()
@@ -442,7 +443,7 @@ start_context(rocprofiler_context_id_t context_id)
         // A context that is mid-stop is still in the active array while its GPU drain runs, so
         // scanning against that state would either report a conflict against a context that is on
         // its way out, or hand back a slot that the stop is about to clear.
-        wait_for_pending_stops(_lk);
+        wait_for_stopping_contexts(_lk);
 
         auto current_contexts = context_array_t{};
         for(const auto* itr : get_active_contexts(current_contexts))
@@ -532,7 +533,7 @@ stop_context(rocprofiler_context_id_t idx)
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
 
         // another thread may already be tearing this context down
-        wait_for_pending_stops(_lk);
+        wait_for_stopping_contexts(_lk);
 
         for(auto& itr : get_active_contexts_impl())
         {
@@ -667,7 +668,7 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
 
     // a context mid-stop is still in the active array; let its teardown finish rather than
     // clearing the slot underneath it
-    wait_for_pending_stops(_lk);
+    wait_for_stopping_contexts(_lk);
 
     for(auto& itr : get_active_contexts_impl())
     {
@@ -698,7 +699,7 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
 
         // a context mid-stop is still being torn down through a raw pointer; retiring its registry
         // entry now would pull the object out from under that teardown
-        wait_for_pending_stops(_lk);
+        wait_for_stopping_contexts(_lk);
 
         for(auto& itr : *get_registered_contexts_impl())
         {

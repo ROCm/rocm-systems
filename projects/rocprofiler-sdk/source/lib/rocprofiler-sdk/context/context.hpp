@@ -306,6 +306,15 @@ deregister_client_contexts(rocprofiler_client_id_t id);
 std::mutex&
 get_contexts_mutex();
 
+// Blocks until no context stop is in progress. stop_context() releases get_contexts_mutex()
+// across the GPU drain, so holding the mutex alone is not enough to exclude a stop: for that
+// window the context is still in the active array with nothing held. Anything that reads
+// activation state to decide whether a context is running has to wait here first.
+//
+// _lk must own get_contexts_mutex(); it is released while waiting and re-acquired on return.
+void
+wait_for_stopping_contexts(std::unique_lock<std::mutex>& _lk);
+
 inline bool
 default_context_filter(const context* val)
 {
