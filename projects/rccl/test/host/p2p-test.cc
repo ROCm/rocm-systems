@@ -4070,6 +4070,7 @@ struct ShutdownFlagGuard {
     ~ShutdownFlagGuard() { rcclShutdownFlag().store(false, std::memory_order_release); }
 };
 
+#if ROCM_VERSION >= 70000
 TEST_F(P2pFreeMicrotest, SendFree_CuMemResources_ReleasesEachRetainedHandle)
 {
     // cuMem enabled selects the cuMem free arm rather than the legacy
@@ -4112,12 +4113,15 @@ TEST_F(P2pFreeMicrotest, SendFree_CuMemResources_ReleasesEachRetainedHandle)
         {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x2000)}}));
 }
 
+#endif  // ROCM_VERSION >= 70000
+
 TEST_F(P2pFreeMicrotest, RecvFree_NoResources_IsNoopSuccess)
 {
     ncclConnector recv{};
     EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
 }
 
+#if ROCM_VERSION >= 70000
 TEST_F(P2pFreeMicrotest, RecvFree_CuMemResources_ReleasesEachRetainedHandle)
 {
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
@@ -4149,6 +4153,7 @@ TEST_F(P2pFreeMicrotest, RecvFree_CuMemResources_ReleasesEachRetainedHandle)
         {FreeKind::CudaFree,      reinterpret_cast<void*>(0x3000)},
         {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x4000)}}));
 }
+#endif  // ROCM_VERSION >= 70000
 
 TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcResources_ClosesEachRetainedHandle)
 {
@@ -5192,6 +5197,7 @@ struct GraphRegisterState {
 };
 }  // namespace
 
+#if ROCM_VERSION >= 70000
 // Scenario 4: a successful non-legacy registration enqueues the cleanup
 // callback onto the caller's plan queue and bumps the element count.
 TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_NonLegacySuccess_EnqueuesPlanCleanupAndCountsIt)
@@ -5246,6 +5252,7 @@ TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_NonLegacySuccessNullCount_Enque
     std::free(ncclIntruQueueDequeue(&cleanupQueue));
 }
 
+#endif  // ROCM_VERSION >= 70000
 // Scenario 4c: the same argument guard as the local wrapper -- null comm,
 // null userbuff, zero size, or zero peers make graph-register a no-op that
 // never reaches the address-range / graph-register seams.
@@ -5281,6 +5288,7 @@ TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_InvalidArgs_IsNoopWithZeroedOut
     EXPECT_EQ(nCleanupQueueElts, 0);
 }
 
+#if ROCM_VERSION >= 70000
 // Scenario 5: a successful legacy-IPC registration routes the cleanup callback
 // onto comm->legacyRegCleanupQueue and leaves the plan-queue count untouched.
 TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_LegacySuccess_EnqueuesLegacyCleanupWithoutCounting)
@@ -5478,6 +5486,7 @@ TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_GraphRegisterFails_PropagatesAn
     EXPECT_EQ(nCleanupQueueElts, 0);
 }
 
+#endif  // ROCM_VERSION >= 70000
 // Scenario 8: deregister ships a blocking ncclProxyMsgDeregister carrying the
 // registration's impInfo payload to the record's proxy connector.
 TEST_F(P2pRegisterFamilyMicrotest, Deregister_ShipsDeregisterMessageWithImpInfoPayload)
@@ -6631,6 +6640,7 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_ValidRequest_AllocatesBufferAn
     EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
 }
 
+#if ROCM_VERSION >= 70000
 // Send proxySetup, cuMem arm: with cuMemEnable the allocated buffer is copied
 // into a heap p2pCuMemProxyInfo which becomes the stashed transportResources
 // (rather than the raw device pointer), and *done is latched.
@@ -6724,6 +6734,7 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_WrongRequestSize_ReturnsIntern
     EXPECT_EQ(done, 0);
 }
 
+#endif  // ROCM_VERSION >= 70000
 // Recv proxySetup, non-memcpy arm: mirrors the send path -- allocate, publish
 // into the response, stash on transportResources, latch *done.
 TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_ValidRequest_AllocatesBufferAndPublishesResponse)
