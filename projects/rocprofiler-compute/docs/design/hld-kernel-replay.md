@@ -243,7 +243,7 @@ in use.
 | --- | --- |
 | Replayed dispatch | Holds the per-agent writer lock across draining, capture, execution, restoration, and completion submission. |
 | Ordinary dispatch while replay is active | Holds the same agent's reader lock across submission. Ordinary submissions can coexist, but cannot enter an active replay window. |
-| Already-submitted work | A submitting-queue barrier and agent-wide handler drain complete prior kernels before capture. Submission locks alone do not wait for GPU completion. |
+| Already-submitted work | A submitting-queue barrier and agent-wide handler drain complete prior kernels before capture. |
 | Different agents | Use separate locks and agent-scoped snapshots; replay can proceed concurrently for independent device state. |
 | Queue or handler drain stalls | Bounded waits warn and then abort, rather than snapshotting or restoring while work is still active. |
 
