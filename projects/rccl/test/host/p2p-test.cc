@@ -5622,6 +5622,25 @@ protected:
     hipMemAllocationHandleType saved_handle_type_{};
     ncclComm            comm_{};
     ncclProxyConnector  proxyConn_{};
+
+    // Every walk test issues the same call, differing only in the user-buffer
+    // size; hoist the declare-and-call preamble behind this accessor and
+    // destructure the outputs with a structured binding at the call site.
+    struct WalkOutputs {
+        ncclResult_t   r;
+        size_t         totalMappedBufferSize;
+        int            numSegments;
+        p2pIpcExpInfo* ipcInfos;
+    };
+    WalkOutputs CallWalk(size_t userBuffSize)
+    {
+        const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+        WalkOutputs o{ncclSuccess, 0, 0, nullptr};
+        o.r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                                &proxyConn_, &o.totalMappedBufferSize,
+                                                &o.numSegments, &o.ipcInfos);
+        return o;
+    }
 };
 
 // A buffer spanning more segments than the initial two-slot capacity walks
@@ -5633,15 +5652,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_BufferSpansManySegments_GrowsArrayAndBalan
     constexpr int         kNumSegments = 5;   // > initial capacity 2 -> realloc
     SegmentRangeEmulator seg(kSegSize);
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(numSegments, kNumSegments);
@@ -5671,15 +5683,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_ExceedsMaxSegments_FailsAndReleasesRetaine
     const int kNumSegments = kMaxSegments + 1;
     SegmentRangeEmulator seg(kSegSize);
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclInternalError);
     // The array is freed on the cleanup path.
@@ -5732,15 +5737,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
             return ncclSuccess;
         });
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(numSegments, kNumSegments);
@@ -5795,15 +5793,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_FabricCrossProcess_ExportsHandlesIntoIpcDe
             return ncclSystemError;
         });
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(numSegments, kNumSegments);
@@ -5850,15 +5841,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
             return ncclSystemError;   // force the cleanup path
         });
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSystemError);
     EXPECT_EQ(ipcInfos, nullptr);          // freed on the cleanup path
@@ -5888,15 +5872,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_IpcInfosAllocFails_PropagatesWithoutRetain
     // capacity starts at 2; the ipcInfos array is the first ncclCalloc.
     SetP2pCallocFailSize(2 * sizeof(p2pIpcExpInfo));
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSystemError);
     EXPECT_EQ(seg.retainCalls, 0);   // no segment was ever walked
@@ -5917,15 +5894,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_ExpFdsAllocFails_PropagatesWithoutRetainin
     // capacity(2) * sizeof(int) is the expFds array (POSIX-fd path only).
     SetP2pCallocFailSize(2 * sizeof(int));
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSystemError);
     EXPECT_EQ(seg.retainCalls, 0);
@@ -5943,15 +5913,8 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_SegmentHandlesAllocFails_PropagatesWithout
     // the second ncclCalloc: capacity(2) * sizeof(handle).
     SetP2pCallocFailSize(2 * sizeof(hipMemGenericAllocationHandle_t));
 
-    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
-    const size_t userBuffSize  = kSegSize * kNumSegments;
-    size_t totalMappedBufferSize = 0;
-    int    numSegments           = 0;
-    p2pIpcExpInfo* ipcInfos      = nullptr;
-
-    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
-                                               &proxyConn_, &totalMappedBufferSize,
-                                               &numSegments, &ipcInfos);
+    const size_t userBuffSize = kSegSize * kNumSegments;
+    auto [r, totalMappedBufferSize, numSegments, ipcInfos] = CallWalk(userBuffSize);
 
     EXPECT_EQ(r, ncclSystemError);
     EXPECT_EQ(seg.retainCalls, 0);
