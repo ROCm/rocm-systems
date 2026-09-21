@@ -23,7 +23,6 @@ from utils.mem_chart_common import (
     build_legend,
     colored,
     format_edge,
-    format_scientific,
     format_value,
     make_arrows,
     mem_chart_cli_main,
@@ -31,6 +30,7 @@ from utils.mem_chart_common import (
     pad_to,
     progress_bar,
     render_chart_to_string,
+    safe_float,
     stack_metrics,
 )
 
@@ -39,22 +39,14 @@ from utils.mem_chart_common import (
 # ---------------------------------------------------------------------------
 
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
+    # Compute Units panel
     ("Wavefront Occupancy", 8),
-    ("Wave Life", 4200),
-    ("SALU", 1200),
-    ("SMEM", 45),
-    ("VALU", 3500),
-    ("Matrix Ops", 800),
-    ("VMEM", 220),
-    ("LDS", 150),
-    ("GWS", 0),
-    ("BR", 90),
     ("VGPR", 64),
     ("SGPR", 32),
     ("LDS Allocation", 32768),
     ("Scratch Allocation", 0),
-    ("Wavefronts", 16384),
     ("Workgroups", 256),
+    # Kernel→L1 request edges
     ("Flat Read", 80),
     ("Flat Write", 20),
     ("Flat Atomic", 4),
@@ -63,58 +55,33 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
     ("Buffer Atomic", 8),
     ("LDS Req", 150),
     ("LDS Util", 45),
-    ("LDS Latency", 28),
     ("LDS Read", None),
     ("LDS Write", None),
     ("LDS Atomic", None),
-    ("VL1 Rd", 3200),
-    ("VL1 Wr", 480),
-    ("VL1 Atomic", 12),
+    # VL1D cache panel
     ("VL1 Hit", 92),
-    ("VL1 Lat", 180),
     ("VL1 Coalesce", 87),
-    ("VL1 Stall", 5),
-    ("VL1_L2 Rd", 256),
-    ("VL1_L2 Wr", 48),
-    ("VL1_L2 Atomic", 12),
+    # L1→L2 BW edges
     ("VL1_L2 Read BW", 32e9),
     ("VL1_L2 Write BW", 3e9),
     ("VL1_L2 Atomic BW", 768e6),
+    # sL1D / L1I cache panels + edges
     ("sL1D Rd", 45),
     ("sL1D Hit", 98),
-    ("sL1D Lat", 85),
-    ("sL1D_L2 Rd", 1),
-    ("sL1D_L2 Wr", 0),
-    ("sL1D_L2 Atomic", 0),
     ("sL1D_L2 Read BW", 64e6),
     ("IL1 Fetch", 32),
     ("IL1 Hit", 99),
-    ("IL1 Lat", 42),
-    ("IL1_L2 Rd", 1),
     ("IL1_L2 Read BW", 64e6),
-    ("L2 Rd", 300),
-    ("L2 Wr", 52),
-    ("L2 Atomic", 12),
+    # L2 cache panel + L2→Fabric BW edges
     ("L2 Hit", 85),
-    ("L2 Rd Lat", 220),
-    ("L2 Wr Lat", 180),
-    ("Fabric_L2 Rd", 45),
-    ("Fabric_L2 Wr", 8),
-    ("Fabric_L2 Atomic", 1),
     ("L2-Fabric Read BW", 45e9),
     ("L2-Fabric Write and Atomic BW", 8e9),
-    ("Fabric Rd Lat", 350),
-    ("Fabric Wr Lat", 280),
-    ("Fabric Atomic Lat", 310),
-    ("HBM Rd", 42),
-    ("HBM Wr", 7),
-    ("HBM Read Traffic", None),
-    ("HBM Write and Atomic Traffic", None),
-    ("Remote Read Traffic", None),
-    ("Remote Write and Atomic Traffic", None),
-    ("HBM Read BW", None),
+    # Fabric→MALL→HBM BW
+    ("HBM Read BW", 42e9),
+    ("HBM Write and Atomic BW", 7e9),
     ("HBM Write BW", None),
     ("HBM Atomic BW", None),
+    # xGMI / PCIe BW (gfx950 only)
     ("xGMI Read BW", None),
     ("xGMI Write BW", None),
     ("xGMI Atomic BW", None),
@@ -151,6 +118,14 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     """Extract rendered metrics from the flat dict. Missing keys → None."""
     metrics: dict[str, Any] = {}
 
+    # Compute Unit stats
+    metrics["wave_occ"] = metric_dict.get("Wavefront Occupancy")
+    metrics["vgpr"] = metric_dict.get("VGPR")
+    metrics["sgpr"] = metric_dict.get("SGPR")
+    metrics["scratch_alloc"] = metric_dict.get("Scratch Allocation")
+    metrics["lds_alloc"] = metric_dict.get("LDS Allocation")
+    metrics["workgroups"] = metric_dict.get("Workgroups")
+
     # Kernel→L1 request edges
     metrics["flat_read"] = metric_dict.get("Flat Read")
     metrics["flat_write"] = metric_dict.get("Flat Write")
@@ -168,6 +143,7 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
     # L1 cache panels
     metrics["vl1_hit"] = metric_dict.get("VL1 Hit")
+    metrics["vl1_coalesce"] = metric_dict.get("VL1 Coalesce")
     metrics["sl1d_hit"] = metric_dict.get("sL1D Hit")
     metrics["il1_hit"] = metric_dict.get("IL1 Hit")
 
@@ -185,14 +161,9 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics["l2_fabric_read_bw"] = metric_dict.get("L2-Fabric Read BW")
     metrics["l2_fabric_wr_at_bw"] = metric_dict.get("L2-Fabric Write and Atomic BW")
 
-    # Fabric→HBM
-    metrics["hbm_rd"] = metric_dict.get("HBM Rd")
-    metrics["hbm_wr"] = metric_dict.get("HBM Wr")
-    metrics["hbm_read_traffic"] = metric_dict.get("HBM Read Traffic")
-    metrics["hbm_wr_at_traffic"] = metric_dict.get("HBM Write and Atomic Traffic")
-    metrics["remote_read_traffic"] = metric_dict.get("Remote Read Traffic")
-    metrics["remote_wr_at_traffic"] = metric_dict.get("Remote Write and Atomic Traffic")
+    # Fabric→MALL→HBM BW
     metrics["hbm_read_bw"] = metric_dict.get("HBM Read BW")
+    metrics["hbm_wr_at_bw"] = metric_dict.get("HBM Write and Atomic BW")
     metrics["hbm_write_bw"] = metric_dict.get("HBM Write BW")
     metrics["hbm_atomic_bw"] = metric_dict.get("HBM Atomic BW")
 
@@ -233,8 +204,10 @@ _PCIE_PANEL_W = 46  # fits "PCIe (to CPU or Non-xGMI connected GPU)" label
 _IO_PAD_OFFSET = 3  # gap between fabric_col edge and xGMI/PCIe arrow text
 # Arch capability sets
 _MALL_ARCHS = frozenset({"gfx940", "gfx941", "gfx942", "gfx950"})
+_XGMI_ARCHS = frozenset({"gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"})
 # Console dimensions
 _CONSOLE_WIDTH = 240  # CDNA layout is wider (more IP blocks than RDNA3.5)
+_FABRIC_COL_INDEX = 6  # kernel, req_edges, l1_stack, l1_l2_edges, l2, l2_fab_edges
 
 
 def _rwa_triplet(
@@ -383,6 +356,7 @@ def _build_l1_stack(
     """Build vertically stacked L1 cache panels: VL1D, LDS, sL1D, L1I."""
     vl1_rows: list[CachePanelRow] = [
         ("Hit", metrics["vl1_hit"], "%", COLORS["hit"]),
+        ("Coalesce", metrics["vl1_coalesce"], "%", COLORS["hit"]),
     ]
     gl1_stall_rows = _collect_stall_rows(membw, "GL1")  # gfx950 membw
     vl1_rows.extend(gl1_stall_rows)
@@ -479,27 +453,6 @@ def _build_l1_l2_edges(
     return Text.from_markup("\n".join(lines))
 
 
-def _build_fabric_content(metrics: dict[str, Any]) -> str:
-    """Build Rich markup for the Data Fabric panel (gfx908–gfx942)."""
-    color_read = COLORS["read"]
-    color_write = COLORS["write"]
-    hbm_section = "\n".join([
-        "[white]To/From HBM (Req)[/white]",
-        f"  Read {colored(format_scientific(metrics['hbm_rd']), color_read)}",
-        f"  Write {colored(format_scientific(metrics['hbm_wr']), color_write)}",
-    ])
-    traffic_section = "\n".join([
-        "[white]HBM Traffic[/white]",
-        f"  {metric_line('Read', metrics['hbm_read_traffic'], '%', color_read)}",
-        f"  {metric_line('Write', metrics['hbm_wr_at_traffic'], '%', color_write)}",
-        "",
-        "[white]Remote Traffic[/white]",
-        f"  {metric_line('Read', metrics['remote_read_traffic'], '%', color_read)}",
-        f"  {metric_line('Write', metrics['remote_wr_at_traffic'], '%', color_write)}",
-    ])
-    return stack_metrics(hbm_section, traffic_section)
-
-
 def _build_hbm_content(
     metrics: dict[str, Any],
 ) -> str:
@@ -563,7 +516,29 @@ def _build_io_row(
     return Group(arrow_grid, panel_grid)
 
 
-_FABRIC_COL_INDEX = 6  # kernel, req_edges, l1_stack, l1_l2_edges, l2, l2_fab_edges
+def _build_io_panel_only(
+    fabric_col: int,
+    *,
+    panel_label: str,
+    panel_width: int,
+) -> Group:
+    """Build an IO block (xGMI or PCIe) without BW arrows."""
+    panel = Panel(
+        f"[dim]{panel_label}[/dim]",
+        border_style=COLORS["block"],
+        width=panel_width,
+        height=3,
+    )
+    panel_grid = Table.grid(padding=0)
+    col_offset = (panel_width - _XGMI_PANEL_W) // 2
+    panel_grid.add_column(width=fabric_col - col_offset)
+    panel_grid.add_column()
+    panel_grid.add_row("", panel)
+    connector = Table.grid(padding=0)
+    connector.add_column(width=fabric_col + _IO_PAD_OFFSET)
+    connector.add_column()
+    connector.add_row("", Text.from_markup("[dim]||[/dim]"))
+    return Group(panel_grid, connector)
 
 
 def _build_scope_bar(total_width: int, fabric_col: int) -> str:
@@ -605,9 +580,22 @@ def create_mem_chart_diagram(
     std_arrows = make_arrows(_STD_ARROW_LEN)
     is_gfx950 = gpu_arch is not None and gpu_arch.startswith("gfx950")
     has_mall = gpu_arch in _MALL_ARCHS
+    has_xgmi = gpu_arch in _XGMI_ARCHS
 
     # Build main diagram grid first (needed to measure width for scope bar)
-    kernel = build_kernel_panel(_TOTAL_H, padding_lines=13)
+    scratch_bytes = safe_float(metrics["scratch_alloc"])
+    scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
+    lds_bytes = safe_float(metrics["lds_alloc"])
+    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
+    cu_stats = [
+        ("Wave Occ", metrics["wave_occ"], "%"),
+        ("vGPRs", metrics["vgpr"], ""),
+        ("sGPRs", metrics["sgpr"], ""),
+        ("Scratch", scratch_kb, " KB"),
+        ("LDS Alloc", lds_alloc_kb, " KB"),
+        ("Workgroups", metrics["workgroups"], ""),
+    ]
+    kernel = build_kernel_panel(_TOTAL_H, stats=cu_stats)
     req_edges = _build_request_edges(metrics, kernel_arrows)
     l1_stack = _build_l1_stack(metrics, membw=membw)
     l1_l2_edges = _build_l1_l2_edges(metrics, std_arrows)
@@ -636,7 +624,7 @@ def create_mem_chart_diagram(
         ],
         std_arrows,
     )
-    if is_gfx950:  # gfx950 membw: EA stall annotations in Data Fabric
+    if is_gfx950:
         ea_content = _build_ea_stall_content(membw)
         ea_border = COLORS["stall"] if ea_content else COLORS["block"]
         fabric = build_ip_block(
@@ -646,13 +634,16 @@ def create_mem_chart_diagram(
             ea_content,
             border_style=ea_border,
         )
+    else:
+        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H)
+
+    umc = build_ip_block("UMC", _IP_BLOCK_W, _TOTAL_H)
+
+    if is_gfx950:
         hbm_content = _build_hbm_content(metrics)
         hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H, hbm_content)
     else:
-        fabric_content = _build_fabric_content(metrics)
-        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H, fabric_content)
         hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H)
-    umc = build_ip_block("UMC", _IP_BLOCK_W, _TOTAL_H)
 
     grid_cols: list[tuple[RenderableType, VerticalAlignMethod]] = [
         (kernel, "top"),
@@ -664,6 +655,22 @@ def create_mem_chart_diagram(
         (fabric, "top"),
     ]
     if has_mall:
+        # gfx940-942 use 64B-per-request estimates; gfx950 has exact 32B counters
+        rd_label = "Est. Read BW" if not is_gfx950 else "Read BW"
+        wr_label = "Est. Wr/At BW" if not is_gfx950 else "Write/Atomic BW"
+        mall_edges = build_bw_edges(
+            [
+                (rd_label, metrics["hbm_read_bw"], "left", COLORS["read"]),
+                (
+                    wr_label,
+                    metrics["hbm_wr_at_bw"],
+                    "right",
+                    COLORS["write"],
+                ),
+            ],
+            std_arrows,
+        )
+        grid_cols.append((mall_edges, "middle"))
         grid_cols.append((build_ip_block("MALL", _IP_BLOCK_W, _TOTAL_H), "top"))
     grid_cols.extend([(umc, "top"), (hbm, "top")])
 
@@ -681,17 +688,30 @@ def create_mem_chart_diagram(
     if chart_title:
         sections.append(f"[bold]{chart_title}[/bold]")
 
-    if is_gfx950:
-        sections.append(
-            _build_io_row(
-                metrics,
-                fabric_col,
-                bw_keys=("xgmi_read_bw", "xgmi_write_bw", "xgmi_atomic_bw"),
-                panel_label="xGMI (to Peer GPU)",
-                panel_width=_XGMI_PANEL_W,
-                panel_above=True,
+    if has_xgmi:
+        if is_gfx950:
+            sections.append(
+                _build_io_row(
+                    metrics,
+                    fabric_col,
+                    bw_keys=(
+                        "xgmi_read_bw",
+                        "xgmi_write_bw",
+                        "xgmi_atomic_bw",
+                    ),
+                    panel_label="xGMI (to Peer GPU)",
+                    panel_width=_XGMI_PANEL_W,
+                    panel_above=True,
+                )
             )
-        )
+        else:
+            sections.append(
+                _build_io_panel_only(
+                    fabric_col,
+                    panel_label="xGMI (to Peer GPU)",
+                    panel_width=_XGMI_PANEL_W,
+                )
+            )
 
     sections.append(_build_scope_bar(chart_width, fabric_col))
     sections.append("")
