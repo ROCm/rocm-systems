@@ -163,6 +163,19 @@ class Runtime {
   };
 
   /// @brief Open connection to kernel driver and increment reference count.
+  ///
+  /// @details An initialization that did not finish is fatal for the process
+  /// rather than something to attempt again: it can leave the singleton half
+  /// built, and nothing gives that state back. This latches the first such
+  /// failure - error return or exception, from the singleton's construction
+  /// as much as from ::Load() - and returns the same error to every later
+  /// call instead of building on what the failed one left behind, so the only
+  /// correct response to an hsa_init() error is for the caller to terminate
+  /// the process.
+  ///
+  /// A call that only takes another reference on a runtime already up is not
+  /// an initialization and latches nothing, so nested hsa_init() and a fresh
+  /// hsa_init() after a balanced hsa_shut_down() are unaffected.
   static hsa_status_t Acquire();
 
   /// @brief Decrement reference count and close connection to kernel driver.
@@ -197,39 +210,6 @@ class Runtime {
 
   /// @brief Close and delete all agent driver objects from ::agent_drivers_.
   void DestroyDrivers();
-
-  /// @brief Give back everything AMD::Load() built: the agents it published,
-  /// what points at them, and the drivers it registered.
-  ///
-  /// @details The rollback for a load that failed. Acquire() keeps the
-  /// singleton after a failed Load() and only drops the reference count, so
-  /// whatever is still registered here is what the next hsa_init() finds. Both
-  /// drivers and agents are published by appending, so leaving them would make
-  /// the retry double them and re-run Init() on a driver the unwind already
-  /// closed - not a leak but a use of state that has been torn down.
-  ///
-  /// Tears down in the order ::Unload() uses, tolerates the half-built state a
-  /// failed load leaves behind, and is safe to run more than once.
-  void DestroyTopology();
-
-  /// @brief Give back the extensions, the aqlprofile probe handle and the
-  /// loader, in the reverse of the order ::Load() acquires them.
-  ///
-  /// @details These three sit between the topology and ::PostToolsInit(), so
-  /// both the rollback for a failure at that point and a normal ::Unload() have
-  /// to give back exactly this much, in exactly this order. Stated once so the
-  /// two cannot drift: the failure path is the one nobody runs.
-  ///
-  /// Tolerates any of them never having been acquired, and is safe to run more
-  /// than once.
-  void DestroyLoaderAndExtensions();
-
-  /// @brief Close the thunk and release the loader that owns it.
-  ///
-  /// @details The last thing ::Load() builds up from, so the last thing to go.
-  /// Safe to run more than once, and on a loader that never got as far as
-  /// binding its API table.
-  void DestroyThunkLoader();
 
   /// @brief Set the number of links connecting the agents in the platform.
   void SetLinkCount(size_t num_link);
@@ -1041,11 +1021,15 @@ class Runtime {
   // Holds reference count to runtime object.
   std::atomic<uint32_t> ref_count_;
 
+  // Set when Load() fails, and never cleared. Read and written under
+  // bootstrap_lock(); see Acquire().
+  static bool load_failed_;
+
   // Track environment variables.
   Flag flag_;
 
-  // Owned, because Load() builds one per attempt and every failure return below
-  // it has to give back the shared thunk it holds open.
+  // Owned: Unload() is the only thing that closes the shared thunk, so the
+  // loader holding it open has to belong to the runtime that runs Unload().
   std::unique_ptr<ThunkLoader> thunkLoader_;
 
   // Pools memory for SharedSignal (Signal ABI blocks)

@@ -465,17 +465,15 @@ class ThunkLoader {
     /// other optional acquire/release pair in the table,
     /// hsaKmtImportExternalSemaphore and hsaKmtDestroyExternalSemaphore.
     ///
-    /// Ownership of the instance is recorded here and nowhere else, so that a
-    /// load which fails before or during this call leaves nothing for the
-    /// rollback to give back.
+    /// Ownership of the instance is recorded here and nowhere else, so this
+    /// call either takes an instance and records how to give it back or takes
+    /// nothing at all.
     bool CreateThunkInstance();
 
     /// @brief Destroy the instance this loader owns, if it owns one.
     ///
-    /// @details Owning nothing is success - the rollback path runs this after
-    /// failures at every stage of the load, including ones that never got as
-    /// far as creating an instance. Idempotent, so an unwind on the failure
-    /// path and a later normal shutdown cannot both release the same instance.
+    /// @details Owning nothing is success, so this is safe on a loader that
+    /// never got as far as creating an instance. Idempotent.
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
     bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }

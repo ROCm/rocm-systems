@@ -729,8 +729,8 @@ LOAD_ERROR:
 
     // Both halves up front. A thunk exporting DtifCreate but not DtifDestroy
     // would otherwise hand over an instance that nothing in this process can
-    // ever give back, and the load would only find that out during its own
-    // rollback, with the library about to be closed underneath it.
+    // ever give back, and DestroyThunkInstance() would only find that out at
+    // hsa_shut_down(), with the library about to be closed underneath it.
     DtifCreateFunc* pfnDtifCreate =
         (DtifCreateFunc*)rocr::os::GetExportAddress(thunk_handle, "DtifCreate");
     DtifDestroyFunc* pfnDtifDestroy =
@@ -755,17 +755,13 @@ LOAD_ERROR:
     if (!IsDTIF())
       return true;
 
-    // Nothing to give back. The load can fail before CreateThunkInstance() ever
-    // runs - LoadThunkApiTable() rejecting an incomplete table - or inside it,
-    // and either way the rollback still comes through here. There is no lookup
-    // on this path at all now: if an instance is owned then the way to release
-    // it was resolved before it was taken, and if none is owned there is
-    // nothing to look up.
+    // Nothing to give back, and no lookup to do: if an instance is owned then
+    // the way to release it was resolved before it was taken, and if none is
+    // owned there is nothing to look up.
     if (dtif_destroy_ == nullptr) return true;
 
-    // Dropped before the call rather than after it, so a destroy that fails
-    // cannot be retried into a second release. Ownership ends here either way:
-    // there is no second instance to give back.
+    // Ownership ends here whatever the call returns: there is no second
+    // instance to give back.
     DtifDestroyFunc* pfnDtifDestroy = dtif_destroy_;
     dtif_destroy_ = nullptr;
 

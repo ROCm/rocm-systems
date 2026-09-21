@@ -124,9 +124,34 @@ namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
+bool Runtime::load_failed_ = false;
 
 hsa_status_t Runtime::Acquire() {
   std::lock_guard<std::mutex> boot(bootstrap_lock());
+
+  // An initialization that did not finish is fatal for this process. It can
+  // leave the singleton half built - drivers opened and registered, agents
+  // published, the thunk held open - and Unload() never runs, because the
+  // reference count never stayed at one. Starting over on top of that would
+  // re-open and re-register, so the failure is permanent and the caller must
+  // terminate.
+  if (load_failed_) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Whether this call is the one that builds the runtime up, rather than one
+  // taking a reference on a runtime that is already up. A non-null singleton
+  // here belongs to a call that got all the way through: the only other
+  // writer is Release(), which nulls it on the same transition that deletes
+  // it, and the one state that outlives a failed attempt is refused above.
+  const bool initializing = (runtime_singleton_ == NULL);
+
+  // Armed for every way out below that is not success, exceptions included -
+  // a std::bad_alloc from the allocation, a throw out of the constructor, an
+  // error return or a throw out of Load(). A call that is only taking another
+  // reference latches nothing: HSA_STATUS_ERROR_REFCOUNT_OVERFLOW says the
+  // caller has counted too far, not that the runtime is unusable.
+  MAKE_NAMED_SCOPE_GUARD(failureLatch, [initializing]() {
+    if (initializing) load_failed_ = true;
+  });
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
@@ -149,6 +174,7 @@ hsa_status_t Runtime::Acquire() {
   }
 
   refGuard.Dismiss();
+  failureLatch.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -270,9 +296,8 @@ void Runtime::RegisterDriver(std::unique_ptr<Driver> driver) {
 void Runtime::DestroyAgents() {
   agents_by_node_.clear();
 
-  // Holds the same pointers agents_by_node_ does. Leaving it populated was
-  // harmless only while the singleton was deleted immediately afterwards;
-  // anything that reuses the runtime finds a map of freed agents.
+  // Holds the same pointers agents_by_node_ does, so it goes with them rather
+  // than outliving them as a map of agents this function is about to delete.
   agents_by_gpuid_.clear();
 
   std::for_each(gpu_agents_.begin(), gpu_agents_.end(), DeleteObject());
@@ -293,89 +318,6 @@ void Runtime::DestroyAgents() {
 }
 
 void Runtime::DestroyDrivers() { agent_drivers_.clear(); }
-
-void Runtime::DestroyTopology() {
-  // The order here is Unload()'s, for Unload()'s reasons: the signals and the
-  // two pools hold allocations carved out of agent-owned regions, the region
-  // lists point into that same memory, and the agents point into the drivers.
-  // Each layer has to go before the one it depends on, which puts the drivers
-  // last.
-  //
-  // Every step tolerates the half-built state a failed load leaves - a pointer
-  // that was never filled in, an empty pool, an agent that got no further than
-  // its constructor - and every step is idempotent, so running this twice
-  // gives nothing back twice.
-  //
-  // Within the span of Unload() this reproduces - the agents' ReleaseResources()
-  // through DestroyDrivers() - three steps are deliberately missing, all of
-  // them no-ops on the rollback path:
-  //
-  //  - CloseTools(). LoadTools() and LoadHotswapTool() both run below the last
-  //    failure this unwinds, so tool_libs_ is still empty here. This is also
-  //    why Unload() cannot hand its tail to this method and have the sequence
-  //    written once: CloseTools() has to stay where it is, after
-  //    DestroyAgents(), because LoadTools() puts whatever WrapAgent() returned
-  //    into cpu_agents_ and gpu_agents_, and the destructors DestroyAgents()
-  //    then runs live in the tool libraries CloseTools() unloads.
-  //  - mapped_handle_map_ and memory_handles. Only the VMemory* entry points
-  //    behind hsa_amd_vmem_* fill these, and none of them can have been called
-  //    before hsa_init() returned.
-  //
-  // All three need revisiting if a failure return ever appears below
-  // LoadTools(). Unload()'s last step, DestroyThunkLoader(), is past the end of
-  // that span rather than missing from it: the thunk is not something
-  // AMD::Load() built, and Runtime::Load() unwinds it through its own guard.
-  for (auto& node_agents : agents_by_node_) {
-    for (auto* agent : node_agents.second) agent->ReleaseResources();
-  }
-
-  asyncSignals_.reset();
-  asyncExceptions_.reset();
-
-  vm_fault_signal_.reset();
-  vm_fault_event_.reset();
-  hw_exception_signal_.reset();
-  hw_exception_event_.reset();
-
-  SharedSignalPool.clear();
-  EventPool.clear();
-
-  system_regions_fine_.clear();
-  system_regions_coarse_.clear();
-
-  DestroyAgents();
-
-  AMD::Unload();
-
-  DestroyDrivers();
-}
-
-void Runtime::DestroyLoaderAndExtensions() {
-  UnloadExtensions();
-
-  // Skip the dlclose when running under Valgrind due to a Valgrind bug, see:
-  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
-  if (aqlprofile_lib_ != nullptr) {
-    if (!flag_.running_valgrind()) {
-      os::CloseLib(aqlprofile_lib_);
-    }
-    aqlprofile_lib_ = nullptr;
-  }
-
-  // Null on the rollback path when the failure came from far enough up that the
-  // loader was never created, and on a second run of this.
-  if (loader_ != nullptr) {
-    amd::hsa::loader::Loader::Destroy(loader_.get());
-    loader_.reset();
-  }
-}
-
-void Runtime::DestroyThunkLoader() {
-  if (thunkLoader_ == nullptr) return;
-
-  thunkLoader_->DestroyThunkInstance();
-  thunkLoader_.reset();
-}
 
 void Runtime::SetLinkCount(size_t num_nodes) {
   num_nodes_ = num_nodes;
@@ -2861,12 +2803,6 @@ hsa_status_t Runtime::Load() {
 
   thunkLoader_.reset(new ThunkLoader());
 
-  // Constructing it opened the shared thunk. Acquire() keeps the singleton
-  // after a failed Load(), so a return below that leaves this one in place has
-  // the next attempt overwrite it - dropping the object and the reference it
-  // holds on the library.
-  MAKE_NAMED_SCOPE_GUARD(thunkGuard, [this]() { DestroyThunkLoader(); });
-
   // A thunk that is missing an entry point leaves the rest of the table null,
   // and the first call through one of those nulls is a fault rather than an
   // error - the runtime has no way to notice by then. This is a real
@@ -2891,27 +2827,6 @@ hsa_status_t Runtime::Load() {
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-
-  // AMD::Load() opened the kernel driver, registered it, and published the
-  // agents built on top of it. Every failure below returns to Acquire(), which
-  // drops the runtime reference count and returns the error - Unload() never
-  // runs, so this is the only thing that gives those back, and the only thing
-  // that stops the next hsa_init() finding them still registered and appending
-  // to them.
-  //
-  // AMD::Load()'s own failures never reach this guard: the return above it is
-  // taken before the guard is armed, and AMD::Load() has already unwound
-  // itself by then.
-  //
-  // The loader, the aqlprofile probe handle and the extensions are all
-  // acquired below and before the two failure returns left - PostToolsInit()
-  // and LoadHotswapTool() - so the guard has to give those back too, and give
-  // them back first. It runs only on a failure return: the success path
-  // dismisses it, leaving the teardown to Unload().
-  MAKE_NAMED_SCOPE_GUARD(loadGuard, [this]() {
-    DestroyLoaderAndExtensions();
-    DestroyTopology();
-  });
 
   asyncSignals_.reset(new AsyncEventsInfo(false));
   asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
@@ -2971,8 +2886,6 @@ hsa_status_t Runtime::Load() {
   }
 #endif
 
-  loadGuard.Dismiss();
-  thunkGuard.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2996,10 +2909,20 @@ void Runtime::Unload() {
   svm_profile_.reset(nullptr);
 
   UnloadTools();
+  UnloadExtensions();
 
-  // The same three, in the same order, as the rollback for a load that failed
-  // at PostToolsInit().
-  DestroyLoaderAndExtensions();
+  // Close the aqlprofile probe handle. Skip the dlclose when
+  // running under Valgrind due to a Valgrind bug, see below:
+  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
+  if (aqlprofile_lib_ != nullptr) {
+    if (!flag_.running_valgrind()) {
+      os::CloseLib(aqlprofile_lib_);
+    }
+    aqlprofile_lib_ = nullptr;
+  }
+
+  amd::hsa::loader::Loader::Destroy(loader_.get());
+  loader_.reset();
 
   for (auto nodeAgent : agents_by_node_) {
     for (auto agent : nodeAgent.second) agent->ReleaseResources();
@@ -3040,7 +2963,10 @@ void Runtime::Unload() {
 
   DestroyDrivers();
 
-  DestroyThunkLoader();
+  if (thunkLoader_ != nullptr) {
+    thunkLoader_->DestroyThunkInstance();
+    thunkLoader_.reset();
+  }
 }
 
 void Runtime::LoadExtensions() {
