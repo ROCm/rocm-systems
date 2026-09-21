@@ -1,22 +1,5 @@
-// Copyright (C) 2024 Advanced Micro Devices. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-// the Software, and to permit persons to whom the Software is furnished to do so,
-// subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-// IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 extern crate bindgen;
 use std::env;
@@ -122,40 +105,8 @@ fn generate_amdsmi_wrapper(amdsmi_header_file: &str) {
         .allowlist_function("^(amdsmi.*)$")
         .allowlist_var("^(AMDSMI.*)$")
         .parse_callbacks(Box::new(callbacks::UpperCamelCaseCallbacks))
-        .raw_line("// Copyright (C) 2024 Advanced Micro Devices. All rights reserved.")
-        .raw_line("//")
-        .raw_line(
-            "// Permission is hereby granted, free of charge, to any person obtaining a copy of",
-        )
-        .raw_line(
-            "// this software and associated documentation files (the \"Software\"), to deal in",
-        )
-        .raw_line("// the Software without restriction, including without limitation the rights to")
-        .raw_line(
-            "// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of",
-        )
-        .raw_line(
-            "// the Software, and to permit persons to whom the Software is furnished to do so,",
-        )
-        .raw_line("// subject to the following conditions:")
-        .raw_line("//")
-        .raw_line(
-            "// The above copyright notice and this permission notice shall be included in all",
-        )
-        .raw_line("// copies or substantial portions of the Software.")
-        .raw_line("//")
-        .raw_line("// THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR")
-        .raw_line(
-            "// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS",
-        )
-        .raw_line(
-            "// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR",
-        )
-        .raw_line(
-            "// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
-        )
-        .raw_line("// IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN")
-        .raw_line("// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.")
+        .raw_line("// Copyright Advanced Micro Devices, Inc.")
+        .raw_line("// SPDX-License-Identifier: MIT")
         .raw_line("")
         .raw_line("#![allow(non_upper_case_globals)]")
         .generate()

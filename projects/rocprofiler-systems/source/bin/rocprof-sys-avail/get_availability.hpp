@@ -8,11 +8,10 @@
 #include "get_categories.hpp"
 #include "info_type.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
-#include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/type_list.hpp>
@@ -68,7 +67,7 @@ struct get_availability<type_list<Types...>>
 
     static data_type get_info(data_type& _v)
     {
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace_back(get_availability<Types>::get_info()));
+        (_v.emplace_back(get_availability<Types>::get_info()), ...);
         return _v;
     }
 

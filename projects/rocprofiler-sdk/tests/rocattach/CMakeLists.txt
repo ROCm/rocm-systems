@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocattach
@@ -31,6 +31,12 @@ else()
     set(LOG_LEVEL "trace")
 endif()
 
+set(DEFAULT_TOOL_SONAME_TEST_DISABLED ${IS_DISABLED})
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    # This test requires trace output, which is intentionally disabled under LSan.
+    set(DEFAULT_TOOL_SONAME_TEST_DISABLED ON)
+endif()
+
 set(rocattach-test-env
     "ROCP_TOOL_ATTACH=1"
     "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
@@ -54,6 +60,14 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
 
+add_executable(rocattach-register-library-alias-test)
+target_sources(rocattach-register-library-alias-test
+               PRIVATE register_library_alias_test.cpp)
+target_link_libraries(
+    rocattach-register-library-alias-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::tests-build-flags)
+
 if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
    AND TARGET rocprofiler-sdk::rocprofiler-sdk-common-library)
     set(ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../source")
@@ -73,6 +87,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
         target_sources(${NAME} PRIVATE symbol_lookup_fixture.cpp)
         target_compile_definitions(${NAME} PRIVATE ROCATTACH_FIXTURE_VALUE=${VALUE})
         target_link_libraries(${NAME} PRIVATE rocprofiler-sdk::tests-build-flags)
+        target_link_options(${NAME} PRIVATE "LINKER:--build-id")
         set_target_properties(${NAME} PROPERTIES OUTPUT_NAME
                                                  "rocprofiler-register.so.${NAME}")
         if(HASH_STYLE)
@@ -86,6 +101,11 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-shifted 6 "")
     target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
                                PRIVATE ROCATTACH_FIXTURE_PADDED=1)
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-no-build-id 7 "")
+    # rocattach_add_symbol_lookup_fixture links with "--build-id". This appends after it,
+    # and the last --build-id flag on the link line wins.
+    target_link_options(rocattach-symbol-lookup-fixture-no-build-id PRIVATE
+                        "LINKER:--build-id=none")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-b 5 "")
 
@@ -102,6 +122,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
                 rocprofiler-sdk::rocprofiler-sdk-headers
                 rocprofiler-sdk::rocprofiler-sdk-build-flags
                 rocprofiler-sdk::rocprofiler-sdk-common-library
+                rocprofiler-sdk::tests-common-library
                 ${CMAKE_DL_LIBS})
     add_dependencies(
         rocattach-symbol-lookup-test
@@ -109,6 +130,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
         rocattach-symbol-lookup-fixture-gnu
         rocattach-symbol-lookup-fixture-sysv
         rocattach-symbol-lookup-fixture-shifted
+        rocattach-symbol-lookup-fixture-no-build-id
         rocattach-symbol-lookup-fixture-ambiguous-a
         rocattach-symbol-lookup-fixture-ambiguous-b)
 
@@ -119,6 +141,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-gnu>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-sysv>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-shifted>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-no-build-id>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-a>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-b>
         TIMEOUT 30
@@ -161,6 +184,35 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION
         "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-equivalent-register-library-test-execute
+    TARGET rocattach-register-library-alias-test
+    ARGS $<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>
+    TIMEOUT 10
+    LABELS "attachment"
+    ENVIRONMENT
+        "ROCPROFILER_LIBRARY_CTOR=0"
+        "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: equivalent ROCPROFILER_REGISTER_LIBRARY alias accepted"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|ROCPROFILER_REGISTER_LIBRARY is already set|Test FAILED"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-default-tool-soname-test-execute
+    TARGET rocattach-tool-path-validation-test
+    ARGS --default
+    TIMEOUT 5
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${DEFAULT_TOOL_SONAME_TEST_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Tool library path: librocprofiler-sdk-tool\\.so\\.[0-9]+"
+    FAIL_REGULAR_EXPRESSION "Test FAILED")
 
 # Verify absolute tool library paths fail early when target-side dlopen could not resolve
 # them from the target mount namespace.

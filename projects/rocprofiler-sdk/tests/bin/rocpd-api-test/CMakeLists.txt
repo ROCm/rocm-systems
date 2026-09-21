@@ -1,7 +1,7 @@
 #
 # rocpd API test: exercises rocpd_get_version and rocpd_sql_load_schema
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(rocprofiler-sdk-tests-bin-rocpd-api-test LANGUAGES CXX)
 

@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -766,9 +767,15 @@ ompt_impl<OpIdx>::begin(ompt_data_t* data, Args... args)
                                buffered_contexts,
                                external_corr_ids);
 
-    auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->ancestor;
+    auto* corr_id = tracing::correlation_service::construct(ref_count);
+    if(!corr_id)
+    {
+        // finalization began mid-call: construct() returns null. Skip this OMPT region; no state
+        // is stashed, so the paired end() skips too (see the null-state guard there).
+        return;
+    }
+    auto internal_corr_id = corr_id->internal;
+    auto ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -830,9 +837,12 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
     ompt_save_state* state = nullptr;
     if(data != nullptr)
         state = static_cast<ompt_save_state*>(data->ptr);
-    else
-        state = get_ompt_state_stack().pop_back_val();
-    assert(state != nullptr);
+    else if(auto& _state_stack = get_ompt_state_stack(); !_state_stack.empty())
+        state = _state_stack.pop_back_val();
+
+    // begin() does not stash state when it cannot construct a correlation id (finalization in
+    // progress), so there is nothing to pair this end() with -- skip instead of dereferencing null.
+    if(!state) return;
 
     ROCP_FATAL_IF(state->operation_idx != info_type::operation_idx)
         << "Mismatch of OMPT operation: begin=" << state->operation_idx
@@ -1103,6 +1113,7 @@ update_table(ompt_update_func f, std::index_sequence<OpIdx, OpIdxTail...>)
     update_table(f, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0) update_table(f, std::index_sequence<OpIdxTail...>{});
 }
+
 }  // namespace
 
 template <size_t OpIdx>
@@ -1197,6 +1208,28 @@ void
 update_table(ompt_update_func f)
 {
     update_table(f, std::make_index_sequence<ompt::ompt_domain_info::ompt_last>{});
+}
+
+// Returns true if any registered rocprofiler client subscribes to the OMPT
+// callback or buffered tracing domain, i.e. the SDK has a reason to be the OMPT
+// tool. Must be called *after* registration::initialize() so that client
+// tool_init callbacks have run and contexts exist.
+//
+// Deliberately domain-level: this answers the once-per-process question of
+// whether the OMPT tool role belongs to us, asked at ompt_start_tool() before
+// any operation exists. should_enable_callback() above answers the narrower
+// per-operation "which callbacks do I register" question and reads the same
+// context domains() bitsets, so the two cannot disagree.
+bool
+ompt_service_requested()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(!itr) continue;
+        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_OMPT)) return true;
+        if(itr->is_tracing(ROCPROFILER_BUFFER_TRACING_OMPT)) return true;
+    }
+    return false;
 }
 
 }  // namespace ompt

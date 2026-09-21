@@ -64,7 +64,7 @@ enum class EventStatus {
 /// Describes a detected race condition. Used by the race detection layer
 /// to report violations without depending on any exception type.
 struct RaceViolation {
-  enum class Space { VGPR, SGPR, LDS };
+  enum class Space { VGPR, SGPR, TTMP, LDS };
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
@@ -79,28 +79,22 @@ struct RaceViolation {
         workgroupId(workgroupId), conflictingEvent(conflictingEvent) {}
 };
 
-/// Pending memory event data dispatched to WaveRaceState by the plugin adapter.
-struct PendingMemoryEvent {
-  uint64_t pc;
-  MemoryEventType type;
-  std::vector<uint32_t> registers;
-  uint64_t execMask;
-  int waveSize;
-  uint8_t byteMask = 0xF;
-  // LDS events:
-  std::vector<uint32_t> laneBaseAddresses;
-  int bytesPerLane = 0;
-  // Dual-offset LDS events:
-  bool isDualOffset = false;
-  int32_t offset0 = 0;
-  int32_t offset1 = 0;
+struct WaitCounterUpdate {
+  amdgpu::WaitCounterType type;
+  int threshold;
 };
 
-/// Pending wait count data written by the s_waitcnt executor. Dispatched to
-/// WaveRaceState by Workgroup::run after tryExecute returns.
+/// Counter thresholds changed by one wait instruction. A wait can update one
+/// or more counters; counters absent from this list retain their prior state.
 struct PendingWaitCount {
-  int vmcnt = -1;
-  int lgkmcnt = -1;
+  void add(amdgpu::WaitCounterType type, int threshold) {
+    if (threshold >= 0)
+      updates.push_back({type, threshold});
+  }
+
+  [[nodiscard]] bool empty() const { return updates.empty(); }
+
+  std::vector<WaitCounterUpdate> updates;
 };
 
 } // namespace rocjitsu::plugins::race_detector

@@ -19,7 +19,8 @@ Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
 Before get started, make sure your environment satisfies the following prerequisites.
 See the [requirements](#install_reqs) section for more information.
 
-1. Ensure `amdgpu` drivers are installed properly for initialization.
+1. Ensure `amdgpu` drivers are installed properly for initialization. CPU APIs
+   require the `amd_hsmp` kernel module. See {ref}`install_amdgpu_driver`.
 
 2. Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
 

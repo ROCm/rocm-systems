@@ -13,9 +13,6 @@
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
-#undef hipGetDeviceProperties
-#undef hipDeviceProp_t
-
 namespace hip {
 
 // ================================================================================================
@@ -111,9 +108,15 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool 
 
 // ================================================================================================
 void Device::ReleaseFreedMemory() {
-  std::scoped_lock lock(lock_);
-  for (auto* pool : mem_pools_) {
+  std::vector<MemoryPool*> pools;
+  {
+    std::scoped_lock lock(lock_);
+    pools.assign(mem_pools_.begin(), mem_pools_.end());
+    for (auto* pool : pools) pool->retain();
+  }
+  for (auto* pool : pools) {
     pool->ReleaseFreedMemory();
+    pool->release();
   }
 }
 
@@ -186,7 +189,11 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    activeQueues = blocking_stream->device().getActiveQueues();
+    // Wait on the active streams of this device, not blocking_stream->device().
+    // blocking_stream is only where the barrier gets enqueued and it can be on a
+    // different device. (e.g. hipMemcpyPeer is the cross-device caller waiting on peer
+    // device while enqueuing the barrier on the current device's null stream).
+    activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one
@@ -623,7 +630,7 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
 }
 
 // ================================================================================================
-hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
+hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -827,6 +834,8 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int device) {
   HIP_INIT_API(hipGetDevicePropertiesR0600, prop, device);
 
+  // For now, we can forward to the internal/unstable API. In the future, if
+  // hipDeviceProp_t is different, this will fail to compile.
   HIP_RETURN(ihipGetDeviceProperties(prop, device));
 }
 
@@ -1022,8 +1031,3 @@ hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion,
 }
 
 }  // namespace hip
-
-// ================================================================================================
-extern "C" hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
-  return hip::hipGetDevicePropertiesR0000(props, device);
-}
