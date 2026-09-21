@@ -19,6 +19,7 @@
 
 namespace {
 
+constexpr int kPeer = 3;
 constexpr size_t kFloatSize = sizeof(float);
 constexpr size_t kDoubleSize = sizeof(double);
 constexpr size_t kCollSendBytes = kCount * kFloatSize;
@@ -42,6 +43,8 @@ constexpr uintptr_t kSendWindowAddr = 0x40004ULL;
 constexpr uintptr_t kRecvWindowAddr = 0x50008ULL;
 constexpr size_t kAlignedGap = 16;
 constexpr size_t kMisalignedGap = 8;
+
+const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x5eedULL);
 
 void* TaskPreTuning_Addr(uintptr_t address) {
   return reinterpret_cast<void*>(address);
@@ -87,6 +90,27 @@ class TaskPreTuning_Windows {
   struct ncclDevrWindow recvWindow_{};
   ScopedHook<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> hook_;
 };
+
+std::vector<struct ncclRawTask*> TaskPreTuning_RawTasks(
+  struct ncclIntruQueue<struct ncclRawTask, &ncclRawTask::next>* queue) {
+  std::vector<struct ncclRawTask*> raws;
+  for (struct ncclRawTask* raw = ncclIntruQueueHead(queue); raw != nullptr; raw = raw->next) {
+    raws.push_back(raw);
+  }
+  return raws;
+}
+
+std::vector<struct ncclRawTask*> TaskPreTuning_TunedRaws(struct ncclTaskTuningInfoQueue* tiq) {
+  std::vector<struct ncclRawTask*> raws;
+  for (struct ncclTaskTuningInfo* task : QueueTasks(&tiq->queue)) {
+    raws.push_back(task->raw);
+  }
+  return raws;
+}
+
+std::vector<struct ncclRawTask*> TaskPreTuning_List(std::initializer_list<struct ncclRawTask*> raws) {
+  return std::vector<struct ncclRawTask*>(raws);
+}
 
 // TaskPrepScene starts non-capturing, so the fixture needs no SetUp of its own beyond the fakes reset.
 class TaskPreTuningMicrotest : public TaskPrepFakesFixture {
@@ -575,6 +599,387 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_MinCTAsAtMaxCTAs_KeepsMinCTAs
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
   EXPECT_EQ(kCommCTAs, in.minCTAs);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_UnregisteredBuffer_CopiesTheRawFieldsAndClearsRegBuff) {
+  struct ncclRawTask* raw = scene_.NewSendRecv(ncclFuncSend, kPeer);
+  raw->sendRecv.datatype = ncclFloat64;
+  raw->sendRecv.bytes = kCount * kDoubleSize;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillSendRecvTuningInput(scene_.comm(), &raw->sendRecv, &in));
+
+  EXPECT_EQ(scene_.comm(), in.comm);
+  EXPECT_EQ(NCCL_TUNING_MASK_ALL, in.tuningMask);
+  EXPECT_EQ(ncclFuncSend, in.func);
+  EXPECT_EQ(ncclFloat64, in.datatype);
+  EXPECT_EQ(kCount, in.count);
+  EXPECT_EQ(kCount, in.countMax);
+  EXPECT_EQ(1, in.nWorks);
+  EXPECT_EQ(1, in.numPipeOps);
+  EXPECT_EQ(kCount * kDoubleSize, in.nBytes);
+  EXPECT_EQ(0, in.regBuff);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_RegistrationCoversTheBuffer_SetsRegBuff) {
+  struct ncclRawTask* raw = scene_.NewSendRecv(ncclFuncRecv, kPeer);
+  RegisteredRanges registered(&scene_, {{raw->sendRecv.buff, raw->sendRecv.bytes}});
+  struct ncclReg* probed = nullptr;
+  ScopedHook isValid(g_regLocalIsValid, [&probed](struct ncclReg* reg, bool* out) {
+    probed = reg;
+    *out = true;
+    return ncclSuccess;
+  });
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillSendRecvTuningInput(scene_.comm(), &raw->sendRecv, &in));
+
+  EXPECT_EQ(1, in.regBuff);
+  EXPECT_EQ(1, isValid.calls);
+  EXPECT_NE(nullptr, probed);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_RegistrationShorterThanTheBuffer_ClearsRegBuff) {
+  struct ncclRawTask* raw = scene_.NewSendRecv(ncclFuncSend, kPeer);
+  RegisteredRanges registered(&scene_, {{raw->sendRecv.buff, raw->sendRecv.bytes - 1}});
+  TaskPreTuning_LocallyValidRegistrations isValid;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillSendRecvTuningInput(scene_.comm(), &raw->sendRecv, &in));
+
+  EXPECT_EQ(0, in.regBuff);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_RegistrationNotLocallyValid_ClearsRegBuff) {
+  struct ncclRawTask* raw = scene_.NewSendRecv(ncclFuncSend, kPeer);
+  RegisteredRanges registered(&scene_, {{raw->sendRecv.buff, raw->sendRecv.bytes}});
+  struct ncclReg* probed = nullptr;
+  ScopedHook isValid(g_regLocalIsValid, [&probed](struct ncclReg* reg, bool* out) {
+    probed = reg;
+    *out = false;
+    return ncclSuccess;
+  });
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillSendRecvTuningInput(scene_.comm(), &raw->sendRecv, &in));
+
+  EXPECT_EQ(0, in.regBuff);
+  EXPECT_NE(nullptr, probed) << "the registration must still have been found";
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_CapturingGraphWithGraphRegister_SetsRegBuff) {
+  scene_.SetGraphCapture(true);
+  struct ncclRawTask* raw = scene_.NewSendRecv(ncclFuncSend, kPeer);
+  ScopedHook param(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+    return std::strcmp(env, "GRAPH_REGISTER") == 0 ? 1 : deft;
+  });
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillSendRecvTuningInput(scene_.comm(), &raw->sendRecv, &in));
+
+  EXPECT_EQ(1, in.regBuff);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_GraphArmHalfSatisfied_ClearsRegBuff) {
+  for (bool capturing : {true, false}) {
+    const int64_t graphRegister = capturing ? 0 : 1;
+    TaskPrepScene scene;
+    scene.SetGraphCapture(capturing);
+    struct ncclRawTask* raw = scene.NewSendRecv(ncclFuncSend, kPeer);
+    ScopedHook param(g_loadParam, [graphRegister](const char* env, int64_t deft) -> int64_t {
+      return std::strcmp(env, "GRAPH_REGISTER") == 0 ? graphRegister : deft;
+    });
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillSendRecvTuningInput(scene.comm(), &raw->sendRecv, &in));
+
+    EXPECT_EQ(0, in.regBuff) << "capturing = " << capturing;
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, FillSendRecvTuningInput_RegLocalIsValidFails_PropagatesBeforeWritingRegBuff) {
+  struct ncclRawTask* raw = scene_.NewSendRecv(ncclFuncSend, kPeer);
+  ScopedHook isValid(g_regLocalIsValid, [](struct ncclReg*, bool*) { return ncclInternalError; });
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  EXPECT_EQ(ncclInternalError, fillSendRecvTuningInput(scene_.comm(), &raw->sendRecv, &in));
+
+  EXPECT_EQ(TaskPrep_Poisoned<int>(), in.regBuff);
+  EXPECT_EQ(kCount * kFloatSize, in.nBytes);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillRmaTuningInput_PutSignal_TakesTheCountAndDatatypeFromThePutSignalOp) {
+  struct ncclRawTask* raw = scene_.NewRma(ncclFuncPutSignal);
+  raw->rma.rmaOp.putSignal.datatype = ncclFloat64;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillRmaTuningInput(scene_.comm(), &raw->rma, &in));
+
+  EXPECT_EQ(scene_.comm(), in.comm);
+  EXPECT_EQ(NCCL_TUNING_MASK_ALL, in.tuningMask);
+  EXPECT_EQ(ncclFuncPutSignal, in.func);
+  EXPECT_EQ(1, in.nWorks);
+  EXPECT_EQ(1, in.numPipeOps);
+  EXPECT_EQ(ncclFloat64, in.datatype);
+  EXPECT_EQ(kCount, in.count);
+  EXPECT_EQ(kCount, in.countMax);
+  EXPECT_EQ(kCount * kDoubleSize, in.nBytes);
+}
+
+TEST_F(TaskPreTuningMicrotest, FillRmaTuningInput_SignalAndWaitSignal_CarryNoPayload) {
+  for (ncclFunc_t func : {ncclFuncSignal, ncclFuncWaitSignal}) {
+    TaskPrepScene scene;
+    struct ncclRawTask* raw = scene.NewRma(func);
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillRmaTuningInput(scene.comm(), &raw->rma, &in));
+
+    EXPECT_EQ(func, in.func) << "func = " << func;
+    EXPECT_EQ(ncclInt8, in.datatype);
+    EXPECT_EQ(0u, in.count);
+    EXPECT_EQ(0u, in.countMax);
+    EXPECT_EQ(0u, in.nBytes);
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, FillRmaTuningInput_UnknownRmaFunc_LeavesThePayloadFieldsUntouched) {
+  struct ncclRawTask* raw = scene_.NewRma(ncclFuncAllReduce);
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillRmaTuningInput(scene_.comm(), &raw->rma, &in));
+
+  EXPECT_EQ(ncclFuncAllReduce, in.func);
+  EXPECT_EQ(TaskPrep_Poisoned<ncclDataType_t>(), in.datatype);
+  EXPECT_EQ(TaskPrep_Poisoned<size_t>(), in.count);
+  EXPECT_EQ(TaskPrep_Poisoned<size_t>(), in.countMax);
+  EXPECT_EQ(TaskPrep_Poisoned<size_t>(), in.nBytes);
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningRawTaskPtrEqual_MatchesOnIdentityNotOnContents) {
+  struct ncclRawTask* first = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* second = scene_.NewColl(ncclFuncBroadcast);
+
+  EXPECT_TRUE(preTuningRawTaskPtrEqual(first, first));
+  EXPECT_FALSE(preTuningRawTaskPtrEqual(first, second));
+  EXPECT_FALSE(preTuningRawTaskPtrEqual(first, nullptr));
+  EXPECT_TRUE(preTuningRawTaskPtrEqual(nullptr, nullptr));
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningBcastFallsBack_EveryBroadcastShape_IsUnconditionallyTrue) {
+  for (int root : {0, kPeer}) {
+    for (size_t count : {size_t{0}, kCount}) {
+      struct ncclRawTask* raw = scene_.NewColl(ncclFuncBroadcast);
+      raw->coll.root = root;
+      raw->coll.count = count;
+      raw->coll.stream = kStream;
+      EXPECT_TRUE(preTuningBcastFallsBack(&raw->coll)) << "root = " << root << " count = " << count;
+    }
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningRemoveBcastRawFromQueue_WithoutFree_UnlinksAndKeepsThePoolEmpty) {
+  struct ncclRawTask* first = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* second = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* third = scene_.NewColl(ncclFuncBroadcast);
+  for (struct ncclRawTask* raw : {first, second, third}) {
+    scene_.EnqueueBcast(raw);
+  }
+
+  ASSERT_EQ(ncclSuccess, preTuningRemoveBcastRawFromQueue(
+                           scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, second, false));
+
+  EXPECT_EQ(TaskPreTuning_List({first, third}),
+            TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
+  EXPECT_EQ(nullptr, scene_.comm()->memPool_ncclRawTask.head);
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningRemoveBcastRawFromQueue_WithFree_ReturnsTheRawTaskToThePool) {
+  struct ncclRawTask* only = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueBcast(only);
+  ASSERT_EQ(nullptr, scene_.comm()->memPool_ncclRawTask.head);
+
+  ASSERT_EQ(ncclSuccess, preTuningRemoveBcastRawFromQueue(
+                           scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, only, true));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene_.comm()->rawTaskQueue.bcastQueue));
+  EXPECT_EQ(static_cast<void*>(only), static_cast<void*>(scene_.comm()->memPool_ncclRawTask.head));
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningRemoveBcastRawFromQueue_TailRemoved_LeavesTheQueueAppendable) {
+  struct ncclRawTask* first = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* tail = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* appended = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueBcast(first);
+  scene_.EnqueueBcast(tail);
+
+  ASSERT_EQ(ncclSuccess, preTuningRemoveBcastRawFromQueue(
+                           scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, tail, false));
+  scene_.EnqueueBcast(appended);
+
+  EXPECT_EQ(TaskPreTuning_List({first, appended}),
+            TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningRemoveBcastRawFromQueue_RawTaskNotQueued_LeavesTheQueueIntact) {
+  struct ncclRawTask* queued = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* stranger = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueBcast(queued);
+
+  ASSERT_EQ(ncclSuccess, preTuningRemoveBcastRawFromQueue(
+                           scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, stranger, false));
+
+  EXPECT_EQ(TaskPreTuning_List({queued}),
+            TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningMergeBcastQueue_EmptyQueue_LeavesTheTuningQueueEmpty) {
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+
+  ASSERT_EQ(ncclSuccess,
+            preTuningMergeBcastQueue(scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, &tiq));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&tiq.queue));
+}
+
+// preTuningBcastFallsBack is hardcoded true, so every broadcast takes the fallback arm and agvRaw stays null.
+TEST_F(TaskPreTuningMicrotest, PreTuningMergeBcastQueue_EveryBroadcastFallsBack_DrainsThemInQueueOrder) {
+  struct ncclRawTask* first = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* second = scene_.NewColl(ncclFuncBroadcast, ncclFloat64);
+  struct ncclRawTask* third = scene_.NewColl(ncclFuncBroadcast);
+  for (struct ncclRawTask* raw : {first, second, third}) {
+    scene_.EnqueueBcast(raw);
+  }
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+
+  ASSERT_EQ(ncclSuccess,
+            preTuningMergeBcastQueue(scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, &tiq));
+
+  EXPECT_EQ(TaskPreTuning_List({first, second, third}), TaskPreTuning_TunedRaws(&tiq));
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene_.comm()->rawTaskQueue.bcastQueue));
+  EXPECT_EQ(nullptr, scene_.comm()->memPool_ncclRawTask.head) << "the fallback arm must not free the raw task";
+  std::vector<struct ncclTaskTuningInfo*> tuned = QueueTasks(&tiq.queue);
+  ASSERT_EQ(3u, tuned.size());
+  EXPECT_EQ(kCollSendBytes, tuned[0]->tuningIn.count);
+  EXPECT_EQ(kCount * kDoubleSize, tuned[1]->tuningIn.count);
+  EXPECT_TRUE(CarriesNoTuningEstimate(tuned[0]->tuningOut));
+}
+
+TEST_F(TaskPreTuningMicrotest, PreTuningMergeBcastQueue_TuningInputFails_PropagatesAndKeepsTheRemainder) {
+  struct ncclRawTask* first = scene_.NewColl(ncclFuncBroadcast);
+  struct ncclRawTask* second = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueBcast(first);
+  scene_.EnqueueBcast(second);
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+  ScopedHook isValid(g_regLocalIsValid, [](struct ncclReg*, bool*) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclInternalError,
+            preTuningMergeBcastQueue(scene_.comm(), &scene_.comm()->rawTaskQueue.bcastQueue, &tiq));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&tiq.queue));
+  EXPECT_EQ(TaskPreTuning_List({first, second}),
+            TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
+}
+
+TEST_F(TaskPreTuningMicrotest, TaskPreTuning_NullArgument_ReturnsInvalidArgument) {
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+  scene_.EnqueueGeneric(scene_.NewColl(ncclFuncAllReduce));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclTaskPreTuning(nullptr, &scene_.comm()->rawTaskQueue, &tiq));
+  EXPECT_EQ(ncclInvalidArgument, ncclTaskPreTuning(scene_.comm(), nullptr, &tiq));
+  EXPECT_EQ(ncclInvalidArgument, ncclTaskPreTuning(scene_.comm(), &scene_.comm()->rawTaskQueue, nullptr));
+  EXPECT_TRUE(ncclIntruQueueEmpty(&tiq.queue));
+  EXPECT_FALSE(ncclIntruQueueEmpty(&scene_.comm()->rawTaskQueue.genericQueue));
+}
+
+TEST_F(TaskPreTuningMicrotest, TaskPreTuning_BothQueues_DrainsTheGenericQueueBeforeTheBroadcasts) {
+  struct ncclRawTask* coll = scene_.NewColl(ncclFuncAllReduce);
+  struct ncclRawTask* sendRecv = scene_.NewSendRecv(ncclFuncSend, kPeer);
+  struct ncclRawTask* bcast = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueGeneric(coll);
+  scene_.EnqueueGeneric(sendRecv);
+  scene_.EnqueueBcast(bcast);
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+
+  ASSERT_EQ(ncclSuccess, ncclTaskPreTuning(scene_.comm(), &scene_.comm()->rawTaskQueue, &tiq));
+
+  EXPECT_EQ(TaskPreTuning_List({coll, sendRecv, bcast}), TaskPreTuning_TunedRaws(&tiq));
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene_.comm()->rawTaskQueue.genericQueue));
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene_.comm()->rawTaskQueue.bcastQueue));
+}
+
+TEST_F(TaskPreTuningMicrotest, TaskPreTuning_EachTaskKind_FillsItsOwnTuningInput) {
+  struct ncclRawTask* rma = scene_.NewRma(ncclFuncPutSignal);
+  rma->rma.rmaOp.putSignal.datatype = ncclFloat64;
+  scene_.EnqueueGeneric(scene_.NewColl(ncclFuncAllReduce));
+  scene_.EnqueueGeneric(scene_.NewSendRecv(ncclFuncSend, kPeer));
+  scene_.EnqueueGeneric(rma);
+  scene_.EnqueueGeneric(scene_.NewAllGatherV());
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+
+  ASSERT_EQ(ncclSuccess, ncclTaskPreTuning(scene_.comm(), &scene_.comm()->rawTaskQueue, &tiq));
+
+  std::vector<struct ncclTaskTuningInfo*> tuned = QueueTasks(&tiq.queue);
+  ASSERT_EQ(4u, tuned.size());
+  const std::vector<ncclFunc_t> expectedFuncs = {ncclFuncAllReduce, ncclFuncSend, ncclFuncPutSignal,
+                                                 ncclFuncAllGatherV};
+  const std::vector<size_t> expectedBytes = {kCollSendBytes, kCollSendBytes, kCount * kDoubleSize,
+                                             kCount};
+  for (size_t i = 0; i < expectedFuncs.size(); i++) {
+    EXPECT_EQ(expectedFuncs[i], tuned[i]->tuningIn.func) << "index = " << i;
+    EXPECT_EQ(expectedBytes[i], tuned[i]->tuningIn.nBytes) << "index = " << i;
+    EXPECT_EQ(scene_.comm(), tuned[i]->tuningIn.comm);
+    EXPECT_TRUE(CarriesNoTuningEstimate(tuned[i]->tuningOut));
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, TaskPreTuning_UnknownRawTaskKind_ReturnsInternalError) {
+  struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
+  raw->kind = TaskPrep_Poisoned<ncclTaskKind>();
+  scene_.EnqueueGeneric(raw);
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+
+  EXPECT_EQ(ncclInternalError, ncclTaskPreTuning(scene_.comm(), &scene_.comm()->rawTaskQueue, &tiq));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&tiq.queue));
+}
+
+TEST_F(TaskPreTuningMicrotest, TaskPreTuning_GenericQueueFails_PropagatesBeforeTheBroadcasts) {
+  scene_.EnqueueGeneric(scene_.NewColl(ncclFuncAllReduce));
+  struct ncclRawTask* bcast = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueBcast(bcast);
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+  ScopedHook isValid(g_regLocalIsValid, [](struct ncclReg*, bool*) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclInternalError, ncclTaskPreTuning(scene_.comm(), &scene_.comm()->rawTaskQueue, &tiq));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&tiq.queue));
+  // Only a drained generic queue proves the generic arm ran first; a bcast-first drain would leave it full.
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene_.comm()->rawTaskQueue.genericQueue));
+  EXPECT_EQ(TaskPreTuning_List({bcast}),
+            TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
+}
+
+// Nothing on the generic queue, so the only path to a failure is the NCCLCHECK around the bcast merge.
+TEST_F(TaskPreTuningMicrotest, TaskPreTuning_BcastQueueFails_PropagatesThroughTheMerge) {
+  struct ncclRawTask* bcast = scene_.NewColl(ncclFuncBroadcast);
+  scene_.EnqueueBcast(bcast);
+  struct ncclTaskTuningInfoQueue tiq;
+  ncclIntruQueueConstruct(&tiq.queue);
+  ScopedHook isValid(g_regLocalIsValid, [](struct ncclReg*, bool*) { return ncclInternalError; });
+
+  EXPECT_EQ(ncclInternalError, ncclTaskPreTuning(scene_.comm(), &scene_.comm()->rawTaskQueue, &tiq));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&tiq.queue));
+  EXPECT_EQ(TaskPreTuning_List({bcast}),
+            TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
 }
 
 }  // namespace
