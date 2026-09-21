@@ -45,7 +45,7 @@ if(${ARCH_GFX1250} GREATER_EQUAL 0)
     set(TEST_SRC
         test_amd_gfx1250_TDM.cpp
     )
-    hip_add_exe_to_target(NAME tdm_basic_load_store
+    hip_add_exe_to_target(NAME test_amd_gfx1250_TDM
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests)
 endif()
