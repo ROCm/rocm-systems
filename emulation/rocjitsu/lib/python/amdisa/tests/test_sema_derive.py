@@ -3183,10 +3183,11 @@ class TestDeriveBufferFormat:
         assert sem.num_elems == 1
         assert sem.d16_lo and not sem.d16_hi
 
-    def test_typed_non_d16_load_under_vbuffer_stays_nop(self):
+    def test_typed_non_d16_load_under_vbuffer_is_executable(self):
         sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_VBUFFER')
         assert sem is not None
-        assert sem.semantic_class == 'nop'
+        assert sem.semantic_class == 'tbuffer_load'
+        assert sem.num_elems == 4
 
     @pytest.mark.parametrize(
         'legacy,rdna_ordered,enc',

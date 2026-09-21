@@ -5992,7 +5992,7 @@ TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
   EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
-TEST(RdnaAddrCalcTest, Rdna3MubufIgnoresSoffsetInRangeCheck) {
+TEST(RdnaAddrCalcTest, Rdna3IndexedBoundsExcludeSoffset) {
   amdgpu::GpuMemory mem("rdna3_mubuf_soffset_mem");
   amdgpu::L2Cache l2("rdna3_mubuf_soffset_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -6014,7 +6014,7 @@ TEST(RdnaAddrCalcTest, Rdna3MubufIgnoresSoffsetInRangeCheck) {
   cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 2, 120);
-  cu->write_sgpr(sbase + 3, 0);
+  cu->write_sgpr(sbase + 3, 1u << 28); // Index-only mode.
   cu->write_sgpr(sbase + 8, 64);
   cu->write_vgpr(vbase + 4, 0, 116);
 
