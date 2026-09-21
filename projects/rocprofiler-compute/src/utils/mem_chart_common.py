@@ -16,8 +16,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from utils.utils_analysis import format_bw_human_readable
-
 CachePanelRow = Union[
     tuple[str, Any, str, str],
     tuple[str, Any, str, str, bool],
@@ -52,7 +50,11 @@ _STALL_ENTRY: tuple[str, str, str] = ("█", "Stall", "stall")
 def format_value(
     value: Union[int, float, str, None], unit: str = "", precision: int = 1
 ) -> str:
-    """Format a metric value with unit. Returns 'N/A' for None/NaN/invalid."""
+    """Format a metric value with unit. Returns 'N/A' for None/NaN/invalid.
+
+    Bandwidth units (Bytes/s, GB/s) are always rendered as fixed GB/s
+    with 3 decimal places for easy comparison across cache levels.
+    """
     if value is None:
         return "N/A"
     try:
@@ -61,8 +63,12 @@ def format_value(
         return "N/A"
     if math.isnan(numeric):
         return "N/A"
-    if unit in ("GB/s", "Bytes/s"):
-        return format_bw_human_readable(value, unit, precision)
+    if unit == "GB/s":
+        gbps = numeric
+        return f"{gbps:.3f} GB/s"
+    if unit == "Bytes/s":
+        gbps = numeric / 1e9
+        return f"{gbps:.3f} GB/s"
     if unit == "%":
         return f"{numeric:.{precision}f}%"
     return f"{numeric:.{precision}f}{unit}"
@@ -234,13 +240,29 @@ def build_arch_notes(
 def build_kernel_panel(
     height: int,
     padding_lines: int = 13,
+    stats: Optional[list] = None,
 ) -> Panel:
-    """Build the Kernel (shader core) panel used by both gfx9 and gfx11."""
+    """Build the Compute Units panel used by gfx9 and gfx11.
+
+    When *stats* is given, each entry is a (label, value, unit) tuple
+    rendered as a metric line inside the panel. Otherwise the panel
+    shows decorative placeholder text.
+    """
+    if stats:
+        lines: list[str] = []
+        for label, value, unit in stats:
+            lines.append(metric_line(label, value, unit))
+        content = "\n".join(lines)
+    else:
+        content = (
+            "\n" * padding_lines + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]"
+        )
+    color = COLORS["kernel"]
     return Panel(
-        "\n" * padding_lines + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
-        title=(f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]"),
-        border_style=COLORS["kernel"],
-        width=14,
+        content,
+        title=f"[bold {color}]Compute Units[/bold {color}]",
+        border_style=color,
+        width=19,
         height=height,
     )
 
