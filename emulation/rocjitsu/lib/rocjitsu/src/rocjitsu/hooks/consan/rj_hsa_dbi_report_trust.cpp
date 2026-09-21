@@ -18,7 +18,8 @@ ReportTrustEvaluation evaluate_report_trust(const ReportSummary &summary, bool r
   result.dynamic_incomplete_count = summary.allocation_failure_count +
                                     summary.cleanup_failure_count + result.dropped_record_count +
                                     summary.unusable_snapshot_count() +
-                                    summary.unsupported_sync_count + summary.malformed_sync_count;
+                                    summary.unsupported_sync_count + summary.malformed_sync_count +
+                                    summary.epoch_exhaustion_count;
   result.dynamic_complete =
       result.dynamic_incomplete_count == 0u && !result.required_records_missing;
   result.has_diagnostics = summary.conflict_count + summary.immediate_conflict_count > 0u;

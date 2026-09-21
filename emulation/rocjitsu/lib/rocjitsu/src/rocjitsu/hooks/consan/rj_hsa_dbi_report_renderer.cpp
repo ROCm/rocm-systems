@@ -123,7 +123,7 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
          "pending_acquire_malformed=%u pending_release_slots_examined=%llu "
          "conflicts=%u suppressed_uniform_write_conflicts=%u "
          "immediate_conflicts=%llu claimed_windows=%llu "
-         "dropped_windows=%llu saturated_windows=%llu "
+         "dropped_windows=%llu saturated_windows=%llu epoch_exhaustion=%llu "
          "stale_snapshots=%llu incomplete_snapshots=%llu "
          "changed_snapshots=%llu malformed_snapshots=%llu "
          "static_mapping_malformed=%llu"
@@ -147,6 +147,7 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
          static_cast<unsigned long long>(summary.claimed_window_count),
          static_cast<unsigned long long>(summary.dropped_window_count),
          static_cast<unsigned long long>(summary.saturated_window_count),
+         static_cast<unsigned long long>(summary.epoch_exhaustion_count),
          static_cast<unsigned long long>(summary.stale_snapshot_count),
          static_cast<unsigned long long>(summary.incomplete_snapshot_count),
          static_cast<unsigned long long>(summary.changed_snapshot_count),

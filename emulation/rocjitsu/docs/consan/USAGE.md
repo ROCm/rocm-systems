@@ -97,6 +97,16 @@ experiments when comparing presets. Check the resolved settings with
 `RJ_CONSAN_LOG=1`; see the [expert reference](EXPERT_CONTROLS.md#consan-event-and-sampling-controls)
 for override rules.
 
+### Barrier epoch limit
+
+The default detector distinguishes epochs 0 through 1023 per wave. After the
+1024th instrumented workgroup barrier, that wave stops publishing memory-access
+evidence; its accesses can no longer yield race diagnoses. The report records
+`epoch_exhaustion`, marks `dynamic_complete=false` and `analysis_complete=false`,
+and prints an explicit warning. Earlier evidence remains usable, including real
+races within epoch 1023. `RJ_CONSAN_FORBID_OVERFLOW=1` makes exhaustion terminate
+with exit code 90. Increasing the sampling preset does not lift this limit.
+
 ## Generate and use a kernel allowlist
 
 An allowlist can greatly reduce startup work on large library binaries by

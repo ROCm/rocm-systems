@@ -434,6 +434,18 @@ using detail::WorkitemOwnerDerivationPlan;
       instrumentation::build_s_cselect_b32(publication_scc_save_sgpr, scalar_positive_inline_u32(1),
                                            scalar_positive_inline_u32(0), arch),
       instrumentation::build_s_mov_b64(selection_vcc_save_sgpr, kAmdGpuVccLo, arch));
+  if (plan.owner_epoch_vgprs.epoch) {
+    // Execute the guest access normally, but never publish an exhausted epoch
+    // through the narrower packed field (which would wrap it back to zero).
+    require_emission.append(
+        "ConSan probe could not guard exhausted epoch",
+        instrumentation::build_v_mov_b32_literal(high_vgpr, watchpoint::exhausted_epoch, arch),
+        instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(high_vgpr),
+                                                *plan.owner_epoch_vgprs.epoch, arch));
+    sequence.branch(restore_label, InstructionSequence::BranchKind::VccZero)
+        .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo,
+                                                          arch));
+  }
   // Publication has several nested EXEC-narrowing paths. Some paths reuse the
   // publication-save pair after an earlier narrowing, so that pair is not a
   // reliable copy of the guest mask at the common exit. Keep the otherwise

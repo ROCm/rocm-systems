@@ -3499,7 +3499,7 @@ TEST(HsaHooksUnitTest, ConSanReportTrustEvaluationOwnsDynamicCompleteness) {
                        &Summary::dropped_window_count, &Summary::stale_snapshot_count,
                        &Summary::incomplete_snapshot_count, &Summary::changed_snapshot_count,
                        &Summary::malformed_snapshot_count, &Summary::unsupported_sync_count,
-                       &Summary::malformed_sync_count}) {
+                       &Summary::malformed_sync_count, &Summary::epoch_exhaustion_count}) {
     auto incomplete = summary;
     incomplete.*counter = 1;
     const auto evaluated = evaluate_report_trust(incomplete, true);

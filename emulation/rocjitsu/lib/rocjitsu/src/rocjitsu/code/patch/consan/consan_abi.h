@@ -25,7 +25,7 @@ enum class AtomicEventKind : uint32_t {
 };
 
 inline constexpr uint32_t kReportMagic = 0x494f4d43u; // "CMOI" little-endian.
-inline constexpr uint32_t kReportAbiVersion = 15;
+inline constexpr uint32_t kReportAbiVersion = 16;
 struct alignas(8) ReportHeader {
   uint32_t magic = kReportMagic;
   uint32_t abi_version = kReportAbiVersion;
@@ -49,6 +49,8 @@ struct alignas(8) ReportHeader {
   uint32_t pending_acquire_contention_count = 0;
   uint32_t pending_acquire_collision_count = 0;
   uint32_t pending_acquire_malformed_count = 0;
+  // Waves which attempted to advance beyond the last representable epoch.
+  uint32_t epoch_exhaustion_count = 0;
 };
 
 struct alignas(8) CausalWindow {
@@ -97,7 +99,7 @@ struct alignas(8) PendingAcquireSlot {
   [[nodiscard]] constexpr bool operator==(const PendingAcquireSlot &) const = default;
 };
 
-static_assert(sizeof(ReportHeader) == 96);
+static_assert(sizeof(ReportHeader) == 104);
 static_assert(sizeof(CausalWindow) == 56);
 static_assert(sizeof(SyncMetadataPacked) == 24);
 static_assert(sizeof(PendingAcquireSlot) == 72);

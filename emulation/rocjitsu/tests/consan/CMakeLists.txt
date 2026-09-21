@@ -457,6 +457,56 @@ function(rj_add_consan_device_conformance_cases)
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
 
+    foreach(_epoch_case IN ITEMS LastOrderedPair LastEpochRace ExhaustedOrderedPair RepeatedExhaustion OverflowPolicy)
+        set(_epoch_filter "${_epoch_case}")
+        set(_epoch_exit 0)
+        set(_epoch_forbid_overflow 0)
+        set(_epoch_require_records 1)
+        if(_epoch_case STREQUAL "OverflowPolicy")
+            set(_epoch_filter RepeatedExhaustion)
+            set(_epoch_exit 90)
+            set(_epoch_forbid_overflow 1)
+        endif()
+        if(_epoch_filter STREQUAL "RepeatedExhaustion")
+            set(_epoch_require_records 0)
+        endif()
+        set(_epoch_complete true)
+        set(_epoch_exhaustion 0)
+        set(_epoch_race 0)
+        if(_epoch_filter MATCHES "Exhausted|Repeated")
+            set(_epoch_complete false)
+            if(_device_TARGET MATCHES "gfx942|gfx950")
+                set(_epoch_exhaustion 2)
+            else()
+                set(_epoch_exhaustion 4)
+            endif()
+        elseif(_epoch_case STREQUAL "LastEpochRace")
+            set(_epoch_race 1)
+        endif()
+        rj_add_consan_hip_case(
+            NAME "${_device_PREFIX}.Epoch.${_epoch_case}"
+            TARGET hip_consan_device_epoch_exhaustion_${_device_TARGET}_test
+            FILTER "ConSanDeviceEpochTest.${_epoch_filter}"
+            EXPECTED_EXIT ${_epoch_exit}
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 120
+            PASS_REGEX "ConSan analysis verdict applicable=true analysis_complete=${_epoch_complete}.*dynamic_complete=${_epoch_complete}.*epoch_exhaustion=${_epoch_exhaustion}"
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "HSA_TOOLS_DISABLE_REGISTER=1"
+                "RJ_CONSAN_MODE=default"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_PRESET=max"
+                "RJ_CONSAN_REQUIRE_RECORDS=${_epoch_require_records}"
+                "RJ_CONSAN_REQUIRE_DIAGNOSTICS=${_epoch_race}"
+                "RJ_CONSAN_FORBID_DIAGNOSTICS=$<IF:$<BOOL:${_epoch_race}>,0,1>"
+                "RJ_CONSAN_FORBID_OVERFLOW=${_epoch_forbid_overflow}"
+                "RJ_CONSAN_TRACK_BARRIERS=1"
+            LABELS ${_labels} default epoch-exhaustion
+        )
+    endforeach()
+
     # Exact masks currently require ordinary VGPR addressing, without the
     # selectable-bank state of gfx1250.
     if(NOT _device_TARGET STREQUAL "gfx1250")
@@ -1580,6 +1630,7 @@ function(rj_add_consan_device_fixture_targets target)
     rj_add_consan_device_module_lifecycle_fixture(${target})
     set(_device_workload_sources
         "selection|selection_test.hip"
+        "epoch_exhaustion|epoch_exhaustion_test.hip"
         "ordered_tile_handoff|ordered_tile_handoff_test.hip"
         "reduction|reduction_test.hip"
         "shared_helper_owners|shared_helper_owners_test.hip"

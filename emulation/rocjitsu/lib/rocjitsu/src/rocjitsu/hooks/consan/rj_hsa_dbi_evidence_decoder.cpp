@@ -352,6 +352,7 @@ DecodedEvidence decode_evidence(const ReportPipelineInput &input, const ReportHe
   summary.claimed_window_count = header->causal_window_count;
   summary.dropped_window_count = header->dropped_window_count;
   summary.saturated_window_count = header->saturated_window_count;
+  summary.epoch_exhaustion_count = header->epoch_exhaustion_count;
   summary.unsupported_sync_count = header->unsupported_sync_count;
   summary.malformed_sync_count += header->malformed_sync_count;
 

@@ -32,6 +32,7 @@ struct ReportSummary {
   uint64_t claimed_window_count = 0;
   uint64_t dropped_window_count = 0;
   uint64_t saturated_window_count = 0;
+  uint64_t epoch_exhaustion_count = 0;
   uint64_t stale_snapshot_count = 0;
   uint64_t incomplete_snapshot_count = 0;
   uint64_t changed_snapshot_count = 0;

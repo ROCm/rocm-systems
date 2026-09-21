@@ -535,7 +535,8 @@ TEST(ConSan, DirectProbeWritesPackedWatchpointEntry) {
   ASSERT_TRUE(restore_exec);
   EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *save_scc), 1);
   EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *restore_scc), 1);
-  EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *narrow_exec), 2);
+  // Epoch validity adds a narrowing before the publication/identity checks.
+  EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *narrow_exec), 3);
   // Winner, exact duplicate, and different-identity collision paths restore
   // the original EXEC mask independently.
   EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *restore_exec), 3);
