@@ -8,6 +8,8 @@
 #include <unistd.h>
 #endif
 
+#include <cinttypes>
+
 #include "CL/cl_ext.h"
 
 #include "utils/util.hpp"
@@ -1298,7 +1300,7 @@ amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bo
     // Retrieve the corresponding phys_mem handle for the mapped dev_ptr.
     hsa_status_t hsa_status = Hsa::vmem_retain_alloc_handle(&mem_handle, dev_ptr);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot retain alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+      LogPrintfError("Cannot retain alloc handle for dev_ptr: %p hsa returned status: %d",
                      dev_ptr, hsa_status);
       return MapHsaExportError(hsa_status);
     }
@@ -1313,13 +1315,14 @@ amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bo
     hsa_status_t release_status = Hsa::vmem_handle_release(mem_handle);
 
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
-                     mem_handle, hsa_status);
+      LogPrintfError("Cannot get shareable handle for mem_handle: %" PRIu64
+                     ", hsa returned status: %d",
+                     mem_handle.handle, hsa_status);
       return MapHsaExportError(hsa_status);
     }
     if (release_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
-          "Cannot release retained alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+          "Cannot release retained alloc handle for dev_ptr: %p hsa returned status: %d",
           dev_ptr, release_status);
       // The retained handle could not be balanced after a successful export. Don't hand back
       // a fd whose backing allocation's reference count is now in an unknown state.
@@ -1334,7 +1337,7 @@ amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bo
                                                              &offset, dmabuf_mapping_type);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
-          "Cannot export a portable fd for dev_ptr: 0x%x with size: %lu,"
+          "Cannot export a portable fd for dev_ptr: %p with size: %zu, "
           "hsa returned status: %d",
           dev_ptr, size, hsa_status);
       return MapHsaExportError(hsa_status);
