@@ -11,7 +11,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import profile_data
+from utils import csv_compression, profile_data
 from utils.logger import (
     console_error,
     console_log,
@@ -22,6 +22,8 @@ from utils.utils_common import (
     canonical_config_arch,
     normalize_filter_to_str_list,
 )
+
+KERNEL_SYMBOLS_CSV_GLOB = f"kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -229,6 +231,49 @@ def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
         tool_records.append(tool_record)
     _validate_pc_sampling_process_ids(tool_records)
     return tool_records
+
+
+def load_kernel_short_names(
+    workload_path: str,
+    tool_data_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Map a workload's kernel names to the short names profiling captured."""
+    symbol_frames = _read_kernel_symbol_csvs(workload_path)
+
+    # A PC-sampling-only run has no rocpd database to write the CSV from, so
+    # read the same pair out of its results JSON instead.
+    if not symbol_frames:
+        return {
+            symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
+            for tool_data in tool_data_records
+            for symbol in tool_data.get("kernel_symbols", [])
+        }
+
+    # A symbol is written once per process and once per run. The repeats all
+    # say the same thing, so keeping the last one is enough.
+    symbols = pd.concat(symbol_frames, ignore_index=True).dropna(
+        subset=["Kernel_Name", "Kernel_Short_Name"]
+    )
+    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
+
+
+def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
+    """Return the workload's symbol CSVs that hold symbols to read.
+
+    The conversion opens each file before it runs its query, so an extract that
+    failed leaves an empty file behind rather than no file.
+    """
+    symbol_frames = []
+    for symbol_csv_path in sorted(Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)):
+        try:
+            symbols = pd.read_csv(symbol_csv_path)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            continue
+        if not symbols.empty and {"Kernel_Name", "Kernel_Short_Name"}.issubset(
+            symbols.columns
+        ):
+            symbol_frames.append(symbols)
+    return symbol_frames
 
 
 def process_pc_sampling_kernel_traces(
