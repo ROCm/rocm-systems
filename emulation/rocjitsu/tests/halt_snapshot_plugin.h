@@ -46,6 +46,8 @@ struct WavefrontSnapshot {
   uint32_t status = 0;
   uint32_t mode_raw = 0;            ///< MODE register at halt.
   uint8_t vgpr_msb_mode = 0;        ///< Decoded s_set_vgpr_msb layout at halt.
+  uint64_t scratch_base = 0;        ///< Wave scratch slice base.
+  uint32_t scratch_lane_size = 0;   ///< Private bytes per lane.
   uint64_t lds_size_bytes = 0;      ///< Size of the LDS region visible to this wave.
   simdojo::ComponentID cu_id = 0;   ///< Originating CU component id (for per-CU grouping).
   std::vector<uint32_t> sgprs;      ///< Full physical SGPR block (sgprs_per_wf).
@@ -125,6 +127,8 @@ public:
     s.mode_raw = wf.mode_raw();
     s.vgpr_msb_mode = wf.vgpr_msb_mode();
     s.lds_size_bytes = wf.lds().size_bytes();
+    s.scratch_base = wf.scratch_base();
+    s.scratch_lane_size = wf.scratch_lane_size();
     s.cu_id = wf.cu().id();
 
     // Read the live register file through the instruction-facing facade rather

@@ -159,7 +159,8 @@ struct VmFixture {
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
   VmFixture(std::string_view arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
-            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104, uint32_t vgprs_per_wf = 256) {
+            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104, uint32_t vgprs_per_wf = 256,
+            uint64_t max_ticks = 10000) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -171,7 +172,8 @@ struct VmFixture {
                std::to_string(i) + R"(","latency":1,"weight":10})";
     }
 
-    std::string json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":")" + std::string(arch) +
+    std::string json = R"({"max_ticks":)" + std::to_string(max_ticks) +
+                       R"(,"num_threads":1,"vm":{"arch":")" + std::string(arch) +
                        R"("},)"
                        R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
                        R"({"name":"vram","type":"gpu_memory"},)"
@@ -6628,6 +6630,190 @@ TEST(DoorbellMonitorLifecycle, ConcurrentLastQueueRemovalAndRegistrationKeepsMon
     cp->unregister_queue(new_queue.queue_id, new_queue.process_id);
     ASSERT_FALSE(cp->doorbell_monitor_running_for_test());
     ASSERT_FALSE(cp->doorbell_monitor_joinable_for_test());
+  }
+}
+
+TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
+  for (const auto *arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4"}) {
+    for (uint32_t wave_size : {32u, 64u}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(wave_size);
+      for (bool graphics_engine : {false, true}) {
+        VmFixture f(arch, 1, 8, 64, 106, 256, /*max_ticks=*/0);
+        auto *snapshots = f.capture_halts();
+        amdgpu::HwQueue queue;
+        queue.queue_id = 71;
+        queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
+        f.cp()->register_queue(std::move(queue));
+        constexpr uint64_t code = 0x8000, ib = 0x4000, indirect = 0x6010;
+        const bool unpacked_ids =
+            std::string_view(arch) == "rdna1" || std::string_view(arch) == "rdna2";
+        f.mem()->write32(code, unpacked_ids ? 0xbf810000 : 0xbfb00000); // s_endpgm.
+        for (uint32_t i = 0; i < 3; ++i)
+          f.mem()->write32(indirect + i * 4, 1);
+        std::vector<uint32_t> words;
+        auto packet = [&](amdgpu::Pm4Opcode opcode, std::initializer_list<uint32_t> payload) {
+          words.push_back(0xc0000000 | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
+          words.insert(words.end(), payload.begin(), payload.end());
+        };
+        const bool sgpr_ids = std::string_view(arch) != "rdna4";
+        const bool rdna1 = std::string_view(arch) == "rdna1";
+        const uint32_t initiator = 1u | (wave_size == 32 ? 1u << 15 : 0);
+        const uint32_t size_x = wave_size == 32 ? 11 : 13;
+        const uint32_t size_y = wave_size == 32 ? 3 : 5;
+        packet(amdgpu::Pm4Opcode::SetShReg,
+               {amdgpu::kPm4ComputeStartX, 2, 3, 4}); // COMPUTE_START_X/Y/Z.
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, size_x, size_y,
+                                             2}); // Three waves, with a partial final wave.
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeUserData0, 0x12345678, 0xabcdef01});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
+        packet(amdgpu::Pm4Opcode::SetShReg,
+               {amdgpu::kPm4ComputePgmRsrc2, (2u << 1) | (7u << 7) | (1u << 10) | (2u << 11)});
+        packet(amdgpu::Pm4Opcode::DispatchDirect, {3, 4, 5, initiator}); // One group at (2,3,4).
+        packet(amdgpu::Pm4Opcode::LoadShRegIndex,
+               {uint32_t(indirect), 0, amdgpu::kPm4ComputeUserData0, 3}); // LOAD_SH_REG_INDEX.
+        if (graphics_engine) {
+          packet(amdgpu::Pm4Opcode::SetBase,
+                 {1, 0x6000, 0}); // SET_BASE for graphics DISPATCH_INDIRECT.
+          packet(amdgpu::Pm4Opcode::DispatchIndirect, {0x10, initiator | 4});
+        } else {
+          packet(amdgpu::Pm4Opcode::DispatchIndirect, {uint32_t(indirect), 0, initiator | 4});
+        }
+        packet(amdgpu::Pm4Opcode::Nop, {0});
+        for (uint32_t i = 0; i < words.size(); ++i)
+          f.mem()->write32(ib + i * 4, words[i]);
+        bool completed = false, succeeded = false;
+        amdgpu::Pm4Submission submission;
+        submission.graphics_engine = graphics_engine;
+        submission.buffers.push_back({ib, uint32_t(words.size())});
+        // The real driver keeps a VM primary alive while waiting for its fence.
+        f.engine->register_as_primary();
+        submission.complete = [&](bool success) {
+          completed = true;
+          succeeded = success;
+          f.engine->primary_release();
+        };
+        ASSERT_TRUE(f.cp()->submit_pm4(71, 0, std::move(submission)));
+        f.engine->run();
+        ASSERT_TRUE(completed) << "snapshots=" << snapshots->snapshots().size();
+        ASSERT_TRUE(succeeded);
+        ASSERT_EQ(snapshots->snapshots().size(), 6u);
+        std::array<uint32_t, 3> wave_counts{};
+        for (size_t i = 0; i < 6; ++i) {
+          const auto &wave = snapshots->snapshots()[i];
+          const bool based = i < 3;
+          EXPECT_EQ(wave.wf_size, wave_size);
+          EXPECT_EQ(wave.sgpr(0), based ? 0x12345678u : 1u);
+          EXPECT_EQ(wave.sgpr(1), based ? 0xabcdef01u : 1u);
+          uint32_t wave_id;
+          if (sgpr_ids) {
+            EXPECT_EQ(wave.sgpr(2), based ? 2u : 0u);
+            EXPECT_EQ(wave.sgpr(3), based ? 3u : 0u);
+            EXPECT_EQ(wave.sgpr(4), based ? 4u : 0u);
+            const uint32_t info = wave.sgpr(5);
+            wave_id = (info >> 6) & 31;
+            ASSERT_LT(wave_id, 3u);
+            EXPECT_EQ(info, 3u | (wave_id << 6) | (rdna1 ? 0u : wave_id << 20) |
+                                (wave_id == 0 ? 1u << 31 : 0));
+          } else {
+            EXPECT_EQ(wave.ttmp(9), based ? 2u : 0u);
+            EXPECT_EQ(wave.ttmp(7), based ? (4u << 16) | 3u : 0u);
+            wave_id = (wave.ttmp(8) >> 25) & 31;
+            EXPECT_EQ(wave.sgpr(2), 3u | (wave_id << 6));
+          }
+          ASSERT_LT(wave_id, 3u);
+          ++wave_counts[wave_id];
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
+            const uint32_t tid = wave_id * wave_size + lane;
+            EXPECT_EQ(bool(wave.exec & (uint64_t{1} << lane)), tid < size_x * size_y * 2);
+            if (!(wave.exec & (uint64_t{1} << lane)))
+              continue;
+            const uint32_t x = tid % size_x, y = (tid / size_x) % size_y,
+                           z = tid / (size_x * size_y);
+            if (unpacked_ids) {
+              EXPECT_EQ(wave.vgpr(0, lane), x);
+              EXPECT_EQ(wave.vgpr(1, lane), y);
+              EXPECT_EQ(wave.vgpr(2, lane), z);
+            } else {
+              EXPECT_EQ(wave.vgpr(0, lane), x | (y << 10) | (z << 20));
+            }
+          }
+        }
+        EXPECT_EQ(wave_counts, (std::array<uint32_t, 3>{2, 2, 2}));
+      }
+    }
+  }
+}
+
+TEST(Pm4DispatchTest, ScratchUsesTargetRegisterLayout) {
+  for (const auto *arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    const bool legacy = std::string_view(arch) == "rdna1" || std::string_view(arch) == "rdna2";
+    for (uint32_t wave_size : {32u, 64u}) {
+      for (uint32_t units : {1u, 0x8001u}) {
+        if (units > 1 && std::string_view(arch) != "rdna4")
+          continue;
+        SCOPED_TRACE(wave_size);
+        SCOPED_TRACE(units);
+        constexpr uint64_t code = 0x8000, ib = 0x4000, scratch = 0x10000;
+        constexpr uint32_t pid = 7;
+        const uint32_t wave_bytes = units * (legacy ? 1024 : 256);
+        KfdProcess process(pid);
+        std::array<uint8_t, 4096> code_backing{}, ib_backing{};
+        std::vector<uint8_t> scratch_backing(3 * wave_bytes);
+        process.map_pages(code, code_backing.data(), code_backing.size());
+        process.map_pages(ib, ib_backing.data(), ib_backing.size());
+        process.map_pages(scratch, scratch_backing.data(), scratch_backing.size());
+        VmFixture f(arch, 1, 8, 64, 106, 256, /*max_ticks=*/0);
+        f.mem()->register_process(pid, &process.page_table_, &process.page_table_mutex_,
+                                  process.page_table_generation());
+        auto *snapshots = f.capture_halts();
+        amdgpu::HwQueue queue;
+        queue.queue_id = 71;
+        queue.process_id = pid;
+        queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
+        f.cp()->register_queue(std::move(queue));
+        f.mem()->write32(code, legacy ? 0xbf810000 : 0xbfb00000, pid);
+        std::vector<uint32_t> words;
+        auto packet = [&](amdgpu::Pm4Opcode op, std::initializer_list<uint32_t> payload) {
+          words.push_back(0xc0000000 | ((payload.size() - 1) << 16) | (uint32_t(op) << 8));
+          words.insert(words.end(), payload.begin(), payload.end());
+        };
+        packet(amdgpu::Pm4Opcode::SetShReg,
+               {amdgpu::kPm4ComputeNumThreadX, wave_size * 2 + 2, 1, 1});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc2, 1});
+        packet(amdgpu::Pm4Opcode::SetShReg,
+               {amdgpu::kPm4ComputeScratchLo, uint32_t(scratch >> 8), 0});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeTmpringSize, 3u | (units << 12)});
+        packet(amdgpu::Pm4Opcode::DispatchDirect, {1, 1, 1, 1u | (wave_size == 32 ? 1u << 15 : 0)});
+        for (uint32_t i = 0; i < words.size(); ++i)
+          f.mem()->write32(ib + i * 4, words[i], pid);
+        bool completed = false, succeeded = false;
+        amdgpu::Pm4Submission submission;
+        submission.buffers.push_back({ib, uint32_t(words.size())});
+        f.engine->register_as_primary();
+        submission.complete = [&](bool success) {
+          completed = true;
+          succeeded = success;
+          f.engine->primary_release();
+        };
+        ASSERT_TRUE(f.cp()->submit_pm4(71, pid, std::move(submission)));
+        f.engine->run();
+        ASSERT_TRUE(completed);
+        ASSERT_TRUE(succeeded);
+        ASSERT_EQ(snapshots->snapshots().size(), 3u);
+        std::vector<uint64_t> bases;
+        for (const auto &wave : snapshots->snapshots()) {
+          EXPECT_EQ(wave.scratch_lane_size, wave_bytes / wave_size);
+          bases.push_back(wave.scratch_base);
+        }
+        std::sort(bases.begin(), bases.end());
+        EXPECT_EQ(bases,
+                  (std::vector<uint64_t>{scratch, scratch + wave_bytes, scratch + 2 * wave_bytes}));
+        f.mem()->unregister_process(pid);
+      }
+    }
   }
 }
 

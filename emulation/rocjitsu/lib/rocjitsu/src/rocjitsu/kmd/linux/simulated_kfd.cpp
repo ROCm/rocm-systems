@@ -110,6 +110,32 @@ bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
   return true;
 }
 
+int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
+                             amdgpu::Pm4Submission submission) {
+  if (!find_process(local_process_id_))
+    return -ENODEV;
+  const uint32_t ordinal = num_gpus() == 1 ? 0 : render_minor - 128;
+  if (ordinal >= gpus_.size())
+    return -ENODEV;
+  std::lock_guard lock(pm4_mutex_);
+  auto it = pm4_queues_.find(queue_key);
+  if (it == pm4_queues_.end()) {
+    auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
+    if (!cp)
+      return -ENODEV;
+    amdgpu::HwQueue queue;
+    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
+    queue.process_id = local_process_id_;
+    queue.queue_id = next_pm4_queue_id_++;
+    const uint32_t queue_id = queue.queue_id;
+    cp->register_queue(std::move(queue));
+    it = pm4_queues_.emplace(queue_key, std::pair{cp, queue_id}).first;
+  }
+  return it->second.first->submit_pm4(it->second.second, local_process_id_, std::move(submission))
+             ? 0
+             : -EIO;
+}
+
 namespace {
 
 /// @brief mmap via the real libc, bypassing the interposer.
@@ -1937,7 +1963,11 @@ int SimulatedKfd::get_tile_config_ioctl(void *arg) {
 
   args->num_tile_configs = tile_write_count;
   args->num_macro_tile_configs = macro_write_count;
-  args->gb_addr_config = kmd::gb_addr_config_for_arch(gpu->soc->arch());
+  const uint32_t ordinal = gpu_ordinal(args->gpu_id);
+  args->gb_addr_config =
+      ordinal < gpu_infos_.size()
+          ? kmd::gb_addr_config_for_gfx_target_version(gpu_infos_[ordinal].gfx_target_version)
+          : kmd::gb_addr_config_for_arch(gpu->soc->arch());
   args->num_banks = 0;
   args->num_ranks = 0;
   return 0;
