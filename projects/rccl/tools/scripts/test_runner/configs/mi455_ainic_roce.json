@@ -1271,6 +1271,21 @@
           "test_filter": "Rcclwrap.*"
         },
         {
+          "name": "RcclAllReduceDdaDecision",
+          "description": "DDA-vs-ring AllReduce decision unit tests, including the RCCL_DDA_NRANKS_RELAX minRanks floor",
+          "test_filter": "RcclAllReduceDdaDecision.*"
+        },
+        {
+          "name": "RcclAlltoAllDdaDecision",
+          "description": "DDA-vs-CE AlltoAll decision unit tests, including the RCCL_DDA_NRANKS_RELAX minRanks floor",
+          "test_filter": "RcclAlltoAllDdaDecision.*"
+        },
+        {
+          "name": "DdaAllReduceIpcTreeEligibleTest",
+          "description": "ncclAllReduceDdaIpcTreeEligible() divisibility/16-byte-alignment predicate, shared by AllReduce IPC eligibility and launch dispatch",
+          "test_filter": "DdaAllReduceIpcTreeEligibleTest.*"
+        },
+        {
           "name": "TransportTest",
           "description": "Transport layer tests",
           "test_filter": "TransportTest.*"
@@ -1284,6 +1299,21 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllReduce eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaNranksRelaxTest.*:DdaNranksRelaxIsolatedTest.*"
+        },
+        {
+          "name": "DdaCollectivesNranksRelaxTest",
+          "description": "Low-rank (2..8) DDA IPC AllGather/ReduceScatter/AllToAll eligibility tests (RCCL_DDA_NRANKS_RELAX)",
+          "test_filter": "DdaCollectivesNranksRelaxTest.*:DdaCollectivesNranksRelaxIsolatedTest.*"
+        },
+        {
+          "name": "DdaNranksRelaxConsensusTest",
+          "description": "RCCL_DDA_NRANKS_RELAX per-rank agreement check (hang-prevention gate)",
+          "test_filter": "DdaNranksRelaxConsensus.*"
         },
         {
           "name": "DdaFabricEligibilityTest",
@@ -3636,9 +3666,56 @@
           "command_args": "-d fp8_e5m2"
         }
       ]
+    },
+    "dda_nranks_relax_4rank": {
+      "extends": "perf_base",
+      "description": "End-to-end rccl-tests sweep of the four single-node DDA IPC collectives with RCCL_DDA_NRANKS_RELAX=1. perf_base already runs at 4 ranks, but without the knob set the DDA paths stay gated at the 8-rank floor, so the relaxed low-rank kernels are never reached outside the in-process unit tests. Restricted to float/half/bfloat16: the DDA IPC eligibility predicates admit no other datatype, so an int sweep would silently fall back to ring and cover nothing. -c 1 makes this a correctness gate rather than a perf measurement.",
+      "env_variables": {
+        "RCCL_DDA_NRANKS_RELAX": "1"
+      },
+      "command_args": "-b 8 -e 256M -f 2 -g 1 -n 20 -w 5 -c 1",
+      "timeout": 900,
+      "tests": [
+        {
+          "name": "DdaRelax4Rank_AllReduce_float",
+          "description": "AllReduce over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "all_reduce_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "DdaRelax4Rank_AllReduce_bfloat16",
+          "description": "AllReduce over DDA IPC at 4 ranks (relaxed floor), datatype bfloat16",
+          "binary": "all_reduce_perf",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "DdaRelax4Rank_AllGather_float",
+          "description": "AllGather over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "all_gather_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "DdaRelax4Rank_ReduceScatter_float",
+          "description": "ReduceScatter over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "reduce_scatter_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "DdaRelax4Rank_AlltoAll_float",
+          "description": "AlltoAll over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "alltoall_perf",
+          "command_args": "-d float"
+        }
+      ]
     }
   },
   "test_suites": [
+    {
+      "name": "DDA IPC - Relaxed 4-Rank Floor (RCCL_DDA_NRANKS_RELAX)",
+      "description": "rccl-tests correctness sweep of AllReduce/AllGather/ReduceScatter/AlltoAll over the DDA IPC path at 4 ranks with the relaxed participant-count floor enabled",
+      "config": "dda_nranks_relax_4rank",
+      "enabled": true
+    },
     {
       "name": "SHM Tests - Complete Suite",
       "description": "All shared memory transport tests (single node)",

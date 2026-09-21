@@ -14,13 +14,21 @@
 
 namespace dda::common {
 
+// NRANKS semantics match the CollCommon helpers:
+//   - NRANKS  > 0 : compile-time clique size; the peer loop is fully unrolled and
+//                   nRanksRuntime is ignored.
+//   - NRANKS == 0 : runtime fallback; the clique size comes from nRanksRuntime and
+//                   the peer loop is partially unrolled 8-wide, so one instantiation
+//                   covers every supported clique size.
 template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaReduceScatterIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                      const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+                                      const T* __restrict__ sendbuff, int selfRank, int nRanksRuntime,
+                                      IpcGpuBarrier barrier) {
 
+  const int nRanks = (NRANKS > 0) ? NRANKS : nRanksRuntime;
   barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -30,7 +38,7 @@ __launch_bounds__(512)
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
+  reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, nRanks, idxStart, idxEnd, idxStride, 0);
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }

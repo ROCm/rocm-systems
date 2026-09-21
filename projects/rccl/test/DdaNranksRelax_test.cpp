@@ -1,0 +1,896 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Unit tests for the RCCL_DDA_NRANKS_RELAX low-rank DDA IPC AllReduce gate.
+//
+// These exercise ncclAllReduceDdaIpcEligible() and ncclDdaNranksRelaxEnabled()
+// with the mock ncclComm (no GPUs required).
+//
+// RCCL_PARAM values are cached per-process, so the fixture tests below cover the
+// default (relax-off) semantics that the eligibility change must preserve:
+// exactly kDdaNranks stays eligible, and 2..7 rank comms are rejected unless the
+// operator explicitly opts in.
+//
+// The relax-enabled path is covered by DdaNranksRelaxIsolatedTest, which re-execs
+// this binary with RCCL_DDA_NRANKS_RELAX=1 pre-set (the value must be in the
+// environment before any param read) and asserts every count in
+// [2, kDdaNranks] becomes eligible while counts outside that range do not.
+// End-to-end engagement is covered too: the dda_nranks_relax_4rank suite in
+// mi455_ainic_roce.json runs the rccl-tests sweep at 4 ranks with
+// RCCL_DDA_NRANKS_RELAX=1 set in the environment. The isolated-process tests here
+// remain the tighter check -- they call the DDA entry points directly, so no
+// threshold or backend choice can route around the kernel under test.
+
+#include "common/DdaIpcTestHelpers.hpp"
+#include "common/ProcessIsolatedTestRunner.hpp"
+
+#include <rccl/rccl.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <new>
+#include <thread>
+#include <vector>
+
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "gtest/gtest.h"
+
+namespace RcclUnitTesting
+{
+
+class DdaNranksRelaxTest : public ::testing::Test
+{
+protected:
+    DdaIpcMockComm mockComm_;
+    void*          sendbuff_{reinterpret_cast<void*>(0x10)};
+    void*          recvbuff_{reinterpret_cast<void*>(0x20)};
+    static constexpr size_t kCount{1024};  // 4 KiB fp32: flat path, 16B aligned
+};
+
+// With RCCL_DDA_NRANKS_RELAX unset the knob defaults to disabled.
+TEST_F(DdaNranksRelaxTest, RelaxDisabledByDefault)
+{
+    EXPECT_FALSE(ncclDdaNranksRelaxEnabled());
+}
+
+// Default behaviour is preserved: a full kDdaNranks (8) clique stays eligible.
+TEST_F(DdaNranksRelaxTest, FullCliqueEligibleByDefault)
+{
+    mockComm_.comm.nRanks = nccl_dda_detail::kDdaNranks;
+    EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
+}
+
+// Without the relax knob, 4-rank comms are NOT eligible for the DDA IPC path.
+TEST_F(DdaNranksRelaxTest, FourRanksRejectedWhenRelaxOff)
+{
+    mockComm_.comm.nRanks = 4;
+    EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
+}
+
+// Likewise for 2-rank comms.
+TEST_F(DdaNranksRelaxTest, TwoRanksRejectedWhenRelaxOff)
+{
+    mockComm_.comm.nRanks = 2;
+    EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
+}
+
+// With relax off (default), any count other than the full kDdaNranks clique is
+// rejected -- e.g. a 3-rank comm.
+TEST_F(DdaNranksRelaxTest, ThreeRanksRejectedWhenRelaxOff)
+{
+    mockComm_.comm.nRanks = 3;
+    EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
+}
+
+// Standard eligibility guards remain intact at full clique size.
+TEST_F(DdaNranksRelaxTest, NullCommRejected)
+{
+    EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+        nullptr, sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaNranksRelaxTest, NonSumOpRejected)
+{
+    mockComm_.comm.nRanks = nccl_dda_detail::kDdaNranks;
+    EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclMax));
+}
+
+TEST_F(DdaNranksRelaxTest, MissingIpcResourcesRejected)
+{
+    mockComm_.comm.nRanks = nccl_dda_detail::kDdaNranks;
+    mockComm_.setIpcResourcesPresent(false);
+    EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum));
+}
+
+// The dispatch gate agrees with eligibility when relax is off: the full clique
+// reaches the launch path (and fails only the scratch-size check), while a
+// low-rank comm is refused by ncclDdaIpcNranksSupported() before it. Distinct
+// return codes keep the two apart. No GPU: both return before any kernel launch.
+TEST_F(DdaNranksRelaxTest, DispatchRejectsLowRankWhenRelaxOff)
+{
+    mockComm_.comm.ddaScratchBytes = 0;
+
+    mockComm_.comm.nRanks = nccl_dda_detail::kDdaNranks;
+    EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum,
+                                  mockComm_.get(), nullptr),
+              ncclInvalidArgument);
+
+    for (int nRanks : {2, 3, 4, 5, 6, 7})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff_, recvbuff_, kCount, ncclFloat32, ncclSum,
+                                      mockComm_.get(), nullptr),
+                  ncclInvalidUsage)
+            << "nRanks=" << nRanks << " must be refused with relax off";
+    }
+}
+
+// Relaxed path (RCCL_DDA_NRANKS_RELAX=1). RCCL_PARAM caches per-process and
+// NCCL_NO_CACHE is parsed once, so the relaxed value has to be set before any
+// param read: run in a fresh re-exec'd process with the env pre-set. This proves
+// the eligibility gate opens for every single-node count in [2, kDdaNranks] (and
+// still rejects counts outside that range) when the operator opts in. No
+// test_runner config sets RCCL_DDA_NRANKS_RELAX as an environment variable yet,
+// so this in-process test is what actually covers the relaxed dispatch today.
+TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RelaxedPathAdmitsTwoThroughEightRanks",
+        []()
+        {
+            void*                  sendbuff = reinterpret_cast<void*>(0x10);
+            void*                  recvbuff = reinterpret_cast<void*>(0x20);
+            constexpr size_t       count    = 1024;  // 4 KiB fp32: flat path, 16B aligned
+            DdaIpcMockComm         mockComm;
+
+            EXPECT_TRUE(ncclDdaNranksRelaxEnabled());
+
+            // With relax on, every single-node count in [2, kDdaNranks] is eligible
+            // (kDdaNranks uses the specialised kernel, the rest the NRANKS == 0 one).
+            for (int nRanks = 2; nRanks <= nccl_dda_detail::kDdaNranks; ++nRanks)
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
+                    mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum))
+                    << "nRanks=" << nRanks << " should be eligible with relax on";
+            }
+
+            // AllGather, ReduceScatter and AllToAll are also relaxed by this
+            // branch (DdaNranksRelaxCollectives_test.cpp verifies that
+            // directly for all four counts); the 8-rank-only invariant that
+            // held for them on the AllReduce-only PR does not apply here.
+
+            // Counts outside [2, kDdaNranks] stay ineligible.
+            for (int nRanks : {1, 9, 16})
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+                    mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum))
+                    << "nRanks=" << nRanks << " must not be eligible";
+            }
+
+            // Eligibility alone does not prove the dispatch routes the count: with
+            // only the checks above, deleting a supported count from
+            // ncclAllReduceDdaIpcTyped() would still pass. Drive the real entry
+            // point and separate the two failure modes by rank count.
+            //
+            // ddaScratchBytes = 0 makes every supported count fail the scratch-size
+            // check inside ncclAllReduceDdaIpcLaunch() and return
+            // ncclInvalidArgument, which is reached only after the dispatch has
+            // accepted the count -- and before any barrier deref or kernel launch,
+            // so this needs no GPU. An unsupported count is rejected earlier by the
+            // ncclDdaIpcNranksSupported() gate and returns ncclInvalidUsage.
+            mockComm.comm.ddaScratchBytes = 0;
+
+            for (int nRanks = 2; nRanks <= nccl_dda_detail::kDdaNranks; ++nRanks)
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, ncclFloat32,
+                                              ncclSum, mockComm.get(), nullptr),
+                          ncclInvalidArgument)
+                    << "nRanks=" << nRanks
+                    << " should reach the launch path and fail the scratch check";
+            }
+
+            for (int nRanks : {1, 9, 16})
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_EQ(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, ncclFloat32,
+                                              ncclSum, mockComm.get(), nullptr),
+                          ncclInvalidUsage)
+                    << "nRanks=" << nRanks << " must be refused by the dispatch gate";
+            }
+        },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// The isolated test above only ever uses count=1024 (4 KiB), always below
+// kDdaFlatTreeThresholdBytes (256 KiB), so the tree branch's
+// `count % comm->nRanks` divisibility check is never exercised at a relaxed
+// (non-8) rank count -- that branch only runs above the threshold, and 8 was
+// the only rank count reachable there before this PR. Pin it directly at
+// nRanks=3: one count that divides evenly (eligible) and one immediately
+// above it that does not (ineligible), both otherwise identical.
+TEST(DdaNranksRelaxIsolatedTest, TreeThresholdDivisibilityAtRelaxedRankCount)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "TreeThresholdDivisibilityAtRelaxedRankCount",
+        []()
+        {
+            void*          sendbuff = reinterpret_cast<void*>(0x10);
+            void*          recvbuff = reinterpret_cast<void*>(0x20);
+            DdaIpcMockComm mockComm;
+            mockComm.comm.nRanks = 3;
+
+            // 196608 floats = 786432 B (> 256 KiB, tree path); 196608 % 3 == 0
+            // and the per-rank slice (65536 floats = 262144 B) is 16-byte aligned.
+            EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
+                mockComm.get(), sendbuff, recvbuff, 196608, ncclFloat32, ncclSum))
+                << "196608 % 3 == 0 should be eligible for the tree path";
+
+            // One count higher: same size class, but 196612 % 3 == 1.
+            EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+                mockComm.get(), sendbuff, recvbuff, 196612, ncclFloat32, ncclSum))
+                << "196612 % 3 == 1 must not be eligible for the tree path";
+
+            // At nRanks=2, 196612 floats = 786448 B: passes the total-bytes 16-byte
+            // check (786448 % 16 == 0) and is divisible by nRanks (196612 % 2 == 0),
+            // but the per-rank slice (98306 floats = 393224 B) is not itself
+            // 16-byte aligned: 393224 % 16 == 8. Total-bytes alignment and
+            // divisibility are each individually satisfied here; only the
+            // per-rank-slice check (the one specific to the tree path) catches
+            // this, so this case actually exercises it -- unlike a count that
+            // also fails the total-bytes check, which would be rejected earlier
+            // regardless of the tree-specific logic.
+            mockComm.comm.nRanks = 2;
+            EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+                mockComm.get(), sendbuff, recvbuff, 196612, ncclFloat32, ncclSum))
+                << "196612 % 2 == 0 but the per-rank slice is not 16-byte aligned";
+        },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// ncclAllReduceDdaIpcTreeEligible() directly: the pure predicate both
+// ncclAllReduceDdaIpcEligible() and the IPC launch path call, so a mutation
+// or drift between them shows up here as well as at the call sites above.
+// No GPU, no comm, no relaxed-rank env var needed.
+TEST(DdaAllReduceIpcTreeEligibleTest, RejectsNonPositiveRanks)
+{
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/1024, /*nRanks=*/0, /*typeSize=*/4));
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/1024, /*nRanks=*/-1, /*typeSize=*/4));
+}
+
+TEST(DdaAllReduceIpcTreeEligibleTest, RejectsNonDivisibleCount)
+{
+    // 196612 % 3 == 1.
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196612, /*nRanks=*/3, /*typeSize=*/4));
+}
+
+TEST(DdaAllReduceIpcTreeEligibleTest, RejectsDivisibleButUnalignedSlice)
+{
+    // 196611 % 3 == 0, but (196611 / 3) * 4 == 262148, and 262148 % 16 == 4.
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196611, /*nRanks=*/3, /*typeSize=*/4));
+}
+
+TEST(DdaAllReduceIpcTreeEligibleTest, AcceptsDivisibleAndAlignedSlice)
+{
+    // 196608 % 3 == 0, and (196608 / 3) * 4 == 262144, which is 16-byte aligned.
+    EXPECT_TRUE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196608, /*nRanks=*/3, /*typeSize=*/4));
+}
+
+// ---------------------------------------------------------------------------
+// Real-GPU comm-init engagement
+// ---------------------------------------------------------------------------
+//
+// Everything above uses DdaIpcMockComm, which fabricates comm->ddaIpcMemHandler
+// and comm->ddaScratch directly. None of it reaches the gate in init.cc:
+//
+//     } else if (comm->nNodes == 1 && ncclDdaIpcNranksSupported(comm->nRanks)) {
+//       NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+//
+// Reverting that condition to the pre-feature `comm->nRanks == kDdaNranks`
+// would leave the low-rank path dead at runtime with every test above still
+// passing. The pair below closes that: a real 4-rank ncclCommInitRank, then an
+// assertion on whether ncclDdaIpcCommInit() actually stamped the communicator.
+//
+// The negative control (relax off -> no resources) is what makes the positive
+// case meaningful: without it, "the gate opened for 4 ranks" and "comm init
+// always allocates these" are indistinguishable.
+//
+// --- Why fork() one process per rank, and not ncclCommInitAll ---
+//
+// comm->directMode is set whenever a single process drives more than one local
+// rank, and ncclDdaIpcCommInit() bails out on it before allocating anything.
+// ncclCommInitAll runs every rank in one process, so directMode is always true
+// and the DDA IPC pointers stay null no matter what the gate decides -- the
+// assertion would hold identically on a reverted build, proving nothing. One
+// process per rank keeps directMode false and the gate observable. This mirrors
+// P2pThenCollective_SameBuffer in RegisterTests.cpp, which forks for the same
+// reason. The HIP runtime is not fork-safe, so the parent makes no HIP or RCCL
+// call: rank 0's child performs the preconditions and publishes the unique ID.
+
+namespace
+{
+
+enum class DdaInitState : int
+{
+    NotReady = 0,
+    Ready    = 1,
+    Skip     = -1,
+};
+
+struct DdaInitShared
+{
+    ncclUniqueId              id;
+    std::atomic<DdaInitState> state;
+};
+
+enum DdaInitChildExit
+{
+    kDdaInitChildOk   = 0,
+    kDdaInitChildFail = 1,
+    kDdaInitChildSkip = 2,
+};
+
+// GTest assertions do not propagate across fork(); children report via exit code.
+#define DDA_INIT_CHILD_HC(x)                                                              \
+    do                                                                                    \
+    {                                                                                     \
+        hipError_t _e = (x);                                                              \
+        if (_e != hipSuccess)                                                             \
+        {                                                                                 \
+            printf("[rank %d] HIP error %d (%s) @ %s:%d\n", rank, _e,                     \
+                   hipGetErrorString(_e), __FILE__, __LINE__);                            \
+            return kDdaInitChildFail;                                                     \
+        }                                                                                 \
+    } while (0)
+
+#define DDA_INIT_CHILD_NC(x)                                                              \
+    do                                                                                    \
+    {                                                                                     \
+        ncclResult_t _e = (x);                                                            \
+        if (_e != ncclSuccess)                                                             \
+        {                                                                                 \
+            printf("[rank %d] RCCL error %d (%s) @ %s:%d\n", rank, _e,                    \
+                   ncclGetErrorString(_e), __FILE__, __LINE__);                           \
+            return kDdaInitChildFail;                                                     \
+        }                                                                                 \
+    } while (0)
+
+// ncclDdaIpcCommInit() only runs on the architectures the DDA IPC kernels
+// support; elsewhere it bails before allocating and the test cannot observe the
+// gate either way.
+bool ddaInitArchSupported(const char* gcnArchName)
+{
+    return strncmp(gcnArchName, "gfx942", 6) == 0 || strncmp(gcnArchName, "gfx950", 6) == 0;
+}
+
+bool allDevicesSupportDdaInit(int numDevices, char* unsupportedArchOut, size_t outLen)
+{
+    for (int dev = 0; dev < numDevices; dev++)
+    {
+        hipDeviceProp_t prop;
+        if (hipGetDeviceProperties(&prop, dev) != hipSuccess)
+        {
+            return false;
+        }
+        if (!ddaInitArchSupported(prop.gcnArchName))
+        {
+            if (unsupportedArchOut && outLen > 0)
+            {
+                strncpy(unsupportedArchOut, prop.gcnArchName, outLen - 1);
+                unsupportedArchOut[outLen - 1] = '\0';
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
+// Rank 0's preconditions and unique-ID generation, split out so that the
+// DDA_INIT_CHILD_* macros' early returns stay inside it: whatever code this
+// returns, the single caller below is then guaranteed to publish a terminal
+// state for the other ranks. A path that returned without publishing would
+// leave them waiting on a state that never arrives.
+int ddaInitRank0Prepare(int rank, int nranks, DdaInitShared* shared)
+{
+    int numDevices = 0;
+    DDA_INIT_CHILD_HC(hipGetDeviceCount(&numDevices));
+    if (numDevices < nranks)
+    {
+        printf("Requires %d GPUs (detected %d).\n", nranks, numDevices);
+        return kDdaInitChildSkip;
+    }
+
+    char unsupportedArch[256] = {0};
+    if (!allDevicesSupportDdaInit(nranks, unsupportedArch, sizeof(unsupportedArch)))
+    {
+        printf("Unsupported GPU architecture '%s' for DDA IPC (requires gfx942 or gfx950).\n", unsupportedArch);
+        return kDdaInitChildSkip;
+    }
+
+    // ncclDdaIpcCommInit() requires direct GPU-to-GPU P2P across the whole
+    // clique; without it the resources stay null regardless of the gate.
+    for (int i = 0; i < nranks; i++)
+    {
+        for (int j = i + 1; j < nranks; j++)
+        {
+            int canAccess = 0;
+            DDA_INIT_CHILD_HC(hipDeviceCanAccessPeer(&canAccess, i, j));
+            if (!canAccess)
+            {
+                printf("No direct P2P between GPU %d and %d; DDA IPC would not engage.\n", i, j);
+                return kDdaInitChildSkip;
+            }
+        }
+    }
+
+    DDA_INIT_CHILD_NC(ncclGetUniqueId(&shared->id));
+    return kDdaInitChildOk;
+}
+
+// Drives one real DDA IPC AllReduce on the live communicator and checks the
+// numbers that come back.
+//
+// This is what pins the relaxed rank counts to a working kernel. Comm init only
+// proves the resources were allocated; every other case in this file stops at
+// the scratch check (ddaScratchBytes = 0) before the rank count is ever read, so
+// nothing else here would notice if the NRANKS == 0 runtime kernel's
+// `nRanksRuntime` were replaced by a hardcoded 8. At a 4-rank clique that
+// substitution makes the kernel fold in peer slots 4..7, which ipc_init.cu
+// deliberately leaves null/zeroed -- a wrong sum rather than a crash, which is
+// exactly the kind of defect only a checked result catches.
+//
+// It calls ncclAllReduceDdaIpc() rather than ncclAllReduce() on purpose: the
+// public entry point's backend choice depends on size thresholds and tuning
+// heuristics, so it could silently stop selecting DDA and leave this test
+// passing without ever running the kernel it exists to cover.
+//
+// Both kernels are exercised. They are separate template instantiations and the
+// flat/tree split is by message size (kDdaFlatTreeThresholdBytes, 256 KiB), so
+// covering only one would leave the other free to regress.
+int ddaInitRunAllReduceCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    // 4 KiB stays under the 256 KiB flat/tree threshold; 1 MiB clears it. The
+    // large count is also divisible by nranks with a 16-byte-aligned per-rank
+    // slice, which the tree path additionally requires.
+    const size_t counts[] = {1024, 262144};
+
+    for (size_t ci = 0; ci < sizeof(counts) / sizeof(counts[0]); ++ci)
+    {
+        const size_t count = counts[ci];
+        const size_t bytes = count * sizeof(float);
+
+        void* sendbuff = nullptr;
+        void* recvbuff = nullptr;
+        DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, bytes));
+        DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, bytes));
+
+        // Rank r contributes r+1 everywhere, so a correct sum is nranks*(nranks+1)/2
+        // in every element -- and a kernel folding in the wrong set of peers
+        // lands on a different value.
+        std::vector<float> host(count, static_cast<float>(rank + 1));
+        DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), bytes, hipMemcpyHostToDevice));
+        DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, bytes));
+
+        const ncclResult_t ar =
+            ncclAllReduceDdaIpc(sendbuff, recvbuff, count, ncclFloat32, ncclSum, comm, stream);
+        if (ar != ncclSuccess)
+        {
+            printf("[rank %d] ncclAllReduceDdaIpc(count=%zu) failed: %d (%s)\n", rank, count, ar,
+                   ncclGetErrorString(ar));
+            return kDdaInitChildFail;
+        }
+        DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+        std::vector<float> out(count, 0.0f);
+        DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, bytes, hipMemcpyDeviceToHost));
+
+        const float expected = static_cast<float>(nranks * (nranks + 1) / 2);
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (out[i] != expected)
+            {
+                printf("[rank %d] count=%zu element %zu: expected %.1f, got %.1f "
+                       "(a wrong participant set would produce exactly this)\n",
+                       rank, count, i, expected, out[i]);
+                return kDdaInitChildFail;
+            }
+        }
+
+        DDA_INIT_CHILD_HC(hipFree(sendbuff));
+        DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    }
+
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
+
+// The three non-AllReduce DDA IPC collectives, on the same live communicator.
+//
+// Each has its own <T, 0> runtime-rank instantiation, and each is dispatched by
+// the same NRANKS == 0 fallback the AllReduce check above covers -- but they are
+// separate kernels, so covering AllReduce alone leaves these three free to
+// regress. Like that check these call the ncclXxxDdaIpc() entry points directly
+// rather than the public collectives, so no size threshold or backend choice can
+// route around the kernel under test.
+//
+// Every payload below encodes the contributing rank, not a constant: a kernel
+// that folds in the wrong participant set (peer slots 4..7 are null/zeroed at 4
+// ranks) produces a wrong value rather than a crash, and only a checked result
+// catches that.
+//
+// sendcount is a multiple of 4 so sendcount * sizeof(float) is 16-byte aligned,
+// which the AllGather and AllToAll eligibility predicates both require.
+constexpr size_t kDdaInitCollectiveCount = 65536;
+
+// AllGather: rank r contributes r+1, so chunk j of the gathered result must hold
+// j+1. A wrong peer set leaves some chunk at its memset zero instead.
+int ddaInitRunAllGatherCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    const size_t sendcount = kDdaInitCollectiveCount;
+    const size_t sendBytes = sendcount * sizeof(float);
+    const size_t recvBytes = sendBytes * static_cast<size_t>(nranks);
+
+    void* sendbuff = nullptr;
+    void* recvbuff = nullptr;
+    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, sendBytes));
+    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, recvBytes));
+
+    std::vector<float> host(sendcount, static_cast<float>(rank + 1));
+    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), sendBytes, hipMemcpyHostToDevice));
+    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, recvBytes));
+
+    const ncclResult_t ag =
+        ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, ncclFloat32, comm, stream);
+    if (ag != ncclSuccess)
+    {
+        printf("[rank %d] ncclAllGatherDdaIpc(sendcount=%zu) failed: %d (%s)\n", rank, sendcount, ag,
+               ncclGetErrorString(ag));
+        return kDdaInitChildFail;
+    }
+    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+    std::vector<float> out(sendcount * static_cast<size_t>(nranks), 0.0f);
+    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, recvBytes, hipMemcpyDeviceToHost));
+
+    for (int j = 0; j < nranks; ++j)
+    {
+        const float expected = static_cast<float>(j + 1);
+        for (size_t k = 0; k < sendcount; ++k)
+        {
+            const size_t i = static_cast<size_t>(j) * sendcount + k;
+            if (out[i] != expected)
+            {
+                printf("[rank %d] allgather chunk %d element %zu: expected %.1f, got %.1f\n", rank, j,
+                       k, expected, out[i]);
+                return kDdaInitChildFail;
+            }
+        }
+    }
+
+    DDA_INIT_CHILD_HC(hipFree(sendbuff));
+    DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
+
+
+
+// ReduceScatter: rank r fills chunk j with (r+1)*(j+1), so the shard rank r keeps
+// is sum over sources s of (s+1)*(r+1) = (r+1) * nranks*(nranks+1)/2. Scaling by
+// the chunk index makes the expected value differ per rank, so this also catches a
+// kernel that reduces the right peers into the wrong shard -- which a payload
+// constant across chunks would hide.
+int ddaInitRunReduceScatterCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    const size_t recvcount = kDdaInitCollectiveCount;
+    const size_t recvBytes = recvcount * sizeof(float);
+    const size_t sendBytes = recvBytes * static_cast<size_t>(nranks);
+
+    void* sendbuff = nullptr;
+    void* recvbuff = nullptr;
+    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, sendBytes));
+    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, recvBytes));
+
+    std::vector<float> host(recvcount * static_cast<size_t>(nranks), 0.0f);
+    for (int j = 0; j < nranks; ++j)
+    {
+        const float v = static_cast<float>((rank + 1) * (j + 1));
+        for (size_t k = 0; k < recvcount; ++k)
+        {
+            host[static_cast<size_t>(j) * recvcount + k] = v;
+        }
+    }
+    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), sendBytes, hipMemcpyHostToDevice));
+    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, recvBytes));
+
+    const ncclResult_t rs = ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, ncclFloat32,
+                                                    ncclSum, comm, stream);
+    if (rs != ncclSuccess)
+    {
+        printf("[rank %d] ncclReduceScatterDdaIpc(recvcount=%zu) failed: %d (%s)\n", rank, recvcount,
+               rs, ncclGetErrorString(rs));
+        return kDdaInitChildFail;
+    }
+    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+    std::vector<float> out(recvcount, 0.0f);
+    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, recvBytes, hipMemcpyDeviceToHost));
+
+    const float expected = static_cast<float>((rank + 1) * (nranks * (nranks + 1) / 2));
+    for (size_t k = 0; k < recvcount; ++k)
+    {
+        if (out[k] != expected)
+        {
+            printf("[rank %d] reducescatter element %zu: expected %.1f, got %.1f\n", rank, k,
+                   expected, out[k]);
+            return kDdaInitChildFail;
+        }
+    }
+
+    DDA_INIT_CHILD_HC(hipFree(sendbuff));
+    DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
+// AllToAll: rank r sends (r+1)*10 + (d+1) to destination d, so the chunk rank r
+// receives from source s must hold (s+1)*10 + (r+1). Encoding both endpoints is
+// what makes this catch a transposed exchange -- a payload keyed on the sender
+// alone would look identical whether the kernel read row r or column r. At 4
+// ranks the largest value is 44, exactly representable in float.
+int ddaInitRunAllToAllCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    const size_t count = kDdaInitCollectiveCount;  // elements per rank pair
+    const size_t bytes = count * sizeof(float) * static_cast<size_t>(nranks);
+
+    void* sendbuff = nullptr;
+    void* recvbuff = nullptr;
+    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, bytes));
+    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, bytes));
+
+    std::vector<float> host(count * static_cast<size_t>(nranks), 0.0f);
+    for (int d = 0; d < nranks; ++d)
+    {
+        const float v = static_cast<float>((rank + 1) * 10 + (d + 1));
+        for (size_t k = 0; k < count; ++k)
+        {
+            host[static_cast<size_t>(d) * count + k] = v;
+        }
+    }
+    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), bytes, hipMemcpyHostToDevice));
+    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, bytes));
+
+    const ncclResult_t a2a =
+        ncclAllToAllDdaIpc(sendbuff, recvbuff, count, ncclFloat32, comm, stream);
+    if (a2a != ncclSuccess)
+    {
+        printf("[rank %d] ncclAllToAllDdaIpc(count=%zu) failed: %d (%s)\n", rank, count, a2a,
+               ncclGetErrorString(a2a));
+        return kDdaInitChildFail;
+    }
+    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+    std::vector<float> out(count * static_cast<size_t>(nranks), 0.0f);
+    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, bytes, hipMemcpyDeviceToHost));
+
+    for (int src = 0; src < nranks; ++src)
+    {
+        const float expected = static_cast<float>((src + 1) * 10 + (rank + 1));
+        for (size_t k = 0; k < count; ++k)
+        {
+            const size_t i = static_cast<size_t>(src) * count + k;
+            if (out[i] != expected)
+            {
+                printf("[rank %d] alltoall chunk-from-%d element %zu: expected %.1f, got %.1f\n",
+                       rank, src, k, expected, out[i]);
+                return kDdaInitChildFail;
+            }
+        }
+    }
+
+    DDA_INIT_CHILD_HC(hipFree(sendbuff));
+    DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
+// Runs entirely inside a forked child: the first HIP/RCCL call happens here.
+int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
+{
+    if (rank == 0)
+    {
+        const int prep = ddaInitRank0Prepare(rank, nranks, shared);
+        // Publish on every path, including the HIP/RCCL error ones: the other
+        // ranks are already waiting and only rank 0 can release them.
+        shared->state.store(prep == kDdaInitChildOk ? DdaInitState::Ready : DdaInitState::Skip,
+                            std::memory_order_release);
+        if (prep != kDdaInitChildOk)
+        {
+            return prep;
+        }
+    }
+    else
+    {
+        // Bounded wait rather than an unbounded spin. Rank 0 always publishes,
+        // so the deadline should never be reached; it is here so that a future
+        // path that somehow does not publish costs a failed test rather than a
+        // wedged run (the runner kills the re-exec'd child by pid, not the
+        // process group, so a spinner would outlive the suite timeout).
+        constexpr int kWaitSeconds = 120;
+        DdaInitState  st           = DdaInitState::NotReady;
+        const auto    deadline     = std::chrono::steady_clock::now() + std::chrono::seconds(kWaitSeconds);
+        while ((st = shared->state.load(std::memory_order_acquire)) == DdaInitState::NotReady)
+        {
+            if (std::chrono::steady_clock::now() > deadline)
+            {
+                printf("[rank %d] rank 0 published no state within %d s; giving up.\n", rank, kWaitSeconds);
+                return kDdaInitChildFail;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (st == DdaInitState::Skip)
+        {
+            return kDdaInitChildSkip;
+        }
+    }
+
+    ncclUniqueId id = shared->id;
+
+    DDA_INIT_CHILD_HC(hipSetDevice(rank));
+
+    ncclComm_t commHandle{};
+    DDA_INIT_CHILD_NC(ncclCommInitRank(&commHandle, nranks, id, rank));
+
+    // Cast to the internal struct to observe what comm init actually did.
+    ncclComm*  c       = commHandle;
+    const bool haveDda = (c->ddaIpcMemHandler != nullptr) && (c->ddaScratch != nullptr) &&
+                         (c->ddaPeerPtrsDev != nullptr);
+
+    int rc = kDdaInitChildOk;
+    if (haveDda != expectResources)
+    {
+        printf("[rank %d] nranks=%d relax=%d: expected DDA IPC resources %s, but "
+               "ddaIpcMemHandler=%p ddaScratch=%p ddaPeerPtrsDev=%p\n",
+               rank, nranks, expectResources ? 1 : 0, expectResources ? "present" : "absent",
+               c->ddaIpcMemHandler, c->ddaScratch, c->ddaPeerPtrsDev);
+        rc = kDdaInitChildFail;
+    }
+
+    // Only meaningful when the gate opened: with relax off at a non-8 rank count
+    // the resources are absent by design and there is no DDA kernel to drive.
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunAllReduceCheck(rank, nranks, c);
+    }
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunAllGatherCheck(rank, nranks, c);
+    }
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunReduceScatterCheck(rank, nranks, c);
+    }
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunAllToAllCheck(rank, nranks, c);
+    }
+
+    DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
+    return rc;
+}
+
+// Forks nranks children, each initialising one rank of a real communicator, and
+// checks whether comm init engaged the DDA IPC path.
+void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
+{
+    // Shared region set up before any fork and before any HIP/RCCL call.
+    DdaInitShared* shared = static_cast<DdaInitShared*>(
+        mmap(nullptr, sizeof(DdaInitShared), PROT_READ | PROT_WRITE,
+             MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+    ASSERT_NE(shared, MAP_FAILED) << "mmap for shared bootstrap failed";
+    new (&shared->state) std::atomic<DdaInitState>(DdaInitState::NotReady);
+
+    std::vector<pid_t> pids(nranks, -1);
+    for (int r = 0; r < nranks; r++)
+    {
+        pids[r] = fork();
+        ASSERT_GE(pids[r], 0) << "fork() failed for rank " << r;
+        if (pids[r] == 0)
+        {
+            _exit(ddaInitRunRank(r, nranks, shared, expectResources));
+        }
+    }
+
+    bool anySkip = false;
+    bool anyFail = false;
+    for (int r = 0; r < nranks; r++)
+    {
+        int status = 0;
+        waitpid(pids[r], &status, 0);
+        if (WIFEXITED(status))
+        {
+            int code = WEXITSTATUS(status);
+            if (code == kDdaInitChildSkip)
+            {
+                anySkip = true;
+            }
+            else if (code != kDdaInitChildOk)
+            {
+                anyFail = true;
+                ADD_FAILURE() << "Rank " << r << " child exited with failure code " << code << ".";
+            }
+        }
+        else
+        {
+            anyFail = true;
+            ADD_FAILURE() << "Rank " << r << " child terminated abnormally (status " << status
+                          << ").";
+        }
+    }
+
+    munmap(shared, sizeof(DdaInitShared));
+
+    if (anySkip && !anyFail)
+    {
+        GTEST_SKIP() << "Requires " << nranks
+                     << " P2P-capable gfx942/gfx950 GPUs; preconditions not met.";
+    }
+}
+
+}  // namespace
+
+// With the knob on, a 4-rank communicator must come out of ncclCommInitRank with
+// the DDA IPC resources allocated -- i.e. init.cc's gate admitted a non-8 rank
+// count and ncclDdaIpcCommInit() ran to completion. Reverting that gate to
+// `comm->nRanks == kDdaNranks` makes this fail.
+TEST(DdaNranksRelaxIsolatedTest, FourRankCommInitAllocatesDdaIpcResources)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "FourRankCommInitAllocatesDdaIpcResources",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/4, /*expectResources=*/true); },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// Negative control for the test above: with the knob off, the same 4-rank
+// communicator must NOT get DDA IPC resources. Without this, the positive test
+// cannot distinguish "the gate opened" from "comm init always allocates these".
+TEST(DdaNranksRelaxIsolatedTest, FourRankCommInitSkipsDdaIpcWhenRelaxOff)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "FourRankCommInitSkipsDdaIpcWhenRelaxOff",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/4, /*expectResources=*/false); },
+        {{"RCCL_DDA_NRANKS_RELAX", "0"}});
+}
+
+}  // namespace RcclUnitTesting

@@ -259,4 +259,22 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx942_FourRanks_Disabled)
         kDdaAlltoAllGfx1250ThresholdBytes));
 }
 
+// testRcclDdaAlltoAllThresholdEnabled()'s minRanks parameter actually reaches
+// rcclDdaEnabled(): default (8) rejects a 4-rank comm the same as
+// Gfx942_FourRanks_Disabled above; passing 2 admits it, matching what
+// rcclAlltoAllShouldTakeDdaPath() passes in collectives.cc when
+// RCCL_DDA_NRANKS_RELAX=1. See RcclAlltoAllDdaDecision.Gfx950_FourRanks_
+// RelaxOn_TakesDda in RcclWrapTests.cpp for the real call site's own test.
+TEST_F(DdaAlltoAllThresholdTest, MinRanksParameter_ReachesRcclDdaEnabled)
+{
+    mockComm_.reset("gfx942:sramecc+:xnack-");
+    mockComm_.comm.nRanks = 4;
+    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4KbPerRank, ncclFloat32))
+        << "default minRanks (8) must still reject a 4-rank comm";
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4KbPerRank, ncclFloat32, /*minRanks=*/2))
+        << "minRanks=2 must admit a 4-rank comm";
+}
+
 } // namespace RcclUnitTesting
