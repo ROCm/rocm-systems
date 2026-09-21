@@ -13,8 +13,11 @@ from amdisa.codegen.execute.packed import (
     gen_mad_mix_lo_hi,
     gen_pk_binop,
     gen_pk_binop_f32,
+    gen_pk_binop_f64,
+    gen_pk_ternary_f64,
     gen_pk_fmac_vop2,
     gen_pk_fmac_vop3,
+    gen_pk_binop_u64,
     gen_pk_lshl_add_u64,
     gen_pk_ternary,
 )
@@ -121,6 +124,32 @@ def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
     assert 'std::min(sum_lo, c_lo)' in unsigned
 
 
+def test_pk_mad_integer_clamp_saturates_both_selected_halves():
+    signed = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'i16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+    unsigned = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'u16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+
+    assert signed.count('vop3_integer_mad<int16_t, 16>') == 2
+    assert signed.count('inst_.clamp') == 2
+    assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
+    assert unsigned.count('inst_.clamp') == 2
+
+
 def test_dot8_iu4_uses_operand_signedness_modifiers():
     cpp = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_i32_iu4')
 
@@ -172,7 +201,7 @@ def test_pk_f16_binop_narrows_inline_float_constants():
     assert 'encoding_value_' not in cpp
 
 
-def test_pk_bf16_ternary_narrows_inline_float_constants_as_bf16():
+def test_pk_bf16_ternary_preserves_fp32_inline_constants():
     cpp = gen_pk_ternary(
         ['vdst'],
         ['src0', 'src1', 'src2'],
@@ -182,9 +211,24 @@ def test_pk_bf16_ternary_narrows_inline_float_constants_as_bf16():
         opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
     )
 
-    assert 'raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));' in cpp
-    assert 'raw2 = util::f32_to_bf16(std::bit_cast<float>(raw2));' in cpp
+    assert 'pk16_src_needs_narrowing' not in cpp
+    assert 'raw0 = util::f32_to_bf16' not in cpp
+    assert 'raw2 = util::f32_to_bf16' not in cpp
     assert 'f32_to_f16' not in cpp
+
+
+def test_pk_bf16_binary_preserves_fp32_inline_constants():
+    for op in ('add', 'mul', 'min', 'max'):
+        cpp = gen_pk_binop(
+            ['vdst'],
+            ['src0', 'src1'],
+            op,
+            'bf16',
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        )
+        assert 'pk16_src_needs_narrowing' not in cpp
+        assert 'raw0 = util::f32_to_bf16' not in cpp
+        assert 'raw1 = util::f32_to_bf16' not in cpp
 
 
 def test_dot2_half_forms_narrow_inline_float_constants():
@@ -322,6 +366,88 @@ def test_pk_lshl_add_u64_rejects_unproven_counts_before_any_write():
     assert report in cpp
     assert write in cpp
     assert cpp.index(reject) < cpp.index(report) < cpp.index(write)
+
+
+def test_pk_u64_add_sub_generate_per_element_negation_and_integer_clamp():
+    add = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'add')
+    sub = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'sub')
+
+    for cpp in (add, sub):
+        assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
+        assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
+        assert 'using Wide = util::int128_t;' in cpp
+        assert 'if (negate_lhs) lhs_wide = -lhs_wide;' in cpp
+        assert 'if (negate_rhs) rhs_wide = -rhs_wide;' in cpp
+        assert 'if (result < Wide{}) return 0;' in cpp
+        assert 'if (result > kMax) return std::numeric_limits<uint64_t>::max();' in cpp
+        assert '(inst_.neg & 1u) != 0' in cpp
+        assert '(inst_.neg_hi & 2u) != 0' in cpp
+        assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+        assert cpp.index('if (negate_lhs)') < cpp.index('const Wide result')
+        assert cpp.index('const Wide result') < cpp.index('if (inst_.clamp)')
+    assert 'const Wide result = lhs_wide + rhs_wide;' in add
+    assert 'const Wide result = lhs_wide - rhs_wide;' in sub
+
+
+def test_pk_u64_binop_rejects_unknown_operation():
+    import pytest
+
+    with pytest.raises(ValueError, match='unsupported packed U64 binary operation'):
+        gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'mul')
+
+
+def test_pk_f64_binops_use_mode_aware_two_element_execution():
+    expected_operations = {
+        'add': 'Add',
+        'mul': 'Multiply',
+        'max_num': 'MaximumNumber',
+        'min_num': 'MinimumNumber',
+    }
+    for operation, enum_name in expected_operations.items():
+        cpp = gen_pk_binop_f64(['vdst'], ['src0', 'src1'], operation)
+
+        assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
+        assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
+        assert f'BinaryF64Op::{enum_name}' in cpp
+        assert cpp.count('amdgpu::fp_mode::binary_f64(') == 1
+        assert 'wf.fp_round_mode_f16_f64()' in cpp
+        assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+        assert 'lhs_bits ^= kSignBit' in cpp
+        assert 'rhs_bits ^= kSignBit' in cpp
+        assert 'amdgpu::fp_mode::finish_f64(' in cpp
+        assert 'inst_.clamp' in cpp
+        assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+
+
+def test_pk_f64_binop_rejects_unknown_operation():
+    import pytest
+
+    with pytest.raises(ValueError, match='unsupported packed F64 binary operation'):
+        gen_pk_binop_f64(['vdst'], ['src0', 'src1'], 'divide')
+
+
+def test_pk_f64_fma_uses_mode_aware_fused_two_element_execution():
+    cpp = gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'fma')
+
+    assert 'const auto multiplicand = read_pk_u64_pair(src0, wf, lane);' in cpp
+    assert 'const auto multiplier = read_pk_u64_pair(src1, wf, lane);' in cpp
+    assert 'const auto addend = read_pk_u64_pair(src2, wf, lane);' in cpp
+    assert cpp.count('amdgpu::fp_mode::fma_f64(') == 1
+    assert 'wf.fp_round_mode_f16_f64()' in cpp
+    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+    assert 'multiplicand_bits ^= kSignBit' in cpp
+    assert 'multiplier_bits ^= kSignBit' in cpp
+    assert 'addend_bits ^= kSignBit' in cpp
+    assert 'amdgpu::fp_mode::finish_f64(' in cpp
+    assert 'inst_.clamp' in cpp
+    assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+
+
+def test_pk_f64_ternary_rejects_unknown_operation():
+    import pytest
+
+    with pytest.raises(ValueError, match='unsupported packed F64 ternary operation'):
+        gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'mad')
 
 
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():

@@ -15,6 +15,7 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -92,23 +93,32 @@ struct AppliedSite {
   uint16_t target_pair_base = 0;
 };
 
-// Human-readable single-lane register name for spill diagnostics.
+// Human-readable register name for spill diagnostics. Ordinary registers are
+// named by prefix and index (s5, v3, acc2); special singletons carry no index.
 std::string reg_name(RegisterRef ref) {
-  const char *prefix = "?";
   switch (ref.cls) {
   case RegClass::SGPR:
-    prefix = "s";
-    break;
+    return "s" + std::to_string(ref.index);
   case RegClass::VGPR:
-    prefix = "v";
-    break;
+    return "v" + std::to_string(ref.index);
   case RegClass::ACC_VGPR:
-    prefix = "acc";
-    break;
-  default:
-    break;
+    return "acc" + std::to_string(ref.index);
+  case RegClass::TTMP:
+    return "ttmp" + std::to_string(ref.index);
+  case RegClass::EXEC:
+    return "exec";
+  case RegClass::VCC:
+    return "vcc";
+  case RegClass::SCC:
+    return "scc";
+  case RegClass::M0:
+    return "m0";
+  case RegClass::FLAT_SCRATCH:
+    return "flat_scratch";
+  case RegClass::PC:
+    return "pc";
   }
-  return std::string(prefix) + std::to_string(ref.index);
+  return "?" + std::to_string(ref.index);
 }
 
 // Largest positive byte offset encodable in the scratch store/load offset field,
@@ -174,6 +184,45 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   }
 }
 
+// How one kernel's VGPR allocation divides into an ordinary prefix and an
+// AccVGPR window.
+struct KernelVgprBounds {
+  uint32_t total = 0;          // Allocated VGPRs: ordinary prefix plus AccVGPR window.
+  uint32_t ordinary_bound = 0; // One past the last ordinary VGPR.
+  uint32_t acc_count = 0;      // AccVGPRs in the window; 0 when there is none.
+};
+
+// Decode @p desc's VGPR allocation for @p arch.
+KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
+                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
+  const uint32_t granulated = AMDHSA_BITS_GET(
+      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  // The descriptor encoding granule is wave-size dependent on RDNA (8 for
+  // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
+  // overcount the allocation and let the SGPR bridge scan pick an unallocated
+  // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
+  const uint32_t total = (granulated + 1) * descriptor_vgpr_granularity_for_wavefront(
+                                                arch, kernel_wavefront_size(arch, desc));
+  // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
+  // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
+  // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
+  // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
+  const uint32_t accum_base =
+      arch_has_unified_vgpr_allocation(arch)
+          ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+             1) *
+                4
+          : total;
+  return KernelVgprBounds{
+      .total = total,
+      // An ordinary VGPR is one below the accumulator window: an index inside it
+      // would alias an AGPR.
+      .ordinary_bound = std::min(total, accum_base),
+      .acc_count = total > accum_base ? total - accum_base : 0,
+  };
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -190,19 +239,16 @@ bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *
 }
 
 // Check that the probe does not clobber the link pair.
-bool check_probe_link_pair(const ProbeClobberSummary &summary, ProbeCallingConvention cc,
+bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &abi,
                            std::string *error_out) {
-  const std::optional<uint16_t> link_base = link_pair_for(cc);
-  if (!link_base)
-    return true; // Unknown convention: plan_probe_call rejects it with a cc-specific error.
-  RegisterSet link_pair;
-  link_pair.expand(RegisterRef{RegClass::SGPR, *link_base, 2});
-  if (!summary.ordinary_clobbers.intersects(link_pair))
+  if (!is_valid_probe_abi(abi))
+    return true; // plan_probe_call rejects an unusable ABI with its own error.
+  if (!summary.ordinary_clobbers.intersects(probe_link_pair(abi)))
     return true;
   if (error_out != nullptr) {
-    const uint16_t hi = static_cast<uint16_t>(*link_base + 1);
-    *error_out = "probe body overwrites its own return-link pair s[" + std::to_string(*link_base) +
-                 ":" + std::to_string(hi) +
+    const uint16_t hi = static_cast<uint16_t>(abi.link_pair_base + 1);
+    *error_out = "probe body overwrites its own return-link pair s[" +
+                 std::to_string(abi.link_pair_base) + ":" + std::to_string(hi) +
                  "] before returning; it would return through a corrupted PC";
   }
   return false;
@@ -280,9 +326,15 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                       "(a probe call) or both be empty (the inline nop)");
     return std::nullopt;
   }
-  // TODO: consume force_full_exec when EXEC policy management is implemented
-  if (pt.force_full_exec) {
-    fail("InstrumentationPoint::force_full_exec must be false temporarily");
+  // The inline nop has nowhere to put arguments. Rejected rather than ignored,
+  // so a caller that meant to request a probe call finds out.
+  if (pt.probe_obj == nullptr && !pt.probe_args.empty()) {
+    fail("InstrumentationPoint::probe_args requires a probe_obj / probe_symbol");
+    return std::nullopt;
+  }
+  // Likewise, the inline nop has no envelope whose mask could be widened.
+  if (pt.probe_obj == nullptr && pt.force_full_exec) {
+    fail("InstrumentationPoint::force_full_exec requires a probe_obj / probe_symbol");
     return std::nullopt;
   }
 
@@ -381,7 +433,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
   return true;
 }
 
-bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_unavailable,
                       const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
                       SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
                       uint16_t &out_bridge, std::string *error_out) {
@@ -410,14 +462,17 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
   }
 
   // Bridge, within the kernel's allocated VGPR count (never an unallocated index).
-  // Prefer a dead VGPR; else reuse a spilled VGPR, whose value is already on scratch
-  // (build_spill_bracket orders its store/reload around the bridge use). A spilled
-  // VGPR is live at the anchor, so the dead scan never returns one.
+  // Prefer a VGPR the site is not already using; else reuse a spilled VGPR, whose
+  // own value is already on scratch and gets reloaded after the bridge's last use
+  // (build_spill_bracket orders the VGPR fills after the SGPR ones). Those are the
+  // only two safe choices: the prologue's writelane destroys whatever the bridge
+  // held, so anything live that is not spilled would be lost. bridge_unavailable
+  // covers the live set, so the first scan never returns one of those.
   const uint16_t vgpr_bound =
       static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
   std::optional<uint16_t> bridge;
   for (uint16_t v = 0; v < vgpr_bound; ++v) {
-    if (!live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1})) {
+    if (!bridge_unavailable.contains(RegisterRef{RegClass::VGPR, v, 1})) {
       bridge = v;
       break;
     }
@@ -663,16 +718,68 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
 
-  // Store probe objects and symbols together in probe_keys (object, symbol).
-  std::vector<std::pair<const AmdGpuCodeObject *, std::string>> probe_keys;
+  // A probe is identified by the object it came from and the symbol inside it,
+  // and its body is copied into the cave once per identity. The rest of the call
+  // shape (how many argument dwords, where each one comes from, which lanes the
+  // body runs on) describes that one body, so it is recorded on the
+  // ProbeCallable rather than keyed here. Two points naming one probe and
+  // declaring it differently are not two probes; they are one probe declared
+  // twice, and the second declaration is rejected. Only the immediate *values*
+  // are genuinely per-site.
+  //
+  // Whichever point resolves first supplies the declaration. Nothing here can do
+  // better: a body reveals neither its arity nor its mask policy, so the two
+  // declarations are equally credible and the diagnostic names the conflict
+  // instead of blaming the later point.
+  struct ProbeKey {
+    const AmdGpuCodeObject *obj;
+    std::string symbol;
+  };
+  // The shape half of a point's argument list, which belongs to the probe.
+  auto arg_sources_of = [](const InstrumentationPoint &pt) {
+    std::vector<ProbeArgSource> sources;
+    sources.reserve(pt.probe_args.size());
+    for (const ProbeArgValue &arg : pt.probe_args)
+      sources.push_back(arg.source);
+    return sources;
+  };
+  std::vector<ProbeKey> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
   // If the probe is new, then resolve it and get probe info; add it to
   // probe_keys and out.probes.
   auto resolve_probe_index = [&](const InstrumentationPoint &pt,
                                  std::string &perr) -> std::optional<size_t> {
+    const std::vector<ProbeArgSource> sources = arg_sources_of(pt);
     for (size_t i = 0; i < probe_keys.size(); ++i) {
-      if (probe_keys[i].first == pt.probe_obj && probe_keys[i].second == pt.probe_symbol)
-        return i;
+      if (probe_keys[i].obj != pt.probe_obj || probe_keys[i].symbol != pt.probe_symbol)
+        continue;
+      const ProbeCallable &declared = out.probes[i];
+      if (static_cast<size_t>(declared.abi.num_arg_vgprs) != pt.probe_args.size()) {
+        perr = "probe '" + pt.probe_symbol + "' was already declared with " +
+               std::to_string(declared.abi.num_arg_vgprs) +
+               " argument dwords; this point declares " + std::to_string(pt.probe_args.size());
+        return std::nullopt;
+      }
+      if (declared.arg_sources != sources) {
+        perr =
+            "probe '" + pt.probe_symbol + "' was already declared with different argument sources";
+        return std::nullopt;
+      }
+      if (declared.force_full_exec != pt.force_full_exec) {
+        perr = std::string("probe '") + pt.probe_symbol + "' was already declared with " +
+               (declared.force_full_exec ? "force_full_exec" : "the anchor mask") +
+               "; this point declares " +
+               (pt.force_full_exec ? "force_full_exec" : "the anchor mask");
+        return std::nullopt;
+      }
+      return i;
+    }
+    // Bounded before the narrowing cast below, which would wrap a large count
+    // into a small in-range one.
+    if (pt.probe_args.size() > kMaxProbeArgVgprs) {
+      perr = "probe '" + pt.probe_symbol + "' was given " + std::to_string(pt.probe_args.size()) +
+             " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
+      return std::nullopt;
     }
     const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
     if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
@@ -683,11 +790,28 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
     if (!sym)
       return std::nullopt;
-    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_, &perr);
+    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_,
+                                         static_cast<uint8_t>(pt.probe_args.size()), &perr);
     if (!callable)
       return std::nullopt;
+    // Inputs the probe reads that its convention does not supply. Typically a
+    // value only the kernel prologue produces -- workitem_id_x in v31, say --
+    // which a trampoline at an arbitrary site cannot reproduce, so the probe
+    // would read whatever the instrumented kernel left behind. An ordinary
+    // uninitialized read lands here too, and is equally unusable.
+    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
+    if (!live_ins)
+      return std::nullopt;
+    if (!live_ins->none()) {
+      perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
+             " before defining it, and its ABI (" + std::to_string(pt.probe_args.size()) +
+             " argument dwords) does not supply it";
+      return std::nullopt;
+    }
+    callable->arg_sources = sources;
+    callable->force_full_exec = pt.force_full_exec;
     out.probes.push_back(std::move(*callable));
-    probe_keys.emplace_back(pt.probe_obj, pt.probe_symbol);
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol});
     return out.probes.size() - 1;
   };
 
@@ -731,6 +855,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         continue;
       }
       site->probe_index = *index;
+      site->probe_args = pt.probe_args;
     }
 
     sites.push_back(std::move(*site));
@@ -823,6 +948,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // the descriptors already scanned above.
   const std::optional<uint32_t> kernel_sgpr_count =
       AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+
+  // The kernel's VGPR allocation, decoded once: it depends only on the
+  // descriptor and the arch, both loop-invariant. Stays all-zero unless exactly
+  // one kernel was discovered, since with several there is no single allocation
+  // to name; `kernels.size() != 1` is the guard every use tests. The zero state
+  // fails closed rather than silently widening a bound: `ordinary_bound == 0`
+  // leaves the SGPR bridge scan with nothing to pick, and `acc_count == 0`
+  // rejects every AccVGPR index.
+  const KernelVgprBounds vgpr_bounds = kernels.size() == 1
+                                           ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
+                                           : KernelVgprBounds{};
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -856,14 +992,59 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The kernel must own the fixed return-link pair.
-      if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
-          link_base && !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
+      if (const uint16_t link_base = probe.abi.link_pair_base;
+          is_valid_probe_abi(probe.abi) &&
+          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
         result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
-            std::to_string(*link_base + 1) + "] but the kernel allocates only " +
+            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+            std::to_string(link_base + 1) + "] but the kernel allocates only " +
             std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(*link_base + 2) + " SGPRs");
+            std::to_string(link_base + 2) + " SGPRs");
         continue;
+      }
+
+      // The kernel must likewise own the argument VGPRs. Only asked of a call
+      // that passes arguments, so a zero-argument probe call stays independent
+      // of the VGPR allocation entirely.
+      if (probe.abi.num_arg_vgprs != 0) {
+        // vgpr_bounds stays all-zero when no single kernel descriptor was
+        // discovered, so `kernels.size() != 1` is the guard, matching every other
+        // use. Same fail-closed case as the SGPR bound above: the allocation the
+        // argument VGPRs must fit inside is unknown. The zero state would reject
+        // any non-zero count anyway; asking here is what makes the diagnostic say
+        // which of the two things went wrong.
+        if (kernels.size() != 1) {
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) +
+                                  " passes arguments, which requires a discovered kernel "
+                                  "descriptor to bound VGPR selection, but none was found");
+          continue;
+        }
+        if (!probe_args_fit_in_kernel(vgpr_bounds.ordinary_bound, probe.abi)) {
+          const uint16_t last =
+              static_cast<uint16_t>(probe.abi.arg_vgpr_base + probe.abi.num_arg_vgprs - 1);
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) + " needs argument VGPRs v" +
+                                  std::to_string(probe.abi.arg_vgpr_base) + "..v" +
+                                  std::to_string(last) + " but the kernel allocates only " +
+                                  std::to_string(vgpr_bounds.ordinary_bound) + " ordinary VGPRs");
+          continue;
+        }
+        // A Wave32 kernel's EXEC is one dword; exec_hi is not part of the mask
+        // the guest ran under, so handing it to a probe would deliver whatever
+        // the register happens to hold. The probe's own signature is already
+        // wave-size specific (uint32_t or uint64_t at compile time), so this is
+        // the caller declaring the wrong one, not a gap to paper over.
+        if (kernel_wavefront_size(arch_, kernels.front().descriptor) == 32 &&
+            std::any_of(site.probe_args.begin(), site.probe_args.end(), [](const ProbeArgValue &a) {
+              return a.source == ProbeArgSource::AnchorExecHi;
+            })) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " passes the high dword of the anchor EXEC mask, but the kernel is Wave32 and "
+              "has no such dword");
+          continue;
+        }
       }
 
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
@@ -881,7 +1062,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The probe must not overwrite its own return-link pair before returning.
-      if (!check_probe_link_pair(*summary, probe.cc, &err)) {
+      if (!check_probe_link_pair(*summary, probe.abi, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -908,9 +1089,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count
       plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.probe_args = site.probe_args;
+      plan.force_full_exec = probe.force_full_exec;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
-      if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,
+      if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
                                               &err)) {
         result.errors.push_back(std::move(err));
         continue;
@@ -925,7 +1108,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const RegisterSet spill = compute_spill_set(live, clobbers);
       if (!spill.none()) {
         // Single-kernel assumption: spilling needs exactly one kernel descriptor
-        // with non-zero fixed scratch to grow.
+        // with non-zero fixed scratch to grow. That is the same condition under
+        // which vgpr_bounds was decoded, so testing it here is what licenses the
+        // reads below.
         if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
           result.errors.push_back(
               "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
@@ -957,45 +1142,23 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           result.errors.push_back(std::move(err));
           continue;
         }
-        const uint32_t granulated_vgpr_count =
-            AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-        // The descriptor encoding granule is wave-size dependent on RDNA (8 for
-        // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
-        // overcount the allocation and let the SGPR bridge scan pick an unallocated
-        // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
-        const uint32_t kernel_vgpr_count =
-            (granulated_vgpr_count + 1) *
-            descriptor_vgpr_granularity_for_wavefront(
-                arch_, kernel_wavefront_size(arch_, kernel.descriptor));
-        // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
-        // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
-        // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
-        // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
-        const uint32_t accum_base =
-            arch_has_unified_vgpr_allocation(arch_)
-                ? (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
-                                   rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
-                   1) *
-                      4
-                : kernel_vgpr_count;
         // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
         // window would alias an AGPR that is not part of acc_spills.
-        const uint32_t ordinary_vgpr_bound = std::min(kernel_vgpr_count, accum_base);
+        // Defensively exclude the argument VGPRs from bridge selection as well
+        // as the live set.
+        const RegisterSet bridge_unavailable = live | arg_registers(probe.abi);
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, ordinary_vgpr_bound, *spills,
-                              arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+            !plan_sgpr_spills(sgpr_spill, bridge_unavailable, plan.vgpr_spills,
+                              vgpr_bounds.ordinary_bound, *spills, arch_, plan.sgpr_spills,
+                              plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }
         // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
-        if (!acc_spill.none()) {
-          const uint32_t acc_count =
-              kernel_vgpr_count > accum_base ? kernel_vgpr_count - accum_base : 0;
-          if (!plan_acc_spills(acc_spill, acc_count, *spills, arch_, plan.acc_spills, &err)) {
-            result.errors.push_back(std::move(err));
-            continue;
-          }
+        if (!acc_spill.none() && !plan_acc_spills(acc_spill, vgpr_bounds.acc_count, *spills, arch_,
+                                                  plan.acc_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
         }
       }
 

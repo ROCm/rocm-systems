@@ -128,12 +128,6 @@ struct client_data
     rocprofiler_buffer_id_t            memory_copy_buffer        = { 0 };
     rocprofiler_buffer_id_t            memory_alloc_buffer       = { 0 };
     rocprofiler_buffer_id_t            counter_collection_buffer = { 0 };
-    rocprofiler_buffer_id_t            kfd_page_fault_buffer     = { 0 };
-    rocprofiler_buffer_id_t            kfd_page_migrate_buffer   = { 0 };
-    rocprofiler_buffer_id_t            kfd_queue_buffer          = { 0 };
-    rocprofiler_buffer_id_t            kfd_event_queue_buffer    = { 0 };
-    rocprofiler_buffer_id_t            kfd_event_unmap_buffer    = { 0 };
-    rocprofiler_buffer_id_t            kfd_event_dropped_buffer  = { 0 };
     std::vector<tool_agent>            cpu_agents                = {};
     std::vector<tool_agent>            gpu_agents                = {};
     std::vector<hardware_counter_info> events_info               = {};
@@ -193,12 +187,10 @@ client_data::get_code_obj_context() const
 inline client_data::buffer_id_vec_t
 client_data::get_buffers() const
 {
-    return buffer_id_vec_t{ kernel_dispatch_buffer,    scratch_memory_buffer,
-                            memory_copy_buffer,        memory_alloc_buffer,
-                            counter_collection_buffer, kfd_page_fault_buffer,
-                            kfd_page_migrate_buffer,   kfd_queue_buffer,
-                            kfd_event_queue_buffer,    kfd_event_unmap_buffer,
-                            kfd_event_dropped_buffer };
+    return buffer_id_vec_t{
+        kernel_dispatch_buffer, scratch_memory_buffer,     memory_copy_buffer,
+        memory_alloc_buffer,    counter_collection_buffer,
+    };
 }
 
 inline const rocprofsys_agent_t*
@@ -262,7 +254,7 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
         });
 }
 
-inline constexpr client_data*
+constexpr client_data*
 as_client_data(void* _ptr)
 {
     return static_cast<client_data*>(_ptr);
