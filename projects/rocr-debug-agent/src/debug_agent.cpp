@@ -29,6 +29,7 @@
    DEALINGS WITH THE SOFTWARE.  */
 
 #include "agent_config.h"
+#include "agent_dbgapi_logging.h"
 #include "agent_utils.h"
 #include "code_object.h"
 #include "debug.h"
