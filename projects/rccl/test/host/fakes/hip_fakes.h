@@ -169,6 +169,13 @@ extern std::function<hipError_t(void)> g_hipGetLastError;
 // lets a test drive hipEventRecord independently of the shared async-ops seam.
 extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)> g_hipEventRecord;
 
+// Opt-in record->query fidelity. When true, hipEventQuery reports hipErrorNotReady
+// for any event that has not been recorded via hipEventRecord, modelling the
+// async publish-ordering the CE proxy relies on (a copy's completion event must
+// be recorded before the query is allowed to see the copy as done). Off by
+// default so existing tests keep the simple g_hipAsyncOpsResult behaviour.
+extern bool g_hipEventQueryRequiresRecord;
+
 // Install a working host-memory stand-in for the VMM surface: mmap-backed
 // reserve/free (honouring the requested alignment), succeeding map/unmap/
 // create/import, and copies that actually copy.

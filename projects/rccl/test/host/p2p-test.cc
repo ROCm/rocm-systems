@@ -7299,12 +7299,21 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndComple
         // Async copy, event record and event query all succeed so the single
         // step transmits and then completes in one pump.
         g_hipAsyncOpsResult = hipSuccess;
+        // Model the async publish-ordering: the query for a slot only reports
+        // the copy complete once the proxy has recorded that slot's event. This
+        // makes the completion the test observes depend on the event actually
+        // being recorded, not just on the shared async-ops result.
+        g_hipEventQueryRequiresRecord = true;
 
         ncclProxyState state{};
         state.buffSizes[NCCL_PROTO_SIMPLE] = 8 * NCCL_STEPS;
 
         ncclRecvMem ceRecvMem{};
         ceRecvMem.tail = 64;   // GPU has produced well past the transmit cursor
+        // The slot the proxy will transmit carries a payload; production must
+        // move exactly these bytes from the device buffer into the recv FIFO.
+        constexpr int kPayloadBytes = 8;   // == stepSize (buffSizes[SIMPLE] / NCCL_STEPS)
+        ceRecvMem.connFifo[0].size = kPayloadBytes;
         p2pShm shm{};
 
         p2pShmProxyInfo info{};
@@ -7313,8 +7322,25 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndComple
         info.shm       = &shm;
         char recvFifo[64] = {};
         char ceDevBuff[64] = {};
+        // Seed the source with a recognisable payload and leave the destination
+        // zeroed, so a real copy is the only thing that can make them match.
+        const char payload[kPayloadBytes] = {'C', 'E', 'c', 'o', 'p', 'y', '!', '\n'};
+        std::memcpy(ceDevBuff, payload, kPayloadBytes);
         info.recvFifo = recvFifo;
         info.ceDevBuff = ceDevBuff;
+        // A distinct event handle for the slot the proxy will transmit, so the
+        // record->query dependency has something to key on.
+        info.events[0] = reinterpret_cast<hipEvent_t>(0x1);
+
+        // Make the async-copy seam actually move bytes (the default fake only
+        // returns a status). We assert on the bytes that land, not on the fact
+        // that any particular primitive was called, so the implementation stays
+        // free to move the payload however it likes.
+        ScopedHook copyHook(g_hipMemcpyAsync,
+            [](void* dst, const void* src, size_t n, hipMemcpyKind, hipStream_t) {
+                if (dst && src && dst != src) std::memcpy(dst, src, n);
+                return hipSuccess;
+            });
 
         ncclProxyConnection conn{};
         conn.transportResources = &info;
@@ -7334,5 +7360,9 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndComple
         EXPECT_EQ(args.done, 1);                        // the sub completed
         EXPECT_EQ(args.state, ncclProxyOpNone);         // op finished
         EXPECT_EQ(shm.recvMem.tail, args.subs[0].base + args.subs[0].done);
+        // The observable job of the copy engine: the payload produced by the
+        // GPU is now present in the recv FIFO. This fails if the proxy skips
+        // the transfer, regardless of which primitive performs it.
+        EXPECT_EQ(0, std::memcmp(recvFifo, payload, kPayloadBytes));
     });
 }
