@@ -179,6 +179,6 @@ private:
     static constexpr int defaultCgIterations = 1;
     static constexpr uint64_t defaultMathAccuracyIterations = 4294967296; // 2^32
     static constexpr int defaultMathAccuracyMaxMemoryPercentage = 80;
-    static constexpr size_t defaultMaxMemory = 8589934592; // 8G
+    static constexpr size_t defaultMathMaxMemory = 8589934592; // 8G
     static constexpr double defaultMathReductionFactor = 0.1;
 };
