@@ -1648,6 +1648,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                      totalBytes >= agCeNonRegMin &&
                                      totalBytes <= agCeNonRegMax;
       if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
+          winRegType == ncclSymSendNonregRecvNonreg &&
           !hasSysmemSegment &&
           comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
         decision->algo = RCCL_CE_SCRATCH;

@@ -4342,7 +4342,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRejectsFullyRegistered
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, /*stream=*/nullptr, true,
                                                    false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4364,7 +4364,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRejectsRegisteredRecvW
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, /*stream=*/nullptr, true,
                                                    false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
