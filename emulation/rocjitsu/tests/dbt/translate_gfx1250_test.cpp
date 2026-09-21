@@ -7805,6 +7805,36 @@ TEST(BinaryTranslatorE2E, Gfx1250E5m3PackReplacementMatchesReferenceConversion) 
   }
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250E5m3PackRoundsSubnormalTiesToEven) {
+  // Midpoints between successive E5M3 values from zero to the smallest normal,
+  // in F32 bits. The E5M3 quantum is 2^-17, including the normal boundary.
+  constexpr std::array<uint32_t, 8> kMidpoints = {0x36800000u, 0x37400000u, 0x37a00000u,
+                                                  0x37e00000u, 0x38100000u, 0x38300000u,
+                                                  0x38500000u, 0x38700000u};
+  constexpr uint32_t kDstInitial = 0xa5a5a5a5u;
+  for (const bool fp16_ovfl : {false, true}) {
+    for (const bool write_high : {false, true}) {
+      for (uint32_t lower = 0; lower < kMidpoints.size(); ++lower) {
+        for (const int32_t delta : {-1, 0, 1}) {
+          const uint32_t magnitude = kMidpoints[lower] + delta;
+          // E5M3 encodes magnitude only, so exercise both signs and sources.
+          const auto produced = run_gfx1250_e5m3_replacement(
+              cdna5::kVCvtPkFp8F32Vop3, static_cast<uint8_t>(write_high ? 8 : 0),
+              e5m3_vgpr(magnitude), e5m3_vgpr(magnitude | 0x80000000u), kDstInitial, fp16_ovfl);
+          ASSERT_TRUE(produced.has_value());
+          const uint32_t byte = delta < 0 ? lower : delta > 0 ? lower + 1 : (lower + 1) & ~1u;
+          const uint32_t packed = byte | (byte << 8);
+          const uint32_t expected = write_high ? ((kDstInitial & 0x0000ffffu) | (packed << 16))
+                                               : ((kDstInitial & 0xffff0000u) | packed);
+          EXPECT_EQ(produced->vdst, expected)
+              << "lower=" << lower << " delta=" << delta << " fp16_ovfl=" << fp16_ovfl
+              << " write_high=" << write_high;
+        }
+      }
+    }
+  }
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250E5m3StochasticReplacementMatchesReferenceConversion) {
   static constexpr std::array<uint32_t, 14> kValues = {
       0x00000000u, 0x80000000u, 0x00000001u, 0x36800000u, 0x37000000u, 0x38800000u, 0x3F800000u,

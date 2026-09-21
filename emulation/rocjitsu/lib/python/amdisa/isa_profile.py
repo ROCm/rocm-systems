@@ -707,6 +707,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        """Additional lane source encodings qualified beyond the XML ranges."""
+        return ((192, 192),)
+
+    @property
     def smem_address_uses_access_size(self) -> bool:
         """True when generated SMEM address helpers need the access size."""
         return False
@@ -2164,6 +2169,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
     """
 
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
+
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
@@ -2189,6 +2195,12 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return super().skip_inst_encoding(
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # READLANE masks the value to the wave width, not the selector encoding.
+        # RADV emits both inline 64 and literal lane indices.
+        return ((192, 192), (255, 255))
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2388,6 +2400,11 @@ class Rdna3_5Profile(Rdna3Profile):
     """
 
     @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # Literal lane indices are only qualified on RDNA3 and RDNA4.
+        return ((192, 192),)
+
+    @property
     def renders_gfx11_image_syntax(self) -> bool:
         return True
 
@@ -2473,6 +2490,12 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return super().skip_inst_encoding(
             enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
         )
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # READLANE masks the value to the wave width, not the selector encoding.
+        # RADV emits both inline 64 and literal lane indices.
+        return ((192, 192), (255, 255))
 
     @property
     def global_addtid_offset_expr(self) -> str:
@@ -2752,6 +2775,11 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def vmem_stores_complete_in_order(self) -> bool:
         return True
+
+    @property
+    def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
+        # Literal lane indices are only qualified on RDNA3 and RDNA4.
+        return ((192, 192),)
 
     @property
     def global_addtid_offset_expr(self) -> str:

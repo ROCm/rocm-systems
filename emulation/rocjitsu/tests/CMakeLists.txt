@@ -454,10 +454,12 @@ add_executable(
     cdna5_sdma_test.cpp
     cdna5_tensor_dma_test.cpp
     lds_test.cpp
+    lds_counter_test.cpp
     l2_cache_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
+    packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
@@ -466,6 +468,7 @@ add_executable(
     partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
+    readlane_selector_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
     smem_sbase_operand_test.cpp
@@ -508,6 +511,7 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    vop3_conversion_modifiers_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp

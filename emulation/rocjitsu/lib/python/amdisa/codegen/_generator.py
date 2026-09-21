@@ -44,7 +44,7 @@ from amdisa.fieldless_policy import (
     fieldless_policy,
     operand_participates,
 )
-from amdisa.semantics import InstructionSemantics, SemanticsSpec
+from amdisa.semantics import F32_TO_INTEGER_DTYPES, InstructionSemantics, SemanticsSpec
 from amdisa.isa_profile import DppOpcodeRule
 
 from amdisa.codegen.config import CodegenConfig
@@ -182,6 +182,7 @@ _LITERAL_CAPABLE_OPERAND_TYPES = frozenset(
         'OPR_SREG_LITERAL',
         'OPR_SSRC',
         'OPR_SSRC_NOLDS',
+        'OPR_SSRC_LANESEL',
     }
 )
 
@@ -6163,21 +6164,32 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
+                is_integer_to_f32 = cls == 'vector_unary' and dtype in (
+                    'f32_i32',
+                    'f32_u32',
+                    'f32_ubyte0',
+                    'f32_ubyte1',
+                    'f32_ubyte2',
+                    'f32_ubyte3',
+                )
+                is_f32_to_integer = (
+                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                )
                 if (
                     is_vop3
-                    and is_float_op
+                    and (is_float_op or is_integer_to_f32 or is_f32_to_integer)
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = {'neg'}
-                    if has_abs:
+                    ef = set() if is_integer_to_f32 else {'neg'}
+                    if has_abs and not is_integer_to_f32:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields:
+                    if 'clamp' in inst_fields and not is_f32_to_integer:
                         ef.add('clamp')
-                    if 'omod' in inst_fields:
+                    if 'omod' in inst_fields and not is_f32_to_integer:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
@@ -9592,6 +9604,9 @@ class CodeGenerator:
             lo = enum_values[pattern.min_enum]
             hi = enum_values[pattern.max_enum]
             intervals.append((min(lo, hi), max(lo, hi)))
+
+        if operand_type == 'OPR_SSRC_LANESEL':
+            intervals.extend(self.isa_spec.profile.extra_lane_selector_intervals)
 
         merged: list[tuple[int, int]] = []
         for lo, hi in sorted(intervals):

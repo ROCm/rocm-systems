@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from amdisa.isa_profile import IsaProfile
 
 
+# Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
+F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
+
+
 @dataclass
 class InstructionSemantics:
     """Semantic metadata for a single instruction.

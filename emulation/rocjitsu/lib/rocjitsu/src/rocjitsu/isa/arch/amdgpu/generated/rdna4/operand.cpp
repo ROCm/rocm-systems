@@ -152,7 +152,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192) ||
+          (encoding_value >= 255 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
