@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
@@ -37,23 +38,38 @@
 
 #include <unistd.h>
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <random>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
 namespace context
 {
+// Owns the contexts it names. A reader holding a snapshot keeps them alive for the duration of
+// the read, so deregister_client_contexts() dropping the registry's reference cannot destroy a
+// context out from under an in-flight completion. The parallel raw-pointer array is what the
+// snapshot iterates, so walking one costs no reference counting.
+struct registered_context_storage
+{
+    std::vector<std::shared_ptr<context>> owned = {};
+    std::vector<const context*>           view  = {};
+};
+
 namespace
 {
-using reserve_size_t       = common::container::reserve_size;
-using stable_context_vec_t = common::container::stable_vector<std::optional<context>, 8>;
-using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
+using reserve_size_t         = common::container::reserve_size;
+using context_ptr_t          = std::shared_ptr<context>;
+using stable_context_vec_t   = common::container::stable_vector<context_ptr_t, 8>;
+using active_context_vec_t   = common::container::stable_vector<std::atomic<const context*>, 8>;
+using context_snapshot_ptr_t = std::shared_ptr<const registered_context_storage>;
 
 constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
 
@@ -97,6 +113,122 @@ get_active_contexts_impl()
     static auto* _v = new active_context_vec_t{reserve_size_t{active_context_vec_t::chunk_size}};
     return *_v;
 }
+
+// C++20 replaces these with std::atomic<std::shared_ptr<T>>; the free functions are the C++17
+// spelling and are deprecated there, so select on the feature macro rather than leaving a
+// deprecation warning to trip -Werror on a future standard bump.
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+using published_snapshot_t = std::atomic<context_snapshot_ptr_t>;
+
+context_snapshot_ptr_t
+load_snapshot(published_snapshot_t& _v)
+{
+    return _v.load(std::memory_order_acquire);
+}
+
+void
+store_snapshot(published_snapshot_t& _v, context_snapshot_ptr_t&& _new)
+{
+    _v.store(std::move(_new), std::memory_order_release);
+}
+#else
+using published_snapshot_t = context_snapshot_ptr_t;
+
+context_snapshot_ptr_t
+load_snapshot(published_snapshot_t& _v)
+{
+    return std::atomic_load_explicit(&_v, std::memory_order_acquire);
+}
+
+void
+store_snapshot(published_snapshot_t& _v, context_snapshot_ptr_t&& _new)
+{
+    std::atomic_store_explicit(&_v, std::move(_new), std::memory_order_release);
+}
+#endif
+
+// Shares the registry's lifetime so that reads after common::destroy_static_objects() see an
+// empty snapshot rather than a destroyed one.
+published_snapshot_t*
+get_published_snapshot()
+{
+    static auto*& _v = common::static_object<published_snapshot_t>::construct();
+    return _v;
+}
+
+context_snapshot_ptr_t
+current_registered_contexts()
+{
+    auto* _pub = get_published_snapshot();
+    if(!_pub) return {};
+    return load_snapshot(*_pub);
+}
+
+// Rebuilds the published snapshot from the registry. Must be called with get_contexts_mutex()
+// held, i.e. by whichever function just mutated the registry.
+void
+publish_registered_contexts()
+{
+    auto* _pub = get_published_snapshot();
+    if(!_pub) return;
+
+    auto _data = std::make_shared<registered_context_storage>();
+
+    if(auto* _impl = get_registered_contexts_impl())
+    {
+        _data->owned.reserve(_impl->size());
+        _data->view.reserve(_impl->size());
+        for(const auto& itr : *_impl)
+        {
+            if(!itr) continue;
+            _data->owned.emplace_back(itr);
+            _data->view.emplace_back(itr.get());
+        }
+    }
+
+    store_snapshot(*_pub, std::move(_data));
+}
+
+// Snapshots skip deregistered slots, so match on context_idx rather than on position.
+context*
+find_registered_context(uint64_t handle)
+{
+    auto _data = current_registered_contexts();
+    if(!_data) return nullptr;
+
+    for(const auto& itr : _data->owned)
+    {
+        if(itr->context_idx == handle) return itr.get();
+    }
+    return nullptr;
+}
+
+// Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across the
+// GPU drain, so for that window the context is still in the active array with no lock held. This
+// set is what keeps start_context() and a second stop_context() from acting on that half-stopped
+// state. Guarded by get_contexts_mutex().
+std::unordered_set<uint64_t>&
+get_stopping_contexts()
+{
+    static auto _v = std::unordered_set<uint64_t>{};
+    return _v;
+}
+
+std::condition_variable&
+get_contexts_cv()
+{
+    static auto _v = std::condition_variable{};
+    return _v;
+}
+
+// _lk must own get_contexts_mutex(). Waits until no context is mid-stop, which restores the
+// property the old single-lock stop_context() had: no other lifecycle operation ever observes a
+// context whose services have been torn down but whose active slot is still populated.
+void
+wait_for_pending_stops(std::unique_lock<std::mutex>& _lk)
+{
+    get_contexts_cv().wait(_lk, []() { return get_stopping_contexts().empty(); });
+}
 }  // namespace
 
 std::mutex&
@@ -120,22 +252,33 @@ dispatch_counter_collection_service::intersects(
     return false;
 }
 
+registered_contexts_snapshot::registered_contexts_snapshot(context_snapshot_ptr_t&& data)
+: m_data{std::move(data)}
+{
+    if(m_data)
+    {
+        m_begin = m_data->view.data();
+        m_end   = m_begin + m_data->view.size();
+    }
+}
+
+registered_contexts_snapshot
+get_registered_contexts_snapshot()
+{
+    return registered_contexts_snapshot{current_registered_contexts()};
+}
+
 context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter)
 {
     data.clear();
 
-    if(!get_registered_contexts_impl()) return data;
+    auto snapshot = get_registered_contexts_snapshot();
+    if(snapshot.empty()) return data;
 
-    auto num_ctx = get_registered_contexts_impl()->size();
-    if(num_ctx <= 0) return data;
-
-    data.reserve(num_ctx);
-    for(auto& itr : *get_registered_contexts_impl())
+    data.reserve(snapshot.size());
+    for(const auto* ctx : snapshot)
     {
-        if(!itr.has_value()) continue;
-
-        const auto* ctx = &itr.value();
         if(!filter || (filter && filter(ctx))) data.emplace_back(ctx);
     }
     return data;
@@ -231,13 +374,9 @@ allocate_context()
     // initial context identifier number
     auto _idx = get_registered_contexts_impl()->size() + get_contexts_offset();
 
-    // make space in registered
-    get_registered_contexts_impl()->emplace_back();
-
     // create an entry in the registered
-    auto& _cfg_v = get_registered_contexts_impl()->back();
-    _cfg_v.emplace();
-    auto* _cfg = &_cfg_v.value();
+    auto& _cfg_v = get_registered_contexts_impl()->emplace_back(std::make_shared<context>());
+    auto* _cfg   = _cfg_v.get();
     // ...
 
     if(!_cfg) return std::nullopt;
@@ -250,6 +389,8 @@ allocate_context()
         << " rocprofiler internal error: a context was allocated without an associated tool client "
            "identifier";
 
+    publish_registered_contexts();
+
     return rocprofiler_context_id_t{_idx};
 }
 
@@ -257,13 +398,10 @@ context*
 get_mutable_registered_context(rocprofiler_context_id_t id)
 {
     if(id.handle < get_contexts_offset()) return nullptr;
-    if(!get_registered_contexts_impl()) return nullptr;
-    auto _idx = id.handle - get_contexts_offset();
-    if(_idx >= get_registered_contexts_impl()->size())
-        return nullptr;
-    else if(get_registered_contexts_impl()->at(_idx).has_value())
-        return &get_registered_contexts_impl()->at(_idx).value();
-    return nullptr;
+
+    // Read through the published snapshot rather than indexing the registry: allocate_context()
+    // may be appending to the registry concurrently.
+    return find_registered_context(id.handle);
 }
 
 const context*
@@ -283,11 +421,6 @@ start_context(rocprofiler_context_id_t context_id)
 {
     if(context_id.handle < get_contexts_offset()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    if(!get_registered_contexts_impl()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-
-    if((context_id.handle - get_contexts_offset()) >= get_registered_contexts_impl()->size())
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-
     const auto* cfg = get_registered_context(context_id);
 
     if(!cfg) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
@@ -295,47 +428,48 @@ start_context(rocprofiler_context_id_t context_id)
     if(validate_context(cfg) != ROCPROFILER_STATUS_SUCCESS)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    auto current_contexts = context_array_t{};
-    for(const auto* itr : get_active_contexts(current_contexts))
-    {
-        if(cfg->context_idx == itr->context_idx)
-        {
-            return ROCPROFILER_STATUS_SUCCESS;
-        }
-        else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection &&
-                cfg->dispatch_counter_collection->intersects(*itr->dispatch_counter_collection))
-        {
-            // Conflicting context. Two counter-collection contexts can run concurrently as
-            // long as they target disjoint sets of GPU agents -- the hardware counters they
-            // program are per-agent, so contexts that never touch the same agent cannot
-            // contend. A context with no agent restriction claims every agent and therefore
-            // still conflicts with any other counter-collection context.
-            return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
-        }
-    }
-
-    uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
-    auto     idx               = rocp_tot_contexts;
-    auto&    active_contexts   = get_active_contexts_impl();
+    constexpr auto no_slot         = std::numeric_limits<size_t>::max();
+    auto           idx             = no_slot;
+    auto&          active_contexts = get_active_contexts_impl();
     {
         // hold a lock here to prevent multiple threads from finding the same nullptr slot
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
-        // try to find a nullptr slot first
+
+        // A context that is mid-stop is still in the active array while its GPU drain runs, so
+        // starting against that state would either return SUCCESS for a context that is about to
+        // be cleared, or report a conflict against a context that is on its way out.
+        wait_for_pending_stops(_lk);
+
+        // The conflict scan reads the same array as the slot search below and has to agree with
+        // it, so both run under one acquisition of the lock.
         for(size_t i = 0; i < active_contexts.size(); ++i)
         {
             const auto* itr = active_contexts.at(i).load(std::memory_order_relaxed);
             if(itr == nullptr)
             {
-                idx = i;
-                break;
+                if(idx == no_slot) idx = i;
+                continue;
             }
-            else if(context_id.handle == itr->context_idx)
+
+            if(cfg->context_idx == itr->context_idx)
             {
                 return ROCPROFILER_STATUS_SUCCESS;
             }
+
+            if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection &&
+               cfg->dispatch_counter_collection->intersects(*itr->dispatch_counter_collection))
+            {
+                // Conflicting context. Two counter-collection contexts can run concurrently as
+                // long as they target disjoint sets of GPU agents -- the hardware counters they
+                // program are per-agent, so contexts that never touch the same agent cannot
+                // contend. A context with no agent restriction claims every agent and therefore
+                // still conflicts with any other counter-collection context.
+                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+            }
         }
+
         // if no nullptr slot was found, then create one while lock is held
-        if(idx == rocp_tot_contexts)
+        if(idx == no_slot)
         {
             idx = active_contexts.size();
             active_contexts.emplace_back();
@@ -376,72 +510,111 @@ start_context(rocprofiler_context_id_t context_id)
 rocprofiler_status_t
 stop_context(rocprofiler_context_id_t idx)
 {
-    // hold a lock here to prevent other thread from changing the active contexts array
-    auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+    std::atomic<const context*>* slot      = nullptr;
+    const context*               _expected = nullptr;
 
-    // atomically assign the context pointer to NULL so that it is skipped in future
-    // callbacks
-    for(auto& itr : get_active_contexts_impl())
+    // Phase one, locked: claim the context. Only the search of the active array needs the lock;
+    // the teardown below must not hold it.
     {
-        const context* _expected = itr.load(std::memory_order_acquire);
-        if(_expected && _expected->context_idx == idx.handle)
+        auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+
+        // another thread may already be tearing this context down
+        wait_for_pending_stops(_lk);
+
+        for(auto& itr : get_active_contexts_impl())
         {
-            // Stop queue-interposed services before clearing the active slot so
-            // disable_serialization() always runs before dispatches stop being instrumented.
-            // Clearing the slot first opens the opposite window, in which
-            // kernel_dispatch_phase_enter_hook sees no active context and a dispatch is submitted
-            // without serializer packets while the serializer is still enabled.
-            if(_expected->dispatch_counter_collection)
+            const context* _ctx = itr.load(std::memory_order_acquire);
+            if(_ctx && _ctx->context_idx == idx.handle)
             {
-                rocprofiler::counters::stop_context(const_cast<context*>(_expected));
-            }
-
-            if(_expected->dispatch_spm)
-                rocprofiler::spm::stop_context(const_cast<context*>(_expected));
-
-            if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
-            if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
-
-            bool success = itr.compare_exchange_strong(_expected, nullptr);
-
-            if(success)
-            {
-                auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
-                if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
-
-                rocprofiler::hsa::queue_interposition::
-                    notify_queue_interposition_consumer_context_stopped(_expected);
-
-                if(_expected->device_counter_collection)
-                {
-                    rocprofiler::counters::stop_agent_ctx(const_cast<context*>(_expected));
-                }
-
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-                if(_expected->pc_sampler)
-                {
-                    rocprofiler::pc_sampling::stop_service(_expected);
-                }
-#endif
-
-                return ROCPROFILER_STATUS_SUCCESS;
+                slot      = &itr;
+                _expected = _ctx;
+                break;
             }
         }
+
+        if(!slot) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+        get_stopping_contexts().emplace(idx.handle);
     }
 
-    return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;  // compare exchange failed
+    auto _unclaim = common::scope_destructor{[&idx]() {
+        {
+            auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+            get_stopping_contexts().erase(idx.handle);
+        }
+        get_contexts_cv().notify_all();
+    }};
+
+    // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), an
+    // unbounded wait on in-flight GPU work. Holding get_contexts_mutex() across it stalls every
+    // context lifecycle operation in the process behind one context's dispatches, and it puts the
+    // mutex on the far side of a wait that the completion path has to get through -- so any future
+    // completion-path read that took the mutex would deadlock rather than merely block.
+    //
+    // The active slot stays populated for the whole phase, which is deliberate:
+    // kernel_dispatch_phase_enter_hook has to keep seeing the context so the serialized ->
+    // unserialized transition stays coordinated until disable_serialization() has run. Clearing
+    // the slot first opens the opposite window, in which the enter hook sees no active context and
+    // a dispatch is submitted without serializer packets while the serializer is still enabled.
+    // get_stopping_contexts() is what keeps other lifecycle callers from reading that state as a
+    // running context.
+    if(_expected->dispatch_counter_collection)
+    {
+        rocprofiler::counters::stop_context(const_cast<context*>(_expected));
+    }
+
+    if(_expected->dispatch_spm) rocprofiler::spm::stop_context(const_cast<context*>(_expected));
+
+    if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
+    if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
+
+    // Phase three, relocked: retire the slot. The element address is stable across phase two --
+    // stable_vector never moves an element once constructed -- so slot is still the entry the
+    // search found.
+    {
+        auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+
+        if(!slot->compare_exchange_strong(_expected, nullptr))
+        {
+            // deactivate_client_contexts() cleared the slot while phase two ran; the services are
+            // already stopped, so there is nothing left to retire.
+            return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+        }
+
+        auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
+        if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
+    }
+
+    // Phase four, unlocked: the remaining services are not queue-interposed, so they only need
+    // the slot to be cleared first, not the lock to be held. They wait on the GPU too --
+    // stop_agent_ctx() waits for its stop packet and pc_sampling::stop_service() drains the
+    // device buffers -- and the stopping marker above, not the mutex, is what keeps a concurrent
+    // start_context() from running before they finish.
+    rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_stopped(
+        _expected);
+
+    if(_expected->device_counter_collection)
+    {
+        rocprofiler::counters::stop_agent_ctx(const_cast<context*>(_expected));
+    }
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    if(_expected->pc_sampler)
+    {
+        rocprofiler::pc_sampling::stop_service(_expected);
+    }
+#endif
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 context_id_array_t
 get_client_contexts(rocprofiler_client_id_t id)
 {
     auto _data = context_id_array_t{};
-    if(!get_registered_contexts_impl()) return _data;
 
-    for(auto& itr : *get_registered_contexts_impl())
+    for(const auto* itr : get_registered_contexts_snapshot())
     {
-        if(!itr.has_value()) continue;
-
         if(itr->client_idx == id.handle)
         {
             _data.emplace_back(rocprofiler_context_id_t{.handle = itr->context_idx});
@@ -456,10 +629,12 @@ stop_client_contexts(rocprofiler_client_id_t client_id)
     if(!get_registered_contexts_impl()) return ROCPROFILER_STATUS_ERROR;
 
     auto ret = ROCPROFILER_STATUS_SUCCESS;
-    for(auto& itr : *get_registered_contexts_impl())
-    {
-        if(!itr.has_value()) continue;
 
+    // Held across the loop: stop_context() may block on a GPU drain, and a snapshot is what keeps
+    // the contexts it is iterating alive for that long.
+    auto snapshot = get_registered_contexts_snapshot();
+    for(const auto* itr : snapshot)
+    {
         if(itr->client_idx == client_id.handle)
         {
             auto status = stop_context(rocprofiler_context_id_t{itr->context_idx});
@@ -475,6 +650,11 @@ void
 deactivate_client_contexts(rocprofiler_client_id_t client_id)
 {
     auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+
+    // a context mid-stop is still in the active array; let its teardown finish rather than
+    // clearing the slot underneath it
+    wait_for_pending_stops(_lk);
+
     for(auto& itr : get_active_contexts_impl())
     {
         const context* itr_v = itr.load(std::memory_order_acquire);
@@ -492,9 +672,16 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
 void
 deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
+    if(!get_registered_contexts_impl()) return;
+
+    // Mutates the registry, so it needs the same lock allocate_context() takes. Dropping the
+    // registry's reference does not destroy the context: any snapshot still naming it holds it
+    // alive, which is what makes this safe against a read that is already in flight.
+    auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+
     for(auto& itr : *get_registered_contexts_impl())
     {
-        if(!itr.has_value()) continue;
+        if(!itr) continue;
 
         if(itr->client_idx == client_id.handle && buffer::get_buffers())
         {
@@ -505,6 +692,8 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
             itr.reset();
         }
     }
+
+    publish_registered_contexts();
 }
 
 template <typename KindT>
