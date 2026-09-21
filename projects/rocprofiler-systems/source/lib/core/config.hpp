@@ -11,7 +11,6 @@
 #include <cstdint>
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/macros/language.hpp>
 
 #include <fstream>
 #include <optional>
@@ -273,12 +272,6 @@ get_perfetto_backend();
 // make this visible so rocprof-sys-avail can call it
 std::string
 get_perfetto_output_filename();
-
-double
-get_trace_delay();
-
-double
-get_trace_duration();
 
 std::string
 get_trace_region();

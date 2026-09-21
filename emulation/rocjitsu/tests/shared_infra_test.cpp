@@ -275,7 +275,7 @@ public:
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    execute_instruction(inst, wf);
+    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
       route_memory_inst(inst, wf);
     else
@@ -570,7 +570,7 @@ TEST(TransposeLoadTest, WmmaTrB8Wave64UsesFirst32AddressesAndOneVgpr) {
     for (uint32_t byte = 0; byte < 8; ++byte)
       state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
 
-  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state), 0xFFFF'FFFFULL);
+  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state, state.wf_size), 0xFFFF'FFFFULL);
   amdgpu::transpose_response(state);
 
   ASSERT_EQ(state.num_elems, 1u);
@@ -2585,6 +2585,32 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->arch(), arch);
+}
+
+TEST_P(CuFactoryTest, LdsContentsSurviveWorkgroupAllocationReuse) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = GetParam();
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 102;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  // Two adjacent allocations retain independent contents, including alignment
+  // padding. Retiring the workgroups releases space, not the physical bytes.
+  ASSERT_EQ(cu->allocate_lds(257), 0u);
+  cu->lds().write32(0, 0x12345678u);
+  cu->lds().write32(508, 0xAABBCCDDu);
+  ASSERT_EQ(cu->allocate_lds(256), 512u);
+  cu->lds().write32(512, 0x87654321u);
+  cu->maybe_reset_lds_alloc();
+  ASSERT_EQ(cu->allocate_lds(768), 0u);
+  EXPECT_EQ(cu->lds().read32(0), 0x12345678u);
+  EXPECT_EQ(cu->lds().read32(508), 0xAABBCCDDu);
+  EXPECT_EQ(cu->lds().read32(512), 0x87654321u);
 }
 
 TEST(CuFactoryTest, CdnaAccVgprsDoNotAliasNextWaveSlot) {
@@ -7657,7 +7683,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, kReadfirstlaneS24V1.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 24, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 24), 0x100u + i);
   }
 
@@ -7667,7 +7693,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 0);
     cu->write_sgpr(sbase + 4, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x200u + i);
   }
 
@@ -7677,7 +7703,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 4, 0);
     cu->write_sgpr(sbase + 31, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x300u + i);
   }
 
@@ -7687,7 +7713,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 31);
     cu->write_sgpr(sbase + 4, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x400u + i);
   }
 
@@ -7698,7 +7724,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 31);
     cu->write_sgpr(sbase + 4, 0x500u + i);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 2), 0x200u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 31), 0x500u + i);
   }
@@ -7716,13 +7742,13 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(read_inst, nullptr);
     cu->write_sgpr(sbase + 2, 43);
     cu->write_sgpr(sbase + 4, 0x700u + i);
-    cu->execute_instruction(write_inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(write_inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 11), 0x700u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 31), 0x500u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 160, 11), 0xdead6000u + i);
 
     cu->write_sgpr(sbase + 4, 0);
-    cu->execute_instruction(read_inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(read_inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x700u + i);
   }
 }
@@ -7765,11 +7791,11 @@ TEST(RdnaVectorLaneReadTest, Wave64SelectorsShareOneArchitecturalRegisterContext
   cu->write_vgpr(vbase + 159, 43, 0x43434343u);
   cu->write_vgpr(vbase + 160, 11, 0xdeadbeefu);
   cu->write_sgpr(sbase + 2, 43);
-  cu->execute_instruction(read_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(read_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x43434343u);
 
   cu->write_sgpr(sbase + 4, 0x84848484u);
-  cu->execute_instruction(write_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(write_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vbase + 159, 43), 0x84848484u);
   EXPECT_EQ(cu->read_vgpr(vbase + 159, 11), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(vbase + 160, 11), 0xdeadbeefu);
@@ -7853,7 +7879,7 @@ TEST(Rdna4GlobalLoadTransposeTest, Wave64B128ReadsLowHalfAndWritesTwoVgprs) {
     }
   }
 
-  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state), 0xFFFFFFFFULL);
+  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state, state.wf_size), 0xFFFFFFFFULL);
   amdgpu::transpose_response(state);
 
   ASSERT_EQ(state.num_elems, 2u);

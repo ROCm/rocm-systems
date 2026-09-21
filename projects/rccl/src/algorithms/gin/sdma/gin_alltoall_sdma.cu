@@ -158,7 +158,8 @@ ncclResult_t ncclGinA2AInitOnce(ncclComm* comm) {
     reqs.ginSignalCount = kGinA2AMaxCtas;
     reqs.barrierCount = kGinA2ASdmaCtas;
     reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-    NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true));
+    NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true,
+                                         /*deviceCodeVersion=*/NCCL_VERSION_CODE));
     state->initialized = true;
   }
   return ncclSuccess;
@@ -181,7 +182,9 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
 
   // This path runs on the comm's shared GIN backend, so it has to be SDMA.
-  if (comm->sharedRes->ginState.ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
+  if (ncclGetGinType(comm, &ginType) != ncclSuccess) return false;
+  if (ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
 
   // Every rank must be reachable over LSA.
   if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;

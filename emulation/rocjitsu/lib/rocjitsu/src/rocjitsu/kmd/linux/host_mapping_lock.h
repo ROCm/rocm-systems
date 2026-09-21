@@ -8,6 +8,7 @@
 /// @brief Serializes host mapping changes against accesses that hold a pointer.
 
 #include "util/observable_shared_mutex.h"
+#include <new>
 
 namespace rocjitsu {
 
@@ -46,6 +47,14 @@ namespace rocjitsu {
 inline util::ObservableSharedMutex &host_mapping_lock() {
   static util::ObservableSharedMutex lock;
   return lock;
+}
+
+/// @brief Reset the mapping lock in a fork child that inherited no GPU backend.
+/// @pre Called by the child atfork handler, before publishing its fresh context.
+/// No other thread survives fork, and the inherited lock must not be destroyed
+/// or acquired: a vanished parent thread may have held it.
+inline void reset_host_mapping_lock_after_fork() {
+  new (&host_mapping_lock()) util::ObservableSharedMutex();
 }
 
 } // namespace rocjitsu
