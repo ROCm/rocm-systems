@@ -5619,6 +5619,25 @@ rsmi_status_t rsmi_dev_gpu_metrics_header_info_get(uint32_t dv_ind,
 
 // dev_read_gpu_metrics_header_data
 
+namespace {
+
+// Both public metrics entry points reject an unsupported revision the same way,
+// so keep the wording and the reported status in one place.
+rsmi_status_t log_unsupported_metrics_revision(const char* caller, uint32_t dv_ind,
+                                               DevInfoTypes type, const std::string& file_name,
+                                               rsmi_status_t status_code) {
+  std::ostringstream ss;
+  ss << caller << " | ======= end ======= "
+     << " | Cause: Metric version found is not supported"
+     << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
+     << " | File: " << file_name << " | Returning = " << getRSMIStatusString(status_code, false)
+     << " |";
+  LOG_ERROR(ss);
+  return status_code;
+}
+
+}  // namespace
+
 /**
  *  Note: These keep backwards compatibility with previous GPU metrics work
  */
@@ -5672,15 +5691,10 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
   // An unsupported metrics revision has no table to copy, so stop here and let
   // the caller see NOT_SUPPORTED instead of the unexpected-data result the copy
   // stage would report.
-  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream);
+  const auto setup_status = dev->dev_log_gpu_metrics(ostrstream, type);
   if (setup_status == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Cause: Metric version found is not supported"
-       << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
-       << " | File: " << file_name << " | Returning = " << getRSMIStatusString(setup_status, false)
-       << " |";
-    LOG_ERROR(ss);
-    return setup_status;
+    return log_unsupported_metrics_revision(__PRETTY_FUNCTION__, dv_ind, type, file_name,
+                                            setup_status);
   }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -5759,13 +5773,8 @@ rsmi_status_t rsmi_dev_gpu_partition_metrics_info_get(uint32_t dv_ind, rsmi_gpu_
   // stage would report.
   const auto setup_status = dev->dev_log_gpu_metrics(ostrstream, type);
   if (setup_status == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Cause: Metric version found is not supported"
-       << " | Device #: " << dv_ind << " | Type: " << Device::get_type_string(type)
-       << " | File: " << file_name << " | Returning = " << getRSMIStatusString(setup_status, false)
-       << " |";
-    LOG_ERROR(ss);
-    return setup_status;
+    return log_unsupported_metrics_revision(__PRETTY_FUNCTION__, dv_ind, type, file_name,
+                                            setup_status);
   }
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics(type);
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
