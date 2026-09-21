@@ -602,6 +602,66 @@ int ddaInitRunAllGatherCheck(int rank, int nranks, ncclComm* comm)
 
 
 
+// ReduceScatter: rank r fills chunk j with (r+1)*(j+1), so the shard rank r keeps
+// is sum over sources s of (s+1)*(r+1) = (r+1) * nranks*(nranks+1)/2. Scaling by
+// the chunk index makes the expected value differ per rank, so this also catches a
+// kernel that reduces the right peers into the wrong shard -- which a payload
+// constant across chunks would hide.
+int ddaInitRunReduceScatterCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    const size_t recvcount = kDdaInitCollectiveCount;
+    const size_t recvBytes = recvcount * sizeof(float);
+    const size_t sendBytes = recvBytes * static_cast<size_t>(nranks);
+
+    void* sendbuff = nullptr;
+    void* recvbuff = nullptr;
+    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, sendBytes));
+    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, recvBytes));
+
+    std::vector<float> host(recvcount * static_cast<size_t>(nranks), 0.0f);
+    for (int j = 0; j < nranks; ++j)
+    {
+        const float v = static_cast<float>((rank + 1) * (j + 1));
+        for (size_t k = 0; k < recvcount; ++k)
+        {
+            host[static_cast<size_t>(j) * recvcount + k] = v;
+        }
+    }
+    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), sendBytes, hipMemcpyHostToDevice));
+    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, recvBytes));
+
+    const ncclResult_t rs = ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, ncclFloat32,
+                                                    ncclSum, comm, stream);
+    if (rs != ncclSuccess)
+    {
+        printf("[rank %d] ncclReduceScatterDdaIpc(recvcount=%zu) failed: %d (%s)\n", rank, recvcount,
+               rs, ncclGetErrorString(rs));
+        return kDdaInitChildFail;
+    }
+    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+    std::vector<float> out(recvcount, 0.0f);
+    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, recvBytes, hipMemcpyDeviceToHost));
+
+    const float expected = static_cast<float>((rank + 1) * (nranks * (nranks + 1) / 2));
+    for (size_t k = 0; k < recvcount; ++k)
+    {
+        if (out[k] != expected)
+        {
+            printf("[rank %d] reducescatter element %zu: expected %.1f, got %.1f\n", rank, k,
+                   expected, out[k]);
+            return kDdaInitChildFail;
+        }
+    }
+
+    DDA_INIT_CHILD_HC(hipFree(sendbuff));
+    DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
 // Runs entirely inside a forked child: the first HIP/RCCL call happens here.
 int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
 {
@@ -673,6 +733,10 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
     if (rc == kDdaInitChildOk && expectResources)
     {
         rc = ddaInitRunAllGatherCheck(rank, nranks, c);
+    }
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunReduceScatterCheck(rank, nranks, c);
     }
 
     DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
