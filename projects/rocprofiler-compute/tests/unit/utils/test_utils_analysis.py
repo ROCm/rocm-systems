@@ -12,7 +12,11 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
-from utils.ml_api_trace_errors import MissingSourceLocationError
+from utils.ml_api_trace_errors import (
+    MissingSourceLocationError,
+    OverlappingMarkerRangeError,
+    UncorrelatedForwardIntervalError,
+)
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
@@ -20,6 +24,7 @@ from utils.utils_analysis import (
     attach_unlocated_trees_by_forward_thread,
     build_operator_summary,
     fold_identical_sibling_subtrees,
+    nest_marker_intervals,
     rollup_node_stats,
 )
 
@@ -48,6 +53,7 @@ def leaf_operator(
     )
     rollup_node_stats(node)
     return node
+
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
@@ -943,6 +949,66 @@ def test_attach_defers_missing_source_and_grafts_other_roots():
     assert engine in backward.children
     assert "9247" not in forest
     assert detach in forest["9081"]
+
+
+def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
+    backward = CallTreeNode(
+        name="torch.Tensor.backward",
+        file_name="simple.py",
+        line_number=28,
+        backend="torch",
+        start_timestamp=0.0,
+        end_timestamp=10.0,
+        t_tid="1",
+    )
+    backward.invocation_ids.add("bw")
+    child = CallTreeNode(
+        name="SumBackward0",
+        backend="torch",
+        start_timestamp=51.0,
+        end_timestamp=59.0,
+        f_tid="1",
+    )
+    child.invocation_ids.add("sum_bw")
+    engine = CallTreeNode(
+        name="autograd::engine::evaluate_function: SumBackward0",
+        backend="torch",
+        start_timestamp=50.0,
+        end_timestamp=60.0,
+    )
+    engine.invocation_ids.add("eval")
+    engine.children = [child]
+    forest = {"14444": [backward], "14611": [engine]}
+    errors = attach_unlocated_trees_by_forward_thread(forest)
+    assert len(errors) == 1
+    assert isinstance(errors[0], UncorrelatedForwardIntervalError)
+    assert engine in forest["14611"]
+    assert engine not in backward.children
+
+
+def test_nest_overlap_collects_error_and_keeps_first_marker():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1", "1"],
+        "Start_Timestamp": [0.0, 5.0],
+        "End_Timestamp": [10.0, 15.0],
+        "Operator_Name": ["outer", "overlap"],
+    })
+    errors = []
+    forest = nest_marker_intervals(trace_df, errors)
+    assert len(errors) == 1
+    assert isinstance(errors[0], OverlappingMarkerRangeError)
+    assert [node.name for node in forest["1"]] == ["outer"]
+
+
+def test_nest_overlap_raises_without_error_list():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1", "1"],
+        "Start_Timestamp": [0.0, 5.0],
+        "End_Timestamp": [10.0, 15.0],
+        "Operator_Name": ["outer", "overlap"],
+    })
+    with pytest.raises(OverlappingMarkerRangeError):
+        nest_marker_intervals(trace_df)
 
 
 def test_rollup_leaf_node():

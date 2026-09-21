@@ -68,8 +68,8 @@ class Workload:
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Nested operator trees keyed by Thread_Id.
     ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
-    # Unlocated torch/triton roots with no usable F_Tid; reported after the tree.
-    ml_api_missing_source_errors: list[Any] = field(default_factory=list)
+    # ML API trace errors collected during analyze; reported after the tree.
+    ml_api_trace_errors: list[Any] = field(default_factory=list)
     # Glob-matched operator nodes from --torch-operator / --triton-operator.
     ml_api_glob_matches: list[Any] = field(default_factory=list)
     membw_result: Optional[MemBwAnalysisResult] = None
