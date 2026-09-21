@@ -117,12 +117,18 @@ Memory chart - Instruction Cache:
   ICache Hit Rate:
     rst: Instruction Cache hit rate.
     unit: Percent
+  ICache Latency:
+    rst: Average Instruction Cache request latency.
+    unit: Cycles
   ICache Request Stall Rate:
     rst: Percentage of shader-busy cycles the instruction fetch unit is stalled.
     unit: Percent
   ICache-GL1 Read Bandwidth:
     rst: Instruction Cache miss fill bandwidth from GL1.
-    unit: GB/s
+    unit: Bytes/s
+  ICache-GL1 Request Latency:
+    rst: Average latency of Instruction Cache requests sent to GL1.
+    unit: Cycles
 Memory chart - Scalar Data Cache:
   Dcache Requests:
     rst: Total Scalar Data Cache requests.
@@ -133,19 +139,22 @@ Memory chart - Scalar Data Cache:
   Dcache Hit Rate:
     rst: Scalar Data Cache hit rate.
     unit: Percent
+  Dcache Latency:
+    rst: Average Scalar Data Cache request latency.
+    unit: Cycles
   Dcache Request Stall Rate:
     rst: Percentage of WGP cycles the SQC scalar cache is stalled.
     unit: Percent
   Dcache Request Bandwidth:
-    rst: Total Scalar Data Cache bandwidth.
-    unit: GB/s
+    rst: Total Scalar Data Cache request bandwidth.
+    unit: Bytes/s
   Dcache-GL1 Read Bandwidth:
     rst: Scalar Data Cache miss fill bandwidth from GL1.
-    unit: GB/s
+    unit: Bytes/s
+  Dcache-GL1 Request Latency:
+    rst: Average latency of Scalar Data Cache requests sent to GL1.
+    unit: Cycles
 Memory chart - GL0 Cache (Vector L0):
-  GL0 Total Requests:
-    rst: Total GL0 cache requests.
-    unit: Requests per Normalization Unit
   GL0 Read Requests:
     rst: Number of GL0 read requests.
     unit: Requests per Normalization Unit
@@ -161,6 +170,9 @@ Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:
     rst: GL0 cache hit rate.
     unit: Percent
+  GL0 Total Requests:
+    rst: Total GL0 cache requests.
+    unit: Requests per Normalization Unit
   GL0 Request Latency:
     rst: Average GL0 cache request latency.
     unit: Cycles
@@ -183,70 +195,55 @@ Memory chart - LDS (Local Data Share):
   LDS Utilization:
     rst: Percentage of VMW-busy cycles the LDS is executing any operation.
     unit: Percent
-  LDS Utilization - Load:
-    rst: Percentage of VMW-busy cycles the LDS is executing a load.
-    unit: Percent
-  LDS Utilization - Store:
-    rst: Percentage of VMW-busy cycles the LDS is executing a store.
-    unit: Percent
   LDS Bank Conflict Stall Rate:
     rst: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
     unit: Percent
-  LDS Address Conflict Stall Rate:
-    rst: Percentage of VMW-busy cycles LDS is stalled due to address conflict.
-    unit: Percent
   LDS Load Bandwidth:
     rst: Total LDS load bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   LDS Store Bandwidth:
     rst: Total LDS store bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   LDS Atomic Bandwidth:
     rst: Total LDS atomic bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   Async Load Bandwidth:
     rst: Total async load bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   Async Store Bandwidth:
     rst: Total async store bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   TDM Load Bandwidth:
     rst: Total TDM load bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   TDM Store Bandwidth:
     rst: Total TDM store bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   TDM Load Requests:
     rst: Total TDM load requests.
     unit: Requests per Normalization Unit
   TDM Store Requests:
     rst: Total TDM store requests.
     unit: Requests per Normalization Unit
+  LDS Utilization - Load:
+    rst: Percentage of VMW-busy cycles the LDS is executing a load.
+    unit: Percent
+  LDS Utilization - Store:
+    rst: Percentage of VMW-busy cycles the LDS is executing a store.
+    unit: Percent
+  LDS Address Conflict Stall Rate:
+    rst: Percentage of VMW-busy cycles LDS is stalled due to address conflict.
+    unit: Percent
 Memory chart - GL0-GL1 Interface:
-  GL0-GL1 Read Requests:
-    rst: Number of GL0-GL1 read requests.
-    unit: Requests per Normalization Unit
-  GL0-GL1 Write Requests:
-    rst: Number of GL0-GL1 write requests.
-    unit: Requests per Normalization Unit
   GL0-GL1 Read Bandwidth:
     rst: Total GL0-GL1 read bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   GL0-GL1 Write Bandwidth:
     rst: Total GL0-GL1 write bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   GL0-GL1 Atomic Bandwidth:
     rst: Total GL0-GL1 atomic bandwidth.
-    unit: GB/s
-  GL0-GL1 Read Latency:
-    rst: Average GL0-GL1 read latency.
-    unit: Cycles
-  GL0-GL1 Write Latency:
-    rst: Average GL0-GL1 write latency.
-    unit: Cycles
-  GL0-GL1 Request Stall Rate:
-    rst: Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
-    unit: Percent
+    unit: Bytes/s
   GL1A Utilization:
     rst: Percentage of cycles GL1 Arbiter is processing requests from GL0.
     unit: Percent
@@ -256,10 +253,46 @@ Memory chart - GL0-GL1 Interface:
   GL1C Buffer Full Stall:
     rst: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
     unit: Percent
+  GL0-GL1 Read Requests:
+    rst: Number of GL0-GL1 read requests.
+    unit: Requests per Normalization Unit
+  GL0-GL1 Write Requests:
+    rst: Number of GL0-GL1 write requests.
+    unit: Requests per Normalization Unit
+  GL0-GL1 Read Latency:
+    rst: Average GL0-GL1 read latency.
+    unit: Cycles
+  GL0-GL1 Write Latency:
+    rst: Average GL0-GL1 write latency.
+    unit: Cycles
+  GL0-GL1 Request Stall Rate:
+    rst: Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
+    unit: Percent
 Memory chart - GLARB (GL1-GL2 Arbiter):
   GLARBA Utilization:
     rst: Percentage of cycles the Graphic Level Arbiter is processing requests.
     unit: Percent
+  GLARBC Utilization:
+    rst: Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
+    unit: Percent
+  GLARBC Buffer Full Stall:
+    rst: Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full buffer.
+    unit: Percent
+  GL1-GLARB Read Bandwidth:
+    rst: Total GL1 to Graphic Level Arbiter read bandwidth.
+    unit: Bytes/s
+  GL1-GLARB Write Bandwidth:
+    rst: Total GL1 to Graphic Level Arbiter write bandwidth.
+    unit: Bytes/s
+  GLARB-GL2 Read Bandwidth:
+    rst: Total Graphic Level Arbiter to GL2 read bandwidth.
+    unit: Bytes/s
+  GLARB-GL2 Write Bandwidth:
+    rst: Total Graphic Level Arbiter to GL2 write bandwidth.
+    unit: Bytes/s
+  GLARB-GL2 Atomic Bandwidth:
+    rst: Total Graphic Level Arbiter to GL2 atomic bandwidth.
+    unit: Bytes/s
   GLARBA Request Path Utilization:
     rst: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
     unit: Percent
@@ -269,27 +302,6 @@ Memory chart - GLARB (GL1-GL2 Arbiter):
   GLARBA Request Latency:
     rst: Average latency of requests sent to the Graphics Level Arbiter.
     unit: Cycles
-  GLARBC Utilization:
-    rst: Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
-    unit: Percent
-  GLARBC Buffer Full Stall:
-    rst: Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full buffer.
-    unit: Percent
-  GL1-GLARB Read Bandwidth:
-    rst: Total GL1 to Graphic Level Arbiter read bandwidth.
-    unit: GB/s
-  GL1-GLARB Write Bandwidth:
-    rst: Total GL1 to Graphic Level Arbiter write bandwidth.
-    unit: GB/s
-  GLARB-GL2 Read Bandwidth:
-    rst: Total Graphic Level Arbiter to GL2 read bandwidth.
-    unit: GB/s
-  GLARB-GL2 Write Bandwidth:
-    rst: Total Graphic Level Arbiter to GL2 write bandwidth.
-    unit: GB/s
-  GLARB-GL2 Atomic Bandwidth:
-    rst: Total Graphic Level Arbiter to GL2 atomic bandwidth.
-    unit: GB/s
 Memory chart - GL2 Cache (L2):
   GL2A Utilization:
     rst: Percentage of cycles the GL2 Arbiter is distributing requests across GL2 Cache partitions.
@@ -299,41 +311,41 @@ Memory chart - GL2 Cache (L2):
     unit: Percent
   GL2-EA Read Bandwidth:
     rst: Total GL2 to Efficiency Arbiter read bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   GL2-EA Write Bandwidth:
     rst: Total GL2 to Efficiency Arbiter write bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   GL2-EA Atomic Bandwidth:
     rst: Total GL2 to Efficiency Arbiter atomic bandwidth.
-    unit: GB/s
+    unit: Bytes/s
 Memory chart - EA to HBM:
   EA Utilization:
     rst: Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or fabric.
     unit: Percent
   DRAM Read Bandwidth:
     rst: Total HBM read bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   DRAM Write Bandwidth:
     rst: Total HBM write bandwidth.
-    unit: GB/s
+    unit: Bytes/s
   IO Read Bandwidth:
     rst: Total read bandwidth from host CPU memory (pinned or mapped) through the EA.
-    unit: GB/s
+    unit: Bytes/s
   IO Write Bandwidth:
     rst: Total write bandwidth to host CPU memory (pinned or mapped) through the EA.
-    unit: GB/s
+    unit: Bytes/s
   HDM Read Bandwidth:
     rst: Total read bandwidth from Host Data Memory (unified memory pages) through the EA.
-    unit: GB/s
+    unit: Bytes/s
   HDM Write Bandwidth:
     rst: Total write bandwidth to Host Data Memory (unified memory pages) through the EA.
-    unit: GB/s
+    unit: Bytes/s
   GMI Read Bandwidth:
     rst: Total read bandwidth from peer GPU HBM via Infinity Fabric.
-    unit: GB/s
+    unit: Bytes/s
   GMI Write Bandwidth:
     rst: Total write bandwidth to peer GPU HBM via Infinity Fabric.
-    unit: GB/s
+    unit: Bytes/s
   EA Stall Rate:
     rst: Percentage of EA-busy cycles where the EA is stalled.
     unit: Percent
