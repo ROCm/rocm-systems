@@ -96,8 +96,8 @@ physical_register_properties(rj_code_arch_t arch) {
     return {.simds_per_cu = 4,
             .max_waves_per_simd = 16,
             .native_wave_size = 32,
-            .vgprs_per_simd = 1536,
-            .vgpr_alloc_granule_wave32 = 24,
+            .vgprs_per_simd = 1024,
+            .vgpr_alloc_granule_wave32 = 16,
             .sgpr_occupancy_limited = false};
   default:
     return {};

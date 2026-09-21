@@ -481,7 +481,7 @@ TEST(PhysicalRegisterResourceTest, Rdna4VgprPressureLimitsResidencyAndReclaimsCa
               /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
   auto *cu = f.cu();
 
-  // GFX12 has 1536 Wave32 VGPRs per SIMD, allocated in 24-VGPR
+  // RDNA4 has 1536 Wave32 VGPRs per SIMD, allocated in 24-VGPR
   // granules. A 256-VGPR wave consumes 264 entries, so each of the two
   // SIMDs admits five waves.
   EXPECT_TRUE(cu->can_accept_workgroup(/*num_wfs=*/10, /*num_sgprs=*/128,
@@ -504,6 +504,27 @@ TEST(PhysicalRegisterResourceTest, Rdna4VgprPressureLimitsResidencyAndReclaimsCa
   EXPECT_NE(cu->dispatch_wf(/*wg_id=*/10, /*pc=*/0x1040, /*num_sgprs=*/128,
                             /*num_vgprs=*/256, /*wave_size=*/32),
             nullptr);
+}
+
+TEST(PhysicalRegisterResourceTest, Cdna5VgprPressureLimitsResidencyAndReclaimsCapacity) {
+  VmFixture f("cdna5", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+  auto *cu = f.cu();
+
+  // GFX1250 has 1024 Wave32 VGPRs per SIMD in 16-register granules.
+  // Each of the four SIMDs admits four waves with 256 VGPRs apiece.
+  EXPECT_TRUE(cu->can_accept_workgroup(16, 128, 256, 32));
+  EXPECT_FALSE(cu->can_accept_workgroup(17, 128, 256, 32));
+  amdgpu::Wavefront *first = nullptr;
+  for (uint32_t i = 0; i < 16; ++i) {
+    auto *wave = cu->dispatch_wf(i, 0x1000, 128, 256, 32);
+    ASSERT_NE(wave, nullptr) << "wave " << i;
+    if (!first)
+      first = wave;
+  }
+  EXPECT_EQ(cu->dispatch_wf(16, 0x1000, 128, 256, 32), nullptr);
+  first->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_NE(cu->dispatch_wf(16, 0x1000, 128, 256, 32), nullptr);
 }
 
 TEST(PhysicalRegisterResourceTest, Cdna3SgprPressureLimitsResidency) {
