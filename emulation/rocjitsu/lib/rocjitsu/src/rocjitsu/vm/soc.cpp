@@ -211,6 +211,10 @@ SoC::SoC(std::string name, const Config &config)
       add_child(std::move(xcd_ptr));
     }
   }
+  if (config.scratch_slots_per_cu != 0)
+    for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
+    });
 }
 
 void SoC::set_arch(rj_code_arch_t arch) {

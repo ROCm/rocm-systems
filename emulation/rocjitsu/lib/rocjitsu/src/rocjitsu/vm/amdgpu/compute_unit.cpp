@@ -126,6 +126,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
       wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
       vgpr_allocation_block_size_(vgpr_allocation_block_size),
+      scratch_slots_per_cu_(config.num_wf_slots),
       setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)),
       decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
                    ? Decoder::create(config.arch)
@@ -246,7 +247,10 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
   // halted slot is immediately available, as is a slot never materialized.
   size_t slot = config_.num_wf_slots;
-  for (size_t i = 0; i < wfs_.size(); ++i) {
+  const size_t slot_limit = scratch_wave_limit_per_se == UINT32_MAX
+                                ? wfs_.size()
+                                : std::min<size_t>(wfs_.size(), scratch_slots_per_cu_);
+  for (size_t i = 0; i < slot_limit; ++i) {
     const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + i;
     if (scratch_scoreboard_id < scratch_wave_limit_per_se && (!wfs_[i] || wfs_[i]->is_halted())) {
       slot = i;
@@ -683,7 +687,10 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
                                            uint32_t scratch_wave_limit_per_se) const {
   // Count free wavefront slots.
   uint32_t free_slots = 0;
-  for (size_t slot = 0; slot < wfs_.size(); ++slot) {
+  const size_t slot_limit = scratch_wave_limit_per_se == UINT32_MAX
+                                ? wfs_.size()
+                                : std::min<size_t>(wfs_.size(), scratch_slots_per_cu_);
+  for (size_t slot = 0; slot < slot_limit; ++slot) {
     const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + slot;
     if (scratch_scoreboard_id < scratch_wave_limit_per_se &&
         (!wfs_[slot] || wfs_[slot]->is_halted()))
