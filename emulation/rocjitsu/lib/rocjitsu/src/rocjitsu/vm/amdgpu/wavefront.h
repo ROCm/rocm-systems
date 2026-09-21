@@ -28,6 +28,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+struct Pm4FailureState;
+
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
 class Lds;
@@ -251,6 +253,18 @@ public:
 
   /// @brief Set the owning GPU address space at dispatch time.
   void set_address_space(AddressSpaceHandle address_space) { address_space_ = address_space; }
+  /// @brief Select host monotonic timestamps for PM4, modeled time for AQL.
+  void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
+  /// @brief Read the realtime clock selected by the launch ABI.
+  uint64_t realtime_timestamp() const;
+  /// @brief Bind wave errors to the PM4 submission that launched this wave.
+  void set_pm4_failure(std::shared_ptr<Pm4FailureState> failure) {
+    pm4_failure_ = std::move(failure);
+  }
+  /// @brief Report a failed shader to its PM4 queue; returns false for an AQL wave.
+  bool fail_pm4_submission();
+  /// @brief Retain a PM4 scratch slot until this wave retires.
+  void set_scratch_lease(std::shared_ptr<uint32_t> lease) { scratch_lease_ = std::move(lease); }
 
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
@@ -880,6 +894,9 @@ public:
     wave_in_group_ = 0;
     address_space_ = {};
     process_id_ = 0;
+    use_system_clock_ = false;
+    scratch_lease_.reset();
+    pm4_failure_.reset();
     lds_base_ = 0;
     lds_size_ = 0;
     lds_ = nullptr;
@@ -962,6 +979,10 @@ protected:
   uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
   AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
   uint32_t process_id_ = 0;          ///< Owning process ID (PASID analog, set per dispatch).
+
+  bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
+  std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
+  std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
