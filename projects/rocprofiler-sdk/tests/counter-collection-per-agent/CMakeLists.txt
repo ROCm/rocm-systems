@@ -49,4 +49,4 @@ rocprofiler_add_integration_execute_test(
     TARGET counter-collection-per-agent-app
     TIMEOUT 120
     LABELS "integration-tests"
-    SKIP_REGULAR_EXPRESSION "SKIP: per-agent scoping requires at least 2 GPUs")
+    SKIP_REGULAR_EXPRESSION "SKIP: per-agent scoping requires at least 2 GPUs|SKIP: HIP device"
