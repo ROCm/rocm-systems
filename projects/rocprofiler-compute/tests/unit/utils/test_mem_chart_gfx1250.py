@@ -57,7 +57,7 @@ class TestPlotMemChartGfx1250:
             mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
         )
         expected_components = (
-            "Kernel",
+            "Compute Units",
             "TCP",
             "LDS",
             "GL0",
@@ -109,7 +109,7 @@ class TestPlotMemChartGfx1250:
             "DRAM Write Bandwidth": 5e12,
         }
         result = mem_chart_gfx1250.plot_mem_chart(extreme, chart_title=DEFAULT_TITLE)
-        assert "TB/s" in result
+        assert "GB/s" in result
 
     def test_zero_bandwidth_values(self):
         zero = {
@@ -202,7 +202,7 @@ class TestIntegrationGfx1250:
         )
         assert isinstance(chart, str)
         assert len(chart) > 100
-        assert "Kernel" in chart
+        assert "Compute Units" in chart
         assert "Legend" in chart
 
     def test_bandwidth_unit_consistency(self):
