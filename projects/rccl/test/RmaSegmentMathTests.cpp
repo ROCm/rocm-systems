@@ -168,3 +168,24 @@ TEST(RmaSegmentMathTest, CompactConsensusOverlaysRegistrationStackWhenHeapFails)
     EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, stack, sizeof(stack), 0, sizeof(int)), nullptr);
     EXPECT_EQ(ncclRmaCompactConsensusRecv(nullptr, nullptr, sizeof(stack), 65, sizeof(int)), nullptr);
 }
+
+TEST(RmaSegmentMathTest, SegmentCountsMatchIgnoresBoundaries)
+{
+    EXPECT_TRUE(ncclRmaSegmentCountsMatch(2, 2));
+    EXPECT_TRUE(ncclRmaSegmentCountsMatch(NCCL_RMA_MAX_SEGMENTS, NCCL_RMA_MAX_SEGMENTS));
+    EXPECT_FALSE(ncclRmaSegmentCountsMatch(2, 1));
+    EXPECT_FALSE(ncclRmaSegmentCountsMatch(0, 0));
+    EXPECT_FALSE(ncclRmaSegmentCountsMatch(NCCL_RMA_MAX_SEGMENTS + 1, NCCL_RMA_MAX_SEGMENTS + 1));
+}
+
+TEST(RmaSegmentMathTest, PeerSegOffIndexesPerRankTable)
+{
+    size_t local[] = {0, 100};
+    size_t table[(NCCL_RMA_MAX_SEGMENTS + 1) * 2] = {};
+    table[1] = 4096;
+    table[NCCL_RMA_MAX_SEGMENTS + 2] = 8192;
+    EXPECT_EQ(ncclRmaPeerSegOff(nullptr, local, 0), local);
+    EXPECT_EQ(ncclRmaPeerSegOff(table, local, -1), local);
+    EXPECT_EQ(ncclRmaPeerSegOff(table, local, 0)[1], size_t{4096});
+    EXPECT_EQ(ncclRmaPeerSegOff(table, local, 1)[1], size_t{8192});
+}

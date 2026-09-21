@@ -1075,11 +1075,10 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
 }
 
-// NEGATIVE: equal segment counts are not sufficient symmetry. Rank 0 maps
-// [4 MiB GPU][2 MiB CPU], while rank 1 maps [2 MiB GPU][4 MiB CPU]. The total
-// size and count match, but using either rank's local boundary for the other's
-// MR would address the wrong registration.
-TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesRejected)
+// POSITIVE: equal segment counts with different per-rank boundaries (asymmetric
+// windows / mixed GPU+CPU splits). Registration keeps a per-rank segOff table
+// and splits the full-window put on each side independently.
+TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesTransfer)
 {
     if (!SetUpFixture(2, 2)) return;
 
@@ -1090,12 +1089,29 @@ TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesRejected)
         GTEST_SKIP() << "mixed GPU/CPU VMM allocation unavailable on this host";
 
     void *mh = nullptr, *gh = nullptr;
-    const ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
+    ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, bb->totalSize, &mh, &gh));
     if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
-    EXPECT_EQ(r, ncclInvalidUsage);
-    EXPECT_EQ(mh, nullptr);
+    constexpr size_t kTotal = 6 * kMiB;
+    constexpr uint8_t kSentinel = 0xC3;
+    if (worldRank_ == 0)
+        FillBuf(bb->ptr, kTotal, /*seed=*/0x5A);
+    if (worldRank_ == 1)
+        FillSentinel(bb->ptr, kTotal, kSentinel);
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, mh, kTotal, 0, mh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        EXPECT_TRUE(VerifyBuf(bb->ptr, kTotal, /*seed=*/0x5A));
 }
 
 // NEGATIVE: only rank 0 exceeds the segment cap. Rank 1 successfully registers
