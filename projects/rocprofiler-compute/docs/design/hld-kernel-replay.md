@@ -61,17 +61,17 @@ flowchart TD
     Tool["Profiling tool<br/>Dispatch selection<br/>Pass policy<br/>Service control<br/>and results"]
 
     subgraph SDK["rocprofiler-sdk · profiled process"]
-        Queue["Queue interception<br/>Eligibility<br/>Per-agent isolation"]
-        Replay["Replay callbacks<br/>and pass loop"]
-        Tracker["Allocation tracking<br/>HSA allocate/free<br/>interception"]
+        Queue["HSA queue interceptor<br/>Eligibility and dispatch ID<br/>Per-agent dispatch isolation<br/>Replay pass loop"]
+        Replay["KERNEL_REPLAY callback domain<br/>CONFIG/PASS callbacks<br/>Pass policy and local overrides"]
+        Tracker["Tracked HSA allocations<br/>Allocate/free interception"]
         Modules["Loaded code objects<br/>Module-variable<br/>discovery"]
-        Snapshot["Snapshot manager<br/>Agent memory copied<br/>to host"]
+        Snapshot["Snapshot manager<br/>Supported agent memory<br/>copied to host"]
         Services["Dispatch profiling<br/>services<br/>Async completion<br/>handler"]
-        Queue --> Replay
+        Queue <-->|"plan and callback<br/>lifecycle"| Replay
         Tracker --> Snapshot
         Modules --> Snapshot
-        Replay -- "capture<br/>and restore" --> Snapshot
-        Replay -- "each pass" --> Services
+        Queue -- "capture<br/>and restore" --> Snapshot
+        Queue -- "each pass through<br/>the packet pipeline" --> Services
     end
 
     subgraph GPU["GPU agent"]
@@ -80,8 +80,8 @@ flowchart TD
     end
 
     App -- "dispatch<br/>submission" --> Queue
-    App -- "allocation<br/>lifecycle" --> Tracker
-    Tool <-->|"configure and start<br/>CONFIG/PASS callbacks<br/>pass policy and overrides"| Replay
+    App -- "tracked HSA<br/>allocation lifecycle" --> Tracker
+    Tool <-->|"configure and start context<br/>callbacks, policy,<br/>and overrides"| Replay
     Services <-->|"instrumented dispatch<br/>and completion"| Queues
     Services -- "counter and<br/>trace records" --> Tool
     Snapshot <-->|"device/host<br/>copies"| Memory
