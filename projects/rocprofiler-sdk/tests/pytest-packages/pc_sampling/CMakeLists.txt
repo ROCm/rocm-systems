@@ -31,8 +31,10 @@ file(
 from __future__ import absolute_import
 
 from . import exec_mask_manipulation
+from . import selected_regions
 ")
 
 add_subdirectory(exec_mask_manipulation)
 add_subdirectory(stochastic)
 add_subdirectory(transpose_multiple_agents)
+add_subdirectory(selected_regions)

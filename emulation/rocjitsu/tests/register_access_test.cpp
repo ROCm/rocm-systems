@@ -713,6 +713,35 @@ TEST(RegisterAccessTest, LanePair32ReadsGfx1250FlatScratchBase) {
   EXPECT_EQ(pair.hi, 0x77777777u);
 }
 
+TEST(RegisterAccessTest, ReplicatedScalarPairObservesOnlyOneScalarWord) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(fx.wf, nullptr);
+  RegisterAccess regs(*fx.wf);
+  fx.cu->write_sgpr(fx.sgpr_base() + 8, 0x11223344u);
+  fx.cu->write_sgpr(fx.sgpr_base() + 9, 0x55667788u);
+  cdna5::Operand source(64, cdna5::OperandType::OPR_SRC, 8);
+
+  const auto scalar = regs.read_lane_pair32(source, 0, ScalarPairMode::Replicate32);
+  EXPECT_EQ(scalar.lo, 0x11223344u);
+  EXPECT_EQ(scalar.hi, 0x11223344u);
+  ASSERT_EQ(fx.plugin->sgpr_reads.size(), 1u);
+  EXPECT_EQ(fx.plugin->sgpr_reads[0], fx.sgpr_base() + 8);
+
+  if constexpr (util::has_stdx_simd) {
+    fx.plugin->sgpr_reads.clear();
+    const auto view = regs.read_operand_pair32(source, 1, ScalarPairMode::Replicate32,
+                                               /*byte_mask=*/0b1100);
+    const auto lo = view.load_lo_native<uint32_t>(0);
+    const auto hi = view.load_hi_native<uint32_t>(0);
+    for (std::size_t lane = 0; lane < util::native_width_v<uint32_t>; ++lane) {
+      EXPECT_EQ(lo[lane], 0x11220000u);
+      EXPECT_EQ(hi[lane], 0x11220000u);
+    }
+    ASSERT_EQ(fx.plugin->sgpr_reads.size(), 1u);
+    EXPECT_EQ(fx.plugin->sgpr_reads[0], fx.sgpr_base() + 8);
+  }
+}
+
 TEST(RegisterAccessTest, CuBoundSgprWritesCannotBypassObservation) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

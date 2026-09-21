@@ -164,9 +164,9 @@ auto SelectSymkTuning(ncclSymkKernelId id, int maxChannels) {
 }  // namespace
 
 // ===========================================================================
-// rcclGetProtoForGfx120x -- directly test the protocol-selector helper. The
-// surrounding rcclUpdateCollectiveProtocol tests cover gfx120x recognition via
-// the production IsArchMatch(..., "gfx120") prefix check.
+// Navi protocol-selector helpers. The surrounding
+// rcclUpdateCollectiveProtocol tests cover gfx110x/gfx120x recognition via the
+// production prefix checks.
 // ===========================================================================
 
 // SingleNodeLLCutoffs[] is indexed directly by ncclFunc_t, so its ordering IS
@@ -219,6 +219,22 @@ TEST(WrapMicrotest, GetProtoForGfx120x_ZeroCutoffFuncsOnlyLLAtZero) {
 // this build.
 TEST(WrapMicrotest, GetProtoForGfx120x_FuncBeyondTable_DefaultsSimple) {
   EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx120x(ncclFuncAlltoAll, 1));
+}
+
+TEST(WrapMicrotest, GetProtoForGfx110x_CutoffBoundaries) {
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncBroadcast, 1536));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncBroadcast, 1537));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncReduce, 1024));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncReduce, 1025));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncAllGather, 24756));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncAllGather, 24757));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncReduceScatter, 24756));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncReduceScatter, 24757));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncAllReduce, 65536));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncAllReduce, 65537));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncSendRecv, 0));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncSendRecv, 1));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncAlltoAll, 1));
 }
 
 // ===========================================================================
@@ -1154,7 +1170,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisa
       "Wrap_UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        SetMicroEnv("NCCL_P2P_DISABLE", "1");
+        ScopedHook p2pDisable(g_paramP2pDisable, []() { return 1; });
         ncclComm* comm = MakeCommWithArch("gfx1200");
         comm->nNodes = 1;
         comm->nRanks = 1;
@@ -1181,6 +1197,30 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDelegatesT
         info.protocol = NCCL_PROTO_SIMPLE;
         rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
         EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx110xSingleNodeDelegatesToProtocolSelector) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx110xSingleNodeDelegatesToProtocolSelector",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx1100");
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+
+        ncclTaskColl atCutoff{};
+        atCutoff.func = ncclFuncAllReduce;
+        atCutoff.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/65536, &atCutoff);
+        EXPECT_EQ(NCCL_PROTO_LL, atCutoff.protocol);
+
+        ncclTaskColl pastCutoff{};
+        pastCutoff.func = ncclFuncAllReduce;
+        pastCutoff.protocol = NCCL_PROTO_LL;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/65537, &pastCutoff);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, pastCutoff.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -2695,6 +2735,45 @@ TEST(WrapMicrotest, OverrideChannels_FewerThan2NodesLeavesNcUntouched) {
   int nc = -100;
   EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
   EXPECT_EQ(-100, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, OverrideChannels_SingleNodeNaviAppliesTuning) {
+  for (const char* arch : {"gfx1100", "gfx1201"}) {
+    ncclComm* comm = MakeCommWithArch(arch);
+    comm->nNodes = 1;
+    comm->nRanks = 8;
+    comm->nChannels = 32;
+    comm->config.minCTAs = 1;
+    comm->config.maxCTAs = 64;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+    int nc = -100;
+    EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc));
+    EXPECT_EQ(8, nc) << arch;
+    DeleteCommWithArch(comm);
+  }
+}
+
+TEST(WrapMicrotest, OverrideChannels_NonzeroRankSuppressesVerboseTuningLogs) {
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
+  ncclComm* comm = MakeCommWithArch("gfx1100");
+  comm->rank = 1;
+  comm->nNodes = 1;
+  comm->nRanks = 8;
+  comm->nChannels = 32;
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 64;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+  int nc = -100;
+  const std::string log = RcclUnitTesting::CaptureLog(
+    [&]() { EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc)); });
+  EXPECT_EQ(8, nc);
+  EXPECT_EQ(std::string::npos, log.find("nBytes:"));
+  EXPECT_EQ(std::string::npos, log.find("RCCL tuning model overrides nchannels"));
   DeleteCommWithArch(comm);
 }
 
