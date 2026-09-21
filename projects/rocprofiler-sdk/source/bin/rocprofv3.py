@@ -132,9 +132,7 @@ def warn_unsupported_stats_output_formats(stats_enabled, output_formats):
 
     requested_formats = list(
         dict.fromkeys(
-            str(itr).strip().lower()
-            for itr in (output_formats or [])
-            if str(itr).strip()
+            str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
         )
     )
     if any(itr in STATS_OUTPUT_FORMATS for itr in requested_formats):

@@ -130,8 +130,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
-        "--stats has no effect.*output format\\(s\\) pftrace, otf2.*only to csv and json"
-    )
+        "--stats has no effect.*output format\\(s\\) pftrace, otf2.*only to csv and json")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-stats-supported-output-format-no-warning
@@ -141,10 +140,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        "--stats has no effect"
-    )
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}" "--stats has no effect")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-stats-output-format-env-no-warning
@@ -156,7 +152,4 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        "--stats has no effect"
-    )
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}" "--stats has no effect")
