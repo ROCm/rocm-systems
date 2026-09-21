@@ -65,7 +65,7 @@ function(get_ais_gnu_warning_flags outvar compiler_version)
         -Wshadow
         -Wshadow-local
         -Wshift-overflow=2
-        -Wstrict-overflow=4
+        -Wno-strict-overflow
         -Wswitch-default
         -Wswitch-enum
         -Wtrampolines

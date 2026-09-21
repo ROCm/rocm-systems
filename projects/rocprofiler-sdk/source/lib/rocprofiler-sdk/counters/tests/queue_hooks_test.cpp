@@ -176,23 +176,25 @@ TEST(counters_queue_hooks, is_any_active_false_when_no_context_active)
 
 TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_id)
 {
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_FALSE(agents.empty());
+    const auto& [_, agent] = *agents.begin();
+    hsa::QueueHooksFakeQueue fq(agent, {.handle = 1});
+
     hsa::inst_pkt_t inst_pkt;
-    inst_pkt.emplace_back(
-        std::make_pair(std::make_unique<rocprofiler::hsa::AQLPacket>(),
-                       rocprofiler::hsa::queue_hooks::THREAD_TRACE_CLIENT_ID));
+    inst_pkt.emplace_back(std::make_pair(std::make_unique<rocprofiler::hsa::EmptyAQLPacket>(),
+                                         rocprofiler::hsa::queue_hooks::THREAD_TRACE_CLIENT_ID));
 
-    auto sess    = std::make_shared<rocprofiler::hsa::queue_info_session_t>();
-    auto packet  = rocprofiler::hsa::packet_data_t{};
-    auto fq_pkt  = rocprofiler::hsa::rocprofiler_packet{};
+    auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
+    auto packet = rocprofiler::hsa::packet_data_t{};
+    auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
-    // Must return without touching registered counter contexts (no init required).
+    // Must return without touching registered counter contexts.
     rocprofiler::counters::kernel_dispatch_phase_exit_hook(
-        *reinterpret_cast<rocprofiler::hsa::Queue*>(nullptr),
-        fq_pkt,
-        sess,
-        packet,
-        inst_pkt,
-        rocprofiler::kernel_dispatch::profiling_time{});
+        fq, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
     SUCCEED();
 }
 
@@ -219,7 +221,7 @@ TEST(counters_queue_hooks, is_any_active_true_while_context_started)
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
-    set_client_ctx(get_client_ctx());
+    get_client_ctx() = rocprofiler_context_id_t{0};
 }
 
 // Regression for callback-registry removal, per the review on #8891: dispatches enqueued while the

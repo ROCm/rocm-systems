@@ -111,6 +111,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicCmpswapMimg : public Mimg {
@@ -120,6 +122,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicAddMimg : public Mimg {
@@ -129,6 +133,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicSubMimg : public Mimg {
@@ -138,6 +144,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicSminMimg : public Mimg {
@@ -147,6 +155,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicUminMimg : public Mimg {
@@ -156,6 +166,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicSmaxMimg : public Mimg {
@@ -165,6 +177,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicUmaxMimg : public Mimg {
@@ -174,6 +188,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicAndMimg : public Mimg {
@@ -183,6 +199,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicOrMimg : public Mimg {
@@ -192,6 +210,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicXorMimg : public Mimg {
@@ -201,6 +221,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicIncMimg : public Mimg {
@@ -210,6 +232,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageAtomicDecMimg : public Mimg {
@@ -219,6 +243,8 @@ public:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class ImageGetResinfoMimg : public Mimg {

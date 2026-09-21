@@ -8,6 +8,14 @@ Known issues
 
 This page documents known issues with hipFile.
 
+Asynchronous operations that use the fastpath backend will not retry on the fallback backend
+============================================================================================
+
+If asynchronous operations satisfy fastpath prerequisites, they now run on the
+fastpath backend. If the fastpath device lookup fails or the p2pdma transfer
+is not supported between the devices, the asynchronous operation will now
+fail.
+
 Poor performance with GPU Virtual Functions
 ===========================================
 
@@ -39,6 +47,9 @@ Example:
    +-------------------------------------+----------------------------------------+
 
 hipFile's fastpath is only supported on GPU physical functions (PFs).
+
+``ais-check`` also detects virtual functions via ``amd-smi`` and prints a warning
+when one is present. This warning won't change the exit code.
 
 High memory utilization with hipFile
 ====================================

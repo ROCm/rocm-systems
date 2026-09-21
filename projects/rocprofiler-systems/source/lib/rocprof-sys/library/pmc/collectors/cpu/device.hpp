@@ -7,7 +7,7 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 #include <cstdint>
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <concepts>
 #include <map>

@@ -111,10 +111,22 @@ jobs:
         submodules: 'false'
 
     - name: Init/Update submodules
+      timeout-minutes: 15
+      continue-on-error: true
       shell: bash
       run: |
         git config --global --add safe.directory '*'
         git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+
+    # This is a separate step because the checkout action requires git to be already installed,
+    # but we need the checkout action to fetch requirements.txt
+    - name: Install pip requirements
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        python3 -m pip install -U --user -r projects/rocprofiler-sdk/requirements.txt
+        # Add pip packages to path
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL

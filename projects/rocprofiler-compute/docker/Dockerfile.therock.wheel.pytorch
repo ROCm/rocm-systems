@@ -19,13 +19,13 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y python3.12 python3.12-venv
 # rocm-sdk core/libraries/device packages; the rocm[profiler,devel] extras add
 # the rocprofiler tools and headers needed to build rocprofiler-compute. Pin a
 # dated nightly via ROCM_VERSION for reproducibility; bump it manually to update.
-# Browse versions at https://rocm.nightlies.amd.com/whl-multi-arch/rocm/
+# Browse versions at https://nightly.repo.amd.com/rocm/whl-next/rocm/
 ARG ROCM_VERSION=<rocm_version>
 ARG GFX_ARCH=<gfx_arch>
 RUN rm -rf /rocm-venv && python3.12 -m venv /rocm-venv && \
     /rocm-venv/bin/pip install --upgrade pip && \
     /rocm-venv/bin/pip install \
-        --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+        --index-url https://nightly.repo.amd.com/rocm/whl-next/ \
         "rocm[profiler,devel,libraries,device-${GFX_ARCH}]==${ROCM_VERSION}" \
         "torch[device-${GFX_ARCH}]" \
         "torchvision[device-${GFX_ARCH}]" \

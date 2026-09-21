@@ -21,32 +21,35 @@ class CodeObjectInstruction(NamedTuple):
     """One disassembled instruction within a code object."""
 
     virtual_address: int
-    instruction: str
-    comment: str
-    kernel_name: str
+    instruction: Optional[str]
+    source: Optional[str]
 
 
-class CodeObjectDisassembly(NamedTuple):
-    """A code object and every instruction disassembled from it."""
+class CodeObjectSymbol(NamedTuple):
+    """One kernel symbol within a code object, and the instructions it spans."""
 
-    code_object_id: int
+    name: Optional[str]
+    virtual_address: int
     instructions: list[CodeObjectInstruction]
 
 
-def parse_code_object_info(data: dict[str, Any]) -> list[CodeObjectDisassembly]:
-    """Flatten a parsed code-object info dict into per-object instructions.
+class CodeObjectDisassembly(NamedTuple):
+    """A code object and every symbol disassembled from it."""
 
-    Each code object owns several symbols; every symbol carries its own
-    instruction list, flattened here into one list per code object.
+    code_object_id: int
+    symbols: list[CodeObjectSymbol]
+
+
+def parse_code_object_info(data: dict[str, Any]) -> list[CodeObjectDisassembly]:
+    """Parse a code-object info dict into a per-object symbol tree.
+
+    Keeps only virtual addresses: the artifact's own ``code_object_offset`` is
+    a file offset, which callers cannot rebase onto the runtime load_base.
     """
     return [
         CodeObjectDisassembly(
             code_object_id=code_object["id"],
-            instructions=[
-                _to_instruction(instruction, symbol.get("name"))
-                for symbol in code_object.get("symbols", [])
-                for instruction in symbol.get("instructions", [])
-            ],
+            symbols=[_to_symbol(symbol) for symbol in code_object.get("symbols", [])],
         )
         for code_object in data.get("code_objects", [])
     ]
@@ -83,13 +86,22 @@ def _parse_pid(json_path: Path) -> Optional[int]:
     return int(pid_text)
 
 
-def _to_instruction(
-    instruction: dict[str, Any], symbol_name: str
-) -> CodeObjectInstruction:
+def _to_symbol(symbol: dict[str, Any]) -> CodeObjectSymbol:
+    """Convert one raw symbol dict into a CodeObjectSymbol."""
+    return CodeObjectSymbol(
+        name=symbol.get("name"),
+        virtual_address=symbol["virtual_address"],
+        instructions=[
+            _to_instruction(instruction)
+            for instruction in symbol.get("instructions", [])
+        ],
+    )
+
+
+def _to_instruction(instruction: dict[str, Any]) -> CodeObjectInstruction:
     """Convert one raw instruction dict into a CodeObjectInstruction."""
     return CodeObjectInstruction(
         virtual_address=instruction["virtual_address"],
         instruction=instruction.get("name"),
-        comment=instruction.get("comment"),
-        kernel_name=symbol_name,
+        source=instruction.get("comment"),
     )

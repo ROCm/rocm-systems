@@ -1013,3 +1013,276 @@ void SvmMemoryTestBasic::TestAccessedByAllDevices(void) {
 
   // Note: cleanup_svm() is automatically called by ScopeGuard destructor
 }
+
+void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
+                                                        hsa_amd_memory_pool_t pool) {
+  hsa_device_type_t ag_type;
+  rocrtst::pool_info_t pool_i;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) return;
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed) return;
+
+  static const uint32_t kNumRegions = 4;
+  static const size_t kRegionSize = 1024 * 1024;
+
+  std::vector<void*> ptrs(kNumRegions);
+  std::vector<size_t> sizes(kNumRegions, kRegionSize);
+  std::vector<hsa_agent_t> dst_agents(kNumRegions, agent);
+
+  // reserve svm memory ranges
+  for (uint32_t i = 0; i < kNumRegions; i++) {
+    ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&ptrs[i], kRegionSize, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+    ASSERT_NE(ptrs[i], nullptr);
+
+    std::vector<hsa_amd_svm_attribute_pair_t> dev_attrs;
+    dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, agent.handle});
+    dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, agent.handle});
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_set(ptrs[i], sizes[i], dev_attrs.data(), dev_attrs.size()));
+
+    if (verbosity() > 0) {
+      std::cout << "Reserved SVM region " << i << " at " << ptrs[i] << std::endl;
+    }
+  }
+
+  hsa_signal_t completion = {0};
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &completion));
+
+  for (uint32_t i = 0; i < kNumRegions; i++) {
+    hsa_signal_store_relaxed(completion, 1);
+    ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptrs[i], sizes[i], agent, 0, nullptr, completion));
+    while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+  }
+
+  // set up dependency signals
+  static const uint32_t kNumDepSignals = 3;
+  hsa_signal_t dep_signals[kNumDepSignals];
+  for (uint32_t i = 0; i < kNumDepSignals; i++) {
+    ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &dep_signals[i]));
+  }
+  hsa_signal_store_relaxed(completion, 1);
+  
+  ASSERT_SUCCESS(hsa_amd_svm_discard_and_prefetch_batch_async(
+      ptrs.data(), sizes.data(), kNumRegions, dst_agents.data(), kNumRegions, kNumDepSignals,
+      dep_signals, completion));
+
+  /* The operation must only run after every dep signal has reached 0, so 
+  the completion signal should still be pending */
+  ASSERT_EQ(hsa_signal_load_scacquire(completion), 1);
+
+  // resolve all dep signals one by one
+  for (uint32_t i = 0; i < kNumDepSignals; i++) {
+    hsa_signal_store_screlease(dep_signals[i], 0);
+  }
+
+  // wait for submitted discard-and-prefetch op to actually complete 
+  while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {}
+
+  // The final prefetch of the combined operation targets the requested gpu
+  for (uint32_t i = 0; i < kNumRegions; i++) {
+    hsa_amd_svm_attribute_pair_t attr;
+    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION;
+    attr.value = 0;
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(ptrs[i], sizes[i], &attr, 1));
+    ASSERT_EQ(attr.value, agent.handle) << "region " << i << " was not prefetched to the destination GPU";
+
+    hsa_amd_pointer_info_t ptrInfo = {};
+    ptrInfo.size = sizeof(ptrInfo);
+    ASSERT_SUCCESS(hsa_amd_pointer_info(ptrs[i], &ptrInfo, nullptr, nullptr, nullptr));
+    ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+  }
+
+  // cleanup
+  hsa_signal_destroy(completion);
+  for (uint32_t i = 0; i < kNumDepSignals; i++) {
+    hsa_signal_destroy(dep_signals[i]);
+  }
+  for (uint32_t i = 0; i < kNumRegions; i++) {
+    hsa_amd_vmem_address_free(ptrs[i], sizes[i]);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Batch discard-and-prefetch test completed successfully" << std::endl;
+  }
+}
+
+void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent,
+                                                            hsa_amd_memory_pool_t pool) {
+  hsa_device_type_t ag_type;
+  rocrtst::pool_info_t pool_i;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) return;
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed) return;
+
+  hsa_agent_t cpu_agent;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NEAREST_CPU, &cpu_agent));
+
+  static const size_t kRegionSize = 64 * 1024 * 1024;
+  static const uint32_t kNumIters = 20;
+
+  void* ptr = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&ptr, kRegionSize, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  ASSERT_NE(ptr, nullptr);
+
+  std::vector<hsa_amd_svm_attribute_pair_t> dev_attrs;
+  dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, agent.handle});
+  dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, agent.handle});
+  ASSERT_SUCCESS(hsa_amd_svm_attributes_set(ptr, kRegionSize, dev_attrs.data(), dev_attrs.size()));
+
+  hsa_signal_t signal = {0};
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &signal));
+
+  // prefetch the range to the gpu so pages are resident
+  auto populate_on_gpu = [&]() {
+    hsa_signal_store_relaxed(signal, 1);
+    ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+  };
+
+  void* ptrs_arr[1] = {ptr};
+  size_t sizes_arr[1] = {kRegionSize};
+  hsa_agent_t dst_arr[1] = {agent};
+
+  // Record timing for prefetch only operation 
+  double prefetch_only_us = 0.0;
+  for (uint32_t i = 0; i < kNumIters; i++) {
+    // Prefetch to pages to cpu first
+    hsa_signal_store_relaxed(signal, 1);
+    ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, cpu_agent, 0, nullptr, signal));
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+    hsa_signal_store_relaxed(signal, 1);
+
+    auto t0 = std::chrono::steady_clock::now();
+    ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+    auto t1 = std::chrono::steady_clock::now();
+
+    prefetch_only_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
+  }
+
+  // Combined API discard_and_prefetch_batch_async
+  double fused_us = 0.0;
+  for (uint32_t i = 0; i < kNumIters; i++) {
+    populate_on_gpu();
+    hsa_signal_store_relaxed(signal, 1);
+    auto t0 = std::chrono::steady_clock::now();
+    ASSERT_SUCCESS(hsa_amd_svm_discard_and_prefetch_batch_async(ptrs_arr, sizes_arr, 1, dst_arr,
+                                                                1, 0, nullptr, signal));
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+    auto t1 = std::chrono::steady_clock::now();
+    fused_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
+  }
+
+  // discard_batch_async + prefetch_async
+  double split_us = 0.0;
+  for (uint32_t i = 0; i < kNumIters; i++) {
+    populate_on_gpu();
+    hsa_signal_store_relaxed(signal, 1);
+    auto t0 = std::chrono::steady_clock::now();
+    ASSERT_SUCCESS(hsa_amd_svm_discard_batch_async(ptrs_arr, sizes_arr, 1, 0, nullptr, signal));
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+    hsa_signal_store_relaxed(signal, 1);
+    ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {}
+    auto t1 = std::chrono::steady_clock::now();
+    split_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
+  }
+
+  const double fused_avg_ms = fused_us / kNumIters / 1000.0;
+  const double split_avg_ms = split_us / kNumIters / 1000.0;
+  const double prefetch_avg_ms = prefetch_only_us / kNumIters / 1000.0;
+
+  std::cout << "    discard_and_prefetch_batch_async : " << fused_avg_ms << " ms/iter" << std::endl;
+  std::cout << "    discard_batch_async + prefetch   : " << split_avg_ms << " ms/iter" << std::endl;
+  std::cout << "    prefetch only                    : " << prefetch_avg_ms << " ms/iter" << std::endl;
+
+  hsa_signal_destroy(signal);
+  hsa_amd_vmem_address_free(ptr, kRegionSize);
+}
+
+void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(void) {
+  bool svm_supported = false;
+  hsa_status_t err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping SVMDiscardAndPrefetchBatch test ***"
+              << std::endl;
+    return;
+  }
+
+  bool xnack_enabled = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &xnack_enabled);
+  if (err != HSA_STATUS_SUCCESS || !xnack_enabled) {
+    std::cout << "  *** XNACK not enabled - skipping SVMDiscardAndPrefetchBatch test ***"
+              << std::endl;
+    return;
+  }
+
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("SVMDiscardAndPrefetchBatch Test");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      TestSVMDiscardAndPrefetchBatch(a->agent, p);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(void) {
+  bool svm_supported = false;
+  hsa_status_t err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping SVMDiscardAndPrefetchBatchPerf test ***"
+              << std::endl;
+    return;
+  }
+
+  bool xnack_enabled = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &xnack_enabled);
+  if (err != HSA_STATUS_SUCCESS || !xnack_enabled) {
+    std::cout << "  *** XNACK not enabled - skipping SVMDiscardAndPrefetchBatchPerf test ***"
+              << std::endl;
+    return;
+  }
+
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("SVMDiscardAndPrefetchBatchPerf Test");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      TestSVMDiscardAndPrefetchBatchPerf(a->agent, p);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}

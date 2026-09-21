@@ -16,7 +16,7 @@ struct ncclGinBarrierHandle {
   ncclDevResourceHandle_t unused;
 };
 
-#if NCCL_CHECK_CUDACC
+#ifdef __CUDACC__
 template <typename Coop>
 struct ncclGinBarrierSession_internal {
   Coop coop;
@@ -25,6 +25,8 @@ struct ncclGinBarrierSession_internal {
   ncclGinBarrierHandle handle;
   int index;
   ncclGinSignal_t signal;
+  // True when the fence covers every GIN context on the comm.
+  bool fenceAllContexts;
 
   template <bool EnableTimeout>
   NCCL_DEVICE_INLINE ncclResult_t syncInternal(Coop, cuda::memory_order ord, ncclGinFenceLevel fence,

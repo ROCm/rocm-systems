@@ -23,6 +23,10 @@
 
 #include "util/perf_timer.h"
 
+#if defined(__powerpc__)
+#include <sys/platform/ppc.h>
+#endif
+
 PerfTimer::PerfTimer() { freq_in_100mhz_ = MeasureTSCFreqHz(); }
 
 PerfTimer::~PerfTimer() {
@@ -158,6 +162,7 @@ uint64_t PerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t PerfTimer::MeasureTSCFreqHz() {
+#if defined(__x86_64__) || defined(_M_X64)
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;
@@ -174,4 +179,9 @@ uint64_t PerfTimer::MeasureTSCFreqHz() {
   uint64_t coarseIntervalNs = (coarseEndUs - coarseBeginUs) * 1000;
   uint64_t tscIntervalTicks = tscTicksEnd - tscTicksBegin;
   return (tscIntervalTicks * 10 + (coarseIntervalNs / 2)) / coarseIntervalNs;
+#elif defined(__powerpc__)
+  return (__ppc_get_timebase_freq() + 50000000) / 100000000;
+#else
+#error "Unsupported architecture"
+#endif
 }

@@ -12,6 +12,7 @@
 #include "util/simd.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -39,8 +40,17 @@ public:
   VectorReg() = default;
   VectorReg(Storage data) : data_(std::move(data)) {}
 
-  VecElem operator[](size_t idx) const { return data_[idx]; }
-  VecElem &operator[](size_t idx) { return data_[idx]; }
+  // Lane indices come from wave-size-dependent loops, and a wave32 register is
+  // exactly 32 lanes wide: a loop that assumes 64 reads its neighbour rather
+  // than failing. Catch that in debug builds; release keeps the bare index.
+  VecElem operator[](size_t idx) const {
+    assert(idx < NUM_ELEMS && "VectorReg lane index out of range");
+    return data_[idx];
+  }
+  VecElem &operator[](size_t idx) {
+    assert(idx < NUM_ELEMS && "VectorReg lane index out of range");
+    return data_[idx];
+  }
 
   /// SIMD load of `native<T>` from W contiguous lanes starting at `lane_base`.
   /// The storage pointer never escapes the object. T is a 32-bit lane type.
