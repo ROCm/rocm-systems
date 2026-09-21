@@ -54,6 +54,7 @@ add_library(
     preset_registry.cpp
     common_utils.cpp
     cli_dispatcher.cpp
+    avail_command.cpp
 )
 
 target_include_directories(
@@ -67,6 +68,7 @@ target_link_libraries(
     PUBLIC
         rocprofiler-systems::rocprofiler-systems-json
         rocprofiler-systems::rocprofiler-systems-common-library
+        rocprofiler-systems::rocprofiler-systems-avail
 )
 
 # Create alias for consistent naming

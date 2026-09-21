@@ -153,13 +153,34 @@ TEST(cli_dispatcher_test, causal_execs_sibling_binary)
     EXPECT_EQ(result.binary_name, "rocprof-sys-causal");
 }
 
-TEST(cli_dispatcher_test, avail_execs_without_requiring_app)
+TEST(cli_dispatcher_test, avail_runs_in_process_without_requiring_app)
 {
     auto args   = argv_builder{ "rocsys", "avail" };
     auto result = parse_dispatch(args.argc(), args.argv());
-    EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
-    EXPECT_EQ(result.binary_name, "rocprof-sys-avail");
+    EXPECT_EQ(result.kind, dispatch_kind::in_process_avail);
+    EXPECT_TRUE(result.binary_name.empty());
     EXPECT_TRUE(result.strip_subcommand);
+}
+
+TEST(cli_dispatcher_test, avail_flags_reach_the_handler_unchanged)
+{
+    auto args   = argv_builder{ "rocsys", "avail", "--devices", "--gpu-counters", "--traces" };
+    auto result = parse_dispatch(args.argc(), args.argv());
+    ASSERT_EQ(result.kind, dispatch_kind::in_process_avail);
+
+    const auto fwd = forwarded_args(args.argc(), args.argv(), result.strip_subcommand);
+    ASSERT_EQ(fwd.size(), 4U);
+    EXPECT_EQ(fwd[0], "rocsys");
+    EXPECT_EQ(fwd[1], "--devices");
+    EXPECT_EQ(fwd[2], "--gpu-counters");
+    EXPECT_EQ(fwd[3], "--traces");
+}
+
+TEST(cli_dispatcher_test, avail_help_is_not_treated_as_the_rocsys_help)
+{
+    auto args   = argv_builder{ "rocsys", "avail", "--help" };
+    auto result = parse_dispatch(args.argc(), args.argv());
+    EXPECT_EQ(result.kind, dispatch_kind::in_process_avail);
 }
 
 TEST(cli_dispatcher_test, python_execs_sibling_binary)

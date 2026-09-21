@@ -10,9 +10,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - `rocsys` unified CLI entry point. `rocsys -- ./app` and `rocsys profile -- ./app`
   produce a full trace profile. `rocsys rewrite` runs `rocprof-sys-instrument`
-  in binary-rewrite mode (`-o`). Other subcommands (`instrument`, `causal`,
-  `avail`, `python`, `attach`) forward to the existing tools. The
-  `rocprof-sys-*` binaries are unchanged.
+  in binary-rewrite mode (`-o`). `rocsys avail` queries devices and per-GPU
+  counters in-process through the new capability catalog. Other subcommands
+  (`instrument`, `causal`, `python`, `attach`) forward to the existing tools.
+  The `rocprof-sys-*` binaries are unchanged.
 
 ### Changed
 

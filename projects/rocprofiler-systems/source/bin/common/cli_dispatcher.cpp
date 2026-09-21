@@ -86,11 +86,23 @@ make_error(std::string message)
     return result;
 }
 
+[[nodiscard]] constexpr dispatch_kind
+kind_for(dispatch_target target) noexcept
+{
+    switch(target)
+    {
+        case dispatch_target::tool_runner: return dispatch_kind::in_process;
+        case dispatch_target::avail: return dispatch_kind::in_process_avail;
+        case dispatch_target::sibling_exec: break;
+    }
+    return dispatch_kind::exec_tool;
+}
+
 dispatch_result
 from_spec(const subcommand_spec& spec, bool strip_subcommand)
 {
     dispatch_result result;
-    result.kind = spec.in_process ? dispatch_kind::in_process : dispatch_kind::exec_tool;
+    result.kind = kind_for(spec.target);
     result.mode = spec.mode;
     result.binary_name      = spec.binary_name;
     result.subcommand_name  = spec.name;

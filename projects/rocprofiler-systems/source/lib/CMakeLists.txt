@@ -71,6 +71,8 @@ add_subdirectory(core)
 add_subdirectory(backends)
 add_subdirectory(binary)
 add_subdirectory(logger)
+# after backends: picks up the rocprofiler-sdk backend target when it exists
+add_subdirectory(avail)
 
 # ------------------------------------------------------------------------------#
 #

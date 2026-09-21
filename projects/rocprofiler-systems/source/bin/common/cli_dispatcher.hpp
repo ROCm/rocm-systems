@@ -20,8 +20,18 @@ enum class dispatch_kind : std::uint8_t
     show_help,
     show_version,
     in_process,
+    in_process_avail,
     exec_tool,
     error
+};
+
+// Who actually runs the subcommand. Keeping this in the table means adding an
+// in-process verb never adds a branch to parse_dispatch.
+enum class dispatch_target : std::uint8_t
+{
+    sibling_exec,  // execvp the sibling binary named by binary_name
+    tool_runner,   // in-process common_utils::run_tool with mode
+    avail,         // in-process capability catalog query
 };
 
 struct subcommand_spec
@@ -29,7 +39,7 @@ struct subcommand_spec
     std::string_view        name;
     std::string_view        description;
     std::string_view        binary_name;
-    bool                    in_process   = false;
+    dispatch_target         target       = dispatch_target::sibling_exec;
     bool                    requires_app = true;
     common_utils::tool_mode mode         = common_utils::tool_mode::sample;
     bool                    is_default   = false;
@@ -43,19 +53,24 @@ inline constexpr std::array<subcommand_spec, 7> subcommands{ {
     { "profile",
       "Full trace profile (default)",
       "rocprof-sys-run",
-      true,
+      dispatch_target::tool_runner,
       true,
       common_utils::tool_mode::run,
       true },
-    { "instrument", "Runtime instrumentation (Dyninst)", "rocprof-sys-instrument", false,
+    { "instrument", "Runtime instrumentation (Dyninst)", "rocprof-sys-instrument",
+      dispatch_target::sibling_exec, true },
+    { "rewrite", "Binary rewrite (Dyninst)", "rocprof-sys-instrument",
+      dispatch_target::sibling_exec, true, common_utils::tool_mode::sample, false, "-o" },
+    { "causal", "Causal profiling", "rocprof-sys-causal", dispatch_target::sibling_exec,
       true },
-    { "rewrite", "Binary rewrite (Dyninst)", "rocprof-sys-instrument", false, true,
-      common_utils::tool_mode::sample, false, "-o" },
-    { "causal", "Causal profiling", "rocprof-sys-causal", false, true },
-    { "avail", "Query available counters and settings", "rocprof-sys-avail", false,
+    // Served by the in-process capability catalog, so no sibling binary. The
+    // standalone rocprof-sys-avail tool is unaffected.
+    { "avail", "Report profilable devices and GPU counters", {}, dispatch_target::avail,
       false },
-    { "python", "Python application profiling", "rocprof-sys-python", false, true },
-    { "attach", "Attach to a running process", "rocprof-sys-attach", false, true },
+    { "python", "Python application profiling", "rocprof-sys-python",
+      dispatch_target::sibling_exec, true },
+    { "attach", "Attach to a running process", "rocprof-sys-attach",
+      dispatch_target::sibling_exec, true },
 } };
 
 [[nodiscard]] constexpr int

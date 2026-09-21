@@ -41,12 +41,13 @@ rocprofiler_systems_strip_target(rocprofiler-systems-exe)
 
 install(TARGETS rocprofiler-systems-exe DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
 
+# Sibling binaries rocsys may execvp. `avail` is served in-process, so
+# rocprofiler-systems-avail is not listed here; it still builds and installs.
 foreach(
     _dep
     rocprofiler-systems-run
     rocprofiler-systems-instrument
     rocprofiler-systems-causal
-    rocprofiler-systems-avail
     rocprofiler-systems-attach
 )
     if(TARGET ${_dep})
