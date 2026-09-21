@@ -65,6 +65,35 @@ public:
             ssize_t *bytes_transferred);
 };
 
+class AsyncResourcePool {
+public:
+    AsyncResourcePool();
+    virtual ~AsyncResourcePool();
+
+    AsyncResourcePool(const AsyncResourcePool &)            = delete;
+    AsyncResourcePool &operator=(const AsyncResourcePool &) = delete;
+    AsyncResourcePool(AsyncResourcePool &&)                 = delete;
+    AsyncResourcePool &operator=(AsyncResourcePool &&)      = delete;
+
+    virtual void *acquireOp(size_t size);
+    virtual void  releaseOp(void *ptr) noexcept;
+
+    virtual uint64_t *acquireSignal();
+    virtual void      releaseSignal(uint64_t *slot) noexcept;
+
+    virtual void drain();
+
+private:
+    struct DevicePool {
+        std::vector<void *>     ops;
+        std::vector<uint64_t *> signals;
+    };
+    std::mutex                          mutex;
+    std::unordered_map<int, DevicePool> free_lists;
+    std::unordered_map<void *, int>     op_devices;
+    std::unordered_map<uint64_t *, int> signal_devices;
+};
+
 class AsyncMonitor {
 public:
     virtual ~AsyncMonitor();

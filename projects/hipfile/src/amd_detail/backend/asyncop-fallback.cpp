@@ -9,11 +9,9 @@
 #include "buffer.h"
 #include "context.h"
 #include "hip.h"
-#include "sys.h"
 
 #include <memory>
 #include <new>
-#include <syslog.h>
 
 namespace hipFile {
 class IFile;
@@ -53,7 +51,7 @@ void *
 AsyncOpFallback::operator new(size_t size_)
 {
     try {
-        return Context<Hip>::get()->hipHostMalloc(size_, 0);
+        return Context<AsyncResourcePool>::get()->acquireOp(size_);
     }
     catch (...) {
         throw std::bad_alloc{};
@@ -63,10 +61,5 @@ AsyncOpFallback::operator new(size_t size_)
 void
 AsyncOpFallback::operator delete(void *ptr) noexcept
 {
-    try {
-        Context<Hip>::get()->hipHostFree(ptr);
-    }
-    catch (...) {
-        Context<Sys>::get()->syslog(LOG_CRIT, "Freeing AsyncOpFallback failed.");
-    }
+    Context<AsyncResourcePool>::get()->releaseOp(ptr);
 }

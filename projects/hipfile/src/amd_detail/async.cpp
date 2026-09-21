@@ -95,11 +95,20 @@ AsyncMonitor::completion_thread()
         if (!completed_ops.empty()) {
             AsyncOp *op{completed_ops.back()};
             completed_ops.pop_back();
-            auto nh = submitted_ops.extract(op);
-            // Lock needs to be released before destructor runs, as hipHostFree calls hipDeviceSynchronize.
-            // If another host function is running completeOp and waiting for the lock, this would cause
-            // deadlock.
-            lock.unlock();
+            bool idle{false};
+            {
+                auto nh = submitted_ops.extract(op);
+                idle    = submitted_ops.empty();
+                // Lock released before the op is destroyed. Returning the op to the pool is cheap, but
+                // holding the lock while another host function runs completeOp and waits for it would
+                // deadlock the moment a synchronizing free runs.
+                lock.unlock();
+            }
+            // With nothing outstanding, release the pooled pinned allocations. hipHostFree/hipFree
+            // synchronize, so this runs only at idle rather than once per completed op.
+            if (idle) {
+                Context<AsyncResourcePool>::get()->drain();
+            }
         }
         else if (!is_finished) {
             cv.wait(lock, [this] { return is_finished || !completed_ops.empty(); });
@@ -128,20 +137,123 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
 uint64_t *
 allocateSignalSlot()
 {
-    auto slot = static_cast<uint64_t *>(
-        Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
-    std::atomic_ref<uint64_t>{*slot}.store(0, std::memory_order_release);
-    return slot;
+    return Context<AsyncResourcePool>::get()->acquireSignal();
 }
 
 AsyncOp::~AsyncOp()
 {
     if (signal_slot) {
+        Context<AsyncResourcePool>::get()->releaseSignal(signal_slot);
+    }
+}
+
+AsyncResourcePool::AsyncResourcePool()  = default;
+AsyncResourcePool::~AsyncResourcePool() = default;
+
+void *
+AsyncResourcePool::acquireOp(size_t size)
+{
+    int device = Context<Hip>::get()->hipGetDevice();
+    {
+        std::lock_guard<std::mutex> lock{mutex};
+        auto                        found = free_lists.find(device);
+        if (found != free_lists.end() && !found->second.ops.empty()) {
+            void *ptr = found->second.ops.back();
+            found->second.ops.pop_back();
+            return ptr;
+        }
+    }
+    void *ptr = Context<Hip>::get()->hipHostMalloc(size, 0);
+    {
+        std::lock_guard<std::mutex> lock{mutex};
+        op_devices.emplace(ptr, device);
+    }
+    return ptr;
+}
+
+void
+AsyncResourcePool::releaseOp(void *ptr) noexcept
+{
+    std::lock_guard<std::mutex> lock{mutex};
+    auto                        found = op_devices.find(ptr);
+    if (found == op_devices.end()) {
+        Context<Sys>::get()->syslog(LOG_CRIT, "Releasing an untracked AsyncOpFallback allocation.");
+        return;
+    }
+    free_lists[found->second].ops.push_back(ptr);
+}
+
+uint64_t *
+AsyncResourcePool::acquireSignal()
+{
+    int       device = Context<Hip>::get()->hipGetDevice();
+    uint64_t *slot   = nullptr;
+    {
+        std::lock_guard<std::mutex> lock{mutex};
+        auto                        found = free_lists.find(device);
+        if (found != free_lists.end() && !found->second.signals.empty()) {
+            slot = found->second.signals.back();
+            found->second.signals.pop_back();
+        }
+    }
+    if (slot == nullptr) {
+        slot = static_cast<uint64_t *>(
+            Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
+        std::lock_guard<std::mutex> lock{mutex};
+        signal_devices.emplace(slot, device);
+    }
+    std::atomic_ref<uint64_t>{*slot}.store(0, std::memory_order_release);
+    return slot;
+}
+
+void
+AsyncResourcePool::releaseSignal(uint64_t *slot) noexcept
+{
+    std::lock_guard<std::mutex> lock{mutex};
+    auto                        found = signal_devices.find(slot);
+    if (found == signal_devices.end()) {
+        Context<Sys>::get()->syslog(LOG_CRIT, "Releasing an untracked async signal slot.");
+        return;
+    }
+    free_lists[found->second].signals.push_back(slot);
+}
+
+void
+AsyncResourcePool::drain()
+{
+    std::vector<void *>     ops;
+    std::vector<uint64_t *> signals;
+    {
+        std::lock_guard<std::mutex> lock{mutex};
+        for (auto &[device, pool] : free_lists) {
+            for (void *ptr : pool.ops) {
+                ops.push_back(ptr);
+                op_devices.erase(ptr);
+            }
+            for (uint64_t *slot : pool.signals) {
+                signals.push_back(slot);
+                signal_devices.erase(slot);
+            }
+            pool.ops.clear();
+            pool.signals.clear();
+        }
+    }
+    // Freed outside the lock: hipHostFree/hipFree synchronize the device, and holding the pool lock
+    // across them would stall op enqueues that need to acquire.
+    for (void *ptr : ops) {
         try {
-            Context<Hip>::get()->hipFree(signal_slot);
+            Context<Hip>::get()->hipHostFree(ptr);
         }
         catch (...) {
-            Context<Sys>::get()->syslog(LOG_CRIT, "Unable to free async signal memory.");
+            Context<Sys>::get()->syslog(LOG_CRIT, "Freeing pooled AsyncOpFallback failed.");
+        }
+    }
+    for (uint64_t *slot : signals) {
+        try {
+            Context<Hip>::get()->hipFree(slot);
+        }
+        catch (...) {
+            Context<Sys>::get()->syslog(LOG_CRIT, "Freeing pooled async signal memory failed.");
         }
     }
 }
