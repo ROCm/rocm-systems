@@ -25,8 +25,6 @@ constexpr int kRoot = 2;
 constexpr int kOffRootRank = 1;
 constexpr int kAboveRootRank = 3;
 constexpr int kPeer = 3;
-constexpr int kNoGraphUsage = 0;
-constexpr unsigned long long kCapturingGraphId = 1;
 constexpr ncclDataType_t kP2pDatatype = ncclFloat64;
 constexpr size_t kP2pElemSize = 8;
 constexpr size_t kP2pBytes = kCount * kP2pElemSize;
@@ -49,38 +47,6 @@ auto TaskClassify_FailRegLocalIsValidFrom(int nth) {
     return ncclSuccess;
   };
 }
-
-void TaskClassify_SetGraphCapture(TaskPrepScene* scene, bool capturing) {
-  struct ncclCudaGraph graph = ncclCudaGraphNone(kNoGraphUsage);
-  if (capturing) {
-    graph.graphId = kCapturingGraphId;
-  }
-  scene->comm()->planner.capturingGraph = graph;
-}
-
-// Publishes one registration covering [base, base + bytes) so the real inline ncclRegFind finds it.
-class TaskClassify_RegisteredRange {
- public:
-  TaskClassify_RegisteredRange(TaskPrepScene* scene, const void* base, size_t bytes) : comm_(scene->comm()) {
-    reg_.begAddr = reinterpret_cast<uintptr_t>(base);
-    reg_.endAddr = reg_.begAddr + bytes;
-    comm_->regCache.slots = &slot_;
-    comm_->regCache.capacity = 1;
-    comm_->regCache.population = 1;
-  }
-
-  // The comm outlives this object at every use site, so the slots it published have to go with it.
-  ~TaskClassify_RegisteredRange() {
-    comm_->regCache.slots = nullptr;
-    comm_->regCache.capacity = 0;
-    comm_->regCache.population = 0;
-  }
-
- private:
-  struct ncclComm* comm_;
-  struct ncclReg reg_{};
-  struct ncclReg* slot_ = &reg_;
-};
 
 // Self-constructing: a site that forgets ncclIntruQueueConstruct gets a garbage head, not an empty queue.
 struct TaskClassify_Queue : TaskTuningInfoQueue {
@@ -181,7 +147,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_UnregisteredBuffer_CopiesT
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredAndLocallyValid_SetsRegBuff) {
   TaskPrepScene scene;
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
-  TaskClassify_RegisteredRange registered(&scene, raw->sendRecv.buff, kP2pBytes);
+  RegisteredRanges registered(&scene, {{raw->sendRecv.buff, kP2pBytes}});
   struct ncclReg* probed = nullptr;
   ScopedHook isValid(g_regLocalIsValid, [&probed](struct ncclReg* reg, bool* out) {
     probed = reg;
@@ -200,7 +166,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredAndLocallyValid_
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredButNotLocallyValid_ClearsRegBuff) {
   TaskPrepScene scene;
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
-  TaskClassify_RegisteredRange registered(&scene, raw->sendRecv.buff, kP2pBytes);
+  RegisteredRanges registered(&scene, {{raw->sendRecv.buff, kP2pBytes}});
   struct ncclReg* probed = nullptr;
   ScopedHook isValid(g_regLocalIsValid, [&probed](struct ncclReg* reg, bool* out) {
     probed = reg;
@@ -218,7 +184,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredButNotLocallyVal
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegistrationShorterThanTheBuffer_ClearsRegBuff) {
   TaskPrepScene scene;
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
-  TaskClassify_RegisteredRange registered(&scene, raw->sendRecv.buff, kP2pBytes - 1);
+  RegisteredRanges registered(&scene, {{raw->sendRecv.buff, kP2pBytes - 1}});
   ScopedHook isValid(g_regLocalIsValid, [](struct ncclReg*, bool* out) {
     *out = true;
     return ncclSuccess;
@@ -232,7 +198,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegistrationShorterThanThe
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_CapturingGraphWithGraphRegister_SetsRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, true);
+  scene.SetGraphCapture(true);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
   ScopedHook param(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
     return std::strcmp(env, "GRAPH_REGISTER") == 0 ? 1 : deft;
@@ -248,7 +214,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_GraphArmHalfSatisfied_Clea
   for (bool capturing : {true, false}) {
     const int64_t graphRegister = capturing ? 0 : 1;
     TaskPrepScene scene;
-    TaskClassify_SetGraphCapture(&scene, capturing);
+    scene.SetGraphCapture(capturing);
     struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
     ScopedHook param(g_loadParam, [graphRegister](const char* env, int64_t deft) -> int64_t {
       return std::strcmp(env, "GRAPH_REGISTER") == 0 ? graphRegister : deft;
