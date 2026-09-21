@@ -21,7 +21,7 @@
 
 # GIN-SDMA AllToAll regression tests for the >1 GiB SDMA hang fix (PR #9927).
 #
-# These drive the real GinHybridAlltoAllKernel (deviceImpl 3, NCCL_GIN_TYPE=6)
+# These drive the real GinHybridAlltoAllKernel (deviceImpl 3, NCCL_GIN_TYPE=7)
 # at per-peer transfer sizes that cross the two single-descriptor limits the
 # 128 MiB SDMA copy clamp guards. The clamp now lives in the Anvil-SDMA backend
 # Put (ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>), which segments every
@@ -118,7 +118,7 @@ def _run_a2a(request, total_bytes, dtype):
     # Essentials to exercise the GIN-SDMA put path; force the SDMA (large) tier
     # for every size. Deployment-specific env comes from RCCL_TESTS_A2A_XENV.
     gin_env = []
-    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6",
+    for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7",
                "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
                "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLTOALL=0"] + XENV:
         gin_env += ["-x", kv]
