@@ -145,9 +145,9 @@ else()
             SQLITE_OMIT_SHARED_CACHE=1
     )
 
-    # Seal the bundled SQLite symbols so they are not exported from
-    # libprofiler-hub.{so,a} and cannot collide with (or be interposed by)
-    # other sqlite3 versions bundled by sibling components on TheRock.
+    # Seal the bundled SQLite symbols so no shared library linking this archive
+    # exports them, and they cannot collide with (or be interposed by) other
+    # sqlite3 versions bundled by sibling components on TheRock.
     target_compile_options(
         profiler-hub-sqlite3-static
         PRIVATE -O2 -fPIC -fvisibility=hidden
