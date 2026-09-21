@@ -1609,6 +1609,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_NE(legacy_config, nullptr);
   EXPECT_FALSE(
       flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM));
+  EXPECT_FALSE(
+      flatbuffers::IsFieldPresent(legacy_config, fb::ComputeUnitConfig::VT_SCRATCH_SLOTS_PER_CU));
   ASSERT_NE(checkpoint->compute_units(), nullptr);
   ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
   EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
@@ -1617,6 +1619,45 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
+  EXPECT_EQ(cu->scratch_slots_per_cu(), cu->num_wf_slots());
+}
+
+TEST(CheckpointTest, RoundTripsCdna5ScratchCapacity) {
+  auto source =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
+  ASSERT_EQ(source_cu->num_wf_slots(), 64u);
+  ASSERT_EQ(source_cu->scratch_slots_per_cu(), 32u);
+  ASSERT_EQ(source_cu->scratch_scoreboard_base(), 480u);
+
+  test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-scratch-checkpoint-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *stored_cu = fb::GetSimulationCheckpoint(bytes.data())
+                              ->config()
+                              ->vm()
+                              ->gpu()
+                              ->xcd()
+                              ->shader_engine()
+                              ->compute_unit();
+  ASSERT_NE(stored_cu, nullptr);
+  EXPECT_EQ(stored_cu->scratch_slots_per_cu(), 32u);
+
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_EQ(restored.soc()->num_xcds(), 8u);
+  for (auto *xcd : restored.soc()->xcds()) {
+    auto *cp = xcd->command_processor();
+    ASSERT_NE(cp, nullptr);
+    const auto &cus = cp->compute_units();
+    ASSERT_EQ(cus.size(), 32u);
+    for (const auto *cu : cus) {
+      EXPECT_EQ(cu->num_wf_slots(), 64u);
+      EXPECT_EQ(cu->scratch_slots_per_cu(), 32u);
+    }
+    EXPECT_EQ(cus[15]->scratch_scoreboard_base(), 480u);
+    EXPECT_EQ(cus[16]->scratch_scoreboard_base(), 0u);
+  }
 }
 
 TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {

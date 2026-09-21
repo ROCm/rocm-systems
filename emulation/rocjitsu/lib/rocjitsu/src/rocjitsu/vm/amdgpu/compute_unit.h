@@ -437,12 +437,24 @@ public:
   /// @returns Total hardware wavefront slot count.
   uint32_t num_wf_slots() const { return config_.num_wf_slots; }
 
+  /// @brief Limit scratch-backed residency without reducing general wave slots.
+  /// @details Scratch scoreboard IDs are compact within each shader engine even
+  /// when a CU has more execution contexts than scratch slots.
+  void set_scratch_slots_per_cu(uint32_t slots) {
+    scratch_slots_per_cu_ = std::clamp(slots, 1u, config_.num_wf_slots);
+    scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
+  }
+
+  /// @returns Scratch-backed wavefront slots available on this CU.
+  uint32_t scratch_slots_per_cu() const { return scratch_slots_per_cu_; }
+
   /// @brief Record this CU's physical location within its XCC.
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index) {
     shader_engine_id_ = shader_engine_id;
-    scratch_scoreboard_base_ = cu_index * config_.num_wf_slots;
+    shader_engine_cu_index_ = cu_index;
+    scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
   }
 
   /// @brief Return this CU's physical shader-engine index.
@@ -1082,6 +1094,8 @@ protected:
   uint32_t vgpr_storage_lane_count_ = 0;
   uint32_t vgpr_allocation_block_size_ = 0;
   uint32_t shader_engine_id_ = 0;
+  uint32_t shader_engine_cu_index_ = 0;
+  uint32_t scratch_slots_per_cu_ = 1;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   const bool setreg_vgpr_msb_fixup_ = false;

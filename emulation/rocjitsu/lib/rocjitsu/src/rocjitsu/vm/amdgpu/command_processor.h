@@ -156,6 +156,9 @@ public:
     scratch_wave_divisor_ = se_per_xcc == 0 ? 1 : se_per_xcc;
   }
 
+  /// @brief Configure scratch-backed wave slots independently of CU execution slots.
+  void set_scratch_slots_per_cu(uint32_t slots);
+
   /// @brief Tell this CP where its XCD sits among the SoC's XCDs.
   ///
   /// @details @p peers lists every XCD's command processor in XCD index order and
@@ -253,10 +256,12 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
+    if (configured_scratch_slots_per_cu_ != 0)
+      cu->set_scratch_slots_per_cu(configured_scratch_slots_per_cu_);
     scratch_shader_engine_count_ =
         std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
     scratch_waves_per_se_ =
-        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->scratch_slots_per_cu());
     cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_gpu_vm(gpu_vm_);
@@ -954,6 +959,7 @@ private:
   uint32_t scratch_wave_divisor_ = 1;
   uint32_t scratch_shader_engine_count_ = 1;
   uint32_t scratch_waves_per_se_ = 1;
+  uint32_t configured_scratch_slots_per_cu_ = 0;
   uint32_t scratch_xcc_id_ = 0;
   uint32_t scratch_xcc_count_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
