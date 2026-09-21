@@ -52,8 +52,7 @@ context when they need to be managed as a unit.
 The SDK owns dispatch repetition, memory restoration, and queue isolation. The tool chooses which
 dispatches to replay, how many passes to request, and which profiling services collect on each pass.
 
-The component diagram shows these responsibilities inside the profiled process. Replay uses the
-ordinary dispatch profiling path for every pass; it is independent of counter collection.
+The component diagram shows these responsibilities inside the profiled process.
 
 ```mermaid
 flowchart TD
