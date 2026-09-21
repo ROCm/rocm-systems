@@ -41,7 +41,6 @@
 #include "rocprofiler-sdk.hpp"
 #include "rocprofiler-sdk/roctx_client.hpp"
 
-#include <iterator>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
@@ -50,6 +49,7 @@
 
 #include <cstddef>
 #include <exception>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -2844,7 +2844,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.operations =
             get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API);
         domain_selection_list.push_back(selection);
-        LOG_CRITICAL("Adding Hip compiler api");
     }
 
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API))
@@ -2859,7 +2858,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.operations =
             get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API);
         domain_selection_list.push_back(selection);
-        LOG_CRITICAL("Adding Hip runtime api");
     }
 
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API))

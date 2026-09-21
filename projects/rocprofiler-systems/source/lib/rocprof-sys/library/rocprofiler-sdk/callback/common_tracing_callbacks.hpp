@@ -83,7 +83,7 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
 
     typename SdkBackend::timestamp_t timestamp = SdkBackend::get_timestamp();
 
-    if(!Externals::is_active())
+    if(!Externals::is_active() || !user_data)
     {
         return;
     }
@@ -116,13 +116,10 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
 
     const std::string args_str = get_args_string(args);
 
-    const std::string region_name{ name };
-
     Externals::buffer_storage_store(typename Externals::region_sample{
-        record.thread_id, region_name.c_str(), record.correlation_id.internal,
+        record.thread_id, name, record.correlation_id.internal,
         SdkBackend::get_parent_stack_id(record.correlation_id), begin_timestamp,
-        end_timestamp, call_stack.dump().c_str(), args_str.c_str(),
-        Category<Externals>::k_name.data() });
+        end_timestamp, call_stack.dump(), args_str, Category<Externals>::k_name });
 }
 
 }  // namespace rocprofsys::domains::callback

@@ -627,21 +627,21 @@ struct externals
 
     struct region_sample
     {
-        std::uint64_t thread_id       = 0;
-        const char*   name            = nullptr;
-        std::uint64_t correlation_id  = 0;
-        std::uint64_t parent_stack_id = 0;
-        std::uint64_t start_timestamp = 0;
-        std::uint64_t end_timestamp   = 0;
-        const char*   call_stack      = nullptr;
-        const char*   args_str        = nullptr;
-        const char*   category        = nullptr;
+        std::uint64_t    thread_id = 0;
+        std::string_view name;
+        std::uint64_t    correlation_id  = 0;
+        std::uint64_t    parent_stack_id = 0;
+        std::uint64_t    start_timestamp = 0;
+        std::uint64_t    end_timestamp   = 0;
+        std::string_view call_stack;
+        std::string_view args_str;
+        std::string_view category;
     };
 
     struct backtrace_json_t
     {
-        // dump() must mirror the SDK's std::string-returning json dump(), consumed
-        // via .c_str() at the call site.
+        // dump() must mirror the SDK's std::string-returning json dump(), which
+        // implicitly converts to std::string_view at the call site.
         // NOLINTNEXTLINE(modernize-use-string-view)
         [[nodiscard]] std::string dump() const { return {}; }
     };
@@ -825,10 +825,9 @@ struct externals_with_tracing : externals
     static void buffer_storage_store(region_sample&& sample)
     {
         g_externals_mock->region_sample_buffer_storage_store(
-            sample.thread_id, sample.name != nullptr ? sample.name : "",
-            sample.correlation_id, sample.parent_stack_id, sample.start_timestamp,
-            sample.end_timestamp, sample.args_str != nullptr ? sample.args_str : "",
-            sample.category != nullptr ? sample.category : "");
+            sample.thread_id, std::string{ sample.name }, sample.correlation_id,
+            sample.parent_stack_id, sample.start_timestamp, sample.end_timestamp,
+            std::string{ sample.args_str }, std::string{ sample.category });
     }
 };
 
