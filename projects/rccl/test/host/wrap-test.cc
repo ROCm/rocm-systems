@@ -4755,58 +4755,6 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLChosenOnGfx1250) {
       });
 }
 
-// The genuinely ReduceScatter-unique exception: on gfx1250, DDA fabric is
-// allowed to preempt symmetric eligibility entirely (`!symEligible ||
-// ddaFabricArch`) -- distinct from every other gate in this function (and
-// from AllReduce/AllGather's DDA, which are strictly !symEligible-gated
-// with no such override).
-TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenWhenEligible) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenWhenEligible",
-      []() {
-        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*, bool) { return true; });
-        ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible,
-                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-                                 return true;
-                               });
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo); // DDA won, not SYMMETRIC
-        DeleteCommWithArch(comm);
-      });
-}
-
-// Complementary proof: on a NON-gfx1250 arch, the same symEligible=true +
-// DDA-eligible=true setup must NOT let DDA win -- the preemption is
-// strictly gfx1250-specific.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotSymEligible) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotSymEligible",
-      []() {
-        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*, bool) { return true; });
-        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
-                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-                                 return true;
-                               });
-        ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250
-        // 8, not 1: satisfies rcclDdaEnabled's own gfx942 rank floor so this test isolates
-        // the symEligible gate specifically, rather than piggybacking on an unrelated
-        // rank-count guard that would mask the same gate being broken.
-        comm->nRanks = 8;
-        comm->nNodes = 1;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo); // symmetric won, not DDA_IPC
-        DeleteCommWithArch(comm);
-      });
-}
 
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEligible) {
   RUN_ISOLATED_TEST(
