@@ -422,9 +422,10 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   std::optional<uint16_t> borrowed_pair;
   std::optional<uint16_t> staged_vgpr_pair;
   if (layout->vector) {
-    borrowed_pair = liveness.find_free_sgpr_pair(&inst);
-    if (!borrowed_pair || *borrowed_pair + 1 > kMaxOrdinarySgpr) {
-      borrowed_pair.reset();
+    const std::optional<uint16_t> free_pair = liveness.find_free_sgpr_pair(&inst);
+    borrowed_pair =
+        (free_pair.has_value() && *free_pair + 1 <= kMaxOrdinarySgpr) ? free_pair : std::nullopt;
+    if (!borrowed_pair) {
       staged_vgpr_pair = reusable_destination_pair(inst, *layout, *words, liveness);
       if (!staged_vgpr_pair) {
         return ExpandResult::failed(
@@ -472,7 +473,11 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
       set_word_field((*words)[field.word], 256u + *staged_vgpr_pair, field.shift, field.width);
       continue;
     }
-    set_word_field((*words)[field.word], *borrowed_pair, field.shift, field.width);
+    // The pair is engaged on this path: scalar and staged rewrites continued
+    // to the next source field, and failing to reserve either temporary
+    // returned outright.
+    const uint32_t replacement_selector = borrowed_pair.value_or(0);
+    set_word_field((*words)[field.word], replacement_selector, field.shift, field.width);
   }
 
   if (staged_vgpr_pair) {

@@ -2198,6 +2198,7 @@ INCLUDE_FILE_PATTERNS  =
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
 PREDEFINED             = "__HIP_PLATFORM_AMD__" \
+                         "HIP_FORCE_API_VERSION=99999" \
                          "DOXYGEN_SHOULD_INCLUDE_THIS=1" \
                          "DOXYGEN_SHOULD_SKIP_THIS=1" \
                          "__dparm(x)=" \
@@ -2208,7 +2209,6 @@ PREDEFINED             = "__HIP_PLATFORM_AMD__" \
                          "__CG_QUALIFIER__=" \
                          "__CG_STATIC_QUALIFIER__=static" \
                          "_CG_STATIC_CONST_DECL_=static constexpr" \
-                         "HIP_PUBLIC_API" \
                          "HIP_ENABLE_WARP_SYNC_BUILTINS" \
                          "__HOST_DEVICE__" \
                          "__forceinline__"

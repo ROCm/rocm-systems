@@ -1,3 +1,6 @@
 #
 # ThreadSanitizer suppressions file for rocprofiler-register project.
 #
+
+# data race arising from hsa runtime
+race:libhsa-runtime64.so

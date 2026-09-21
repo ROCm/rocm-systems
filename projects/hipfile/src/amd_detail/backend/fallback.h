@@ -29,14 +29,17 @@ struct Fallback : public Backend {
     using Backend::io;
     virtual ~Fallback() override = default;
 
-    static constexpr size_t DefaultChunkSize = 16 * 1024 * 1024;
-
     int score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
               hoff_t file_offset, hoff_t buffer_offset) const override;
 
     void async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t *size_p,
                   hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
                   std::shared_ptr<IStream> stream) override;
+
+    void enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
+                        size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+                        ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
+                        std::shared_ptr<AsyncFailoverState> failover) override;
 
     // Once we can import gtest.h and make test suites or test friends everything
     // below here should be made protected.
@@ -56,4 +59,5 @@ extern "C" {
 void async_io_bind_params(void *userargs);
 void async_io_cpu_copy(void *userargs);
 void async_io_advance(void *userargs);
+void async_failover_gate(void *userargs);
 }
