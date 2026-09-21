@@ -413,6 +413,9 @@ void GraphExecSegmented::BuildSyncPlan() {
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
 
+  uint32_t n_completion_on_barrier = 0;
+  uint32_t n_completion_on_dispatch = 0;
+
   // PASS 0: Barrier-ROI collapse. Only runs in mode 0 (default) and only when
   // the graph is shallow (max_level<=4). Modes 1 (round-robin) and 2 (DFS)
   // never collapse. When collapse fires, every segment is folded onto stream 0
@@ -593,7 +596,10 @@ void GraphExecSegmented::BuildSyncPlan() {
     const bool completion_signal_needed = (hw_slot >= 0);
 
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured && completion_signal_needed) {
+    // A completion signal on a dispatch packet is exposed to queue interceptors that rewrite
+    // dispatch packets; on its own barrier packet it is not.
+    const bool own_barrier_packet = last_node_uncaptured || (DEBUG_CLR_DEVICE_ORDERING_EDGE == 1);
+    if (own_barrier_packet && completion_signal_needed) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -604,6 +610,7 @@ void GraphExecSegmented::BuildSyncPlan() {
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
+      ++n_completion_on_barrier;
     } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
@@ -618,12 +625,20 @@ void GraphExecSegmented::BuildSyncPlan() {
       // the corner case where every node packet in this batch is disabled.
       lastBatch.fallbackBarrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(lastBatch.fallbackBarrier);
+      ++n_completion_on_dispatch;
     }
 
     if (segment.segment_ids_edges.empty()) {
       sync_plan_.leaf_segment_ids.push_back(segment.id);
     }
   }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[hipGraph] SyncPlan: segments=%d hw_events=%d completion_on_barrier=%u "
+          "completion_on_dispatch=%u collapsed=%d device_ordering_edge=%u",
+          sync_plan_.num_segments, sync_plan_.num_hw_events, n_completion_on_barrier,
+          n_completion_on_dispatch, static_cast<int>(collapsed_to_single_stream_),
+          static_cast<uint32_t>(DEBUG_CLR_DEVICE_ORDERING_EDGE));
 
   // Create the per-graph HW event signal pool once at instantiate time
   // (single-threaded here) and pre-create the signals, so the launch hot path

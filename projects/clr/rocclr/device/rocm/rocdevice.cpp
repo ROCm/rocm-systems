@@ -797,12 +797,9 @@ bool Device::create() {
     }
   }
 
-  // The revert switch, and the only way to turn this off: a runtime dropped into somebody
-  // else's stack has to be revertible without swapping libraries.  With it set nothing is
-  // created and the ROCr entry point is never called.
-  if (ordering_edge_signals_ && DEBUG_CLR_DISABLE_ORDERING_EDGE) {
+  if (ordering_edge_signals_ && (DEBUG_CLR_DEVICE_ORDERING_EDGE == 0)) {
     ordering_edge_signals_ = false;
-    edge_state = "disabled by DEBUG_CLR_DISABLE_ORDERING_EDGE";
+    edge_state = "disabled by DEBUG_CLR_DEVICE_ORDERING_EDGE=0";
   } else if (ordering_edge_signals_) {
     edge_state = "enabled";
   }
