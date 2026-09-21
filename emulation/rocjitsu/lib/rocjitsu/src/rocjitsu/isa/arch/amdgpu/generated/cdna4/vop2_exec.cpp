@@ -821,7 +821,8 @@ void VDot2cF32Bf16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     float b0 = util::bf16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
     float b1 = util::bf16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
     acc += a0 * b0 + a1 * b1;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(acc));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               std::bit_cast<uint32_t>(acc));
   }
 }
 
@@ -850,7 +851,8 @@ RJ_NOINLINE void VDot2cF32Bf16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf)
     float b0 = util::bf16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
     float b1 = util::bf16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
     acc += a0 * b0 + a1 * b1;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(acc));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               std::bit_cast<uint32_t>(acc));
   }
   dpp_write_mask_scope_.restore();
 }

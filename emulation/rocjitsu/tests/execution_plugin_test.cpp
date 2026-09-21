@@ -2878,6 +2878,58 @@ TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x22222222u);
 }
 
+TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
+  // CDNA3 section 7.2 and CDNA4 section 7.3: these VOP1 conversions use only
+  // the SDWA source register and byte selection; CLAMP and OMOD are ignored.
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    amdgpu::GpuMemory memory("sdwa_fp8_memory");
+    amdgpu::L2Cache cache("sdwa_fp8_cache");
+    cache.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu =
+        amdgpu::ComputeUnitCore::create("sdwa_fp8", config, &memory, &cache);
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_mode_raw(0); // Enable ordinary OMOD so the opcode exception is exercised.
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint32_t opcode : {84u, 85u}) {
+      // Both encodings represent +2; CDNA3 uses the FNUZ biases.
+      const uint32_t input =
+          arch == ROCJITSU_CODE_ARCH_CDNA3 ? (opcode == 84 ? 0x48u : 0x44u) : 0x40u;
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        for (uint32_t modifiers = 0; modifiers < 8; ++modifiers) {
+          SCOPED_TRACE(::testing::Message() << "arch=" << arch << " opcode=" << opcode
+                                            << " byte=" << byte << " modifiers=" << modifiers);
+          const std::array<uint32_t, 2> words{
+              0x7e000000u | (6u << 17) | (opcode << 9) | amdgpu::SRC_SDWA,
+              2u | (amdgpu::sdwa::DWORD << 8) | (modifiers << 13) | (byte << 16),
+          };
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          for (uint64_t exec : {uint64_t{0b101}, ~uint64_t{0}}) {
+            wave->set_exec(exec);
+            for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+              cu->write_vgpr(base + 2, lane, input << (8 * byte));
+              cu->write_vgpr(base + 6, lane, 0xdeadbeefu);
+            }
+            ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+            for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+              EXPECT_EQ(cu->read_vgpr_storage(base + 6, lane),
+                        (exec & (uint64_t{1} << lane)) ? 0x40000000u : 0xdeadbeefu);
+          }
+        }
+      }
+    }
+    wave->halt();
+  }
+}
+
 TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
