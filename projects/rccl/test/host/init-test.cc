@@ -7345,6 +7345,7 @@ TEST_F(InitMicrotest, CommInitRankFunc_TransportInitFails_StampsTheArchFieldsAnd
   EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
   EXPECT_EQ(rcclLL128LineElemsFromArch(Rank_kGcnArchName), s.comm()->ll128LineElems);
   EXPECT_EQ(rcclLL128DataElemsFromArch(Rank_kGcnArchName), s.comm()->ll128DataElems);
+  EXPECT_EQ(rcclLL128ShmemElemsPerThreadFromArch(Rank_kGcnArchName), s.comm()->ll128ShmemElemsPerThread);
   EXPECT_EQ(res, s.comm()->initState);
 }
 
