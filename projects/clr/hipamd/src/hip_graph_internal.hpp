@@ -384,6 +384,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   /// Create amd::command for the graph node
   virtual hipError_t CreateCommand(hip::Stream* stream) {
     commands_.clear();
+    eventWaitList_.clear();
     stream_ = stream;
     return hipSuccess;
   }
@@ -445,6 +446,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   virtual bool TopologicalOrder(std::vector<Node>& TopoOrder) { return true; }
   /// Update waitlist of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual void UpdateEventWaitLists(const amd::Command::EventWaitList& waitList) {
+    eventWaitList_ = waitList;
     for (auto command : commands_) {
       command->updateEventWaitList(waitList);
     }
@@ -455,11 +457,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     // Node can be enabled/disabled only for kernel, memcpy and memset nodes.
     if (!isEnabled_ && (type_ == hipGraphNodeTypeKernel || type_ == hipGraphNodeTypeMemcpy ||
                         type_ == hipGraphNodeTypeMemset)) {
-      amd::Command::EventWaitList waitList;
-      if (!commands_.empty()) {
-        waitList = commands_[0]->eventWaitList();
+      amd::Command* command =
+          new amd::Marker(*stream, !kMarkerDisableFlush, eventWaitList_);
+      for (auto& oldCommand : commands_) {
+        oldCommand->release();
       }
-      amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
+      commands_.clear();
+      commands_.push_back(command);
       command->enqueue();
       command->release();
       return hipSuccess;
@@ -590,6 +594,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
   bool wait_ = false;
+  //! Dependencies to preserve when a disabled node has no command to carry its wait list.
+  amd::Command::EventWaitList eventWaitList_;
 };
 
 class GraphEventWaitNode : public GraphNode {
@@ -1633,25 +1639,6 @@ class GraphKernelNode : public GraphNode {
 
  public:
   bool HasHiddenHeap() const { return hasHiddenHeap_; }
-  hipError_t EnqueueCommands(hip::Stream* stream) override {
-    // If the node is disabled it becomes empty node. To maintain ordering just enqueue marker.
-    // Node can be enabled/disabled only for kernel, memcpy and memset nodes.
-    if (!isEnabled_) {
-      amd::Command::EventWaitList waitList;
-      if (!commands_.empty()) {
-        waitList = commands_[0]->eventWaitList();
-      }
-      amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-      command->enqueue();
-      command->release();
-      return hipSuccess;
-    }
-    for (auto& command : commands_) {
-      command->enqueue();
-      command->release();
-    }
-    return hipSuccess;
-  }
 
   void PrintAttributes(std::ostream& out, hipGraphDebugDotFlags flag) override {
     out << "[";
@@ -2561,6 +2548,10 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   }
 
   virtual hipError_t EnqueueCommands(hip::Stream* stream) override {
+    if (!isEnabled_) {
+      return GraphNode::EnqueueCommands(stream);
+    }
+
     bool isH2H = false;
     if ((kind_ == hipMemcpyHostToHost || kind_ == hipMemcpyDefault) && IsHtoHMemcpy(dst_, src_)) {
       isH2H = true;
@@ -3847,14 +3838,14 @@ class GraphDrvMemcpyNode : public GraphNode {
   GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::Driver; }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
     if (!isEnabled_ || (copyParams_.srcMemoryType == hipMemoryTypeHost &&
                         copyParams_.dstMemoryType == hipMemoryTypeHost &&
                         IsHtoHMemcpy(copyParams_.dstHost, copyParams_.srcHost))) {
       return hipSuccess;
-    }
-    hipError_t status = GraphNode::CreateCommand(stream);
-    if (status != hipSuccess) {
-      return status;
     }
     commands_.reserve(1);
     amd::Command* command;

@@ -862,6 +862,8 @@ graph:
   Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect:
     <<: *level_2
     tags: [exec]
+    # PAL does not implement batch memory operations
+    disabled: [amd_windows]
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_2
     tags: [node]
