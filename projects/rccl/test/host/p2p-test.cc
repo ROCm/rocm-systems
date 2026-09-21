@@ -5495,7 +5495,11 @@ TEST_F(P2pRegisterFamilyMicrotest, GraphCleanupCallback_DeregisterFails_Propagat
 
     struct ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanupQueue);
     ASSERT_NE(cb, nullptr);
-    EXPECT_EQ(cb->fn(&st.reuse.cb.comm(), cb), ncclSystemError);  // frees cb
+    // On the failure arm cleanupIpc's NCCLCHECK returns before free(obj)
+    // (p2p.cc:1384), so the dequeued record is not reclaimed -- free it here to
+    // keep LeakSanitizer quiet.
+    EXPECT_EQ(cb->fn(&st.reuse.cb.comm(), cb), ncclSystemError);
+    std::free(cb);
 }
 
 // Scenario 6b: a graph-register failure propagates and the wrapper zeroes
