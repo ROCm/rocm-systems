@@ -3659,13 +3659,8 @@ void GpuAgent::InitAllocators() {
 }
 
 // The region an ordering edge signal's ABI block -- and so its value word -- is
-// placed in.  Named by property, never by position in regions():
-// InitRegionList() pushes up to three regions per frame buffer heap and that
-// order has already changed once, so "the first local region" is not a stable
-// statement and a reorder would silently move every ordering edge signal.
-// IsPublic() is the portable form of the large BAR question -- it asks the
-// topology whether the frame buffer is host visible.  Cacheability is a third
-// axis, set on the allocation; see AllocateDeviceSignalBlock() in signal.cpp.
+// placed in.  IsPublic() is the portable form of the large BAR question: it asks
+// the topology whether the frame buffer is host visible.
 //
 // Do not add a HSA_AMD_REGION_INFO_HOST_ACCESSIBLE clause here.  That attribute
 // reads 0 for every device local region on parts where the host can in fact
@@ -3676,11 +3671,9 @@ static bool IsOrderingEdgeSignalRegion(const AMD::MemoryRegion* region) {
 }
 
 const core::MemoryRegion* GpuAgent::OrderingEdgeSignalRegion() const {
-  // DO NOT ADD A HsaNodeProperties::LocalMemSize CLAUSE HERE.  It is the obvious
-  // extra guard to reach for and it is WRONG: the field is not populated for
-  // discrete GPUs, so it refuses every such agent.  The condition it reaches for
-  // is already expressed -- InitRegionList() constructs no MemoryRegion for a
-  // bank reporting SizeInBytes == 0.
+  // Do not add a HsaNodeProperties::LocalMemSize clause here: the field is not
+  // populated for discrete GPUs, so it refuses every such agent.  InitRegionList()
+  // already constructs no MemoryRegion for a bank reporting SizeInBytes == 0.
   for (const auto& region : regions()) {
     const core::MemoryRegion* r = &*region;
     if (IsOrderingEdgeSignalRegion(static_cast<const AMD::MemoryRegion*>(r))) return r;
@@ -3689,12 +3682,8 @@ const core::MemoryRegion* GpuAgent::OrderingEdgeSignalRegion() const {
 }
 
 // ---- Ordering edge signal slab ---------------------------------------------
-// One AllocateDirect | AllocateUncached allocation per (process x device),
-// carved into fixed stride slots addressed by index, with a free index list.
 
 hsa_status_t GpuAgent::GrowOrderingEdgeSlab() {
-  // Two failures, two answers: a bool would force the caller to re-derive the
-  // region predicate to tell "not this agent" from "out of memory".
   const core::MemoryRegion* local = OrderingEdgeSignalRegion();
   if (local == nullptr) return HSA_STATUS_ERROR_INVALID_AGENT;
 
@@ -3705,15 +3694,14 @@ hsa_status_t GpuAgent::GrowOrderingEdgeSlab() {
           &ptr) != HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Deliberately NOT constructed here: the pages a process touches track the
-  // edges it uses rather than the configured pool size.
+  // Not constructed here, so the pages a process touches track the edges it uses
+  // rather than the configured pool size.
   constexpr size_t slots = kOrderingEdgeBlockSize / kOrderingEdgeDefaultStride;
   const size_t base_index = edge_slab_.blocks.size() * slots;
   edge_slab_.blocks.push_back(static_cast<char*>(ptr));
 
   edge_slab_.free_slots.reserve(edge_slab_.free_slots.size() + slots);
-  // Descending, so the first hand-outs walk the block forwards.  Nothing depends
-  // on it; it only makes a dump of a lightly used pool readable.
+  // Descending, so the first hand-outs walk the block forwards.
   for (size_t i = slots; i-- > 0;)
     edge_slab_.free_slots.push_back(static_cast<uint32_t>(base_index + i));
 

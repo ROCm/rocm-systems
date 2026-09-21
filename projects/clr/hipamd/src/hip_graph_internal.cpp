@@ -2980,8 +2980,8 @@ hipError_t Graph::RunOneNode(Node node) {
       releaseWaitOrderCommands();
       return status;
     }
-    // All of them, before enqueue: a consumer waits on all of them.  A command with no
-    // completion signal is covered instead by the marker Event::notifyCmdQueue() adds.
+    // A command with no completion signal is covered instead by the marker
+    // Event::notifyCmdQueue() adds.
     const bool cross_stream = cross_stream_producers_.count(node) != 0;
     for (auto command : node->GetCommands()) {
       command->setCrossStreamProducer(cross_stream);
@@ -3034,14 +3034,13 @@ hipError_t Graph::RunOneNode(Node node) {
   return hipSuccess;
 }
 
-// The nodes whose completion another stream waits on.  A hint: a missing entry costs a host
-// resident wait, an extra one costs a barrier packet.  Known before a producer is enqueued,
-// because by the time a consumer discovers the edge its producer has been submitted.
+// A hint, not an exact set: a missing entry costs a host resident wait, an extra one costs a
+// barrier packet.
 void Graph::FindCrossStreamProducers(int32_t base_stream) {
   cross_stream_producers_.clear();
   for (auto node : vertices_) {
-    // A dependency that crosses a stream id.  The command a consumer of a child graph waits on
-    // is the last one the child queued, which is on the child graph node's own stream.
+    // The command a consumer of a child graph waits on is the last one the child queued,
+    // which is on the child graph node's own stream.
     for (auto dep : node->GetDependencies()) {
       if (dep->stream_id_ != node->stream_id_) {
         cross_stream_producers_.insert(dep);
@@ -3062,9 +3061,8 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
   }
-  // Computed once per base stream: rebuilding it per launch would put a container
-  // clear/insert on a path that takes no lock.  Safe only because a graph has one pending
-  // launch at a time.
+  // Rebuilding this per launch would put a container clear/insert on a path that takes no
+  // lock.  Safe only because a graph has one pending launch at a time.
   if (cross_stream_base_ != base_stream) {
     FindCrossStreamProducers(base_stream);
     cross_stream_base_ = base_stream;
@@ -3132,8 +3130,8 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
   // Wait for leafs in the graph's app stream
   if (wait_list.size() > 0) {
     auto end_marker = new amd::Marker(*streams_[base_stream], true, wait_list);
-    // The last command this graph queues.  RunOneNode() collects it only after the child has
-    // been enqueued, so the parent cannot mark it; the flag comes down from there instead.
+    // RunOneNode() collects this marker only after the child has been enqueued, so the parent
+    // cannot mark it; the flag comes down from there instead.
     end_marker->setCrossStreamProducer(waited_cross_stream);
     end_marker->enqueue();
     end_marker->release();

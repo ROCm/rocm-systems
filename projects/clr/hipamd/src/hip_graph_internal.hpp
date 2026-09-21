@@ -771,7 +771,6 @@ class Graph {
   //! Runs one node on the assigned stream
   hipError_t RunOneNode(Node node);  //!< Node for the execution on GPU
 
-  //! Fills cross_stream_producers_ for the current stream assignment
   void FindCrossStreamProducers(int32_t base_stream);
 
   //! Runs all nodes from the execution graph on the assigned streams
@@ -995,7 +994,6 @@ class Graph {
   //!< Used as a temporary storage for the waiting nodes
   //!< to reduce the stack pressure in recursion
   std::vector<Node> wait_order_;
-  //!< Nodes whose completion is waited on from another stream
   std::unordered_set<Node> cross_stream_producers_;
   int32_t cross_stream_base_ = -1;     //!< base_stream cross_stream_producers_ was built for
   std::vector<hip::Stream*> streams_;  //!< The list of streams, used in the execution

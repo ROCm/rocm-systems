@@ -235,9 +235,8 @@ class SharedSignalPool_t : private BaseShared {
 
   SharedSignal* alloc();
 
-  /// @brief Placement-aware overload, matching PageAllocator<T>::alloc().  This
-  /// pool's blocks are process-global host kernarg memory, so agent_node_id == 0
-  /// is the only placement it can honour; anything else throws.
+  /// @brief This pool's blocks are process-global host kernarg memory, so
+  /// agent_node_id == 0 is the only placement it can honour; anything else throws.
   SharedSignal* alloc(int agent_node_id, int flags);
 
   void free(SharedSignal* ptr);
@@ -259,11 +258,10 @@ class LocalSignal {
   }
   LocalSignal(hsa_signal_value_t initial_value, bool exportable);
 
-  /// @brief Place the whole ABI block in device_agent's local memory rather than
-  /// in the host pool, so a GPU waiting on the value word reads locally.  The
-  /// caller must have checked the agent supports it -- see
-  /// hsa_amd_signal_create_v2().  The block is one slot of that agent's ordering
-  /// edge slab and returns to its free list on destruction.
+  /// @brief Place the whole ABI block in device_agent's local memory, so a GPU
+  /// waiting on the value word reads locally.  The caller must have checked the
+  /// agent supports it.  The block is one slot of that agent's ordering edge slab
+  /// and returns to its free list on destruction.
   LocalSignal(hsa_signal_value_t initial_value, core::Agent& device_agent);
 
   ~LocalSignal();
@@ -272,15 +270,12 @@ class LocalSignal {
     return (device_block_ != nullptr) ? device_block_ : local_signal_.shared_object();
   }
 
-  /// @brief True iff the value word of this signal is in device memory, and so
-  /// must not be the target of a host atomic read-modify-write.
   bool device_resident_value() const { return device_block_ != nullptr; }
 
  private:
   Shared<SharedSignal, SharedSignalPool_t> local_signal_;
   SharedSignal* device_block_ = nullptr;
-  /// @brief The agent whose slab device_block_ came from, so the destructor
-  /// returns the slot to the right free list.  Null iff device_block_ is null.
+  /// @brief Null iff device_block_ is null.
   core::Agent* device_agent_ = nullptr;
 };
 
@@ -312,8 +307,7 @@ class Signal {
 
   /// @brief True iff the value word lives in device memory.  A host atomic
   /// read-modify-write of such a word is not promoted to a bus atomic and can
-  /// silently lose a concurrent device update, so the runtime must not issue
-  /// one and the public RMW entry points refuse to.
+  /// silently lose a concurrent device update.
   bool IsDeviceResidentValue() const { return device_resident_value_; }
 
   /// @brief Interface to discard a signal handle (hsa_signal_t)
@@ -327,8 +321,7 @@ class Signal {
     // Skipped on a device resident word, where that CAS is not a bus atomic (see
     // IsDeviceResidentValue).  Nothing is stranded: such a signal is always a
     // core::DefaultSignal, whose waiters spin rather than park in MWAITX on such
-    // a word, so there is no monitor to break.  The assert only documents the
-    // precondition; release builds rely on the carve-out.
+    // a word, so there is no monitor to break.
     assert((!device_resident_value_ || waiting_ == 0) &&
            "ordering edge signal destroyed with a registered waiter");
     if (--refcount_ == 0 && !device_resident_value_) CasRelaxed(0, 0);
@@ -572,8 +565,6 @@ class Signal {
   /// @variable Count of handle references and Retain() calls for this handle (see IPC APIs)
   std::atomic<uint32_t> retained_;
 
-  /// @variable True iff amd_signal.value is in device memory.  Set once at
-  /// construction and never changed.
   const bool device_resident_value_ = false;
 
   void registerIpc();

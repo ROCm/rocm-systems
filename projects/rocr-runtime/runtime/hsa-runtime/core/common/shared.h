@@ -131,8 +131,7 @@ class Shared final : private BaseShared {
       shared_object_ = PageAllocator<T>::alloc(flags);
   }
 
-  /// @brief Construct naming the node the object should be placed near.  An
-  /// Allocator used with this constructor must provide
+  /// @brief An Allocator used with this constructor must provide
   /// alloc(int agent_node_id, int flags), as PageAllocator<T> does.
   explicit Shared(int agent_node_id, Allocator* pool = nullptr, int flags = 0) : pool_(pool) {
     assert(allocate_() != nullptr && free_() != nullptr &&
@@ -144,7 +143,6 @@ class Shared final : private BaseShared {
       shared_object_ = PageAllocator<T>::alloc(agent_node_id, flags);
   }
 
-  /// @brief Tag type selecting the constructor which allocates nothing.
   struct NoAlloc {};
 
   /// @brief Construct an empty container; the owner supplies the storage.
