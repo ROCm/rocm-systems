@@ -142,7 +142,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionSkipWritePath) {
 
 // =============================================================================
 // OptRecvCompletionMultiRecvNoHint
-// n>1 must not use the optional-recv hint (IbCastCanSkipRecvCompletion asserts).
+// n>1 must not use the optional-recv hint (IbCastCanSkipRecvCompletion returns ncclInternalError).
 // One 4-wide irecv, matched by four isends. The sends can only be posted as a
 // group: IbCastMultiSend fires once every slot of the multi-recv is filled, so
 // waiting on any one send before the rest are posted would hang.
