@@ -460,6 +460,86 @@ int ddaInitRank0Prepare(int rank, int nranks, DdaInitShared* shared)
     return kDdaInitChildOk;
 }
 
+// Drives one real DDA IPC AllReduce on the live communicator and checks the
+// numbers that come back.
+//
+// This is what pins the relaxed rank counts to a working kernel. Comm init only
+// proves the resources were allocated; every other case in this file stops at
+// the scratch check (ddaScratchBytes = 0) before the rank count is ever read, so
+// nothing else here would notice if the NRANKS == 0 runtime kernel's
+// `nRanksRuntime` were replaced by a hardcoded 8. At a 4-rank clique that
+// substitution makes the kernel fold in peer slots 4..7, which ipc_init.cu
+// deliberately leaves null/zeroed -- a wrong sum rather than a crash, which is
+// exactly the kind of defect only a checked result catches.
+//
+// It calls ncclAllReduceDdaIpc() rather than ncclAllReduce() on purpose: the
+// public entry point's backend choice depends on size thresholds and tuning
+// heuristics, so it could silently stop selecting DDA and leave this test
+// passing without ever running the kernel it exists to cover.
+//
+// Both kernels are exercised. They are separate template instantiations and the
+// flat/tree split is by message size (kDdaFlatTreeThresholdBytes, 256 KiB), so
+// covering only one would leave the other free to regress.
+int ddaInitRunAllReduceCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    // 4 KiB stays under the 256 KiB flat/tree threshold; 1 MiB clears it. The
+    // large count is also divisible by nranks with a 16-byte-aligned per-rank
+    // slice, which the tree path additionally requires.
+    const size_t counts[] = {1024, 262144};
+
+    for (size_t ci = 0; ci < sizeof(counts) / sizeof(counts[0]); ++ci)
+    {
+        const size_t count = counts[ci];
+        const size_t bytes = count * sizeof(float);
+
+        void* sendbuff = nullptr;
+        void* recvbuff = nullptr;
+        DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, bytes));
+        DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, bytes));
+
+        // Rank r contributes r+1 everywhere, so a correct sum is nranks*(nranks+1)/2
+        // in every element -- and a kernel folding in the wrong set of peers
+        // lands on a different value.
+        std::vector<float> host(count, static_cast<float>(rank + 1));
+        DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), bytes, hipMemcpyHostToDevice));
+        DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, bytes));
+
+        const ncclResult_t ar =
+            ncclAllReduceDdaIpc(sendbuff, recvbuff, count, ncclFloat32, ncclSum, comm, stream);
+        if (ar != ncclSuccess)
+        {
+            printf("[rank %d] ncclAllReduceDdaIpc(count=%zu) failed: %d (%s)\n", rank, count, ar,
+                   ncclGetErrorString(ar));
+            return kDdaInitChildFail;
+        }
+        DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+        std::vector<float> out(count, 0.0f);
+        DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, bytes, hipMemcpyDeviceToHost));
+
+        const float expected = static_cast<float>(nranks * (nranks + 1) / 2);
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (out[i] != expected)
+            {
+                printf("[rank %d] count=%zu element %zu: expected %.1f, got %.1f "
+                       "(a wrong participant set would produce exactly this)\n",
+                       rank, count, i, expected, out[i]);
+                return kDdaInitChildFail;
+            }
+        }
+
+        DDA_INIT_CHILD_HC(hipFree(sendbuff));
+        DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    }
+
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
+
 // Runs entirely inside a forked child: the first HIP/RCCL call happens here.
 int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
 {
@@ -520,6 +600,13 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
                rank, nranks, expectResources ? 1 : 0, expectResources ? "present" : "absent",
                c->ddaIpcMemHandler, c->ddaScratch, c->ddaPeerPtrsDev);
         rc = kDdaInitChildFail;
+    }
+
+    // Only meaningful when the gate opened: with relax off at a non-8 rank count
+    // the resources are absent by design and there is no DDA kernel to drive.
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunAllReduceCheck(rank, nranks, c);
     }
 
     DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
