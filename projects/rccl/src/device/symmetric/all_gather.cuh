@@ -65,7 +65,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
   if (0 < nIters) {
 #if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+      ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
       ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
     } else
 #endif
@@ -84,6 +84,19 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
       int dr = inPlace ? 1 : 0;
       int r = rank + dr;
       if (r == nRanks) r = 0;
+#if NCCL_SYMK_ASYNC_TILE
+      // This rank's own copy is the only destination in local memory. Peeling it off
+      // the front leaves the loop below a single cache policy; folded into the loop it
+      // would have to emit both scopes and choose between them on every store. In
+      // place there is no own copy to make, which is why dr already started at 1.
+      if NCCL_IF_CONSTEXPR (EnableTma) {
+        if (!inPlace && !skip) {
+          ncclSymkTileStore<kNcclSymkTileLocalPolicy>(outPacks.lsaPtr(rank), tmaSmem->buff[0], tileSize, lane);
+          dr = 1;
+          if (++r == nRanks) r = 0;
+        }
+      }
+#endif
       NVCC_PRAGMA_UNROLL(2)
       for (int partial = 0; partial <= 1 && !skip; partial++) {
         NVCC_PRAGMA_UNROLL_DISABLED
@@ -93,7 +106,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
             if (partial && dr == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileStore(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
+              ncclSymkTileStore<kNcclSymkTilePeerPolicy>(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
@@ -117,7 +130,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
       if (nIters <= 0) break;
 #if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+        ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
         ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
       } else
 #endif
