@@ -985,6 +985,7 @@ template <bool EnableAsync>
       if (window)
         window->drain();
     }
+    active->fail_pm4_submission();
     if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
       return;
     // Wavefront::halt() is silent, so say why this wave stopped. Without this
@@ -1026,6 +1027,7 @@ template <bool EnableAsync>
     // Under a debugger, surface the undecodable instruction as an illegal-
     // instruction exception (stops the wave at this PC) instead of silently
     // retiring it. Without a debugger this halts as before.
+    active->fail_pm4_submission();
     if (illegal_inst_handler_ && illegal_inst_handler_(*active))
       return;
     active->halt();
@@ -1214,8 +1216,10 @@ template <bool EnableAsync>
                                             this->name(), active->wf_id(), inst->mnemonic(),
                                             active->pc, instruction_execution_error_name(error));
     util::Logger::warn(failure);
-    if (auto *sim_engine = this->engine())
-      sim_engine->request_exit(failure, /*code=*/1);
+    if (!active->fail_pm4_submission()) {
+      if (auto *sim_engine = this->engine())
+        sim_engine->request_exit(failure, /*code=*/1);
+    }
     active->halt();
     return;
   }
@@ -1359,7 +1363,12 @@ template <bool EnableAsync>
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
     }
+    const GpuMemory::FaultScope access_faults;
     route_memory_inst(decoded.value().release(), *active);
+    if (access_faults.observed() && active->fail_pm4_submission()) {
+      active->halt();
+      return;
+    }
   } else {
     decoded.value().reset();
   }

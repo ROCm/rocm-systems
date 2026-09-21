@@ -8,7 +8,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets and dispatch work to compute units.
+/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
+/// dispatch work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Three sub-blocks handle distinct pipeline stages:
@@ -27,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -61,8 +63,10 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief Description of an AQL hardware queue registered with the CP.
+/// @brief Description of an AQL, SDMA, or PM4 hardware queue registered with the CP.
 struct HwQueue {
+  /// @brief Non-null for PM4 queues; other queues consume their ring buffer.
+  std::shared_ptr<Pm4QueueState> pm4;
   uint32_t process_id = 0;
   uint32_t queue_id = 0;
   uint64_t ring_base_va = 0;
@@ -118,7 +122,8 @@ enum class SdmaPacketDialect {
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
-/// round-robin order, activating pre-allocated wavefront slots.
+/// round-robin order, activating pre-allocated wavefront slots. PM4 compute queues
+/// build the same dispatch entries from shader registers and dispatch packets.
 ///
 /// Event-driven: the CP monitors registered hardware queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the
@@ -192,6 +197,8 @@ public:
   }
 
   void register_queue(HwQueue queue);
+  /// @returns False if this queue has faulted; no new work is queued.
+  bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
   void set_queue_cu_selection(uint32_t queue_id, uint32_t process_id,
                               const QueueCuSelection &enabled_cus);
@@ -438,11 +445,21 @@ private:
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
                           uint64_t aql_packet_id = 0, ClusterDispatchShape cluster_shape = {});
+  /// @brief Halt resident waves, fail published fences, and clear the faulted queue.
+  void fail_pm4_queue(HwQueue &queue, HwQueueState &qs);
+  /// @brief Consume ready PM4 packets until a dispatch needs the engine to run.
+  /// @details A nonempty dispatch queue stalls further packet consumption until retirement.
+  void fetch_pm4(HwQueue &queue, HwQueueState &qs, simdojo::Tick now);
+  /// @brief Decode shader launch registers and append a compute dispatch to qs.
+  void dispatch_pm4(const HwQueue &queue, HwQueueState &qs,
+                    const std::array<uint32_t, 4> &dimensions);
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
+  /// @brief Launch workgroups; the wrapper translates PM4 exceptions into queue failure.
+  uint32_t dispatch_workgroups_impl(DispatchEntry &entry);
 
   /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
   ///

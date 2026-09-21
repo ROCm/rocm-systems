@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/pm4.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -245,6 +246,8 @@ public:
   /// @details Public so the interposer's DRM GEM_VA path can install page-table
   /// entries with the same coherency type the KFD alloc requested.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+  /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
+  int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
 
   /// @brief Install a host range into the local process's GPU page table.
   /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
@@ -526,6 +529,8 @@ private:
   /// interrupt_mutex_ is a leaf: the CP interrupt callback takes it and only
   /// descends into EventState::mutex_, and close() takes it only after releasing
   /// process_mutex_, so there is no cycle.
+  /// PM4 registration/enqueue takes pm4_mutex_ -> hw_queue_mutex_. Neither the
+  /// engine nor code holding process_mutex_ acquires pm4_mutex_.
   /// The CP engine thread acquires hw_queue_mutex_ first, then reaches
   /// process_mutex_ (scratch resolver) or alloc_mutex_ (scratch allocator) through
   /// the callbacks — hw_queue_mutex_ -> process_mutex_ and, separately,
@@ -534,6 +539,13 @@ private:
   /// CommandProcessor call that takes hw_queue_mutex_ (e.g. register_queue) — build
   /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;
+
+  /// @brief PM4 queue registry; nests outside CP queue locks, never inside process_mutex_.
+  /// The engine does not acquire this mutex when completing a submission.
+  std::mutex pm4_mutex_;
+  std::unordered_map<uint64_t, std::pair<amdgpu::CommandProcessor *, uint32_t>> pm4_queues_;
+  static constexpr uint32_t kPm4QueueIdBase = 0x80000000; ///< Separate from KFD queue IDs.
+  uint32_t next_pm4_queue_id_ = kPm4QueueIdBase;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
   uint32_t next_process_id_ = 1;
 
