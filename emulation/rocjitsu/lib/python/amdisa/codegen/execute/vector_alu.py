@@ -18,6 +18,7 @@ from amdisa.codegen.execute.vop3_modifiers import (
     vop3_dst_mod,
     vop3_dst_mod_f64,
 )
+from amdisa.semantics import F32_TO_INTEGER_DTYPES
 
 
 def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
@@ -80,7 +81,8 @@ def gen_vector_unary(
             ),
             'rpi_i32_f32': (
                 f'    float s = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));\n'
-                f'    float rounded = std::ceil(s - 0.5f);\n'
+                f'    float rounded = std::floor(s);\n'
+                f'    if (s - rounded >= 0.5f) rounded += 1.0f;\n'
                 f'    int32_t r;\n'
                 f'    if (std::isnan(rounded)) r = 0;\n'
                 f'    else if (rounded >= 2147483648.0f) r = INT32_MAX;\n'
@@ -193,7 +195,14 @@ def gen_vector_unary(
             ),
         }
         if dtype in cvt_map:
-            L.append(cvt_map[dtype])
+            body = cvt_map[dtype]
+            if is_vop3 and dtype in F32_TO_INTEGER_DTYPES:
+                source, rest = body.split('\n', 1)
+                L.append(source)
+                L.extend(vop3_src_mod('s', 0, has_abs))
+                L.append(rest)
+            else:
+                L.append(body)
         else:
             L.append(f'    // TODO: cvt {dtype}')
             L.append(
@@ -378,7 +387,7 @@ def gen_vector_unary(
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',
-            'rndne': 'std::nearbyint(s)',
+            'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
             'abs': 'std::fabs(s)',
             'neg': '-s',
@@ -410,7 +419,7 @@ def gen_vector_unary(
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',
-            'rndne': 'std::nearbyint(s)',
+            'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
             'exp2': 'std::exp2(s)',
             'log2': 'std::log2(s)',
@@ -448,7 +457,7 @@ def gen_vector_unary(
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',
-            'rndne': 'std::nearbyint(s)',
+            'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
             'exp2': 'amdgpu::transcendental::exp_f32(s)',
             'log2': 'amdgpu::transcendental::log_f32(s)',

@@ -850,7 +850,7 @@ void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   *this, wf,
                   [&]() {
                     float v = [&]() {
-                      float v = std::nearbyint([&]() {
+                      float v = util::rndne_scalar([&]() {
                         float sv = util::f16_to_f32(static_cast<uint16_t>(
                             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                         if (inst_.abs & (1u << 0))
@@ -2050,7 +2050,15 @@ void VPkFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))
+      raw0 = (raw0 & 0xffffu) * 0x10001u;
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
+      raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
                                                         wf.ieee_mode(), true, inst_.omod);
@@ -7573,8 +7581,8 @@ void VCvtPkrtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
     uint32_t lo = util::f32_to_f16_rtz(s0);
     uint32_t hi = util::f32_to_f16_rtz(s1);
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               lo | (hi << 16));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf, vdst, lane,
+                                                                 lo | (hi << 16));
   }
 }
 

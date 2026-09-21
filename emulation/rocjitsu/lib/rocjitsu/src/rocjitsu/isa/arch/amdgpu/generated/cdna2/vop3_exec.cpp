@@ -847,7 +847,7 @@ void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   *this, wf,
                   [&]() {
                     float v = [&]() {
-                      float v = std::nearbyint([&]() {
+                      float v = util::rndne_scalar([&]() {
                         float sv = util::f16_to_f32(static_cast<uint16_t>(
                             ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
                         if (inst_.abs & (1u << 0))

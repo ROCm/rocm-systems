@@ -1916,6 +1916,10 @@ void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))
+      raw0 = (raw0 & 0xffffu) * 0x10001u;
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
     uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
     const uint32_t omod =
