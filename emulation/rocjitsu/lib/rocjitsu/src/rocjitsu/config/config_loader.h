@@ -28,6 +28,9 @@ class SoC;
 namespace amdgpu {
 class GpuMemory;
 class Xcd;
+namespace matrix_coexecution {
+class ExecutionResources;
+} // namespace matrix_coexecution
 } // namespace amdgpu
 
 namespace config {
@@ -41,26 +44,29 @@ inline constexpr uint32_t kDefaultExecutionThreadCap = 32;
 /// Compatibility name for the older dispatch-only override API.
 inline constexpr uint32_t kDefaultCpuDispatchThreadCap = kDefaultExecutionThreadCap;
 
-/// A single VM-wide budget includes engines and retained workers from every SoC's
-/// dispatch pool. Explicit knobs take priority.
+/// A single VM-wide budget includes engines, retained workers from every SoC's
+/// dispatch pool, and one shared async-helper pool. Explicit knobs take priority.
 struct ExecutionThreadRequest {
-  uint32_t budget = 0;   ///< Zero: min(affinity, 32); nonzero overrides the default.
+  uint32_t budget = 0;   ///< Zero: affinity, with engine/dispatch capped at 32.
   uint32_t engines = 0;  ///< Zero selects from the table.
   uint32_t dispatch = 0; ///< Inclusive width per SoC; zero selects automatic sizing.
+  int32_t helpers = -1;  ///< -1 selects automatic sizing; zero disables helpers.
 };
 
 /// One target-configured granule, with an inclusive dispatch width per GPU.
-/// engines maps to num_threads and dispatch to cpu_dispatch_threads in JSON.
+/// engines maps to num_threads, dispatch to cpu_dispatch_threads, and helpers
+/// to async_helper_threads in JSON.
 struct ExecutionThreadChoice {
   uint32_t engines = 1;
   uint32_t dispatch = 1;
+  uint32_t helpers = 0;
   bool operator==(const ExecutionThreadChoice &) const = default;
 };
 
-/// Effective engine count and inclusive dispatch widths, one width per SoC.
 struct ExecutionThreadAllocation {
   uint32_t engines = 1;
   std::vector<uint32_t> dispatch;
+  uint32_t helpers = 0;
 };
 
 /// Pure table selector. Choose the largest effective allocation fitting the budget,
@@ -70,6 +76,7 @@ struct ExecutionThreadAllocation {
 ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
                                                     uint32_t host_threads, uint32_t xcds,
                                                     std::span<const uint32_t> dispatch_capacities,
+                                                    bool async_supported,
                                                     std::span<const ExecutionThreadChoice> choices,
                                                     bool clocked = false);
 
@@ -79,11 +86,13 @@ struct ExecutionThreadSettings {
   std::vector<ExecutionThreadChoice> choices;
   uint32_t xcds = 1;
   std::vector<uint32_t> dispatch_capacities;
+  bool async_supported = false;
   bool clocked = false;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
   ExecutionThreadAllocation resolve(uint32_t host_threads) const {
-    return resolve_execution_threads(request, host_threads, xcds, dispatch_capacities, choices,
-                                     clocked);
+    return resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
+                                     async_supported, choices, clocked);
   }
 };
 
@@ -96,6 +105,12 @@ struct ExecutionThreadSettings {
 /// @details Allocates no simulator components or worker threads.
 ExecutionThreadSettings load_execution_thread_settings(const std::string &json_path,
                                                        const std::string &schema_text);
+
+/// @brief Check whether the ISA supports asynchronous MMA execution.
+bool configured_async_mma_supported(rj_code_arch_t arch);
+/// @brief Create lazy VM-owned resources for the requested helper count.
+std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+make_async_execution_resources(uint32_t helpers);
 
 /// Resolve the requested functional CU-dispatch width for each SoC.
 ///
@@ -181,13 +196,15 @@ struct LoadedConfig {
   /// Requested dispatch width. Omitted/zero selects from thread_allocations;
   /// each SoC's effective width is CU-capacity-clamped.
   uint32_t cpu_dispatch_threads = 0;
-  uint32_t cpu_thread_budget = 0;              ///< Zero uses affinity capped at 32.
+  uint32_t cpu_thread_budget = 0; ///< Zero uses affinity; engine/dispatch stay capped at 32.
+  /// Preserve old automatic-dispatch checkpoint metadata when saving again.
+  bool legacy_auto_dispatch = false;
+  int32_t async_helper_threads = -1;           ///< -1 selects from the table; zero disables.
   uint32_t requested_engine_threads = 0;       ///< Original request, retained for checkpoints.
   ExecutionThreadAllocation execution_threads; ///< Effective allocation resolved during loading.
   std::vector<ExecutionThreadChoice> thread_allocations; ///< Target-preferred granules.
-  /// Old checkpoints with explicit automatic dispatch and no allocation metadata.
-  /// Retain that wire representation when saving again so host sizing survives.
-  bool legacy_auto_dispatch = false;
+  std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+      async_resources; ///< Shared by CUs.
 
   /// @brief Apply the requested functional dispatch policy to every loaded SoC.
   ///
@@ -196,10 +213,9 @@ struct LoadedConfig {
   void apply_cpu_dispatch_threads();
 
   /// @brief Explicitly override dispatch sizing independently of the total budget.
-  /// @details This dispatch-only override uses resolve_cpu_dispatch_thread_budgets();
-  /// it neither consults thread_allocations nor reallocates engines. To evaluate
-  /// the table for another host width, use ExecutionThreadSettings::resolve()
-  /// or resolve_execution_threads().
+  /// @details This dispatch-only override ignores the allocation table and does not
+  /// reallocate engines or helpers. Use resolve_execution_threads() to evaluate
+  /// the joint plan for another host width.
   /// @param hardware_threads Host-thread count available for automatic sizing.
   /// @param automatic_thread_cap Maximum host-wide width in automatic mode;
   /// values below one are treated as one.

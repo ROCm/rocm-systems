@@ -15,11 +15,18 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
   false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
   fixed set of true tokens.
+- Perfetto trace output now defaults to the `.pftrace` extension instead of
+  `.proto`, and `--output-format pftrace` is the canonical token for
+  requesting it (`proto` is kept as a permanent backward-compatible alias).
 
 ### Resolved issues
 
 - Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
   because PMC metadata names did not match the sample insertion path.
+- `--trace-clock-id` no longer crashes the profiled process; the option is
+  now restricted to its two documented, supported values (realtime,
+  cputime), and an invalid value now fails cleanly at startup instead of
+  aborting mid-run.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
@@ -50,6 +57,19 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   loaded, so its settings take effect. A configuration file already named by
   `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
   appended to it.
+
+- Pausing sampling now stops the underlying per-thread timers instead of only
+  discarding the samples they produce. Previously a paused sampler kept delivering
+  timer signals, so the profiled application's sleeps were still interrupted
+  throughout a window in which no data was being collected.
+
+### Fixed
+
+- `ROCPROFSYS_TRACE_DELAY`/`ROCPROFSYS_TRACE_DURATION` now actually gate GPU context
+  startup, producing a real gap in cached GPU/RocPD data. Previously they only
+  suppressed downstream category emission. For GPU-only tracing with no marker
+  domain or trace region configured, the configured delay had no effect at all on
+  when GPU data collection actually began.
 
 ### Removed
 

@@ -33,7 +33,9 @@ struct PkF32Words {
 };
 
 PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+  // CDNA5 ISA section 7.7.1: scalar sources supply one replicated DWORD.
+  const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(
+      operand, lane, amdgpu::ScalarPairMode::Replicate32);
   return {pair.lo, pair.hi};
 }
 
@@ -47,10 +49,11 @@ struct PkU32Pair {
   uint32_t hi;
 };
 
-Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
-  Operand shifted = operand;
-  shifted.encoding_value_ += static_cast<int>(dword_offset);
-  return shifted;
+uint32_t packed_vgpr_physical_base(const Operand &operand, const amdgpu::Wavefront &wf) {
+  const auto offset = Isa::resolved_vgpr_offset(wf, operand.opr_type_, operand.encoding_value_,
+                                                operand.vgpr_msb_role());
+  assert(offset);
+  return wf.vgpr_alloc().base + *offset;
 }
 
 PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
@@ -59,15 +62,15 @@ PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf, 
   if (!reg || reg->cls != RegClass::VGPR)
     return {lo, lo};
 
-  const Operand hi_operand = packed_register_dword_offset(operand, 2);
-  return {lo, amdgpu::RegisterAccess(wf).read_lane64(hi_operand, lane)};
+  const uint32_t base = packed_vgpr_physical_base(operand, wf);
+  return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
 }
 
 PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-  // GFX12+ single-SGPR-read operands read the first SGPR and replicate it.
-  // VGPRs and 64-bit special registers such as VCC and EXEC remain pairs.
+  // Packed 32-bit scalar inputs replicate one word, including special
+  // scalar registers. Only VGPR inputs supply two independent words.
   const auto reg = operand.to_register_ref();
-  if (reg && reg->cls == RegClass::SGPR) {
+  if (!reg || reg->cls != RegClass::VGPR) {
     const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
     return {value, value};
   }
@@ -77,10 +80,10 @@ PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf, 
 
 void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
                        PkU64Pair value) {
-  const Operand hi_operand = packed_register_dword_offset(operand, 2);
   amdgpu::RegisterAccess access(wf);
   access.write_lane64(operand, lane, value.lo);
-  access.write_lane64(hi_operand, lane, value.hi);
+  const uint32_t base = packed_vgpr_physical_base(operand, wf);
+  access.write_vgpr64(base + 2, lane, value.hi);
 }
 
 uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {
@@ -2916,6 +2919,40 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::exec_wmma_f32(cu, 32, 16, 128, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
                         amdgpu::extract_fp4, const_acc,
                         amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+}
+
+void VPkFmaF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    const auto multiplicand = read_pk_u64_pair(src0, wf, lane);
+    const auto multiplier = read_pk_u64_pair(src1, wf, lane);
+    const auto addend = read_pk_u64_pair(src2, wf, lane);
+    constexpr uint64_t kSignBit = 0x8000000000000000ULL;
+    const auto apply = [&](uint64_t multiplicand_bits, uint64_t multiplier_bits,
+                           uint64_t addend_bits, bool negate_multiplicand, bool negate_multiplier,
+                           bool negate_addend) {
+      if (negate_multiplicand)
+        multiplicand_bits ^= kSignBit;
+      if (negate_multiplier)
+        multiplier_bits ^= kSignBit;
+      if (negate_addend)
+        addend_bits ^= kSignBit;
+      uint64_t result =
+          amdgpu::fp_mode::fma_f64(multiplicand_bits, multiplier_bits, addend_bits,
+                                   wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+      return amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,
+                                         amdgpu::floating_clamp_nan_to_zero(wf));
+    };
+    const uint64_t result_lo =
+        apply(multiplicand.lo, multiplier.lo, addend.lo, (inst_.neg & 1u) != 0,
+              (inst_.neg & 2u) != 0, (inst_.neg & 4u) != 0);
+    const uint64_t result_hi =
+        apply(multiplicand.hi, multiplier.hi, addend.hi, (inst_.neg_hi & 1u) != 0,
+              (inst_.neg_hi & 2u) != 0, (inst_.neg_hi & 4u) != 0);
+    write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});
+  }
 }
 
 void VPkMulF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
