@@ -93,9 +93,12 @@ static ncclResult_t IbCastPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
 
-static inline bool IbCastCanSkipRecvCompletion(const struct ncclIbNetCommBase* base, bool optionalCompletionRequested,
-                                               int nreqs) {
-  return optionalCompletionRequested && nreqs == 1 && base->resiliency == nullptr;
+static inline bool IbCastCanSkipRecvCompletion(const struct ncclIbNetCommBase* base, const void **req,
+                                               const int nreqs) {
+  // By design, NCCL_NET_OPTIONAL_RECV_COMPLETION should not be used with N>1
+  assert(((nreqs == 1) && (*req == (void*) NCCL_NET_OPTIONAL_RECV_COMPLETION))
+	||(*req != (void*) NCCL_NET_OPTIONAL_RECV_COMPLETION));
+  return ((*req == (void*) NCCL_NET_OPTIONAL_RECV_COMPLETION) && base->optRecvCompletion);
 }
 
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
@@ -396,7 +399,6 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  const bool optionalCompletionRequested = *request == (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
   if (comm->base.ready == 0) {
     WARN("NET/IB: IbCastIsend() called when comm->base.ready == 0");
     *request = NULL;
@@ -429,8 +431,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
   }
 
-  const bool useWriteOp = IbCastCanSkipRecvCompletion(&comm->base, optionalCompletionRequested, nreqs);
-
+  const bool useWriteOp = IbCastCanSkipRecvCompletion(&comm->base, request, nreqs);
   for (int r = 0; r < nreqs; r++) {
     if (!comm->useCtsOffload) {
       if (reqs[r] != NULL || (int)ctsFifoTag(slots, r) != tag) continue;
@@ -634,7 +635,6 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
-  const bool optionalCompletionRequested = *request == (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
   uint16_t rxReqIndex = 0;
   ncclResult_t res = ncclSuccess;
   if (comm->base.ready == 0) {
@@ -644,7 +644,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
   NCCLCHECK(IbCastStatsCheckFatalCount(&comm->base.stats, __func__));
-  const bool netOptRecvCompletionEnabled = IbCastCanSkipRecvCompletion(&comm->base, optionalCompletionRequested, n);
+  const bool netOptRecvCompletionEnabled = IbCastCanSkipRecvCompletion(&comm->base, request, n);
 
   struct ncclIbRequest* req = NULL;
   int slot = comm->base.fifoHead % NET_IB_MAX_REQUESTS;

@@ -1277,9 +1277,10 @@ ib_recv_dev_list:
   comm->base.isP2p = isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&comm->base, comm->useCtsOffload);
 
-  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d", isP2p, handle->isRMA,
-       comm->useCtsOffload, comm->base.recvMatchingScheme);
+  INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d optRecvCompletion=%d",
+       isP2p, handle->isRMA, comm->useCtsOffload, comm->base.recvMatchingScheme, (int)comm->base.optRecvCompletion);
   comm->base.nqps = IbCastCalculateNqps(isP2p, comm->base.vProps.ndevs, remoteVProps.ndevs, __func__);
   if (handle->isRMA) {
     comm->base.nqps = 1;
@@ -1915,6 +1916,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, recvPeerProcTag, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
     rComm->base.sharedPrimaryNqps = primaryNqps;
     rComm->useCtsOffload = false;
+    IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
 
     IbCastSharedQpKey recvKey;
     memset(&recvKey, 0, sizeof(recvKey));
@@ -2006,6 +2008,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
          __func__, rComm->base.commId, recvGroupIdx);
     rComm->base.isSharedQpPrimary = true;
     rComm->useCtsOffload = false; // sender useCtsOffload is also false: IbCastOffloadEnabled=false at init (init.cc)
+    IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
     *outRole = QP_SHARING_PRIMARY;
   }
 
@@ -2190,9 +2193,11 @@ ib_recv:
   rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
-  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
+  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d "
+                 "optRecvCompletion=%d",
        remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(),
-       rComm->base.recvMatchingScheme);
+       rComm->base.recvMatchingScheme, (int)rComm->base.optRecvCompletion);
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
   if (remMeta.isRMA) {
     rComm->base.nqps = 1;

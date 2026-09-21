@@ -23,6 +23,7 @@ ncclProfilerCallback_t IbCastProfilerFunction;
 NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
+RCCL_PARAM(IbCastOptRecvCompletion, "IB_OPT_RECV_COMPLETION", 0);
 extern int ncclParamIbCastOooRq();
 extern int ncclParamIbCastResiliencyPortFailover();
 
@@ -64,8 +65,25 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   baseComm->ready = 0;
 
   NCCLCHECK(IbCastResiliencyInit(baseComm, &baseComm->resiliency));
+  // useCtsOffload is a send/recv-comm field, not known until connect/accept.
+  // Apply control + resiliency/QP-sched here; CTS offload is applied when that
+  // per-comm flag is set.
+  IbCastInitOptRecvCompletion(baseComm, false);
 
   return ncclSuccess;
+}
+
+void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload) {
+  // Optional recv completion: control is off by default. Per-comm CTS offload
+  // enables it; resiliency and QP scheduling require remote completions and
+  // force it off.
+  bool optRecvCompletion = ncclParamIbCastOptRecvCompletion();
+  if (useCtsOffload) optRecvCompletion = true;
+  if (baseComm->resiliency || castGlobalQpSchedParms.enable) optRecvCompletion = false;
+  baseComm->optRecvCompletion = optRecvCompletion;
+  INFO(NCCL_NET, "NET/IB: %s: optRecvCompletion=%d (useCtsOffload=%d resiliency=%d qpSched=%d control=%ld)", __func__,
+       (int)baseComm->optRecvCompletion, (int)useCtsOffload, baseComm->resiliency != nullptr,
+       (int)castGlobalQpSchedParms.enable, ncclParamIbCastOptRecvCompletion());
 }
 
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
