@@ -237,16 +237,15 @@ def build_arch_notes(
 # ---------------------------------------------------------------------------
 
 
-def build_kernel_panel(
+def build_cu_panel(
     height: int,
     padding_lines: int = 13,
     stats: Optional[list] = None,
 ) -> Panel:
-    """Build the Compute Units panel used by gfx9 and gfx11.
+    """Build the Compute Units panel.
 
-    When *stats* is given, each entry is a (label, value, unit) tuple
-    rendered as a metric line inside the panel. Otherwise the panel
-    shows decorative placeholder text.
+    *stats*: list of (label, value, unit) tuples to display.
+    Falls back to decorative placeholder text when omitted.
     """
     if stats:
         lines: list[str] = []

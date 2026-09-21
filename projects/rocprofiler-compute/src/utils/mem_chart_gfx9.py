@@ -18,8 +18,8 @@ from utils.mem_chart_common import (
     build_arch_notes,
     build_bw_edges,
     build_cache_panel,
+    build_cu_panel,
     build_ip_block,
-    build_kernel_panel,
     build_legend,
     colored,
     format_edge,
@@ -76,7 +76,9 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float, None]], ...] = (
     ("L2 Hit", 85),
     ("L2-Fabric Read BW", 45e9),
     ("L2-Fabric Write and Atomic BW", 8e9),
-    # Fabric→MALL→HBM BW
+    # Fabric→MALL→HBM BW (gfx940-942 use estimated; gfx950 uses exact)
+    ("Estimated HBM Read BW", None),
+    ("Estimated HBM Write and Atomic BW", None),
     ("HBM Read BW", 42e9),
     ("HBM Write and Atomic BW", 7e9),
     ("HBM Write BW", None),
@@ -161,9 +163,13 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics["l2_fabric_read_bw"] = metric_dict.get("L2-Fabric Read BW")
     metrics["l2_fabric_wr_at_bw"] = metric_dict.get("L2-Fabric Write and Atomic BW")
 
-    # Fabric→MALL→HBM BW
-    metrics["hbm_read_bw"] = metric_dict.get("HBM Read BW")
-    metrics["hbm_wr_at_bw"] = metric_dict.get("HBM Write and Atomic BW")
+    # Fabric→MALL→HBM BW (gfx940-942 use "Estimated …"; gfx950 uses exact)
+    metrics["hbm_read_bw"] = metric_dict.get("HBM Read BW") or metric_dict.get(
+        "Estimated HBM Read BW"
+    )
+    metrics["hbm_wr_at_bw"] = metric_dict.get(
+        "HBM Write and Atomic BW"
+    ) or metric_dict.get("Estimated HBM Write and Atomic BW")
     metrics["hbm_write_bw"] = metric_dict.get("HBM Write BW")
     metrics["hbm_atomic_bw"] = metric_dict.get("HBM Atomic BW")
 
@@ -588,14 +594,14 @@ def create_mem_chart_diagram(
     lds_bytes = safe_float(metrics["lds_alloc"])
     lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
     cu_stats = [
-        ("Wave Occ", metrics["wave_occ"], "%"),
+        ("Wave Occ", metrics["wave_occ"], " waves/CU"),
         ("vGPRs", metrics["vgpr"], ""),
         ("sGPRs", metrics["sgpr"], ""),
         ("Scratch", scratch_kb, " KB"),
         ("LDS Alloc", lds_alloc_kb, " KB"),
         ("Workgroups", metrics["workgroups"], ""),
     ]
-    kernel = build_kernel_panel(_TOTAL_H, stats=cu_stats)
+    kernel = build_cu_panel(_TOTAL_H, stats=cu_stats)
     req_edges = _build_request_edges(metrics, kernel_arrows)
     l1_stack = _build_l1_stack(metrics, membw=membw)
     l1_l2_edges = _build_l1_l2_edges(metrics, std_arrows)
@@ -655,14 +661,11 @@ def create_mem_chart_diagram(
         (fabric, "top"),
     ]
     if has_mall:
-        # gfx940-942 use 64B-per-request estimates; gfx950 has exact 32B counters
-        rd_label = "Est. Read BW" if not is_gfx950 else "Read BW"
-        wr_label = "Est. Wr/At BW" if not is_gfx950 else "Write/Atomic BW"
         mall_edges = build_bw_edges(
             [
-                (rd_label, metrics["hbm_read_bw"], "left", COLORS["read"]),
+                ("Read BW", metrics["hbm_read_bw"], "left", COLORS["read"]),
                 (
-                    wr_label,
+                    "Write/Atomic BW",
                     metrics["hbm_wr_at_bw"],
                     "right",
                     COLORS["write"],
