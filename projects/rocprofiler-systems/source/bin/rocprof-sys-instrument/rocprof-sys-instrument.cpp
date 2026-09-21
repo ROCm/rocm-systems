@@ -82,7 +82,7 @@ get_default_max_library_functions()
         rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
 }
 
-/// Read src_fd until EOF and return everything received. The caller must have closed
+/// Read read_fd until EOF and return everything received. The caller must have closed
 /// every other copy of the pipe's write end first, or this blocks forever. On a read
 /// error, the bytes received so far are returned.
 std::string
