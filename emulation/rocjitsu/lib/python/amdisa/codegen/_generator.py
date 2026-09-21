@@ -939,6 +939,44 @@ class CodeGenerator:
         )
 
     @staticmethod
+    def _sdwa_result_format(sem: InstructionSemantics | None) -> str:
+        """Return the C++ result format for numerical SDWA output modifiers.
+
+        Conversion types may describe both source and destination, or omit the
+        type for byte conversions. Their mnemonic explicitly names the result
+        format. Integer-destination conversions can use CLAMP for an exception
+        control, so the floating source type must not enable output modifiers.
+        """
+        # FP8/BF8 expansion uses SDWA only for source register/byte selection.
+        # CDNA3 section 7.2 and CDNA4 section 7.3 ignore the other SDWA fields.
+        if sem and sem.name in ('V_CVT_F32_FP8', 'V_CVT_F32_BF8'):
+            return 'amdgpu::sdwa::ResultFormat::NONE'
+        if sem and (conversion := re.match(r'^V_CVT_(F16|F32)_', sem.name)):
+            return f'amdgpu::sdwa::ResultFormat::{conversion.group(1)}'
+        if sem and sem.operation in (
+            'frexp_exp_f32',
+            'frexp_exp_f16',
+            'cvt_norm_i16_f16',
+            'cvt_norm_u16_f16',
+        ):
+            return 'amdgpu::sdwa::ResultFormat::NONE'
+        if sem and sem.name == 'V_PK_FMAC_F16':
+            return 'amdgpu::sdwa::ResultFormat::PK_F16'
+        suffix = {'f16': 'F16', 'f32': 'F32'}.get(
+            sem.data_type if sem else None, 'NONE'
+        )
+        return f'amdgpu::sdwa::ResultFormat::{suffix}'
+
+    @staticmethod
+    def _apply_sdwa_f16_omod(body: str, instruction: str) -> str:
+        """Apply SDWA OMOD at the F16 producer, before result narrowing."""
+        body = body.replace(
+            'util::f32_to_f16_mode(',
+            f'amdgpu::sdwa::round_f16_result({instruction}, wf, ',
+        )
+        return body
+
+    @staticmethod
     def _sdwa_source_modifier_format(
         sem: InstructionSemantics, source_index: int, opnd: Operand
     ) -> str:
@@ -6500,7 +6538,7 @@ class CodeGenerator:
                         'amdgpu::fp_mode::effective_f16_omod(\n'
                         '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
                         if is_vop3
-                        else '0u'
+                        else 'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf)'
                     )
                     clamp = 'inst_.clamp' if is_vop3 else 'false'
                     return (
@@ -12003,24 +12041,23 @@ class CodeGenerator:
                                         '    wf.set_vcc_raw(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
-                        _apply_float_sdwa_clamp = bool(
-                            sem and sem.data_type in ('f16', 'f32', 'f64')
-                        )
-                        _clamp_template_arg = (
-                            'true' if _apply_float_sdwa_clamp else 'false'
-                        )
+                        _result_format = self._sdwa_result_format(sem)
                         _local_body = body
+                        if _result_format == 'amdgpu::sdwa::ResultFormat::F16':
+                            _local_body = self._apply_sdwa_f16_omod(
+                                _local_body, '*this'
+                            )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                             r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                            rf'amdgpu::sdwa::write_lane<{_clamp_template_arg}>'
+                            rf'amdgpu::sdwa::write_lane<{_result_format}>'
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane64\(\s*'
                             r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                            rf'amdgpu::sdwa::write_lane64<{_clamp_template_arg}>'
+                            rf'amdgpu::sdwa::write_lane64<{_result_format}>'
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
@@ -13342,6 +13379,17 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body
             )
+            if self._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::F16':
+                prefixed_body = self._apply_sdwa_f16_omod(prefixed_body, 'inst')
+            if sem.data_type == 'f16':
+                for result_format in ('F16', 'PK_F16'):
+                    helper = (
+                        'amdgpu::sdwa::output_modifier<'
+                        f'amdgpu::sdwa::ResultFormat::{result_format}>'
+                    )
+                    prefixed_body = prefixed_body.replace(
+                        f'{helper}(*this, wf)', f'{helper}(inst, wf)'
+                    )
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
@@ -13349,19 +13397,17 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
             )
-            clamp_template_arg = (
-                'true' if sem.data_type in ('f16', 'f32', 'f64') else 'false'
-            )
+            result_format = self._sdwa_result_format(sem)
             prefixed_body = _re.sub(
                 r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                 r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                rf'sdwa::write_lane<{clamp_template_arg}>' r'(inst, wf, \1, lane, ',
+                rf'sdwa::write_lane<{result_format}>' r'(inst, wf, \1, lane, ',
                 prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'amdgpu::RegisterAccess\(wf\)\.write_lane64\(\s*'
                 r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                rf'sdwa::write_lane64<{clamp_template_arg}>' r'(inst, wf, \1, lane, ',
+                rf'sdwa::write_lane64<{result_format}>' r'(inst, wf, \1, lane, ',
                 prefixed_body,
             )
             prefixed_body = prefixed_body.replace(
