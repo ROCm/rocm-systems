@@ -64,7 +64,18 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
 /// @brief A served device plus the client attached to it.
 ///
 /// @details Serving happens on its own thread, as it does in the product, so
-/// the tests exercise the same threading the transport ships with.
+/// the tests exercise the same threading the transport ships with. Two
+/// underlying conditions govern state shared with those callbacks. Lifetime:
+/// state captured by work that may still run during teardown must outlive
+/// this fixture, because the destructor joins the serving thread only after
+/// such work has had every chance to run. Work submitted to the serving
+/// thread after `stop_serving()` has joined it never runs, so it cannot
+/// touch anything -- `DiscardsAskedWorkWhenServingHasStopped` relies on this
+/// and declares its flag after the fixture. Synchronization: reading
+/// non-atomic state a callback wrote still needs a happens-before with the
+/// callback. `stop_serving()` supplies one through the join, as can a future
+/// or another explicit synchronization; merely knowing that the thread has
+/// stopped does not itself provide that ordering.
 class ServedDevice {
 public:
   ServedDevice()
@@ -582,17 +593,23 @@ TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
-  // And the slot is still free, so a real request is not lost behind it.
-  std::atomic<bool> ran = false;
-  EXPECT_TRUE(served.host().ask_serving_thread([&ran] { ran = true; }))
+  // And the slot is still free, so a real request is not lost behind it. No
+  // state is captured: the acceptance alone is the claim under test, and a
+  // captured flag could never be read back reliably, because a request that
+  // is still queued when serving stops is discarded by contract.
+  EXPECT_TRUE(served.host().ask_serving_thread([] {}))
       << "the refused request consumed the one outstanding slot";
 }
 
 TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
+  // Declared before the fixture so the promise outlives the join in its
+  // destructor: if the wait below times out, the test returns with the
+  // request still pending, and the serving thread may call set_value()
+  // after the test body has ended.
+  std::promise<std::thread::id> ran_on;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
-  std::promise<std::thread::id> ran_on;
   std::future<std::thread::id> where = ran_on.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread(
       [&ran_on] { ran_on.set_value(std::this_thread::get_id()); }));
@@ -609,35 +626,48 @@ TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
 // a 64-deep queue and discarded silently past that, which gave a caller no way to
 // tell that its request had been thrown away.
 TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
+  // Declared before the fixture so destruction order is the reverse of what
+  // it would be otherwise: everything the callbacks touch outlives the join
+  // in the fixture destructor, on every return path.
+  std::promise<void> running;
+  std::future<void> is_running = running.get_future();
+  std::promise<void> release;
+  std::future<void> may_finish = release.get_future();
+  bool second_ran = false;
+
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
   // Block the first request inside the serving thread so it stays outstanding
   // while the second is offered.
-  std::promise<void> running;
-  std::future<void> is_running = running.get_future();
-  std::promise<void> release;
-  std::future<void> may_finish = release.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread([&running, &may_finish] {
     running.set_value();
     (void)may_finish.wait_for(std::chrono::seconds(10));
   }));
   ASSERT_EQ(is_running.wait_for(std::chrono::seconds(10)), std::future_status::ready);
 
-  bool second_ran = false;
   EXPECT_FALSE(served.host().ask_serving_thread([&second_ran] { second_ran = true; }))
       << "a second request must be refused while one is outstanding";
   release.set_value();
+
+  // Join before reading anything the callbacks wrote, so the write above is
+  // visible here and the bounded wait in the first callback has ended.
+  served.stop_serving();
   EXPECT_FALSE(second_ran) << "a refused request must not run";
 }
 
 // A request that throws must not take the process with it: it runs on the serving
 // thread, where an escaping exception would terminate rather than propagate.
 TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
+  // Both promises are declared before the fixture so they outlive the join
+  // in its destructor: on a timed-out wait, or a rejected retry loop, the
+  // test returns with a request still pending, and the serving thread may
+  // call set_value() after the test body has ended.
+  std::promise<void> threw;
+  std::promise<void> ran_after;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
-  std::promise<void> threw;
   std::future<void> did_throw = threw.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread([&threw] {
     threw.set_value();
@@ -649,7 +679,6 @@ TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
   // did not. Retried because the throwing request signalled before it threw, so
   // it is legitimately still outstanding -- and therefore still refusing -- for
   // the moment it takes the serving thread to unwind and clear it.
-  std::promise<void> ran_after;
   std::future<void> after = ran_after.get_future();
   bool accepted = false;
   for (int attempt = 0; attempt < 200 && !accepted; ++attempt) {

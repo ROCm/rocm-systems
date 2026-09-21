@@ -2318,6 +2318,36 @@ void VirtMemoryTestInterProcess::ChildProcessImpl() {
   ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
   ASSERT_SUCCESS(hsa_amd_vmem_map(addrRange, 10 * rec_mem_granule, 0, imported_handle, 0));
 
+  // Verify set_access api works on an imported handle for every CPU and GPU agent
+  {
+    std::vector<hsa_agent_t> cpus;
+    std::vector<hsa_agent_t> gpus;
+    EXPECT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+    EXPECT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+
+    // gpu agents
+    std::vector<hsa_amd_memory_access_desc_t> gpu_desc;
+    for (const auto& gpu : gpus) gpu_desc.push_back({HSA_ACCESS_PERMISSION_RW, gpu});
+    PROCESS_LOG("Child: set_access on imported handle for all available GPU agents\n");
+    EXPECT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * rec_mem_granule, gpu_desc.data(), gpu_desc.size()));
+    for (const auto& d : gpu_desc) {
+      hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+      EXPECT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, d.agent_handle));
+      EXPECT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+    }
+
+    // cpu agents
+    std::vector<hsa_amd_memory_access_desc_t> cpu_desc;
+    for (const auto& cpu : cpus) cpu_desc.push_back({HSA_ACCESS_PERMISSION_RW, cpu});
+    PROCESS_LOG("Child: set_access on imported handle for all available CPU agents\n");
+    EXPECT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * rec_mem_granule, cpu_desc.data(), cpu_desc.size()));
+    for (const auto& d : cpu_desc) {
+      hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+      EXPECT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, d.agent_handle));
+      EXPECT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+    }
+  }
+
   ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, 10 * rec_mem_granule));
 
   PROCESS_LOG("Child: Signalling parent process\n");

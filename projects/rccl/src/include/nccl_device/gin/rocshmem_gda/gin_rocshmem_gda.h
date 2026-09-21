@@ -186,4 +186,12 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   }
 };
 
+// Mirrors ginRocshmemGdaGetGinProperties()'s supportsStrongSignals on the host side.
+template <>
+struct ncclGinApi_SupportsStrongSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static bool call(ncclGinCtx) {
+    return true;
+  }
+};
+
 #endif /* _NCCL_DEVICE_GIN_ROCSHMEM_GDA_H_ */

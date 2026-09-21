@@ -56,7 +56,7 @@ const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
 
 template <typename Type>
     requires type_traits::supported_cache_type<Type>
-__attribute__((always_inline)) inline constexpr size_t
+__attribute__((always_inline)) constexpr size_t
 get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
@@ -88,7 +88,7 @@ get_size(Type&& val)
 }
 
 template <typename Type, typename... Types>
-__attribute__((always_inline)) inline constexpr size_t
+__attribute__((always_inline)) constexpr size_t
 get_size(Type&& val, Types&&... vals)
 {
     return get_size(std::forward<Type>(val)) + get_size(std::forward<Types>(vals)...);

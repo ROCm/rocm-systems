@@ -158,16 +158,6 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
 
 
 // ---------------------------------------------------------------------------
-// Symmetric kernels.
-// ---------------------------------------------------------------------------
-// Seam: deferred symmetric-kernel init, NCCLCHECKGOTO'd behind the
-// NCCL_WIN_COLL_SYMMETRIC flag. Counting calls is what proves the flag gates it.
-static ncclResult_t DefaultSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce = DefaultSymkInitOnce;
-
-ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { return g_devrSymkInitOnce(comm); }
-
-// ---------------------------------------------------------------------------
 // Space allocator.
 // ---------------------------------------------------------------------------
 void         ncclSpaceConstruct(struct ncclSpace*) {}
@@ -552,7 +542,6 @@ void ResetDevRuntimeMicroFakes() {
   g_devrShadowPoolToHost                        = DefaultShadowPoolToHost;
   g_devrIntruAddressMapFind                     = DefaultIntruAddressMapFind;
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
-  g_devrSymkInitOnce                            = DefaultSymkInitOnce;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
   g_devrTeamWorld                               = DefaultTeamWorld;

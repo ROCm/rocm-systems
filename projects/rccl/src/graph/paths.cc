@@ -1317,9 +1317,10 @@ int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // When set, pick p2pnChannelsPerPeer so that a P2P plan touches every channel
-// in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
-// ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
-// causes round bases to wrap and channels to collide.
+// in the pool: ppp = pow2Down(p2pnChannels / maxP2pPeers), where maxP2pPeers is
+// the configured peer limit and defaults to nRanks. The pow2 step keeps the
+// per-peer tile a divisor of the pool. Declaring fewer peers than a job actually
+// uses deliberately oversubscribes channels across rounds.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 extern int64_t ncclParamWorkArgsBytes();
@@ -1434,28 +1435,43 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   if (saturateP2p == RCCL_VALUE_UNSET) {
     saturateP2p = isGfx1250 ? 1 : 0;
   }
-  if (saturateP2p && comm->nRanks > 0) {
-    int target = std::max(1, comm->p2pnChannels / comm->nRanks);
+  // Divisor for both per-peer heuristics below, resolved from config.maxP2pPeers (or
+  // nRanks when unset) by ncclTopoComputeP2pChannelsPerPeer, which init.cc runs first.
+  const int maxP2pPeers = comm->p2pMaxPeers;
+  if (saturateP2p && maxP2pPeers > 0) {
+    int target = std::max(1, comm->p2pnChannels / maxP2pPeers);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
     INFO(NCCL_INIT | NCCL_TUNING,
-         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, nRanks=%d)",
-         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, comm->nRanks);
+         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, maxP2pPeers=%d)",
+         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, maxP2pPeers);
     comm->p2pnChannelsPerPeer = newPpp;
   }
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
-    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
+    INFO(NCCL_INIT, "Tuning P2P operations with maxP2pPeers = %d", maxP2pPeers);
+    while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
            comm->p2pnChannelsPerPeer > 1)
       comm->p2pnChannelsPerPeer /= 2;
+    if (rcclUseAinic()) {
+      // A single AINIC NIC is only saturated by two net-p2p channels per peer.
+      // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
+      bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
+      int nChannelsMax = atScale ? 1 : 2;
+      comm->p2pnChannelsPerPeer = std::max(
+        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+    }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
   // Final safety: arch-specific caps above and the halving loop may still
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out
-  // at 1 but divUp(nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
-  // a later arch cap shrinks p2pnChannels). Clamp to preserve the device-side
-  // invariant required by ncclP2pChannelToPart.
+  // at 1 but divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
+  // a later arch cap shrinks p2pnChannels). Covers the plain ncclP2pChannelToPart
+  // bound only. The shift branch (device.h) needs p2pnChannels >> p2pChannelShiftSize,
+  // which this does not enforce. That gap predates this change, but a small maxP2pPeers
+  // widens what can reach it: divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is 1, so the loop
+  // above can now stop at p2pnChannels/2 where dividing by nRanks stopped at /4 or lower.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path
@@ -1464,6 +1480,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     NCCLCHECK(ncclTopoReconcileGrowChannels(comm, &comm->p2pnChannels));
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
+
+  INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
 
   // Init channels that weren't used so far
   for (int c = comm->nChannels; c < std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));
@@ -1512,6 +1531,35 @@ ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int*
       maxPath = std::max(maxPath, paths[j].type);
     }
   }
+  *max = maxPath;
+  return ncclSuccess;
+}
+
+// RCCL: worst case over the GPUs of the best path each of them has to a NIC of its own. A PXN
+// relay counts as one, since it reaches the NIC through the GPU that owns it, and a single relay
+// raises the result for the whole system, so a search bounded by it still reaches the relays.
+ncclResult_t ncclTopoGetGpuMaxLocalNetPath(struct ncclTopoSystem* system, int* max) {
+  int maxPath = PATH_LOC;
+  bool hasPxnRelay = false;
+
+  for (int i = 0; i < system->nodes[GPU].count; i++) {
+    struct ncclTopoLinkList* paths = system->nodes[GPU].nodes[i].paths[NET];
+    if (paths == NULL) continue;
+
+    int nearest = PATH_DIS;
+    for (int n = 0; n < system->nodes[NET].count; n++) {
+      nearest = std::min(nearest, paths[n].type);
+      if (paths[n].type == PATH_PXN) hasPxnRelay = true;
+    }
+
+    // A GPU that reaches no NIC constrains nothing, and would otherwise force PATH_DIS.
+    if (nearest == PATH_DIS) continue;
+
+    maxPath = std::max(maxPath, nearest);
+  }
+
+  if (hasPxnRelay) maxPath = std::max(maxPath, PATH_PXN);
+
   *max = maxPath;
   return ncclSuccess;
 }

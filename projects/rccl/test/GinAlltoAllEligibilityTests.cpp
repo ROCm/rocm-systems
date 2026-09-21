@@ -44,8 +44,9 @@ struct GinAlltoAllMockComm
         comm.devrState.lsaSize = comm.nRanks;
         comm.devrState.lsaSelf = comm.rank;
 
-        sharedRes.ginState.ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
-        comm.sharedRes             = &sharedRes;
+        sharedRes.ginState.numActiveBackends   = 1;
+        sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
+        comm.sharedRes                         = &sharedRes;
     }
 
     ncclComm* get() { return &comm; }
@@ -146,11 +147,21 @@ TEST_F(GinAlltoAllEligibilityTest, LsaTeamSmallerThanComm)
 // other backend must not be claimed.
 TEST_F(GinAlltoAllEligibilityTest, WrongGinBackend)
 {
-    mockComm_.sharedRes.ginState.ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
+    mockComm_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
     EXPECT_FALSE(eligible(kCount));
 
-    mockComm_.sharedRes.ginState.ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
+    mockComm_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
     EXPECT_FALSE(eligible(kCount));
+}
+
+// WrongGinBackend above cannot pin which backends[] slot the gate reads: the empty
+// window registry rejects every case anyway, so writing the wrong index would still
+// leave it passing. Assert the accessor directly against the fixture's default state.
+TEST_F(GinAlltoAllEligibilityTest, MockBackendSlotMatchesGinTypeAccessor)
+{
+    ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
+    ASSERT_EQ(ncclGetGinType(mockComm_.get(), &ginType), ncclSuccess);
+    EXPECT_EQ(ginType, (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
 }
 
 // The kernel puts straight into symmetric windows, so unregistered buffers are

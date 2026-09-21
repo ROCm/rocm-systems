@@ -12,6 +12,7 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
 #include <algorithm>
@@ -40,15 +41,6 @@ struct WorkitemCoord {
   uint32_t x = 0;
   uint32_t y = 0;
   uint32_t z = 0;
-};
-
-struct ClusterDispatchShape {
-  uint32_t count_x = 0;
-  uint32_t count_y = 0;
-  uint32_t count_z = 0;
-  uint32_t size_x = 1;
-  uint32_t size_y = 1;
-  uint32_t size_z = 1;
 };
 
 /// @brief What a queue entry carries, which decides how it retires.
