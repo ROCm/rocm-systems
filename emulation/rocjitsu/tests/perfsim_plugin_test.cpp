@@ -96,6 +96,15 @@ FfmMemoryAccess make_memory_access(EntityId instruction_id, FfmWaveInfo wave_inf
   return access;
 }
 
+// Loader version errors share a prefix with ELF symbol versions (`GLIBC_2.33`).
+// They are not observer-ABI rejections; the host C/C++ runtime is simply too old
+// to map the backend. This can happen on any host, VM, chroot, or container.
+bool is_loader_symbol_version_error(std::string_view error) {
+  return error.find("GLIBC_") != std::string_view::npos ||
+         error.find("GLIBCXX_") != std::string_view::npos ||
+         error.find("CXXABI_") != std::string_view::npos;
+}
+
 class SyntheticInstruction final : public Instruction {
 public:
   SyntheticInstruction(std::string_view mnemonic, std::span<const uint32_t> words,
@@ -2008,7 +2017,13 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   // The direct half retains its mapping for the process lifetime, matching the
   // adapter. Some Perfsim builds perform LLVM-global cleanup when finally unloaded.
   const util::LibraryHandle direct_backend = util::open_library(backend_path.c_str());
-  ASSERT_NE(direct_backend, nullptr) << util::last_library_error();
+  if (!direct_backend) {
+    const std::string error = util::last_library_error();
+    if (is_loader_symbol_version_error(error))
+      GTEST_SKIP() << "Perfsim backend needs a newer C/C++ runtime than this host: " << error
+                   << " (runtime library version mismatch, not an observer ABI rejection)";
+    FAIL() << "Perfsim backend failed to load: " << error;
+  }
   const auto get_api =
       util::lookup_symbol<FfmObserverPluginGetApiFn>(direct_backend, "ffm_observer_plugin_get_api");
   ASSERT_NE(get_api, nullptr) << util::last_library_error();
