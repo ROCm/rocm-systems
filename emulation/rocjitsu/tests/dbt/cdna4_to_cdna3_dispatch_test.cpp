@@ -8,6 +8,7 @@
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
+#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
@@ -41,8 +42,29 @@ RJ_DIAGNOSTIC_POP
 #include <string_view>
 #include <vector>
 
+#if defined(__SANITIZE_THREAD__)
+#define ROCJITSU_DISPATCH_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define ROCJITSU_DISPATCH_TEST_TSAN 1
+#endif
+#endif
+
+#ifdef ROCJITSU_DISPATCH_TEST_TSAN
+#include <sanitizer/tsan_interface.h>
+#endif
+
 #ifdef HAS_HOST_AMDGPU
 using namespace rocjitsu;
+
+// ROCR serializes its async-event pool with an uninstrumented HybridMutex.
+// TSan cannot observe that lock and can report the pool's allocator reuse as a
+// race. Ignore only accesses originating in the external runtime while keeping
+// rocjitsu and this raw-HSA test fully instrumented.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n"
+         "thread:rocr::os::os_thread\n";
+}
 
 namespace {
 
@@ -58,6 +80,79 @@ using test::kernel_path;
 // timed out" failures. Keep this generously below the ctest TIMEOUT so a real hang
 // still surfaces as a signal-wait failure rather than a hard ctest kill.
 constexpr uint64_t kDispatchSignalWaitTimeoutNs = 120'000'000'000ULL;
+
+/// @brief Wait for a raw-HSA dispatch and preserve its acquire edge under TSan.
+///
+/// ROCR is an external, uninstrumented library. Its scacquire wait provides the
+/// architectural synchronization, but ThreadSanitizer cannot see the acquire
+/// performed inside that library. Once the wait observes completion, repeat the
+/// acquire directly on amd_signal_t::value in TSan builds. The simulator's
+/// completion CAS is instrumented, so this exposes the real release/acquire edge
+/// without suppressing races in either the test or rocjitsu.
+hsa_signal_value_t wait_for_dispatch(hsa_signal_t signal, uint64_t timeout_ns) {
+  const hsa_signal_value_t observed = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                                                timeout_ns, HSA_WAIT_STATE_BLOCKED);
+#ifdef ROCJITSU_DISPATCH_TEST_TSAN
+  if (observed < 1) {
+    auto *amd_signal = reinterpret_cast<amd_signal_t *>(signal.handle);
+    __tsan_acquire(const_cast<int64_t *>(&amd_signal->value));
+  }
+#endif
+  return observed;
+}
+
+void annotate_hsa_copy_release(const void *ptr, size_t size) {
+#ifdef ROCJITSU_DISPATCH_TEST_TSAN
+  if (ptr == nullptr || size == 0)
+    return;
+  constexpr uintptr_t kHostPageMask = 4095;
+  const uintptr_t begin = reinterpret_cast<uintptr_t>(ptr) & ~kHostPageMask;
+  const uintptr_t end = (reinterpret_cast<uintptr_t>(ptr) + size - 1) & ~kHostPageMask;
+  for (uintptr_t page = begin;; page += kHostPageMask + 1) {
+    __tsan_release(reinterpret_cast<void *>(page));
+    if (page == end)
+      break;
+  }
+#else
+  (void)ptr;
+  (void)size;
+#endif
+}
+
+void annotate_hsa_copy_acquire(void *ptr, size_t size) {
+#ifdef ROCJITSU_DISPATCH_TEST_TSAN
+  if (ptr == nullptr || size == 0)
+    return;
+  constexpr uintptr_t kHostPageMask = 4095;
+  const uintptr_t begin = reinterpret_cast<uintptr_t>(ptr) & ~kHostPageMask;
+  const uintptr_t end = (reinterpret_cast<uintptr_t>(ptr) + size - 1) & ~kHostPageMask;
+  for (uintptr_t page = begin;; page += kHostPageMask + 1) {
+    __tsan_acquire(reinterpret_cast<void *>(page));
+    if (page == end)
+      break;
+  }
+#else
+  (void)ptr;
+  (void)size;
+#endif
+}
+
+hsa_status_t synchronized_hsa_memory_copy(void *dst, const void *src, size_t size) {
+  // ROCR performs this ownership transfer in an uninstrumented shared library.
+  // Mirror its synchronous hand-off for TSan. Publish the source before the
+  // copy engine consumes it. A completed copy returns source ownership and
+  // publishes the destination; the simulator annotates identity-page
+  // reads/writes at the matching device boundaries.
+  annotate_hsa_copy_release(src, size);
+  annotate_hsa_copy_release(dst, size);
+  const hsa_status_t status = hsa_memory_copy(dst, src, size);
+  if (status == HSA_STATUS_SUCCESS) {
+    annotate_hsa_copy_acquire(const_cast<void *>(src), size);
+    annotate_hsa_copy_acquire(dst, size);
+    annotate_hsa_copy_release(dst, size);
+  }
+  return status;
+}
 
 std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
   std::ifstream file(kernel_hsaco_path(name), std::ios::binary);
@@ -615,6 +710,16 @@ struct HsaDispatchResources {
     return st;
   }
 
+  /// @brief Quiesce and destroy the queue while packet-referenced locals live.
+  [[nodiscard]] hsa_status_t close_queue() {
+    if (!queue)
+      return HSA_STATUS_SUCCESS;
+    const hsa_status_t st = hsa_queue_destroy(queue);
+    if (st == HSA_STATUS_SUCCESS)
+      queue = nullptr;
+    return st;
+  }
+
   ~HsaDispatchResources() {
     // Stop queue execution before releasing anything referenced by an AQL
     // packet. This also makes an assertion after a dispatch timeout safe: the
@@ -732,10 +837,13 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
       src_host[i] = 0x12340000u ^ (static_cast<uint32_t>(iter) << 12) ^ i;
     std::fill(dst_init.begin(), dst_init.end(), kSentinel);
 
-    ASSERT_EQ(hsa_memory_copy(src_dev, src_host.data(), kMaxBytes), HSA_STATUS_SUCCESS);
-    ASSERT_EQ(hsa_memory_copy(dst_dev, dst_init.data(), kMaxBytes), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(synchronized_hsa_memory_copy(src_dev, src_host.data(), kMaxBytes),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(synchronized_hsa_memory_copy(dst_dev, dst_init.data(), kMaxBytes),
+              HSA_STATUS_SUCCESS);
 
     args->n = n;
+    annotate_hsa_copy_release(args, sizeof(*args));
     hsa_signal_store_relaxed(signal, 1);
 
     const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
@@ -760,11 +868,11 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
     __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
     hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
-    const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-        signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
+    const hsa_signal_value_t val = wait_for_dispatch(signal, kDispatchSignalWaitTimeoutNs);
     ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-    ASSERT_EQ(hsa_memory_copy(dst_host.data(), dst_dev, kMaxBytes), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(synchronized_hsa_memory_copy(dst_host.data(), dst_dev, kMaxBytes),
+              HSA_STATUS_SUCCESS);
 
     uint32_t mismatches = 0;
     for (uint32_t i = 0; i < kMaxN; ++i) {
@@ -1003,14 +1111,17 @@ void run_virtual_lds_smoke(const std::vector<uint8_t> &elf_bytes, const Dispatch
   ASSERT_TRUE(write_kernarg_extension_wrapper(
       std::span<uint8_t>(static_cast<uint8_t *>(kernarg), kernarg_bytes), *wrapper_layout,
       original_kernarg.data(), reinterpret_cast<uintptr_t>(kernarg), std::span{&write, 1}));
+  annotate_hsa_copy_release(kernarg, kernarg_bytes);
 
   std::vector<uint32_t> input_host(kWorkItems);
   std::vector<uint32_t> output_init(kWorkItems * kWordsPerLane, kSentinel);
   std::vector<uint32_t> output_host(kWorkItems * kWordsPerLane);
   for (uint32_t i = 0; i < kWorkItems; ++i)
     input_host[i] = 0x13572468u ^ (i * 0x045d9f3bu);
-  ASSERT_EQ(hsa_memory_copy(input_dev, input_host.data(), kInputBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(output_dev, output_init.data(), kOutputBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(input_dev, input_host.data(), kInputBytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(output_dev, output_init.data(), kOutputBytes),
+            HSA_STATUS_SUCCESS);
 
   hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
@@ -1047,11 +1158,11 @@ void run_virtual_lds_smoke(const std::vector<uint8_t> &elf_bytes, const Dispatch
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 10'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val = wait_for_dispatch(signal, 10'000'000'000ULL);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-  ASSERT_EQ(hsa_memory_copy(output_host.data(), output_dev, kOutputBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(output_host.data(), output_dev, kOutputBytes),
+            HSA_STATUS_SUCCESS);
 
   uint32_t mismatches = 0;
   for (uint32_t wg = 0; wg < kGroups; ++wg) {
@@ -1182,11 +1293,14 @@ void run_cvt_pk_bf16_f32(const std::vector<uint8_t> &elf_bytes, const DispatchTa
   auto *args = static_cast<KernArgs *>(kernarg);
   args->input = reinterpret_cast<const float *>(input_dev);
   args->output = output_dev;
+  annotate_hsa_copy_release(args, sizeof(*args));
 
   std::vector<uint32_t> output_init(kLanes, kSentinel);
   std::vector<uint32_t> output_host(kLanes);
-  ASSERT_EQ(hsa_memory_copy(input_dev, input_bits.data(), kInputBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(output_dev, output_init.data(), kOutputBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(input_dev, input_bits.data(), kInputBytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(output_dev, output_init.data(), kOutputBytes),
+            HSA_STATUS_SUCCESS);
 
   hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
@@ -1225,11 +1339,11 @@ void run_cvt_pk_bf16_f32(const std::vector<uint8_t> &elf_bytes, const DispatchTa
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val = wait_for_dispatch(signal, 5'000'000'000ULL);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-  ASSERT_EQ(hsa_memory_copy(output_host.data(), output_dev, kOutputBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(output_host.data(), output_dev, kOutputBytes),
+            HSA_STATUS_SUCCESS);
 
   uint32_t mismatches = 0;
   for (uint32_t lane = 0; lane < kLanes; ++lane) {
@@ -1344,6 +1458,7 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
   args->m = kM;
   args->n = kN;
   args->k = kK;
+  annotate_hsa_copy_release(args, sizeof(*args));
 
   std::vector<uint16_t> a_host(kAElements);
   std::vector<uint16_t> b_host(kBElements);
@@ -1351,9 +1466,9 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
   std::vector<float> c_host(kCElements);
   fill_seeded_half_inputs(a_host, 0xA0D4'0001u ^ kM ^ (kK << 8));
   fill_seeded_half_inputs(b_host, 0xB0D4'0001u ^ kN ^ (kK << 8));
-  ASSERT_EQ(hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
 
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
@@ -1388,12 +1503,15 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const DispatchTarg
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(resources.queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val =
-      hsa_signal_wait_scacquire(resources.signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val = wait_for_dispatch(resources.signal, kDispatchSignalWaitTimeoutNs);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-  ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
+
+  // The host vectors were created after resources and therefore destruct first.
+  // Explicitly quiesce the queue before returning so no pool worker can retain a
+  // device-allocation backing that the next dispatch may recycle for a vector.
+  ASSERT_EQ(resources.close_queue(), HSA_STATUS_SUCCESS);
 
   if (observed)
     *observed = std::move(c_host);
@@ -1510,6 +1628,7 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   args->a = a_dev;
   args->b = b_dev;
   args->c = c_dev;
+  annotate_hsa_copy_release(args, sizeof(*args));
 
   std::vector<uint16_t> a_host(kAElements);
   std::vector<uint16_t> b_host(kBElements);
@@ -1528,9 +1647,9 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   } else {
     fill_seeded_half_inputs(b_host, 0xB0D4'1001u);
   }
-  ASSERT_EQ(hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
 
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
@@ -1567,11 +1686,10 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val = wait_for_dispatch(signal, kDispatchSignalWaitTimeoutNs);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-  ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
 
   if (observed)
     *observed = std::move(c_host);
@@ -1669,6 +1787,7 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   args->v = v_dev;
   args->o = o_dev;
   args->softmax_scale = 1.0f;
+  annotate_hsa_copy_release(args, sizeof(*args));
 
   std::vector<uint16_t> q_host(kQElements);
   std::vector<uint16_t> k_host(kKVElements);
@@ -1680,10 +1799,10 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   fill_seeded_half_inputs(v_host, 0xF1A5'0003u);
   if (reference)
     *reference = reference_flash_attention_slices(q_host, k_host, v_host);
-  ASSERT_EQ(hsa_memory_copy(q_dev, q_host.data(), kQBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(k_dev, k_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(v_dev, v_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(o_dev, o_init.data(), kOBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(q_dev, q_host.data(), kQBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(k_dev, k_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(v_dev, v_host.data(), kKVBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(o_dev, o_init.data(), kOBytes), HSA_STATUS_SUCCESS);
 
   uint32_t queue_size = 0;
   hsa_agent_get_info(target.agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
@@ -1720,11 +1839,10 @@ void run_flash_attention_triton(const std::vector<uint8_t> &elf_bytes, const Dis
   __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
 
-  const hsa_signal_value_t val = hsa_signal_wait_scacquire(
-      signal, HSA_SIGNAL_CONDITION_LT, 1, kDispatchSignalWaitTimeoutNs, HSA_WAIT_STATE_BLOCKED);
+  const hsa_signal_value_t val = wait_for_dispatch(signal, kDispatchSignalWaitTimeoutNs);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-  ASSERT_EQ(hsa_memory_copy(o_host.data(), o_dev, kOBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(synchronized_hsa_memory_copy(o_host.data(), o_dev, kOBytes), HSA_STATUS_SUCCESS);
 
   if (observed)
     *observed = std::move(o_host);

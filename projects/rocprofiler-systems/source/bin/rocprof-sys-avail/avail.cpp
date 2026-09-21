@@ -1325,10 +1325,12 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     {
         for(const auto& itr : fitr.second)
         {
-            width_type _w = { { (std::int64_t) itr.symbol().length(), (std::int64_t) 4,
-                                (std::int64_t) 6,
-                                (std::int64_t) itr.short_description().length(),
-                                (std::int64_t) itr.long_description().length() } };
+            width_type _w = {
+                { static_cast<std::int64_t>(itr.symbol().length()),
+                  static_cast<std::int64_t>(4), static_cast<std::int64_t>(6),
+                  static_cast<std::int64_t>(itr.short_description().length()),
+                  static_cast<std::int64_t>(itr.long_description().length()) }
+            };
             for(auto& witr : _w)
                 witr += fmt_opts.padding;
 
@@ -1668,8 +1670,8 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, ch
     ss << "\n";
     if(_remain != 0)
     {
-        printf("[banner]> non-zero remainder: %i with total: %i\n", (int) _remain,
-               (int) _total);
+        printf("[banner]> non-zero remainder: %i with total: %i\n",
+               static_cast<int>(_remain), static_cast<int>(_total));
     }
     return ss.str();
 }

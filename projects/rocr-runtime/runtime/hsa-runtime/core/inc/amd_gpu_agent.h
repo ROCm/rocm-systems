@@ -987,7 +987,7 @@ class GpuAgent : public GpuAgentInt {
   struct alignas(64) per_xcc_pcs_data_t {
     pcs_sampling_data_t* device_data;         // This XCC's device buffer region
     os::Thread thread;                        // Thread handle for this XCC's flush thread
-    uint32_t which_buffer;                    // Current buffer selector (0 or 1)
+    std::atomic<uint32_t> which_buffer{0};    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
     hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
     uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
