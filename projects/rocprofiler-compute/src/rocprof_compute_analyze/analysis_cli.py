@@ -100,6 +100,12 @@ def _assign_kernel_ids_from_top(
     return kernel_ids
 
 
+def _warn_missing_source_location_errors(workload: schema.Workload) -> None:
+    """Print deferred missing-source messages after the call tree."""
+    for exc in workload.ml_api_missing_source_errors:
+        console_warning("analysis", str(exc))
+
+
 def _ml_api_operator_cli_requested(args: argparse.Namespace) -> bool:
     """Return True when a list-operators or operator-filter flag is set."""
     for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values():
@@ -199,6 +205,7 @@ class cli_analysis(OmniAnalyze_Base):
             for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
                 if getattr(args, cli["list_attr"], False):
                     self.list_operators(path_info[0], kernel_top_df, backend)
+                    _warn_missing_source_location_errors(workload)
                     sys.exit(0)
 
             for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
@@ -356,6 +363,7 @@ class cli_analysis(OmniAnalyze_Base):
                 "ml api trace",
                 f"No {label} operators matched the pattern(s): {pattern_list}",
             )
+            _warn_missing_source_location_errors(workload)
             sys.exit(0)
 
         kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
@@ -399,6 +407,7 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Display the matched operator call tree for a single backend."""
         if not workload.ml_api_glob_matches:
+            _warn_missing_source_location_errors(workload)
             return
         cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
         label = cli["label"]
@@ -413,3 +422,4 @@ class cli_analysis(OmniAnalyze_Base):
         tty.show_call_tree(subtree)
         tty.show_operator_summary(build_operator_summary(subtree))
         print(f"{'=' * 80}")
+        _warn_missing_source_location_errors(workload)
