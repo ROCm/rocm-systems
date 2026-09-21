@@ -6817,6 +6817,7 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_BufferAllocFails_Propagates)
 
     EXPECT_EQ(r, ncclSystemError);
     EXPECT_EQ(done, 0);
+    EXPECT_EQ(conn_.transportResources, nullptr);   // no dangling stash, as recv mirror asserts
 }
 
 // Recv proxySetup, buffer allocation fails: the allocator's error is
