@@ -91,6 +91,10 @@ rocprofiler_context_id_t ctx_all_second  = {.handle = 0};
 // reorder HIP ordinals.
 std::vector<rocprofiler_agent_id_t> gpu_agents = {};
 
+// HIP ordinal that could not be matched to a rocprofiler agent, or -1 when every device
+// mapped. Reported by main() so a skip is distinguishable from a machine with one GPU.
+int unmapped_device = -1;
+
 // Intermediate storage used to build the HIP-to-rocprofiler mapping: keeps the
 // location_id (BDF) and PCI domain alongside the agent id until the mapping is done.
 struct agent_info_t
@@ -254,6 +258,10 @@ tool_init(rocprofiler_client_finalize_t, void*)
     int device_count = 0;
     if(hipGetDeviceCount(&device_count) != hipSuccess || device_count < 2) return 0;
 
+    // A device with no matching agent must not be skipped silently: dropping it would shift
+    // every later ordinal, so gpu_agents[i] would stop being HIP device i and the contexts
+    // would be scoped to a different physical GPU than the workload runs on. Bail instead and
+    // let main() report the skip.
     for(int dev = 0; dev < device_count; ++dev)
     {
         hipDeviceProp_t prop{};
@@ -261,14 +269,24 @@ tool_init(rocprofiler_client_finalize_t, void*)
         const auto bus = static_cast<uint32_t>(prop.pciBusID);
         const auto did = static_cast<uint32_t>(prop.pciDeviceID);
         const auto dom = static_cast<uint32_t>(prop.pciDomainID);
+
+        bool matched = false;
         for(const auto& info : all_gpu_agent_info)
         {
             if(info.domain == dom && (info.location_id >> 8) == bus &&
                ((info.location_id >> 3) & 0x1Fu) == did)
             {
                 gpu_agents.push_back(info.id);
+                matched = true;
                 break;
             }
+        }
+
+        // Only the first two ordinals are used, so an unmapped device beyond them is harmless.
+        if(!matched)
+        {
+            unmapped_device = dev;
+            break;
         }
     }
 
@@ -371,7 +389,12 @@ main()
 
     if(device_count < 2 || gpu_agents.size() < 2)
     {
-        printf("SKIP: per-agent scoping requires at least 2 GPUs (found %d)\n", device_count);
+        if(unmapped_device >= 0 && unmapped_device < 2)
+            printf("SKIP: HIP device %d has no rocprofiler agent with matching PCI "
+                   "coordinates, so per-agent scoping cannot be checked on this machine\n",
+                   unmapped_device);
+        else
+            printf("SKIP: per-agent scoping requires at least 2 GPUs (found %d)\n", device_count);
         return 0;
     }
 
@@ -406,6 +429,17 @@ main()
            scoped_ms,
            kNumStreams,
            kKernelsPer);
+    // This test only runs on a multi-GPU machine, so print the mapping and the raw counts the
+    // assertions below read: a control failure is otherwise indistinguishable from a scoping bug.
+    printf("hip device 0 -> agent %lu, hip device 1 -> agent %lu\n",
+           static_cast<unsigned long>(agent_0.handle),
+           static_cast<unsigned long>(agent_1.handle));
+    printf("unrestricted: dispatches(gpu0)=%zu | scoped: records(gpu1)=%zu dispatches(gpu0)=%zu "
+           "records(gpu0)=%zu\n",
+           unrestricted_dispatches_gpu0,
+           scoped_records_gpu1,
+           scoped_dispatches_gpu0,
+           scoped_records_gpu0);
 
     // Exact assertions. These hold regardless of how fast the machine is.
     check(unrestricted_dispatches_gpu0 > 0,
