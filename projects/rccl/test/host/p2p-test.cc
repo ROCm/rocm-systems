@@ -6993,6 +6993,13 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_ValidRequest_RecordsFifoAndArms
         EXPECT_EQ(r, ncclSuccess);
         EXPECT_EQ(info->recvFifo, fifo);                  // FIFO pointer recorded
         EXPECT_EQ(conn.proxyAppendPtr, &conn.proxyAppend); // append armed
+        // The copy stream and every per-step event the CE proxy needs were
+        // created and stashed on the proxy info (calloc'd to null above, so a
+        // skipped creation leaves them null). Asserted as "a handle exists"
+        // rather than a specific value, so the fake's sentinel is not pinned.
+        EXPECT_NE(info->stream, nullptr);
+        for (int i = 0; i < NCCL_STEPS; i++)
+            EXPECT_NE(info->events[i], nullptr) << "event " << i << " not created";
         std::free(info);
     });
 }
