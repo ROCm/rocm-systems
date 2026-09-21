@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -187,7 +188,7 @@ private:
     [[nodiscard]] migration_direction classify_direction(
         const std::string& src_label, const std::string& dst_label) const;
     [[nodiscard]] std::optional<std::pair<std::string, std::string>>
-    parse_agent_ids_from_args(const std::string& args_str) const;
+    parse_agent_ids_from_args(std::string_view args_str) const;
 
     [[nodiscard]] std::string resolve_device_label(const kfd_sample&  sample,
                                                    const std::string& src_label,

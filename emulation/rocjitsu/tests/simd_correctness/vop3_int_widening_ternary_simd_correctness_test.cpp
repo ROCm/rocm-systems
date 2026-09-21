@@ -121,7 +121,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -202,7 +202,7 @@ void check_mad_u32_u16_opsel_high_halves(uint64_t exec) {
                 kOpSelSrc0Src1High);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_mad_u32_u16_vop3 decode failed";
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     delete inst;
 
     std::array<uint32_t, WF_SIZE> out{};

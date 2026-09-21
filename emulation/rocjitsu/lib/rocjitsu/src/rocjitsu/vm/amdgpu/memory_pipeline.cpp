@@ -180,6 +180,24 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
+  // Performance-only fast path for ordinary dword loads. The general completion
+  // path below remains authoritative for atomics, conversions, and partial-register
+  // writes. Whole-range ownership was validated above, so this special case can write
+  // through one raw pointer per destination register. Memory completion is VM
+  // bookkeeping and deliberately has no instruction-side observation to preserve.
+  if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
+    for (uint32_t i = 0; i < vgpr_count; ++i) {
+      auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
+      uint64_t lanes = d.lane_mask;
+      while (lanes) {
+        const uint32_t lane = std::countr_zero(lanes);
+        lanes &= lanes - 1;
+        std::memcpy(&destination[lane], &d.response_data[lane * stride + i * sizeof(uint32_t)],
+                    sizeof(uint32_t));
+      }
+    }
+    return MemoryAccessCompletion::Complete;
+  }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
@@ -555,23 +573,20 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   // scratch, not of the instruction, so issue the two groups separately rather
   // than striding a global lane's second dword by lane_count*4. Uniform waves
   // (including every dedicated SCRATCH op) take the single-request path.
-  const uint64_t request_lanes = transpose_request_lane_mask(d);
+  const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
   const uint32_t base_offset = d.scratch_addr_base_offset;
 
   if (d.is_load) {
-    const uint64_t request_lanes = transpose_request_lane_mask(d);
-    const uint64_t scratch_request_lanes = scratch_lanes & request_lanes;
-    const uint64_t plain_request_lanes = plain_lanes & request_lanes;
     d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
-    if (scratch_request_lanes)
-      l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
+    if (scratch_lanes)
+      l1_->load(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
                 d.wf_size, wf.process_id(), stride, base_offset, d.element_lane_masks.view());
-    if (plain_request_lanes)
-      l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
+    if (plain_lanes)
+      l1_->load(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
                 d.wf_size, wf.process_id(), 0, /*addr_base_offset=*/0, d.element_lane_masks.view());
   } else {
@@ -610,8 +625,8 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
 
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    lds.vector_load(d.per_lane_addr.data(), transpose_request_lane_mask(d), d.elem_size,
-                    d.num_elems, d.response_data.data());
+    lds.vector_load(d.per_lane_addr.data(), transpose_request_lane_mask(d, wf.wf_size()),
+                    d.elem_size, d.num_elems, d.response_data.data());
     if (d.ds2_active) {
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
       lds.vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,

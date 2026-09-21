@@ -550,33 +550,33 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1122,8 +1122,8 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1298,8 +1298,8 @@ void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2484,13 +2484,13 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2655,8 +2655,8 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2682,7 +2682,30 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_load_addtid_b32_ds(*this, wf);
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  {
+    uint64_t exec = wf.exec();
+    d->lane_mask = exec;
+    d->exec_mask = exec;
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
+    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
+    uint32_t m0 = wf.m0();
+    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();
+    }
+  }
+  set_data(std::move(d));
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
