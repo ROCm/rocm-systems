@@ -91,9 +91,9 @@ namespace RcclUnitTesting
 
     // Device data-op layer (reusable by any collective/test). Fills this (device)
     // buffer with the shared pattern via a kernel; the pattern at position j uses
-    // global index (startIdx + j). IsEqualDevice compares two device buffers with
-    // the same per-type tolerance as IsEqual, returns the mismatch count, and on a
-    // mismatch logs the first divergent index with its expected/actual value.
+    // global index (startIdx + j). IsEqualDevice compares an actual buffer against
+    // the primary and optional FP8-alternative references, returns the mismatch
+    // count, and logs the first divergent index with its expected/actual value.
     ErrCode FillPatternDevice(ncclDataType_t const dataType,
                               size_t         const numElements,
                               int            const globalRank,
@@ -103,18 +103,22 @@ namespace RcclUnitTesting
                                  size_t         const numElements,
                                  void*          const actualGpu,
                                  void*          const expectedGpu,
-                                 size_t&              mismatches);
+                                 void*          const alternativeExpectedGpu,
+                                 size_t&              mismatches,
+                                 bool           const verbose = true);
 
     // Device-build the all-ranks reduction of the pattern into this (device) buffer,
-    // mirroring PtrUnion::Reduce + DivideByInt. Used for AllReduce's expected in
-    // device-data mode. Handles ncclSum/Prod/Max/Min/Avg (no scalar/bias/const).
+    // mirroring PtrUnion::Reduce + DivideByInt. For FP8, also build the FP32-accumulate,
+    // one-final-round reference in alternativeExpectedGpu. Used for AllReduce's
+    // expected in device-data mode. Handles ncclSum/Prod/Max/Min/Avg (no scalar/bias/const).
     // startIdx offsets the pattern's global element index (0 for AllReduce's full
     // buffer; globalRank*numOutput for ReduceScatter's per-rank scattered slice).
     ErrCode FillReducedPatternDevice(ncclDataType_t const dataType,
                                      size_t         const numElements,
                                      int            const totalRanks,
                                      ncclRedOp_t    const op,
-                                     size_t         const startIdx = 0);
+                                     size_t         const startIdx = 0,
+                                     void*          const alternativeExpectedGpu = nullptr);
 
     ErrCode Set(ncclDataType_t const dataType, int const idx, int valueI, double valueF);
     ErrCode Get(ncclDataType_t const dataType, int const idx, int& valueI, double& valueF) const;
@@ -140,6 +144,7 @@ namespace RcclUnitTesting
     ErrCode IsEqual(ncclDataType_t const  dataType,
                     size_t         const  numElements,
                     PtrUnion       const& expected,
+                    PtrUnion       const* alternativeExpected,
                     bool           const  verbose,
                     bool&                 isMatch);
 
