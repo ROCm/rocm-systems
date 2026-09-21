@@ -151,7 +151,7 @@ static void ResetP2pFakes();
 
 // ---------------------------------------------------------------------------
 // Recording shim for the alloc.h free primitives (ncclCuMemFreeAddr,
-// ncclCuMemFree, ncclCudaFree).
+// ncclCudaFree).
 //
 // These are header-only functions in alloc.h, so there is no external symbol
 // or hookable seam to observe them. But the p2p.cc free paths (send/recv
@@ -170,7 +170,7 @@ static void ResetP2pFakes();
 // Defined here, while the real inline names are still callable (the #define
 // shims below would otherwise make the wrapper bodies recurse).
 namespace {
-enum class FreeKind { CuMemFreeAddr, CuMemFree, CudaFree };
+enum class FreeKind { CuMemFreeAddr, CudaFree };
 struct FreeCall {
     FreeKind    kind;
     const void* ptr;
@@ -183,11 +183,6 @@ inline ncclResult_t RecordCuMemFreeAddr(void* ptr, struct ncclMemManager* mgr,
     g_freeCalls.push_back({FreeKind::CuMemFreeAddr, ptr});
     return ncclCuMemFreeAddr(ptr, mgr, numSegments);
 }
-inline ncclResult_t RecordCuMemFree(void* ptr, struct ncclMemManager* mgr,
-                                    int numSegments = 1) {
-    g_freeCalls.push_back({FreeKind::CuMemFree, ptr});
-    return ncclCuMemFree(ptr, mgr, numSegments);
-}
 template <typename T>
 inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
                                    int numSegments = 1) {
@@ -199,8 +194,11 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 // Route every call site in the included p2p.cc through the recording wrappers.
 // Variadic so both the 2-arg (manager only) and 3-arg (manager, numSegments)
 // call sites expand.
+// ncclCuMemFree has no bare call site in p2p.cc (every cuMem free goes through
+// ncclCuMemFreeAddr, and ncclCudaFree's internal ncclCuMemFree call was already
+// bound to the real inline when alloc.h was included above), so no intercept is
+// needed for it.
 #define ncclCuMemFreeAddr(...) RecordCuMemFreeAddr(__VA_ARGS__)
-#define ncclCuMemFree(...)     RecordCuMemFree(__VA_ARGS__)
 #define ncclCudaFree(...)      RecordCudaFree(__VA_ARGS__)
 
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
