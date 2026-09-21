@@ -2033,113 +2033,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(
-                        header->payload);
-
-                bool _group_by_queue = _default_group_by_queue;
-
-                auto        _stack_id     = record->correlation_id.internal;
-                auto        _beg_ns       = record->start_timestamp;
-                auto        _end_ns       = record->end_timestamp;
-                auto        _dst_agent_id = record->dst_agent_id;
-                auto        _src_agent_id = record->src_agent_id;
-                const auto* dst_agent     = g_tool_data->get_agent(_dst_agent_id);
-                const auto* src_agent     = g_tool_data->get_agent(_src_agent_id);
-                auto name = g_tool_data->buffered_tracing_info.at(record->kind,
-                                                                  record->operation);
-
-                std::uint64_t _stream_id = get_stream_id(record).handle;
-                if(_stream_id == 0)
-                {
-                    // memory_copy is not associated with a HIP stream
-                    _group_by_queue = true;
-                }
-
-                {
-                    size_t      thread_idx = record->thread_id;
-                    std::string track_name;
-
-                    track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                                             dst_agent->logical_node_id, thread_idx);
-
-                    cache_category<category::rocm_memory_copy>();
-                    cache_add_track(track_name.c_str(), record->thread_id);
-
-                    cache_memory_copy(record, _stream_id);
-                }
-
-                if(get_use_timemory())
-                {
-                    const auto& _tinfo = thread_info::get(record->thread_id, SystemTID);
-                    auto        _tid   = _tinfo->index_data->sequent_value;
-
-                    auto _bundle = kernel_dispatch_bundle_t{ name };
-
-                    _bundle.push(_tid).start().stop();
-                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
-                        _wc->set_value(_end_ns - _beg_ns);
-                        _wc->set_accum(_end_ns - _beg_ns);
-                    });
-                    _bundle.pop();
-                }
-
-                if(get_use_perfetto())
-                {
-                    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-                        if(config::get_perfetto_annotations())
-                        {
-                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
-                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "stack_id", _stack_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
-                            tracing::add_perfetto_annotation(ctx, "dst_agent",
-                                                             dst_agent->logical_node_id);
-                            tracing::add_perfetto_annotation(ctx, "src_agent",
-                                                             src_agent->logical_node_id);
-                        }
-                    };
-
-                    if(_group_by_queue)
-                    {
-                        auto _track_desc = [](std::int32_t            _device_id_v,
-                                              rocprofiler_thread_id_t _tid) {
-                            const auto& _tid_v = thread_info::get(_tid, SystemTID);
-                            return fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                                               _device_id_v,
-                                               _tid_v->index_data->sequent_value);
-                        };
-
-                        const auto _track = tracing::get_perfetto_track(
-                            category::rocm_memory_copy{}, _track_desc,
-                            dst_agent->logical_node_id, record->thread_id);
-
-                        tracing::push_perfetto(category::rocm_memory_copy{}, name.data(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_stack_id),
-                                               add_perfetto_annotations);
-
-                        tracing::pop_perfetto(category::rocm_memory_copy{}, "", _track,
-                                              _end_ns);
-                    }
-                    else
-                    {
-                        const auto _track = tracing::get_perfetto_track(
-                            category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
-
-                        tracing::push_perfetto(category::rocm_hip_stream{}, name.data(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_stack_id),
-                                               add_perfetto_annotations);
-
-                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
-                                              _end_ns);
-                    }
-                }
-            }
 #if (ROCPROFILER_VERSION >= 600)
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
@@ -2608,19 +2501,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         rocprofiler_sdk::rccl_comm_data_initialize();
     }
 
-    // ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,          ///< @see
-    // ::rocprofiler_hsa_core_api_id_t ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0)
-    {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
-            &_data->memory_copy_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
-            _data->memory_copy_buffer));
-    }
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
@@ -2663,6 +2543,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         domain_selection selection;
         selection.name = "kernel_dispatch";
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
+    {
+        domain_selection selection;
+        selection.name = "memory_copy";
         domain_selection_list.push_back(selection);
     }
 
