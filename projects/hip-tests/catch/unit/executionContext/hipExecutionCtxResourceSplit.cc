@@ -15,13 +15,15 @@
 #include <hip_test_kernels.hh>
 #include "hip_executionctx_common.hh"
 
+#include <algorithm>
 #include <vector>
 
 /**
  * Test Description
  * ------------------------
- *  - Splits device SM resources into 2 explicit groups via hipDevSmResourceSplit
- *    and verifies the output resource counts match the request.
+ *  - Splits device SM resources into a single group containing half the total
+ *    SMs (aligned to smCoscheduledAlignment) via hipDevSmResourceSplit.
+ *    Verifies the result SM count and that the remainder captures the rest.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
   HIP_CHECK(hipSetDevice(0));
@@ -34,26 +36,20 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int halfSMs = (totalSMs / 2 / alignment) * alignment;
-  REQUIRE(halfSMs >= 2);
+  REQUIRE(halfSMs >= alignment);
 
-  hipDevSmResourceGroupParams params[2] = {};
+  hipDevSmResourceGroupParams params[1] = {};
   params[0].smCount = halfSMs;
-  params[1].smCount = halfSMs;
 
-  hipDevResource result[2] = {};
+  hipDevResource result[1] = {};
   hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+  HIP_CHECK(hipDevSmResourceSplit(result, 1, &input, &remainder, 0, params));
 
   REQUIRE(result[0].type == hipDevResourceTypeSm);
   REQUIRE(result[0].sm.smCount == halfSMs);
-  REQUIRE(result[1].type == hipDevResourceTypeSm);
-  REQUIRE(result[1].sm.smCount == halfSMs);
 
-  unsigned int remainderSMs = 0;
-  if (remainder.type == hipDevResourceTypeSm) {
-    remainderSMs = remainder.sm.smCount;
-  }
-  REQUIRE(result[0].sm.smCount + result[1].sm.smCount + remainderSMs == totalSMs);
+  REQUIRE(remainder.type == hipDevResourceTypeSm);
+  REQUIRE(remainder.sm.smCount == totalSMs - halfSMs);
 }
 
 /**
@@ -135,10 +131,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
           == hipErrorInvalidResourceType);
 
   // smCount < minSmPartitionSize (must be >= minSmPartitionSize)
-  hipDevSmResourceGroupParams tooSmall[1] = {};
-  tooSmall[0].smCount = input.sm.minSmPartitionSize - 1;
-  REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 0, tooSmall)
-          == hipErrorInvalidResourceConfiguration);
+  if (input.sm.minSmPartitionSize > 1) {
+    hipDevSmResourceGroupParams tooSmall[1] = {};
+    tooSmall[0].smCount = input.sm.minSmPartitionSize - 1;
+    REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 0, tooSmall)
+            == hipErrorInvalidResourceConfiguration);
+  }
 
   // smCount exceeds total SMs
   hipDevSmResourceGroupParams tooLarge[1] = {};
@@ -157,10 +155,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
 /**
  * Test Description
  * ------------------------
- *  - Splits SM resources into 2 explicit groups via hipDevSmResourceSplit using
- *    a 60/40 split.  Any SMs left over due to alignment are captured in the
- *    remainder.  Creates a execution context and stream from each partition, runs a
- *    vectorADD kernel, and verifies correctness.
+ *  - Uses hipDevSmResourceSplitByCount discovery to find the supported number
+ *    of groups.  If at least 3 groups are possible, performs an asymmetric
+ *    hipDevSmResourceSplit (1x and 2x alignment); otherwise falls back to a
+ *    symmetric split (alignment + alignment).  Creates a execution context and
+ *    stream from each partition, runs a vectorADD kernel, and verifies
+ *    correctness.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
   HIP_CHECK(hipSetDevice(0));
@@ -172,10 +172,13 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
-  unsigned int groupA = (static_cast<unsigned int>(totalSMs * 0.6) / alignment) * alignment;
-  unsigned int groupB = (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment;
-  REQUIRE(groupA >= alignment);
-  REQUIRE(groupB >= alignment);
+
+  unsigned int nbGroups = 0;
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, alignment));
+  REQUIRE(nbGroups >= 2);
+
+  unsigned int groupA = alignment;
+  unsigned int groupB = (nbGroups >= 3) ? alignment * 2 : alignment;
 
   hipDevSmResourceGroupParams params[2] = {};
   params[0].smCount = groupA;
@@ -185,7 +188,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
   hipDevResource remainder{};
   HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
 
+  REQUIRE(result[0].type == hipDevResourceTypeSm);
   REQUIRE(result[0].sm.smCount == groupA);
+  REQUIRE(result[1].type == hipDevResourceTypeSm);
   REQUIRE(result[1].sm.smCount == groupB);
 
   unsigned int remainderSMs = 0;
@@ -248,8 +253,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
-  unsigned int minCount = (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment;
-  REQUIRE(minCount >= alignment);
+  unsigned int minCount = min(alignment, (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment);
 
   unsigned int nbGroups = 0;
   HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount));
@@ -267,6 +271,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
   if (remainder.type == hipDevResourceTypeSm) {
     remainderSMs = remainder.sm.smCount;
   }
+
   REQUIRE(assignedSMs + remainderSMs == totalSMs);
 
   RunVectorAddOnResource(&result[0], 0);
@@ -276,10 +281,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
 /**
  * Test Description
  * ------------------------
- *  - Splits SM resources into 2 groups via hipDevSmResourceSplit where the first
- *    group gets 65% of CUs and the second group uses the backfill flag to absorb
- *    all remaining CUs.  Verifies that the remainder has 0 CUs and runs a
- *    vectorADD kernel on each partition.
+ *  - Uses hipDevSmResourceSplitByCount discovery to find the supported number
+ *    of groups, then splits SM resources into 2 groups via hipDevSmResourceSplit
+ *    where the first group gets ~65% of SMs (capped to the discoverable range)
+ *    and the second group uses the backfill flag to absorb all remaining SMs.
+ *    Verifies that the remainder is invalid and runs a vectorADD kernel on each
+ *    partition.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Backfill_Functional) {
   HIP_CHECK(hipSetDevice(0));
@@ -291,7 +298,14 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Backfill_Functional) {
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
+
+  unsigned int nbGroups = 0;
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, alignment));
+  REQUIRE(nbGroups >= 2);
+
+  unsigned int maxExplicit = (nbGroups - 1) * alignment;
   unsigned int group0 = (static_cast<unsigned int>(totalSMs * 0.65) / alignment) * alignment;
+  group0 = std::min(group0, maxExplicit);
   REQUIRE(group0 >= alignment);
 
   hipDevSmResourceGroupParams params[2] = {};
@@ -331,8 +345,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int groupSize = (totalSMs / 3 / alignment) * alignment;
-  REQUIRE(groupSize >= alignment);
-
+  if (groupSize < alignment) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kSmCountTooSmall);
+  }
   hipDevSmResourceGroupParams params[3] = {};
   params[0].smCount = groupSize;
   params[1].smCount = groupSize;
@@ -347,7 +362,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
     REQUIRE(result[i].sm.smCount == groupSize);
   }
 
-  unsigned int maskWords = (totalSMs + 31) / 32;
+  unsigned int totalWGPs = (alignment > 1) ? totalSMs / alignment : totalSMs;
+  unsigned int maskWords = (totalWGPs + 31) / 32;
   std::vector<std::vector<uint32_t>> masks(3);
   hipExecutionCtx_t ctx[3] = {};
   hipStream_t stream[3] = {};

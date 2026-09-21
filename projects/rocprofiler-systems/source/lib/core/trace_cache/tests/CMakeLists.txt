@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 set(trace_cache_tests_sources
+    test_args_serialization.cpp
     test_buffer_storage.cpp
     test_cache_integration.cpp
     test_cacheable.cpp
@@ -9,6 +10,8 @@ set(trace_cache_tests_sources
     test_enabled_formats.cpp
     test_flush_worker.cpp
     test_kfd_args.cpp
+    test_rocpd_pmc_name_contract.cpp
+    test_rocpd_processor.cpp
     test_rocpd_xcp_output.cpp
     test_sample_type.cpp
     test_storage_parser.cpp
@@ -23,8 +26,8 @@ target_link_libraries(
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
+        rocprofiler-systems-profiler-hub
         rocprofiler-systems-logger
-        rocprofiler-systems-ghc-filesystem
         rocprofiler-systems-headers
         rocprofiler-systems-rocm
         rocprofiler-systems-json

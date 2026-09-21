@@ -5,6 +5,7 @@
 
 #include "configuration.h"
 #include "environment.h"
+#include "hipfile-literals.h"
 #include "hipfile-warnings.h"
 #include "mhip.h"
 #include "msys.h"
@@ -37,8 +38,11 @@ struct HipFileConfiguration : public Test {
             .WillOnce(Return(hipAmdFileWrite));
     }
 
-    void expect_configuration_fallback(const char *hipfile_allow_compat_mode)
+    void expect_configuration_fallback(const char *hipfile_force_compat_mode,
+                                       const char *hipfile_allow_compat_mode)
     {
+        EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::FORCE_COMPAT_MODE)))
+            .WillOnce(Return(const_cast<char *>(hipfile_force_compat_mode)));
         EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::ALLOW_COMPAT_MODE)))
             .WillOnce(Return(const_cast<char *>(hipfile_allow_compat_mode)));
     }
@@ -53,6 +57,12 @@ struct HipFileConfiguration : public Test {
     {
         EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::UNSUPPORTED_FILE_SYSTEMS)))
             .WillOnce(Return(const_cast<char *>(hipfile_unsupported_file_systems)));
+    }
+
+    void expect_configuration_async_buffer_size(const char *hipfile_async_buffer_size)
+    {
+        EXPECT_CALL(msys, getenv(StrEq(hipFile::Environment::ASYNC_BUFFER_SIZE)))
+            .WillOnce(Return(const_cast<char *>(hipfile_async_buffer_size)));
     }
 };
 
@@ -134,26 +144,26 @@ TEST_F(HipFileConfiguration, CantOverrideDisabledFastpathBackendIfHipAmdFileWrit
 
 TEST_F(HipFileConfiguration, FallbackEnabledIfAllowCompatModeEnvironmentVariableIsNotSet)
 {
-    expect_configuration_fallback(nullptr);
+    expect_configuration_fallback(nullptr, nullptr);
     ASSERT_TRUE(Configuration().fallback());
 }
 
 TEST_F(HipFileConfiguration, FallbackEnabledIfAllowCompatModeEnvironmentVariableIsInvalid)
 {
-    expect_configuration_fallback("not-a-bool");
+    expect_configuration_fallback(nullptr, "not-a-bool");
     ASSERT_TRUE(Configuration().fallback());
 }
 
 TEST_F(HipFileConfiguration, FallbackEnabledIfAllowCompatModeEnvironmentVariableIsTrue)
 {
-    expect_configuration_fallback("true");
+    expect_configuration_fallback(nullptr, "true");
     ASSERT_TRUE(Configuration().fallback());
 }
 
 TEST_F(HipFileConfiguration, OverrideEnabledFallbackBackend)
 {
     Configuration config{};
-    expect_configuration_fallback(nullptr);
+    expect_configuration_fallback(nullptr, nullptr);
     ASSERT_TRUE(config.fallback());
 
     config.fallback(false);
@@ -162,18 +172,33 @@ TEST_F(HipFileConfiguration, OverrideEnabledFallbackBackend)
 
 TEST_F(HipFileConfiguration, FallbackDisabledIfAllowCompatModeEnvironmentVariableIsFalse)
 {
-    expect_configuration_fallback("false");
+    expect_configuration_fallback(nullptr, "false");
     ASSERT_FALSE(Configuration().fallback());
 }
 
 TEST_F(HipFileConfiguration, OverrideDisabledFallbackBackend)
 {
     Configuration config{};
-    expect_configuration_fallback("false");
+    expect_configuration_fallback(nullptr, "false");
     ASSERT_FALSE(config.fallback());
 
     config.fallback(true);
     ASSERT_TRUE(config.fallback());
+}
+
+TEST_F(HipFileConfiguration, FallbackForcedOnWhenForceCompatTrueAndAllowCompatFalse)
+{
+    // HIPFILE_FORCE_COMPAT_MODE=true + HIPFILE_ALLOW_COMPAT_MODE=false would disable both backends.
+    // The guard must force the fallback path back on.
+    expect_configuration_fallback("true", "false");
+    ASSERT_TRUE(Configuration().fallback());
+}
+
+TEST_F(HipFileConfiguration, FallbackEnabledWhenForceCompatTrueAndAllowCompatTrue)
+{
+    // FORCE=true + ALLOW=true: forced fallback, unchanged behavior.
+    expect_configuration_fallback("true", "true");
+    ASSERT_TRUE(Configuration().fallback());
 }
 
 TEST_F(HipFileConfiguration, StatsLevelEnvironmentVariableIsNotSet)
@@ -216,6 +241,30 @@ TEST_F(HipFileConfiguration, UnsupportedFilesystemsDisabledIfEnvironmentVariable
 {
     expect_configuration_unsupported_file_systems("false");
     ASSERT_FALSE(Configuration().unsupportedFileSystems());
+}
+
+TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsNotSet)
+{
+    expect_configuration_async_buffer_size(nullptr);
+    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
+}
+
+TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsInvalid)
+{
+    expect_configuration_async_buffer_size("not-a-number");
+    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
+}
+
+TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsSet)
+{
+    expect_configuration_async_buffer_size("2097152");
+    ASSERT_EQ(2097152, Configuration().asyncBufferSize());
+}
+
+TEST_F(HipFileConfiguration, AsyncBufferSizeEnvironmentVariableIsZero)
+{
+    expect_configuration_async_buffer_size("0");
+    ASSERT_EQ(16_MiB, Configuration().asyncBufferSize());
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

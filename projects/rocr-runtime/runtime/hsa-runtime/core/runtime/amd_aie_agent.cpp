@@ -248,6 +248,9 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
       assert(regions_.size() != 0 && "No device local memory found!");
       *static_cast<bool*>(value) = true;
       break;
+    case HSA_AMD_AGENT_INFO_NEAREST_CPU:
+      *static_cast<hsa_agent_t*>(value) = GetNearestCpuAgent()->public_handle();
+      break;
     case HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES:
       std::memset(value, 0, sizeof(uint8_t) * 8);
       break;
@@ -260,6 +263,12 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   }
 
   return HSA_STATUS_SUCCESS;
+}
+
+core::Agent* AieAgent::GetNearestCpuAgent() const {
+  // AIE agents are currently associated with the first CPU agent.
+  assert(!core::Runtime::runtime_singleton_->cpu_agents().empty());
+  return core::Runtime::runtime_singleton_->cpu_agents()[0];
 }
 
 hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
@@ -286,7 +295,8 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  auto aql_queue(new AieAqlQueue(shared_queue, this, size, node_id(), flags));
+  auto aql_queue(
+      new AieAqlQueue(shared_queue, this, size, node_id(), event_callback, data, flags));
   if (aql_queue == nullptr) {
     core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;

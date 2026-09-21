@@ -30,7 +30,7 @@ is_power_of_two(size_t value)
 /// @brief Alignment used for O_DIRECT transfers. Must be a power of two and a
 /// multiple of the underlying filesystem's logical block size; 4 KiB satisfies
 /// both for the ext4/xfs setups hipFile supports today.
-#define BLOCK_ALIGN ((size_t)4096)
+#define BLOCK_ALIGN (static_cast<size_t>(4096))
 static_assert(is_power_of_two(BLOCK_ALIGN), "BLOCK_ALIGN must be a power of two");
 
 /// @brief Round value up to the next multiple of align. Align _must_ be a power of 2.

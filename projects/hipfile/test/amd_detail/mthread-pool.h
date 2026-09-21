@@ -8,10 +8,10 @@
 #include "context.h"
 #include "thread-pool.h"
 
-#include <cstddef>
 #include <functional>
-#include <gmock/gmock.h>
 #include <memory>
+
+#include <gmock/gmock.h>
 
 namespace hipFile {
 
@@ -24,14 +24,13 @@ public:
 
 class MThreadPool : public IThreadPool {
 public:
-    ContextOverride<IThreadPool> co;
+    ContextOverride<IThreadPool> o_co;
 
-    MThreadPool() : co{this}
+    MThreadPool() : o_co{this}
     {
     }
 
     MOCK_METHOD(std::unique_ptr<ITaskGroup>, makeTaskGroup, (), (override));
-    MOCK_METHOD(std::size_t, threadCount, (), (const, noexcept, override));
 };
 
 }

@@ -18,7 +18,6 @@
 struct ncclComm;
 #include "os.h"
 #include <memory>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unordered_map>
@@ -36,6 +35,10 @@ struct ncclComm;
 #include "rocmwrap.h"
 #endif
 
+#if defined(NCCL_OS_LINUX)
+#include <unistd.h>
+#endif
+
 // Global flag to detect process shutdown. Set by atexit handler before
 // HIP runtime static destructors run. This prevents use-after-free crashes
 // when RCCL proxy threads try to free GPU memory during process exit.
@@ -50,23 +53,81 @@ inline void rcclShutdownHandler() {
 
 inline void rcclRegisterShutdownHandler() {
   static std::once_flag once;
-  std::call_once(once, []() {
-    atexit(rcclShutdownHandler);
-  });
+  std::call_once(once, []() { atexit(rcclShutdownHandler); });
 }
 
+// RCCL workaround (gfx950 / gfx1250): hipMemUnmap on cuMem VMM *peer* allocations
+// can deadlock or double-free in the HSA busy-wait during ncclCommDestroy teardown.
+// To avoid that we skip ONLY the peer-aperture teardown in ncclCuMemFreeAddr (the
+// cuMemUnmap + cuMemAddressFree of the peer-mapped VA range), leaking just that
+// VA aperture (the OS reclaims it at process exit). The owner's physical handle
+// (ncclCuMemFree -> cuMemRelease) and ordinary buffers (ncclCudaFree -> cudaFree)
+// still free normally, so long-lived processes do not grow memory on every
+// ncclCommDestroy. Auto-enabled on gfx950 and gfx1250 (ROCM-30633); override with
+// NCCL_CUMEM_SKIP_FREE=0 (force off) or =1 (force on).
+//
+// Separate site: ncclDevrFinalize may skip owner-local cuMemAddressFree of the
+// LSA flat VA reservation (lsaFlatBase). Temporary gfx1250-only workaround
+// (ROCM-30633): leftover peer maps can hang or double-free AddressFree, and this
+// is the only reclaim site, so a process that creates/destroys device-API comms
+// in a loop will not recover that VA until exit. MI355 (gfx950) still
+// AddressFrees this reservation with skip-free auto-on. NCCL_CUMEM_SKIP_FREE
+// =0/1 still overrides both helpers below.
+inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx950") != nullptr ||
+         strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclSkipLsaFlatAddressFreeFromArch(const hipDeviceProp_t& prop) {
+  return strstr(prop.gcnArchName, "gfx1250") != nullptr;
+}
+
+inline bool rcclQueryDeviceProp(hipDeviceProp_t* prop) {
+  *prop = hipDeviceProp_t{};
+  int dev = 0;
+  if (hipGetDevice(&dev) != hipSuccess) return false;
+  if (hipGetDeviceProperties(prop, dev) != hipSuccess) return false;
+  return true;
+}
+
+// Shared NCCL_CUMEM_SKIP_FREE parse + memoization; ArchPred is the only difference.
+template <bool (*ArchPred)(const hipDeviceProp_t&)>
+inline bool rcclSkipCuMemFreeIfArch() {
+  static const bool skip = []() {
+    const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
+    if (e) return atoi(e) != 0;
+    hipDeviceProp_t prop;
+    if (!rcclQueryDeviceProp(&prop)) return false;
+    return ArchPred(prop);
+  }();
+  return skip;
+}
+
+inline bool rcclSkipCuMemFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipCuMemFreeFromArch>();
+}
+
+inline bool rcclSkipLsaFlatAddressFree() {
+  return rcclSkipCuMemFreeIfArch<rcclSkipLsaFlatAddressFreeFromArch>();
+}
 uint64_t clockNano(); // from utils.h with which we have a circular dependency
 
-template<typename T>
-constexpr size_t ncclSizeOfT() { return sizeof(T); }
-template<>
-constexpr size_t ncclSizeOfT<void>() { return 1; }
+template <typename T>
+constexpr size_t ncclSizeOfT() {
+  return sizeof(T);
+}
+template <>
+constexpr size_t ncclSizeOfT<void>() {
+  return 1;
+}
 
 // C++14-compatible wrapper that captures function pointers through template parameters.
 template <typename FunctionPtr, FunctionPtr Function>
 struct ncclDeleterWrapper {
   template <typename... Args>
-  constexpr auto operator()(Args &&...args) const { return Function(std::forward<Args>(args)...); }
+  constexpr auto operator()(Args&&... args) const {
+    return Function(std::forward<Args>(args)...);
+  }
 }; // struct ncclDeleterWrapper
 
 using ncclDeleterFree = ncclDeleterWrapper<decltype(&std::free), std::free>;
@@ -75,81 +136,160 @@ using ncclUniquePtr = std::unique_ptr<T, ncclDeleterFree>;
 template <typename T>
 using ncclUniqueArrayPtr = std::unique_ptr<T[], ncclDeleterFree>;
 
+// Side streams are cached per (busId, priority) and reference counted by the
+// number of active "allocation scopes" (comm init and P2P connect bursts,
+// including lazy connect). The stream is created on the first acquire of a
+// given (busId, priority) and destroyed - releasing its scarce GPU hardware
+// queue - when the last scope for that key exits. This keeps allocations within
+// a burst churn-free while ensuring no side stream persists (and holds a HW
+// queue) through the steady-state collective phase.
+struct ncclSideStreamKey {
+  int64_t busId;
+  int priority;
+  bool operator==(const ncclSideStreamKey& o) const {
+    return busId == o.busId && priority == o.priority;
+  }
+};
+struct ncclSideStreamKeyHash {
+  size_t operator()(const ncclSideStreamKey& k) const {
+    return std::hash<int64_t>()(k.busId) ^ (std::hash<int>()(k.priority) << 1);
+  }
+};
+
 struct ncclSideStream {
   cudaStream_t stream;
   uint64_t refCount;
 };
 
-inline std::unordered_map<int64_t, ncclSideStream> sideStream;
+inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
 inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
-extern ncclResult_t getBusId(int cudaDev, int64_t *busId);
 
-static inline ncclResult_t ncclCreateSideStream(int cudaDev) {
+extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
+
+// Clamp a requested stream priority into the device-supported range.
+// greatest is the most-prioritized (numerically smallest) value.
+static inline int ncclClampStreamPriority(int priority) {
+  int least = 0, greatest = 0;
+  cudaError_t err = cudaDeviceGetStreamPriorityRange(&least, &greatest);
+  if (err != cudaSuccess) {
+    // Fall back to priority 0 rather than leaving an out-of-range value. This
+    // path does not go through CUDACHECK/rcclCudaErrorHandler, so log here.
+    WARN("cudaDeviceGetStreamPriorityRange failed: '%s'; defaulting side-stream "
+         "priority clamp to 0",
+         cudaGetErrorString(err));
+    return 0;
+  }
+  if (priority < greatest) priority = greatest;
+  if (priority > least) priority = least;
+  return priority;
+}
+
+// Acquire a scoped, refcounted, priority-keyed side stream for this device.
+static inline ncclResult_t ncclSideStreamAcquire(int cudaDev, int priority = 0) {
   ncclResult_t res = ncclSuccess;
   int64_t busId;
   NCCLCHECK(getBusId(cudaDev, &busId));
+  priority = ncclClampStreamPriority(priority);
+  ncclSideStreamKey key{busId, priority};
   pthread_mutex_lock(&sideStreamLock);
-  if (auto it = sideStream.find(busId); it != sideStream.end()) {
+  if (auto it = sideStream.find(key); it != sideStream.end()) {
     it->second.refCount++;
-    INFO(NCCL_ALLOC, "Side stream %p of dev %d busid %lx inc count to %ld",
-      it->second.stream, cudaDev, busId, it->second.refCount);
+    INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d inc count to %ld", it->second.stream, cudaDev, busId,
+         priority, it->second.refCount);
   } else {
     cudaStream_t stream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), res, fail);
-    sideStream.emplace(busId, ncclSideStream{stream, 1});
-    INFO(NCCL_ALLOC, "Created side stream %p of dev %d busid %lx",
-      stream, cudaDev, busId);
+    // cudaStreamCreateWithPriority can fail for OOM, invalid value, init/driver
+    // errors, etc. — not only cudaErrorStreamCaptureInvalidated. CUDACHECKGOTO
+    // logs the HIP string via rcclCudaErrorHandler; add operation context here.
+    CUDACHECKGOTO(cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, priority), res, fail);
+    sideStream.emplace(key, ncclSideStream{stream, 1});
+    INFO(NCCL_ALLOC, "Created side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
   }
 fail:
+  if (res != ncclSuccess)
+    WARN("ncclSideStreamAcquire: cudaStreamCreateWithPriority failed for "
+         "dev %d busid %lx prio %d (see HIP failure above)",
+         cudaDev, busId, priority);
   pthread_mutex_unlock(&sideStreamLock);
   return res;
-};
+}
 
-static inline ncclResult_t ncclDestroySideStream(int cudaDev) {
+// Release a previously-acquired side stream. Destroys it (freeing the HW queue)
+// when the last scope for this (busId, priority) exits.
+static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) {
   ncclResult_t res = ncclSuccess;
   int64_t busId;
   NCCLCHECK(getBusId(cudaDev, &busId));
+  priority = ncclClampStreamPriority(priority);
+  ncclSideStreamKey key{busId, priority};
   pthread_mutex_lock(&sideStreamLock);
-  if (auto it = sideStream.find(busId); it != sideStream.end()) {
-    it->second.refCount--;
-    if (it->second.refCount== 0) {
-      INFO(NCCL_ALLOC, "Destroyed side stream %p of dev %d busid %lx",
-        it->second.stream, cudaDev, busId);
-      CUDACHECKGOTO(cudaStreamDestroy(it->second.stream), res, fail);
+  if (auto it = sideStream.find(key); it != sideStream.end()) {
+    if (--it->second.refCount == 0) {
+      // Drop the map entry before destroy so a CUDACHECKGOTO failure cannot
+      // leave a refCount==0 zombie that getSideStream would still return.
+      // If destroy itself fails, the HW queue may leak until process exit, but
+      // that is preferable to handing out a dead/half-released stream later.
+      cudaStream_t stream = it->second.stream;
+      INFO(NCCL_ALLOC, "Destroyed side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
       sideStream.erase(it);
+      CUDACHECKGOTO(cudaStreamDestroy(stream), res, fail);
     } else {
-      INFO(NCCL_ALLOC, "Side stream %p of dev %d busid %lx dec count to %ld",
-        it->second.stream, cudaDev, busId, it->second.refCount);
+      INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d dec count to %ld", it->second.stream, cudaDev, busId,
+           priority, it->second.refCount);
     }
   } else {
-    WARN("Side stream of dev %d busid %lx was not found for destroy", cudaDev, busId);
+    WARN("Side stream of dev %d busid %lx prio %d was not found for release", cudaDev, busId, priority);
   }
 fail:
+  if (res != ncclSuccess)
+    WARN("ncclSideStreamRelease: cudaStreamDestroy failed for "
+         "dev %d busid %lx prio %d (see HIP failure above)",
+         cudaDev, busId, priority);
   pthread_mutex_unlock(&sideStreamLock);
   return res;
-};
+}
 
-static inline ncclResult_t getSideStream(cudaStream_t *stream) {
+// Return the cached side stream for the current device+priority, or nullptr if
+// no scope is currently active (caller then uses a local fallback stream).
+static inline ncclResult_t getSideStream(cudaStream_t* stream, int priority = 0) {
   int cudaDev;
   int64_t busId;
   CUDACHECK(cudaGetDevice(&cudaDev));
   NCCLCHECK(getBusId(cudaDev, &busId));
+  priority = ncclClampStreamPriority(priority);
   pthread_mutex_lock(&sideStreamLock);
-  if (auto it = sideStream.find(busId); it != sideStream.end()) {
+  if (auto it = sideStream.find(ncclSideStreamKey{busId, priority}); it != sideStream.end()) {
     *stream = it->second.stream;
-    INFO(NCCL_ALLOC, "Found side stream %p of dev %d busid %lx count %ld",
-      it->second.stream, cudaDev, busId, it->second.refCount);
   } else {
-    *stream = 0;
-    WARN("Side stream of dev %d busid %lx was not found", cudaDev, busId);
+    *stream = nullptr;
   }
   pthread_mutex_unlock(&sideStreamLock);
   return ncclSuccess;
 }
 
+// RAII helper: hold a side-stream scope for the duration of an allocation-heavy
+// phase (e.g. transport pre-connect). All ncclCudaCalloc/ncclCudaMemcpy in the
+// phase - including those issued on the proxy thread for the same device while
+// the calling thread blocks - reuse the one pooled stream, then the HW queue is
+// freed on scope exit. The pool is keyed by (busId, priority), so cross-thread
+// reuse for the same device and priority works without merging priorities.
+struct ncclSideStreamScope {
+  int dev;
+  int prio;
+  bool active;
+  explicit ncclSideStreamScope(int cudaDev, int priority = 0) : dev(cudaDev), prio(priority), active(false) {
+    if (ncclSideStreamAcquire(dev, prio) == ncclSuccess) active = true;
+  }
+  ~ncclSideStreamScope() {
+    if (active) ncclSideStreamRelease(dev, prio);
+  }
+  ncclSideStreamScope(const ncclSideStreamScope&) = delete;
+  ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
+};
+
 #if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
 
-static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle *handlep, size_t size) {
+static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle* handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
   size_t granularity = 0;
   CUdevice currentDev;
@@ -210,7 +350,8 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
 
   if (handlep) *handlep = handle;
-  INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %p numa %d dev %d granularity %ld", size, *ptr, (void*)(uintptr_t)handle, cpuNumaNodeId, cudaDev, granularity);
+  INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %p numa %d dev %d granularity %ld", size, *ptr,
+       (void*)(uintptr_t)handle, cpuNumaNodeId, cudaDev, granularity);
   return result;
 fail:
   WARN("ncclCuMemHostAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
@@ -220,6 +361,8 @@ fail:
   *ptr = nullptr;
   return result;
 }
+#define ncclCuMemHostAlloc(ptr, handlep, size) \
+  ncclCuMemHostAllocDebug((ptr), (handlep), (size), __FILE__, __LINE__, __func__)
 
 static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   if (ptr == NULL) return ncclSuccess;
@@ -241,10 +384,19 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
 
 #else /* CUDART_VERSION >= 12020 */
 
-static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, void* handlep, size_t size) {
+static inline ncclResult_t ncclCuMemHostAllocDebug(void** ptr, void* handlep, size_t size, const char* file, int line,
+                                                   const char* callerFunc) {
+  (void)ptr;
+  (void)handlep;
+  (void)size;
+  (void)file;
+  (void)line;
+  (void)callerFunc;
   WARN("CUMEM Host is not supported prior to CUDA 12.2");
   return ncclInternalError;
 }
+#define ncclCuMemHostAlloc(ptr, handlep, size) \
+  ncclCuMemHostAllocDebug((ptr), (handlep), (size), __FILE__, __LINE__, __func__)
 
 static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   WARN("CUMEM Host is not supported prior to CUDA 12.2");
@@ -254,32 +406,24 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
 #endif  /* CUDART_VERSION >= 12020 */
 
 template <typename T>
-ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char *filefunc, int line) {
+ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  int managed = 0;
-  CUDACHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
   if (nelem > 0) {
-    if (managed) {
-#if defined(HIP_UNCACHED_MEMORY)
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), hipDeviceMallocUncached), result, finish);
-#else
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), hipDeviceMallocFinegrained), result, finish);
-#endif
-    } else
 #if defined(HIP_HOST_UNCACHED_MEMORY)
-      CUDACHECKGOTO(hipHostMalloc(ptr, nelem*ncclSizeOfT<T>(), cudaHostAllocMapped | hipHostMallocUncached), result, finish);
+    CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped | hipHostMallocUncached), result,
+                  finish);
 #else
-      CUDACHECKGOTO(hipHostMalloc(ptr, nelem*ncclSizeOfT<T>(), cudaHostAllocMapped), result, finish);
+    CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped), result, finish);
 #endif
-    memset(*ptr, 0, nelem*ncclSizeOfT<T>());
+    memset(*ptr, 0, nelem * ncclSizeOfT<T>());
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA host alloc %ld bytes", nelem*ncclSizeOfT<T>());
-  INFO(NCCL_ALLOC, "%s:%d Cuda Host Alloc Size %ld pointer %p", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr);
+  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA host alloc %ld bytes", nelem * ncclSizeOfT<T>());
+  INFO(NCCL_ALLOC, "%s:%d Cuda Host Alloc Size %ld pointer %p", filefunc, line, nelem * ncclSizeOfT<T>(), *ptr);
   return result;
 }
 
@@ -297,16 +441,20 @@ static inline ncclResult_t ncclCudaHostFree(void* ptr) {
 #define ncclCudaHostCalloc(...) ncclCudaHostCallocDebug(__VA_ARGS__, __FILE__, __LINE__)
 
 template <typename T>
-ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char *filefunc, int line) {
+ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char* file, int line, const char* callerFunc,
+                             bool logHostAlloc) {
   if (nelem > 0) {
-    T* p = (T*)malloc(nelem*ncclSizeOfT<T>());
+    T* p = (T*)malloc(nelem * ncclSizeOfT<T>());
     if (p == NULL) {
-      WARN("Failed to malloc %ld bytes", nelem*ncclSizeOfT<T>());
+      WARN("Failed to malloc %ld bytes", nelem * ncclSizeOfT<T>());
       return ncclSystemError;
     }
-    //INFO(NCCL_ALLOC, "%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*ncclSizeOfT<T>(), p);
-    memset((void*)p, 0, nelem*ncclSizeOfT<T>());
+    // INFO(NCCL_ALLOC, "%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*ncclSizeOfT<T>(), p);
+    memset((void*)p, 0, nelem * ncclSizeOfT<T>());
     *ptr = p;
+    if (logHostAlloc)
+      INFO_LOC_FN(NCCL_ALLOC_HOST, file, line, callerFunc, "Host Calloc Size %ld pointer %p", nelem * ncclSizeOfT<T>(),
+                  p);
   } else {
     *ptr = NULL;
   }
@@ -314,43 +462,53 @@ ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char *filefunc, int li
 }
 
 template <typename T>
-ncclResult_t ncclCallocDebug(ncclUniquePtr<T>& ptr, size_t nelem, const char *filefunc, int line) {
+ncclResult_t ncclCallocDebug(ncclUniquePtr<T>& ptr, size_t nelem, const char* file, int line, const char* callerFunc,
+                             bool logHostAlloc) {
   typename ncclUniquePtr<T>::pointer p = nullptr;
-  ncclResult_t result = ncclCallocDebug(&p, nelem, filefunc, line);
+  ncclResult_t result = ncclCallocDebug(&p, nelem, file, line, callerFunc, logHostAlloc);
   ptr.reset(p);
   return result;
 }
 
 template <typename T>
-ncclResult_t ncclCallocDebug(ncclUniqueArrayPtr<T>& ptr, size_t nelem, const char *filefunc, int line) {
+ncclResult_t ncclCallocDebug(ncclUniqueArrayPtr<T>& ptr, size_t nelem, const char* file, int line,
+                             const char* callerFunc, bool logHostAlloc) {
   typename ncclUniqueArrayPtr<T>::pointer p = nullptr;
-  ncclResult_t result = ncclCallocDebug(&p, nelem, filefunc, line);
+  ncclResult_t result = ncclCallocDebug(&p, nelem, file, line, callerFunc, logHostAlloc);
   ptr.reset(p);
   return result;
 }
 
-#define ncclCalloc(...) ncclCallocDebug(__VA_ARGS__, __FILE__, __LINE__)
+#define ncclCalloc(...) ncclCallocDebug(__VA_ARGS__, __FILE__, __LINE__, __func__, true)
+/* Quiet calloc/realloc skip NCCL_ALLOC_HOST INFO on very high-churn host paths only. */
+#define ncclCallocQuiet(...) ncclCallocDebug(__VA_ARGS__, __FILE__, __LINE__, __func__, false)
 
 template <typename T>
-ncclResult_t ncclRealloc(T** ptr, size_t oldNelem, size_t nelem) {
+ncclResult_t ncclReallocDebug(T** ptr, size_t oldNelem, size_t nelem, const char* file, int line,
+                              const char* callerFunc, bool logHostAlloc) {
   T* oldp = *ptr;
   if (nelem < oldNelem || (oldp == NULL && oldNelem > 0)) return ncclInternalError;
   if (nelem == oldNelem) return ncclSuccess;
 
-  T* p = (T*)malloc(nelem*ncclSizeOfT<T>());
+  T* p = (T*)malloc(nelem * ncclSizeOfT<T>());
   if (p == NULL) {
-    WARN("Failed to malloc %ld bytes", nelem*ncclSizeOfT<T>());
+    WARN("Failed to malloc %ld bytes", nelem * ncclSizeOfT<T>());
     return ncclSystemError;
   }
   if (oldp && oldNelem) memcpy(p, oldp, oldNelem * ncclSizeOfT<T>());
   if (oldp) free(oldp);
-  memset(p+oldNelem, 0, (nelem-oldNelem)*ncclSizeOfT<T>());
+  memset(p + oldNelem, 0, (nelem - oldNelem) * ncclSizeOfT<T>());
   *ptr = (T*)p;
-  INFO(NCCL_ALLOC, "Mem Realloc old size %ld, new size %ld pointer %p", oldNelem*ncclSizeOfT<T>(), nelem*ncclSizeOfT<T>(), *ptr);
+  INFO(NCCL_ALLOC, "Mem Realloc old size %ld, new size %ld pointer %p", oldNelem * ncclSizeOfT<T>(),
+       nelem * ncclSizeOfT<T>(), *ptr);
   return ncclSuccess;
 }
+#define ncclRealloc(ptr, oldNelem, nelem) \
+  ncclReallocDebug((ptr), (oldNelem), (nelem), __FILE__, __LINE__, __func__, true)
+#define ncclReallocQuiet(ptr, oldNelem, nelem) \
+  ncclReallocDebug((ptr), (oldNelem), (nelem), __FILE__, __LINE__, __func__, false)
 
-struct __attribute__ ((aligned(64))) allocationTracker {
+struct __attribute__((aligned(64))) allocationTracker {
   union {
     struct {
       uint64_t totalAlloc;
@@ -370,9 +528,8 @@ extern struct allocationTracker allocTracker[];
 // [RCCL] Helper introduced upstream in NCCL 2.29.7 -- maps a virtual address
 // range to a physical allocation and grants RW access on the given device.
 // Used by mem_manager.cc and the per-allocator helpers below.
-static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
-  CUmemGenericAllocationHandle handle,
-  int cudaDev) {
+static inline ncclResult_t ncclCuMemMapAndSetAccess(void* ptr, size_t size, CUmemGenericAllocationHandle handle,
+                                                    int cudaDev) {
   ncclResult_t result = ncclSuccess;
   CUCHECK(cuMemMap((CUdeviceptr)ptr, size, 0, handle, 0));
   CUmemAccessDesc accessDesc = {};
@@ -384,7 +541,7 @@ static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
 }
 
 // ncclCuMemAllocAddr takes memory handle and size and returns the mapped address pointer
-static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
+static inline ncclResult_t ncclCuMemAllocAddr(void** ptr, CUmemGenericAllocationHandle* handleIn, size_t size) {
   ncclResult_t result = ncclSuccess;
   size_t granularity = 0;
   CUmemAllocationProp prop = {};
@@ -397,7 +554,7 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr *)ptr, size, granularity, 0, 0), result, fail);
+  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
   addressReserved = true;
   /* Map the virtual address range to the physical allocation */
   CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, *handleIn, 0), result, fail);
@@ -409,10 +566,11 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
   TRACE(NCCL_ALLOC, "CuMem Map Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)*handleIn);
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
-     __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
   }
-  INFO(NCCL_ALLOC, "ncclCuMemAllocAddr: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
+  INFO(NCCL_ALLOC, "ncclCuMemAllocAddr: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize,
+       cudaDev);
   return result;
 fail:
   WARN("ncclCuMemAllocAddr failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
@@ -422,11 +580,16 @@ fail:
   return result;
 }
 
-static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
+static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
-  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
-    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (process shutdown) pointer %p", ptr);
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // gfx950/gfx1250 (rcclSkipCuMemFree): hipMemUnmap on cuMem VMM *peer* apertures can
+  // deadlock in the HSA busy-wait during ncclCommDestroy. GIN-SDMA device tests
+  // allocate symmetric windows and hit this on teardown; skipping only the peer
+  // VA unmap here lets the run finish (OS reclaims at exit). Owner handle release
+  // (ncclCuMemFree) and ordinary buffers are unaffected — see rcclSkipCuMemFree().
+  if (rcclShutdownFlag().load(std::memory_order_acquire) || rcclSkipCuMemFree()) {
+    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (%s) pointer %p", rcclSkipCuMemFree() ? "NCCL_CUMEM_SKIP_FREE" : "process shutdown", ptr);
     return ncclSuccess;
   }
 
@@ -439,22 +602,36 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* m
 
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
-  for (int segment = 0; segment < numSegments; segment++) {
-    size_t segmentSize = 0;
-    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-    CUdeviceptr base = nullptr;
-    // RCCL: cast through char* before pointer arithmetic
-    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
-    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
-    totalSize += segmentSize;
-  }
+  struct ncclMemUntrackInfo info = {};
 
-  // Untrack from memory manager
+  // Untrack the dynamic entry (if any) first, so we can tell whether the memory was already released
+  // by a suspend.  In that case the cuMem release functions below would fail, so we must skip them.
   if (manager != nullptr) {
-    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+    NCCLCHECKGOTO(ncclMemUntrackDynamic(manager, ptr, &info), result, fail);
   }
 
+  if (info.memType != ncclMemPersist && info.dynMemState == ncclDynMemStateReleased) {
+    // Suspended dynamic memory: physical backing already released.
+    totalSize = info.dynMemSize;
+  } else {
+    // Unmap for each segment for active dynamic memory and persistent memory.
+    for (int segment = 0; segment < numSegments; segment++) {
+      size_t segmentSize = 0;
+      // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+      // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+      CUdeviceptr base = nullptr;
+      // RCCL: cast through char* before pointer arithmetic
+      CUCHECKGOTO(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)), result, fail);
+      CUCHECKGOTO(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize), result, fail);
+      totalSize += segmentSize;
+    }
+    // Untrack persistent memory.
+    if (manager != nullptr && info.memType == ncclMemPersist) {
+      NCCLCHECKGOTO(ncclMemUntrackPersist(manager, ptr, totalSize), result, fail);
+    }
+  }
+
+fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
@@ -462,14 +639,14 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* m
   trackSize *= -1;
   CUDACHECK(hipGetDevice(&dev));
   if (dev < MAX_ALLOC_TRACK_NGPU) {
-     __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, trackSize, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[dev].totalAllocSize, trackSize, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   return result;
 }
 
-static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHandle *handlep,
+static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHandle* handlep,
                                           CUmemAllocationHandleType type, size_t size,
                                           struct ncclMemManager* manager = nullptr,
                                           ncclMemType_t memType = ncclMemPersist) {
@@ -511,7 +688,7 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   CUCHECKGOTO(cuMemCreate(&handle, size, &prop, 0), result, fail);
   handleCreated = true;
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr *)ptr, size, granularity, 0, 0), result, fail);
+  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
   addressReserved = true;
   /* Map the virtual address range to the physical allocation */
   CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0), result, fail);
@@ -532,13 +709,23 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   {
     cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&capMode), result, fail);
-    cudaStream_t zeroStream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    // Reuse the pooled side stream when an allocation scope is active (comm
+    // init / P2P connect burst) so this per-allocation zeroing does not churn a
+    // scarce GPU hardware queue via create/destroy on every VMM allocation.
+    // Fall back to a private non-blocking stream when no scope is active.
+    cudaStream_t sidestream = nullptr, zeroStream = nullptr;
+    NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
+    zeroStream = sidestream;
+    if (sidestream == nullptr) {
+      CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    }
     CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
     CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
-destroyStream:
-    CUDACHECK(cudaStreamDestroy(zeroStream));
-restoreCapMode:
+  destroyStream:
+    if (sidestream == nullptr) {
+      CUDACHECK(cudaStreamDestroy(zeroStream));
+    }
+  restoreCapMode:
     CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
     if (result != ncclSuccess) goto fail;
   }
@@ -550,8 +737,8 @@ restoreCapMode:
   }
 
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
-     __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemAlloc: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
   return result;
@@ -564,9 +751,13 @@ fail:
   return result;
 }
 
-static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
+static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // NOTE: the gfx950/gfx1250 rcclSkipCuMemFree() workaround is intentionally NOT
+  // applied here -- this releases the owner's physical handle (cuMemRelease), which
+  // does not hit the peer-unmap deadlock; skipping it would leak physical memory.
+  // The skip is confined to the peer aperture unmap in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCuMemFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
@@ -581,42 +772,58 @@ static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manag
 
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
-  for (int segment = 0; segment < numSegments; segment++) {
-    CUmemGenericAllocationHandle handle;
-    size_t segmentSize = 0;
-    CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)));
-    CUCHECK(cuMemRelease(handle));
-    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-    CUdeviceptr base = nullptr;
-    // RCCL: cast through char* before pointer arithmetic 
-    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
-    TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d",
-          segmentSize, ptr, (void*)(uintptr_t)handle, segment, numSegments);
-    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
-    CUCHECK(cuMemRelease(handle));
-    totalSize += segmentSize;
-  }
+  struct ncclMemUntrackInfo info = {};
 
-  // Update tracking with total size after processing all segments
+  // Untrack the dynamic entry (if any) first, so we can tell whether the memory was already released
+  // by a suspend.  In that case the cuMem release functions below would fail, so we must skip them.
   if (manager != nullptr) {
-    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+    NCCLCHECKGOTO(ncclMemUntrackDynamic(manager, ptr, &info), result, fail);
   }
 
+  if (info.memType != ncclMemPersist && info.dynMemState == ncclDynMemStateReleased) {
+    // Suspended dynamic memory: physical backing already released.
+    totalSize = info.dynMemSize;
+  } else {
+    // Unmap and release physical memory handles for each segment for active dynamic memory and persistent memory.
+    for (int segment = 0; segment < numSegments; segment++) {
+      CUmemGenericAllocationHandle handle;
+      size_t segmentSize = 0;
+      CUCHECKGOTO(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)), result, fail);
+      CUCHECKGOTO(cuMemRelease(handle), result, fail);
+      // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+      // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+      CUdeviceptr base = nullptr;
+      // RCCL: cast through char* before pointer arithmetic
+      CUCHECKGOTO(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)), result, fail);
+      TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d", segmentSize, ptr,
+            (void*)(uintptr_t)handle, segment, numSegments);
+      CUCHECKGOTO(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize), result, fail);
+      CUCHECKGOTO(cuMemRelease(handle), result, fail);
+      totalSize += segmentSize;
+    }
+    // Untrack persistent memory.
+    if (manager != nullptr && info.memType == ncclMemPersist) {
+      NCCLCHECKGOTO(ncclMemUntrackPersist(manager, ptr, totalSize), result, fail);
+    }
+  }
+
+fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
   CUDACHECK(hipGetDevice(&dev));
   if (dev < MAX_ALLOC_TRACK_NGPU) {
-     __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, -(int64_t)totalSize, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&allocTracker[dev].totalAllocSize, -(int64_t)totalSize, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemFree: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   return result;
 }
 
 // Get the base and size of all segments that span a given user buffer
-static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
+static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize,
+                                                    CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize,
+                                                    int* numSegments, bool* hasSysmemSegment = nullptr) {
   *totalMappedBufferSize = 0;
   *mappedPtrBase = 0;
   if (numSegments) *numSegments = 0;
@@ -626,14 +833,49 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
   CUdeviceptr baseSend;
   size_t baseSendSize;
 
+  if (hasSysmemSegment != nullptr) {
+    *hasSysmemSegment = false;
+  }
+
   while ((char*)mappedPtrEnd < (char*)userBuffEnd) {
     CUCHECK(cuMemGetAddressRange(&baseSend, &baseSendSize, mappedPtrEnd));
 
+    if (hasSysmemSegment != nullptr && *hasSysmemSegment == false) {
+      CUmemGenericAllocationHandle handle;
+      CUmemAllocationProp prop;
+      CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)mappedPtrEnd));
+      CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
+#if defined(__HIP_PLATFORM_AMD__)
+#if ROCM_VERSION >= 71200
+      // CLR rejects HostNuma; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST
+      // (host VMM alloc is only available on ROCm >= 7.12, matching ncclCuMemHostAlloc).
+      if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST) {
+        *hasSysmemSegment = true;
+      }
+#endif
+#else
+      if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA) {
+        *hasSysmemSegment = true;
+      }
+#endif
+      CUCHECK(cuMemRelease(handle));
+    }
+
     if (*totalMappedBufferSize == 0) {
-      *mappedPtrBase = baseSend;
+      // Workaround for CPU backed buffers since baseSend can be 0 in some CUDA driver versions
+      if (baseSend == 0) {
+        *mappedPtrBase = userBuffStart;
+      } else {
+        *mappedPtrBase = baseSend;
+      }
     }
     *totalMappedBufferSize += baseSendSize;
-    mappedPtrEnd = (CUdeviceptr)((char*)baseSend + baseSendSize);
+    // Workaround for CPU backed buffers since baseSend can be 0 in some CUDA driver versions
+    if (baseSend == 0) {
+      mappedPtrEnd = (CUdeviceptr)((char*)mappedPtrEnd + baseSendSize);
+    } else {
+      mappedPtrEnd = (CUdeviceptr)((char*)baseSend + baseSendSize);
+    }
 
     if (numSegments) *numSegments = *numSegments + 1;
   }
@@ -644,77 +886,76 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
 
 extern int ncclCuMemEnable();
 
-static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size,
-                                          struct ncclMemManager* manager,
-                                          ncclMemType_t memType = ncclMemPersist) {
+static inline ncclResult_t ncclCuMemAlloc(void** ptr, void* handlep, int type, size_t size,
+                                          struct ncclMemManager* manager, ncclMemType_t memType = ncclMemPersist) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
-static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
-  return ncclInternalError;
-}
-
-static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
+static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 
-static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
+static inline ncclResult_t ncclCuMemAllocAddr(void** ptr, CUmemGenericAllocationHandle* handleIn, size_t size) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 
-static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
+static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 
-static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
-  CUmemGenericAllocationHandle handle, int cudaDev) {
+static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize,
+                                                    CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize,
+                                                    int* numSegments, bool* hasSysmemSegment = nullptr) {
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  return ncclInternalError;
+}
+
+static inline ncclResult_t ncclCuMemMapAndSetAccess(void* ptr, size_t size, CUmemGenericAllocationHandle handle,
+                                                    int cudaDev) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
 #endif
 
 template <typename T>
-ncclResult_t ncclCudaMallocDebug(T** ptr, size_t nelem, const char *filefunc, int line,
-                                 struct ncclMemManager* manager,
-                                 ncclMemType_t memType = ncclMemPersist,
-                                 unsigned int flags = hipDeviceMallocDefault) {
+ncclResult_t ncclCudaMallocDebug(T** ptr, size_t nelem, const char* filefunc, int line, struct ncclMemManager* manager,
+                                 ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>(), manager, memType), result, finish);
+      NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
+                    result, finish);
     } else {
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
     }
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA malloc %ld bytes", nelem*ncclSizeOfT<T>());
+  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA malloc %ld bytes", nelem * ncclSizeOfT<T>());
   else {
-     int dev;
-     CUDACHECK(hipGetDevice(&dev));
-     if (dev < MAX_ALLOC_TRACK_NGPU) {
-        __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
-        __atomic_fetch_add(&allocTracker[dev].totalAllocSize, nelem*ncclSizeOfT<T>(), __ATOMIC_RELAXED);
-     }
-     INFO(NCCL_ALLOC, "ncclCudaMallocDebug: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
+    int dev;
+    CUDACHECK(hipGetDevice(&dev));
+    if (dev < MAX_ALLOC_TRACK_NGPU) {
+      __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
+      __atomic_fetch_add(&allocTracker[dev].totalAllocSize, nelem * ncclSizeOfT<T>(), __ATOMIC_RELAXED);
+    }
+    INFO(NCCL_ALLOC, "ncclCudaMallocDebug: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   }
-  INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr, flags);
+  INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem * ncclSizeOfT<T>(), *ptr,
+       flags);
   return result;
 }
 #define ncclCudaMalloc(ptr, nelem, ...) ncclCudaMallocDebug(ptr, nelem, __FILE__, __LINE__, ##__VA_ARGS__)
 
 template <typename T>
-ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char *filefunc, int line,
-                                 struct ncclMemManager* manager,
-                                 ncclMemType_t memType = ncclMemPersist,
-                                 unsigned int flags = hipDeviceMallocDefault) {
+ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line, struct ncclMemManager* manager,
+                                 ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
@@ -722,34 +963,36 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char *filefunc, in
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
-    // Need a side stream so as not to interfere with graph capture.
-    cudaStream_t stream, sidestream;
-    NCCLCHECK(getSideStream(&sidestream));
-    stream = sidestream;
-    if (sidestream == nullptr)
-      CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>(), manager, memType), result, finish);
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset/stream is needed.
+      NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
+                    result, finish);
     } else {
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
+      // Need a side stream so as not to interfere with graph capture.
+      cudaStream_t stream, sidestream;
+      NCCLCHECK(getSideStream(&sidestream));
+      stream = sidestream;
+      if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
+      CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
+      if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish);
-    CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-    if (sidestream == nullptr)
-      CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA calloc %ld bytes", nelem*ncclSizeOfT<T>());
+  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA calloc %ld bytes", nelem * ncclSizeOfT<T>());
   else {
-      CUDACHECK(hipGetDevice(&dev));
-      if (dev < MAX_ALLOC_TRACK_NGPU) {
-    	 __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
-    	 __atomic_fetch_add(&allocTracker[dev].totalAllocSize, nelem*ncclSizeOfT<T>(), __ATOMIC_RELAXED);
-      }
-      INFO(NCCL_ALLOC, "ncclCudaCallocDebug: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
+    CUDACHECK(hipGetDevice(&dev));
+    if (dev < MAX_ALLOC_TRACK_NGPU) {
+      __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
+      __atomic_fetch_add(&allocTracker[dev].totalAllocSize, nelem * ncclSizeOfT<T>(), __ATOMIC_RELAXED);
+    }
+    INFO(NCCL_ALLOC, "ncclCudaCallocDebug: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   }
-  INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr, flags);
+  INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem * ncclSizeOfT<T>(), *ptr,
+       flags);
   return result;
 }
 #define ncclCudaCalloc(ptr, nelem, ...) ncclCudaCallocDebug(ptr, nelem, __FILE__, __LINE__, ##__VA_ARGS__)
@@ -762,23 +1005,20 @@ finish:
 // the HIP allocator path yet. This way new upstream call sites compile
 // without forcing every old AMD call site to change.
 template <typename T>
-ncclResult_t ncclCudaMallocDebug(const char *filefunc, int line, T** ptr, size_t nelem,
-                                 struct ncclMemManager* /*manager*/,
-                                 ncclMemType_t /*memType*/ = ncclMemPersist) {
+ncclResult_t ncclCudaMallocDebug(const char* filefunc, int line, T** ptr, size_t nelem,
+                                 struct ncclMemManager* /*manager*/, ncclMemType_t /*memType*/ = ncclMemPersist) {
   return ncclCudaMallocDebug(filefunc, line, ptr, nelem);
 }
 
 template <typename T>
-ncclResult_t ncclCudaCallocDebug(const char *filefunc, int line, T** ptr, size_t nelem,
-                                 struct ncclMemManager* /*manager*/,
-                                 ncclMemType_t /*memType*/ = ncclMemPersist) {
+ncclResult_t ncclCudaCallocDebug(const char* filefunc, int line, T** ptr, size_t nelem,
+                                 struct ncclMemManager* /*manager*/, ncclMemType_t /*memType*/ = ncclMemPersist) {
   return ncclCudaCallocDebug(filefunc, line, ptr, nelem);
 }
 
 template <typename T>
-ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream, const char *filefunc, int line,
-                                      struct ncclMemManager* manager,
-                                      ncclMemType_t memType = ncclMemPersist,
+ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream, const char* filefunc, int line,
+                                      struct ncclMemManager* manager, ncclMemType_t memType = ncclMemPersist,
                                       unsigned int flags = hipDeviceMallocDefault) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
@@ -788,35 +1028,38 @@ ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream,
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>(), manager, memType), result, finish);
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset is needed.
+      NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
+                    result, finish);
     } else {
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA calloc async %ld bytes", nelem*ncclSizeOfT<T>());
+  if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA calloc async %ld bytes", nelem * ncclSizeOfT<T>());
   else {
-     CUDACHECK(hipGetDevice(&dev));
-     if (dev < MAX_ALLOC_TRACK_NGPU) {
-       __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
-       __atomic_fetch_add(&allocTracker[dev].totalAllocSize, nelem*ncclSizeOfT<T>(), __ATOMIC_RELAXED);
-     }
-     INFO(NCCL_ALLOC, "ncclCudaCallocDebug: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
+    CUDACHECK(hipGetDevice(&dev));
+    if (dev < MAX_ALLOC_TRACK_NGPU) {
+      __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
+      __atomic_fetch_add(&allocTracker[dev].totalAllocSize, nelem * ncclSizeOfT<T>(), __ATOMIC_RELAXED);
+    }
+    INFO(NCCL_ALLOC, "ncclCudaCallocDebug: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   }
-  INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr, flags);
+  INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem * ncclSizeOfT<T>(), *ptr,
+       flags);
   return result;
 }
-#define ncclCudaCallocAsync(ptr, nelem, stream, ...) ncclCudaCallocAsyncDebug(ptr, nelem, stream, __FILE__, __LINE__, ##__VA_ARGS__)
+#define ncclCudaCallocAsync(ptr, nelem, stream, ...) \
+  ncclCudaCallocAsyncDebug(ptr, nelem, stream, __FILE__, __LINE__, ##__VA_ARGS__)
 
 // [RCCL] Manager/memType overload for ncclCudaCallocAsyncDebug; see the note
 // above ncclCudaMallocDebug for rationale.
 template <typename T>
-ncclResult_t ncclCudaCallocAsyncDebug(const char *filefunc, int line, T** ptr, size_t nelem,
-                                      hipStream_t stream,
-                                      struct ncclMemManager* /*manager*/,
-                                      ncclMemType_t /*memType*/ = ncclMemPersist) {
+ncclResult_t ncclCudaCallocAsyncDebug(const char* filefunc, int line, T** ptr, size_t nelem, hipStream_t stream,
+                                      struct ncclMemManager* /*manager*/, ncclMemType_t /*memType*/ = ncclMemPersist) {
   return ncclCudaCallocAsyncDebug(filefunc, line, ptr, nelem, stream);
 }
 
@@ -829,28 +1072,10 @@ ncclResult_t ncclCudaMemcpy(T* dst, T* src, size_t nelem) {
   cudaStream_t stream, sidestream;
   NCCLCHECK(getSideStream(&sidestream));
   stream = sidestream;
-  if (sidestream == nullptr)
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, finish);
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, finish);
   NCCLCHECKGOTO(ncclCudaMemcpyAsync(dst, src, nelem, stream), result, finish);
   CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-  if (sidestream == nullptr)
-    CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
-finish:
-  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  return result;
-}
-
-template <typename T>
-ncclResult_t ncclCudaMemset(T* dst, int value, size_t nelem) {
-  ncclResult_t result = ncclSuccess;
-  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
-  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  // Need a side stream so as not to interfere with graph capture.
-  cudaStream_t stream;
-  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, finish);
-  CUDACHECKGOTO(cudaMemsetAsync((void*)dst, value, nelem * ncclSizeOfT<T>(), stream), result, finish);
-  CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-  CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   return result;
@@ -861,7 +1086,7 @@ ncclResult_t ncclCudaMemcpyAsync(T* dst, T* src, size_t nelem, cudaStream_t stre
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  CUDACHECKGOTO(cudaMemcpyAsync(dst, src, nelem*ncclSizeOfT<T>(), cudaMemcpyDefault, stream), result, finish);
+  CUDACHECKGOTO(cudaMemcpyAsync(dst, src, nelem * ncclSizeOfT<T>(), cudaMemcpyDefault, stream), result, finish);
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   return result;
@@ -874,6 +1099,10 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   // Check if process is shutting down. The atexit handler sets this flag
   // BEFORE HIP runtime static destructors run, so we can safely skip the free.
   // The OS will reclaim all memory when the process exits anyway.
+  // NOTE: the gfx950/gfx1250 rcclSkipCuMemFree() workaround is intentionally NOT
+  // applied here -- ordinary buffers (cudaFree) and the VMM handle release
+  // (ncclCuMemFree) must free normally so long-lived processes do not leak on
+  // every ncclCommDestroy. The peer-unmap deadlock is dodged in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCudaFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
@@ -892,26 +1121,26 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
 
   // get the size of the allocation for tracking
   {
-     CUdeviceptr baseAddress;
-     size_t retrievedSize;
+    CUdeviceptr baseAddress;
+    size_t retrievedSize;
 
-     CUDACHECK(cuMemGetAddressRange(&baseAddress, &retrievedSize, ptr));
-     retrievedSize *= -1;
+    CUDACHECK(cuMemGetAddressRange(&baseAddress, &retrievedSize, ptr));
+    retrievedSize *= -1;
 
-     if (ptr == baseAddress) {
-        int dev;
-        CUDACHECK(hipGetDevice(&dev));
-        if (dev < MAX_ALLOC_TRACK_NGPU) {
-           __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-           __atomic_fetch_add(&allocTracker[dev].totalAllocSize, retrievedSize, __ATOMIC_RELAXED);
-        }
-        INFO(NCCL_ALLOC, "ncclCudaFree: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
-     }
+    if (ptr == baseAddress) {
+      int dev;
+      CUDACHECK(hipGetDevice(&dev));
+      if (dev < MAX_ALLOC_TRACK_NGPU) {
+        __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&allocTracker[dev].totalAllocSize, retrievedSize, __ATOMIC_RELAXED);
+      }
+      INFO(NCCL_ALLOC, "ncclCudaFree: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
+    }
   }
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (ncclCuMemEnable()) {
-    NCCLCHECKGOTO(ncclCuMemFree((void *)ptr, manager, numSegments), result, finish);
+    NCCLCHECKGOTO(ncclCuMemFree((void*)ptr, manager, numSegments), result, finish);
   } else {
     if (numSegments > 1) {
       result = ncclUnhandledCudaError;
@@ -928,22 +1157,29 @@ finish:
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // allocated on separate pages as those pages will be marked DONTFORK
 // and if they are shared, that could cause a crash in a child process
-inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char *filefunc, int line) {
+inline ncclResult_t ncclIbMallocDebug(void** ptr, size_t size, const char* file, int line, const char* callerFunc) {
   if (size > 0) {
-    long page_size = ncclOsGetPageSize();
-    if (page_size < 0) return ncclSystemError;
-    void* p;
-    int size_aligned = ROUNDUP(size, page_size);
+    void* p = NULL;
+    size_t page_size = ncclOsGetPageSize();
+#if defined(NCCL_OS_LINUX)
+    size_t size_aligned = ROUNDUP(size, page_size);
     int ret = posix_memalign(&p, page_size, size_aligned);
     if (ret != 0) return ncclSystemError;
-    memset(p, 0, size);
+#elif defined(NCCL_OS_WINDOWS)
+    size_t size_aligned = ROUNDUP(size, page_size);
+    p = _aligned_malloc(size_aligned, page_size);
+    if (p == NULL) return ncclSystemError;
+#endif
+    if (p != NULL) {
+      memset(p, 0, size);
+    }
     *ptr = p;
   } else {
     *ptr = NULL;
   }
-  INFO(NCCL_ALLOC, "%s:%d Ib Alloc Size %ld pointer %p", filefunc, line, size, *ptr);
+  INFO_LOC_FN(NCCL_ALLOC, file, line, callerFunc, "Ib Alloc Size %ld pointer %p", size, *ptr);
   return ncclSuccess;
 }
-#define ncclIbMalloc(...) ncclIbMallocDebug(__VA_ARGS__, __FILE__, __LINE__)
+#define ncclIbMalloc(...) ncclIbMallocDebug(__VA_ARGS__, __FILE__, __LINE__, __func__)
 
 #endif

@@ -3,337 +3,186 @@
 
 #pragma once
 
+#include "backends/concepts/backend_factory.hpp"
 #include "library/pmc/common/types.hpp"
-#include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <sstream>
-#include <stdexcept>
-#include <string>
+#include <utility>
 #include <vector>
-
-#include <amd_smi/amdsmi.h>
 
 namespace rocprofsys::pmc::device_providers::amd_smi
 {
 
+namespace concepts
+{
+
+/**
+ * @brief AMD SMI-specific factory concept — extends the generic backend_factory
+ * with the session interface this provider calls at runtime.
+ */
+template <typename F>
+concept factory = ::rocprofsys::backends::concepts::backend_factory<F> &&
+                  requires(typename F::backend_t& sess) {
+                      { sess.initialize() };
+                      { sess.shutdown() };
+                      { sess.get_lib_version() };
+                      { sess.enumerate_gpu_handles() };
+                  }
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+                  &&
+                  requires(typename F::backend_t& sess) {
+                      { sess.enumerate_nic_handles() };
+                  }
+#endif
+;
+}  // namespace concepts
+
 /**
  * @brief AMD SMI device provider for initialization and device enumeration.
  *
- * This class manages the AMD SMI driver initialization/shutdown and provides
- * access to raw device handles. It is designed to be shared by collectors
- * (GPU and NIC). Device object creation and filtering is the responsibility
- * of the collector.
+ * Manages AMD SMI backend lifecycle (init/shutdown) and provides device
+ * enumeration. Shared between GPU and NIC collectors.
  *
- * @tparam DriverFactory Factory for creating AMD SMI driver instances.
+ * Follows the same factory pattern as procfs and rocprofiler_sdk providers:
+ * BackendFactory::create_backend() instantiates the backend; the provider
+ * stores it as @c m_backend_api and dispatches lifecycle and enumeration
+ * calls through that instance.
+ *
+ * @tparam BackendFactory  Provides @c backend_t and @c create_backend().
  */
-template <typename DriverFactory>
+template <concepts::factory BackendFactory>
 class provider
 {
-private:
-    /**
-     * @brief Check AMD SMI status and throw on error.
-     * @param status AMD SMI status code.
-     * @param error_message Error message to include in exception.
-     */
-    static void check_amd_smi_status(amdsmi_status_t status, const char* error_message)
-    {
-        if(status != AMDSMI_STATUS_SUCCESS)
-        {
-            std::stringstream ss;
-            ss << error_message << " AMD SMI Error code: " << status;
-            throw std::runtime_error(ss.str());
-        }
-    }
-
-    /**
-     * @brief Get all socket handles.
-     *
-     * Queries the AMD SMI driver for all available socket handles in the system.
-     *
-     * @return Vector of socket handles.
-     * @throws std::runtime_error If querying socket handles fails.
-     */
-    [[nodiscard]] std::vector<amdsmi_socket_handle> get_socket_handles()
-    {
-        std::uint32_t count = 0;
-        check_amd_smi_status(m_driver_api->get_socket_handles(&count, nullptr),
-                             "Failed to get socket count!");
-
-        std::vector<amdsmi_socket_handle> handles(count);
-        if(count > 0)
-        {
-            check_amd_smi_status(m_driver_api->get_socket_handles(&count, handles.data()),
-                                 "Failed to get socket handles!");
-        }
-
-        return handles;
-    }
-
-    /**
-     * @brief Get GPU processor handles for a socket.
-     *
-     * Uses the standard amdsmi_get_processor_handles() which is available on all
-     * ROCm versions and returns only GPU processors.
-     *
-     * @param socket_handle Socket to query.
-     * @return Vector of GPU processor handles (empty if none found).
-     */
-    [[nodiscard]] std::vector<amdsmi_processor_handle> get_gpu_handles_for_socket(
-        amdsmi_socket_handle socket_handle)
-    {
-        std::uint32_t count = 0;
-        auto status = m_driver_api->get_processor_handles(socket_handle, &count, nullptr);
-
-        if(status != AMDSMI_STATUS_SUCCESS || count == 0)
-        {
-            return {};
-        }
-
-        std::vector<amdsmi_processor_handle> handles(count);
-        status =
-            m_driver_api->get_processor_handles(socket_handle, &count, handles.data());
-
-        if(status != AMDSMI_STATUS_SUCCESS)
-        {
-            return {};
-        }
-
-        return handles;
-    }
-
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    /**
-     * @brief Get NIC processor handles for a socket.
-     *
-     * Uses amdsmi_get_processor_handles_by_type() which is only available on
-     * AMD SMI >= 26.3 (ROCm 7.0+).
-     *
-     * @param socket_handle Socket to query.
-     * @return Vector of NIC processor handles (empty if none found).
-     */
-    [[nodiscard]] std::vector<amdsmi_processor_handle> get_nic_handles_for_socket(
-        amdsmi_socket_handle socket_handle)
-    {
-        std::uint32_t count  = 0;
-        auto          status = m_driver_api->get_processor_handles_by_type(
-            socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &count);
-
-        if(status != AMDSMI_STATUS_SUCCESS || count == 0)
-        {
-            return {};
-        }
-
-        std::vector<amdsmi_processor_handle> handles(count);
-        status = m_driver_api->get_processor_handles_by_type(
-            socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, handles.data(), &count);
-
-        if(status != AMDSMI_STATUS_SUCCESS)
-        {
-            return {};
-        }
-
-        return handles;
-    }
-#endif
-
-    /**
-     * @brief Enumerate GPU devices across all sockets.
-     *
-     * Creates a GpuDriver per handle, then wraps it in a Device.
-     *
-     * @tparam Device The device type to create.
-     * @tparam GpuDriver The GPU driver type (owns the handle).
-     * @return Vector of shared pointers to GPU device objects.
-     */
-    template <typename Device, typename GpuDriver>
-    [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_gpu_devices()
-    {
-        std::vector<std::shared_ptr<Device>> devices;
-
-        auto   socket_handles = get_socket_handles();
-        size_t index          = 0;
-
-        for(auto& socket_handle : socket_handles)
-        {
-            auto handles = get_gpu_handles_for_socket(socket_handle);
-            for(auto& handle : handles)
-            {
-                auto driver = std::make_shared<GpuDriver>(handle);
-                devices.push_back(std::make_shared<Device>(std::move(driver), index));
-                index++;
-            }
-        }
-
-        return devices;
-    }
-
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    /**
-     * @brief Enumerate NIC devices across all sockets.
-     *
-     * Creates a NicDriver per handle, then wraps it in a Device.
-     *
-     * @tparam Device The device type to create.
-     * @tparam NicDriver The NIC driver type (owns the handle).
-     * @return Vector of shared pointers to NIC device objects.
-     */
-    template <typename Device, typename NicDriver>
-    [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_nic_devices()
-    {
-        std::vector<std::shared_ptr<Device>> devices;
-
-        auto   socket_handles = get_socket_handles();
-        size_t index          = 0;
-
-        for(auto& socket_handle : socket_handles)
-        {
-            auto handles = get_nic_handles_for_socket(socket_handle);
-            for(auto& handle : handles)
-            {
-                auto driver = std::make_shared<NicDriver>(handle);
-                devices.push_back(std::make_shared<Device>(std::move(driver), index));
-                index++;
-            }
-        }
-
-        return devices;
-    }
-#endif
-
-    std::shared_ptr<typename DriverFactory::driver_t>
-            m_driver_api;  ///< Driver API instance
-    version m_version{};   ///< AMD SMI library version
+    std::shared_ptr<typename BackendFactory::backend_t> m_backend_api;
+    version                                             m_version{};
 
 public:
-    using driver_t = typename DriverFactory::driver_t;
+    using backend_t = BackendFactory::backend_t;
 
     /**
-     * @brief Construct and initialize the AMD SMI device provider.
-     *
-     * Creates the driver instance, initializes the AMD SMI driver, and retrieves version
-     * information.
-     *
-     * @throws std::runtime_error If AMD SMI initialization fails or version retrieval
-     * fails.
+     * @brief Initialize the AMD SMI backend and retrieve version information.
+     * @throws std::runtime_error on AMD SMI failure.
      */
     provider()
-    : m_driver_api(DriverFactory::create_driver())
+    : m_backend_api(BackendFactory::create_backend())
     {
-        // Initialize AMD SMI driver
-        check_amd_smi_status(m_driver_api->init(),
-                             "Failed to initialize AMD SMI driver!");
+        m_backend_api->initialize();
 
-        // Get and store version information
-        amdsmi_version_t ver;
-        check_amd_smi_status(m_driver_api->get_version(&ver),
-                             "Failed to get AMD SMI driver version!");
-
+        auto ver                                 = m_backend_api->get_lib_version();
         m_version.numeric_representation.major   = ver.major;
         m_version.numeric_representation.minor   = ver.minor;
         m_version.numeric_representation.release = ver.release;
-        m_version.string_representation          = ver.build;
+        m_version.string_representation          = ver.build ? ver.build : "";
     }
 
     ~provider() noexcept
     {
-        if(m_driver_api)
-        {
-            m_driver_api->shutdown();
-        }
+        if(m_backend_api) m_backend_api->shutdown();
     }
 
-    // Non-copyable, but movable
+    // Non-copyable, movable
     provider(const provider&)            = delete;
     provider& operator=(const provider&) = delete;
 
     provider(provider&& other) noexcept
-    : m_driver_api(std::move(other.m_driver_api))
+    : m_backend_api(std::move(other.m_backend_api))
     , m_version(std::move(other.m_version))
     {
-        other.m_driver_api.reset();  // Prevent double-shutdown
+        other.m_backend_api.reset();
     }
 
     provider& operator=(provider&& other) noexcept
     {
         if(this != &other)
         {
-            if(m_driver_api)
-            {
-                m_driver_api->shutdown();
-            }
-            m_driver_api = std::move(other.m_driver_api);
-            m_version    = std::move(other.m_version);
-            other.m_driver_api.reset();
+            if(m_backend_api) m_backend_api->shutdown();
+            m_backend_api = std::move(other.m_backend_api);
+            m_version     = std::move(other.m_version);
+            other.m_backend_api.reset();
         }
         return *this;
     }
 
     /**
      * @brief Get AMD SMI library version.
-     * @return Const reference to the version information.
      */
     [[nodiscard]] const version& get_version() const noexcept { return m_version; }
 
     /**
-     * @brief Shutdown the AMD SMI driver.
-     *
-     * Releases the driver API and cleans up resources. Safe to call multiple times.
+     * @brief Shutdown the AMD SMI backend. Safe to call multiple times.
      */
     void shutdown()
     {
-        if(m_driver_api)
+        if(m_backend_api)
         {
-            m_driver_api->shutdown();
-            m_driver_api.reset();
+            m_backend_api->shutdown();
+            m_backend_api.reset();
         }
     }
 
     /**
      * @brief Get all GPU devices.
      *
-     * @tparam Device The GPU device type.
-     * @tparam GpuDriver The GPU driver type (owns the processor handle).
-     * @return Vector of shared pointers to GPU device objects.
+     * Enumerates GPU handles via the shared session, then wraps each handle in
+     * a @c Device::backend_type (i.e. @c device<backend_t>) constructed
+     * with the session and the handle.
+     *
+     * @tparam Device  Concrete device type; exposes @c backend_type used to
+     *                 construct per-device backend instances from handles.
      */
-    template <typename Device, typename GpuDriver>
+    template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_gpu_devices()
     {
-        return enumerate_gpu_devices<Device, GpuDriver>();
+        auto handles = m_backend_api->enumerate_gpu_handles();
+
+        std::vector<std::shared_ptr<Device>> result;
+        result.reserve(handles.size());
+
+        std::size_t index = 0;
+        for(auto handle : handles)
+        {
+            auto proxy =
+                std::make_shared<typename Device::backend_type>(m_backend_api, handle);
+            result.push_back(std::make_shared<Device>(std::move(proxy), index++));
+        }
+
+        return result;
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     /**
      * @brief Get all NIC devices.
-     *
-     * @tparam Device The NIC device type.
-     * @tparam NicDriver The NIC driver type (owns the processor handle).
-     * @return Vector of shared pointers to NIC device objects.
      */
-    template <typename Device, typename NicDriver>
+    template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_nic_devices()
     {
-        return enumerate_nic_devices<Device, NicDriver>();
+        auto handles = m_backend_api->enumerate_nic_handles();
+
+        std::vector<std::shared_ptr<Device>> result;
+        result.reserve(handles.size());
+
+        std::size_t index = 0;
+        for(auto handle : handles)
+        {
+            auto proxy =
+                std::make_shared<typename Device::backend_type>(m_backend_api, handle);
+            result.push_back(std::make_shared<Device>(std::move(proxy), index++));
+        }
+
+        return result;
     }
 #endif
 };
 
 /**
  * @brief Factory for creating AMD SMI provider instances.
- *
- * @tparam DriverFactory Factory type for creating AMD SMI driver instances.
  */
-template <typename DriverFactory>
+template <concepts::factory BackendFactory>
 struct provider_factory
 {
-    using provider_t = provider<DriverFactory>;
+    using provider_t = provider<BackendFactory>;
 
-    /**
-     * @brief Create a new provider instance.
-     * @return Shared pointer to a newly created provider.
-     */
     static std::shared_ptr<provider_t> create() { return std::make_shared<provider_t>(); }
 };
 

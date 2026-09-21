@@ -78,7 +78,12 @@ struct QueueSemaphoreCreateInfo
             uint32 forceUseMonitoredFence :  1;
             /// This queue semaphore can be shared across adapters
             uint32 crossAdapter           :  1;
-            uint32 reserved               : 24;  ///< Reserved for future use.
+            /// This queue semaphore is a gpu fence. Gpu fences have a 64-bit unsigned integer payload whose value is
+            /// directly controlled by clients to sychronize workloads between hardware engines or the CPU.
+            /// Having an engine wait on a value will block the engine until the value has been signaled.
+            /// Clients are responsible for avoiding deadlocks when using gpu fences.
+            uint32 gpuFence               :  1;
+            uint32 reserved               : 23;  ///< Reserved for future use.
         };
         uint32 u32All;              ///< Flags packed as 32-bit uint.
     } flags;                        ///< Queue semaphore creation flags.
@@ -93,6 +98,9 @@ struct QueueSemaphoreCreateInfo
                                     ///  Must not be larger than maxCount for counting semaphores.
                                     ///  For DX12 native fence, DXCP needs to pass InitialFenceValue from
                                     ///  D3DDDI_NATIVEFENCEINFO.
+
+    gpusize counterGpuVa;           ///< Address of an externally-owned monitored fence to use as a gpuFence.
+                                    ///  Only valid when forceUseMonitoredFence=1 and gpuFence=1.
 
 };
 
@@ -139,7 +147,7 @@ struct QueueSemaphoreExportInfo
             uint32 isReference        :  1;   ///< If set, then the semaphore exporting a handle that reference the
                                               ///< same sync object in the kernel.  Otherwise, the object is copied
                                               ///< to the new Semaphore.
-            uint32 reserved           : 31;   ///< Reserved for future use.
+            uint32 reserved           : 31;   ///< Resevered for future use.
         };
         uint32 u32All;                        ///< Flags packed as 32-bit uint.
     } flags;                                  ///< External queue semaphore export flags.

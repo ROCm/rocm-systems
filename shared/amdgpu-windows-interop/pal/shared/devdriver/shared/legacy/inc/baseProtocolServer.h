@@ -36,6 +36,11 @@ namespace DevDriver
     public:
         virtual ~BaseProtocolServer();
 
+        BaseProtocolServer(const BaseProtocolServer&) = delete;
+        BaseProtocolServer& operator=(const BaseProtocolServer&) = delete;
+        BaseProtocolServer(BaseProtocolServer&&) = delete;
+        BaseProtocolServer& operator=(BaseProtocolServer&&) = delete;
+
         Protocol GetProtocol() const override final { return m_protocol; };
         SessionType GetType() const override final { return SessionType::Server; };
         Version GetMinVersion() const override final { return m_minVersion; };

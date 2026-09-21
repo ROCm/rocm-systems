@@ -163,7 +163,7 @@ public:
 
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
-    // have comleted.
+    // have completed.
     void    async_started() { _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1); }
     void    async_complete() { _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1); }
     int64_t active_async_packets() const
@@ -171,7 +171,12 @@ public:
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
 
-    void sync() const;
+    // Block up to one ~5s slice for in-flight async completion handlers to finish. Returns true if
+    // the queue drained (zero active kernels), false if the slice elapsed first. HSA's signal wait
+    // does not wake spuriously, so false is a real per-slice timeout rather than an early return.
+    // Teardown callers treat false as warn-and-proceed. Callers needing a guaranteed drain loop
+    // until true (e.g., see @replay_drain_or_fatal).
+    bool sync() const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);
     void remove_callback(ClientID id);

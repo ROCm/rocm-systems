@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - CPC_CPC_STAT_STALL
+  - CPC_CPC_TCIU_BUSY
+  - CPF_CPF_STAT_IDLE
+  - CPF_CPF_STAT_STALL

@@ -13,9 +13,8 @@
 // Initialization Tests
 
 TEST_F(NetIbMPITest, InitializePlugin) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     ncclResult_t result = InitNetIb();
     ASSERT_EQ(result, ncclSuccess) << "Failed to initialize NET IB plugin";
@@ -23,9 +22,8 @@ TEST_F(NetIbMPITest, InitializePlugin) {
 }
 
 TEST_F(NetIbMPITest, GetDeviceCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -41,9 +39,8 @@ TEST_F(NetIbMPITest, GetDeviceCount) {
 // Device Properties Tests
 
 TEST_F(NetIbMPITest, GetDeviceProperties) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -67,9 +64,8 @@ TEST_F(NetIbMPITest, GetDeviceProperties) {
 }
 
 TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -84,9 +80,8 @@ TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
 // Connection Setup Tests
 
 TEST_F(NetIbMPITest, ListenAndConnect) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -105,9 +100,8 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
 }
 
 TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -124,9 +118,8 @@ TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
 // Memory Registration Tests
 
 TEST_F(NetIbMPITest, RegisterHostMemory) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -152,9 +145,8 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
 }
 
 TEST_F(NetIbMPITest, RegisterGpuMemory) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -180,9 +172,8 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
 }
 
 TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -201,9 +192,8 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
 }
 
 TEST_F(NetIbMPITest, DeregisterNullHandle) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -221,81 +211,180 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
 
 // Send/Recv Tests
 
+// Parameterized by MPIEnvironment::nThreads (--net_ib_nthreads=N). Every
+// worker owns an independent connection, matching rccl-tests' -t model. The
+// harness performs MPI setup and failure handshakes on the main thread, then
+// releases the workers together so their data paths overlap deterministically.
 TEST_F(NetIbMPITest, SimpleSendRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    const int senderRank = 1;
+    const int nThreads = MPIEnvironment::nThreads;
 
-    const size_t bufferSize = kSmallBufferSize;
-    const int tag = 42;
+    if (nThreads == 1) {
+        ConnectionPair pair;
+        NetConnectionGuard connGuard(net_);
+        SetupConnectionWithGuard(0, pair, connGuard);
 
-    void* buffer = malloc(bufferSize);
-    ASSERT_NE(buffer, nullptr);
-    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+        const size_t bufferSize = kSmallBufferSize;
+        const int tag = 42;
 
-    void* mhandle = nullptr;
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        void* buffer = malloc(bufferSize);
+        ASSERT_NE(buffer, nullptr);
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
 
-    // Use NetMHandleGuard for automatic cleanup on failure (exception safety)
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+        void* mhandle = nullptr;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
-    void* request = nullptr;
+        void* request = nullptr;
+        if (rank == 0) {
+            PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        }
 
-    if (rank == 0) {
-        // Receiver
-        PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
-    } else {
-        // Sender
-        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
-        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
+        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        if (rank == 0) {
+            EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank)))
+                << "Data validation failed";
+        }
+        return;
     }
 
+    auto runSendRecv = [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        ThreadResult result;
+        const size_t bufferSize = kSmallBufferSize;
+        const int tag = 42;
+        const int seed = WorkerSeed(threadIdx, senderRank);
+
+        void* buffer = malloc(bufferSize);
+        if (!buffer) { result.ok = false; result.msg = "malloc failed"; return result; }
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+        void* mhandle = nullptr;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        if (RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle) != ncclSuccess) {
+            result.ok = false; result.msg = "RegisterMemory failed"; return result;
+        }
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        void* request = nullptr;
+        if (rank == 0) {
+            void*  bufs[1]    = {buffer};
+            size_t sizes[1]   = {bufferSize};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {mhandle};
+            // Unlike the send path below, a NULL request is treated as a hard
+            // failure rather than retried. That is only valid because each
+            // worker owns its own recvComm and posts exactly one receive on it,
+            // so the receive FIFO is guaranteed empty here and irecv cannot
+            // return NULL for want of a free slot — a NULL means the plugin
+            // broke its contract. If workers ever share a comm or post several
+            // receives before waiting, NULL becomes ordinary backpressure and
+            // this path needs the same retry loop the send path uses.
+            if (PostRecv(pair.recvComm, 1, bufs, sizes, tags, handles, &request) != ncclSuccess) {
+                result.ok = false; result.msg = "PostRecv failed"; return result;
+            }
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
+            int attempts = 0;
+            do {
+                if (PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request) != ncclSuccess) {
+                    result.ok = false; result.msg = "PostSend failed"; return result;
+                }
+                if (request != nullptr) break;
+                if (++attempts >= kMaxRetryAttempts) {
+                    result.ok = false; result.msg = "PostSend NULL request after retries"; return result;
+                }
+                usleep(kPollIntervalUs);
+            } while (request == nullptr);
+        }
+
+        int sizes[1] = {0};
+        if (request == nullptr) { result.ok = false; result.msg = "request NULL before wait"; return result; }
+        if (WaitForCompletion(request, sizes) != ncclSuccess) {
+            result.ok = false; result.msg = "WaitForCompletion failed"; return result;
+        }
+
+        if (rank == 0) {
+            if (sizes[0] != (int)bufferSize) {
+                result.ok = false; result.msg = "Received size mismatch"; return result;
+            }
+            if (!verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) {
+                result.ok = false; result.msg = "Data validation failed"; return result;
+            }
+        }
+        return result;
+    };
+
+    const RdmaResourceCounts before = CaptureRdmaResources();
+    // Spread across the NICs with a routable GID rather than piling every worker
+    // onto device 0: this is the plain independent-connection path, so there is no
+    // reason to serialize it on one device's resources.
+    RunMultiThreadedIndependent(ThreadDevPolicy::Spread(), nThreads,
+                                [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        return runSendRecv(threadIdx, pair);
+    });
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // Wait for completion
-    int sizes[1] = {0};
-    ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
-    ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
-
-    if (rank == 0) {
-        EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
-
-        // Verify received data
-        int senderRank = 1;  // Data was sent by rank 1
-        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank))) << "Data validation failed";
-    }
-
-    // NetMHandleGuard will automatically deregister memory when test scope ends
-    // Destructor order ensures MR is deregistered before connection closes:
-    //   1. mhandleGuard destructor (deregisters MR)
-    //   2. bufferGuard destructor (frees buffer)
-    //   3. connGuard destructor (closes connection)
+    AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SimpleSendRecv");
 }
 
+// Parameterized by MPIEnvironment::nThreads. Concurrent workers each sweep the
+// same size ladder on an independent connection, so registrations of many
+// different sizes hit the shared per-device MR cache at once.
 TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    const int nThreads = MPIEnvironment::nThreads;
 
     // Test various sizes
     std::vector<size_t> testSizes = {1, 64, 256, 1024, 4096, 16384, 65536};
+
+    if (nThreads > 1) {
+        // Pinned, unlike SimpleSendRecv: this test's claim is the shared per-device MR
+        // cache, and spreading workers across NICs gives each its own cache, so at two
+        // and four workers on a four-NIC host the contention would not exist at all.
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded SendRecvMultipleSizes",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                // One pattern per worker across the whole ladder. Folding the size into
+                // the seed put different workers on the same bytes at different sizes;
+                // a payload arriving from the wrong connection at the wrong size is
+                // caught by the size check, and at the right size by the pattern.
+                const int seed = WorkerSeed(threadIdx, kMultiSizeSeedOffset);
+                for (size_t size : testSizes) {
+                    result = WorkerHostTransfer(rank, pair, size, 100, seed);
+                    if (!result.ok) return result;
+                }
+                return result;
+            });
+        return;
+    }
+
+    ConnectionPair pair;
+    NetConnectionGuard connGuard(net_);
+    SetupConnectionWithGuard(0, pair, connGuard);
 
     for (size_t size : testSizes) {
         const int tag = 100;
@@ -343,9 +432,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 }
 
 TEST_F(NetIbMPITest, SendRecvZeroSize) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -390,9 +478,8 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
 }
 
 TEST_F(NetIbMPITest, FlushAfterRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -499,94 +586,209 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
 // NOTE: Flush (iflush) is intentionally NOT called because:
 //   1. Flush is only needed for GPU Direct RDMA to ensure data visibility
 //   2. For NCCL_PTR_HOST transfers, flush is unnecessary
+// Parameterized by MPIEnvironment::nThreads. Every worker has an independent
+// connection and buffer. N=1 retains the two per-transfer MPI barriers; the
+// threaded path leaves rank synchronization to the main-thread harness after
+// every worker has completed.
 TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
-
     const size_t bufferSize = kSmallBufferSize;
     const int numTransfers = kNumSequentialTransfers;
+    const int nThreads = MPIEnvironment::nThreads;
 
-    void* sendBuffer = nullptr;
-    void* recvBuffer = nullptr;
-    HostBufferAutoGuard sendBufferGuard(nullptr);
-    HostBufferAutoGuard recvBufferGuard(nullptr);
+    if (nThreads == 1) {
+        ConnectionPair pair;
+        NetConnectionGuard connGuard(net_);
+        SetupConnectionWithGuard(0, pair, connGuard);
 
-    if (rank == 0) {
-        recvBuffer = malloc(bufferSize);
-        ASSERT_NE(recvBuffer, nullptr);
-        recvBufferGuard = makeHostBufferAutoGuard(recvBuffer);
-    } else {
-        sendBuffer = malloc(bufferSize);
-        ASSERT_NE(sendBuffer, nullptr);
-        sendBufferGuard = makeHostBufferAutoGuard(sendBuffer);
-    }
-
-    void* mhandle = nullptr;
-    void* buffer = (rank == 0) ? recvBuffer : sendBuffer;
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
-
-    for (int i = 0; i < numTransfers; i++) {
-        const int tag = kTransferTagBase + i;
-        const int seed = kBaseSeedOffset + i;  // Unique seed for each transfer
-        void* request = nullptr;
+        void* sendBuffer = nullptr;
+        void* recvBuffer = nullptr;
+        HostBufferAutoGuard sendBufferGuard(nullptr);
+        HostBufferAutoGuard recvBufferGuard(nullptr);
 
         if (rank == 0) {
-            memset(recvBuffer, 0, bufferSize);
-            PostSingleRecv(pair.recvComm, recvBuffer, bufferSize, tag, mhandle, &request);
-            ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
+            recvBuffer = malloc(bufferSize);
+            ASSERT_NE(recvBuffer, nullptr);
+            recvBufferGuard = makeHostBufferAutoGuard(recvBuffer);
         } else {
-            fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
-            PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
+            sendBuffer = malloc(bufferSize);
+            ASSERT_NE(sendBuffer, nullptr);
+            sendBufferGuard = makeHostBufferAutoGuard(sendBuffer);
         }
 
-        // Barrier 1: Ensure both ranks have posted their operations before waiting
-        MPI_Barrier(MPI_COMM_WORLD);
+        void* mhandle = nullptr;
+        void* buffer = (rank == 0) ? recvBuffer : sendBuffer;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
-        // Wait for completion
-        int sizes[1] = {0};
-        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+        for (int i = 0; i < numTransfers; i++) {
+            const int tag = kTransferTagBase + i;
+            const int seed = kBaseSeedOffset + i;
+            void* request = nullptr;
 
-        // Barrier 2: CRITICAL - Ensure BOTH ranks have completed before EITHER continues
-        // This prevents rank A from starting transfer N+1 while rank B is still
-        // completing transfer N, which would cause request object reuse race conditions
-        MPI_Barrier(MPI_COMM_WORLD);
+            if (rank == 0) {
+                memset(recvBuffer, 0, bufferSize);
+                PostSingleRecv(pair.recvComm, recvBuffer, bufferSize, tag, mhandle, &request);
+                ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
+            } else {
+                fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
+                PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
+            }
 
-        if (rank == 0) {
-            EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
+            MPI_Barrier(MPI_COMM_WORLD);
 
-            EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed))) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
+            int sizes[1] = {0};
+            ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
 
-            // NOTE: Flush is NOT called for host memory transfers
-            // Flush (iflush) is only needed for GPU Direct RDMA to ensure data visibility on GPU.
-            // For NCCL_PTR_HOST transfers, flush is unnecessary and calling it can cause
-            // race conditions when request objects are rapidly reused.
-            // The NET IB implementation will no-op the flush call for host memory anyway.
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            if (rank == 0) {
+                EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
+                EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed)))
+                    << "Transfer " << i << " data validation failed (seed=" << seed << ")";
+            }
         }
+        return;
     }
 
-    // NetMHandleGuard will automatically deregister at scope end
+    auto runSequentialTransfers = [&](int threadIdx, void* sendComm, void* recvComm) -> ThreadResult {
+        ThreadResult result;
+        void* sendBuffer = nullptr;
+        void* recvBuffer = nullptr;
+        HostBufferAutoGuard sendBufferGuard(nullptr);
+        HostBufferAutoGuard recvBufferGuard(nullptr);
+
+        if (rank == 0) {
+            recvBuffer = malloc(bufferSize);
+            if (!recvBuffer) {
+                result.ok = false;
+                result.msg = "malloc failed";
+            } else {
+                recvBufferGuard = makeHostBufferAutoGuard(recvBuffer);
+            }
+        } else {
+            sendBuffer = malloc(bufferSize);
+            if (!sendBuffer) {
+                result.ok = false;
+                result.msg = "malloc failed";
+            } else {
+                sendBufferGuard = makeHostBufferAutoGuard(sendBuffer);
+            }
+        }
+
+        void* buffer = (rank == 0) ? recvBuffer : sendBuffer;
+        void* comm = (rank == 0) ? recvComm : sendComm;
+        void* mhandle = nullptr;
+        if (result.ok && RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "RegisterMemory failed";
+        }
+
+        if (!result.ok) return result;
+
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        // One pattern for this worker, held across all of its transfers. A per-iteration
+        // seed reduces modulo 256 into another worker's space -- at sixteen workers
+        // thread 0's iteration 66 and thread 2's iteration 0 produce the same bytes --
+        // and these transfers are not synchronized between workers, so a payload
+        // crossing connections could verify clean. The tag still changes per iteration,
+        // which is what the plugin matches on.
+        const int seed = WorkerSeed(threadIdx, kBaseSeedOffset);
+        for (int i = 0; i < numTransfers; i++) {
+            const int tag = kTransferTagBase + i;
+            void* request = nullptr;
+            bool postOk = true;
+
+            if (rank == 0) {
+                memset(recvBuffer, 0, bufferSize);
+                void*  bufs[1]    = {recvBuffer};
+                size_t sizes_[1]  = {bufferSize};
+                int    tags[1]    = {tag};
+                void*  handles[1] = {mhandle};
+                if (PostRecv(recvComm, 1, bufs, sizes_, tags, handles, &request) != ncclSuccess ||
+                    request == nullptr) {
+                    result.ok = false; result.msg = "PostRecv failed"; postOk = false;
+                }
+            } else {
+                fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
+                int attempts = 0;
+                do {
+                    if (PostSend(sendComm, sendBuffer, bufferSize, tag, mhandle, &request) != ncclSuccess) {
+                        result.ok = false; result.msg = "PostSend failed"; postOk = false; break;
+                    }
+                    if (request != nullptr) break;
+                    if (++attempts >= kMaxRetryAttempts) {
+                        result.ok = false; result.msg = "PostSend NULL request after retries"; postOk = false; break;
+                    }
+                    usleep(kPollIntervalUs);
+                } while (request == nullptr);
+            }
+
+            int sizes[1] = {0};
+            if (postOk && request != nullptr && WaitForCompletion(request, sizes) != ncclSuccess) {
+                result.ok = false; result.msg = "WaitForCompletion failed";
+            }
+
+            if (!result.ok) return result;
+
+            if (rank == 0) {
+                if (sizes[0] != (int)bufferSize) {
+                    result.ok = false; result.msg = "Size mismatch"; return result;
+                }
+                if (!verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed))) {
+                    result.ok = false; result.msg = "Data validation failed"; return result;
+                }
+            }
+        }
+        return result;
+    };
+
+    const RdmaResourceCounts before = CaptureRdmaResources();
+    // Spread, for the same reason as SimpleSendRecv: independent connections have no
+    // business sharing one device's queue pairs and completion queue here.
+    RunMultiThreadedIndependent(ThreadDevPolicy::Spread(), nThreads,
+                                [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        return runSequentialTransfers(threadIdx, pair.sendComm, pair.recvComm);
+    });
+    MPI_Barrier(MPI_COMM_WORLD);
+    AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MultipleSequentialTransfers");
 }
 
+// Parameterized by MPIEnvironment::nThreads. Concurrent 16 MB transfers put
+// several large registrations in the per-device MR cache simultaneously and
+// keep the NIC saturated while every worker verifies its own payload.
 TEST_F(NetIbMPITest, LargeTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
+    const int nThreads = MPIEnvironment::nThreads;
+
+    if (nThreads > 1) {
+        // Pinned for the same reason: several large registrations live on one device is
+        // the claim, which spreading would defeat.
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded LargeTransfer",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                return WorkerHostTransfer(rank, pair, kLargeBufferSize, 400,
+                                          WorkerSeed(threadIdx, kBaseSeedOffset),
+                                          kLargeTransferTimeoutMs);
+            });
+        return;
+    }
+
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
     SetupConnectionWithGuard(0, pair, connGuard);
@@ -619,7 +821,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
     // Wait for completion with longer timeout for large transfer
     int sizes[1] = {0};
     ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
-    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeoutMs), ncclSuccess);
 
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
@@ -633,9 +835,8 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 }
 
 TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -646,18 +847,17 @@ TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
 }
 
 TEST_F(NetIbMPITest, ListenCloseListen) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
-    int mergedDev = CreateMergedDevice(4, rank);
+    int mergedDev = CreateMergedDevice(4);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     for (int iter = 0; iter < 3; iter++) {
@@ -726,9 +926,8 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
 }
 
 TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -756,10 +955,13 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
     for (int d : physDevs)
         if (props[d].speed == targetSpeed) compat.push_back(d);
 
-    int mergedDevA = CreateMergedDevice(2, rank);
-    int mergedDevB = CreateMergedDevice(3, rank, 2);
-    if (mergedDevA == -1 || mergedDevB == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+    int mergedDevA = CreateMergedDevice(2);
+    if (mergedDevA == -1) {
+        GTEST_SKIP() << mergeSkipReason_;
+    }
+    int mergedDevB = CreateMergedDevice(3, /*speedGroupStart=*/2);
+    if (mergedDevB == -1) {
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
     // Physical device = first NIC from merged A's group
@@ -910,9 +1112,8 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
 }
 
 TEST_F(NetIbMPITest, MultipleSequentialConnections) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -948,9 +1149,8 @@ TEST_F(NetIbMPITest, MultipleSequentialConnections) {
 }
 
 TEST_F(NetIbMPITest, RapidConnectDisconnect) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -971,9 +1171,9 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
     }
     ASSERT_FALSE(physDevs.empty()) << "No physical devices found";
 
-    int mergedDev = CreateMergedDevice(3, rank);
+    int mergedDev = CreateMergedDevice(3);
     if (mergedDev == -1) {
-        GTEST_SKIP() << "Failed to create merged device";
+        GTEST_SKIP() << mergeSkipReason_;
     }
 
 
@@ -1126,9 +1326,8 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
 }
 
 TEST_F(NetIbMPITest, MultiRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1272,9 +1471,8 @@ TEST_F(NetIbMPITest, MultiRecv) {
 }
 
 TEST_F(NetIbMPITest, MultiRecvShuffled) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1448,11 +1646,10 @@ TEST_F(NetIbMPITest, MultiRecvShuffled) {
 // With RCCL_IB_P2P_DISABLE_CTS=0 the AINIC CTS table overflows ~256 entries
 // and the drain times out; with =1 it passes. Requires exactly 2 ranks.
 TEST_F(NetIbMPITest, CtsDepthStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " MPI processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
-    net_ = &rocmNetIb;
+    net_ = &netIbCast;
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
     int ndev = 0;
@@ -1530,7 +1727,7 @@ TEST_F(NetIbMPITest, CtsDepthStress) {
             ASSERT_EQ(net_->listen(initCtx_, i % ndev, &handles[i],
                                    &conns[i]->listenComm), ncclSuccess)
                 << "listen failed conn=" << i;
-            ASSERT_EQ(rcclRocmNetP2pPolicy(&handles[i], 1), ncclSuccess);
+            ASSERT_EQ(rcclCastNetP2pPolicy(&handles[i], 1), ncclSuccess);
             MPI_Send(&handles[i], sizeof(ncclNetHandle_t), MPI_BYTE,
                      1, i, MPI_COMM_WORLD);
         }

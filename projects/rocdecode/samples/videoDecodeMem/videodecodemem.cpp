@@ -93,6 +93,7 @@ int main(int argc, char **argv) {
     bool b_extract_sei_messages = false;
     bool b_generate_md5 = false;
     bool b_md5_check = false;
+    bool b_md5_check_failed = false;
     int disp_delay = 1;
     Rect crop_rect = {};
     Rect *p_crop_rect = nullptr;
@@ -190,8 +191,8 @@ int main(int argc, char **argv) {
         rocDecVideoCodec rocdec_codec_id = AVCodec2RocDecVideoCodec(demuxer.GetCodecID());
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
         if(!viddec.CodecSupported(device_id, rocdec_codec_id, demuxer.GetBitDepth())) {
-            std::cerr << "GPU doesn't support codec!" << std::endl;
-            return 0;
+            std::cerr << "Error: GPU doesn't support codec!" << std::endl;
+            return 1;
         }
 
         std::string device_name, gcn_arch_name;
@@ -248,6 +249,10 @@ int main(int argc, char **argv) {
         } while (n_video_bytes);
 
         std::cout << "info: Total frame decoded: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::cout << "info: avg decoding time per frame (ms): " << total_dec_time / n_frame << std::endl;
             std::cout << "info: avg FPS: " << (n_frame / total_dec_time) * 1000 << std::endl;
@@ -288,6 +293,7 @@ int main(int argc, char **argv) {
                     std::cout << "MD5 digest matches the reference MD5 digest: ";
                 } else {
                     std::cout << "MD5 digest does not match the reference MD5 digest: ";
+                    b_md5_check_failed = true;
                 }
                 std::cout << ref_md5_string << std::endl;
                 ref_md5_file.close();
@@ -299,5 +305,5 @@ int main(int argc, char **argv) {
       exit(1);
     }
 
-    return 0;
+    return b_md5_check_failed ? 1 : 0;
 }

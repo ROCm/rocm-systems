@@ -6,6 +6,8 @@
  *************************************************************************/
 
 #include "common.h"
+#include "graph/xml.h"
+#include "gdr_peermem.h"
 
 // Detect whether GDR can work on a given NIC with the current CUDA device
 // Returns :
@@ -13,19 +15,47 @@
 // ncclSystemError : no module or module loaded but not supported by GPU
 #define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
 static int ncclIbGdrModuleLoaded = 0; // 1 = true, 0 = false
+
+// Introduce RCCL_FORCE_ENABLE_GDRDMA to force load GPU-NIC RDMA module
+// Use ONLY for debugging!
+RCCL_PARAM(ForceEnableGdrdma, "FORCE_ENABLE_GDRDMA", -1);
+
+extern int64_t ncclParamIbPciRelaxedOrdering();
+
 static void ibGdrSupportInitOnce() {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (rcclParamForceEnableGdrdma() == 1) {
+    // RCCL_FORCE_ENABLE_GDRDMA=1 enables GPU-NIC RDMA only from RCCL-side
+    // Requires support from NIC driver modules
+    // Use ONLY for debugging!
+    ncclIbGdrModuleLoaded = 1;
+    INFO(NCCL_INIT, "RCCL_FORCE_ENABLE_GDRDMA = 1, so explicitly setting ncclIbGdrModuleLoaded = 1");
+  }
+
+  if (ncclIbGdrModuleLoaded == 0) {
+    if (ncclIbScanDefaultPeerMemClients()) ncclIbGdrModuleLoaded = 1;
+
+    char strValue[MAX_STR_LEN];
+    (void)ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
+    if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
+      int roMode = ncclParamIbPciRelaxedOrdering();
+      (void)ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
+      if (strcmp(strValue, "1") == 0 && roMode == 0) ncclIbGdrModuleLoaded = 0;
+    }
+  }
+#else
   // Check for the nv_peer_mem module being loaded
   ncclIbGdrModuleLoaded = KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem/version") ||
                           KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem_nc/version") ||
                           KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
+#endif
 }
 
 // Returns ncclSuccess if any of the peermem modules are loaded.
 ncclResult_t ncclIbGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (!ncclIbGdrModuleLoaded)
-    return ncclSystemError;
+  if (!ncclIbGdrModuleLoaded) return ncclSystemError;
   return ncclSuccess;
 }
 
@@ -34,12 +64,12 @@ static void ibPeerMemSupportInitOnce() {
   ncclIbPeerMemModuleLoaded = KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
 }
 
-// Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem (e.g. nv_mem, nv_mem_nc)
+// Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem
+// (e.g. nv_mem, nv_mem_nc)
 ncclResult_t ncclIbPeerMemSupport() {
   static std::once_flag once;
   std::call_once(once, ibPeerMemSupportInitOnce);
-  if (!ncclIbPeerMemModuleLoaded)
-    return ncclSystemError;
+  if (!ncclIbPeerMemModuleLoaded) return ncclSystemError;
   return ncclSuccess;
 }
 
@@ -53,6 +83,8 @@ static void ibDmaBufSupportInitOnce() {
   ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
   struct ibv_pd* pd;
   struct ibv_context* ctx = ibDev->context;
+  res = rocmLibraryInit();
+  if (res != ncclSuccess) goto failure;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
   // Test kernel DMA-BUF support with a dummy call (fd=-1)
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);

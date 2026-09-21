@@ -9,7 +9,7 @@
 add_library(examples_common STATIC examples_common.cpp)
 target_compile_features(examples_common PRIVATE cxx_std_${AIS_CXX_STANDARD})
 set_target_properties(examples_common PROPERTIES CXX_EXTENSIONS OFF)
-target_compile_options(examples_common PRIVATE -Wall -Wextra -fno-sanitize=all)
+target_compile_options(examples_common PRIVATE -Wall -Wextra)
 target_include_directories(examples_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 if(CMAKE_HIP_PLATFORM STREQUAL "amd")

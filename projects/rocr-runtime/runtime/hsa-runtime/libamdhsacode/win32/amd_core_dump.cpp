@@ -96,7 +96,7 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
   return HSA_STATUS_ERROR;
 }
 }  // namespace impl
-hsa_status_t dump_gpu_core() {
+hsa_status_t dump_gpu_core(std::vector<AMD::AqlQueue*>* suspended_queues_out) {
   assert(!"Unimplemented!");
   return HSA_STATUS_ERROR;
 }

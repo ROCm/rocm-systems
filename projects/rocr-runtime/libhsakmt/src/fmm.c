@@ -27,7 +27,7 @@
 #include "libhsakmt.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -43,6 +43,7 @@
 #include <numaif.h>
 #include "rbtree.h"
 #include <amdgpu.h>
+#include "xf86drm.h"
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -118,6 +119,8 @@ struct vm_object {
 	void *user_data;
 	/* Flag to indicate imported KFD buffer */
 	bool is_imported_kfd_bo;
+	/* Paged host memory backed by SVM, no BO behind it */
+	bool is_svm_paged;
 #ifdef SANITIZER_AMDGPU
 	int mmap_flags;
 	int mmap_fd;
@@ -206,11 +209,15 @@ typedef struct {
 						 * dgpu_aperture. When requested by RT, each
 						 * GPU will get a differnt range
 						 */
-	manageable_aperture_t gpuvm_aperture;   /* used for GPUVM on APU, outsidethe canonical address range */
+	manageable_aperture_t gpuvm_aperture;   /* used for GPUVM on APU, outside the canonical address range */
+	aperture_t gpuvm_range;                 /* raw gpuvm base/limit from kernel, always valid */
 	int drm_render_fd;
 	uint32_t usable_peer_id_num;
 	uint32_t *usable_peer_id_array;
 	int drm_render_minor;
+	uint32_t drm_vm_timeline_syncobj;   /* per GPU global timeline syncobj */
+	uint64_t drm_vm_timeline_seqnum;    /* per GPU global sequence number */
+	bool stall_on_retry_fault;          /* node runs in recoverable-fault mode */
 } gpu_mem_t;
 
 enum svm_aperture_type {
@@ -232,6 +239,7 @@ typedef struct {
 
 	/* whether to use userptr for paged memory */
 	bool userptr_for_paged_mem;
+	bool svm_for_paged_mem;
 
 	/* whether to check userptrs on registration */
 	bool check_userptr;
@@ -315,6 +323,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.dgpu_aperture = NULL;
 	ctx->fmm_context->svm.dgpu_alt_aperture = NULL;
 	ctx->fmm_context->svm.userptr_for_paged_mem = false;
+	ctx->fmm_context->svm.svm_for_paged_mem = true;
 	ctx->fmm_context->svm.check_userptr = false;
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
@@ -422,6 +431,7 @@ static vm_object_t *vm_create_and_init_object(void *start, uint64_t size,
 		object->metadata = NULL;
 		object->user_data = NULL;
 		object->is_imported_kfd_bo = false;
+		object->is_svm_paged = false;
 		object->node.key = rbtree_key((unsigned long)start, size);
 		object->user_node.key = rbtree_key(0, 0);
 #ifdef SANITIZER_AMDGPU
@@ -708,30 +718,19 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		/* Reset NUMA policy */
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
-		/* Remove any CPU mapping, but keep the address range reserved */
+		/*
+		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
+		 * allocations, then re-reserve the VA range as PROT_NONE.
+		 * Callers hold fmm_mutex (see contract above), which serializes
+		 * this against aperture allocations, so no allocation can claim
+		 * the VA in the window between munmap() and mmap().
+		 */
+		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
-		if (mmap_ret == MAP_FAILED && errno == ENOMEM) {
-			/* When mmap count reaches max_map_count, any mmap will
-			 * fail. Reduce the count with munmap then map it as
-			 * NORESERVE immediately.
-			 */
-			if (munmap(address, MemorySizeInBytes) == 0) {
-				/* After unmapping, try mmap again and handle failure
-				 * */
-				mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
-						MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-						-1, 0);
-				if (mmap_ret == MAP_FAILED) {
-					/* Handle mmap failure gracefully, log if needed */
-					pr_err("Failed to remap memory after unmap\n");
-				}
-			} else {
-				/* Handle munmap failure if needed */
-				pr_err("Failed to unmap memory\n");
-			}
-		}
+		if (mmap_ret == MAP_FAILED)
+			pr_err("Failed to reserve VA range %p: %s\n", address, strerror(errno));
 	}
 }
 
@@ -1119,12 +1118,17 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
+	/* s_attr is a compile-time constant (16 bytes); no overflow possible */
 	s_attr = 2 * sizeof(struct kfd_ioctl_svm_attribute);
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
 	args->start_addr = aligned_addr;
 	args->size = aligned_size;
 	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
@@ -1140,10 +1144,15 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
 }
 
 static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
@@ -1156,13 +1165,21 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	size_t s_attr;
 	uint32_t i, nattr;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
 	nattr = nodes_array_size;
+
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + nattr * sizeof(struct kfd_ioctl_svm_attribute) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
 	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
 
 	args->start_addr = (uint64_t)address;
 	args->size = size;
@@ -1175,10 +1192,60 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 	/* Driver does one copy_from_user, with extra attrs size */
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
+}
+
+static HSAKMT_STATUS fmm_unmap_mem_svm_api(HsaKFDContext *ctx,
+					   void *address,
+					   uint64_t size,
+					   uint32_t *nodes_to_unmap,
+					   uint32_t num_of_nodes)
+{
+	struct kfd_ioctl_svm_args *args;
+	size_t s_attr;
+	uint32_t i;
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	HSAKMT_STATUS ret;
+
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + num_of_nodes * sizeof(struct kfd_ioctl_svm_attribute) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * num_of_nodes;
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
+	args->start_addr = (uint64_t)address;
+	args->size = size;
+	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+	args->nattr = num_of_nodes;
+	for (i = 0; i < num_of_nodes; i++) {
+		args->attrs[i].type = HSA_SVM_ATTR_NO_ACCESS;
+		args->attrs[i].value = nodes_to_unmap[i];
+	}
+	/* Driver does one copy_from_user, with extra attrs size */
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
+		pr_debug("op set range attrs failed %s\n", strerror(errno));
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
+	}
+
+	ret = HSAKMT_STATUS_SUCCESS;
+out:
+	free(args);
+	return ret;
 }
 
 /* After allocating the memory, return the vm_object created for this memory.
@@ -1566,6 +1633,13 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 					    0, (void *)LONG_MAX, -1);
 	}
 
+	/* A partially initialized aperture (base NULL, limit derived from the
+	 * requested size) would claim every low VA in the process, so leave the
+	 * aperture untouched and let the caller see the failure instead.
+	 */
+	if (!mem)
+		return NULL;
+
 	/* Remember scratch backing aperture for later */
 	aperture_phy->base = mem;
 	aperture_phy->limit = VOID_PTR_ADD(mem, aligned_size-1);
@@ -1851,11 +1925,14 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 	if (hsakmt_udmabuf_dev_fd > 0 && aperture == fmm_ctx->svm.dgpu_aperture
 		 && hsakmt_device_is_apu_by_node_id(ctx, node_id)
 		 && aperture->ops == &mmap_aperture_ops) {
+
 		mem  = udmabuf_allocation(ctx, gpu_id, node_id, size, aperture, alignment,
                                         mflags, &vm_obj);
 		pr_debug("udmabuf_allocation mem %p\n", mem);
-		if (!mem)
-			pr_debug("udmabuf_allocation allocation fail\n");
+		if (!mem) {
+			pr_err("udmabuf_allocation allocation fail size %lu\n", size);
+			return NULL;
+		}
 	}
 
 	/* env HSA_USE_UDMABUF not set, or not apu, or cannot use udmabuf,
@@ -2109,10 +2186,19 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	if (mflags.ui32.OnlyAddress)
 		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
 
+	/* KFD refuses userptr on a node in recoverable-fault mode: evicting a
+	 * userptr BO invalidates its PTEs instead of preempting the queues,
+	 * which the mmu-notifier path cannot do for a stalled wave.
+	 */
+	bool use_userptr = fmm_ctx->svm.userptr_for_paged_mem &&
+			   !fmm_ctx->gpu_mem[gpu_mem_id].stall_on_retry_fault;
+
 	/* Paged memory is allocated as a userptr mapping, non-paged
 	 * memory is allocated from KFD
 	 */
-	if (!mflags.ui32.NonPaged && fmm_ctx->svm.userptr_for_paged_mem) {
+	if (!mflags.ui32.NonPaged &&
+	    (use_userptr ||
+	     (fmm_ctx->svm.svm_for_paged_mem && ctx->hsakmt_is_svm_api_supported))) {
 		int advice = MADV_NORMAL;
 
 		/* set madvise flags to HUGEPAGE always for 2MB pages */
@@ -2138,27 +2224,56 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		madvise(mem, MemorySizeInBytes, advice);
 
-		/* Create userptr BO */
-		mmap_offset = (uint64_t)mem;
-		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
-		vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
-						       aperture, &mmap_offset,
-						       ioc_flags);
-		if (!vm_obj)
-			goto out_release_area;
+		if (!use_userptr) {
+			/* No BO. The pages are served by SVM, but keep the
+			 * object so map, unmap and release still find the range.
+			 */
+			pthread_mutex_lock(&aperture->fmm_mutex);
+			vm_obj = aperture_allocate_object(aperture, mem, 0, size, mflags);
+			if (vm_obj)
+				vm_obj->is_svm_paged = true;
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+
+			if (vm_obj &&
+			    fmm_register_mem_svm_api(ctx, mem, size, mflags)
+					!= HSAKMT_STATUS_SUCCESS) {
+				pthread_mutex_lock(&aperture->fmm_mutex);
+				vm_remove_object(aperture, vm_obj);
+				pthread_mutex_unlock(&aperture->fmm_mutex);
+				vm_obj = NULL;
+			}
+			if (!vm_obj)
+				goto out_release_area;
+		} else {
+			/* Create userptr BO */
+			mmap_offset = (uint64_t)mem;
+			ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+			vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
+							       aperture, &mmap_offset,
+							       ioc_flags);
+			if (!vm_obj)
+				goto out_release_area;
+		}
 	} else {
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_GTT;
 		mem =  __fmm_allocate_device(ctx, preferred_gpu_id, address, size, aperture,
 					     &mmap_offset, ioc_flags, alignment, &vm_obj);
 
-		if (mem && mflags.ui32.HostAccess) {
-			void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
-						   mflags.ui32.HostAccess,
-						   gpu_drm_fd, mmap_offset);
+		if (mflags.ui32.NoAddress) {
+			aperture = &fmm_ctx->mem_handle_aperture;
+		}
 
-			if (ret == MAP_FAILED) {
-				__fmm_release(ctx, vm_obj, aperture);
-				return NULL;
+		if (mem && mflags.ui32.HostAccess) {
+			/* GTT system memory from mem_handle_aperture has no VA, so skip CPU mapping */
+			if (!mflags.ui32.NoAddress) {
+				void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
+							   mflags.ui32.HostAccess,
+							   gpu_drm_fd, mmap_offset);
+
+				if (ret == MAP_FAILED) {
+					__fmm_release(ctx, vm_obj, aperture);
+					return NULL;
+				}
 			}
 		}
     }
@@ -2242,6 +2357,9 @@ static int __fmm_release(HsaKFDContext *ctx,
 
 	if (ret)
 		goto err_free_mem_failed;
+
+	if (object->is_svm_paged)
+		munmap(object->start, object->size);
 
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
@@ -2392,7 +2510,7 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	 *    its own VM space).
 	*/
 	if (ctx->hsakmt_is_primary_ctx) {
-		dev_init_ret = amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
+		dev_init_ret = hsakmt_amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
 	} else if (hsakmt_fn_amdgpu_device_initialize2) {
 		dev_init_ret = hsakmt_fn_amdgpu_device_initialize2(fd, false, &major_drm, &minor_drm,
 						    (HsaAMDGPUDeviceHandle *)device_handle);
@@ -2837,7 +2955,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	struct kfd_process_device_apertures *process_apertures;
 	uint32_t num_of_sysfs_nodes;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-	char *disableCache, *pagedUserptr, *checkUserptr, *guardPagesStr, *reserveSvm;
+	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
 	char *maxVaAlignStr, *mfmaHighPrecisionModeStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
@@ -2853,6 +2971,12 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 */
 	pagedUserptr = getenv("HSA_USERPTR_FOR_PAGED_MEM");
 	fmm_ctx->svm.userptr_for_paged_mem = (!pagedUserptr || strcmp(pagedUserptr, "0"));
+
+	/* Back paged memory with SVM when userptr is off. GTT is capped well
+	 * below system memory, so keep it for NonPaged allocations only.
+	 */
+	pagedSvm = getenv("HSA_SVM_FOR_PAGED_MEM");
+	fmm_ctx->svm.svm_for_paged_mem = (!pagedSvm || strcmp(pagedSvm, "0"));
 
 	if (hsakmt_use_model || !ctx->hsakmt_is_primary_ctx)
 		fmm_ctx->svm.userptr_for_paged_mem = false;
@@ -2946,6 +3070,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].local_mem_size = props.LocalMemSize;
 			gpu_mem[gpu_mem_count].device_id = props.DeviceId;
 			gpu_mem[gpu_mem_count].node_id = i;
+			gpu_mem[gpu_mem_count].stall_on_retry_fault =
+				props.Capability2.ui32.StallOnRetryFault;
 			ctx->hsakmt_is_svm_api_supported &= props.Capability.ui32.SVMAPISupported;
 
 			gpu_mem[gpu_mem_count].scratch_physical.align = PAGE_SIZE;
@@ -2957,6 +3083,13 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].gpuvm_aperture.guard_pages = guardPages;
 			gpu_mem[gpu_mem_count].gpuvm_aperture.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].gpuvm_aperture.fmm_mutex, NULL);
+
+			/* Create timeline syncobj for this GPU device */
+			gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj = 0;
+			gpu_mem[gpu_mem_count].drm_vm_timeline_seqnum = 0;
+			if (drmSyncobjCreate(fd, 0, &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
+                pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+                    props.KFDGpuID);
 
 			gpu_mem_count++;
 		}
@@ -3056,6 +3189,11 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			PORT_UINT64_TO_VPTR(process_apertures[i].scratch_base);
 		gpu_mem[gpu_mem_id].scratch_aperture.limit =
 			PORT_UINT64_TO_VPTR(process_apertures[i].scratch_limit);
+
+		gpu_mem[gpu_mem_id].gpuvm_range.base =
+			PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_base);
+		gpu_mem[gpu_mem_id].gpuvm_range.limit =
+			PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_limit);
 
 		if (IS_CANONICAL_ADDR(process_apertures[i].gpuvm_limit)) {
 			uint64_t vm_alignment = get_vm_alignment(
@@ -3194,13 +3332,43 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	fmm_ctx->all_gpu_id_array_size = 0;
 
 	if (fmm_ctx->gpu_mem) {
-		while (fmm_ctx->gpu_mem_count-- > 0)
+		while (fmm_ctx->gpu_mem_count-- > 0) {
+			/* Destroy timeline syncobj for this GPU */
+			if (fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_vm_timeline_syncobj)
+                drmSyncobjDestroy(
+                    fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_render_fd,
+                    fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].drm_vm_timeline_syncobj);
+
 			free(fmm_ctx->gpu_mem[fmm_ctx->gpu_mem_count].usable_peer_id_array);
+		}
 		free(fmm_ctx->gpu_mem);
 		fmm_ctx->gpu_mem = NULL;
 		fmm_ctx->first_gpu_mem = NULL;
 	}
 	fmm_ctx->gpu_mem_count = 0;
+}
+
+HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
+			HSAuint32 node_id, int *drm_render_fd,
+			uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	int32_t index = gpu_mem_find_by_node_id(fmm_ctx, node_id);
+
+	if (index < 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (drm_render_fd)
+		*drm_render_fd = fmm_ctx->gpu_mem[index].drm_render_fd;
+	if (vm_timeline_syncobj)
+		*vm_timeline_syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
+	
+	if (vm_timeline_point)
+		*vm_timeline_point = __atomic_add_fetch(
+			&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
+			__ATOMIC_SEQ_CST);
+
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
@@ -3216,10 +3384,10 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 
 	switch (aperture_type) {
 	case FMM_GPUVM:
-		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base,
-			fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit)) {
-			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base);
-			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit);
+		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_range.base,
+			fmm_ctx->gpu_mem[slot].gpuvm_range.limit)) {
+			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_range.base);
+			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_range.limit);
 			err = HSAKMT_STATUS_SUCCESS;
 		}
 		break;
@@ -3509,7 +3677,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 	/* Map and return the GPUVM address adjusted by the offset
 	 * from the start of the page
 	 */
-	if (!object && ctx->hsakmt_is_svm_api_supported) {
+	if ((!object || object->is_svm_paged) && ctx->hsakmt_is_svm_api_supported) {
 		svm_addr = (void*)((HSAuint64)addr - page_offset);
 		if (!nodes_to_map) {
 			nodes_to_map = fmm_ctx->all_gpu_id_array;
@@ -3565,7 +3733,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 	/* Successful vm_find_object returns with the aperture locked */
 
 	/* allocate VA only */
-	if (object && object->handles[0] == 0) {
+	if (object && object->handles[0] == 0 && !object->is_svm_paged) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -3580,7 +3748,8 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 		/* Prefetch memory on APUs with dummy-reads */
 		fmm_check_user_memory(address, size);
 		ret = HSAKMT_STATUS_SUCCESS;
-	} else if ((ctx->hsakmt_is_svm_api_supported && !object) || (object && (object->userptr))) {
+	} else if ((ctx->hsakmt_is_svm_api_supported && !object) ||
+		   (object && (object->userptr || object->is_svm_paged))) {
 		ret = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address, object, NULL, 0);
 	} else if (aperture) {
 		ret = _fmm_map_to_gpu(ctx, aperture, address, size, object, NULL, 0);
@@ -3776,6 +3945,11 @@ int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address)
 	if (aperture == &fmm_ctx->cpuvm_aperture)
 		/* On APUs GPU unmapping of system memory is a no-op */
 		ret = 0;
+	else if (object->is_svm_paged)
+		ret = fmm_unmap_mem_svm_api(ctx, object->start, object->size,
+					    fmm_ctx->all_gpu_id_array,
+					    fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t))
+			== HSAKMT_STATUS_SUCCESS ? 0 : -EINVAL;
 	else
 		ret = _fmm_unmap_from_gpu(ctx, aperture, address, NULL, 0, object);
 
@@ -4244,8 +4418,16 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	const HsaSharedMemoryStruct *SharedMemoryStruct =
 		to_const_hsa_shared_memory_struct(SharedMemoryHandle);
 	HSAuint64 SizeInPages = SharedMemoryStruct->SizeInPages;
+	HSAuint64 SizeInBytesCalc;
 	HsaMemFlags mflags;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	SizeInBytesCalc = SizeInPages << PAGE_SHIFT;
+
+	if (SizeInPages == 0) {
+		pr_err("IPC import: size cannot be zero\n");
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	if (gpu_id_array_size > 0 && !gpu_id_array)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -4257,6 +4439,14 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	aperture = fmm_get_aperture(fmm_ctx, SharedMemoryStruct->ApeInfo);
 	if (!aperture)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	HSAuint64 aperture_size = VOID_PTRS_SUB(aperture->limit, aperture->base) + 1;
+	if (SizeInBytesCalc > aperture_size) {
+		pr_err("IPC import: size 0x%llx exceeds aperture range 0x%llx\n",
+				(unsigned long long)SizeInBytesCalc,
+		(unsigned long long)aperture_size);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	reservedMem = aperture_allocate_area(aperture, NULL,
@@ -4415,7 +4605,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 	/* Successful vm_find_object returns with aperture locked */
 
 	/* allocates VA only */
-	if (object && object->handles[0] == 0) {
+	if (object && object->handles[0] == 0 && !object->is_svm_paged) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -4433,7 +4623,8 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	if ((ctx->hsakmt_is_svm_api_supported && !object) || object->userptr) {
+	if ((ctx->hsakmt_is_svm_api_supported && !object) ||
+	    object->userptr || object->is_svm_paged) {
 		retcode = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address,
 				object, nodes_to_map, num_of_nodes * sizeof(uint32_t));
 		if (object)
@@ -4726,22 +4917,35 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 	fmm_clear_aperture(&fmm_ctx->svm.apertures[SVM_COHERENT]);
 
 	if (fmm_ctx->dgpu_shared_aperture_limit) {
-		/* Use the same dgpu range as the parent. If failed, then set
-		 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
-		 * to get a new range
-		 */
-		map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit)-
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1, PROT_NONE,
-			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+		HSAuint64 dgpu_size =
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1;
 
-		if (map_addr == MAP_FAILED) {
-			munmap(fmm_ctx->dgpu_shared_aperture_base,
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1);
-
+		if (hsakmt_use_model) {
+			/* In model mode, hsaKmtCloseKFDCtx frees the fmm context
+			 * after this call, so the "remap-and-keep" path used for
+			 * fork() inheritance would leak the SVM reservation and
+			 * make the next hsa_init in the same process fail to
+			 * reserve SVM address space. Release it instead.
+			 */
+			munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
 			fmm_ctx->dgpu_shared_aperture_base = NULL;
 			fmm_ctx->dgpu_shared_aperture_limit = NULL;
+		} else {
+			/* Use the same dgpu range as the parent. If failed, then set
+			 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
+			 * to get a new range
+			 */
+			map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
+				dgpu_size, PROT_NONE,
+				MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+
+			if (map_addr == MAP_FAILED) {
+				munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
+
+				fmm_ctx->dgpu_shared_aperture_base = NULL;
+				fmm_ctx->dgpu_shared_aperture_limit = NULL;
+			}
 		}
 	}
 

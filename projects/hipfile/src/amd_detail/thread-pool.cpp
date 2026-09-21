@@ -3,87 +3,144 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "taskflow/taskflow.hpp"
 #include "thread-pool.h"
 
-#include <memory>
-#include <oneapi/tbb/task_arena.h>
-#include <oneapi/tbb/task_group.h>
-#include <stdexcept>
+#include <algorithm>
+#include <condition_variable>
+#include <cstdint>
+#include <exception>
+#include <mutex>
 #include <utility>
 
 namespace hipFile {
 
-struct ThreadPool::ThreadPoolStorage {
-    tbb::task_arena arena;
+namespace {
+
+    class TaskflowTaskGroup final : public ITaskGroup {
+    public:
+        explicit TaskflowTaskGroup(std::shared_ptr<tf::Executor> _executor)
+            : executor{std::move(_executor)}, state{std::make_shared<State>()}
+        {
+        }
+
+        ~TaskflowTaskGroup() override
+        {
+            cancel();
+            wait();
+        }
+
+        void run(std::function<void()> task) override
+        {
+            uint64_t task_generation = 0;
+            auto     task_state      = state;
+
+            {
+                std::lock_guard<std::mutex> lock{task_state->mutex};
+
+                task_generation = task_state->generation;
+                task_state->outstanding++;
+            }
+
+            try {
+                executor->silent_async([task_state, task_generation, work = std::move(task)]() mutable {
+                    Completion            completion{task_state};
+                    std::function<void()> local_work;
+                    local_work.swap(work);
+
+                    {
+                        std::lock_guard<std::mutex> lock{task_state->mutex};
+                        if (task_generation != task_state->generation) {
+                            return;
+                        }
+                    }
+
+                    local_work();
+                });
+            }
+            catch (...) {
+                finish(task_state);
+                throw;
+            }
+        }
+
+        void cancel() override
+        {
+            std::lock_guard<std::mutex> lock{state->mutex};
+
+            state->generation++;
+        }
+
+        void wait() override
+        {
+            std::unique_lock<std::mutex> lock{state->mutex};
+
+            state->cv.wait(lock, [this]() { return state->outstanding == 0; });
+        }
+
+    private:
+        struct State {
+            std::mutex              mutex;
+            std::condition_variable cv;
+            uint64_t                generation  = 0;
+            size_t                  outstanding = 0;
+        };
+
+        class Completion {
+        public:
+            explicit Completion(std::shared_ptr<State> _state) : state{std::move(_state)}
+            {
+            }
+
+            ~Completion()
+            {
+                finish(state);
+            }
+
+            Completion(const Completion &)            = delete;
+            Completion &operator=(const Completion &) = delete;
+
+            Completion(Completion &&)            = delete;
+            Completion &operator=(Completion &&) = delete;
+
+        private:
+            std::shared_ptr<State> state;
+        };
+
+        static void finish(const std::shared_ptr<State> &state)
+        {
+            {
+                std::lock_guard<std::mutex> lock{state->mutex};
+
+                state->outstanding--;
+            }
+            state->cv.notify_all();
+        }
+
+        std::shared_ptr<tf::Executor> executor;
+        std::shared_ptr<State>        state;
+    };
+
+}
+
+struct ThreadPool::Impl {
+    explicit Impl(size_t workers) : executor{std::make_shared<tf::Executor>(std::max<size_t>(workers, 1))}
+    {
+    }
+
+    std::shared_ptr<tf::Executor> executor;
 };
 
-class ThreadPool::TaskGroup : public ITaskGroup {
-public:
-    explicit TaskGroup(std::shared_ptr<ThreadPoolStorage> _storage) : storage{std::move(_storage)}
-    {
-    }
-
-    ~TaskGroup() noexcept override
-    {
-        try {
-            cancel_impl();
-            wait_impl();
-        }
-        catch (...) {
-            // Explicit wait() preserves task failures. Destructors cannot report them.
-        }
-    }
-
-    void run(std::function<void()> work) override
-    {
-        if (!work) {
-            throw std::invalid_argument("Task group work item cannot be empty");
-        }
-
-        storage->arena.execute([this, task = std::move(work)]() mutable { tasks.run(std::move(task)); });
-    }
-
-    void cancel() override
-    {
-        cancel_impl();
-    }
-
-    void wait() override
-    {
-        wait_impl();
-    }
-
-private:
-    void cancel_impl()
-    {
-        storage->arena.execute([this]() { tasks.cancel(); });
-    }
-
-    void wait_impl()
-    {
-        storage->arena.execute([this]() { tasks.wait(); });
-    }
-
-    std::shared_ptr<ThreadPoolStorage> storage;
-    tbb::task_group                    tasks;
-};
-
-ThreadPool::ThreadPool() : storage{std::make_shared<ThreadPoolStorage>()}
+ThreadPool::ThreadPool(size_t workers) : impl{std::make_unique<Impl>(workers)}
 {
 }
 
-ThreadPool::~ThreadPool() noexcept = default;
+ThreadPool::~ThreadPool() = default;
 
 std::unique_ptr<ITaskGroup>
 ThreadPool::makeTaskGroup()
 {
-    return std::make_unique<TaskGroup>(storage);
-}
-
-std::size_t
-ThreadPool::threadCount() const noexcept
-{
-    return static_cast<std::size_t>(storage->arena.max_concurrency());
+    return std::make_unique<TaskflowTaskGroup>(impl->executor);
 }
 
 }

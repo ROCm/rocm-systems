@@ -13,7 +13,7 @@
 // Structure used to communicate data about NCCL ranks from NCCL threads to RAS.
 struct rasRankInit {
   union ncclSocketAddress addr;
-  pid_t pid;
+  ncclPid_t pid;
   int cudaDev;
   int nvmlDev;
   uint64_t hostHash;
@@ -23,5 +23,6 @@ struct rasRankInit {
 ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank);
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm);
 ncclResult_t ncclRasAddRanks(struct rasRankInit* ranks, int nranks);
+ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm);
 
 #endif // !NCCL_RAS_H_

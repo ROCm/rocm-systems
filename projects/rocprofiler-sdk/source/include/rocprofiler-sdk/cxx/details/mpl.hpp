@@ -145,10 +145,22 @@ struct is_string_type<const char*> : std::true_type
 template <>
 struct is_string_type<std::string_view> : std::true_type
 {};
+
+template <typename Tp>
+struct is_optional : std::false_type
+{};
+
+template <typename Tp>
+struct is_optional<std::optional<Tp>> : std::true_type
+{};
 }  // namespace impl
 
 template <typename Tp>
 struct is_string_type : impl::is_string_type<unqualified_identity_t<Tp>>
+{};
+
+template <typename Tp>
+struct is_optional : impl::is_optional<unqualified_identity_t<Tp>>
 {};
 
 // template <typename Tp>
@@ -179,7 +191,7 @@ ROCPROFILER_IMPL_SFINAE_CONCEPT(is_iterable,
                                 std::begin(std::declval<Tp>()),
                                 std::end(std::declval<Tp>()))
 
-// compatability
+// compatibility
 template <typename Tp>
 using supports_ostream = can_stringify<Tp>;
 

@@ -98,9 +98,9 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
                          const std::string& isa, const std::vector<std::string>& compileOptions,
                          const std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& exe);
-bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, const std::vector<std::string>& compileOptions,
-                      std::string& buildLog, std::vector<char>& LLVMBitcode);
+bool compileToIR(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
+                 const std::string& isa, const std::vector<std::string>& compileOptions,
+                 std::string& buildLog, std::vector<char>& ir, amd_comgr_data_kind_t kind);
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                      const std::string& isa, const std::vector<std::string>& linkOptions,
                      std::string& buildLog, std::vector<char>& LinkedLLVMBitcode);
@@ -109,7 +109,8 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                       std::string& buildLog, std::vector<char>& executable, bool spirv_bc = false);
 bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                           const std::string& isa, const std::vector<std::string>& linkOptions,
-                          std::string& buildLog, std::vector<char>& linkedSPIRVBitcode);
+                          std::string& buildLog,
+                          comgr_helper::ComgrDataSetUniqueHandle& linkOutputs);
 bool demangleName(const std::string& mangledName, std::string& demangledName);
 std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(const std::vector<char>& executable,
@@ -193,6 +194,7 @@ class RTCProgram {
   std::string isa_;
   std::string build_log_;
   std::vector<char> executable_;
+  amd_comgr_data_kind_t ir_kind_{AMD_COMGR_DATA_KIND_UNDEF};
 
   hip::comgr_helper::ComgrDataSetUniqueHandle exec_input_;
 };

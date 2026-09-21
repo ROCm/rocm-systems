@@ -64,7 +64,7 @@ sudo pip3 install -r requirements.txt
 
 ```bash
 ./rdhc.py -h
-usage: sudo -E rdhc.py [options]
+usage: ./rdhc.py [options]
 
 ROCm Deployment Health Check Tool
 
@@ -75,7 +75,8 @@ optional arguments:
   -v, --verbose         Enable verbose output
   -s, --silent          Silent mode (errors only)
   -j FILE, --json FILE  Export results to JSON file
-  -d DIR, --dir DIR     Directory path for temporary files (default: /tmp/rdhc/)
+  -d DIR, --dir DIR     Directory path for temporary files (must not exist; created with mode 0700)
+  --cleanup             Remove auto-generated temp directory after tests complete
   --rocm-install-prefix DIR  ROCm installation prefix. If set, this path is used; otherwise `ROCM_PATH` env or `/opt/rocm` is used.
   --skip-multinode-readiness   Skip multinode cluster readiness test (e.g. single-node or no RDMA stack)
   --skip-atomic-operations     Skip PCIe atomic operations test (e.g. containers or limited lspci)
@@ -87,45 +88,50 @@ optional arguments:
 
 ```bash
 # Run quick test (default tests only)
-sudo -E ./rdhc.py
+./rdhc.py
 
 # Run all tests including compile and execute the rocm-example program for each component
-sudo -E ./rdhc.py --all
+./rdhc.py --all
 
 # Run all tests with verbose output
-sudo -E ./rdhc.py --all -v
+./rdhc.py --all -v
 
 # Enable verbose output
-sudo -E ./rdhc.py -v
+./rdhc.py -v
 
 # Run in silent mode (only errors shown)
-sudo -E ./rdhc.py -s
+./rdhc.py -s
 
 # Export results to a specific JSON file
-sudo -E ./rdhc.py --all --json rdhc-results.json
+./rdhc.py --all --json rdhc-results.json
 
-# Specify a directory for temp files and logs (default: /tmp/rdhc/)
-sudo -E ./rdhc.py -d /home/user/rdhc-dir/
+# Specify a directory for temp files (directory must not exist)
+./rdhc.py --all -d /home/user/rdhc-run1/
+
+# Auto-generate temp directory and clean it up after tests
+./rdhc.py --all --cleanup
 
 # Custom install prefix
-sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm
+./rdhc.py --rocm-install-prefix /usr/local/rocm
 
 # Custom prefix and run all tests
-sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm --all -v
+./rdhc.py --rocm-install-prefix /usr/local/rocm --all -v
 
 # Skip multinode + atomic checks (single-node or container-friendly)
-sudo -E ./rdhc.py --skip-optional-cluster-checks
+./rdhc.py --skip-optional-cluster-checks
 
 # Or skip only one of them
-sudo -E ./rdhc.py --skip-multinode-readiness
-sudo -E ./rdhc.py --skip-atomic-operations
+./rdhc.py --skip-multinode-readiness
+./rdhc.py --skip-atomic-operations
 
 # Kernel cmdline/sysctl checks: mismatches count as warnings, not FAIL
-sudo -E ./rdhc.py --kernel-params-warnings-only
+./rdhc.py --kernel-params-warnings-only
 
 # Combine with other options
-sudo -E ./rdhc.py --all --skip-optional-cluster-checks --kernel-params-warnings-only -v
+./rdhc.py --all --skip-optional-cluster-checks --kernel-params-warnings-only -v
 ```
+
+**Note on privileges:** Most checks run without elevated privileges. Some checks (e.g., `lspci -vvv` for atomic operations) may require root access. Run as root when necessary, or use `--skip-atomic-operations` if running unprivileged.
 
 ## Optional CLI behavior
 
@@ -171,23 +177,36 @@ source ~/rdhc-venv/bin/activate
 
 # Install required packages
 pip3 install -r requirements.txt
+
+# Run the tool (virtual environment activated)
+./rdhc.py
+./rdhc.py --all
 ```
 
-**Note for Ubuntu 24.04 users:** Due to enhanced security policies, `sudo -E` does not preserve the virtual environment PATH. Replace all `sudo -E` commands with `sudo --preserve-env=PATH` in the usage examples above.
+### Temporary Directory Behavior
 
-For example:
+When using `--all` mode, RDHC clones and builds rocm-examples:
+
+- **Without `-d` flag**: A secure temporary directory is auto-generated in `/tmp` (e.g., `/tmp/rdhc-abc123/`) with mode `0700`. By default, this directory persists after the run. Use `--cleanup` to remove it automatically.
+- **With `-d` flag**: The specified directory is created with mode `0700`. The directory **must not already exist** (for security reasons). If you need to reuse a directory, remove it first: `rm -rf /path/to/dir`
+
+Example workflow for repeated runs:
 
 ```bash
-# Instead of: sudo -E ./rdhc.py
-# Use:
-source ~/rdhc-venv/bin/activate
-sudo --preserve-env=PATH ./rdhc.py
+# Auto-generated temp dir (persists)
+./rdhc.py --all
+# Creates /tmp/rdhc-abc123/ (check logs or report for actual path)
 
-# Run all tests
-sudo --preserve-env=PATH ./rdhc.py --all
+# Auto-generated temp dir with automatic cleanup
+./rdhc.py --all --cleanup
+# Creates and removes temp dir after tests complete
 
-# Run with verbose output
-sudo --preserve-env=PATH ./rdhc.py -v
+# Custom directory (must not exist)
+./rdhc.py --all -d /tmp/my-rdhc-run1/   # First run with this path
+rm -rf /tmp/my-rdhc-run1/                # Clean up before next run
+./rdhc.py --all -d /tmp/my-rdhc-run1/   # Can reuse after cleanup
+
+# Note: --cleanup has no effect when -d is specified
 ```
 
 ---

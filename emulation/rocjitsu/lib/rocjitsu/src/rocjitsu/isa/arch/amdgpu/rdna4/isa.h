@@ -4,9 +4,9 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ISA_H_
 
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/decoder.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
@@ -65,7 +65,8 @@ public:
 ///
 /// @details Inherits all defaults from `amdgpu::RdnaIsaBase` including
 /// `WAITCNT_LGKMCNT_MASK = 0` — RDNA4 uses split S_WAIT_LOADCNT /
-/// S_WAIT_DSCNT / S_WAIT_KMCNT instructions; there is no monolithic S_WAITCNT.
+/// S_WAIT_DSCNT / S_WAIT_KMCNT instructions, while the decoder also accepts
+/// LLVM's monolithic S_WAITCNT compatibility encoding.
 struct Isa : amdgpu::RdnaIsaBase {
   using Decoder = rdna4::Decoder;
   using MachineInst = rdna4::MachineInst;

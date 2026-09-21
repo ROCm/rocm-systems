@@ -12,7 +12,6 @@ set -e
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${GPU_TYPE:=""}
-: ${GPU_TARBALL:=""}
 : ${ROCM_VERSION:=""}
 
 verbose-run()
@@ -108,11 +107,6 @@ do
             GPU_TYPE=${1}
             reset-last
             ;;
-        "--gpu-tarball")
-            shift
-            GPU_TARBALL=${1}
-            reset-last
-            ;;
         "--rocm-version")
             shift
             ROCM_VERSION=${1}
@@ -194,7 +188,6 @@ do
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
         --build-arg GPU_TYPE=${GPU_TYPE} \
-        --build-arg GPU_TARBALL=${GPU_TARBALL} \
         --build-arg ROCM_VERSION=${ROCM_VERSION}
 done
 

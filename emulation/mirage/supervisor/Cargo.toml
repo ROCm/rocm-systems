@@ -1,0 +1,38 @@
+[package]
+name = "mirage_supervisor"
+version.workspace = true
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mirage_core = { workspace = true }
+mirage_container = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+nix = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+
+[dev-dependencies]
+tempfile = { workspace = true }
+inventory = { workspace = true }
+# `test-util` is not in tokio's `full`, and it is what gives the readiness
+# tests a paused clock: they assert on behaviour spanning minutes of
+# bring-up, which is not a thing a test may actually wait for.
+tokio = { workspace = true, features = ["test-util"] }
+chrono = { workspace = true }
+mirage_rocjitsu = { workspace = true }
+mirage_builtin = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+
+[lints]
+workspace = true

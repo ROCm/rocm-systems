@@ -66,7 +66,7 @@ streamperthread:
     tags: [stream]
   Unit_hipStrmPerThrdDefault:
     <<: *level_2
-    tags: [stream]
+    tags: [stream, image]
   Unit_hipGetProcAddress_spt_MemCpy:
     <<: *level_2
     tags: [stream]

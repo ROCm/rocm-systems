@@ -603,8 +603,10 @@ namespace code {
 #if defined(GFX12_BUILD)
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: name = "gfx1200"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1201: name = "gfx1201"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:   name = "gfx12-generic";   xnack_supported = false; sramecc_supported = false; break;
 #endif // GFX12_BUILD
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:    name = "gfx9-generic";    xnack_supported = true; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC:  name = "gfx9-4-generic";  xnack_supported = true; sramecc_supported = true; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC: name = "gfx10-1-generic"; xnack_supported = true; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC: name = "gfx10-3-generic"; xnack_supported = false; sramecc_supported = false; break;
       default: return false;

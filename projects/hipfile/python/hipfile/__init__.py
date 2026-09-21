@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Python bindings for the hipFile GPU-accelerated file I/O library."""
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611
@@ -10,13 +14,15 @@ from hipfile.buffer import Buffer
 from hipfile.driver import Driver
 from hipfile.enums import FileHandleType, OpError
 from hipfile.error import HipFileException
-from hipfile.file import FileHandle
+from hipfile.file import FileHandle, Stream, supports_async
 from hipfile.properties import driver_get_properties, get_version
 
 __all__ = [
     "__version__",
     "Driver",
     "FileHandle",
+    "Stream",
+    "supports_async",
     "Buffer",
     "HipFileException",
     "FileHandleType",

@@ -8,7 +8,23 @@
 #ifndef _NCCL_DEVICE_CORE__TYPES_H_
 #define _NCCL_DEVICE_CORE__TYPES_H_
 #include "../core_tmp.h"
+#if defined(NCCL_OS_WINDOWS)
+#include <cuda.h>
+/* Minimal types instead of nccl_device/gin/gin_device_host_common.h (GIN is Linux-only) */
+#define NCCL_GIN_MAX_CONNECTIONS 4
+typedef void* ncclGinWindow_t;
+#else
 #include "nccl_device/gin/gin_device_host_common.h"
+#endif
+
+// CFT Logical Endpoint ID
+#define NCCL_LE_ID_INVALID ((ncclCftLeId_t) - 1)
+
+struct ncclSegmentWindow {
+  ncclGinWindow_t ginWins[NCCL_GIN_MAX_CONNECTIONS];
+  size_t segmentSize;
+  CUmemLocationType memType;
+};
 
 // nccl.h has: typedef ncclWindow_vidmem* ncclWindow_t;
 struct ncclWindow_vidmem {
@@ -19,8 +35,20 @@ struct ncclWindow_vidmem {
   uint32_t stride4G;
   uint32_t mcOffset4K;
   uint32_t ginOffset4K;
-  ncclGinWindow_t ginWins[NCCL_GIN_MAX_CONNECTIONS];
+  ncclGinWindow_t ginWinsDefaultBackend[NCCL_GIN_MAX_CONNECTIONS];
+  struct ncclSegmentWindow* ginMultiSegmentWins; // multi-segment: pointer to accommodate variable num segments
+  int numSegments;
+  int cftFlatRank;
 };
+
+// Inlined resource-window. A subset of ncclWindow_vidmem with only the fields used
+// for resource-buffer addressing. lsaFlatBase / stride4G / mcOffset4K stay at the same
+// offsets they have inside ncclWindow_vidmem for byte-level compatibility.
+typedef struct ncclResourceWindow_vidmem {
+  char* lsaFlatBase;
+  uint32_t stride4G;
+  uint32_t mcOffset4K;
+} ncclResourceWindow_vidmem_t;
 
 struct ncclMultimemHandle {
   void* mcBasePtr;

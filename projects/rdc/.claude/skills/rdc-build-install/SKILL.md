@@ -10,7 +10,7 @@ Builds RDC from source, packages it, and installs locally. Used by the review ag
 ## Prerequisites
 
 - CMake 3.15+, GCC 5.4+, and a C/C++ toolchain installed
-- gRPC 1.67.1 pre-built at `$GRPC_ROOT` (required for `BUILD_STANDALONE=ON`)
+- gRPC 1.78.1 pre-built at `$GRPC_ROOT` (required for `BUILD_STANDALONE=ON`)
 - AMDSMI installed at `/opt/rocm` (required at runtime)
 - `sudo` access for package install
 - Working directory must be the rdc workspace root (`projects/rdc/`)

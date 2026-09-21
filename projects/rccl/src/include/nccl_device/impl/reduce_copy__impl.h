@@ -15,27 +15,20 @@
 #include "../coop.h"
 #include <type_traits>
 
-#if NCCL_CHECK_CUDACC && defined(__CUDACC_EXTENDED_LAMBDA__)
+#if defined(__CUDACC__) && defined(__CUDACC_EXTENDED_LAMBDA__)
 
 namespace nccl {
 namespace utility {
 
-// Helper Functions
-
 // Core Loop Implementation
 
-template <int UNROLL_PACKS, int UNROLL_SOURCE, typename T, typename Pack, typename RedOp,
-          typename IntCount, typename Coop, bool srcMultimem, bool dstMultimem,
-          typename SrcLambda, typename DstLambda, bool CHECK_BOUNDS, bool SINGLE_SRC>
-NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(
-    Coop coop,
-    SrcLambda srcLambda, int nSrc,
-    DstLambda dstLambda, int nDst,
-    RedOp const& redOp,
-    IntCount totalPacks,
-    IntCount basePackIdx) {
-  static_assert(!SINGLE_SRC || UNROLL_SOURCE == 1,
-                "UNROLL_SOURCE must be 1 when SINGLE_SRC is set");
+template <int UNROLL_PACKS, int UNROLL_SOURCE, typename T, typename Pack, typename RedOp, typename IntCount,
+          typename Coop, bool srcMultimem, bool dstMultimem, typename SrcLambda, typename DstLambda, bool CHECK_BOUNDS,
+          bool SINGLE_SRC>
+NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(Coop coop, SrcLambda srcLambda, int nSrc, DstLambda dstLambda,
+                                                   int nDst, RedOp const& redOp, IntCount totalPacks,
+                                                   IntCount basePackIdx) {
+  static_assert(!SINGLE_SRC || UNROLL_SOURCE == 1, "UNROLL_SOURCE must be 1 when SINGLE_SRC is set");
 
   constexpr int warpSize = 32;
   constexpr int coopStride = CoopStride<Coop>::value;
@@ -54,110 +47,74 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(
   using AccEltType = std::conditional_t<SINGLE_SRC, PackEltType, BaseAccEltType>;
   using AccPackType = EltPack<AccEltType, Pack::Count>;
 
-  // Create accumulator reduction operator from RedOp
-  // Maps RedOp (e.g., OpSum<T>) to accumulator reduction operator (e.g., OpSum<AccEltType>)
   using AccRedOpType = typename AccRedOp<RedOp, AccEltType>::Type;
-  AccRedOpType accRedOp{};
 
   AccPackType acc[UNROLL_PACKS];
 
-  // Reduce phase - optimized fast path for LSA sources without bounds checking
-  if NCCL_IF_CONSTEXPR (!srcMultimem && !CHECK_BOUNDS) {
-    if NCCL_IF_CONSTEXPR (SINGLE_SRC) {
-      Pack* srcPtr0 = (Pack*)srcLambda(0);
-      #pragma unroll UNROLL_PACKS
-      for (int u = 0; u < UNROLL_PACKS; u++) {
-        IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-        Pack loaded = srcPtr0[packIdx];
-        acc[u] = castPack<AccEltType, PackEltType, Pack::Count>(loaded);
-      }
-    } else {
-      Pack loaded[UNROLL_SOURCE][UNROLL_PACKS];
-
-      // Preseed acc[] with source 0 to avoid inner-loop branching.
-      Pack* srcPtr = (Pack*)srcLambda(0);
-      #pragma unroll UNROLL_PACKS
-      for (int u = 0; u < UNROLL_PACKS; u++) {
-        IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-        acc[u] = castPack<AccEltType, PackEltType, Pack::Count>(srcPtr[packIdx]);;
+  // Reduce phase
+  if NCCL_IF_CONSTEXPR (SINGLE_SRC) {
+    Pack* srcPtr0 = (Pack*)srcLambda(0);
+    NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
+    for (int u = 0; u < UNROLL_PACKS; u++) {
+      IntCount packIdx = groupLanePackIdx + u * runtimeStride;
+      if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
+        if (packIdx >= totalPacks) break;
       }
 
-      constexpr int srcCount = UNROLL_SOURCE;
-      #pragma unroll UNROLL_SOURCE
-      for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
-        Pack* srcPtr = (Pack*)srcLambda(srcOffset);
-        #pragma unroll UNROLL_PACKS
-        for (int u = 0; u < UNROLL_PACKS; u++) {
-          IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-          loaded[srcOffset][u] = srcPtr[packIdx];
-        }
-      }
-
-      #pragma unroll UNROLL_PACKS
-      for (int u = 0; u < UNROLL_PACKS; u++) {
-        #pragma unroll UNROLL_SOURCE
-        for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
-          AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
-          acc[u] = reducePack(accRedOp, acc[u], val);
-        }
-      }
-
-      // Remaining passes over sources.
-      for (int srcBase = UNROLL_SOURCE; srcBase < nSrc; srcBase += UNROLL_SOURCE) {
-        #pragma unroll UNROLL_SOURCE
-        for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
-          Pack* srcPtr = (Pack*)srcLambda(srcBase + srcOffset);
-          #pragma unroll UNROLL_PACKS
-          for (int u = 0; u < UNROLL_PACKS; u++) {
-            IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-            loaded[srcOffset][u] = srcPtr[packIdx];
-          }
-        }
-
-        #pragma unroll UNROLL_PACKS
-        for (int u = 0; u < UNROLL_PACKS; u++) {
-          #pragma unroll UNROLL_SOURCE
-          for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
-            AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
-            acc[u] = reducePack(accRedOp, acc[u], val);
-          }
-        }
-      }
+      Pack loaded = load<Pack, srcMultimem, RedOp>(srcPtr0 + packIdx);
+      acc[u] = castPack<AccEltType, PackEltType, Pack::Count>(loaded);
     }
   } else {
-    if NCCL_IF_CONSTEXPR (SINGLE_SRC) {
-      Pack* srcPtr0 = (Pack*)srcLambda(0);
-      #pragma unroll UNROLL_PACKS
+    AccRedOpType accRedOp{};
+    Pack loaded[UNROLL_SOURCE][UNROLL_PACKS];
+
+    // Preseed acc[] with source 0 to avoid inner-loop branching.
+    Pack* srcPtr = (Pack*)srcLambda(0);
+    NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
+    for (int u = 0; u < UNROLL_PACKS; u++) {
+      IntCount packIdx = groupLanePackIdx + u * runtimeStride;
+      if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
+        if (packIdx >= totalPacks) break;
+      }
+      loaded[0][u] = load<Pack, srcMultimem, RedOp>(srcPtr + packIdx);
+      AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[0][u]);
+      acc[u] = val;
+    }
+
+    constexpr int srcCount = UNROLL_SOURCE;
+    NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
+    for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
+      Pack* srcPtr = (Pack*)srcLambda(srcOffset);
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
           if (packIdx >= totalPacks) break;
         }
-
-        Pack loaded = load<Pack, srcMultimem, RedOp>(srcPtr0 + packIdx);
-        acc[u] = castPack<AccEltType, PackEltType, Pack::Count>(loaded);
+        loaded[srcOffset][u] = load<Pack, srcMultimem, RedOp>(srcPtr + packIdx);
       }
-    } else {
-      Pack loaded[UNROLL_SOURCE][UNROLL_PACKS];
+    }
 
-      // Preseed acc[] with source 0 to avoid inner-loop branching.
-      Pack* srcPtr = (Pack*)srcLambda(0);
-      #pragma unroll UNROLL_PACKS
-      for (int u = 0; u < UNROLL_PACKS; u++) {
+    NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
+    for (int u = 0; u < UNROLL_PACKS; u++) {
+      if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
         IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-        if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
-          if (packIdx >= totalPacks) break;
-        }
-        loaded[0][u] = load<Pack, srcMultimem, RedOp>(srcPtr + packIdx);
-        AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[0][u]);
-        acc[u] = val;
+        if (packIdx >= totalPacks) break;
       }
-
-      constexpr int srcCount = UNROLL_SOURCE;
-      #pragma unroll UNROLL_SOURCE
+      NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
       for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
-        Pack* srcPtr = (Pack*)srcLambda(srcOffset);
-        #pragma unroll UNROLL_PACKS
+        AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
+        acc[u] = reducePack(accRedOp, acc[u], val);
+      }
+    }
+
+    // Finish remaining sources.
+    for (int srcBase = UNROLL_SOURCE; srcBase < nSrc; srcBase += UNROLL_SOURCE) {
+      Pack loaded[UNROLL_SOURCE][UNROLL_PACKS];
+      NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
+      for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
+        Pack* srcPtr = (Pack*)srcLambda(srcBase + srcOffset);
+        NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
         for (int u = 0; u < UNROLL_PACKS; u++) {
           IntCount packIdx = groupLanePackIdx + u * runtimeStride;
           if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
@@ -167,83 +124,35 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(
         }
       }
 
-      #pragma unroll UNROLL_PACKS
+      NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
       for (int u = 0; u < UNROLL_PACKS; u++) {
-        IntCount packIdx = groupLanePackIdx + u * runtimeStride;
         if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
+          IntCount packIdx = groupLanePackIdx + u * runtimeStride;
           if (packIdx >= totalPacks) break;
         }
-        #pragma unroll UNROLL_SOURCE
-        for (int srcOffset = 1; srcOffset < srcCount; srcOffset++) {
+        NVCC_PRAGMA_UNROLL(UNROLL_SOURCE)
+        for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
           AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
           acc[u] = reducePack(accRedOp, acc[u], val);
-        }
-      }
-
-      // Finish remaining sources.
-      for (int srcBase = UNROLL_SOURCE; srcBase < nSrc; srcBase += UNROLL_SOURCE) {
-        Pack loaded[UNROLL_SOURCE][UNROLL_PACKS];
-        #pragma unroll UNROLL_SOURCE
-        for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
-          Pack* srcPtr = (Pack*)srcLambda(srcBase + srcOffset);
-          #pragma unroll UNROLL_PACKS
-          for (int u = 0; u < UNROLL_PACKS; u++) {
-            IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-            if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
-              if (packIdx >= totalPacks) break;
-            }
-            loaded[srcOffset][u] = load<Pack, srcMultimem, RedOp>(srcPtr + packIdx);
-          }
-        }
-
-        #pragma unroll UNROLL_PACKS
-        for (int u = 0; u < UNROLL_PACKS; u++) {
-          IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-          if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
-            if (packIdx >= totalPacks) break;
-          }
-          #pragma unroll UNROLL_SOURCE
-          for (int srcOffset = 0; srcOffset < srcCount; srcOffset++) {
-            AccPackType val = castPack<AccEltType, PackEltType, Pack::Count>(loaded[srcOffset][u]);
-            acc[u] = reducePack(accRedOp, acc[u], val);
-          }
         }
       }
     }
   }
 
-  // Broadcast phase - optimized fast path for LSA destinations without bounds checking
-  if NCCL_IF_CONSTEXPR (!dstMultimem && !CHECK_BOUNDS) {
-    // Fast path: LSA destinations, no bounds checking - optimized for performance
-    // Hoist pointer calculations outside inner loop for better instruction scheduling
-    #pragma unroll 4
-    for (int dstIdx = 0; dstIdx < nDst; dstIdx++) {
-      Pack* dstPtr = (Pack*)dstLambda(dstIdx);
-      // Explicit unroll with direct memory access - compiler can better schedule instructions
-      #pragma unroll UNROLL_PACKS
-      for (int u = 0; u < UNROLL_PACKS; u++) {
-        IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-        Pack result = castPack<PackEltType, AccEltType, Pack::Count>(acc[u]);
-        dstPtr[packIdx] = result;
+  // Broadcast phase
+  NVCC_PRAGMA_UNROLL(4)
+  for (int dstIdx = 0; dstIdx < nDst; dstIdx++) {
+    Pack* dstPtr = (Pack*)dstLambda(dstIdx);
+    NVCC_PRAGMA_UNROLL(UNROLL_PACKS)
+    for (int u = 0; u < UNROLL_PACKS; u++) {
+      IntCount packIdx = groupLanePackIdx + u * runtimeStride;
+      if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
+        if (packIdx >= totalPacks) break;
       }
-    }
-  } else {
-    // General path: handles multimem and bounds checking
-    #pragma unroll 4
-    for (int dstIdx = 0; dstIdx < nDst; dstIdx++) {
-      Pack* dstPtr = (Pack*)dstLambda(dstIdx);
-      #pragma unroll UNROLL_PACKS
-      for (int u = 0; u < UNROLL_PACKS; u++) {
-        IntCount packIdx = groupLanePackIdx + u * runtimeStride;
-        if NCCL_IF_CONSTEXPR (CHECK_BOUNDS) {
-          if (packIdx >= totalPacks) break;
-        }
 
-        Pack result = castPack<PackEltType, AccEltType, Pack::Count>(acc[u]);
+      Pack result = castPack<PackEltType, AccEltType, Pack::Count>(acc[u]);
 
-        // Store pack (compile-time optimized based on dstMultimem)
-        store<Pack, dstMultimem>(dstPtr + packIdx, result);
-      }
+      store<Pack, dstMultimem>(dstPtr + packIdx, result);
     }
   }
   const int numGroups = (coopSize + runtimeStride - 1) / runtimeStride;
@@ -253,59 +162,30 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoopCoreImpl(
   return processedPacks * Pack::Count;
 }
 
-template <int UNROLL_PACKS, typename T, typename Pack, typename RedOp,
-          typename IntCount, typename Coop, bool srcMultimem, bool dstMultimem,
-          typename SrcLambda, typename DstLambda, bool CHECK_BOUNDS>
-NCCL_DEVICE_INLINE IntCount reduceCopyLoopCore(
-    Coop coop,
-    SrcLambda srcLambda, int nSrc,
-    DstLambda dstLambda, int nDst,
-    RedOp const& redOp,
-    IntCount totalPacks,
-    IntCount basePackIdx) {
+template <int UNROLL_PACKS, typename T, typename Pack, typename RedOp, typename IntCount, typename Coop,
+          bool srcMultimem, bool dstMultimem, typename SrcLambda, typename DstLambda, bool CHECK_BOUNDS>
+NCCL_DEVICE_INLINE IntCount reduceCopyLoopCore(Coop coop, SrcLambda srcLambda, int nSrc, DstLambda dstLambda, int nDst,
+                                               RedOp const& redOp, IntCount totalPacks, IntCount basePackIdx) {
   if (nSrc == 1) {
     return reduceCopyLoopCoreImpl<UNROLL_PACKS, /*nSrc=*/1, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                           SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/true>(
-        coop, srcLambda, 1, dstLambda, nDst, redOp, totalPacks, basePackIdx);
+                                  SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/true>(
+      coop, srcLambda, 1, dstLambda, nDst, redOp, totalPacks, basePackIdx);
   } else {
     if (nSrc >= 4 && nSrc % 4 == 0) {
-      constexpr int UNROLL_DIV4 = UNROLL_PACKS / 4;
-      if NCCL_IF_CONSTEXPR (UNROLL_DIV4 > 0) {
-        constexpr int UNROLL_DIV4_SAFE = (UNROLL_DIV4 > 0) ? UNROLL_DIV4 : 1;  // only needed for dead-code instantiation
-        return reduceCopyLoopCoreImpl<UNROLL_DIV4_SAFE, /*nSrc=*/4, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                               SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
-            coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
-      }
-    }
-    // NOTE: nSrc % 3 and nSrc % 2 specializations marginally improve performance,
-    // but significantly increase build time due to extra template instantiations.
-    // Keep them disabled unless performance data warrants the extra compile cost.
-    // if (nSrc >= 3 && nSrc % 3 == 0) {
-    //   constexpr int UNROLL_DIV3 = UNROLL_PACKS / 3;
-    //   if NCCL_IF_CONSTEXPR (UNROLL_DIV3 > 0) {
-    //     constexpr int UNROLL_DIV3_SAFE = (UNROLL_DIV3 > 0) ? UNROLL_DIV3 : 1;  // only needed for dead-code instantiation
-    //     return reduceCopyLoopCoreImpl<UNROLL_DIV3_SAFE, /*nSrc=*/3, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-    //                            SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
-    //         coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
-    //   }
-    // }
-    // if (nSrc >= 2 && nSrc % 2 == 0) {
-    //   constexpr int UNROLL_DIV2 = UNROLL_PACKS / 2;
-    //   if NCCL_IF_CONSTEXPR (UNROLL_DIV2 > 0) {
-    //     constexpr int UNROLL_DIV2_SAFE = (UNROLL_DIV2 > 0) ? UNROLL_DIV2 : 1;  // only needed for dead-code instantiation
-    //     return reduceCopyLoopCoreImpl<UNROLL_DIV2_SAFE, /*nSrc=*/2, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-    //                            SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
-    //         coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
-    //   }
-    // }
-    return reduceCopyLoopCoreImpl<UNROLL_PACKS, /*nSrc=*/1, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                           SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
+      return reduceCopyLoopCoreImpl<UNROLL_PACKS, /*nSrc=*/4, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
+                                    SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
         coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
+    }
+    // NOTE: nSrc % 3 and nSrc % 2 specializations add code to this runtime-dispatched device function. Keep them
+    // disabled unless performance data warrants the extra compile/code size cost.
+    return reduceCopyLoopCoreImpl<UNROLL_PACKS, /*nSrc=*/1, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
+                                  SrcLambda, DstLambda, CHECK_BOUNDS, /*singleSrc=*/false>(
+      coop, srcLambda, nSrc, dstLambda, nDst, redOp, totalPacks, basePackIdx);
   }
 }
 
 // Helper struct to calculate loop iteration counts
-template<int UNROLL_PACKS, typename Pack, typename IntCount>
+template <int UNROLL_PACKS, typename Pack, typename IntCount>
 struct ReduceCopyLoopParams {
   IntCount totalPacks;
   IntCount packsPerIteration;
@@ -314,7 +194,7 @@ struct ReduceCopyLoopParams {
   IntCount remainingPacks;  // Number of packs in checked round
   IntCount processedElts;  // Number of elements processed (full packs only)
 
-  NCCL_DEVICE_INLINE ReduceCopyLoopParams(IntCount count, int coopSize, int stride, int nSrc) {
+  NCCL_DEVICE_INLINE ReduceCopyLoopParams(IntCount count, int coopSize, int stride) {
     if NCCL_IF_CONSTEXPR (Pack::Count > 0) {
       totalPacks = safeDiv<IntCount>(count, Pack::Count);
     } else {
@@ -322,21 +202,6 @@ struct ReduceCopyLoopParams {
     }
 
     effectiveUnrollPacks = UNROLL_PACKS;
-    if (nSrc >= 4 && nSrc % 4 == 0) {
-      if NCCL_IF_CONSTEXPR (UNROLL_PACKS / 4 > 0) {
-        effectiveUnrollPacks = UNROLL_PACKS / 4;
-      }
-    }
-    // NOTE: Keep nSrc % 3 and nSrc % 2 unrolls disabled (see note above).
-    // else if (nSrc >= 3 && nSrc % 3 == 0) {
-    //   if NCCL_IF_CONSTEXPR (UNROLL_PACKS / 3 > 0) {
-    //     effectiveUnrollPacks = UNROLL_PACKS / 3;
-    //   }
-    // } else if (nSrc >= 2 && nSrc % 2 == 0) {
-    //   if NCCL_IF_CONSTEXPR (UNROLL_PACKS / 2 > 0) {
-    //     effectiveUnrollPacks = UNROLL_PACKS / 2;
-    //   }
-    // }
 
     // Compute packs per iteration: numGroups * (stride * UNROLL_PACKS)
     const int numGroups = (coopSize + stride - 1) / stride;
@@ -355,22 +220,17 @@ struct ReduceCopyLoopParams {
   }
 };
 
-template <int UNROLL_PACKS, typename T, typename Pack, typename RedOp,
-          typename IntCount, typename Coop, bool srcMultimem, bool dstMultimem,
-          typename SrcLambda, typename DstLambda, bool SkipTail>
-NCCL_DEVICE_INLINE IntCount reduceCopyLoop(
-    Coop coop,
-    SrcLambda srcLambda, int nSrc,
-    DstLambda dstLambda, int nDst,
-    RedOp const& redOp,
-    IntCount count) {
+template <int UNROLL_PACKS, typename T, typename Pack, typename RedOp, typename IntCount, typename Coop,
+          bool srcMultimem, bool dstMultimem, typename SrcLambda, typename DstLambda, bool SkipTail>
+NCCL_DEVICE_INLINE IntCount reduceCopyLoop(Coop coop, SrcLambda srcLambda, int nSrc, DstLambda dstLambda, int nDst,
+                                           RedOp const& redOp, IntCount count) {
   const int coopSize = coop.size();
   constexpr int warpSize = 32;
   constexpr int defaultStride = CoopStride<Coop>::value;
   const int stride = (defaultStride != 0) ? defaultStride : min(coopSize, warpSize);
 
   // Calculate loop parameters
-  ReduceCopyLoopParams<UNROLL_PACKS, Pack, IntCount> params(count, coopSize, stride, nSrc);
+  ReduceCopyLoopParams<UNROLL_PACKS, Pack, IntCount> params(count, coopSize, stride);
   if (params.totalPacks == 0) {
     return 0;
   }
@@ -378,17 +238,27 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoop(
   IntCount processedElts = 0;
   IntCount basePackIdx = 0;
   while (basePackIdx + params.packsPerIteration <= params.totalPacks) {
-    processedElts += reduceCopyLoopCore<UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                                        SrcLambda, DstLambda, false>(
-        coop, srcLambda, nSrc, dstLambda, nDst, redOp, params.totalPacks, basePackIdx);
+    processedElts +=
+      reduceCopyLoopCore<UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem, SrcLambda, DstLambda,
+                         false>(coop, srcLambda, nSrc, dstLambda, nDst, redOp, params.totalPacks, basePackIdx);
     basePackIdx += params.packsPerIteration;
   }
 
   if NCCL_IF_CONSTEXPR (!SkipTail) {
+    constexpr int TAIL_UNROLL_PACKS = (UNROLL_PACKS > 2) ? 2 : UNROLL_PACKS;
+    const int numGroups = (coopSize + stride - 1) / stride;
+    const IntCount tailPacksPerIteration = numGroups * (stride * TAIL_UNROLL_PACKS);
+    while (basePackIdx + tailPacksPerIteration <= params.totalPacks) {
+      processedElts += reduceCopyLoopCore<TAIL_UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
+                                          SrcLambda, DstLambda, false>(coop, srcLambda, nSrc, dstLambda, nDst, redOp,
+                                                                       params.totalPacks, basePackIdx);
+      basePackIdx += tailPacksPerIteration;
+    }
+
     if (basePackIdx < params.totalPacks) {
-      processedElts += reduceCopyLoopCore<UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                                          SrcLambda, DstLambda, true>(
-          coop, srcLambda, nSrc, dstLambda, nDst, redOp, params.totalPacks, basePackIdx);
+      processedElts += reduceCopyLoopCore<TAIL_UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
+                                          SrcLambda, DstLambda, true>(coop, srcLambda, nSrc, dstLambda, nDst, redOp,
+                                                                      params.totalPacks, basePackIdx);
     }
   }
   return processedElts;
@@ -396,24 +266,19 @@ NCCL_DEVICE_INLINE IntCount reduceCopyLoop(
 
 // Scalar Loop Implementation (for scalar remainder sections)
 // Uses reduceCopyLoop with EltPack<T, 1> as the Pack type and UNROLL_PACKS=1
-template <typename T, typename RedOp,
-          typename IntCount, typename Coop, bool srcMultimem, bool dstMultimem,
+template <typename T, typename RedOp, typename IntCount, typename Coop, bool srcMultimem, bool dstMultimem,
           typename SrcLambda, typename DstLambda>
-NCCL_DEVICE_INLINE void reduceCopyScalarLoop(
-    Coop coop,
-    SrcLambda srcLambda, int nSrc,
-    DstLambda dstLambda, int nDst,
-    RedOp const& redOp,
-    IntCount count) {
+NCCL_DEVICE_INLINE void reduceCopyScalarLoop(Coop coop, SrcLambda srcLambda, int nSrc, DstLambda dstLambda, int nDst,
+                                             RedOp const& redOp, IntCount count) {
   if (count == 0) return;
 
   // Default scalar path: one element per pack.
   using Pack = EltPack<T, 1>;
-  auto srcScalarLambda = [=] __device__ (int i) -> Pack* {
+  auto srcScalarLambda = [=] __device__(int i) -> Pack* {
     T* basePtr = srcLambda(i);
     return reinterpret_cast<Pack*>(basePtr);
   };
-  auto dstScalarLambda = [=] __device__ (int i) -> Pack* {
+  auto dstScalarLambda = [=] __device__(int i) -> Pack* {
     T* basePtr = dstLambda(i);
     return reinterpret_cast<Pack*>(basePtr);
   };
@@ -422,48 +287,37 @@ NCCL_DEVICE_INLINE void reduceCopyScalarLoop(
   // This handles chunking and bounds checking properly
   constexpr int UNROLL_PACKS = 1;
 
-  reduceCopyLoop<UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                       decltype(srcScalarLambda), decltype(dstScalarLambda), /*skipTail=*/false>(
-      coop, srcScalarLambda, nSrc, dstScalarLambda, nDst, redOp, count);
+  reduceCopyLoop<UNROLL_PACKS, T, Pack, RedOp, IntCount, Coop, srcMultimem, dstMultimem, decltype(srcScalarLambda),
+                 decltype(dstScalarLambda), /*skipTail=*/false>(coop, srcScalarLambda, nSrc, dstScalarLambda, nDst,
+                                                                redOp, count);
 }
 
 // Main Entry Point (Internal - Not Public API)
 
-template <typename T, typename RedOp, typename Coop,
-          bool srcMultimem, bool dstMultimem,
-          typename SrcLambda, typename DstLambda,
-          typename IntCount, int UNROLL_ELTS>
-NCCL_DEVICE_INLINE void reduceCopy(
-    Coop coop,
-    SrcLambda srcLambda, int nSrc,
-    DstLambda dstLambda, int nDst,
-    RedOp const& redOp,
-    IntCount count,
-    IntCount alignOffset = 0,
-    int maxPackBytes = 16) {
-
+template <typename T, typename RedOp, typename Coop, bool srcMultimem, bool dstMultimem, typename SrcLambda,
+          typename DstLambda, typename IntCount, int UNROLL_ELTS>
+NCCL_DEVICE_INLINE void reduceCopy(Coop coop, SrcLambda srcLambda, int nSrc, DstLambda dstLambda, int nDst,
+                                   RedOp const& redOp, IntCount count, IntCount alignOffset = 0,
+                                   int maxPackBytes = 16) {
   // Step 1: Process scalar prefix to achieve alignment (if needed)
   // alignOffset is already computed by the alignment functions - use it directly
   IntCount processedElts = 0;
   if (alignOffset > 0 && alignOffset < count) {
-    reduceCopyScalarLoop<T, RedOp, IntCount, Coop, srcMultimem, dstMultimem>(
-        coop, srcLambda, nSrc, dstLambda, nDst, redOp, alignOffset);
+    reduceCopyScalarLoop<T, RedOp, IntCount, Coop, srcMultimem, dstMultimem>(coop, srcLambda, nSrc, dstLambda, nDst,
+                                                                             redOp, alignOffset);
     processedElts = alignOffset;
   }
 
-  // Step 2: Process aligned bulk - match all_reduce.cuh strategy: check relative alignment and try pack sizes sequentially
+  // Step 2: Process aligned bulk - match all_reduce.cuh strategy: check relative alignment and try pack sizes
+  // sequentially
   IntCount remainingElts = count - processedElts;
   if (remainingElts == 0) {
     return;
   }
 
   // Create lambdas for remaining work
-  auto srcRemaining = [=] __device__ (int i) -> T* {
-    return srcLambda(i) + processedElts;
-  };
-  auto dstRemaining = [=] __device__ (int i) -> T* {
-    return dstLambda(i) + processedElts;
-  };
+  auto srcRemaining = [=] __device__(int i) -> T* { return srcLambda(i) + processedElts; };
+  auto dstRemaining = [=] __device__(int i) -> T* { return dstLambda(i) + processedElts; };
 
   // Check relative alignment of first source and destination pointers (like all_reduce.cuh)
   // all_reduce.cuh checks: (input.offset - output.offset)%16 == 0
@@ -484,15 +338,14 @@ NCCL_DEVICE_INLINE void reduceCopy(
   if (maxPackBytes >= 16 && relOffset16 % 16 == 0 && remainingElts * scalarSize >= 16) {
     using Pack16 = nccl::utility::EltPackForBytes<T, 16>;
     if NCCL_IF_CONSTEXPR (Pack16::Count > 0) {
-      constexpr int UNROLL_PACKS16_RAW = static_cast<int>(
-          safeDiv(UNROLL_ELTS + Pack16::Count - 1, Pack16::Count));
+      constexpr int UNROLL_PACKS16_RAW = static_cast<int>(safeDiv(UNROLL_ELTS + Pack16::Count - 1, Pack16::Count));
       constexpr int UNROLL_PACKS16 = (UNROLL_PACKS16_RAW > 0) ? UNROLL_PACKS16_RAW : 1;
       if NCCL_IF_CONSTEXPR (UNROLL_PACKS16_RAW > 0) {
         IntCount vectorizableElts16 = safeDiv<IntCount>(remainingElts, Pack16::Count) * Pack16::Count;
         if (vectorizableElts16 > 0) {
           vectorizedElts += reduceCopyLoop<UNROLL_PACKS16, T, Pack16, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                                          decltype(srcRemaining), decltype(dstRemaining), /*skipTail=*/false>(
-              coop, srcRemaining, nSrc, dstRemaining, nDst, redOp, vectorizableElts16);
+                                           decltype(srcRemaining), decltype(dstRemaining), /*skipTail=*/false>(
+            coop, srcRemaining, nSrc, dstRemaining, nDst, redOp, vectorizableElts16);
         }
       }
     }
@@ -520,21 +373,16 @@ NCCL_DEVICE_INLINE void reduceCopy(
     if (sizeof(T) == 4 || (sizeof(T) < 4 && relOffset4After16 % 4 == 0 && srcAligned4 && dstAligned4)) {
       if (remainingAfter16 * scalarSize >= 4) {
         if NCCL_IF_CONSTEXPR (Pack4::Count > 0) {
-          constexpr int UNROLL_PACKS4_RAW = static_cast<int>(
-              safeDiv(UNROLL_ELTS + Pack4::Count - 1, Pack4::Count));
+          constexpr int UNROLL_PACKS4_RAW = static_cast<int>(safeDiv(UNROLL_ELTS + Pack4::Count - 1, Pack4::Count));
           constexpr int UNROLL_PACKS4 = (UNROLL_PACKS4_RAW > 0) ? UNROLL_PACKS4_RAW : 1;
           if NCCL_IF_CONSTEXPR (UNROLL_PACKS4_RAW > 0) {
             IntCount vectorizableElts4 = safeDiv<IntCount>(remainingAfter16, Pack4::Count) * Pack4::Count;
             if (vectorizableElts4 > 0) {
-              auto srcAfter16 = [=] __device__ (int i) -> T* {
-                return srcRemaining(i) + vectorizedElts;
-              };
-              auto dstAfter16 = [=] __device__ (int i) -> T* {
-                return dstRemaining(i) + vectorizedElts;
-              };
+              auto srcAfter16 = [=] __device__(int i) -> T* { return srcRemaining(i) + vectorizedElts; };
+              auto dstAfter16 = [=] __device__(int i) -> T* { return dstRemaining(i) + vectorizedElts; };
               vectorizedElts += reduceCopyLoop<UNROLL_PACKS4, T, Pack4, RedOp, IntCount, Coop, srcMultimem, dstMultimem,
-                                              decltype(srcAfter16), decltype(dstAfter16), /*skipTail=*/false>(
-                  coop, srcAfter16, nSrc, dstAfter16, nDst, redOp, vectorizableElts4);
+                                               decltype(srcAfter16), decltype(dstAfter16), /*skipTail=*/false>(
+                coop, srcAfter16, nSrc, dstAfter16, nDst, redOp, vectorizableElts4);
             }
           }
         }
@@ -545,22 +393,18 @@ NCCL_DEVICE_INLINE void reduceCopy(
   // Step 3: Scalar remainder
   IntCount scalarRemainder = remainingElts - vectorizedElts;
   if (scalarRemainder > 0) {
-    auto srcScalar = [=] __device__ (int i) -> T* {
-      return srcRemaining(i) + vectorizedElts;
-    };
-    auto dstScalar = [=] __device__ (int i) -> T* {
-      return dstRemaining(i) + vectorizedElts;
-    };
+    auto srcScalar = [=] __device__(int i) -> T* { return srcRemaining(i) + vectorizedElts; };
+    auto dstScalar = [=] __device__(int i) -> T* { return dstRemaining(i) + vectorizedElts; };
 
     // Process scalar remainder - always use scalar loop with EltPack<T, 1>
-    reduceCopyScalarLoop<T, RedOp, IntCount, Coop, srcMultimem, dstMultimem>(
-        coop, srcScalar, nSrc, dstScalar, nDst, redOp, scalarRemainder);
+    reduceCopyScalarLoop<T, RedOp, IntCount, Coop, srcMultimem, dstMultimem>(coop, srcScalar, nSrc, dstScalar, nDst,
+                                                                             redOp, scalarRemainder);
   }
 }
 
 } // namespace utility
 } // namespace nccl
 
-#endif // NCCL_CHECK_CUDACC && __CUDACC_EXTENDED_LAMBDA__
+#endif // __CUDACC__ && __CUDACC_EXTENDED_LAMBDA__
 
 #endif // _NCCL_DEVICE_REDUCE_COPY__IMPL_H_

@@ -27,7 +27,7 @@
 #include "lib/common/stringize_arg.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -234,5 +234,15 @@ struct formatter<hsa_amd_external_semaphore_handle_descriptor_t>
         return fmt::format_to(ctx.out(), "type={}, win32_handle={}", label, v.handle.win32_handle);
     }
 };
+}  // namespace fmt
+#endif
+
+#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 12500
+namespace fmt
+{
+template <>
+struct formatter<hsa_fabric_handle_t>
+: rocprofiler::hsa::utils::handle_formatter<hsa_fabric_handle_t>
+{};
 }  // namespace fmt
 #endif

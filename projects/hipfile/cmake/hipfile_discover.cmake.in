@@ -1,0 +1,97 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Relocatable hipFile unit-test discovery, evaluated by ctest at run time.
+#
+# This file is include()'d from share/hipfile/test/CTestTestfile.cmake. ctest
+# evaluates an include()'d file in full scripting mode, so execute_process()/
+# foreach()/if() all run here (unlike the top-level CTestTestfile, which only
+# honors add_test/subdirs/include/set_tests_properties).
+#
+# All paths are resolved RELATIVE to this script's own location, so the tree is
+# fully relocatable. Generated from hipfile_discover.cmake.in by AISInstallTests.
+
+# Locate ourselves: <test_dir>/script/hipfile_discover.cmake -> <test_dir>.
+file(REAL_PATH "${CMAKE_CURRENT_LIST_FILE}" _hipfile_self)
+get_filename_component(_hipfile_script_dir "${_hipfile_self}" DIRECTORY)
+file(REAL_PATH "${_hipfile_script_dir}/.." _hipfile_test_dir)
+
+# Runtime library path, relative to the test dir:
+#   <test_dir> = <prefix>/share/hipfile/test  ->  <prefix>/lib is three up.
+# The bundled sysdeps (e.g. librocm_sysdeps_mount.so.1) live under
+# lib/rocm_sysdeps/lib in TheRock-style installs; harmless if absent elsewhere.
+set(_hipfile_libdir "${_hipfile_test_dir}/../../../lib")
+set(_hipfile_ld "${_hipfile_libdir}:${_hipfile_libdir}/rocm_sysdeps/lib")
+
+# Enumerate one binary's GoogleTest cases and register each as an isolated test.
+macro(_hipfile_discover_binary _bin_name _label_suffix)
+    set(_bin "${_hipfile_test_dir}/${_bin_name}")
+    if(NOT EXISTS "${_bin}")
+        message(FATAL_ERROR "hipFile: test binary not found: ${_bin}")
+    endif()
+
+    # The discovery launch needs the libraries on the path too. ctest evaluates
+    # this script with CMAKE_COMMAND unset, so `cmake -E env` is unavailable;
+    # set(ENV{...}) is the only lever. Save and restore the prior value so this
+    # script does not leave the ctest process environment mutated (each test's
+    # own ENVIRONMENT property, set below, governs the actual test runs).
+    #
+    # Track whether LD_LIBRARY_PATH was originally set: restoring an unset
+    # variable to "" leaves an empty path element, which the loader treats as the
+    # current directory. Unset it instead of blanking it.
+    if(DEFINED ENV{LD_LIBRARY_PATH})
+        set(_ld_was_set TRUE)
+        set(_saved_ld_library_path "$ENV{LD_LIBRARY_PATH}")
+    else()
+        set(_ld_was_set FALSE)
+    endif()
+    set(ENV{LD_LIBRARY_PATH} "${_hipfile_ld}")
+    execute_process(
+        COMMAND "${_bin}" --gtest_list_tests
+        WORKING_DIRECTORY "${_hipfile_test_dir}"
+        OUTPUT_VARIABLE _listing
+        RESULT_VARIABLE _rc
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(_ld_was_set)
+        set(ENV{LD_LIBRARY_PATH} "${_saved_ld_library_path}")
+    else()
+        unset(ENV{LD_LIBRARY_PATH})
+    endif()
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR "hipFile: failed to list tests in ${_bin} (exit ${_rc})")
+    endif()
+
+    # --gtest_list_tests prints a suite header per line ("Suite.") followed by
+    # its cases indented two spaces, each optionally trailed by a
+    # " # GetParam() = ..." annotation we discard. The full filter name is the
+    # suite header concatenated with the case name.
+    #
+    # Split the output into a list of lines. A literal ';' in the output (e.g.
+    # inside a GetParam() value) would otherwise be treated as a CMake list
+    # separator and corrupt the split, so escape ';' -> '\;' BEFORE turning
+    # newlines into the ';' separator (the same ordering CMake's own
+    # GoogleTestAddTests.cmake uses).
+    string(REPLACE ";" "\\;" _listing "${_listing}")
+    string(REPLACE "\n" ";" _lines "${_listing}")
+    set(_suite "")
+    foreach(_line IN LISTS _lines)
+        string(REGEX REPLACE " +#.*$" "" _line "${_line}")
+        if(_line MATCHES "^[^ ].*\\.$")
+            string(STRIP "${_line}" _suite)
+        elseif(_line MATCHES "^  +[^ ]")
+            string(STRIP "${_line}" _case)
+            set(_test "${_suite}${_case}")
+            add_test("${_test}" "${_bin}" "--gtest_filter=${_test}")
+            set_tests_properties("${_test}" PROPERTIES
+                TIMEOUT 300
+                LABELS "unit;${_label_suffix}"
+                ENVIRONMENT "LD_LIBRARY_PATH=${_hipfile_ld}"
+            )
+        endif()
+    endforeach()
+endmacro()
+
+# Per-binary discovery calls, baked in by AISInstallTests at configure time.
+@_discover_blocks@

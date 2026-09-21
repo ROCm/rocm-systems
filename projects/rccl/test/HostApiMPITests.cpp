@@ -11,6 +11,7 @@
  * Tests cover:
  *   W1  - WindowRegisterDeregister: collective register/deregister lifecycle
  *   P1  - SinglePutRank0ToRank1:   basic ncclPutSignal + ncclWaitSignal
+ *   G1  - GraphCaptureReplayPutWait: capture once, replay and verify repeatedly
  *   P2  - PutWithNonZeroOffset:    peerWinOffset at kSize/2
  *   P3  - PutMultipleDataTypes:    float32, int32, float16 (raw bytes)
  *   S1  - SignalOnlyNoData:        ncclSignal with no data transfer
@@ -24,9 +25,11 @@
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
  *   W3  - DoubleDeregister:       ncclCommWindowDeregister twice on same handle
+ *   W4  - DestroyCommWithoutDeregister: window auto-freed during commFree
  *
  * Constraints (proxy GIN path, current API limits):
- *   sigIdx = 0, ctx = 0, flags = 0, winFlags = kWinMode (NCCL_WIN_DEFAULT)
+ *   sigIdx = 0, ctx = 0, flags = 0, winFlags = winMode()
+ *     (NCCL_WIN_COLL_SYMMETRIC when NCCL_CUMEM_ENABLE=1, else NCCL_WIN_DEFAULT)
  *
  * API signatures (from src/nccl.h.in):
  *   ncclResult_t ncclMemAlloc(void** ptr, size_t size);
@@ -53,6 +56,7 @@
 #include "MPITestBase.hpp"
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "HostApiHelpers.hpp"
 #include "TestChecks.hpp"
 
@@ -60,10 +64,25 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <chrono>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLHostApiHelpers;
+
+// ---------------------------------------------------------------------------
+// busy wait kernel
+// ---------------------------------------------------------------------------
+__global__ void hostApiSpinKernel(unsigned long long cycles, volatile int* sink)
+{
+    unsigned long long start = clock64();
+    int                acc   = 0;
+    while(static_cast<unsigned long long>(clock64() - start) < cycles)
+        acc++;
+    if(sink)
+        *sink = acc;
+}
 
 namespace RcclUnitTesting
 {
@@ -119,7 +138,36 @@ constexpr size_t kRecvOffset   = kTransferSize;     // receiver data lands here
 constexpr int    kSigIdx       = 0;
 constexpr int    kCtx          = 0;
 constexpr unsigned int kFlags  = 0;
-constexpr int    kWinMode      = NCCL_WIN_DEFAULT;
+
+// Window registration flag, selected at run time from NCCL_CUMEM_ENABLE.
+//   NCCL_CUMEM_ENABLE=1 -> NCCL_WIN_COLL_SYMMETRIC  (Put/Signal data path works)
+//   NCCL_CUMEM_ENABLE=0 -> NCCL_WIN_DEFAULT         (non-symmetric fallback)
+inline int winMode()
+{
+    static int mode = -2;
+    if (mode == -2) {
+        const char* e = getenv("NCCL_CUMEM_ENABLE");
+        const bool wantSymmetric = e ? (atoi(e) != 0) : true;
+        mode = (wantSymmetric && ncclCuMemRuntimeSupported()) ? NCCL_WIN_COLL_SYMMETRIC
+                                                              : NCCL_WIN_DEFAULT;
+    }
+    return mode;
+}
+
+// Calibrate how many clock64() cycles approximate targetMs of GPU busy wait.
+inline unsigned long long calibrateSpinCycles(hipStream_t s, volatile int* sink,
+                                              double targetMs)
+{
+    const unsigned long long probe = 1500000ULL * 1000ULL; // ~1 ms @ 1.5 GHz guess
+    auto t0 = std::chrono::steady_clock::now();
+    hipLaunchKernelGGL(hostApiSpinKernel, dim3(1), dim3(1), 0, s, probe, sink);
+    (void)hipStreamSynchronize(s);
+    auto t1 = std::chrono::steady_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    if(ms < 1e-3)
+        ms = 1e-3;
+    return static_cast<unsigned long long>((probe / ms) * targetMs);
+}
 } // namespace
 
 // ============================================================================
@@ -149,7 +197,7 @@ TEST_F(HostApiTest, WindowRegisterDeregister)
 
     // Collective window registration.
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(getActiveCommunicator(), buf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(getActiveCommunicator(), buf, kOneMB, &win, winMode());
 
     ASSERT_MPI_NE(win, nullptr);
 
@@ -190,7 +238,7 @@ TEST_F(HostApiTest, SinglePutRank0ToRank1)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
 
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
@@ -236,6 +284,218 @@ TEST_F(HostApiTest, SinglePutRank0ToRank1)
 }
 
 // ============================================================================
+// G1 — GraphCaptureReplayPutWait
+// ============================================================================
+
+/**
+ * @test HostApiTest.GraphCaptureReplayPutWait
+ * @brief Capture ncclPutSignal/ncclWaitSignal once and replay repeatedly.
+ *
+ * Rank 0 captures a PUT into rank 1's window while rank 1 captures the
+ * matching wait.  Each replay uses a different source pattern, proving that
+ * the graph performs a fresh transfer rather than exposing data left by the
+ * first launch.  No eager Put/Wait warm-up is issued before capture.
+ */
+TEST_F(HostApiTest, GraphCaptureReplayPutWait)
+{
+    constexpr int kReplayCount = 10;
+
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    if (auto reason = symmetricMemEnvAndRuntimeSkipReason(); !reason.empty())
+        GTEST_SKIP() << reason;
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    void* srcBuf = static_cast<uint8_t*>(winBuf) + kSendOffset;
+    void* dstBuf = static_cast<uint8_t*>(winBuf) + kRecvOffset;
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    bool captureActive = false;
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        if(captureActive)
+        {
+            hipGraph_t abandonedGraph = nullptr;
+            if(hipStreamEndCapture(stream, &abandonedGraph) == hipSuccess && abandonedGraph)
+                (void)hipGraphDestroy(abandonedGraph);
+        }
+        if(graphExec)
+            (void)hipGraphExecDestroy(graphExec);
+        if(graph)
+            (void)hipGraphDestroy(graph);
+    });
+
+    hipError_t captureRes = hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal);
+    captureActive = (captureRes == hipSuccess);
+    ASSERT_MPI_EQ(hipSuccess, captureRes);
+
+    ncclResult_t rmaRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        rmaRes = ncclPutSignal(srcBuf, kTransferSize, ncclUint8,
+                               /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+                               kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    else
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        rmaRes = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, rmaRes);
+
+    captureRes = hipStreamEndCapture(stream, &graph);
+    captureActive = false;
+    ASSERT_MPI_EQ(hipSuccess, captureRes);
+    ASSERT_MPI_NE(nullptr, graph);
+
+    size_t numNodes = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numNodes));
+    ASSERT_MPI_GT(numNodes, 0u);
+
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    ASSERT_MPI_NE(nullptr, graphExec);
+
+    for(int replay = 0; replay < kReplayCount; ++replay)
+    {
+        const int seed = 17 + replay * 31;
+        if(myRank == 0)
+            FillBuf(srcBuf, kTransferSize, seed);
+        else
+            FillSentinel(dstBuf, kTransferSize, 0);
+
+        ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+        ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+        const bool dataValid = (myRank != 1) || VerifyBuf(dstBuf, kTransferSize, seed);
+        ASSERT_MPI_TRUE(dataValid);
+        TEST_INFO("G1 rank %d: replay %d/%d passed.", myRank, replay + 1, kReplayCount);
+    }
+
+    hipError_t destroyRes = hipGraphExecDestroy(graphExec);
+    if(destroyRes == hipSuccess)
+        graphExec = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, destroyRes);
+
+    destroyRes = hipGraphDestroy(graph);
+    if(destroyRes == hipSuccess)
+        graph = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, destroyRes);
+
+    TEST_INFO("G1 rank %d: GraphCaptureReplayPutWait passed.", myRank);
+}
+
+// ============================================================================
+// A1 — PutSignalEnqueueIsAsync
+// ============================================================================
+/**
+ * @test HostApiTest.PutSignalEnqueueIsAsync
+ * @brief ncclPutSignal host-side enqueue must be asynchronous (no implicit
+ *        CPU-GPU synchronization) even while the target stream is busy.
+ *
+ * Regression test:
+ * defect was an implicit stream synchronization inside the CE / putSignal
+ * enqueue path caused by staging the signal value through a pageable host
+ * memcpy.
+ */
+TEST_F(HostApiTest, PutSignalEnqueueIsAsync)
+{
+    constexpr double kSpinMs        = 80.0;  // how long the busy wait kernel runs
+    constexpr double kBlockFraction = 0.5;   // host-return >= this*kSpinMs => blocked
+    constexpr int    kAsyncNumPuts  = 16;    // puts issued per measurement
+    constexpr size_t kAsyncPutElems = 256;   // uint8 elements per put (small)
+
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    const int    peer     = (myRank + 1) % 2;
+    const size_t winBytes = static_cast<size_t>(kAsyncNumPuts) * kAsyncPutElems;
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, winBytes));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, winBytes, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    // Sink for the busy wait kernel (device scratch).
+    void* sink = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sink, sizeof(int)));
+    auto sinkGuard = makeScopeGuard([&]() { if(sink) (void)hipFree(sink); });
+
+    // Warm up the putSignal machinery once.
+    ncclResult_t warmRes = ncclPutSignal(
+        winBuf, kAsyncPutElems, ncclUint8, peer, win, /*peerWinOffset=*/0,
+        kSigIdx, kCtx, kFlags, comm, stream);
+    ASSERT_MPI_EQ(ncclSuccess, warmRes);
+    {
+        ncclWaitSignalDesc_t d{/*opCnt=*/1, /*peer=*/peer, kSigIdx, kCtx};
+        ASSERT_MPI_EQ(ncclSuccess, ncclWaitSignal(1, &d, comm, stream));
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    const unsigned long long spinCycles =
+        calibrateSpinCycles(stream, static_cast<volatile int*>(sink), kSpinMs);
+
+    // Measurement: occupy the stream, then time a batch of putSignal enqueues.
+    MPI_Barrier(MPI_COMM_WORLD);
+    // NOTE: sink value and winBuf have no meaningfull values, thus should not be checked
+    hipLaunchKernelGGL(hostApiSpinKernel, dim3(1), dim3(1), 0, stream,
+                       spinCycles, static_cast<volatile int*>(sink));
+
+    auto t0 = std::chrono::steady_clock::now();
+    ncclResult_t putRes = ncclSuccess;
+    for(int i = 0; i < kAsyncNumPuts && putRes == ncclSuccess; ++i)
+    {
+        size_t off = static_cast<size_t>(i) * kAsyncPutElems;
+        putRes = ncclPutSignal(
+            static_cast<uint8_t*>(winBuf) + off, kAsyncPutElems, ncclUint8,
+            peer, win, off, kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    const double hostMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    const double blockThresholdMs = kSpinMs * kBlockFraction;
+    const bool   async            = hostMs < blockThresholdMs;
+
+    TEST_INFO("A1 rank %d -> peer %d: %d putSignal enqueues host-return %.3f ms "
+              "(stream busy ~%.1f ms) => %s",
+              myRank, peer, kAsyncNumPuts, hostMs, kSpinMs,
+              async ? "async" : "BLOCKED (implicit sync)");
+
+    ASSERT_MPI_TRUE(async);
+}
+
+// ============================================================================
 // P2 — PutWithNonZeroOffset
 // ============================================================================
 
@@ -265,7 +525,7 @@ TEST_F(HostApiTest, PutWithNonZeroOffset)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -346,7 +606,7 @@ TEST_F(HostApiTest, PutMultipleDataTypes)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -416,7 +676,7 @@ TEST_F(HostApiTest, SignalOnlyNoData)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -489,7 +749,7 @@ TEST_F(HostApiTest, WaitSignalFenceSemantics)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -572,7 +832,7 @@ TEST_F(HostApiTest, DataVisibilityAfterSync)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -633,7 +893,7 @@ TEST_F(HostApiTest, PutSignalNullLocalbuff)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
 
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
@@ -721,7 +981,7 @@ TEST_F(HostApiTest, PutSignalOffsetOutOfBounds)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -767,7 +1027,7 @@ TEST_F(HostApiTest, PutSignalInvalidSigIdx)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -817,7 +1077,7 @@ TEST_F(HostApiTest, SignalCumulativeFence)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -898,7 +1158,7 @@ TEST_F(HostApiTest, MultipleSendersOneReceiver)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -980,7 +1240,7 @@ TEST_F(HostApiTest, WaitSignalMultipleDescriptors)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1060,7 +1320,7 @@ TEST_F(HostApiTest, LargePut)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kLargeSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kLargeSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1129,7 +1389,7 @@ TEST_F(HostApiTest, AllToAllPut)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1187,7 +1447,7 @@ TEST_F(HostApiTest, SignalImpliesPriorPutsDelivered)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1261,7 +1521,7 @@ TEST_F(HostApiTest, PutSignalInvalidCtx)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1373,7 +1633,7 @@ TEST_F(HostApiTest, TwoCommunicatorsIndependentWindows)
     auto buf1Guard = makeScopeGuard([&]() { freeFineGrainBuffer(buf1); });
 
     ncclWindow_t win1 = nullptr;
-    NcclWindowGuard wg1(comm1, buf1, kOneMB, &win1, kWinMode);
+    NcclWindowGuard wg1(comm1, buf1, kOneMB, &win1, winMode());
     ASSERT_MPI_NE(win1, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg1.initResult());
 
@@ -1383,7 +1643,7 @@ TEST_F(HostApiTest, TwoCommunicatorsIndependentWindows)
     auto buf2Guard = makeScopeGuard([&]() { freeFineGrainBuffer(buf2); });
 
     ncclWindow_t win2 = nullptr;
-    NcclWindowGuard wg2(comm2, buf2, kOneMB, &win2, kWinMode);
+    NcclWindowGuard wg2(comm2, buf2, kOneMB, &win2, winMode());
     ASSERT_MPI_NE(win2, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg2.initResult());
 
@@ -1470,7 +1730,7 @@ TEST_F(HostApiTest, StressManySmallPuts)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kWinSize, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1547,7 +1807,7 @@ TEST_F(HostApiTest, PutToSelf)
     auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
 
     ncclWindow_t win = nullptr;
-    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, kWinMode);
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
     ASSERT_MPI_NE(win, nullptr);
     ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
 
@@ -1609,7 +1869,7 @@ TEST_F(HostApiTest, DoubleDeregister)
 
     ncclWindow_t win = nullptr;
     ASSERT_MPI_EQ(ncclSuccess,
-                  ncclCommWindowRegister(comm, winBuf, kOneMB, &win, kWinMode));
+                  ncclCommWindowRegister(comm, winBuf, kOneMB, &win, winMode()));
     ASSERT_MPI_NE(win, nullptr);
 
     // First deregister — should succeed.
@@ -1621,6 +1881,124 @@ TEST_F(HostApiTest, DoubleDeregister)
 
     TEST_INFO("W3 rank %d: DoubleDeregister passed (second deregister returned %d).",
               myRank, static_cast<int>(res2));
+}
+
+// ============================================================================
+// W4 — DestroyCommWithoutDeregister
+// ============================================================================
+
+/**
+ * @test HostApiTest.DestroyCommWithoutDeregister
+ * @brief A registered window must be freed automatically when the communicator
+ *        is destroyed, even if the user never calls ncclCommWindowDeregister.
+ *
+ * Validates the NCCL fix "Free symmetric window objects automatically during
+ * commFree" — ncclCommDestroy drives the internal commFree -> ncclDevrFinalize
+ * path, whose window drain loop releases any still-registered windows.
+ *
+ * Uses a dedicated communicator (not the fixture's shared one) so it can call
+ * ncclCommDestroy explicitly and assert it still returns ncclSuccess.
+ */
+TEST_F(HostApiTest, DestroyCommWithoutDeregister)
+{
+    if(!validateTestPrerequisites(/*min=*/2))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes";
+    }
+
+    const int worldRank = rank();
+    const int worldSize = nRanks();
+
+    // Build a communicator we fully own so we can destroy it explicitly and
+    // observe the result of commFree -> ncclDevrFinalize.
+    ncclUniqueId id{};
+    ncclResult_t idRes = ncclSuccess; // non-root ranks stay success
+    if(worldRank == 0)
+    {
+        idRes = ncclGetUniqueId(&id);
+    }
+    MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
+    // Collective assert (must be called by every rank, not just root).
+    ASSERT_MPI_EQ(ncclSuccess, idRes);
+
+    ncclComm_t ownComm = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommInitRank(&ownComm, worldSize, id, worldRank));
+    ASSERT_MPI_NE(ownComm, nullptr);
+
+    // Safety net: if a later assertion aborts the test before the intentional
+    // destroy below, this guard still tears the comm down. It is cleared after
+    // the explicit ncclCommDestroy to avoid a double-destroy.
+    auto ownCommGuard = makeScopeGuard([&]() { if(ownComm) (void)ncclCommDestroy(ownComm); });
+
+    // Allocate a fine-grain buffer and register it as a window.
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommWindowRegister(ownComm, winBuf, kOneMB, &win, winMode()));
+    ASSERT_MPI_NE(win, nullptr);
+
+    // Intentionally skip ncclCommWindowDeregister — this is the whole point of
+    // the test. Destroying the comm must auto-free the leftover window objects
+    // during commFree -> ncclDevrFinalize and therefore still succeed.
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(ownComm));
+    ownComm = nullptr; // destroyed explicitly; disarm the guard
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    TEST_INFO("W4 rank %d: DestroyCommWithoutDeregister passed.", worldRank);
+}
+
+// ============================================================================
+// W5 — WindowRegisterInvalidArgsNullWindow
+// ============================================================================
+
+/**
+ * @test HostApiTest.WindowRegisterInvalidArgsNullWindow
+ * @brief ncclCommWindowRegister must never leave the caller's window handle
+ *        pointing at an uninitialised/garbage value.
+ *
+ * Validates the entry-point contract aligned with NCCL 2.30.4: the window is
+ * initialised to NULL up front, and invalid arguments are rejected with
+ * ncclInvalidArgument while leaving the out window NULL. The caller seeds the
+ * handle with a non-NULL sentinel beforehand to prove the API overwrites it.
+ *
+ */
+TEST_F(HostApiTest, WindowRegisterInvalidArgsNullWindow)
+{
+    if(!validateTestPrerequisites(/*min=*/2))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes";
+    }
+
+    const int  myRank = rank();
+    ncclComm_t comm   = getActiveCommunicator();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t sentinel = reinterpret_cast<ncclWindow_t>(0x1);
+
+    // Case 1: NULL buffer -> ncclInvalidArgument, window forced to NULL.
+    {
+        ncclWindow_t win = sentinel;
+        ncclResult_t res = ncclCommWindowRegister(comm, nullptr, kOneMB, &win, winMode());
+        ASSERT_MPI_EQ(ncclInvalidArgument, res);
+        ASSERT_MPI_EQ(win, nullptr);
+    }
+
+    // Case 2: zero size -> ncclInvalidArgument, window forced to NULL.
+    {
+        ncclWindow_t win = sentinel;
+        ncclResult_t res = ncclCommWindowRegister(comm, winBuf, 0, &win, winMode());
+        ASSERT_MPI_EQ(ncclInvalidArgument, res);
+        ASSERT_MPI_EQ(win, nullptr);
+    }
+
+    TEST_INFO("W5 rank %d: WindowRegisterInvalidArgsNullWindow passed.", myRank);
 }
 
 } // namespace RcclUnitTesting

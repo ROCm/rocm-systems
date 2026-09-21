@@ -401,6 +401,54 @@ typedef union rocprofiler_rccl_api_args_t
         uint64_t*         value;
     } ncclCommMemStats;
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 6
+    struct
+    {
+        const void*    localbuff;
+        size_t         count;
+        ncclDataType_t datatype;
+        int            peer;
+        ncclWindow_t   peerWin;
+        size_t         peerWinOffset;
+        int            sigIdx;
+        int            ctx;
+        unsigned int   flags;
+        ncclComm_t     comm;
+        hipStream_t    stream;
+    } ncclPutSignal;
+    struct
+    {
+        int          peer;
+        int          sigIdx;
+        int          ctx;
+        unsigned int flags;
+        ncclComm_t   comm;
+        hipStream_t  stream;
+    } ncclSignal;
+    struct
+    {
+        int                   nDesc;
+        ncclWaitSignalDesc_t* signalDescs;
+        ncclComm_t            comm;
+        hipStream_t           stream;
+    } ncclWaitSignal;
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 7
+    struct
+    {
+        ncclComm_t    comm;
+        ncclUniqueId* uniqueId;
+    } ncclCommGetUniqueId;
+    struct
+    {
+        ncclComm_t          comm;
+        int                 nRanks;
+        const ncclUniqueId* uniqueId;
+        int                 rank;
+        ncclComm_t*         newcomm;
+        ncclConfig_t*       config;
+    } ncclCommGrow;
+#endif
 } rocprofiler_rccl_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

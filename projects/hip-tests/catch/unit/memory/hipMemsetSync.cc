@@ -390,7 +390,10 @@ void runTests(allocType type, memSetType memsetType, MultiDData data, hipStream_
   CAPTURE(type, memsetType, data.width, data.height, data.depth, stream, async);
   std::pair<T*, T*> aPtr = initMemory<T>(type, memsetType, data);
   const auto delay = std::chrono::milliseconds(isQuickLevel() ? 10 : 100);
-  LaunchDelayKernel(delay, stream);
+  // Keep the stream busy with a host-side delay rather than the GPU Delay
+  // kernel: the host timer is deterministic and doesn't depend on the device
+  // wall-clock-rate attribute, which makes this synchronization check robust.
+  LaunchDelayHostFunc(delay, stream);
   memsetCheck(aPtr.first, testValue, memsetType, data, async, stream);
 
   if (async || type == allocType::deviceMalloc) {

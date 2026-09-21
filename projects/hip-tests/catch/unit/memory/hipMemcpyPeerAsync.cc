@@ -131,6 +131,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior) {
                                  kPageSize, stream));
     HIP_CHECK_ERROR(hipStreamQuery(nullptr), hipErrorNotReady);
 
+    HIP_CHECK(hipDeviceSynchronize());
+
     HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
   } else {
     INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);

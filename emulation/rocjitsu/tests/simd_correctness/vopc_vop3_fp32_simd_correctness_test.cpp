@@ -12,12 +12,13 @@
 /// same process -- once forcing the scalar body, once the SIMD fast path, with
 /// identical inputs/EXEC/VCC-in -- and the 64-bit compare results are asserted
 /// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
-/// in-process). In-process inactive SGPR-pair bits must be preserved.
+/// in-process). In-process inactive SGPR-pair bits must be zeroed.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -131,7 +132,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(rot, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };
@@ -157,7 +158,7 @@ void check_case(const Case &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, /*src1=*/257, abs, neg, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed (abs=" << abs << " neg=" << neg << ")";
     uint64_t vcc = fx.run(inst, rot, exec, vcc_in);
     delete inst;
@@ -177,12 +178,12 @@ void check_case(const Case &c, uint64_t exec) {
               << std::hex << vcc_in << ": SIMD result diverged from scalar body";
 
           const uint64_t inactive = ~exec;
-          EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
+          EXPECT_EQ(simd_vcc & inactive, 0ULL)
               << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
-              << ": altered inactive-lane dst bit";
-          EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
+              << ": inactive-lane dst bit not zeroed";
+          EXPECT_EQ(scalar_vcc & inactive, 0ULL)
               << c.name << " abs=" << abs << " neg=" << neg << " rot=" << rot
-              << ": altered inactive-lane dst bit";
+              << ": inactive-lane dst bit not zeroed";
         }
       }
     }

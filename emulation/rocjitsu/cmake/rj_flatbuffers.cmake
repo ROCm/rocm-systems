@@ -4,13 +4,18 @@
 # Compile FlatBuffers schemas into C++ headers and embed the simulation config
 # schema as a string constant for runtime JSON parsing.
 
-set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
+set(GENERATED_DIR ${PROJECT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${GENERATED_DIR})
 
 set(SCHEMA_FILES
-    ${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs
-    ${CMAKE_SOURCE_DIR}/schemas/checkpoint.fbs
+    ${PROJECT_SOURCE_DIR}/schemas/simulation_config.fbs
+    ${PROJECT_SOURCE_DIR}/schemas/checkpoint.fbs
 )
+
+# embedded_schema.h is generated at configure time below. Make schema edits
+# trigger CMake regeneration as well as the flatc custom command so the runtime
+# JSON parser and generated typed accessors always use the same table layout.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SCHEMA_FILES})
 
 set(GENERATED_HEADERS)
 foreach(schema ${SCHEMA_FILES})
@@ -19,7 +24,7 @@ foreach(schema ${SCHEMA_FILES})
     add_custom_command(
         OUTPUT ${output_header}
         COMMAND
-            $<TARGET_FILE:flatc> --cpp -I ${CMAKE_SOURCE_DIR}/schemas -o
+            $<TARGET_FILE:flatc> --cpp -I ${PROJECT_SOURCE_DIR}/schemas -o
             ${GENERATED_DIR} ${schema}
         DEPENDS flatc ${schema}
         COMMENT "Compiling FlatBuffers schema: ${schema_name}.fbs"
@@ -31,10 +36,9 @@ add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 
 # Embed simulation_config.fbs as a C++ string constant so the library can parse
 # JSON configs without locating the schema file at runtime.
-file(READ "${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs" _schema_content)
+file(READ "${PROJECT_SOURCE_DIR}/schemas/simulation_config.fbs" _schema_content)
 file(
-    WRITE
-    "${GENERATED_DIR}/embedded_schema.h"
+    WRITE "${GENERATED_DIR}/embedded_schema.h"
     "// Auto-generated from simulation_config.fbs — do not edit.\n"
     "#pragma once\n"
     "namespace rocjitsu {\n"

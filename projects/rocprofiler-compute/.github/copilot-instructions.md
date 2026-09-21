@@ -1,3 +1,3 @@
 # GitHub Copilot Instructions — rocprofiler-compute
 
-See **[`AGENTS.md`](../AGENTS.md)**.
+Follow **[`AGENTS.md`](../AGENTS.md)** and the full redirect chain it references.

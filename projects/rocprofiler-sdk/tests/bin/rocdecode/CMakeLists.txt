@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -37,8 +37,8 @@ add_executable(rocdecode-demo)
 target_sources(rocdecode-demo PRIVATE rocdecode.cpp)
 
 find_package(Threads REQUIRED)
-find_package(rocDecode REQUIRED)
+find_package(rocdecode REQUIRED)
 target_link_libraries(
     rocdecode-demo
     PRIVATE rocprofiler-sdk::tests-build-flags Threads::Threads hsa-runtime64
-            rocprofiler-sdk::tests-common-library rocDecode::rocDecode)
+            rocprofiler-sdk::tests-common-library rocdecode::rocdecode)

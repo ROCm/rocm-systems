@@ -2,8 +2,8 @@
 # mirage + rocjitsu (the software GPU emulator).
 #
 # Unlike the corpus's stock kmd.so env, this file does NOT set LD_PRELOAD or
-# RJ_CONFIG by hand: mirage injects the rocjitsu kmd.so interposer and generates
-# the sim config itself when it runs each IREE tool via
+# ROCJITSU_RUNTIME_DIR by hand: mirage injects the rocjitsu kmd.so interposer and
+# generates the sim config itself when it runs each IREE tool via
 # `mirage run --profile <profile> -- <tool> ...`. This file's only job is to make
 # the ROCm runtime and the IREE tools discoverable in the outer shell that
 # drives the corpus runner.
@@ -22,7 +22,7 @@ fi
 # Let mirage own the emulator wiring; clear anything a previous shell may have
 # left so the rocjitsu injection is the single source of truth.
 unset LD_PRELOAD
-unset RJ_CONFIG
+unset ROCJITSU_RUNTIME_DIR
 unset HSA_MODEL_LIB
 unset HSA_MODEL_TOPOLOGY
 unset HSA_OVERRIDE_GFX_VERSION

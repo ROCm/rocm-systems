@@ -9,7 +9,9 @@
 
 #include "hip_global.hpp"
 
+#include <atomic>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -108,7 +110,6 @@ class DynCO : public CodeObject {
   // Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
-  bool isValidDynFunc(const void* hfunc);
   hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
   hip::Var* getVar(const std::string& var_name);
 
@@ -188,8 +189,11 @@ class StatCO : public CodeObject {
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
+  // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
+  void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+
  private:
-  std::recursive_mutex sclock_;            //!< Guards Static Code object
+  mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;
@@ -205,7 +209,9 @@ class StatCO : public CodeObject {
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
-  std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
+  //! Number of entries in managedVarsDevicePtrInitialized_
+  size_t managedVarsDevicePtrInitializedSize_ = 0;
 };
 
 };  // namespace hip

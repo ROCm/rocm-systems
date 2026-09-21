@@ -24,11 +24,9 @@ Profiling with ROCm Compute Profiler provides the following benefits:
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
-* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler can control
-  the output format of raw performance counter data produced by the underlying
-  :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. Supported output formats are
-  ``csv`` and ``rocpd``. The default output format is ``rocpd``.
-
+* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler writes
+  raw performance counter data produced by the underlying
+  :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend in ``rocpd`` format.
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -115,7 +113,7 @@ The following sample command profiles the ``vcopy`` workload.
       INFO Target: MI325X
       INFO Command: ./sample/vcopy -n 1048576 -b 256
       INFO Kernel Selection: None
-      INFO Dispatch Selection: None
+      INFO Kernel Iteration Range: None
       INFO Filtered sections: All
       INFO
       INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -170,10 +168,10 @@ The following sample command profiles the ``vcopy`` workload.
       INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.257594 140315166887680 simple_timer.cpp:55] [rocprofv3] output generation ::     0.106959 sec
       INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.257624 140315166887680 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.110297 sec
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
-      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv.gz
       INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
       INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
-   WARNING PC sampling data collection skipped as block 21 is not specified.
+   WARNING PC sampling data collection skipped as --pc-sampling is not specified.
       INFO [roofline] Checking for roofline.csv in /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X
    GPU Device 0 (gfx942) with 304 CUs: Profiling...
    100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
@@ -238,7 +236,7 @@ an Instinct MI210 vs an Instinct MI250.
    total 408
    -rw-r--r-- 1 auser agroup   55771 Mar 21 23:49 log.txt
    drwxr-xr-x 1 auser agroup    4096 Mar 21 23:47 perfmon
-   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup   15017 Mar 21 23:48 pmc_perf.csv.gz
    -rw-r--r-- 1 auser agroup    1119 Mar 21 23:47 profiling_config.yaml
    -rw-r--r-- 1 auser agroup    1684 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup     899 Mar 21 23:47 sysinfo.csv
@@ -252,7 +250,7 @@ directory is derived from ``--name`` and the target system information:
 * Without MPI rank detection, the default is ``./workloads/<name>/<gpu_model>``.
 * With MPI rank detection, the default is ``./workloads/<name>/<rank>``.
 
-You can override the output directory with ``--output-directory``. When
+You can override the output directory with ``-d``, ``--output-directory``. When
 ``--output-directory`` is explicitly provided, ``--name`` is ignored.
 
 The output directory can be parameterized with the following keywords:
@@ -264,6 +262,25 @@ The output directory can be parameterized with the following keywords:
 
 If MPI rank is detected and the output directory does not include ``%rank%``,
 ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
+
+Each profiling run should use a fresh output directory. A workload directory
+holds the output of exactly one run, so profiling into a non-empty directory
+fails with an error rather than silently mixing runs. To re-profile in place,
+add ``--overwrite``, which clears the directory first:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy --overwrite -- ./vcopy -n 1048576 -b 256
+
+.. warning::
+
+   ``--overwrite`` deletes the target directory's existing contents. Nothing is
+   removed without it.
+
+.. note::
+
+   Automated runs should never reuse a workload directory: profile into a fresh
+   directory each time, or pass ``--overwrite``.
 
 Examples:
 
@@ -305,15 +322,15 @@ Examples:
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── results_pmc_perf_0.csv.gz
+    ├── results_pmc_perf_1.csv.gz
+    ├── results_pmc_perf_2.csv.gz
+    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv.gz
     ├── roofline.csv
     └── sysinfo.csv
 
-The output files use the default ``rocpd`` format. See :ref:`profiling-output-format` for details
-on available output formats and when the final ``pmc_perf.csv`` is created.
+The output files use ``rocpd`` format. See :ref:`profiling-output-format` for
+details on when the final ``pmc_perf.csv.gz`` is created.
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -353,10 +370,10 @@ on available output formats and when the final ``pmc_perf.csv`` is created.
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── results_pmc_perf_0.csv.gz
+    ├── results_pmc_perf_1.csv.gz
+    ├── results_pmc_perf_2.csv.gz
+    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv.gz
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -365,20 +382,13 @@ on available output formats and when the final ``pmc_perf.csv`` is created.
 Profiling output format
 -----------------------
 
-Use the ``--format-rocprof-output <format>`` profile mode option to specify the output format
-of raw performance counter data produced by the underlying
-:doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. The following formats are supported:
+Raw performance counter data produced by the underlying
+:doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend is written in ``rocpd``
+(SQLite) format:
 
-* ``csv`` format:
-   * Instructs ROCprofiler-SDK to write raw performance counter data in CSV format.
-   * Generates separate CSV files for each profiling run (``pmc_perf_0.csv``, ``pmc_perf_1.csv``, ``SQ_*.csv``, etc.) in the workload directory.
-   * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
-
-* ``rocpd`` format (default):
-   * Instructs ROCprofiler-SDK to write raw performance counter data in rocpd (SQLite) format.
-   * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
-   * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
-   * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
+* The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_SQ_*.csv.gz``, etc.) for each profiling run, after which the database files are removed.
+* These files are merged into a single gzip-compressed ``pmc_perf.csv.gz`` file when running ``rocprof-compute analyze``.
+* Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 .. note::
 
@@ -407,8 +417,8 @@ Filtering options
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
-``-d``, ``--dispatch <dispatch-id>``
-   Allows for dispatch iteration filtering. See :ref:`profiling-dispatch-filtering`.
+``--kernel-iteration-range <iteration>``
+   Allows for kernel iteration filtering. See :ref:`profiling-kernel-iteration-range`.
 
 ``--set <metric-set>``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
@@ -420,8 +430,8 @@ Filtering options
    Be cautious when combining different profiling filters in the same call.
    Conflicting filters may result in error.
 
-   For example, filtering a dispatch, but that dispatch doesn't match your
-   kernel name filter.
+   For example, filtering a kernel iteration, but that iteration doesn't match
+   your kernel name filter.
 
 .. _profiling-hw-component-filtering:
 
@@ -456,7 +466,7 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['10', '7']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -485,7 +495,7 @@ The following example only collects the counters required to calculate ``Total V
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['11.1.1', '12.1.1']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -584,7 +594,7 @@ substring ``vecCopy``.
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: ['vecCopy']
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -592,23 +602,23 @@ substring ``vecCopy``.
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
-.. _profiling-dispatch-filtering:
+.. _profiling-kernel-iteration-range:
 
-Dispatch filtering
-^^^^^^^^^^^^^^^^^^
+Kernel iteration filtering
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Dispatch filtering selects which iterations of each kernel to profile.
-Indices are 1-based, so the first dispatch of a kernel is ``1``. Each
+Kernel iteration filtering selects which iterations of each kernel to profile.
+Indices are 1-based, so the first iteration of a kernel is ``1``. Each
 value is a positive integer or a range with ``start <= end``, written as
 either ``start:end`` or ``start-end`` (for example, ``1``, ``3:5``, or
 ``3-5``).
 
-The following example profiles the first dispatch of each kernel in the
+The following example profiles the first iteration of each kernel in the
 application.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -d 1 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -623,7 +633,7 @@ application.
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: ['1']
+   INFO Kernel Iteration Range: ['1']
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -657,7 +667,7 @@ This option cannot be used with ``--roof-only`` and ``--block``.
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['11.2.2', '11.2.3', '11.2.4', '11.2.5']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -728,6 +738,13 @@ that contains both ``roofline.csv`` and application performance counters
 (see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
 ``--roofline-data-type``) are available in analyze mode.
 
+.. note::
+   Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
+   * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
+   * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   Additionally, the cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+
 Roofline options (profile)
 --------------------------
 
@@ -765,7 +782,7 @@ The following example demonstrates profiling roofline data only:
    INFO Target: MI325X
    INFO Command: ./tests/occupancy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['4']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -793,7 +810,7 @@ successfully.
    $ ls workloads/occupancy/MI325X
    total 48
    drwxr-xr-x 1 auser agroup     0 Mar 21 23:49 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Mar 21 23:49 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup   412 Mar 21 23:49 pmc_perf.csv.gz
    -rw-r--r-- 1 auser agroup  1715 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup   650 Mar 21 23:49 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
@@ -827,31 +844,34 @@ To target a specific GPU device, use ``--device``:
 
    $ rocprof-compute profile --name my_bench --bench-only --device 2
 
-To regenerate benchmark data in an existing profiled workload directory, use
-``--output-directory`` to point at the workload path directly:
+To regenerate benchmark data in an existing workload directory, point
+``--output-directory`` at the workload path. This replaces the existing
+``roofline.csv``, so it requires ``--overwrite``. Unlike a full profile,
+``--bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
+workload (counter data, traces) untouched:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+   $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
 
 .. note::
 
    ``--bench-only`` writes ``roofline.csv`` only; rendering a roofline
    chart additionally requires application performance counters from a
    ``--roof-only`` (or regular profile) run. The intended workflow is to
-   profile first, then re-run ``--bench-only`` against that workload
+   profile first, then re-run ``--bench-only --overwrite`` against that workload
    later to refresh stale peak values before analyzing:
 
    .. code-block:: shell-session
 
       $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy
-      $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+      $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
       $ rocprof-compute analyze --path workloads/vcopy/MI300X_A1
 
 .. _torch-operator-mapping:
 
-Torch operator mapping
-========================
+Torch trace
+===========
 
 ROCm Compute Profiler offers Torch operator mapping functionality to analyze the performance metrics at the PyTorch operator level. This feature maps the performance counters to specific PyTorch operators, enabling detailed performance analysis of
 the PyTorch workloads at the operator granularity.
@@ -877,12 +897,27 @@ which operators contribute to specific performance counter values.
    markers that map the collected kernel performance counters to their originating PyTorch
    operators.
 
+.. _torch-trace-requirements:
+
 Requirements
 ------------
 
-* Valid PyTorch installation in the profiling environment.
+* PyTorch 2.13 or 2.14 in the profiling environment.
 * PyTorch application must be run as a Python script or a Python command.
-* Workload’s Python version must match roctx’s Python version.
+
+.. important::
+
+   PyTorch must be installed together with ROCm from the TheRock package index.
+   Torch trace is built against the PyTorch that ships alongside ROCm, so a
+   PyTorch installed separately, for example from the default PyPI index, is not
+   supported.
+
+   Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
+   ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
+   packages
+   <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-pytorch-python-packages>`_
+   for the index URL, the supported ``device-*`` extras, and the PyTorch version
+   compatibility matrix.
 
 Usage
 -----
@@ -892,7 +927,7 @@ option when profiling a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental profile --name mnist_torch --torch-trace -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -908,7 +943,7 @@ option when profiling a PyTorch workload:
    INFO Command: python train.py
    INFO Torch Trace: Enabled
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Hardware Blocks: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -916,19 +951,45 @@ option when profiling a PyTorch workload:
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
+Reducing instrumentation overhead
+---------------------------------
+
+By default, ``--torch-trace`` also wraps the device- and layout-related
+``torch.Tensor`` methods ``to``, ``cpu``, ``cuda``, and ``contiguous``, which
+attribute tensor movement and layout changes to the originating PyTorch call
+site. These methods are called frequently, so wrapping them adds overhead and
+increases the trace size.
+
+Set the ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` environment variable to
+``0`` (or ``false``, ``no``, ``off``) in the workload environment to disable
+these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
+
+.. code-block:: shell-session
+
+   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+
+Torch trace collector
+---------------------
+
+``--torch-trace`` loads ``torch_trace_collector-<major>.<minor>.<abi>.so`` for
+the workload PyTorch version. If this installation has no collector at all,
+profiling stops and says so. If a collector exists but none matches the workload
+PyTorch version, profiling stops with an error listing the supported versions and
+the workload version.
+
 Output
 ------
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``torch_trace`` prefix. These correlate PyTorch operators
+the ``ml_api_trace`` prefix. These correlate PyTorch operators
 with GPU kernels and performance counters. When you run analyze (e.g. with
 ``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``torch_trace/consolidated.csv``; the source marker and counter files are
+to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
 **retained** in the workload directory and are not deleted.
 
-``torch_trace/`` directory
-The ``torch_trace/`` directory contains ``consolidated.csv`` with all
+``ml_api_trace/`` directory
+The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
 operator/kernel data. The columns include:
 
    * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
@@ -941,7 +1002,7 @@ The consolidated CSV is generated automatically on the first analysis run that
 requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
 subsequent runs.
 
-Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model).
+Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
@@ -990,27 +1051,40 @@ Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model
 Performance counter data file
 -----------------------------
 
-The ``pmc_perf.csv`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
+The ``pmc_perf.csv.gz`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
 
 * Identifying which PyTorch operators executed which GPU kernels
 * Aggregating performance counter values by operator
 * Correlating operator-level timing with kernel-level hardware metrics
 * Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
 
+.. _torch-trace-limitations:
+
 Limitations
 -----------
 
 The Torch trace feature currently has the following limitations:
 
-* Torch trace is experimental. Use ``rocprof-compute --experimental profile ... --torch-trace`` and ``rocprof-compute --experimental analyze ...`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
+* Torch trace is experimental. Use ``rocprof-compute profile ... --experimental --torch-trace`` and ``rocprof-compute analyze ... --experimental`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
-
-* A valid PyTorch installation must be available in the environment where the workload runs.
 
 * The workload’s Python version must match the Python version used by ``roctx``.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
+
+If PyTorch and ROCm come from different installations, the workload aborts while
+loading ROCm libraries and profiling fails with output such as:
+
+.. code-block:: text
+
+   : CommandLine Error: Option 'spirv-expand-step' registered more than once!
+   LLVM ERROR: inconsistency in registered CommandLine options
+   ERROR The workload and the profiler loaded two different ROCm installations in the same
+   process. Duplicate ROCm libraries abort at startup. Install PyTorch and rocm[profiler]
+   from the same package index: <link to the requirements above>
+
+This means the install requirement above was not met.
 
 
 .. _torch-operator-profiling:
@@ -1028,7 +1102,7 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The ``Operator_Name`` column in ``torch_trace/consolidated.csv`` contains
+The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
 the full operator hierarchy.
 
 This hierarchical information enables:
@@ -1054,7 +1128,7 @@ Example with hierarchical naming:
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts PurePosixPath glob patterns (e.g. ``*conv2d``,
+(``--torch-operator``) accepts shell-style glob patterns (e.g. ``*conv2d``,
 ``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
@@ -1067,13 +1141,123 @@ Torch operator mapping can be combined with other profiling options. Use
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute --experimental profile --name mnist --torch-trace -b 11 12 -- python train.py
+   $ rocprof-compute profile -b 11 12 --experimental --torch-trace --name mnist -- python train.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute --experimental profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist --iteration-multiplexing kernel -- python train.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute --experimental profile --name mnist --torch-trace -k elementwise -- python train.py
+   $ rocprof-compute profile --experimental --torch-trace --name mnist -k elementwise -- python train.py
+
+.. _triton-trace:
+
+Triton trace
+============
+
+In addition to PyTorch, ROCm Compute Profiler can map performance counters to
+Triton kernels (including Triton kernels launched by ``torch.compile`` /
+Inductor). This is enabled with the ``--triton-trace`` option and shares the
+same ``ml_api_trace`` output, ``Backend`` attribution, and analysis flow as Torch
+trace.
+
+.. warning::
+
+   Triton trace is currently an experimental feature. You must pass
+   ``--experimental`` to both **profile** and **analyze** commands when using the
+   Triton trace related options (``--triton-trace`` for profile;
+   ``--list-triton-operators`` and ``--triton-operator`` for analyze).
+
+Requirements
+------------
+
+Triton trace has the same requirements and limitations as Torch trace (see
+:ref:`torch-trace-requirements` and :ref:`torch-trace-limitations`), with a
+valid Triton installation required in place of PyTorch.
+
+Usage
+-----
+
+To enable Triton kernel mapping, use ``--experimental`` with the
+``--triton-trace`` option:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --triton-trace --name triton_gemm -- python gemm.py
+
+``--triton-trace`` can be combined with ``--torch-trace`` to instrument both
+frameworks in a single run:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
+
+Each captured marker records its originating framework in the ``Backend`` column
+of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
+independently. To enable all supported backends at once, use
+:ref:`--ml-api-trace <ml-api-trace>`.
+
+To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
+``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
+
+.. _ml-api-trace:
+
+ML API trace
+============
+
+``--ml-api-trace`` enables marker tracing for all supported ML framework backends in a
+single option.
+
+.. warning::
+
+   ML API trace is currently an experimental feature. You must pass
+   ``--experimental`` when using it.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
+
+The output is identical to enabling each framework's trace flag individually.
+Captured kernels are attributed in the ``Backend`` column and analyzed with the
+corresponding per-framework operator options (see :doc:`../analyze/cli`).
+
+.. _profile-vllm-workloads:
+
+Profile vLLM workloads
+======================
+
+vLLM V1 runs GPU kernels in a worker process separate from the vLLM entry
+process. ROCm Compute Profiler profiles that worker process and records its
+kernel dispatches, but vLLM terminates the worker with a signal on shutdown,
+and counter data is only written when a process exits normally. The profiling
+run therefore reports success while leaving no GPU kernel dispatch or
+performance counter data.
+
+To profile vLLM V1 workloads on a single GPU, set
+``VLLM_ENABLE_V1_MULTIPROCESSING=0`` before launching ROCm Compute Profiler.
+The vLLM workload then inherits the setting and runs the model in the profiled
+process, which exits normally and writes its counter data. For example:
+
+.. code-block:: shell-session
+
+   $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
+       rocprof-compute profile \
+       --iteration-multiplexing \
+       --no-roof \
+       --name vllm-offline -- \
+       python offline_inference.py
+
+.. important::
+
+   This workaround applies to single-GPU runs. When the model is split across
+   several GPUs, vLLM starts a separate worker process for each GPU, and a
+   profiling run still completes without performance counter data.
+
+.. note::
+
+   Disabling vLLM V1 multiprocessing does not change the model or the kernels
+   it runs, so the collected counter data remains representative. It does
+   affect end-to-end throughput, because work that normally overlaps across two
+   processes is serialized into one.
 
 .. _iteration-multiplexing:
 
@@ -1156,7 +1340,7 @@ The following example demonstrates how to use iteration multiplexing with the
    INFO Target: MI325X
    INFO Command: ./vcopy -i 20 -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1410,11 +1594,6 @@ workload multiple times to collect all performance counters. This mode fails
 for MPI applications because running the application multiple times results in
 multiple ``MPI_Init`` and ``MPI_Finalize`` calls, which is not permitted by the
 MPI specification.
-
-**PC Sampling:**
-
-PC sampling (block 21) may fail to collect data for multi-rank applications with
-MPI communication due to synchronization requirements.
 
 **Recommended single-pass modes:**
 

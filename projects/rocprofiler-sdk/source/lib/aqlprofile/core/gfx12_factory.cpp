@@ -132,7 +132,7 @@ Gfx12Factory::ConstructTable(const AgentInfo* agent_info)
     }
 }
 
-// Pm4Factory create mathods
+// Pm4Factory create methods
 Pm4Factory*
 Pm4Factory::Gfx12Create(const AgentInfo* agent_info)
 {

@@ -61,7 +61,44 @@ class TraceSession;
 class ITraceController;
 class ITraceSource;
 
-constexpr Pal::uint16 TextIdentifierSize = 16;
+constexpr Pal::uint32 TextIdentifierSize = 16;
+
+/// The 16-byte TraceChunkInfo identifier. It appears to be a null terminated C-string but is not for two reasons:
+///   1. It is *NOT* guaranteed to be null terminated!!
+///   2. All trailing bytes must be zeroed, not just the first one.
+/// So these identifiers should be copied and compared across all 16 bytes. We provide a helper constructor which
+/// converts a string into a valid TraceChunkId, only the first 16 characters are used.
+///
+/// Quoting the RDF spec directly:
+/// "Unused bytes *must* be set to 0. This *must* be a UTF-8 encoded string, which does not require a trailing 0-byte.
+///  If there is a 0-byte, all bytes after it *must* be 0 as well (i.e. it's invalid to have a 0-byte in the middle of
+///  the identifier string.) Implementations *should* validate that the identifier adheres to the requirements during
+///  creation time."
+struct TraceChunkId
+{
+    char bytes[TextIdentifierSize]; ///< Text identifier data. WARNING: may not be null terminated!!
+
+    /// Default to a zeroed out ID.
+    constexpr TraceChunkId() : bytes{} {}
+
+    /// Constructs a properly formatted ID according to the rules outlined in the block comment above.
+    constexpr TraceChunkId(const char* pStr)
+        : bytes{} // Start by zeroing out the whole array.
+    {
+        // Then copy up to TextIdentifierSize non-zero characters from the source string.
+        for (Pal::uint32 idx = 0; (idx < TextIdentifierSize) && (pStr[idx] != '\0'); ++idx)
+        {
+            bytes[idx] = pStr[idx];
+        }
+    }
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    // Make TraceChunkId look like a plain char array on older builds for backwards compatibility.
+    operator char*() { return bytes; }
+    operator const char*() const { return bytes; }
+#endif
+};
+
+static_assert(sizeof(TraceChunkId) == TextIdentifierSize);
 
 /// Information required to create a new chunk of trace data in a TraceSession
 ///
@@ -69,13 +106,13 @@ constexpr Pal::uint16 TextIdentifierSize = 16;
 /// included within this structure are intended to support compatibility with the Radeon Data Format (RDF) spec.
 struct TraceChunkInfo
 {
-    char        id[TextIdentifierSize]; ///<      Text identifier of the chunk
-    Pal::uint32 version;                ///<      Version number of the chunk
-    const void* pHeader;                ///< [in] Pointer to a buffer that contains the header data for the chunk
-    Pal::int64  headerSize;             ///<      Size of the buffer pointed to by pHeader
-    const void* pData;                  ///< [in] Pointer to a buffer that contains the data for the chunk
-    Pal::int64  dataSize;               ///<      Size of the buffer pointed to by pData
-    bool        enableCompression;      ///<      Indicates if the chunk's data should be compressed or not
+    TraceChunkId id;                ///<      Text identifier of the chunk
+    Pal::uint32  version;           ///<      Version number of the chunk
+    const void*  pHeader;           ///< [in] Pointer to a buffer that contains the header data for the chunk
+    Pal::int64   headerSize;        ///<      Size of the buffer pointed to by pHeader
+    const void*  pData;             ///< [in] Pointer to a buffer that contains the data for the chunk
+    Pal::int64   dataSize;          ///<      Size of the buffer pointed to by pData
+    bool         enableCompression; ///<      Indicates if the chunk's data should be compressed or not
 };
 
 /// The available states of TraceSession
@@ -86,17 +123,11 @@ enum class TraceSessionState : Pal::uint32
     Preparing         = 2, ///< Trace has been accepted and is preparing resources before beginning
     Beginning         = 3, ///< Commands are now being submitted to the GPU to begin tracing
     Running           = 4, ///< Trace is in progress
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
     Postamble         = 5, ///< The detailed frame trace has ended but its data has not yet been written
                            ///  into the session. Some trace sources may still collect data during this time.
     PostambleWaiting  = 6, ///< Waiting for Postamble to complete.
     Completed         = 7, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
     Count             = 8
-#else
-    Waiting           = 5, ///< Trace has ended, but data has not been written into the session
-    Completed         = 6, ///< Trace has fully completed. RDF trace data is ready to be pulled out by CollectTrace().
-    Count             = 7
-#endif
 };
 
 /// Defines the type of payload. Currently only strings are supported but in the future can include JSON, structs, etc.
@@ -109,14 +140,14 @@ enum class TraceErrorPayload : Pal::uint32
 /// Chunk header for the error tracing chunk
 struct TraceErrorHeader
 {
-    char              chunkId[TextIdentifierSize]; ///< Text identifier of the failing chunk
-    Pal::uint32       chunkIndex;                  ///< Chunk index of the failing chunk
-    Pal::Result       resultCode;                  ///< PAL Result code of the failure
-    TraceErrorPayload payloadType;                 ///< Type of error chunk payload
+    TraceChunkId      chunkId;     ///< Text identifier of the failing chunk
+    Pal::uint32       chunkIndex;  ///< Chunk index of the failing chunk
+    Pal::Result       resultCode;  ///< PAL Result code of the failure
+    TraceErrorPayload payloadType; ///< Type of error chunk payload
 };
 
-constexpr char ErrorChunkTextIdentifier[TextIdentifierSize]  = "TraceError";
-constexpr Pal::uint32 ErrorTraceChunkVersion                 = 1;
+constexpr TraceChunkId ErrorChunkTextIdentifier = TraceChunkId("TraceError");
+constexpr Pal::uint32  ErrorTraceChunkVersion   = 1;
 
 /// Function type for TraceSession state change callback
 typedef void (PAL_STDCALL *TraceStateChangeCallback)(
@@ -143,6 +174,10 @@ typedef void (PAL_STDCALL *TraceStateChangeCallback)(
 class ITraceController
 {
 public:
+    /// @brief Virtual destructor to ensure proper cleanup of derived classes.
+    virtual ~ITraceController()
+    { }
+
     /// Returns the name of the controller
     ///
     /// @returns the name of the controller as a null terminated string
@@ -322,6 +357,10 @@ public:
     virtual void OnConfigUpdated(DevDriver::StructuredValue* pJsonConfig) = 0;
 #endif
 
+    /// @brief Virtual destructor to ensure proper cleanup of derived classes.
+    virtual ~ITraceSource()
+    { }
+
     /// Returns a bitmask that represents which GPUs are relevant to this trace source
     ///
     /// If the bit at index N is set, GPU N must execute work on the GPU in order to produce trace data
@@ -383,11 +422,7 @@ public:
     ///
     /// @param [in] gpuIndex The index of the GPU that owns pCmdBuf
     /// @param [in] pCmdBuf  A command buffer that can be used to perform any GPU work required to end the postamble
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
-    virtual void OnPostambleEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) = 0;
-#endif
+    virtual void OnPostambleEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) = 0;
 
     /// Called by the associated session to notify the source that the current trace has finished
     ///
@@ -448,7 +483,7 @@ public:
 
     /// Initialize the trace session before requesting a trace.
     ///
-    /// @returns Success if initialization was successful, or ErrorUnknown upon failure.
+    /// @returns Success if initalization was successful, or ErrorUnknown upon failure.
     Pal::Result Init();
 
     /// Returns whether tracing has been formally enabled via UberTrace or not.
@@ -649,7 +684,6 @@ public:
     ///          Otherwise, the error generated by OnEndGpuWork will be returned.
     Pal::Result EndTrace();
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
     /// Ends the postamble phase, which typically runs until the detailed trace data is available.
     /// This function MUST be called after EndTrace. When this function is called, the session will communicate with
     /// all registered trace sources and notify them of the end of the postamble phase. The provided trace controller
@@ -660,13 +694,12 @@ public:
     /// generated in response to the previous EndTrace call! The generated command buffers MUST also complete
     /// execution on the GPU BEFORE FinishPostamble is called!
     ///
-    /// In situations where multiple GPUs are present, the OnEndPostambleGpuWork function will be called once per GPU index
-    /// for all GPUs that are relevant for the current trace sources.
+    /// In situations where multiple GPUs are present, the OnEndPostambleGpuWork function will be called once per GPU
+    /// index for all GPUs that are relevant for the current trace sources.
     ///
     /// @returns Success if the trace was successfully ended.
     ///          Otherwise, the error generated by OnEndPostambleGpuWork will be returned.
     Pal::Result EndPostamble();
-#endif
 
     /// Notifies the session that the trace operation started by the provided controller has finished.
     ///
@@ -726,11 +759,24 @@ public:
     ///
     /// @returns Success if the error chunk was written successfully
     Pal::Result ReportError(
+        const TraceChunkId& chunkId,
+        const void*         pPayload,
+        Pal::uint64         payloadSize,
+        TraceErrorPayload   payloadType,
+        Pal::Result         errorResult);
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Pal::Result ReportError(
         const char        chunkId[TextIdentifierSize],
         const void*       pPayload,
         Pal::uint64       payloadSize,
         TraceErrorPayload payloadType,
-        Pal::Result       errorResult);
+        Pal::Result       errorResult)
+    {
+        const TraceChunkId id(chunkId);
+        return ReportError(id, pPayload, payloadSize, payloadType, errorResult);
+    }
+#endif
 
     /// Explicitly activates this TraceSession for managing traces.
     ///
@@ -754,9 +800,9 @@ public:
         return m_pConfigData;
     }
 
-    /// Indicates if a cancel-trace signal has been received and that a cancellation is in progress.
+    /// Indicates if a cancel-trace signal has been received and that a cancelation is in progress.
     ///
-    /// @return true if a cancellation is in progress.
+    /// @return true if a cancelation is in progress.
     bool IsCancelingTrace() const { return m_cancelingTrace; }
 
     /// Register a function to be called when the Trace Session state changes.
@@ -835,9 +881,9 @@ private:
     rdfStream*          m_pCurrentStream;    // Active RDF stream for writing chunks
     Pal::int32          m_currentChunkIndex; // The current chunk index of the RDF stream
     bool                m_tracingEnabled;    // Flag indicating UberTrace tracing is enabled tool-side
-    void*               m_pConfigData;       // Buffer containing the cached trace configuration
+    void*               m_pConfigData;       // Buffer containing the cached trace configurationn
     size_t              m_configDataSize;    // Size of the cached trace config buffer
-    bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancellation
+    bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancelation
                                              // is in progress.
 
     Util::Mutex         m_stateChangeCallbackLock; // RW lock for state change callbacks

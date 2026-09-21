@@ -14,6 +14,7 @@ set(TEST_SRC
     hipEventCreateWithFlags.cc
     hipEventSynchronize.cc
     Unit_hipEventMGpuMThreads.cc
+    hipEventCoalescing.cc
 )
 
 # The test used wait mechanism and doesnt play well with all arch of nvidia

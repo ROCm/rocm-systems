@@ -142,6 +142,16 @@ public:
 /// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
 
+/// Check if running under Windows Subsystem for Linux (WSL / DXG backend).
+/// \returns true if a WSL environment is detected
+bool isWslEnvironment();
+
+/// If running on WSL/DXG, print a "[ SKIPPED ]" line with the reason and return
+/// true so the caller can return early; returns false otherwise.
+/// \param reason Why the test is skipped on WSL
+/// \returns true if the test should be skipped (WSL detected)
+bool SkipOnWsl(const char* reason);
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored
@@ -186,6 +196,15 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data);
 ///  to the agent upon return
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
 hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data);
+
+/// If the provided agent is associated with an AIE, return that agent through
+/// output parameter. This function is meant to be the call-back function used
+/// with hsa_iterate_agents to find  all the AIE agents.
+/// \param[in] agent Agent to evaluate if AIE
+/// \param[out] data If agent is associated with an AIE, this pointer will point
+///  to the agent upon return
+/// \returns HSA_STATUS_SUCCESS if no errors are encountered.
+hsa_status_t IterateAIEAgents(hsa_agent_t agent, void* data);
 
 /// Find a GLOBAL memory pool. By this, we mean not a kernel args pool.
 /// This function is meant to be the call-back function used

@@ -46,10 +46,48 @@
 extern "C" {
 #endif
 
+#define DOCA_GPUNETIO_VERSION_MAJOR 4
+#define DOCA_GPUNETIO_VERSION_MINOR 0
+#define DOCA_GPUNETIO_VERSION_PATCH 0
+
+#define DOCA_GPUNETIO_VERSION_MAJOR_SHIFT 16
+#define DOCA_GPUNETIO_VERSION_MINOR_SHIFT 8
+#define DOCA_GPUNETIO_VERSION_PATCH_SHIFT 0
+
+#define DOCA_GPUNETIO_VERSION                                             \
+    ((DOCA_GPUNETIO_VERSION_MAJOR << DOCA_GPUNETIO_VERSION_MAJOR_SHIFT) | \
+     (DOCA_GPUNETIO_VERSION_MINOR << DOCA_GPUNETIO_VERSION_MINOR_SHIFT) | \
+     (DOCA_GPUNETIO_VERSION_PATCH << DOCA_GPUNETIO_VERSION_PATCH_SHIFT))
+
+#define DOCA_GPUNETIO_DEVICE_CODE_VERSION DOCA_GPUNETIO_VERSION
+#define DOCA_GPUNETIO_HOST_CODE_VERSION DOCA_GPUNETIO_VERSION
+
+#define DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_MAJOR 2
+#define DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_MINOR 0
+#define DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_PATCH 0
+#define DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION                                             \
+    ((DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_MAJOR << DOCA_GPUNETIO_VERSION_MAJOR_SHIFT) | \
+     (DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_MINOR << DOCA_GPUNETIO_VERSION_MINOR_SHIFT) | \
+     (DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION_PATCH << DOCA_GPUNETIO_VERSION_PATCH_SHIFT))
+
+#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MAJOR 4
+#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MINOR 0
+#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_PATCH 0
+#define DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION                                             \
+    ((DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MAJOR << DOCA_GPUNETIO_VERSION_MAJOR_SHIFT) | \
+     (DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_MINOR << DOCA_GPUNETIO_VERSION_MINOR_SHIFT) | \
+     (DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION_PATCH << DOCA_GPUNETIO_VERSION_PATCH_SHIFT))
+
+#ifdef __GNUC__
+#define TYPEOF(x) __typeof__(x)
+#else
+#define TYPEOF(x) decltype(x)
+#endif
+
 /**
  * Macro to temporarily cast a variable to volatile.
  */
-#define DOCA_GPUNETIO_VOLATILE(x) (*(volatile typeof(x) *)&(x))
+#define DOCA_GPUNETIO_VOLATILE(x) (*(volatile TYPEOF(x) *)&(x))
 
 /**
  * Default warp size value of 32 threads
@@ -84,6 +122,14 @@ extern "C" {
  * Otherwise set it to 0.
  */
 #define DOCA_GPUNETIO_VERBS_MKEY_SWAPPED 1
+
+/**
+ * On NVIDIA NICs, we can violate the memory model using a lighter
+ * fence acquire in poll_cq* functions. Set to 1 by default.
+ */
+#ifndef DOCA_GPUNETIO_VERBS_EXP_NIC_FENCE_ACQUIRE_CTA
+#define DOCA_GPUNETIO_VERBS_EXP_NIC_FENCE_ACQUIRE_CTA 1
+#endif
 
 /**
  * Enable debug prints in this headerfile.
@@ -123,7 +169,7 @@ extern "C" {
     (1ULL << DOCA_GPUNETIO_VERBS_MAX_TRANSFER_SIZE_SHIFT)  // 1GiB
 
 #ifndef ACCESS_ONCE
-#define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
+#define ACCESS_ONCE(x) (*(volatile TYPEOF(x) *)&(x))
 #endif
 
 #ifndef READ_ONCE
@@ -133,6 +179,9 @@ extern "C" {
 #ifndef WRITE_ONCE
 #define WRITE_ONCE(x, v) (ACCESS_ONCE(x) = (v))
 #endif
+
+#define DOCA_GPUNETIO_4_BYTE_ATOMIC_EXT_OPMOD 0x08000000
+#define DOCA_GPUNETIO_8_BYTE_ATOMIC_EXT_OPMOD 0x09000000
 
 enum {
     DOCA_GPUNETIO_IB_MLX5_OPCODE_NOP = 0x00,
@@ -185,12 +234,15 @@ enum doca_gpu_dev_verbs_wqe_ctrl_flags {
     DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_FIRST_CQE_ERROR =
         DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CE_CQE_ON_FIRST_CQE_ERROR << 2,
     DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_SOLICITED = 1 << 1,
-    DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FENCE =
-        DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FM_FENCE_AND_INITIATOR_SMALL_FENCE << 5,
+    DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FENCE = DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FM_FENCE << 5,
     DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_INITIATOR_SMALL_FENCE =
         DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FM_INITIATOR_SMALL_FENCE << 5,
     DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_STRONG_ORDERING =
-        DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FM_STRONG_ORDERING << 5
+        DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FM_STRONG_ORDERING << 5,
+    DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_UPDATE_FENCE =
+        DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CE_CQE_ALWAYS << 2 | DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_FM_FENCE
+                                                                << 5,
+
 };
 
 enum {
@@ -265,6 +317,7 @@ enum {
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_GPU_SM = 1 << 1,
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_BF = 1 << 2,
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_NO_DBR = 1 << 3,
+    DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW = 1 << 4,
 };
 
 /**
@@ -283,7 +336,9 @@ enum doca_gpu_dev_verbs_nic_handler {
     DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR =
         DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_GPU_SM |
         DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_NO_DBR,  ///< GPU SM, no need to update the DBREC
-    DOCA_GPUNETIO_VERBS_NIC_HANDLER_TYPE_MAX,         ///< Sentinel value
+    DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW =
+        DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY |
+        DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW,  ///< CPU Proxy with free flow
 };
 
 /**
@@ -297,11 +352,61 @@ enum doca_gpu_dev_verbs_gpu_code_opt {
     DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_AVAILABILITY_CHECK =
         (1 << 1),                                                 ///< Skip availability check
     DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_DB_RINGING = (1 << 2),  ///< Skip DB ringing
-    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_MAX = INT_MAX                ///< Sentinel value
+    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_CPU_PROXY_UPDATE_PI =
+        (1 << 3),                                   ///< in case of CPU proxy, update producer index
+    DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_MAX = INT_MAX  ///< Sentinel value
+};
+
+enum {
+    DOCA_GPUNETIO_VERBS_CQ_FLAG_COLLAPSED = 1 << 0,
+    DOCA_GPUNETIO_VERBS_CQ_FLAG_HOST = 1 << 1,
+    DOCA_GPUNETIO_VERBS_CQ_FLAG_UNKNOWN = 1 << 7,
+};
+
+/**
+ * @enum doca_gpu_dev_verbs_cq_type
+ * @brief Completion queue storage type.
+ *
+ * UNKNOWN is resolved by host-side QP creation only. Device code loads the resolved
+ * CQ type from the QP when a helper is instantiated with UNKNOWN.
+ */
+enum doca_gpu_dev_verbs_cq_type : uint8_t {
+    DOCA_GPUNETIO_VERBS_CQ_64B = 0,  ///< 64B CQEs in GPU memory
+    DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED =
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_COLLAPSED,  ///< Collapsed 64B CQEs in GPU memory
+    DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST =
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_COLLAPSED |
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_HOST,  ///< Collapsed 64B CQEs in host memory
+    DOCA_GPUNETIO_VERBS_CQ_UNKNOWN =
+        DOCA_GPUNETIO_VERBS_CQ_FLAG_UNKNOWN,  ///< Resolve CQ type from QP attributes
 };
 
 enum doca_gpu_dev_verbs_signal_op {
     DOCA_GPUNETIO_VERBS_SIGNAL_OP_ADD = 0,  ///< Signal operation - Add
+};
+
+enum doca_gpu_dev_verbs_dump_mode {
+    DOCA_GPUNETIO_VERBS_DUMP = 0,
+    DOCA_GPUNETIO_VERBS_NODUMP = 1,
+    DOCA_GPUNETIO_VERBS_DUMP_AUTO = 2,
+};
+
+/**
+ * @enum doca_gpu_dev_verbs_blocking_mode
+ * @brief Type of execution mode: blocking waiting for an event or non-blocking
+ */
+enum doca_gpu_dev_verbs_blocking_mode {
+    DOCA_GPUNETIO_VERBS_BLOCKING_MODE_DISABLED = 0,
+    DOCA_GPUNETIO_VERBS_BLOCKING_MODE_ENABLED = 1,
+};
+
+/**
+ * @enum doca_gpu_dev_verbs_mcst_mode
+ * @brief How to enable the dump in case or RDMA Get or Recv
+ */
+enum doca_gpu_dev_verbs_mcst_mode {
+    DOCA_GPUNETIO_VERBS_MCST_DISABLED = 0, /**< Post a dump WQE after the Get/Recv */
+    DOCA_GPUNETIO_VERBS_MCST_ENABLED = 1,  /**< Don't post a dump WQE after the Get/Recv */
 };
 
 enum {
@@ -330,35 +435,67 @@ enum {
     DOCA_GPUNETIO_IB_MLX5_CQE_INVALID = 15,
 };
 
+enum doca_gpu_dev_verbs_atomic_ext_bytes {
+    DOCA_GPUNETIO_VERBS_ATOMIC_EXT_BYTES_4 = 4,
+    DOCA_GPUNETIO_VERBS_ATOMIC_EXT_BYTES_8 = 8
+};
+
+/**
+ * @enum doca_gpu_dev_verbs_qp_ready_mode
+ * Select the how the doca_gpu_dev_verbs_mark_wqes_ready() should
+ * enable the atomic wait and update operation (via atomicCAS or atomic ld/st).
+ * Suggestion is to use ATOMIC_CAS for GPU sharing mode and LD_ST for CTA mode for performance
+ * reasons.
+ */
+enum doca_gpu_dev_verbs_qp_ready_mode {
+    DOCA_GPUNETIO_VERBS_READY_MODE_DEFAULT = 0,
+    DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS = 1,
+    DOCA_GPUNETIO_VERBS_READY_MODE_LD_ST = 2
+};
+
 struct doca_gpunetio_ib_mlx5_wqe_data_seg {
     __be32 byte_count;
     __be32 lkey;
     __be64 addr;
-};
+} __attribute__((__packed__));
 
 struct doca_gpunetio_ib_mlx5_wqe_ctrl_seg {
-    __be32 opmod_idx_opcode;
-    __be32 qpn_ds;
-    uint8_t signature;
-    __be16 dci_stream_channel_id;
-    uint8_t fm_ce_se;
-    __be32 imm;
+    __be32 opmod_idx_opcode; /**< opcode + wqe idx */
+    __be32 qpn_ds;           /**< qp number */
+    union {
+        struct {
+            uint8_t signature;            /**< signature */
+            __be16 dci_stream_channel_id; /**< dci stream channel id */
+            uint8_t fm_ce_se;             /**< fm_ce_se */
+        } __attribute__((__packed__));
+        struct {
+            __be32 signature_fm_ce_se; /**< all flags in or */
+        } __attribute__((__packed__));
+    } __attribute__((__packed__));
+
+    __be32 imm; /**< immediate */
 } __attribute__((__packed__)) __attribute__((__aligned__(4)));
 
 struct doca_gpunetio_ib_mlx5_wqe_raddr_seg {
     __be64 raddr;
     __be32 rkey;
     __be32 reserved;
-};
+} __attribute__((__packed__));
 
 struct doca_gpunetio_ib_mlx5_wqe_atomic_seg {
     __be64 swap_add;
     __be64 compare;
-};
+} __attribute__((__packed__));
 
 struct doca_gpunetio_ib_mlx5_wqe_inl_data_seg {
     uint32_t byte_count;
 };
+
+struct doca_gpunetio_ib_mlx5_wqe_wait_seg {
+    uint32_t resv[2];
+    __be32 max_index;
+    __be32 qpn_cqn;
+} __attribute__((__packed__));
 
 struct doca_gpunetio_ib_mlx5_tm_cqe {
     __be32 success;
@@ -399,9 +536,14 @@ struct doca_gpunetio_ib_mlx5_cqe64 {
     __be32 byte_cnt;
     __be64 timestamp;
     __be32 sop_drop_qpn;
-    __be16 wqe_counter;
-    uint8_t signature;
-    uint8_t op_own;
+    union {
+        struct {
+            __be16 wqe_counter;
+            uint8_t signature;
+            uint8_t op_own;
+        };
+        __be32 wqe_counter_sig_op_own_raw;
+    };
 };
 
 struct doca_gpunetio_ib_mlx5_err_cqe_ex {

@@ -32,9 +32,12 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/common/container/pool.hpp"
 #include "lib/common/container/pool_object.hpp"
+#include "lib/common/container/static_vector.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -43,6 +46,10 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -55,8 +62,16 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -68,6 +83,8 @@ namespace queue_interposition
 {
 namespace
 {
+auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
+
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
 //  - "active" is for controlling whether wrappers are intercepting or passing through
@@ -78,11 +95,9 @@ auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 
 bool
-should_bypass_inline_intercept()
+has_active_queue_interposition_consumers()
 {
-    return (!s_intercept_installed.load(std::memory_order_acquire) ||
-            !s_intercept_active.load(std::memory_order_acquire) ||
-            registration::get_fini_status() != 0);
+    return s_active_queue_interposition_consumers.load(std::memory_order_relaxed) > 0;
 }
 
 auto*&
@@ -121,7 +136,14 @@ lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing)
     // if create_if_missing is true, create a new state. this is for dynamic discovery of queues.
     if(!_state && create_if_missing)
     {
-        return create_queue_state(queue, true);
+        auto _created = create_queue_state(queue, true);
+        // A queue discovered dynamically (never seen at hsa_queue_create) was
+        // never windowed, so first_owner can no longer be trusted anywhere -- the
+        // documented "owner we never windowed" invariant. Disable signal-less
+        // process-wide. Called with no hub/registry lock held (create returned).
+        if(_created && kfd::signal_less_feature_enabled() && !kfd::signal_less_child_stale())
+            kfd::signal_less_disable_permanently();
+        return _created;
     }
 
     return _state;
@@ -205,6 +227,18 @@ get_doorbell_tls()
     return _v;
 }
 
+// One in-flight completion wait: a batch's completion signal, the value it was
+// enqueued at (the signal drops below this once the kernel completes), and the
+// session whose completion bookkeeping runs when it does.
+struct pending_completion
+{
+    hsa_signal_t                          completion_signal = {};
+    hsa_signal_value_t                    starting_value    = 0;
+    std::shared_ptr<queue_info_session_t> session           = {};
+};
+
+using pending_completion_vector_t = std::vector<pending_completion>;
+
 inline void
 publish_submitted_packets(QueueState* state, uint64_t submit_pos)
 {
@@ -217,8 +251,20 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
         << ") regressed below last_published_submit_pos (" << tls.last_published_submit_pos << ")";
 
     __atomic_store_n(state->real_wdid, submit_pos, __ATOMIC_RELEASE);
-    (*tls.ring_doorbell)(state->doorbell_signal, static_cast<hsa_signal_value_t>(submit_pos - 1));
+    const auto doorbell_idx = static_cast<hsa_signal_value_t>(submit_pos - 1);
+    (*tls.ring_doorbell)(state->doorbell_signal, doorbell_idx);
     tls.last_published_submit_pos = submit_pos;
+}
+
+// Ring the doorbell with the last index we have actually submitted (next_submit_pos - 1),
+// never the application's virtualized value, which may point past it and make the GPU
+// consume unpublished ring slots.
+inline void
+ring_published_doorbell(QueueState* state, const doorbell_fn_t& ring_doorbell)
+{
+    const uint64_t published = state->next_submit_pos;
+    if(published == 0) return;
+    ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(published - 1));
 }
 
 inline void
@@ -227,8 +273,11 @@ wait_for_free_slot(QueueState* state, uint64_t submit_pos)
     while(true)
     {
         auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
-        auto ring_used = submit_pos - real_rdid;
-        if(ring_used < state->ring_size)
+
+        // Guard the unsigned subtraction: if real_rdid has reached or passed our write
+        // position the ring has free space. Otherwise (submit_pos - real_rdid) would
+        // underflow and spin forever while holding gate_lock.
+        if(real_rdid >= submit_pos || (submit_pos - real_rdid) < state->ring_size)
         {
             return;
         }
@@ -273,35 +322,10 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     }
 }
 
-auto
-async_signal_handler_exists()
+}  // namespace
+
+namespace
 {
-    return common::static_object<internal_threading::task_group_t>::get();
-}
-
-internal_threading::task_group_t*
-get_async_signal_handler()
-{
-    using task_group_t           = internal_threading::task_group_t;
-    using create_task_group_fn_t = task_group_t* (*) (void*, size_t);
-
-    // default to 4 threads if neither GPU_MAX_HW_QUEUES or ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS
-    // is set, since the async signal handler is primarily intended for handling queue completion
-    // signals and a typical GPU may have on the order of 4 hardware queues. Note: GPU_MAX_HW_QUEUES
-    // is a ROCr/HSA environment variable. If GPU_MAX_HW_QUEUES is set but
-    // ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS is not set, we will use the value of
-    // GPU_MAX_HW_QUEUES to determine the number of threads for the async signal handler. If
-    // ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS is set, it will take precedence over
-    // GPU_MAX_HW_QUEUES.
-    static auto*& _v =
-        common::static_object<internal_threading::task_group_t>::construct_via_function(
-            static_cast<create_task_group_fn_t>(&internal_threading::create_task_group),
-            common::get_env("ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS",
-                            common::get_env("GPU_MAX_HW_QUEUES", 4)));
-
-    return _v;
-}
-
 bool
 context_filter(const context::context* ctx)
 {
@@ -331,74 +355,193 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
-void
-async_signal_handler(hsa_signal_t                            completion_signal,
-                     hsa_signal_value_t                      starting_value,
-                     std::shared_ptr<queue_info_session_t>&& session)
+// stopped: no monitor thread. active: monitor running and admitting new waits. Drains key off
+// registration::get_fini_status(), not this state.
+enum class monitor_state : uint8_t
 {
-    constexpr auto timeout_hint =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds{10});
+    stopped = 0,
+    active
+};
 
-    auto signal_value = starting_value;
-    auto niterations  = uint64_t{0};
+// How often an unbounded drain repeats its warning. A drain still waiting after this is either a
+// very long-running dispatch or a caller waiting on its own completion; the wait continues either
+// way, and the log is what distinguishes them.
+constexpr auto drain_warn_interval = std::chrono::seconds{30};
 
-    // Stop only on completion or finalization; never run cleanup while the kernel is live.
-    while(true)
-    {
-        signal_value = get_core_table()->hsa_signal_wait_relaxed_fn(completion_signal,
-                                                                    HSA_SIGNAL_CONDITION_LT,
-                                                                    starting_value,
-                                                                    timeout_hint.count(),
-                                                                    HSA_WAIT_STATE_ACTIVE);
+// How often a wait re-tests the condition it is waiting on.
+constexpr auto poll_interval = std::chrono::milliseconds{1};
 
-        if(signal_value < starting_value) break;         // kernel completed
-        if(registration::get_fini_status() != 0) break;  // tearing down: run cleanup path
-        ++niterations;
+class completion_monitor;
 
-        // Surface long-running waits for diagnostics without giving up the wait.
-        constexpr auto warn_interval = (1UL << 20);
-        if(niterations % warn_interval == 0)
-            ROCP_WARNING << fmt::format(
-                "Async signal handler still waiting on signal {{.handle={}}} after {} iterations "
-                "(value={}, starting_value={})",
-                completion_signal.handle,
-                niterations,
-                signal_value,
-                starting_value);
-    }
+void
+move_incoming_to_active(completion_monitor&);
+void
+retire_completed(completion_monitor&, pending_completion_vector_t&);
+void
+force_retire_all(completion_monitor&);
+void
+completion_monitor_loop(completion_monitor&);
 
-    ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={}}} with "
-                             "value {} (original value={}, iterations={})",
-                             completion_signal.handle,
-                             signal_value,
-                             starting_value,
-                             niterations);
+// Shared state for the single completion-monitor thread. Producers push new waits onto `incoming`
+// -- the only cross-thread field -- and bump `wake_signal`, which sits in the last slot of the
+// monitor's wait array so hsa_amd_signal_wait_any returns.
+class completion_monitor
+{
+    // Single owner at any time: the monitor thread while it runs, then the finalizing thread once
+    // stop_completion_monitor has joined it.
+    std::vector<pending_completion> active = {};
 
-    if(auto delay_us = common::get_env("ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US", 0); delay_us > 0)
-    {
-        std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
-    }
+    friend void move_incoming_to_active(completion_monitor&);
+    friend void retire_completed(completion_monitor&, pending_completion_vector_t&);
+    friend void force_retire_all(completion_monitor&);
+    friend void completion_monitor_loop(completion_monitor&);
+
+public:
+    common::Synchronized<std::vector<pending_completion>> incoming    = {};
+    hsa_signal_t                                          wake_signal = {};
+    std::atomic<monitor_state>                            state       = {monitor_state::stopped};
+
+    // Guards the thread handle so start and stop exclude each other: move-assigning onto a joinable
+    // handle calls std::terminate. Both make their `state` transition under this lock, so the loser
+    // waits for the winner to finish rather than racing it. Lock order: this before `incoming`.
+    common::Synchronized<std::thread> thread = {};
+
+    // Registered but not yet retired (inbox + active). Lets other threads see whether
+    // anything is outstanding without touching the monitor-private `active`.
+    std::atomic<uint64_t> inflight = {0};
+
+    // Runs emit_dispatch_records, which calls into tool code, so the monitor thread only does
+    // bounded work between waits. One thread, because records are emitted in retirement order. Not
+    // in get_task_groups(), so no tool can name it. Declared last: destroying it joins it.
+    std::unique_ptr<internal_threading::task_group_t> record_emitter = {};
+};
+
+completion_monitor&
+get_completion_monitor()
+{
+    static auto*& _v = common::static_object<completion_monitor>::construct();
+    return *_v;
+}
+
+// The single gate every wrapper consults: true means pass straight through to the next
+// function table. Defined here rather than beside the other intercept flags because the last
+// disjunct needs the completion monitor's full type.
+bool
+should_bypass_inline_intercept()
+{
+    return (!s_intercept_installed.load(std::memory_order_acquire) ||
+            !s_intercept_active.load(std::memory_order_acquire) ||
+            // `!= 0` covers the whole teardown window: finalize sets the status to -1 before
+            // queue_controller_fini and to 1 only after it returns. That keeps a producer
+            // arriving mid-teardown off the instrumented path while the pool is being destroyed.
+            registration::get_fini_status() != 0 ||
+            // TODO: debug and enable queue interposition for attachment
+            registration::supports_attachment() || !has_active_queue_interposition_consumers() ||
+            // Last, and the order matters: this is the only term that names a static_object whose
+            // destructor nulls it. interposition_fini stores s_intercept_active false during
+            // finalize, which runs ahead of destroy_static_objects.
+            get_completion_monitor().state.load(std::memory_order_acquire) !=
+                monitor_state::active);
+}
+
+// Hand a dispatched batch's completion wait to the monitor: enqueue it on the inbox and bump the
+// wake signal. Returns an entry with a null session once the monitor owns the wait, or the batch
+// itself if the monitor had already stopped, leaving the caller to retire it. All of it runs under
+// the inbox lock, which teardown's final drain also takes, so a wake store never reaches a
+// destroyed signal.
+pending_completion
+register_pending_completion(pending_completion&& pending)
+{
+    auto& mon      = get_completion_monitor();
+    auto  declined = pending_completion{};
+
+    mon.incoming.wlock([&mon, &pending, &declined](auto& inbox) {
+        // The lock orders this load against teardown's state store, so relaxed suffices.
+        if(mon.state.load(std::memory_order_relaxed) == monitor_state::stopped)
+        {
+            declined = std::move(pending);
+            return;
+        }
+
+        mon.inflight.fetch_add(1, std::memory_order_relaxed);
+        inbox.emplace_back(std::move(pending));
+        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+    });
+
+    return declined;
+}
+
+// A batch is complete once its completion signal drops below the value it was enqueued at. The load
+// is acquire so the GPU's timestamp writes into that same signal are ordered before the reads they
+// authorize; force_retire_all reaches this with no waiting call ahead of it.
+bool
+has_completed(const pending_completion& pending)
+{
+    return get_core_table()->hsa_signal_load_scacquire_fn(pending.completion_signal) <
+           pending.starting_value;
+}
+
+// What release_completion_signals hands to emit_dispatch_records: the session, plus the dispatch
+// timestamps copied out of the completion signals before those signals were released.
+// `dispatch_times` is parallel to session->packet_data, and empty for a batch that never completed.
+struct retired_batch
+{
+    std::shared_ptr<queue_info_session_t>        session        = {};
+    std::vector<kernel_dispatch::profiling_time> dispatch_times = {};
+};
+
+// Reads the dispatch timestamps out of each completion signal and hands the signal back. Everything
+// emit_dispatch_records needs is copied out first, because the signal returns to the pool.
+// `completed` is false for a batch whose signal never dropped.
+retired_batch
+release_completion_signals(const std::shared_ptr<queue_info_session_t>& session, bool completed)
+{
+    auto batch = retired_batch{session, {}};
+
+    if(completed) batch.dispatch_times.reserve(session->packet_data.size());
 
     for(auto& packet : session->packet_data)
     {
-        auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
-        kernel_dispatch::dispatch_complete(*session, packet, dispatch_time);
+        if(completed)
+            batch.dispatch_times.emplace_back(kernel_dispatch::get_dispatch_time(*session, packet));
 
-        // if the completion signal was from the pool, we just release it back to the pool for
-        // reuse.
         if(packet.pooled_signal)
         {
-            Queue::release_signal(packet.pooled_signal);
+            // Back to the pool only once the GPU is done with it: Queue::create_signal re-acquires
+            // the same handle a released slot held, so a signal a running kernel will still
+            // decrement would hand that decrement to the next dispatch. Keeping the slot marked in
+            // use instead leaves a leak pool::clear reports.
+            if(completed) Queue::release_signal(packet.pooled_signal);
         }
         else
         {
-            // if the signal was not from the pool, we need to decrement the signal value to clean
-            // up the signal for the application
+            // The application waits on this one and apply_signal_path added 1 to it, so the
+            // subtract is unconditional: skipping it leaves the application waiting forever.
             get_core_table()->hsa_signal_subtract_relaxed_fn(packet.completion_signal, 1);
         }
+    }
+
+    return batch;
+}
+
+// Emits the batch's dispatch records and drops its correlation-id references. Calls into tool code,
+// so it runs on the record-emitter group rather than the monitor thread. The correlation id is
+// released here because dispatch_complete reads its internal and ancestor ids.
+void
+emit_dispatch_records(retired_batch&& batch)
+{
+    auto&      session      = *batch.session;
+    const auto emit_records = !batch.dispatch_times.empty();
+    auto*      _corr_id     = session.correlation_id;
+
+    for(size_t i = 0; i < session.packet_data.size(); ++i)
+    {
+        auto& packet = session.packet_data[i];
+
+        if(emit_records)
+            kernel_dispatch::dispatch_complete(session, packet, batch.dispatch_times[i]);
 
         // we need to decrement this reference count at the end of the functions
-        auto* _corr_id = session->correlation_id;
         if(_corr_id)
         {
             ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
@@ -410,19 +553,422 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
+// The no-signal finalizer. Runs on a task-group worker, or on the thread
+// flushing the retry owner -- never on the reader thread or under a hub lock.
+//
+// There is deliberately no HSA fallback: a signal-less dispatch never had an SDK
+// signal and the app may already have destroyed its own, so a convert/sanity
+// failure emits no record but still retires the correlation id.
+void
+complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
+{
+    auto&       _payload    = proven.payload;
+    const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
+    auto        _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
+
+    auto _convert = [&_hsa_agent](uint64_t ticks, uint64_t* out) {
+        if(!_hsa_agent) return false;
+        const auto* _ext = get_amd_ext_table();
+        if(!_ext || !_ext->hsa_amd_profiling_convert_tick_to_system_domain_fn) return false;
+        return _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(*_hsa_agent, ticks, out) ==
+               HSA_STATUS_SUCCESS;
+    };
+
+    auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
+        kernel_dispatch::emit_kernel_dispatch_record(_payload.tracing_data,
+                                                     _payload.callback_record,
+                                                     _payload.correlation_id,
+                                                     _payload.tid,
+                                                     start_ns,
+                                                     end_ns);
+    };
+
+    // Retires exactly once whatever the outcome, and even if a client callback
+    // throws (run_complete_signal_less_dispatch arms this from a scope destructor).
+    auto _retire = [&_payload]() {
+        auto* _corr_id = _payload.correlation_id;
+        if(!_corr_id) return;
+        ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
+            << "reference counter for correlation id " << _corr_id->internal
+            << " has no reference count";
+        _corr_id->sub_kern_count();
+        _corr_id->sub_ref_count();
+    };
+
+    const uint64_t _now = common::timestamp_ns();
+
+    auto       _detail  = kfd::finalize_detail{};
+    const auto _outcome = kfd::run_complete_signal_less_dispatch(proven.start_ticks,
+                                                                 proven.end_ticks,
+                                                                 _payload.enqueue_ts,
+                                                                 _now,
+                                                                 _convert,
+                                                                 _emit,
+                                                                 _retire,
+                                                                 &_detail);
+
+    if(_outcome == kfd::finalize_outcome::result_ready)
+    {
+        kfd::note_signal_less(kfd::signal_less_counter::finalizer_emitted);
+        return;
+    }
+
+    kfd::note_signal_less(kfd::signal_less_counter::finalizer_no_timing);
+
+    // Rate-limited: the first few are the diagnostic, a steady stream must not
+    // flood the log.
+    static auto _warned = std::atomic<int>{0};
+    if(_warned.fetch_add(1, std::memory_order_relaxed) < 10)
+    {
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: no timing for dispatch (reason={}, gpu={} slot={} idx={})",
+            kfd::finalize_reason_name(_detail.reason),
+            proven.key.gpu_id,
+            proven.key.doorbell_slot,
+            proven.key.dispatch_idx_low32);
+    }
+}
+
+bool
+submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
+{
+    if(registration::get_fini_status() != 0) return false;
+
+    // The monitor's record emitter runs tool code off the calling thread, which is what the hub
+    // needs here. It is null until the monitor first starts; the hub answers a false return by
+    // deferring the completion for the teardown thread.
+    auto& mon = get_completion_monitor();
+    if(!mon.record_emitter) return false;
+
+    // task_group_t::async takes a std::function, which must be copy-constructible;
+    // the payload is move-only, so it travels in a shared_ptr.
+    auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
+
+    // Counted before the submit, not inside the task: `inflight` is what every drain polls, so
+    // work that is queued but not yet counted is work a drain reports as absent.
+    mon.inflight.fetch_add(1, std::memory_order_relaxed);
+    mon.record_emitter->async([&mon, _held]() {
+        // Armed first: a throwing tool callback must not strand the counter every drain polls.
+        auto _dtor = common::scope_destructor{
+            [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
+        complete_signal_less_dispatch(std::move(*_held));
+    });
+    return true;
+}
+
+bool
+is_dispatch_packet(const rocprofiler_packet& pkt)
+{
+    auto _type = bit_extract(pkt.kernel_dispatch.header,
+                             HSA_PACKET_HEADER_TYPE,
+                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+    if(_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) return true;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    if(_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+#endif
+    return false;
+}
+
+// Per-BATCH signal-less eligibility, decided ONCE before any packet is touched.
+// It must be final up front: a batch that has skipped its completion signals
+// cannot be moved back onto the signal path, so even "will the hub accept these
+// keys" is answered here. If ANY packet fails, the WHOLE batch keeps the signal
+// path.
+//
+// keys_out is indexed BY PACKET INDEX, so registration uses the exact keys the
+// hub validated here rather than re-deriving them from a second doorbell lookup
+// that could observe a different generation.
+bool
+signal_less_batch_eligible(Queue*                                            queue,
+                           const rocprofiler_packet*                         packets,
+                           uint64_t                                          num_packets,
+                           uint64_t                                          base_pkt_index,
+                           std::vector<std::optional<kfd::correlation_key>>* keys_out,
+                           kfd::window_ptr*                                  window_out)
+{
+    keys_out->clear();
+    if(window_out) *window_out = {};
+
+    // Cheapest gate first: with the feature off this is one relaxed load.
+    if(kfd::signal_less_child_stale()) return false;
+    if(!kfd::signal_less_feature_enabled()) return false;
+
+    const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
+    if(!kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id))) return false;
+    const auto _gpu = static_cast<uint32_t>(_gpu_id);
+
+    // Resolve the window open for this queue: rlock only, no clock, no bind.
+    // No window (SDMA, poisoned/overlapped slot, disabled) -> signal path.
+    auto _w = kfd::doorbell_map().resolve(_gpu, queue->get_id());
+    if(!_w) return false;
+    const uint32_t _slot = (*_w)->slot;
+
+    keys_out->assign(num_packets, std::nullopt);
+    auto _flat = std::vector<kfd::correlation_key>{};
+    for(uint64_t i = 0; i < num_packets; ++i)
+    {
+        if(!is_dispatch_packet(packets[i])) continue;
+        auto _key = kfd::correlation_key{
+            _slot, static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL), _gpu};
+        (*keys_out)[i] = _key;
+        _flat.emplace_back(_key);
+    }
+    if(_flat.empty())
+    {
+        keys_out->clear();
+        return false;
+    }
+
+    // The admission latch replaces the deleted is_closing() hub call: a
+    // plain bool read while this thread already holds gate_lock, via the
+    // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
+    auto*      _st       = get_doorbell_tls().state;
+    const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
+                           kfd::signal_less_hub().can_register_batch(_flat) &&
+                           !(_st != nullptr && _st->admission_closed);
+
+    if(_eligible)
+    {
+        if(window_out) *window_out = *_w;
+    }
+    else
+    {
+        keys_out->clear();
+    }
+    return _eligible;
+}
+
+// Complete a batch, handing the record emit to the record-emitter group so no tool code runs on the
+// monitor thread or under the thread handle lock. `completed` is false for a batch forced out at
+// teardown before the GPU wrote its timestamps. The group is created once and destroyed only by
+// ~completion_monitor.
+void
+retire_completion_async(completion_monitor&                          mon,
+                        const std::shared_ptr<queue_info_session_t>& session,
+                        bool                                         completed)
+{
+    auto batch = release_completion_signals(session, completed);
+
+    ROCP_FATAL_IF(!mon.record_emitter)
+        << "record-emitter group missing while the completion monitor is running";
+
+    // inflight drops after the records are delivered, not when the signals are released: a code
+    // object may be unloaded the moment a drain returns, and records naming its kernels must
+    // already be out. Only this path decrements.
+    mon.record_emitter->async([&mon, _batch = std::move(batch)]() mutable {
+        // Armed first: a throwing tool callback must not strand the counter every drain polls.
+        auto _dtor = common::scope_destructor{
+            [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
+        emit_dispatch_records(std::move(_batch));
+    });
+}
+
+// Move any newly-registered waits from the shared inbox into `active`.
+void
+move_incoming_to_active(completion_monitor& mon)
+{
+    mon.incoming.wlock([&mon](auto& inbox) {
+        for(auto& pending : inbox)
+            mon.active.emplace_back(std::move(pending));
+        inbox.clear();
+    });
+}
+
+// Retire the batches whose completion signal has dropped and keep the rest for the next
+// pass. `scratch` is a reused compaction buffer so neither vector reallocates across
+// passes.
+void
+retire_completed(completion_monitor& mon, pending_completion_vector_t& scratch)
+{
+    scratch.clear();
+    scratch.reserve(mon.active.size());
+
+    for(auto& pending : mon.active)
+    {
+        if(has_completed(pending))
+        {
+            retire_completion_async(mon, pending.session, true);
+        }
+        else
+            scratch.emplace_back(std::move(pending));
+    }
+
+    mon.active.swap(scratch);
+
+    // Release the swapped-out entries (moved-from sessions, plus any still-live
+    // shared_ptrs from a prior pass) rather than holding them until the next swap.
+    scratch.clear();
+}
+
+// Retire every entry, whether or not its signal dropped, discarding the profiling data of the ones
+// that did not. Teardown only: a batch the GPU never finished still drops its correlation-id
+// references and produces no dispatch record, and keeps its pooled signal rather than handing one
+// back while a kernel is still running.
+void
+force_retire_all(completion_monitor& mon)
+{
+    auto incomplete = uint64_t{0};
+
+    for(auto& pending : mon.active)
+    {
+        const auto completed = has_completed(pending);
+        if(!completed) ++incomplete;
+
+        retire_completion_async(mon, pending.session, completed);
+    }
+    mon.active.clear();
+
+    ROCP_WARNING_IF(incomplete > 0) << fmt::format(
+        "Completion monitor retired {} batch(es) still in flight at teardown; their dispatch "
+        "records were omitted because the GPU had not written their timestamps",
+        incomplete);
+}
+
+// Body of the single completion-monitor thread. Waits on every in-flight completion signal at once
+// via hsa_amd_signal_wait_any, plus a wake signal in the last slot, so the number of signals
+// watched is decoupled from the number of threads.
+void
+completion_monitor_loop(completion_monitor& mon)
+{
+    // hsa_amd_signal_wait_any takes parallel arrays; rebuilt from `active` (+ wake
+    // signal) each iteration. The wake signal always occupies the final slot.
+    auto signals = std::vector<hsa_signal_t>{};
+    auto conds   = std::vector<hsa_signal_condition_t>{};
+    auto values  = std::vector<hsa_signal_value_t>{};
+    auto scratch = pending_completion_vector_t{};
+
+    while(true)
+    {
+        move_incoming_to_active(mon);
+
+        // Reset the wake signal before waiting: any producer bump that happened while
+        // we were processing is folded into this pass by the drain above, and a bump
+        // that arrives after this store re-satisfies the wait so we never miss it.
+        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 0);
+
+        // One more drain closes the window between the pre-wait drain and the reset.
+        move_incoming_to_active(mon);
+
+        // Break only when stop is requested. stop_completion_monitor moves the state to `stopped`
+        // and bumps `wake_signal`, so the wait always returns even if no completion signal
+        // transitions. get_fini_status() does not break: the monitor keeps retiring through
+        // finalization until it is stopped.
+        if(mon.state.load(std::memory_order_acquire) == monitor_state::stopped) break;
+
+        if(mon.active.empty())
+        {
+            // Nothing to watch; block on the wake signal alone until a producer registers work or
+            // requests shutdown. Both bump that signal, so no timeout is needed to notice either.
+            get_core_table()->hsa_signal_wait_relaxed_fn(mon.wake_signal,
+                                                         HSA_SIGNAL_CONDITION_NE,
+                                                         0,
+                                                         std::numeric_limits<uint64_t>::max(),
+                                                         HSA_WAIT_STATE_BLOCKED);
+            continue;
+        }
+
+        signals.clear();
+        conds.clear();
+        values.clear();
+        for(const auto& pending : mon.active)
+        {
+            signals.emplace_back(pending.completion_signal);
+            conds.emplace_back(HSA_SIGNAL_CONDITION_LT);
+            values.emplace_back(pending.starting_value);
+        }
+        // Wake signal occupies the final slot.
+        signals.emplace_back(mon.wake_signal);
+        conds.emplace_back(HSA_SIGNAL_CONDITION_NE);
+        values.emplace_back(0);
+
+        ROCP_TRACE << fmt::format("[queue-interposition] waiting on {} completion signal(s) + wake",
+                                  mon.active.size());
+
+        // Waits indefinitely on purpose. Every event that can change the answer already returns
+        // this call: a completion satisfies its own LT condition, and both
+        // register_pending_completion and stop_completion_monitor bump wake_signal. The satisfying
+        // index and value are discarded -- wait_any names at most one signal, and the active set is
+        // rescanned below because several may have dropped at once.
+        [[maybe_unused]] auto satisfying_value = hsa_signal_value_t{0};
+        get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size()),
+                                                        signals.data(),
+                                                        conds.data(),
+                                                        values.data(),
+                                                        std::numeric_limits<uint64_t>::max(),
+                                                        HSA_WAIT_STATE_BLOCKED,
+                                                        &satisfying_value);
+
+        // Regardless of which signal woke us, scan the active set for completed waits:
+        // wait_any reports only one index, but several may have dropped at once.
+        retire_completed(mon, scratch);
+    }
+}
+
+// Poll the in-flight counter down to zero, warning every drain_warn_interval. The counter falls
+// without the monitor thread: the record emitter decrements it once a batch's records are out. The
+// wait is unbounded, as are the callers it gates -- code-object unload and signal-pool teardown are
+// safe only once the records naming those objects are out.
+//
+// A drain entered from a tool callback running on the record emitter waits on that callback's own
+// still-counted batch and never returns; the warning names that case.
+void
+wait_for_inflight_drain(completion_monitor& mon)
+{
+    const auto start        = std::chrono::steady_clock::now();
+    auto       next_warning = start + drain_warn_interval;
+
+    while(mon.inflight.load(std::memory_order_acquire) > 0)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if(now >= next_warning)
+        {
+            ROCP_WARNING << fmt::format(
+                "Completion monitor drain still waiting on {} batch(es) after {} s. A drain "
+                "entered from a tool callback running on the record emitter waits on that "
+                "callback's own batch and cannot complete.",
+                mon.inflight.load(std::memory_order_acquire),
+                std::chrono::duration_cast<std::chrono::seconds>(now - start).count());
+            next_warning = now + drain_warn_interval;
+        }
+        std::this_thread::sleep_for(poll_interval);
+    }
+}
+
+// Wait for all in-flight completions to retire without stopping the monitor.
+// Safe to call while interception is still active (e.g. on context stop).
+void
+drain_completion_monitor()
+{
+    // Skips the drain both during and after finalization. stop_completion_monitor covers that path,
+    // and past destroy_static_objects the monitor's static_object is null, so it must not be
+    // constructed or dereferenced here.
+    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return;
+
+    // Polls `inflight`, not `state`: work outlives the monitor thread, since submit_to_task_group
+    // admits on fini-status and emitter existence alone. Must not bump wake_signal -- this runs on
+    // arbitrary tool threads with nothing serializing it against stop_completion_monitor, which
+    // destroys that signal.
+    wait_for_inflight_drain(get_completion_monitor());
+}
+
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
-// runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and enqueues a completion-signal
-// waiter on the async signal handler pool. Strict 1:1 packet forwarding; does
+// runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and prepares a completion-signal
+// wait for the monitor thread. Strict 1:1 packet forwarding; does
 // not insert PM4 packets. Distinct from Queue::WriteInterceptor (legacy path).
 void
 write_interceptor(Queue*                                queue,
                   const void*                           packets,
                   uint64_t                              pkt_count,
-                  hsa_amd_queue_intercept_packet_writer writer)
+                  hsa_amd_queue_intercept_packet_writer writer,
+                  pending_completion_vector_t&          deferred_completions,
+                  uint64_t                              base_pkt_index)
 {
     using callback_record_t = packet_data_t::callback_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
 
+    // `> 0` catches only the tail after finalize completes; the wrapper's wider `!= 0` is what
+    // turns producers away during the teardown window itself.
     if(registration::get_fini_status() > 0)
     {
         writer(packets, pkt_count);
@@ -455,6 +1001,16 @@ write_interceptor(Queue*                                queue,
         {
             ++num_dispatch_packets;
         }
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+        else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+        {
+            const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
+            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+            {
+                ++num_dispatch_packets;
+            }
+        }
+#endif
     }
 
     if(num_dispatch_packets == 0)
@@ -503,9 +1059,10 @@ write_interceptor(Queue*                                queue,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
+    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, &deferred_completions](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
+                                    uint64_t                  _base_pkt_index,
                                     const packet_writer_fn_t& _writer) {
         static constexpr auto null_signal = hsa_signal_t{.handle = 0};
 
@@ -523,7 +1080,64 @@ write_interceptor(Queue*                                queue,
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
 
-        // Searching accross all the packets given during this write
+        // Decided once for the whole batch, before any packet is modified. All
+        // packets in a batch share one queue, hence one owner_window.
+        auto            _signal_less_keys   = std::vector<std::optional<kfd::correlation_key>>{};
+        kfd::window_ptr _signal_less_window = {};
+        // Non-const: the register_batch refusal path clears it so the post-loop
+        // signal-path block runs and builds the async waiter for the fallback.
+        bool _signal_less_batch = signal_less_batch_eligible(queue,
+                                                             _packets,
+                                                             _num_packets,
+                                                             _base_pkt_index,
+                                                             &_signal_less_keys,
+                                                             &_signal_less_window);
+        auto _signal_less_regs  = std::vector<kfd::signal_less_hub_t::registration>{};
+
+        // Parallel to _info_session.packet_data: for each dispatch packet, the index
+        // in transformed_packets of its SUBMITTED packet plus whether it is the ext
+        // form. transformed_packets also holds pass-through and barrier/interrupt
+        // packets, so packet_data[k] != transformed_packets[k]; the refusal fallback needs
+        // both to write the replayed signal into the right submitted packet field.
+        struct dispatch_pkt_ref
+        {
+            size_t transformed_index = 0;
+            bool   is_ext            = false;
+        };
+        auto _dispatch_pkt_index = std::vector<dispatch_pkt_ref>{};
+
+        auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
+            if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
+            {
+                auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
+                ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
+                ROCP_FATAL_IF(_signal.get().value == null_signal)
+                    << "Acquired signal from pool that has invalid handle";
+                *CHECK_NOTNULL(signal) = _signal.get().value;
+                return &_signal;
+            }
+            return nullptr;
+        };
+
+        // The three signal-path steps, factored so the normal !_signal_less_batch
+        // branch and the register_batch refusal fallback cannot drift: borrow a pooled signal if
+        // the app supplied none, bump its value by 1, and record it on the packet.
+        // Returns the completion signal written into pd.kernel_packet.
+        auto apply_signal_path = [&create_signal](packet_data_t& pd, bool is_ext) -> hsa_signal_t {
+            (void) is_ext;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            auto& _cs = is_ext ? pd.kernel_packet.ext_kernel_dispatch.completion_signal
+                               : pd.kernel_packet.kernel_dispatch.completion_signal;
+#else
+            auto& _cs = pd.kernel_packet.kernel_dispatch.completion_signal;
+#endif
+            if(_cs == null_signal) pd.pooled_signal = create_signal(&_cs);
+            get_core_table()->hsa_signal_add_scacq_screl_fn(_cs, 1);
+            pd.completion_signal = _cs;
+            return _cs;
+        };
+
+        // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
             const auto& original_packet = _packets[i].kernel_dispatch;
@@ -531,7 +1145,17 @@ write_interceptor(Queue*                                queue,
                 bit_extract(original_packet.header,
                             HSA_PACKET_HEADER_TYPE,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-            if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+            bool is_ext_kernel_dispatch = false;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+            {
+                const auto& ext_packet = _packets[i].ext_kernel_dispatch;
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                    is_ext_kernel_dispatch = true;
+            }
+#endif
+            if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
             {
                 transformed_packets.emplace_back(_packets[i]);
                 continue;
@@ -554,38 +1178,63 @@ write_interceptor(Queue*                                queue,
                 ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
                 internal_corr_id);
 
-            const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
-            const auto     original_completion_signal = original_packet.completion_signal;
-            const auto     existing_completion_signal = (original_completion_signal != null_signal);
+            // Lambda to extract packet info regardless of packet type
+            auto extract_packet_info = [](const rocprofiler_packet& pkt, bool is_ext) {
+                struct packet_info
+                {
+                    hsa_signal_t       completion_signal;
+                    uint64_t           kernel_object;
+                    uint32_t           private_segment_size;
+                    uint32_t           group_segment_size;
+                    rocprofiler_dim3_t workgroup_size;
+                    rocprofiler_dim3_t grid_size;
+                };
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                if(is_ext)
+                {
+                    const auto& e = pkt.ext_kernel_dispatch;
+                    return packet_info{e.completion_signal,
+                                       e.kernel_object,
+                                       e.private_segment_size,
+                                       e.group_segment_size,
+                                       {e.workgroup_size_x, e.workgroup_size_y, e.workgroup_size_z},
+                                       {static_cast<uint32_t>(e.cluster_count_x) *
+                                            static_cast<uint32_t>(e.cluster_size_x) *
+                                            static_cast<uint32_t>(e.workgroup_size_x),
+                                        static_cast<uint32_t>(e.cluster_count_y) *
+                                            static_cast<uint32_t>(e.cluster_size_y) *
+                                            static_cast<uint32_t>(e.workgroup_size_y),
+                                        static_cast<uint32_t>(e.cluster_count_z) *
+                                            static_cast<uint32_t>(e.cluster_size_z) *
+                                            static_cast<uint32_t>(e.workgroup_size_z)}};
+                }
+#else
+                (void) is_ext;
+#endif
+                {
+                    const auto& s = pkt.kernel_dispatch;
+                    return packet_info{s.completion_signal,
+                                       s.kernel_object,
+                                       s.private_segment_size,
+                                       s.group_segment_size,
+                                       {s.workgroup_size_x, s.workgroup_size_y, s.workgroup_size_z},
+                                       {s.grid_size_x, s.grid_size_y, s.grid_size_z}};
+                }
+            };
+
+            const auto     pkt_info  = extract_packet_info(_packets[i], is_ext_kernel_dispatch);
+            const uint64_t kernel_id = code_object::get_kernel_id(pkt_info.kernel_object);
 
             // Copy kernel pkt, copy is to allow for signal to be modified
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
-            auto& kernel_packet     = _packet_data.kernel_packet;
-            auto& completion_signal = _packet_data.kernel_packet.kernel_dispatch.completion_signal;
+            auto& kernel_packet = _packet_data.kernel_packet;
 
-            auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
-                if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
-                {
-                    auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
-                    ROCP_FATAL_IF(!_signal.in_use())
-                        << "Acquired signal from pool that is not in use";
-                    ROCP_FATAL_IF(_signal.get().value == null_signal)
-                        << "Acquired signal from pool that has invalid handle";
-                    *CHECK_NOTNULL(signal) = _signal.get().value;
-                    return &_signal;
-                }
-                return nullptr;
-            };
-
-            // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
-            if(!existing_completion_signal)
-                _packet_data.pooled_signal = create_signal(&completion_signal);
-
-            get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
-
-            // set the completion signal to the kernel packet
-            _packet_data.completion_signal = completion_signal;
+            if(!_signal_less_batch)
+            {
+                // No barrier packet: borrow a pooled signal if needed, bump by 1, record it.
+                apply_signal_path(_packet_data, is_ext_kernel_dispatch);
+            }
 
             // computes the "size" based on the offset of reserved_padding field
             constexpr auto kernel_dispatch_info_rt_size =
@@ -594,27 +1243,22 @@ write_interceptor(Queue*                                queue,
             static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
                           "failed to compute size field based on offset of reserved_padding field");
 
-            auto dispatch_id             = ++sequence_counter;
-            _packet_data.callback_record = callback_record_t{
-                sizeof(callback_record_t),
-                rocprofiler_timestamp_t{0},
-                rocprofiler_timestamp_t{0},
-                rocprofiler_kernel_dispatch_info_t{
-                    .size                 = kernel_dispatch_info_rt_size,
-                    .agent_id             = queue->get_agent().get_rocp_agent()->id,
-                    .queue_id             = queue->get_id(),
-                    .kernel_id            = kernel_id,
-                    .dispatch_id          = dispatch_id,
-                    .private_segment_size = kernel_packet.kernel_dispatch.private_segment_size,
-                    .group_segment_size   = kernel_packet.kernel_dispatch.group_segment_size,
-                    .workgroup_size =
-                        rocprofiler_dim3_t{kernel_packet.kernel_dispatch.workgroup_size_x,
-                                           kernel_packet.kernel_dispatch.workgroup_size_y,
-                                           kernel_packet.kernel_dispatch.workgroup_size_z},
-                    .grid_size = rocprofiler_dim3_t{kernel_packet.kernel_dispatch.grid_size_x,
-                                                    kernel_packet.kernel_dispatch.grid_size_y,
-                                                    kernel_packet.kernel_dispatch.grid_size_z},
-                    .reserved_padding = {0}}};
+            auto dispatch_id = ++sequence_counter;
+            _packet_data.callback_record =
+                callback_record_t{sizeof(callback_record_t),
+                                  rocprofiler_timestamp_t{0},
+                                  rocprofiler_timestamp_t{0},
+                                  rocprofiler_kernel_dispatch_info_t{
+                                      .size        = kernel_dispatch_info_rt_size,
+                                      .agent_id    = queue->get_agent().get_rocp_agent()->id,
+                                      .queue_id    = queue->get_id(),
+                                      .kernel_id   = kernel_id,
+                                      .dispatch_id = dispatch_id,
+                                      .private_segment_size = pkt_info.private_segment_size,
+                                      .group_segment_size   = pkt_info.group_segment_size,
+                                      .workgroup_size       = pkt_info.workgroup_size,
+                                      .grid_size            = pkt_info.grid_size,
+                                      .reserved_padding     = {0}}};
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -636,14 +1280,37 @@ write_interceptor(Queue*                                queue,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
+            if(_signal_less_batch && _signal_less_keys[i].has_value())
+            {
+                auto _reg           = kfd::signal_less_hub_t::registration{};
+                _reg.key            = *_signal_less_keys[i];
+                _reg.correlation_id = internal_corr_id;
+                _reg.window         = _signal_less_window;
+
+                auto& _pl           = _reg.payload;
+                _pl.callback_record = _packet_data.callback_record;
+                _pl.tracing_data    = _packet_data.tracing_data;
+                // The reference this payload inherits was taken by the
+                // add_ref_count()/add_kern_count() above; the finalizer releases it.
+                _pl.correlation_id = corr_id;
+                _pl.tid            = thr_id;
+                _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
+                _pl.enqueue_ts     = _info_session.enqueue_ts;
+
+                _signal_less_regs.emplace_back(std::move(_reg));
+            }
+
             // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
             // along with an ID of the client we got the packet from (this will be returned via
             // completed_cb_t)
 
-            // emplace the kernel packet
+            // emplace the kernel packet; record its submitted index (and ext-ness) so
+            // the refusal fallback can write a replayed signal into the right submitted slot.
+            _dispatch_pkt_index.push_back(
+                dispatch_pkt_ref{transformed_packets.size(), is_ext_kernel_dispatch});
             transformed_packets.emplace_back(kernel_packet);
 
-            ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            ROCP_FATAL_IF(!is_kernel_dispatch && !is_ext_kernel_dispatch)
                 << "get_kernel_id below might need to be updated";
 
             {
@@ -659,14 +1326,76 @@ write_interceptor(Queue*                                queue,
             _info_session.packet_data.emplace_back(std::move(_packet_data));
         }
 
-        if(!_info_session.packet_data.empty())
+        auto last_completion_signal = null_signal;
+        auto current_signal_value   = hsa_signal_value_t{0};
+        auto _shared_info_session   = std::shared_ptr<queue_info_session_t>{};
+
+        // Register the whole batch BEFORE the writer publishes any packet, so a
+        // firmware record can never arrive for a dispatch the hub has not seen.
+        // Cap-evicted closed-window entries leave via _evicted, released here AFTER
+        // m_mu is dropped (the hub's no-destroy-under-lock contract).
+        const auto _signal_less_count = _signal_less_regs.size();
+        auto       _evicted           = std::vector<kfd::signal_less_hub_t::leaked>{};
+        if(_signal_less_batch &&
+           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs), _evicted))
         {
-            auto last_completion_signal = _info_session.packet_data.back().completion_signal;
+            // Reachable on a slot quarantined between eligibility and here, or the
+            // per-GPU cap exceeded with no eligible victim. The batch skipped its
+            // signal instrumentation, so replay exactly the !_signal_less_batch signal
+            // path per dispatch and fall through to the normal signal-path completion.
+            // No id retirement here: register_batch did not consume _signal_less_regs on
+            // refusal, its payload correlation_id* is non-owning, and the signal path's
+            // completion handler performs the matching releases -- retiring here would
+            // double-release. Telemetry only.
+            kfd::note_signal_less(kfd::signal_less_counter::register_refused, _signal_less_count);
+            for(size_t k = 0; k < _info_session.packet_data.size(); ++k)
+            {
+                auto&      _pd  = _info_session.packet_data[k];
+                const auto _sig = apply_signal_path(_pd, _dispatch_pkt_index[k].is_ext);
+                // Mirror the replayed signal into the SUBMITTED packet, whose index in
+                // transformed_packets differs from k (pass-through/barrier packets).
+                auto& _tp = transformed_packets[_dispatch_pkt_index[k].transformed_index];
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                if(_dispatch_pkt_index[k].is_ext)
+                    _tp.ext_kernel_dispatch.completion_signal = _sig;
+                else
+                    _tp.kernel_dispatch.completion_signal = _sig;
+#else
+                _tp.kernel_dispatch.completion_signal = _sig;
+#endif
+            }
+            // Clear BEFORE the post-loop block so it builds the async waiter unchanged.
+            _signal_less_batch = false;
+            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; falling "
+                            "back to the signal path for these dispatches";
+        }
+        else if(_signal_less_batch)
+        {
+            kfd::note_signal_less(kfd::signal_less_counter::entry_registered, _signal_less_count);
+        }
+
+        // Cap eviction is loud accepted coverage loss: count it, warn (rate-limited by
+        // the census cadence), and latch losses (INV-L1) before any finalize can see
+        // the ledgered ids. Off-lock; _evicted's payloads release at scope end.
+        if(!_evicted.empty())
+        {
+            kfd::note_signal_less(kfd::signal_less_counter::cap_evicted, _evicted.size());
+            kfd::note_signal_less_losses();
+            ROCP_WARNING << fmt::format(
+                "KFD dispatch-log: per-GPU hub cap evicted {} closed-window entry(ies); those "
+                "dispatches emit no record",
+                _evicted.size());
+        }
+
+        // A signal-less batch has no completion signal to wait on.
+        if(!_info_session.packet_data.empty() && !_signal_less_batch)
+        {
+            last_completion_signal = _info_session.packet_data.back().completion_signal;
 
             ROCP_FATAL_IF(last_completion_signal == null_signal)
                 << "invalid completion signal in the last packet of the batch";
 
-            auto current_signal_value =
+            current_signal_value =
                 get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
 
             ROCP_INFO << fmt::format(
@@ -674,27 +1403,98 @@ write_interceptor(Queue*                                queue,
                 last_completion_signal.handle,
                 current_signal_value);
 
-            auto _shared_info_session =
-                std::make_shared<queue_info_session_t>(std::move(_info_session));
-            get_async_signal_handler()->async(
-                [_signal_v          = last_completion_signal,
-                 _expected_signal_v = current_signal_value,
-                 _session_v         = std::move(_shared_info_session)]() mutable {
-                    async_signal_handler(_signal_v, _expected_signal_v, std::move(_session_v));
-                });
+            _shared_info_session = std::make_shared<queue_info_session_t>(std::move(_info_session));
         }
 
+        // Copy packets into the real queue before creating the completion wait. The caller
+        // defers registration until after it publishes the final doorbell.
         _writer(std::move(transformed_packets));
+
+        if(_shared_info_session)
+        {
+            auto pending = pending_completion{
+                last_completion_signal, current_signal_value, std::move(_shared_info_session)};
+
+            deferred_completions.emplace_back(std::move(pending));
+        }
     };
 
     ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
         "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-    process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
-        writer(_packets.data(), _packets.size());
-    });
+    process_packet_batch(
+        packets_arr, pkt_count, base_pkt_index, [&writer](packet_vector_t&& _packets) {
+            writer(_packets.data(), _packets.size());
+        });
 }
+
 }  // namespace
+
+// Precondition: caller holds state.drain_mu. gate_lock still orders the
+// admission_closed store against the publishing critical sections.
+uint64_t
+close_admission_and_snapshot_locked(QueueState& state)
+{
+    auto lk                = std::lock_guard<std::mutex>{state.gate_lock};
+    state.admission_closed = true;  // no later batch can register
+    return state.next_submit_pos;   // snapshot, ordered by this same lock
+}
+
+// Precondition: caller holds state.drain_mu, so real_rdid (which points into
+// the runtime's amd_queue_t) cannot be freed by a concurrent destroy under the load.
+bool
+wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t deadline_ns)
+{
+    if(!state.real_rdid) return true;
+
+    while(!hw_queue_drained(__atomic_load_n(state.real_rdid, __ATOMIC_ACQUIRE), submit_pos))
+    {
+        if(kfd::steady_now_ns() >= deadline_ns) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+    return true;
+}
+
+void
+fence_all_queue_gates()
+{
+    // Copy the states out from under the registry lock FIRST: taking a queue's
+    // gate_lock while holding it would invert the established order.
+    auto _states = std::vector<queue_state_ptr_t>{};
+    get_queue_registry().rlock([&_states](const auto& map) {
+        _states.reserve(map.size());
+        for(const auto& itr : map)
+            if(itr.second) _states.emplace_back(itr.second);
+    });
+
+    for(const auto& _state : _states)
+    {
+        auto lk = std::lock_guard<std::mutex>{_state->gate_lock};
+    }
+}
+
+void
+drain_all_queues_hw(uint64_t deadline_ns)
+{
+    // Teardown drain, race-free against concurrent hsa_queue_destroy. Snapshot
+    // the states under the registry lock, release it, then per state take drain_mu
+    // and skip any queue destroy already invalidated (rdid_valid==false) -- that
+    // queue ran its own drain. Lock order: registry lock -> (released) -> drain_mu.
+    auto _states = std::vector<queue_state_ptr_t>{};
+    get_queue_registry().rlock([&_states](const auto& map) {
+        _states.reserve(map.size());
+        for(const auto& itr : map)
+            if(itr.second) _states.emplace_back(itr.second);
+    });
+
+    for(const auto& _state : _states)
+    {
+        auto _lk = std::unique_lock<std::mutex>{_state->drain_mu};
+        if(!_state->rdid_valid) continue;  // destroyed under the same lock; skip
+        const uint64_t _P = close_admission_and_snapshot_locked(*_state);
+        wait_queue_hw_drained_locked(*_state, _P, deadline_ns);
+    }
+}
 
 void
 process_doorbell_impl(const queue_state_ptr_t& state,
@@ -703,7 +1503,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 {
     if(!state) return;
 
-    auto* state_ptr = state.get();
+    auto* state_ptr            = state.get();
+    auto  deferred_completions = pending_completion_vector_t{};
 
     // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
@@ -714,35 +1515,60 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     if(scan_pos >= wptr_end)
     {
+        // Already scanned through virtual_wptr, so `value` is <= what we have submitted and
+        // cannot advertise unpublished slots; forward it (and never drop the doorbell).
         ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
 
-    static thread_local auto snapshot_storage = std::vector<char>{};
-    const uint64_t           max_bytes        = (wptr_end - scan_pos) * state_ptr->pkt_size;
-    if(snapshot_storage.size() < max_bytes) snapshot_storage.resize(max_bytes);
-    char* const source_snapshot = snapshot_storage.data();
+    constexpr size_t kSnapshotMaxPkts = 16;
+    const uint64_t   max_pkts         = wptr_end - scan_pos;
+    const auto       pkt_size         = state_ptr->pkt_size;
+
+    using snapshot_pkt_t = std::array<char, 64>;
+    common::container::static_vector<snapshot_pkt_t, kSnapshotMaxPkts> snapshot;
+    std::vector<char>                                                  overflow_snapshot;
+    char*                                                              source_snapshot = nullptr;
+
+    if(max_pkts > kSnapshotMaxPkts)
+    {
+        overflow_snapshot.resize(max_pkts * pkt_size);
+        source_snapshot = overflow_snapshot.data();
+    }
 
     uint64_t drained = 0;
     for(uint64_t pos = scan_pos; pos < wptr_end; ++pos)
     {
         const auto  ring_slot = pos & state_ptr->ring_mask;
-        char* const slot_base =
-            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * state_ptr->pkt_size);
-        auto* const hdr_ptr = reinterpret_cast<volatile uint16_t*>(slot_base);
+        char* const slot_base = static_cast<char*>(state_ptr->ring_buf) + (ring_slot * pkt_size);
+        auto* const hdr_ptr   = reinterpret_cast<volatile uint16_t*>(slot_base);
 
         if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) ==
            static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
             break;
 
-        ::memcpy(source_snapshot + (drained * state_ptr->pkt_size), slot_base, state_ptr->pkt_size);
+        char* dst = nullptr;
+        if(source_snapshot)
+        {
+            dst = source_snapshot + (drained * pkt_size);
+        }
+        else
+        {
+            dst = snapshot.emplace_back().data();
+        }
+        ::memcpy(dst, slot_base, pkt_size);
         __atomic_store_n(hdr_ptr, static_cast<uint16_t>(HSA_PACKET_TYPE_INVALID), __ATOMIC_RELEASE);
         ++drained;
     }
 
+    if(!source_snapshot) source_snapshot = reinterpret_cast<char*>(snapshot.data());
+
     if(drained == 0)
     {
-        ring_doorbell(state_ptr->doorbell_signal, value);
+        // The next slot is claimed but not yet written by its producer, so there is
+        // nothing to publish now; that producer's own later doorbell will drain it.
+        // Re-ring only the last published index, not the virtual value.
+        ring_published_doorbell(state_ptr, ring_doorbell);
         return;
     }
 
@@ -755,7 +1581,13 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                              scan_pos,
                              scan_end);
 
-    auto& tls                     = get_doorbell_tls();
+    // A tool's enqueue callback runs inside write_interceptor below and may dispatch again, re-
+    // entering this function on the same thread. Save the outer frame's handoff record and put it
+    // back on the way out, so a nested frame cannot corrupt the outer one.
+    auto&      tls         = get_doorbell_tls();
+    const auto outer_tls   = tls;
+    auto restore_outer_tls = common::scope_destructor{[&tls, outer_tls]() { tls = outer_tls; }};
+
     tls.state                     = state_ptr;
     tls.submit_pos                = state_ptr->next_submit_pos;
     tls.pkt_size                  = state_ptr->pkt_size;
@@ -763,16 +1595,24 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     tls.last_published_submit_pos = state_ptr->next_submit_pos;
     uint64_t start_submit_pos     = tls.submit_pos;
 
-    auto*        qc = get_queue_controller();
-    const Queue* queue =
-        (qc && state_ptr->hsa_queue) ? qc->get_queue(*state_ptr->hsa_queue) : nullptr;
+    auto* qc = get_queue_controller();
+    // The bypass test is re-taken after the gate, because a thread can pass the wrapper's copy and
+    // then block, and finalize can move the status on while it waits. Failing it routes to the un-
+    // instrumented arm, where the packets still execute but write_interceptor never runs.
+    const Queue* queue = (qc && state_ptr->hsa_queue && !should_bypass_inline_intercept())
+                             ? qc->get_queue(*state_ptr->hsa_queue)
+                             : nullptr;
 
     if(queue)
     {
         // call local write_interceptor directly instead of heavyweight
         // Queue::invoke_write_interceptor
-        write_interceptor(
-            const_cast<Queue*>(queue), source_snapshot, pkt_count, ring_buffer_writer);
+        write_interceptor(const_cast<Queue*>(queue),
+                          source_snapshot,
+                          pkt_count,
+                          ring_buffer_writer,
+                          deferred_completions,
+                          start_submit_pos);
     }
     else
     {
@@ -801,11 +1641,50 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                      << ", next_submit_pos=" << state_ptr->next_submit_pos;
     }
 
+    // Register the completion waits before the doorbell makes the packets visible to the GPU,
+    // so no batch is ever running while absent from the monitor's watch set. The reverse order
+    // leaves a window in which the GPU can complete a batch nobody is watching.
+    auto declined = pending_completion_vector_t{};
+    for(auto& pending : deferred_completions)
+    {
+        auto orphan = register_pending_completion(std::move(pending));
+        if(orphan.session) declined.emplace_back(std::move(orphan));
+    }
+
     publish_submitted_packets(state_ptr, state_ptr->next_submit_pos);
 
-    tls.ring_doorbell             = nullptr;
-    tls.last_published_submit_pos = 0;
-    tls.state                     = nullptr;
+    // Restore the outer value here rather than leaving it to restore_outer_tls: the emit loop below
+    // runs tool code that can re-enter this function and take its own snapshot of `tls`. The scope
+    // destructor does not fire until after that loop.
+    tls = outer_tls;
+
+    // Batches the monitor declined because it had already stopped, retired across the gate lock
+    // rather than after it. Emitting records runs tool code, which must never run under a lock
+    // the doorbell path takes, so it waits for the unlock below.
+    auto retired    = std::vector<retired_batch>{};
+    auto incomplete = uint64_t{0};
+
+    retired.reserve(declined.size());
+    for(auto& orphan : declined)
+    {
+        const auto completed = has_completed(orphan);
+        if(!completed) ++incomplete;
+
+        retired.emplace_back(release_completion_signals(orphan.session, completed));
+    }
+
+    lock.unlock();
+
+    for(auto& batch : retired)
+        emit_dispatch_records(std::move(batch));
+
+    // Almost always the whole declined set: the doorbell was rung a few lines above, so the GPU
+    // has had no time to write these timestamps. Waiting for it here is not the alternative --
+    // that would put an unbounded GPU wait on a producer thread that has just released the gate.
+    ROCP_WARNING_IF(incomplete > 0) << fmt::format(
+        "Completion monitor declined {} batch(es) after it stopped; their dispatch records were "
+        "omitted because the GPU had not written their timestamps",
+        incomplete);
 }
 
 std::shared_ptr<QueueState>
@@ -843,8 +1722,19 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;
+    // Close the interlock's init end: set AFTER real_rdid, BEFORE publication, so no
+    // observer reaches a state with rdid_valid true but real_rdid null. The wlock
+    // release below orders this plain-bool write for every reader.
+    state->rdid_valid = true;
 
+    // Get-or-create UNDER the final wlock: the pre-check above is a separate rlock, so
+    // two concurrent dynamic-discovery lookups of the same queue could both miss and
+    // both publish, splitting the queue's drain_mu across two live states (real_rdid UAF).
+    // Re-checking here keeps exactly one live QueueState per queue; a loser discards
+    // its just-built state harmlessly (refcount drops).
     return get_queue_registry().wlock([&](auto& map) {
+        auto it = map.find(queue);
+        if(it != map.end() && it->second) return it->second;
         map[queue] = state;
         return state;
     });
@@ -946,6 +1836,10 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
 #define ROCP_SIGNAL_STORE(NAME)                                                                    \
     void signal_##NAME(hsa_signal_t sig, hsa_signal_value_t val)                                   \
     {                                                                                              \
+        /* This gate decides whether to take the interposition path, nothing more. A caller */     \
+        /* admitted here can still be inside process_doorbell_impl when the monitor stops, */      \
+        /* and needs no counting: register_pending_completion re-tests the state under the */      \
+        /* inbox lock and disposes of its own batch if it lost the race. */                        \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
@@ -978,17 +1872,166 @@ supports_queue_interposition()
     return s_intercept_installed.load(std::memory_order_acquire);
 }
 
+namespace
+{
+void
+resync_queue_shadow_state(QueueState* state)
+{
+    if(!state || !state->real_wdid) return;
+
+    const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
+    state->virtual_wptr.store(wdid, std::memory_order_release);
+    state->next_scan_pos   = wdid;
+    state->next_submit_pos = wdid;
+}
+
+void
+resync_all_queue_shadow_states()
+{
+    get_queue_registry().rlock([](const auto& registry) {
+        for(const auto& entry : registry)
+            resync_queue_shadow_state(entry.second.get());
+    });
+}
+}  // namespace
+
+// Catch the shadow indices up when the first tracing consumer arrives. Two gaps remain:
+// interception is also switched off while a client detaches or finalizes, with no arriving consumer
+// arriving to catch it up; and this sweep takes only the registry read lock.
+void
+notify_queue_interposition_consumer_context_started(const context::context* ctx)
+{
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+
+    const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+    if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
+        resync_all_queue_shadow_states();
+
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release);
+}
+
+void
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
+{
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_relaxed);
+    while(cur > 0)
+    {
+        if(s_active_queue_interposition_consumers.compare_exchange_weak(
+               cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
+        {
+            return;
+        }
+    }
+}
+
 void
 interposition_sync()
 {
-    if(async_signal_handler_exists())  // query without constructing
-    {
-        constexpr auto async_only = true;
-        if(auto* tg = get_async_signal_handler(); tg)
-        {
-            tg->join(async_only);
-        }
-    }
+    drain_completion_monitor();
+}
+
+// Create the wake signal and launch the monitor thread. A second call while it is already
+// running does nothing.
+void
+start_completion_monitor()
+{
+    // Nothing to start once interception was never installed or finalization has completed: the
+    // static_object holding the monitor is destroyed by then, and a fork child's interception is
+    // inert by design.
+    if(!s_intercept_installed.load(std::memory_order_acquire) ||
+       registration::get_fini_status() > 0 || internal_threading::fork_stale())
+        return;
+
+    auto& mon = get_completion_monitor();
+
+    // The handle lock spans the whole body, so no stop can be between its own state exchange
+    // and its join while this runs. Without it, this move-assign can land on a handle a
+    // concurrent stop has not yet joined, which is a std::terminate.
+    mon.thread.wlock([&mon](auto& monitor_thread) {
+        // Publishing `active` and creating the wake signal happen together under the inbox lock,
+        // because a producer tests the state under that same lock and then stores to the wake
+        // signal. Split them and a producer can see `active` before `wake_signal` exists.
+        const auto admitted = mon.incoming.wlock([&mon](auto&) {
+            auto expected = monitor_state::stopped;
+            if(!mon.state.compare_exchange_strong(expected,
+                                                  monitor_state::active,
+                                                  std::memory_order_seq_cst,
+                                                  std::memory_order_relaxed))
+                return false;
+
+            auto status =
+                get_amd_ext_table()->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &mon.wake_signal);
+            ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
+                << "failed to create completion-monitor wake signal";
+
+            return true;
+        });
+
+        if(!admitted) return;
+
+        // Stand the record emitter up before the monitor, so the first batch the monitor retires
+        // already has somewhere to send its records. Created once and kept across cycles: a stop
+        // joins it, so it holds no work from a previous one. create_task_group brackets its own
+        // thread creation with the internal-thread notifications.
+        if(!mon.record_emitter) mon.record_emitter = internal_threading::create_task_group(1);
+
+        // Bracket creation with the internal-thread notifications so tools honoring the
+        // rocprofiler_at_internal_thread_create contract can suppress instrumentation of the
+        // SDK's own monitor thread, as other raw-thread sites such as kfd do.
+        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+        monitor_thread = std::thread{[&mon]() { completion_monitor_loop(mon); }};
+        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+    });
+}
+
+// Stop the monitor, wake it so it observes the state change, and join. Every caller returns with
+// the monitor thread dead, every registered batch retired, and every record delivered -- a second
+// caller blocks on the handle lock until the first has finished rather than returning early.
+void
+stop_completion_monitor()
+{
+    // Finalization has completed: destroy_static_objects has nulled the monitor's static_object, so
+    // a second hsa_shut_down from another DSO's teardown must not construct or dereference it.
+    // `> 0` and not `!= 0`: fini_status is -1 for the whole of finalize(), where the stop below is
+    // exactly what is wanted.
+    if(registration::get_fini_status() > 0 || internal_threading::fork_stale()) return;
+
+    auto& mon = get_completion_monitor();
+
+    mon.thread.wlock([&mon](auto& monitor_thread) {
+        // The transition is inside the lock, not before it: a start that took this lock in the gap
+        // would read the value this exchange just wrote, admit itself, and move-assign onto a
+        // handle nobody has joined, which is a std::terminate.
+        if(mon.state.exchange(monitor_state::stopped, std::memory_order_seq_cst) ==
+           monitor_state::stopped)
+            return;
+
+        get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 1);
+        if(monitor_thread.joinable()) monitor_thread.join();
+
+        // The monitor retired what it could before exiting, but a producer already in the doorbell
+        // path may have enqueued since. This drain is the last one: a producer whose inbox lock
+        // precedes it is retired here, and one that follows is declined.
+        move_incoming_to_active(mon);
+        force_retire_all(mon);
+
+        get_core_table()->hsa_signal_destroy_fn(mon.wake_signal);
+        mon.wake_signal = {};
+    });
+
+    // Outside the lock, and every caller does it, not just the one that won the exchange. Outside,
+    // because a tool callback running on the emitter can re-enter this function and would otherwise
+    // wait for a lock held by the thread waiting for that callback. Every caller, because the loser
+    // of the exchange goes straight on to signal-pool teardown and correlation-id finalization, and
+    // records still in the emitter name both.
+    //
+    // This wait is unbounded: it ends when the tool callbacks queued on the emitter return. It is
+    // the only drain that runs on this path -- drain_completion_monitor, which
+    // queue_controller_fini reaches through queue_controller_sync just before this call, returns
+    // immediately once finalization has begun, leaving force_retire_all above and this join to
+    // dispose of everything.
+    if(mon.record_emitter) mon.record_emitter->join();
 }
 
 void
@@ -1033,8 +2076,17 @@ interposition_init(CoreApiTable* core_table, bool enabled)
     core_table->hsa_signal_silent_store_relaxed_fn   = impl::signal_silent_store_relaxed;
     core_table->hsa_signal_silent_store_screlease_fn = impl::signal_silent_store_screlease;
 
+    // launch the completion-monitor thread that waits on in-flight completion signals
+    start_completion_monitor();
+
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
+
+    // Inline intercept is the only path that produces a KFD correlation key, so
+    // probe dispatch-log here (not in generic queue_init()). Master opt-in gate:
+    // the KFD dispatch-log feature does nothing unless signal-less is enabled.
+    // Best-effort.
+    if(kfd::signal_less_feature_enabled()) kfd::init_kfd_profiler();
 }
 
 void
@@ -1046,8 +2098,14 @@ interposition_fini()
     // disable active interception
     s_intercept_active.store(false, std::memory_order_release);
 
-    // wait for any in-flight signal handlers to complete and clean up the signal pool
-    interposition_sync();
+    // A fork child that never exec'd still runs this at exit, and everything below
+    // it is unsafe there: the registry wlock and the signal pool's lock may have
+    // been held by a thread that did not survive the fork, so acquiring them hangs
+    // the child, and destroying inherited HSA signals reaches into a runtime the
+    // child does not own. The child abandoned all of this state and is on its way
+    // out, so skip it. The atomic stores above are kept: they are safe and make the
+    // child's interception inert.
+    if(internal_threading::fork_stale()) return;
 
     // clean up signal pool
     signal_pool_fini();
@@ -1056,4 +2114,43 @@ interposition_fini()
 }
 }  // namespace queue_interposition
 }  // namespace hsa
+
+// Bridge for the KFD layer (declared in kfd/signal_less.hpp). Defined here so
+// kfd never needs the HSA interposition headers, and called directly -- both
+// sides are in the same object library.
+namespace kfd
+{
+bool
+submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p)
+{
+    return hsa::queue_interposition::submit_to_task_group(p);
+}
+
+void
+finalize_complete_signal_less_dispatch(signal_less_hub_t::proven&& p)
+{
+    hsa::queue_interposition::complete_signal_less_dispatch(std::move(p));
+}
+
+void
+drain_signal_less_interceptor()
+{
+    hsa::queue_interposition::fence_all_queue_gates();
+}
+
+void
+drain_signal_less_queues_hw(uint64_t deadline_ns)
+{
+    hsa::queue_interposition::drain_all_queues_hw(deadline_ns);
+}
+
+// Waits on the completion monitor's in-flight counter, which counts signal-less completions
+// alongside interposed ones. Bounded either way: the short grace period once finalization has
+// begun, the long one otherwise.
+void
+join_signal_less_tasks()
+{
+    hsa::queue_interposition::interposition_sync();
+}
+}  // namespace kfd
 }  // namespace rocprofiler

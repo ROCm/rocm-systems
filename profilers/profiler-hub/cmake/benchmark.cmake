@@ -3,17 +3,9 @@
 
 include_guard(DIRECTORY)
 
-option(
-    PROFILER_HUB_USE_SYSTEM_BENCHMARK
-    "Use system-installed Google Benchmark if available"
-    ON
-)
-
 set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Google Benchmark version")
 
-if(PROFILER_HUB_USE_SYSTEM_BENCHMARK)
-    find_package(benchmark ${BENCHMARK_VERSION} QUIET)
-endif()
+find_package(benchmark QUIET)
 
 if(benchmark_FOUND)
     message(

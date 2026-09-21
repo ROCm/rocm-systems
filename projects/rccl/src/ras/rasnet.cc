@@ -7,6 +7,7 @@
 
 #include "ras_internal.h"
 #include "os.h"
+#include <cinttypes>
 
 // Links forming the backbone of the RAS network (currently a ring).
 struct rasLink rasNextLink = {1}, rasPrevLink = {-1};
@@ -16,8 +17,8 @@ struct rasConnection* rasConnsHead;
 struct rasConnection* rasConnsTail;
 
 // Sockets implementing the RAS network.
-struct rasSocket *rasSocketsHead;
-struct rasSocket *rasSocketsTail;
+struct rasSocket* rasSocketsHead;
+struct rasSocket* rasSocketsTail;
 
 static void freeConnEntry(struct rasConnection* conn);
 static void rasConnOpen(struct rasConnection* conn);
@@ -40,7 +41,6 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
 static void rasLinkConnDrop(struct rasLink* link, const struct rasConnection* conn, bool external = false);
 static struct rasLinkConn* rasLinkConnFind(const struct rasLink* link, const struct rasConnection* conn,
                                            int* pLinkIdx = nullptr);
-
 
 ///////////////////////////////////////////////
 // Functions related to the RAS connections. //
@@ -70,17 +70,12 @@ ncclResult_t getNewConnEntry(struct rasConnection** pConn) {
 
 // Frees an entry from the rasConns list.
 static void freeConnEntry(struct rasConnection* conn) {
-  if (conn == nullptr)
-    return;
+  if (conn == nullptr) return;
 
-  if (conn == rasConnsHead)
-    rasConnsHead = rasConnsHead->next;
-  if (conn == rasConnsTail)
-    rasConnsTail = rasConnsTail->prev;
-  if (conn->prev)
-    conn->prev->next = conn->next;
-  if (conn->next)
-    conn->next->prev = conn->prev;
+  if (conn == rasConnsHead) rasConnsHead = rasConnsHead->next;
+  if (conn == rasConnsTail) rasConnsTail = rasConnsTail->prev;
+  if (conn->prev) conn->prev->next = conn->next;
+  if (conn->next) conn->next->prev = conn->prev;
   free(conn);
 }
 
@@ -94,8 +89,7 @@ ncclResult_t rasConnCreate(const union ncclSocketAddress* addr, struct rasConnec
 
   if (conn && conn->sock) {
     // An entry exists and has a socket associated with it -- nothing left for us to do.
-    if (pConn)
-      *pConn = conn;
+    if (pConn) *pConn = conn;
     goto exit;
   }
 
@@ -106,8 +100,7 @@ ncclResult_t rasConnCreate(const union ncclSocketAddress* addr, struct rasConnec
     conn->startRetryTime = clockNano();
   }
 
-  if (pConn)
-    *pConn = conn;
+  if (pConn) *pConn = conn;
 
   rasConnOpen(conn);
 
@@ -123,8 +116,9 @@ static void rasConnOpen(struct rasConnection* conn) {
   int ready;
 
   NCCLCHECKGOTO(getNewSockEntry(&sock), ret, fail);
-  NCCLCHECKGOTO(ncclSocketInit(&sock->sock, &conn->addr, NCCL_SOCKET_MAGIC, ncclSocketTypeRasNetwork, nullptr,
-                               /*asyncFlag*/1, /*customRetry*/1), ret, fail);
+  NCCLCHECKGOTO(ncclSocketInit(&sock->sock, &conn->addr, ncclSocketDefaultMagic(), ncclSocketTypeRasNetwork, nullptr,
+                               /*asyncFlag*/ 1, /*customRetry*/ 1),
+                ret, fail);
   closeSocketOnFail = true;
   NCCLCHECKGOTO(ncclSocketConnect(&sock->sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketReady(&sock->sock, &ready), ret, fail);
@@ -148,8 +142,7 @@ exit:
   // We deliberately ignore ret as this function will be retried later if needed.
   return;
 fail:
-  if (closeSocketOnFail)
-    (void)ncclSocketClose(&sock->sock);
+  if (closeSocketOnFail) (void)ncclSocketClose(&sock->sock);
   freeSockEntry(sock);
   goto exit;
 }
@@ -169,7 +162,7 @@ static ncclResult_t rasConnPrepare(struct rasConnection* conn) {
   msg->connInit.deadPeersHash = rasDeadPeersHash;
   // We don't update lastSent[Dead]PeersHash because we aren't actually sending the peers themselves here.
 
-  rasConnEnqueueMsg(conn, msg, msgLen, /*front*/true);
+  rasConnEnqueueMsg(conn, msg, msgLen, /*front*/ true);
 
   // We'll finish the initialization in rasMsgHandleConnInitAck, after the other side responds.
   return ncclSuccess;
@@ -178,8 +171,7 @@ static ncclResult_t rasConnPrepare(struct rasConnection* conn) {
 // Searches through rasConns for a connection with a provided address.
 struct rasConnection* rasConnFind(const union ncclSocketAddress* addr) {
   for (struct rasConnection* conn = rasConnsHead; conn; conn = conn->next) {
-    if (memcmp(&conn->addr, addr, sizeof(conn->addr)) == 0)
-      return conn;
+    if (memcmp(&conn->addr, addr, sizeof(conn->addr)) == 0) return conn;
   }
 
   return nullptr;
@@ -203,47 +195,44 @@ void rasConnsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
           if (ncclSocketReady(&conn->sock->sock, &ready) != ncclSuccess) {
             INFO(NCCL_RAS, "Unexpected error from ncclSocketReady; terminating the socket connection with %s",
                  ncclSocketToString(&conn->addr, rasLine));
-            rasSocketTerminate(conn->sock, /*finalize*/true);
+            rasSocketTerminate(conn->sock, /*finalize*/ true);
             // We will retry below in the same loop.
             sockTerminated = true;
           } else {
             // We update lastSendTime even if !ready because we need it up-to-date for timeout calculations.
             conn->sock->lastSendTime = clockNano();
             if (!ready && conn->sock->sock.state == ncclSocketStateConnecting)
-              *nextWakeup = std::min(*nextWakeup, conn->sock->lastSendTime+RAS_CONNECT_RETRY);
+              *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(conn->sock->lastSendTime + RAS_CONNECT_RETRY));
             else
               rasPfds[conn->sock->pfd].fd = conn->sock->sock.socketDescriptor; // Enable the handling via the main loop.
           } // if (ncclSocketReady)
         } else {
-          *nextWakeup = std::min(*nextWakeup, conn->sock->lastSendTime+RAS_CONNECT_RETRY);
+          *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(conn->sock->lastSendTime + RAS_CONNECT_RETRY));
         }
       } // if (conn->sock->status == RAS_SOCK_CONNECTING && conn->sock->sock.state == ncclSocketStateConnecting)
 
       // For connections that have data to send but that we've been unable to send a message on for a while,
       // consider their sockets lost and terminate them.
       if (!sockTerminated && !ncclIntruQueueEmpty(&conn->sendQ) && conn->sock->status == RAS_SOCK_READY) {
-        if (now - std::max(conn->sock->lastSendTime,
-                           ncclIntruQueueHead(&conn->sendQ)->enqueueTime) > RAS_STUCK_TIMEOUT) {
+        if (now - std::max(conn->sock->lastSendTime, ncclIntruQueueHead(&conn->sendQ)->enqueueTime) >
+            RAS_STUCK_TIMEOUT) {
           char details[256];
-          long timeoutSecs = (now - std::max(conn->sock->lastSendTime, ncclIntruQueueHead(&conn->sendQ)->enqueueTime)) / CLOCK_UNITS_PER_SEC;
-          snprintf(details, sizeof(details),
-                   "send operation stuck for %lds, terminating connection", timeoutSecs);
-          struct rasEventNotification event = {
-            .eventType = "PEER_SEND_STUCK",
-            .details = details,
-            .peerInfo = nullptr,
-            .peerAddr = &conn->addr
-          };
+          double timeoutSecs =
+            (double)(now - std::max(conn->sock->lastSendTime, ncclIntruQueueHead(&conn->sendQ)->enqueueTime)) /
+            CLOCK_UNITS_PER_SEC;
+          snprintf(details, sizeof(details), "send operation stuck for %gs, terminating connection", timeoutSecs);
+          struct rasEventNotification event = {"PEER_SEND_STUCK", details, nullptr, &conn->addr};
           rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
-          INFO(NCCL_RAS, "RAS send stuck timeout error (%lds) on socket connection with %s",
-               timeoutSecs, ncclSocketToString(&conn->addr, rasLine));
-          rasSocketTerminate(conn->sock, /*finalize*/false, RAS_STUCK_TIMEOUT);
+          INFO(NCCL_RAS, "RAS send stuck timeout error (%gs) on socket connection with %s", timeoutSecs,
+               ncclSocketToString(&conn->addr, rasLine));
+          rasSocketTerminate(conn->sock, /*finalize*/ false, RAS_STUCK_TIMEOUT);
           // We will retry below in the same loop.
         } else {
-          *nextWakeup = std::min(*nextWakeup,
-                                 std::max(conn->sock->lastSendTime, ncclIntruQueueHead(&conn->sendQ)->enqueueTime)+
-                                 RAS_STUCK_TIMEOUT);
+          *nextWakeup =
+            std::min(*nextWakeup, static_cast<int64_t>(std::max(conn->sock->lastSendTime,
+                                                                ncclIntruQueueHead(&conn->sendQ)->enqueueTime) +
+                                                       RAS_STUCK_TIMEOUT));
         }
       } // if (!ncclIntruQueueEmpty(&conn->sendQ) && conn->sock->status == RAS_SOCK_READY)
     } // if (conn->sock)
@@ -255,21 +244,15 @@ void rasConnsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
       // If we've been trying to open a connection for too long (60s), give up and mark the peer as dead
       // so that we don't try again.
       if (now - conn->startRetryTime > RAS_PEER_DEAD_TIMEOUT) {
-        struct rasCollRequest bCast;
+        struct rasCollRequest bCast = {};
         char details[256];
-        snprintf(details, sizeof(details),
-                 "peer failed to respond for %lds, declaring dead",
-                 (now-conn->startRetryTime)/CLOCK_UNITS_PER_SEC);
-        struct rasEventNotification event = {
-          .eventType = "PEER_TIMEOUT_DEAD",
-          .details = details,
-          .peerInfo = nullptr,
-          .peerAddr = &conn->addr
-        };
+        double timeoutSecs = (double)(now - conn->startRetryTime) / CLOCK_UNITS_PER_SEC;
+        snprintf(details, sizeof(details), "peer failed to respond for %gs, declaring dead", timeoutSecs);
+        struct rasEventNotification event = {"PEER_TIMEOUT_DEAD", details, nullptr, &conn->addr};
         rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
-        INFO(NCCL_RAS, "RAS connect retry timeout (%lds) on socket connection with %s",
-             (now-conn->startRetryTime)/CLOCK_UNITS_PER_SEC, ncclSocketToString(&conn->addr, rasLine));
+        INFO(NCCL_RAS, "RAS connect retry timeout (%gs) on socket connection with %s", timeoutSecs,
+             ncclSocketToString(&conn->addr, rasLine));
 
         // Broadcast the info about a dead peer to everybody.  This will handle it locally as well, including
         // declaring the peer dead and terminating the connection.
@@ -280,7 +263,7 @@ void rasConnsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
 
         connTerminated = true;
       } else {
-        *nextWakeup = std::min(*nextWakeup, conn->startRetryTime+RAS_PEER_DEAD_TIMEOUT);
+        *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(conn->startRetryTime + RAS_PEER_DEAD_TIMEOUT));
       }
 
       // RAS_STUCK_TIMEOUT has already been handled in the socket function (we'll pick it up later via
@@ -292,18 +275,12 @@ void rasConnsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
         if (now - conn->startRetryTime > RAS_CONNECT_WARN) {
           if (!conn->experiencingDelays) {
             char details[256];
-            snprintf(details, sizeof(details),
-                     "peer not responding for %lds (connect timeout)",
-                     (now - conn->startRetryTime) / CLOCK_UNITS_PER_SEC);
-            struct rasEventNotification event = {
-              .eventType = "PEER_UNRESPONSIVE",
-              .details = details,
-              .peerInfo = nullptr,
-              .peerAddr = &conn->addr
-            };
+            double timeoutSecs = (double)(now - conn->startRetryTime) / CLOCK_UNITS_PER_SEC;
+            snprintf(details, sizeof(details), "peer not responding for %gs (connect timeout)", timeoutSecs);
+            struct rasEventNotification event = {"PEER_UNRESPONSIVE", details, nullptr, &conn->addr};
             rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
-            INFO(NCCL_RAS, "RAS connect timeout warning (%lds) on socket connection with %s",
-                 (now-conn->startRetryTime) / CLOCK_UNITS_PER_SEC, ncclSocketToString(&conn->addr, rasLine));
+            INFO(NCCL_RAS, "RAS connect timeout warning (%gs) on socket connection with %s", timeoutSecs,
+                 ncclSocketToString(&conn->addr, rasLine));
 
             // See if the connection was meant to be a part of a RAS link and if so, try to initiate fallback
             // connection(s).  At this point, it's mostly just a precaution; we will continue trying to establish
@@ -316,33 +293,28 @@ void rasConnsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
             rasCollsPurgeConn(conn);
           } // if (!conn->experiencingDelays)
         } else {
-          *nextWakeup = std::min(*nextWakeup, conn->startRetryTime+RAS_CONNECT_WARN);
+          *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(conn->startRetryTime + RAS_CONNECT_WARN));
         }
 
         // If a socket was terminated (or never opened, due to some error), try to open it now.
         // We retry once a second.
         if (conn->sock == nullptr) {
           if (now - conn->lastRetryTime > RAS_CONNECT_RETRY) {
+            double timeoutSecs = (double)(now - conn->startRetryTime) / CLOCK_UNITS_PER_SEC;
             if (conn->lastRetryTime == 0) {
               char details[256];
-              snprintf(details, sizeof(details),
-                       "connection attempt timed out after %lds, attempting reconnect",
-                       (now - conn->startRetryTime) / CLOCK_UNITS_PER_SEC);
-              struct rasEventNotification event = {
-                .eventType = "PEER_RETRY",
-                .details = details,
-                .peerInfo = nullptr,
-                .peerAddr = &conn->addr
-              };
+              snprintf(details, sizeof(details), "connection attempt timed out after %gs, attempting reconnect",
+                       timeoutSecs);
+              struct rasEventNotification event = {"PEER_RETRY", details, nullptr, &conn->addr};
               rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
             }
             INFO(NCCL_RAS, "RAS trying to reconnect with %s (experiencingDelays %d, startRetryTime %.2fs)",
                  ncclSocketToString(&conn->addr, rasLine), conn->experiencingDelays,
-                 (conn->startRetryTime ? (now-conn->startRetryTime)/1e9 : 0.0));
+                 (conn->startRetryTime ? timeoutSecs : 0.0));
             rasConnOpen(conn);
           }
           if (conn->sock == nullptr)
-            *nextWakeup = std::min(*nextWakeup, conn->lastRetryTime+RAS_CONNECT_RETRY);
+            *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(conn->lastRetryTime + RAS_CONNECT_RETRY));
         }
       } // if (!connTerminated)
     } // if (conn->startRetryTime)
@@ -370,8 +342,7 @@ static void rasConnTerminate(struct rasConnection* conn) {
   // Make sure there are no lingering rasSockets pointing to it.
   for (struct rasSocket* sock = rasSocketsHead; sock;) {
     struct rasSocket* sockNext = sock->next;
-    if (sock->conn == conn)
-      rasSocketTerminate(sock, /*finalize*/true);
+    if (sock->conn == conn) rasSocketTerminate(sock, /*finalize*/ true);
     sock = sockNext;
   }
 
@@ -387,7 +358,6 @@ static void rasConnTerminate(struct rasConnection* conn) {
   freeConnEntry(conn);
 }
 
-
 ///////////////////////////////////////////
 // Functions related to the RAS sockets. //
 ///////////////////////////////////////////
@@ -401,8 +371,9 @@ ncclResult_t rasNetAcceptNewSocket() {
   bool socketInitialized = false;
   NCCLCHECKGOTO(getNewSockEntry(&sock), ret, fail);
 
-  NCCLCHECKGOTO(ncclSocketInit(&sock->sock, nullptr, NCCL_SOCKET_MAGIC, ncclSocketTypeRasNetwork, nullptr,
-                               /*asyncFlag*/1), ret, fail);
+  NCCLCHECKGOTO(ncclSocketInit(&sock->sock, nullptr, ncclSocketDefaultMagic(), ncclSocketTypeRasNetwork, nullptr,
+                               /*asyncFlag*/ 1),
+                ret, fail);
   socketInitialized = true;
   NCCLCHECKGOTO(ncclSocketAccept(&sock->sock, &rasNetListeningSocket), ret, fail);
   NCCLCHECKGOTO(ncclSocketReady(&sock->sock, &ready), ret, fail);
@@ -413,7 +384,7 @@ ncclResult_t rasNetAcceptNewSocket() {
   NCCLCHECKGOTO(rasGetNewPollEntry(&sock->pfd), ret, fail);
   rasPfds[sock->pfd].fd = sock->sock.socketDescriptor;
   rasPfds[sock->pfd].events = POLLIN; // Initially we'll just wait for a handshake from the other side.  This also
-                                      // helps the code tell the sides apart.
+  // helps the code tell the sides apart.
   sock->status = RAS_SOCK_CONNECTING;
 
   INFO(NCCL_RAS, "RAS new incoming socket connection from %s", ncclSocketToString(&sock->sock.addr, rasLine));
@@ -421,8 +392,7 @@ ncclResult_t rasNetAcceptNewSocket() {
 exit:
   return ret;
 fail:
-  if (socketInitialized)
-    NCCLCHECK(ncclSocketClose(&sock->sock));
+  if (socketInitialized) NCCLCHECK(ncclSocketClose(&sock->sock));
   freeSockEntry(sock);
   goto exit;
 }
@@ -450,17 +420,12 @@ static ncclResult_t getNewSockEntry(struct rasSocket** pSock) {
 
 // Frees an entry from the rasSockets list.
 static void freeSockEntry(struct rasSocket* sock) {
-  if (sock == nullptr)
-    return;
+  if (sock == nullptr) return;
 
-  if (sock == rasSocketsHead)
-    rasSocketsHead = rasSocketsHead->next;
-  if (sock == rasSocketsTail)
-    rasSocketsTail = rasSocketsTail->prev;
-  if (sock->prev)
-    sock->prev->next = sock->next;
-  if (sock->next)
-    sock->next->prev = sock->prev;
+  if (sock == rasSocketsHead) rasSocketsHead = rasSocketsHead->next;
+  if (sock == rasSocketsTail) rasSocketsTail = rasSocketsTail->prev;
+  if (sock->prev) sock->prev->next = sock->next;
+  if (sock->next) sock->next->prev = sock->prev;
   free(sock);
 }
 
@@ -473,66 +438,58 @@ void rasSocksHandleTimeouts(int64_t now, int64_t* nextWakeup) {
       // For socket connections that are still being established, give up on the ones that take too long to initialize.
       if (now - sock->createTime > RAS_STUCK_TIMEOUT) {
         char details[256];
+        double timeoutSecs = (double)(now - sock->createTime) / CLOCK_UNITS_PER_SEC;
         if (sock->conn == nullptr) {
-          snprintf(details, sizeof(details),
-                   "handshake completion timed out after %lds (incoming connection)",
-                   (now-sock->createTime)/CLOCK_UNITS_PER_SEC);
-          struct rasEventNotification event = {
-            .eventType = "PEER_INIT_TIMEOUT",
-            .details = details,
-            .peerInfo = nullptr,
-            .peerAddr = &sock->sock.addr
-          };
+          snprintf(details, sizeof(details), "handshake completion timed out after %gs (incoming connection)",
+                   timeoutSecs);
+          struct rasEventNotification event = {"PEER_INIT_TIMEOUT", details, nullptr, &sock->sock.addr};
           rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
-          INFO(NCCL_RAS, "RAS init timeout error (%lds) on incoming socket connection from %s",
-               (now-sock->createTime)/CLOCK_UNITS_PER_SEC, ncclSocketToString(&sock->sock.addr, rasLine));
+          INFO(NCCL_RAS, "RAS init timeout error (%gs) on incoming socket connection from %s", timeoutSecs,
+               ncclSocketToString(&sock->sock.addr, rasLine));
         } else {
-          snprintf(details, sizeof(details),
-                   "handshake completion timed out after %lds (outgoing connection)",
-                   (now-sock->createTime)/CLOCK_UNITS_PER_SEC);
-          struct rasEventNotification event = {
-            .eventType = "PEER_INIT_TIMEOUT",
-            .details = details,
-            .peerInfo = nullptr,
-            .peerAddr = &sock->sock.addr
-          };
+          snprintf(details, sizeof(details), "handshake completion timed out after %gs (outgoing connection)",
+                   timeoutSecs);
+          struct rasEventNotification event = {"PEER_INIT_TIMEOUT", details, nullptr, &sock->sock.addr};
           rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
-          INFO(NCCL_RAS, "RAS init timeout error (%lds) on socket connection with %s "
+          INFO(NCCL_RAS,
+               "RAS init timeout error (%gs) on socket connection with %s "
                "(experiencingDelays %d, startRetryTime %.2fs, socket status %d)",
-               (now-sock->createTime)/CLOCK_UNITS_PER_SEC, ncclSocketToString(&sock->sock.addr, rasLine),
-               sock->conn->experiencingDelays,
-               (sock->conn->startRetryTime ? (now-sock->conn->startRetryTime)/1e9 : 0.0), sock->status);
+               timeoutSecs, ncclSocketToString(&sock->sock.addr, rasLine), sock->conn->experiencingDelays,
+               (sock->conn->startRetryTime ? (double)(now - sock->conn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0),
+               sock->status);
         }
-        rasSocketTerminate(sock, /*finalize*/true);
+        rasSocketTerminate(sock, /*finalize*/ true);
         // We may retry later.
       } else {
-        *nextWakeup = std::min(*nextWakeup, sock->createTime+RAS_STUCK_TIMEOUT);
+        *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(sock->createTime + RAS_STUCK_TIMEOUT));
       }
     } else if (sock->status == RAS_SOCK_TERMINATING) {
       // For sockets that are being terminated, force finalization of the ones that haven't made progress in too long.
       if (now - std::max(sock->lastSendTime, sock->lastRecvTime) > RAS_STUCK_TIMEOUT) {
-        INFO(NCCL_RAS, "RAS termination stuck timeout error (%lds) on socket connection with %s",
-             (now-std::max(sock->lastSendTime, sock->lastRecvTime)) / CLOCK_UNITS_PER_SEC,
+        INFO(NCCL_RAS, "RAS termination stuck timeout error (%gs) on socket connection with %s",
+             (double)(now - std::max(sock->lastSendTime, sock->lastRecvTime)) / CLOCK_UNITS_PER_SEC,
              ncclSocketToString(&sock->sock.addr, rasLine));
-        rasSocketTerminate(sock, /*finalize*/true);
+        rasSocketTerminate(sock, /*finalize*/ true);
         // This socket is presumably already being re-established, if needed.
       } else {
-        *nextWakeup = std::min(*nextWakeup, std::max(sock->lastSendTime, sock->lastRecvTime)+RAS_STUCK_TIMEOUT);
+        *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(std::max(sock->lastSendTime, sock->lastRecvTime) +
+                                                                 RAS_STUCK_TIMEOUT));
       }
     } else if (sock->status == RAS_SOCK_READY) {
       // Terminate sockets that haven't been used in a good while.  In principle this shouldn't trigger for anything
       // important due to shorter timeouts on RAS network connections, but in case of weird situations like process
       // suspend, rasSocketTerminate will do additional checking.
       if (now - std::max(sock->lastSendTime, sock->lastRecvTime) > RAS_IDLE_TIMEOUT) {
-        INFO(NCCL_RAS, "RAS idle timeout (%lds) on socket connection with %s",
-             (now - std::max(sock->lastSendTime, sock->lastRecvTime)) / CLOCK_UNITS_PER_SEC,
+        INFO(NCCL_RAS, "RAS idle timeout (%gs) on socket connection with %s",
+             (double)(now - std::max(sock->lastSendTime, sock->lastRecvTime)) / CLOCK_UNITS_PER_SEC,
              ncclSocketToString(&sock->sock.addr, rasLine));
-        rasSocketTerminate(sock, /*finalize*/false, /*startRetryOffset*/0, /*retry*/false);
+        rasSocketTerminate(sock, /*finalize*/ false, /*startRetryOffset*/ 0, /*retry*/ false);
         // The RAS network timeout handler will terminate the conn it was associated with, if any.
       } else {
-        *nextWakeup = std::min(*nextWakeup, std::max(sock->lastSendTime, sock->lastRecvTime)+RAS_IDLE_TIMEOUT);
+        *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(std::max(sock->lastSendTime, sock->lastRecvTime) +
+                                                                 RAS_IDLE_TIMEOUT));
       }
     } // if (sock->status == RAS_SOCK_READY)
 
@@ -587,7 +544,8 @@ void rasSocketTerminate(struct rasSocket* sock, bool finalize, uint64_t startRet
               meta->offset = 0;
             }
             ncclIntruQueueEnqueue(&conn->sendQ, meta);
-          } else { // RAS_MSG_CONNINIT || RAS_MSG_CONNINITACK || RAS_MSG_KEEPALIVE
+          } else {
+            // RAS_MSG_CONNINIT || RAS_MSG_CONNINITACK || RAS_MSG_KEEPALIVE
             free(meta);
           }
         } // while (meta)
@@ -650,7 +608,8 @@ void rasSockEventLoop(struct rasSocket* sock, int pollIdx) {
               rasSocketTerminate(sock);
               // We may retry further down.
             }
-          } else { // sock->conn->sock != sock
+          } else {
+            // sock->conn->sock != sock
             // The connection this socket is associated with no longer considers it to be the current one.
             // This could possibly happen due to a race condition.  Simply terminate it.
             INFO(NCCL_RAS, "RAS connected with %s via a socket that's no longer current!",
@@ -658,16 +617,18 @@ void rasSockEventLoop(struct rasSocket* sock, int pollIdx) {
             rasSocketTerminate(sock);
           }
         } // if (connectSide)
-      } else { // !ready
+      } else {
+        // !ready
         if (sock->sock.state == ncclSocketStateConnecting) {
           rasPfds[sock->pfd].fd = POLL_FD_IGNORE; // Don't poll on this socket before connect().
-        } else if (sock->sock.socketDescriptor == -1) {
+        } else if (sock->sock.socketDescriptor == NCCL_INVALID_SOCKET) {
           // Most likely an incoming connection that failed the magic test.
           rasSocketTerminate(sock);
         }
       }
     } // if (ncclSocketReady)
-  } else { // RAS_SOCK_HANDSHAKE || RAS_SOCK_READY || RAS_SOCK_TERMINATING.
+  } else {
+    // RAS_SOCK_HANDSHAKE || RAS_SOCK_READY || RAS_SOCK_TERMINATING.
     // The extra test for TERMINATING is there to take care of a race when the handling of one socket
     // results in another socket being terminated, but one that already has revents waiting from poll.
     if (sock->status != RAS_SOCK_TERMINATING && (rasPfds[pollIdx].revents & POLLOUT)) {
@@ -689,12 +650,8 @@ void rasSockEventLoop(struct rasSocket* sock, int pollIdx) {
         rasSocketTerminate(sock);
         // We may retry further down.
       } else if (closed) {
-        struct rasEventNotification event = {
-          .eventType = "PEER_DISCONNECTED",
-          .details = "peer closed connection during send operation",
-          .peerInfo = nullptr,
-          .peerAddr = &sock->sock.addr
-        };
+        struct rasEventNotification event = {"PEER_DISCONNECTED", "peer closed connection during send operation",
+                                             nullptr, &sock->sock.addr};
         rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
         INFO(NCCL_RAS, "RAS socket connection with %s closed by peer on send; terminating it",
@@ -703,8 +660,7 @@ void rasSockEventLoop(struct rasSocket* sock, int pollIdx) {
         // We may retry further down.
       } else {
         sock->lastSendTime = clockNano();
-        if (allSent)
-          rasPfds[sock->pfd].events &= ~POLLOUT; // Nothing more to send for now.
+        if (allSent) rasPfds[sock->pfd].events &= ~POLLOUT; // Nothing more to send for now.
       }
     }
     if (rasPfds[pollIdx].revents & POLLIN) {
@@ -715,53 +671,43 @@ void rasSockEventLoop(struct rasSocket* sock, int pollIdx) {
         if (rasMsgRecv(sock, &msg, &closed) != ncclSuccess) {
           INFO(NCCL_RAS, "RAS unexpected error from rasMsgRecv; terminating the socket connection with %s",
                ncclSocketToString(&sock->sock.addr, rasLine));
-          rasSocketTerminate(sock, /*finalize*/true);
+          rasSocketTerminate(sock, /*finalize*/ true);
           // We may retry further down.
         } else if (closed) {
           const char* socketType;
-          if (sock->conn == nullptr)
-            socketType = "incoming";
-          else if (sock->conn->sock != sock)
-            socketType = "old";
-          else if (sock->status == RAS_SOCK_HANDSHAKE)
-            socketType = "new";
-          else
-            socketType = "current";
+          if (sock->conn == nullptr) socketType = "incoming";
+          else if (sock->conn->sock != sock) socketType = "old";
+          else if (sock->status == RAS_SOCK_HANDSHAKE) socketType = "new";
+          else socketType = "current";
           char details[256];
-          snprintf(details, sizeof(details),
-                   "peer closed %s connection during receive operation", socketType);
-          struct rasEventNotification event = {
-            .eventType = "PEER_DISCONNECTED",
-            .details = details,
-            .peerInfo = nullptr,
-            .peerAddr = &sock->sock.addr
-          };
+          snprintf(details, sizeof(details), "peer closed %s connection during receive operation", socketType);
+          struct rasEventNotification event = {"PEER_DISCONNECTED", details, nullptr, &sock->sock.addr};
           rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
-          INFO(NCCL_RAS, "RAS %s socket connection with %s closed by peer on receive; terminating it",
-               socketType, ncclSocketToString(&sock->sock.addr, rasLine));
-          rasSocketTerminate(sock, /*finalize*/true);
+          INFO(NCCL_RAS, "RAS %s socket connection with %s closed by peer on receive; terminating it", socketType,
+               ncclSocketToString(&sock->sock.addr, rasLine));
+          rasSocketTerminate(sock, /*finalize*/ true);
           // We may retry further down.
-        } else { // !closed
+        } else {
+          // !closed
           sock->lastRecvTime = clockNano();
           if (msg) {
             (void)rasMsgHandle(msg, sock);
             free(msg);
             // Message handlers can terminate a socket in various cases.  We re-check rasPfds.events to ensure that
             // this hasn't happened here (rasSocketTerminate will reset it when finalizing a socket).
-            if (!(rasPfds[pollIdx].revents & POLLIN))
-              break;
+            if (!(rasPfds[pollIdx].revents & POLLIN)) break;
           }
           if (sock->conn) {
-            if (sock->conn->sock == sock && (sock->conn->startRetryTime || sock->conn->experiencingDelays))
+            if (sock->conn->sock == sock && (sock->conn->startRetryTime || sock->conn->experiencingDelays)) {
               rasConnResume(sock->conn);
+            }
           }
         } // !closed
       } while (msg);
     } // if (POLLIN)
   } // RAS_SOCK_HANDSHAKE || RAS_SOCK_READY || RAS_SOCK_TERMINATING
 }
-
 
 ////////////////////////////////////////////////////////////////
 // Functions related to the handling of RAS network timeouts. //
@@ -772,8 +718,7 @@ void rasNetHandleTimeouts(int64_t now, int64_t* nextWakeup) {
   // A connection can belong to multiple links but, when it comes to various timeouts, we want to handle each
   // connection just once.  We solve that with a simple flag within a connection.  This also allows us to distinguish
   // connections that are part of a link from those that are not.
-  for (struct rasConnection* conn = rasConnsHead; conn; conn = conn->next)
-    conn->linkFlag = false;
+  for (struct rasConnection* conn = rasConnsHead; conn; conn = conn->next) conn->linkFlag = false;
 
   (void)rasLinkHandleNetTimeouts(&rasNextLink, now, nextWakeup);
   (void)rasLinkHandleNetTimeouts(&rasPrevLink, now, nextWakeup);
@@ -782,8 +727,7 @@ void rasNetHandleTimeouts(int64_t now, int64_t* nextWakeup) {
     struct rasConnection* connNext = conn->next;
     if (!conn->linkFlag) {
       // The connection is not part of any link.  Check if it should be terminated.
-      if (conn->sock == nullptr && ncclIntruQueueEmpty(&conn->sendQ))
-        rasConnTerminate(conn);
+      if (conn->sock == nullptr && ncclIntruQueueEmpty(&conn->sendQ)) rasConnTerminate(conn);
     }
     conn = connNext;
   }
@@ -801,8 +745,8 @@ static ncclResult_t rasLinkHandleNetTimeouts(struct rasLink* link, int64_t now, 
       // This triggers when rasLinkReinitConns didn't create the primary connection because we have a higher address
       // than the peer.  If that peer fails to initiate within RAS_CONNECT_WARN, we need to take action.
       if (now - link->lastUpdatePeersTime > RAS_CONNECT_WARN) {
-        INFO(NCCL_RAS, "RAS peer connect timeout warning (%lds) on socket connection from %s",
-             (now-link->lastUpdatePeersTime) / CLOCK_UNITS_PER_SEC,
+        INFO(NCCL_RAS, "RAS peer connect timeout warning (%gs) on socket connection from %s",
+             (double)(now - link->lastUpdatePeersTime) / CLOCK_UNITS_PER_SEC,
              ncclSocketToString(&rasPeers[linkConn->peerIdx].addr, rasLine));
         NCCLCHECK(rasConnCreate(&rasPeers[linkConn->peerIdx].addr, &linkConn->conn));
         if (linkConn->conn) {
@@ -810,7 +754,7 @@ static ncclResult_t rasLinkHandleNetTimeouts(struct rasLink* link, int64_t now, 
         }
         link->lastUpdatePeersTime = 0;
       } else {
-        *nextWakeup = std::min(*nextWakeup, link->lastUpdatePeersTime+RAS_CONNECT_WARN);
+        *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(link->lastUpdatePeersTime + RAS_CONNECT_WARN));
       }
     } // if (linkConn == link->conns && link->lastUpdatePeerTime != 0)
   } // for (linkConn)
@@ -827,7 +771,7 @@ static void rasConnHandleNetTimeouts(struct rasConnection* conn, int64_t now, in
         if (now - conn->sock->lastSendTime > RAS_KEEPALIVE_INTERVAL) {
           rasConnSendKeepAlive(conn);
         } else {
-          *nextWakeup = std::min(*nextWakeup, conn->sock->lastSendTime+RAS_KEEPALIVE_INTERVAL);
+          *nextWakeup = std::min(*nextWakeup, static_cast<int64_t>(conn->sock->lastSendTime + RAS_KEEPALIVE_INTERVAL));
         }
       }
 
@@ -835,18 +779,12 @@ static void rasConnHandleNetTimeouts(struct rasConnection* conn, int64_t now, in
       if (now - conn->sock->lastRecvTime > RAS_KEEPALIVE_TIMEOUT_WARN) {
         if (!conn->experiencingDelays) {
           char details[256];
-          snprintf(details, sizeof(details),
-                   "peer not responding for %lds (keepalive warning)",
-                   (now - conn->sock->lastRecvTime) / CLOCK_UNITS_PER_SEC);
-          struct rasEventNotification event = {
-            .eventType = "PEER_UNRESPONSIVE",
-            .details = details,
-            .peerInfo = nullptr,
-            .peerAddr = &conn->addr
-          };
+          double timeoutSecs = (double)(now - conn->sock->lastRecvTime) / CLOCK_UNITS_PER_SEC;
+          snprintf(details, sizeof(details), "peer not responding for %gs (keepalive warning)", timeoutSecs);
+          struct rasEventNotification event = {"PEER_UNRESPONSIVE", details, nullptr, &conn->addr};
           rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
-          INFO(NCCL_RAS, "RAS keep-alive timeout warning (%lds) on socket connection with %s",
-               (now-conn->sock->lastRecvTime) / CLOCK_UNITS_PER_SEC, ncclSocketToString(&conn->addr, rasLine));
+          INFO(NCCL_RAS, "RAS keep-alive timeout warning (%gs) on socket connection with %s", timeoutSecs,
+               ncclSocketToString(&conn->addr, rasLine));
 
           // At this point, it's mostly just a precaution; we will continue with the primary connection until
           // RAS_PEER_DEAD_TIMEOUT expires.
@@ -858,29 +796,25 @@ static void rasConnHandleNetTimeouts(struct rasConnection* conn, int64_t now, in
           rasCollsPurgeConn(conn);
         }
       } else {
-        *nextWakeup = std::min(*nextWakeup, conn->sock->lastRecvTime+RAS_KEEPALIVE_TIMEOUT_WARN);
+        *nextWakeup =
+          std::min(*nextWakeup, static_cast<int64_t>(conn->sock->lastRecvTime + RAS_KEEPALIVE_TIMEOUT_WARN));
       }
 
       // For long timeouts we need to act.
       if (now - conn->sock->lastRecvTime > RAS_KEEPALIVE_TIMEOUT_ERROR) {
         char details[256];
-        snprintf(details, sizeof(details),
-                 "keepalive timeout after %lds, terminating connection",
-                 (now-conn->sock->lastRecvTime) / CLOCK_UNITS_PER_SEC);
-        struct rasEventNotification event = {
-          .eventType = "PEER_KEEPALIVE_TIMEOUT",
-          .details = details,
-          .peerInfo = nullptr,
-          .peerAddr = &conn->addr
-        };
+        double timeoutSecs = (double)(now - conn->sock->lastRecvTime) / CLOCK_UNITS_PER_SEC;
+        snprintf(details, sizeof(details), "keepalive timeout after %gs, terminating connection", timeoutSecs);
+        struct rasEventNotification event = {"PEER_KEEPALIVE_TIMEOUT", details, nullptr, &conn->addr};
         rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
 
-        INFO(NCCL_RAS, "RAS keep-alive timeout error (%lds) on socket connection with %s",
-             (now-conn->sock->lastRecvTime) / CLOCK_UNITS_PER_SEC, ncclSocketToString(&conn->addr, rasLine));
-        rasSocketTerminate(conn->sock, /*finalize*/true, RAS_KEEPALIVE_TIMEOUT_ERROR);
+        INFO(NCCL_RAS, "RAS keep-alive timeout error (%gs) on socket connection with %s", timeoutSecs,
+             ncclSocketToString(&conn->addr, rasLine));
+        rasSocketTerminate(conn->sock, /*finalize*/ true, RAS_KEEPALIVE_TIMEOUT_ERROR);
         *nextWakeup = now; // Retry will be in the next iteration of the main loop so ensure we don't wait.
       } else {
-        *nextWakeup = std::min(*nextWakeup, conn->sock->lastRecvTime+RAS_KEEPALIVE_TIMEOUT_ERROR);
+        *nextWakeup =
+          std::min(*nextWakeup, static_cast<int64_t>(conn->sock->lastRecvTime + RAS_KEEPALIVE_TIMEOUT_ERROR));
       }
     } // if (conn->sock->status == RAS_SOCK_READY)
   } // if (conn->sock)
@@ -918,13 +852,15 @@ ncclResult_t rasMsgHandleKeepAlive(const struct rasMsg* msg, struct rasSocket* s
 
   if (sock->conn == nullptr) {
     // Should never happen.
-    INFO(NCCL_RAS, "RAS received a keep-alive message on socket with %s that lacks a connection: status %d -- "
-         "internal error?", ncclSocketToString(&sock->sock.addr, rasLine), sock->status);
+    INFO(NCCL_RAS,
+         "RAS received a keep-alive message on socket with %s that lacks a connection: status %d -- "
+         "internal error?",
+         ncclSocketToString(&sock->sock.addr, rasLine), sock->status);
     return ncclInternalError;
   }
   clockRealtime(&currentTime);
-  travelTime = (currentTime.tv_sec-msg->keepAlive.realTime.tv_sec)*1000*1000*1000 +
-    (currentTime.tv_nsec-msg->keepAlive.realTime.tv_nsec);
+  travelTime = (currentTime.tv_sec - msg->keepAlive.realTime.tv_sec) * 1000 * 1000 * 1000 +
+               (currentTime.tv_nsec - msg->keepAlive.realTime.tv_nsec);
 
   if (msg->keepAlive.peersHash != sock->conn->lastRecvPeersHash) {
     sock->conn->lastRecvPeersHash = msg->keepAlive.peersHash;
@@ -939,14 +875,10 @@ ncclResult_t rasMsgHandleKeepAlive(const struct rasMsg* msg, struct rasSocket* s
   peerIdx = rasPeerFind(&sock->conn->addr);
   // Note: it's possible for peerIdx to be -1 at this point if, due to races, the keepAlive arrives before
   // the peers update.
-  if (msg->keepAlive.linkMask & 1)
-    (void)rasLinkConnAddExternal(&rasNextLink, sock->conn, peerIdx);
-  else
-    rasLinkConnDrop(&rasNextLink, sock->conn, /*external*/true);
-  if (msg->keepAlive.linkMask & 2)
-    (void)rasLinkConnAddExternal(&rasPrevLink, sock->conn, peerIdx);
-  else
-    rasLinkConnDrop(&rasPrevLink, sock->conn, /*external*/true);
+  if (msg->keepAlive.linkMask & 1) (void)rasLinkConnAddExternal(&rasNextLink, sock->conn, peerIdx);
+  else rasLinkConnDrop(&rasNextLink, sock->conn, /*external*/ true);
+  if (msg->keepAlive.linkMask & 2) (void)rasLinkConnAddExternal(&rasPrevLink, sock->conn, peerIdx);
+  else rasLinkConnDrop(&rasPrevLink, sock->conn, /*external*/ true);
 
   // If the keep-alive message is from a peer that doesn't actually need this connection (i.e., for that peer the
   // connection is just an external fallback), we should check if *we* still need it.  It might be that we don't,
@@ -956,14 +888,12 @@ ncclResult_t rasMsgHandleKeepAlive(const struct rasMsg* msg, struct rasSocket* s
     if (rasLinkConnFind(&rasNextLink, sock->conn) == nullptr && rasLinkConnFind(&rasPrevLink, sock->conn) == nullptr) {
       // We don't need this connection either.  Notify the peer about it.  To avoid an infinite loop, we set the
       // special nack flag in the message to distinguish it from regular keep-alives.
-      rasConnSendKeepAlive(sock->conn, /*nack*/true);
+      rasConnSendKeepAlive(sock->conn, /*nack*/ true);
     }
   }
 
-  if (sock->conn->travelTimeMin > travelTime)
-    sock->conn->travelTimeMin = travelTime;
-  if (sock->conn->travelTimeMax < travelTime)
-    sock->conn->travelTimeMax = travelTime;
+  if (sock->conn->travelTimeMin > travelTime) sock->conn->travelTimeMin = travelTime;
+  if (sock->conn->travelTimeMax < travelTime) sock->conn->travelTimeMax = travelTime;
   sock->conn->travelTimeSum += travelTime;
   sock->conn->travelTimeCount++;
 
@@ -979,7 +909,6 @@ ncclResult_t rasMsgHandleKeepAlive(const struct rasMsg* msg, struct rasSocket* s
   }
   return ncclSuccess;
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // Functions related to the RAS links and recovery from connection failures. //
@@ -1019,23 +948,20 @@ ncclResult_t rasLinkAddFallback(struct rasLink* link, const struct rasConnection
             firstExtLinkConn = linkConn;
             firstExtLinkIdx = i;
           }
-          if (foundLinkConn)
-            break; // Break out of the loop if we already have all the data we might need.
+          if (foundLinkConn) break; // Break out of the loop if we already have all the data we might need.
         } // linkConn->external && linkConn->peerIdx != -1
       } // if (!linkConn->conn->experiencingDelays)
     } // if (linkConn->conn && linkConn->conn != conn)
 
     if (linkConn->conn == conn) {
-      if (linkConn->external)
-        goto exit; // We don't add fallbacks for external connections...
+      if (linkConn->external) goto exit; // We don't add fallbacks for external connections...
       foundLinkConn = linkConn;
       // We are not breaking out of the loop here because we want to check for active connections on *all* potentially
       // viable elements (in particular, there could be some external ones beyond this one).
     }
   }
 
-  if (foundLinkConn == nullptr)
-    goto exit;
+  if (foundLinkConn == nullptr) goto exit;
 
   if (foundLinkConn->peerIdx == -1) {
     // Should never happen.
@@ -1046,7 +972,7 @@ ncclResult_t rasLinkAddFallback(struct rasLink* link, const struct rasConnection
   }
   // We found an existing element so the connection is part of the link.  No existing non-external connections of this
   // link are active, so a fallback is needed.
-  newPeerIdx = rasLinkCalculatePeer(link, foundLinkConn->peerIdx, /*isFallback*/(foundLinkConn != link->conns));
+  newPeerIdx = rasLinkCalculatePeer(link, foundLinkConn->peerIdx, /*isFallback*/ (foundLinkConn != link->conns));
   // In principle we want to add (at most) one fallback.  However, if the found fallback connection already exists
   // and is also experiencing delays, we need to keep iterating.
   while (newPeerIdx != -1) {
@@ -1057,11 +983,11 @@ ncclResult_t rasLinkAddFallback(struct rasLink* link, const struct rasConnection
     if (firstExtLinkConn) {
       linkIdx = -1;
       // Calculate the index that the newly found fallback would have (pretend mode).
-      NCCLCHECK(rasLinkConnAdd(link, newConn, newPeerIdx, /*pretend*/true, &linkIdx));
+      NCCLCHECK(rasLinkConnAdd(link, newConn, newPeerIdx, /*pretend*/ true, &linkIdx));
       if (linkIdx == -1) {
         // Should never happen.
-        INFO(NCCL_RAS, "RAS link %d: could not add a fallback connection with %s -- internal error?",
-             link->direction, ncclSocketToString(&conn->addr, rasLine));
+        INFO(NCCL_RAS, "RAS link %d: could not add a fallback connection with %s -- internal error?", link->direction,
+             ncclSocketToString(&conn->addr, rasLine));
         ret = ncclInternalError;
         goto exit;
       }
@@ -1071,13 +997,13 @@ ncclResult_t rasLinkAddFallback(struct rasLink* link, const struct rasConnection
         goto exit;
       }
     }
-    NCCLCHECK(rasLinkConnAdd(link, newConn, newPeerIdx, /*pretend*/false, &linkIdx, &newLinkConn));
+    NCCLCHECK(rasLinkConnAdd(link, newConn, newPeerIdx, /*pretend*/ false, &linkIdx, &newLinkConn));
     if (firstExtLinkConn && linkIdx <= firstExtLinkIdx)
       firstExtLinkIdx++; // Adjust if we inserted a new entry ahead of this one.
 
-    INFO(NCCL_RAS, "RAS link %d: %s fallback connection %d with %s",
-         link->direction, (newConn == nullptr ? "opening new" : "calculated existing"),
-         linkIdx, ncclSocketToString(&rasPeers[newPeerIdx].addr, rasLine));
+    INFO(NCCL_RAS, "RAS link %d: %s fallback connection %d with %s", link->direction,
+         (newConn == nullptr ? "opening new" : "calculated existing"), linkIdx,
+         ncclSocketToString(&rasPeers[newPeerIdx].addr, rasLine));
     // Note that we don't follow here our convention of "lower address is the one establishing connections" --
     // that convention is for optimizing regular operations, but we don't want to take chances during fault
     // recovery. It may temporarily result in duplicate connections, but we have a mechanism to deal with those.
@@ -1087,18 +1013,17 @@ ncclResult_t rasLinkAddFallback(struct rasLink* link, const struct rasConnection
     }
 
     // If the fallback connection is also experiencing delays, we need to keep trying.
-    if (!newConn->experiencingDelays)
-      break;
+    if (!newConn->experiencingDelays) break;
     INFO(NCCL_RAS, "RAS connection experiencingDelays %d, startRetryTime %.2fs, socket status %d",
-         newConn->experiencingDelays, (newConn->startRetryTime ? (clockNano()-newConn->startRetryTime)/1e9 : 0.0),
+         newConn->experiencingDelays,
+         (newConn->startRetryTime ? (double)(clockNano() - newConn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0),
          (newConn->sock ? newConn->sock->status : -1));
 
-    newPeerIdx = rasLinkCalculatePeer(link, newPeerIdx, /*isFallback*/true);
+    newPeerIdx = rasLinkCalculatePeer(link, newPeerIdx, /*isFallback*/ true);
   }
   if (newPeerIdx == -1) {
     int nConns = 0;
-    for (struct rasLinkConn* linkConn = link->conns; linkConn; linkConn = linkConn->next)
-      nConns++;
+    for (struct rasLinkConn* linkConn = link->conns; linkConn; linkConn = linkConn->next) nConns++;
     INFO(NCCL_RAS, "RAS link %d: no more fallbacks to add (total %d)", link->direction, nConns);
   }
 exit:
@@ -1112,23 +1037,15 @@ static void rasConnResume(struct rasConnection* conn) {
     INFO(NCCL_RAS, "RAS %s connection with %s (sendQ %sempty, experiencingDelays %d, startRetryTime %.2fs)",
          (conn->experiencingDelays && conn->startRetryTime == 0 ? "recovered" : "established"),
          ncclSocketToString(&conn->addr, rasLine), (ncclIntruQueueEmpty(&conn->sendQ) ? "" : "not "),
-         conn->experiencingDelays, (conn->startRetryTime ? (clockNano()-conn->startRetryTime)/1e9 : 0.0));
+         conn->experiencingDelays,
+         (conn->startRetryTime ? (double)(clockNano() - conn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0));
 
     if (conn->experiencingDelays) {
-      struct rasEventNotification event = {
-        .eventType = "PEER_RECOVERED",
-        .details = "peer responding again",
-        .peerInfo = nullptr,
-        .peerAddr = &conn->addr
-      };
+      struct rasEventNotification event = {"PEER_RECOVERED", "peer responding again", nullptr, &conn->addr};
       rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
     } else {
-      struct rasEventNotification event = {
-        .eventType = "PEER_CONNECTED",
-        .details = "connection established successfully",
-        .peerInfo = nullptr,
-        .peerAddr = &conn->addr
-      };
+      struct rasEventNotification event = {"PEER_CONNECTED", "connection established successfully", nullptr,
+                                           &conn->addr};
       rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
     }
 
@@ -1139,12 +1056,12 @@ static void rasConnResume(struct rasConnection* conn) {
     rasLinkSanitizeFallbacks(&rasNextLink);
     rasLinkSanitizeFallbacks(&rasPrevLink);
 
-    if (!ncclIntruQueueEmpty(&conn->sendQ))
-      rasPfds[conn->sock->pfd].events |= POLLOUT;
+    if (!ncclIntruQueueEmpty(&conn->sendQ)) rasPfds[conn->sock->pfd].events |= POLLOUT;
   }
 }
 
-// Checks if the primary connection is fully established and if so, purges the fallbacks (as they are no longer needed).
+// Checks if the primary connection is fully established and if so, purges the fallbacks (as they are no longer
+// needed).
 static void rasLinkSanitizeFallbacks(struct rasLink* link) {
   if (link->conns && link->conns->conn) {
     struct rasConnection* conn = link->conns->conn;
@@ -1154,9 +1071,8 @@ static void rasLinkSanitizeFallbacks(struct rasLink* link) {
       int i = 1;
       for (struct rasLinkConn* linkConn = link->conns->next; linkConn; i++) {
         struct rasLinkConn* linkConnNext = linkConn->next;
-        INFO(NCCL_RAS, "RAS link %d: dropping %sfallback connection %d with %s",
-             link->direction, (linkConn->external ? "external " : ""), i,
-             ncclSocketToString(&linkConn->conn->addr, rasLine));
+        INFO(NCCL_RAS, "RAS link %d: dropping %sfallback connection %d with %s", link->direction,
+             (linkConn->external ? "external " : ""), i, ncclSocketToString(&linkConn->conn->addr, rasLine));
         free(linkConn);
         linkConn = linkConnNext;
       }
@@ -1186,7 +1102,8 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
 
   if (peerIdx == -1) {
     // Should never happen.
-    INFO(NCCL_RAS, "RAS link %d: rasLinkConnAdd invoked with invalid peerIdx (pretend %d, insert %d) -- internal error?",
+    INFO(NCCL_RAS,
+         "RAS link %d: rasLinkConnAdd invoked with invalid peerIdx (pretend %d, insert %d) -- internal error?",
          link->direction, pretend, insert);
     ret = ncclInternalError;
     goto exit;
@@ -1195,12 +1112,12 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
     // Start by checking if we already have an element with this conn.
     oldLinkConn = rasLinkConnFind(link, conn, &oldLinkIdx);
     if (oldLinkConn) {
-      if (pLinkConn)
-        *pLinkConn = oldLinkConn;
+      if (pLinkConn) *pLinkConn = oldLinkConn;
       if (oldLinkConn->peerIdx != -1) {
         if (oldLinkConn->peerIdx != peerIdx) {
           // Should never happen.
-          INFO(NCCL_RAS, "RAS link %d: rasLinkConnAdd peerIdx %d mismatch with connection with %s "
+          INFO(NCCL_RAS,
+               "RAS link %d: rasLinkConnAdd peerIdx %d mismatch with connection with %s "
                "(pretend %d, insert %d, oldLinkConn->peerIdx %d) -- internal error?",
                link->direction, peerIdx, ncclSocketToString(&oldLinkConn->conn->addr, rasLine), pretend, insert,
                oldLinkConn->peerIdx);
@@ -1208,10 +1125,8 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
           goto exit;
         }
 
-        if (!pretend)
-          oldLinkConn->external = false; // Ensure that external is cleared.
-        if (pLinkIdx)
-          *pLinkIdx = oldLinkIdx;
+        if (!pretend) oldLinkConn->external = false; // Ensure that external is cleared.
+        if (pLinkIdx) *pLinkIdx = oldLinkIdx;
         goto exit; // Nothing more to do if both conn and peerIdx are up to date.
       } // if (oldLinkConn->peerIdx != -1)
 
@@ -1227,8 +1142,9 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
       // The exact linkConn element already exists.
       if (linkConn->conn && linkConn->conn != conn) {
         // Should never happen.
-        char line[SOCKET_NAME_MAXLEN+1];
-        INFO(NCCL_RAS, "RAS link %d: rasLinkConnAdd connection mismatch: linkConn %s, conn %s "
+        char line[SOCKET_NAME_MAXLEN + 1];
+        INFO(NCCL_RAS,
+             "RAS link %d: rasLinkConnAdd connection mismatch: linkConn %s, conn %s "
              "(peerIdx %d, pretend %d, insert %d) -- internal error?",
              link->direction, ncclSocketToString(&linkConn->conn->addr, line), ncclSocketToString(&conn->addr, rasLine),
              peerIdx, pretend, insert);
@@ -1237,8 +1153,7 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
       }
 
       if (!pretend) {
-        if (linkConn->conn == nullptr)
-          linkConn->conn = conn;
+        if (linkConn->conn == nullptr) linkConn->conn = conn;
         linkConn->external = false; // Ensure that external is cleared.
         if (linkConn == link->conns) {
           // We received a connection from the remote peer that matches the primary connection we've been
@@ -1246,25 +1161,22 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
           rasLinkSanitizeFallbacks(link);
         }
       } // if (!pretend)
-      if (pLinkIdx)
-        *pLinkIdx = i;
-      if (pLinkConn)
-        *pLinkConn = linkConn;
+      if (pLinkIdx) *pLinkIdx = i;
+      if (pLinkConn) *pLinkConn = linkConn;
       goto exit;
     } // if (linkConn->peerIdx == peerIdx)
 
     // Ensure that the previous element is valid.
-    if (linkConnPrev == nullptr)
-      continue;
+    if (linkConnPrev == nullptr) continue;
     // linkConns with peerIdx == -1 are stored at the end, so if we reach one of them, we are done.
-    if (linkConn->peerIdx == -1)
-      break;
+    if (linkConn->peerIdx == -1) break;
     // Detect a roll-over and handle it specially.
     if (link->direction * (linkConnPrev->peerIdx - linkConn->peerIdx) > 0) {
       if (link->direction * (peerIdx - linkConnPrev->peerIdx) > 0 ||
           link->direction * (peerIdx - linkConn->peerIdx) < 0)
         break;
-    } else { // Regular, monotonic case with the peerIdx value between two existing elements.
+    } else {
+      // Regular, monotonic case with the peerIdx value between two existing elements.
       if (link->direction * (peerIdx - linkConnPrev->peerIdx) > 0 &&
           link->direction * (peerIdx - linkConn->peerIdx) < 0)
         break;
@@ -1272,17 +1184,16 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
   } // for (linkConn)
 
   // The new element should be inserted after linkConnPrev (which is at index i-1).
-  if (pLinkIdx)
-    *pLinkIdx = i;
-  if (pretend)
-    goto exit;
+  if (pLinkIdx) *pLinkIdx = i;
+  if (pretend) goto exit;
 
   if (oldLinkConn) {
     if (i != oldLinkIdx) {
       // We already have the entry, but we need to move it to a new spot (which must be earlier in the list).
       if (i >= oldLinkIdx) {
         // Should never happen.
-        INFO(NCCL_RAS, "RAS link %d: rasLinkConnAdd new link index %d later in the list than the old one "
+        INFO(NCCL_RAS,
+             "RAS link %d: rasLinkConnAdd new link index %d later in the list than the old one "
              "(insert %d, oldLinkConn %s, oldLinkIdx %d) -- internal error?",
              link->direction, i, insert, ncclSocketToString(&oldLinkConn->conn->addr, rasLine), oldLinkIdx);
         ret = ncclInternalError;
@@ -1310,8 +1221,10 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
     } else {
       if (link->conns != nullptr) {
         // Should never happen -- we don't add an element that would replace an existing primary.
-        INFO(NCCL_RAS, "RAS link %d: rasLinkConnAdd attempting to replace an existing primary connection with %s "
-             "-- internal error?", link->direction, ncclSocketToString(&link->conns->conn->addr, rasLine));
+        INFO(NCCL_RAS,
+             "RAS link %d: rasLinkConnAdd attempting to replace an existing primary connection with %s "
+             "-- internal error?",
+             link->direction, ncclSocketToString(&link->conns->conn->addr, rasLine));
         ret = ncclInternalError;
         goto exit;
       }
@@ -1321,8 +1234,7 @@ static ncclResult_t rasLinkConnAdd(struct rasLink* link, struct rasConnection* c
     linkConn->peerIdx = peerIdx;
     linkConn->conn = conn;
     linkConn->external = false;
-    if (pLinkConn)
-      *pLinkConn = linkConn;
+    if (pLinkConn) *pLinkConn = linkConn;
   } // oldLinkConn == nullptr && insert
 
 exit:
@@ -1352,7 +1264,8 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
   if (oldLinkConn) {
     if (oldLinkConn->peerIdx != -1 && oldLinkConn->peerIdx != peerIdx) {
       // Should never happen.
-      INFO(NCCL_RAS, "RAS link %d: rasLinkConnAddExternald peerIdx %d mismatch with connection with %s "
+      INFO(NCCL_RAS,
+           "RAS link %d: rasLinkConnAddExternald peerIdx %d mismatch with connection with %s "
            "(oldLinkConn->peerIdx %d) -- internal error?",
            link->direction, peerIdx, ncclSocketToString(&oldLinkConn->conn->addr, rasLine), oldLinkConn->peerIdx);
       ret = ncclInternalError;
@@ -1361,7 +1274,7 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
 
     if (oldLinkConn->peerIdx == peerIdx)
       goto exit; // Nothing more to do if both conn and peerIdx are up to date.  Note that we neither check nor
-                 // update the value of external here.
+    // update the value of external here.
 
     // Otherwise (oldLinkConn->peerIdx == -1 && peerIdx != -1) oldLinkConn, due to its -1 peerIdx, is in
     // a wrong place in the array -- we need to find the right spot.  oldLinkConn->peerIdx == -1 can only happen for
@@ -1379,16 +1292,16 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
       // The exact linkConn element already exists.
       if (linkConn->conn && linkConn->conn != conn) {
         // Should never happen.
-        char line[SOCKET_NAME_MAXLEN+1];
-        INFO(NCCL_RAS, "RAS link %d: rasLinkConnAddExternal connection mismatch: linkConn %s, conn %s "
+        char line[SOCKET_NAME_MAXLEN + 1];
+        INFO(NCCL_RAS,
+             "RAS link %d: rasLinkConnAddExternal connection mismatch: linkConn %s, conn %s "
              "(peerIdx %d) -- internal error?",
              link->direction, ncclSocketToString(&linkConn->conn->addr, line), ncclSocketToString(&conn->addr, rasLine),
              peerIdx);
         ret = ncclInternalError;
         goto exit;
       }
-      if (linkConn->conn == nullptr)
-        linkConn->conn = conn;
+      if (linkConn->conn == nullptr) linkConn->conn = conn;
       if (linkConn == link->conns) {
         // We received a connection from the remote peer that matches the primary connection we've been
         // waiting for.  This shouldn't trigger for external connections (rasLinkConnUpdate should be invoked first,
@@ -1400,17 +1313,16 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
     } // if (linkConn->peerIdx == peerIdx)
 
     // Ensure that the previous element is valid.
-    if (linkConnPrev == nullptr)
-      continue;
+    if (linkConnPrev == nullptr) continue;
     // linkConns with peerIdx == -1 are stored at the end, so if we reach one of them, we are done.
-    if (linkConn->peerIdx == -1)
-      break;
+    if (linkConn->peerIdx == -1) break;
     // Detect a roll-over and handle it specially.
     if (link->direction * (linkConnPrev->peerIdx - linkConn->peerIdx) > 0) {
       if (link->direction * (peerIdx - linkConnPrev->peerIdx) > 0 ||
           link->direction * (peerIdx - linkConn->peerIdx) < 0)
         break;
-    } else { // Regular, monotonic case with the peerIdx value between two existing elements.
+    } else {
+      // Regular, monotonic case with the peerIdx value between two existing elements.
       if (link->direction * (peerIdx - linkConnPrev->peerIdx) > 0 &&
           link->direction * (peerIdx - linkConn->peerIdx) < 0)
         break;
@@ -1423,7 +1335,8 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
       // We already have the entry, but we need to move it to a new spot (which must be earlier in the list).
       if (i >= oldLinkIdx) {
         // Should never happen.
-        INFO(NCCL_RAS, "RAS link %d: rasLinkConnAddExternal new link index %d later in the list than the old one "
+        INFO(NCCL_RAS,
+             "RAS link %d: rasLinkConnAddExternal new link index %d later in the list than the old one "
              "(oldLinkConn %s, oldLinkIdx %d) -- internal error?",
              link->direction, i, ncclSocketToString(&oldLinkConn->conn->addr, rasLine), oldLinkIdx);
         ret = ncclInternalError;
@@ -1444,7 +1357,8 @@ static ncclResult_t rasLinkConnAddExternal(struct rasLink* link, struct rasConne
     } // if (i != oldLinkIdx)
     oldLinkConn->peerIdx = peerIdx;
     oldLinkConn->external = false;
-  } else { // oldLinkConn == nullptr
+  } else {
+    // oldLinkConn == nullptr
     struct rasLinkConn* linkConn;
     NCCLCHECK(ncclCalloc(&linkConn, 1));
     if (linkConnPrev) {
@@ -1482,8 +1396,8 @@ ncclResult_t rasLinkConnUpdate(struct rasLink* link, struct rasConnection* conn,
     goto exit;
   }
 
-  NCCLCHECK(rasLinkConnAdd(link, conn, peerIdx, /*pretend*/false, /*pLinkIdx*/nullptr, /*pLinkConn*/nullptr,
-                           /*insert*/false));
+  NCCLCHECK(rasLinkConnAdd(link, conn, peerIdx, /*pretend*/ false, /*pLinkIdx*/ nullptr, /*pLinkConn*/ nullptr,
+                           /*insert*/ false));
 exit:
   return ret;
 }
@@ -1497,25 +1411,25 @@ static void rasLinkConnDrop(struct rasLink* link, const struct rasConnection* co
   for (struct rasLinkConn* linkConn = link->conns; linkConn; linkConnPrev = linkConn, linkConn = linkConn->next, i++) {
     if (linkConn->conn == conn && (!external || linkConn->external)) {
       if (linkConnPrev) {
-        INFO(NCCL_RAS, "RAS link %d: dropping %sfallback connection %d with %s",
-             link->direction, (linkConn->external ? "external " : ""), i,
-             ncclSocketToString(&conn->addr, rasLine));
+        INFO(NCCL_RAS, "RAS link %d: dropping %sfallback connection %d with %s", link->direction,
+             (linkConn->external ? "external " : ""), i, ncclSocketToString(&conn->addr, rasLine));
         linkConnPrev->next = linkConn->next;
         free(linkConn);
       } else { // linkConnPrev == nullptr
-        INFO(NCCL_RAS, "RAS link %d: dropping primary connection with %s",
-             link->direction, ncclSocketToString(&conn->addr, rasLine));
+        INFO(NCCL_RAS, "RAS link %d: dropping primary connection with %s", link->direction,
+             ncclSocketToString(&conn->addr, rasLine));
         if (linkConn->next) {
           link->conns = linkConn->next;
           // Ensure that the conn becoming the primary is not marked as external (we don't want to lose it if
           // the remote peer loses interest in it).
           link->conns->external = false;
           if (link->conns->conn)
-            INFO(NCCL_RAS, "RAS link %d: former fallback connection 1 with %s is the new primary",
-                 link->direction, ncclSocketToString(&link->conns->conn->addr, rasLine));
+            INFO(NCCL_RAS, "RAS link %d: former fallback connection 1 with %s is the new primary", link->direction,
+                 ncclSocketToString(&link->conns->conn->addr, rasLine));
           rasLinkSanitizeFallbacks(link);
           free(linkConn);
-        } else { // linkConn->next == nullptr
+        } else {
+          // linkConn->next == nullptr
           // We prefer the primary entry to always be present, even if empty.
           linkConn->peerIdx = -1;
           linkConn->conn = nullptr;
@@ -1534,13 +1448,11 @@ static struct rasLinkConn* rasLinkConnFind(const struct rasLink* link, const str
   int i = 0;
   for (struct rasLinkConn* linkConn = link->conns; linkConn; linkConn = linkConn->next, i++) {
     if (linkConn->conn == conn) {
-      if (pLinkIdx)
-        *pLinkIdx = i;
+      if (pLinkIdx) *pLinkIdx = i;
       return linkConn;
     }
   }
-  if (pLinkIdx)
-    *pLinkIdx = -1;
+  if (pLinkIdx) *pLinkIdx = -1;
   return nullptr;
 }
 

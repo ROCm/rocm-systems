@@ -50,10 +50,11 @@ The ``videodecoderaw.cpp`` example also demonstrates how to use the bitstream re
             return 1;
         }
 
+``rocDecDestroyBitstreamReader`` must always be called to destroy the bitstream reader once processing is complete.
 
-.. note:: 
-    
-    ``rocDecDestroyBitstreamReader`` must always be called to destroy the bitstream reader once processing is complete.
+.. note::
+
+    Before running the sample, ensure that the ``ROCM_PATH`` environment variable is pointing to the location of your ROCm installation.
 
 
 .. |videodecode| replace:: ``videodecode.cpp``

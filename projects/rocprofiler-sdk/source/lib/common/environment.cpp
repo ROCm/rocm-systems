@@ -26,6 +26,7 @@
 
 #include <fmt/format.h>
 
+#include <sys/auxv.h>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -204,6 +205,16 @@ SPECIALIZE_SET_ENV(uint16_t)
 SPECIALIZE_SET_ENV(uint32_t)
 SPECIALIZE_SET_ENV(uint64_t)
 }  // namespace impl
+
+bool
+is_at_secure()
+{
+    // AT_SECURE is set by the kernel when the program was executed in a way that
+    // requires "secure execution" (setuid/setgid, file capabilities, etc.).
+    // Cache the value since it cannot change during the lifetime of the process.
+    static const bool _v = (::getauxval(AT_SECURE) != 0);
+    return _v;
+}
 
 env_store::env_store(std::initializer_list<env_config>&& _container)
 {

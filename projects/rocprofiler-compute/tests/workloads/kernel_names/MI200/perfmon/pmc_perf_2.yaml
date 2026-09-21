@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - SQ_INSTS_VALU_TRANS_F64
+  - SQ_LDS_BANK_CONFLICT
+  - SQ_LDS_IDX_ACTIVE
+  - SQ_WAVES

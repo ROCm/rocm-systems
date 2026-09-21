@@ -27,6 +27,7 @@ struct module_function
     static void             reset_width();
     static void             update_width(const module_function& rhs);
     static void             write_header(std::ostream& os);
+    static string_t         get_source_object_name(procedure_t* func);
 
     module_function()                                      = default;
     module_function(const module_function&)                = default;
@@ -45,6 +46,7 @@ struct module_function
     // instrumentation
     std::pair<size_t, size_t> operator()(address_space_t* _addr_space,
                                          procedure_t*     _entr_trace,
+                                         procedure_t*     _entr_trace_args,
                                          procedure_t*     _exit_trace) const;
 
     // applies logic for all "is_*" and "can_*" checks below
@@ -102,6 +104,7 @@ struct module_function
     bool is_overlapping() const;  // checks if func overlaps
 
 private:
+    const string_t&     get_module_identity(const string_t& module_base) const;
     symbol_linkage_t    get_linkage() const;
     symbol_visibility_t get_visibility() const;
     bool is_loop_num_instructions_constrained() const;  // checks loop instr constraint

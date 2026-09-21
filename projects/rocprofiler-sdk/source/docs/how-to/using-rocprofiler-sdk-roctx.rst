@@ -185,7 +185,7 @@ Two modes of operation
 
 When running ``rocprofv3`` without the ``--selected-regions`` option, profiling is **enabled** as soon as the application starts. The ``roctxProfilerPause()`` and ``roctxProfilerResume()`` APIs are used to temporarily hide specific sections of code from profiling.
 
-- Use case: Profile everything exluding the specific regions.
+- Use case: Profile everything excluding the specific regions.
 - Profiler starts: **Enabled**
 - ``roctxProfilerPause()``: Temporarily stops data collection.
 - ``roctxProfilerResume()``: Resumes data collection.
@@ -288,7 +288,7 @@ When using ``0`` as the thread ID argument, the control applies to all threads. 
 
 The ``--selected-regions`` option works with all tracing and profiling options, such as:
 
-- API tracing: ``--hip-trace``, ``--hsa-trace``, ``--marker-trace``, ``--rccl-trace``, and others.
+- API tracing: ``--hip-trace``, ``--hsa-trace``, ``--marker-trace``, ``--rccl-trace``, ``--rocshmem-trace``, and others.
 - Kernel tracing: ``--kernel-trace``.
 - Memory tracing: ``--memory-copy-trace``, ``--memory-allocation-trace``, ``--scratch-memory-trace``.
 - Counter collection: ``--pmc``.

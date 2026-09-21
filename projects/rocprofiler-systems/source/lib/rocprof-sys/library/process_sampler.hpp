@@ -24,12 +24,13 @@ namespace process_sampler
 {
 struct instance
 {
-    std::function<void()> setup        = []() {};
-    std::function<void()> shutdown     = []() {};
-    std::function<void()> config       = []() {};
-    std::function<void()> sample       = []() {};
-    std::function<void()> post_process = []() {};
-    std::function<void()> pause        = []() {};
+    std::function<void()> setup               = []() {};
+    std::function<void()> shutdown            = []() {};
+    std::function<void()> config              = []() {};
+    std::function<void()> sample              = []() {};
+    std::function<void()> post_process        = []() {};
+    std::function<void()> pause               = []() {};
+    std::function<void()> flush_pending_pause = []() {};
 };
 //
 struct sampler
@@ -39,13 +40,16 @@ struct sampler
     using nsec_t    = std::chrono::nanoseconds;
     using promise_t = std::promise<void>;
     using future_t  = std::future<void>;
-    using state_t   = State;
+    using state_t   = state::process::State;
 
     using timestamp_t = std::int64_t;
 
-    template <typename Tp                                                      = nsec_t,
-              std::enable_if_t<!std::is_same_v<std::decay_t<Tp>, nsec_t>, int> = 0>
-    static void poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t*);
+    template <typename Tp = nsec_t>
+        requires(!std::is_same_v<std::decay_t<Tp>, nsec_t>)
+    static void poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t* _prom)
+    {
+        poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
+    }
 
     static void setup();
     static void shutdown();
@@ -55,15 +59,6 @@ struct sampler
     static void set_state(state_t);
     static void poll(std::atomic<state_t>* _state, nsec_t _interval, promise_t*);
 };
-//
-template <
-    typename Tp,
-    std::enable_if_t<!std::is_same_v<std::decay_t<Tp>, std::chrono::nanoseconds>, int>>
-void
-sampler::poll(std::atomic<state_t>* _state, Tp&& _interval, promise_t* _prom)
-{
-    poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
-}
 //
 inline void
 setup()

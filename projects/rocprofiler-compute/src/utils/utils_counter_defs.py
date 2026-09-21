@@ -29,16 +29,22 @@ HW_COUNTER_RE = re.compile(HW_COUNTER_BLK + HW_COUNTER_SFX)
 
 # Captures the variable name after '$'.
 VARIABLE_RE = re.compile(r"\$([0-9A-Za-z_]*[0-9A-Za-z])")
+AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 
 # ---------------------------------------------------------------------------
 # Built-in variable and denominator definitions
 # ---------------------------------------------------------------------------
 
+# per_kernel denom column, injected at pmc load with 1 per dispatch so
+# SUM($denom) == N and Avg is the mean per dispatch.
+UNIT_COUNTER = "Dispatch_Unit"
+
 SUPPORTED_DENOM: dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
+    # A vector, not a scalar, so SUM($denom) == N.
+    "per_kernel": UNIT_COUNTER,
 }
 
 
@@ -75,7 +81,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
                 "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
                 "$max_sclk)), 0)"
             ),
-            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_memory_channels)",
         },
         "rdna35": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
@@ -84,9 +90,9 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
         },
     }
 
-    if gpu_series.startswith("MI"):
+    if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
-    elif gpu_series.startswith("NAVI"):
+    elif gpu_series.startswith("RDNA"):
         return build_in_vars["rdna35"]
     else:
         console_error(
@@ -96,7 +102,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Block remapping — SQC and SP counters belong to the SQ IP block
+# Block remapping: SQC and SP counters belong to the SQ IP block
 # ---------------------------------------------------------------------------
 
 BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
@@ -108,11 +114,11 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 
 
 def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
-    """Extract HW counter names and ``$variable`` names from formula *text*.
+    """Extract HW counter names and $variable names from formula text.
 
-    Returns ``(hw_counters, variables)`` where *variables* are the names
-    without the leading ``$``.  Matches that look like variables are removed
-    from the HW counter set.
+    Returns (hw_counters, variables) where variables are the names without
+    the leading $. Matches that look like variables are removed from the HW
+    counter set.
     """
     hw_counter_matches = set(HW_COUNTER_RE.findall(text))
     variable_matches = set(VARIABLE_RE.findall(text))
@@ -121,37 +127,50 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
     return hw_counter_matches, variable_matches
 
 
-def extract_counters(text: str, gpu_series: str) -> set[str]:
-    """Return the full set of HW counters referenced by *text*.
+def extract_counters_and_variables(
+    text: str, gpu_series: str, include_supported_denom: bool = True
+) -> tuple[set[str], set[str]]:
+    """Return (hw_counters, builtin_vars) referenced by text, with transitive
+    resolution. Recognizes both $var and ammolite__var forms.
 
-    Resolves ``$variable`` references and supported denominators
-    recursively so that all transitive counter dependencies are included.
+    Profiling must collect the SUPPORTED_DENOM counters too, because every
+    metric is implicitly divided by its unit denominator. Pass
+    include_supported_denom=False to get only the counters a formula names
+    itself, which is what deciding perfmon bucket membership needs.
     """
     hw, variables = parse_counters_text(text)
+    variables.update(AMMOLITE_VAR_RE.findall(text))
 
-    # Include counters from all supported denominators
-    for formula in SUPPORTED_DENOM.values():
-        hw_d, var_d = parse_counters_text(formula)
-        hw.update(hw_d)
-        variables.update(var_d)
+    if include_supported_denom:
+        for formula in SUPPORTED_DENOM.values():
+            hw_d, var_d = parse_counters_text(formula)
+            hw.update(hw_d)
+            variables.update(var_d)
 
-    # Recursively resolve built-in variables
     build_in_vars = get_build_in_vars(gpu_series)
+    builtin_vars: set[str] = set()
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()
         for var in variables - seen:
             seen.add(var)
             if var in build_in_vars:
+                builtin_vars.add(var)
                 hw_v, var_v = parse_counters_text(build_in_vars[var])
                 hw.update(hw_v)
                 new_vars.update(var_v)
         variables.update(new_vars)
 
-    return hw
+    return hw, builtin_vars
 
 
 def counter_to_block(counter: str) -> str:
-    """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`."""
+    """Map a counter name to its IP block, applying the BLOCK_REMAP table."""
+    if counter.startswith("GC_CANE_"):
+        return "GC_CANE"
+    if counter.startswith("GC_EA_SE_"):
+        return "GC_EA_SE"
     block = counter.split("_")[0]
+    if block == "TX":
+        return "TCP"
     return BLOCK_REMAP.get(block, block)

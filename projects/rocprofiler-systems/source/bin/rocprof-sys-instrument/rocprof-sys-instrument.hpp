@@ -3,19 +3,23 @@
 
 #pragma once
 
+#include "common/path.hpp"
+#include "core/common_types.hpp"
+#include "core/demangler.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "info.hpp"
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <string>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
+#include <utility>
 
 //======================================================================================//
 
@@ -23,18 +27,8 @@ bool
 is_text_file(const std::string& filename);
 
 //======================================================================================//
-
-inline string_t
-to_lower(string_t s)
-{
-    for(auto& itr : s)
-        itr = tolower(itr);
-    return s;
-}
-//
-//======================================================================================//
-//
-template <typename Tp, std::enable_if_t<!std::is_same<Tp, std::string>::value, int> = 0>
+template <typename Tp>
+    requires(!std::is_same_v<Tp, std::string>)
 snippet_pointer_t
 get_snippet(Tp arg)
 {
@@ -43,7 +37,8 @@ get_snippet(Tp arg)
 //
 //======================================================================================//
 //
-template <typename Tp, std::enable_if_t<std::is_same<Tp, std::string>::value, int> = 0>
+template <typename Tp>
+    requires std::is_same_v<Tp, std::string>
 snippet_pointer_t
 get_snippet(const Tp& arg)
 {
@@ -57,7 +52,7 @@ snippet_pointer_vec_t
 get_snippets(Args&&... args)
 {
     snippet_pointer_vec_t _tmp{};
-    TIMEMORY_FOLD_EXPRESSION(_tmp.push_back(get_snippet(std::forward<Args>(args))));
+    (_tmp.push_back(get_snippet(std::forward<Args>(args))), ...);
     return _tmp;
 }
 //
@@ -80,7 +75,7 @@ struct rocprofsys_call_expr
         return _ret;
     }
 
-    inline call_expr_pointer_t get(procedure_t* func)
+    call_expr_pointer_t get(procedure_t* func)
     {
         return call_expr_pointer_t((func) ? new call_expr_t(*func, get_params())
                                           : nullptr);
@@ -124,13 +119,13 @@ private:
 //======================================================================================//
 //
 static inline bool
-rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
+rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 {
     bool _is_executable = _default_v;
 
-    if(_cmd.empty())
+    if(!_cmd.empty())
     {
-        if(!tim::filepath::exists(std::string{ _cmd }))
+        if(!rocprofsys::path::is_regular_file(_cmd))
         {
             verbprintf(
                 0,
@@ -140,7 +135,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
         }
 
         Dyninst::SymtabAPI::Symtab* _symtab = nullptr;
-        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
+        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd))
         {
             _is_executable = _symtab->isExecutable() && _symtab->isExec();
             Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
@@ -154,7 +149,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
 static inline address_space_t*
 rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
                              const std::vector<std::string>& _cmdenv, bool _rewrite,
-                             int _pid = -1, const std::string& _name = {})
+                             const std::string& _name = {})
 {
     address_space_t* mutatee = nullptr;
 
@@ -180,9 +175,7 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     }
     else
     {
-        bool _attach = (_pid >= 0);
-
-        // override the current environment create/attach to process, revert environment
+        // override the current environment to start the process, revert environment
         using strpair_t    = std::pair<std::string, std::string>;
         auto _imported     = std::vector<strpair_t>{};
         auto _exported     = std::vector<strpair_t>{};
@@ -211,129 +204,37 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
             verbprintf(4, "[env] %s=%s\n", itr.first.c_str(), itr.second.c_str());
         }
 
-        if(_attach)
+        if(_cmdc < 1) errprintf(-127, "No command provided");
+
+        if(is_text_file(_cmdv[0]))
         {
-            verbprintf(1, "Attaching to process %i... ", _pid);
-            fflush(stderr);
-            char* _cmdv0 = (_cmdc > 0) ? _cmdv[0] : nullptr;
-            mutatee      = _bpatch->processAttach(_cmdv0, _pid);
-            if(!mutatee)
-            {
-                verbprintf(-1, "Failed to connect to process %i\n", (int) _pid);
-                throw std::runtime_error("Failed to attach to process");
-            }
-            verbprintf_bare(1, "Done\n");
+            errprintf(-1,
+                      "'%s' is a text file. rocprof-sys only supports instrumenting "
+                      "binary files",
+                      _cmdv[0]);
         }
-        else
+
+        std::stringstream ss;
+        for(int i = 0; i < _cmdc; ++i)
         {
-            if(_cmdc < 1) errprintf(-127, "No command provided");
-
-            if(is_text_file(_cmdv[0]))
-            {
-                errprintf(-1,
-                          "'%s' is a text file. rocprof-sys only supports instrumenting "
-                          "binary files",
-                          _cmdv[0]);
-            }
-
-            std::stringstream ss;
-            for(int i = 0; i < _cmdc; ++i)
-            {
-                if(!_cmdv || !_cmdv[i]) continue;
-                ss << " " << _cmdv[i];
-            }
-            auto _cmd_msg = ss.str();
-            if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
-
-            verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
-            fflush(stderr);
-            mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv, nullptr);
-            if(!mutatee)
-            {
-                verbprintf(-1, "Failed to create process: '%s'\n", _cmd_msg.c_str());
-                throw std::runtime_error("Failed to create process");
-            }
-            verbprintf_bare(1, "Done\n");
+            if(!_cmdv || !_cmdv[i]) continue;
+            ss << " " << _cmdv[i];
         }
+        auto _cmd_msg = ss.str();
+        if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
+
+        verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
+        fflush(stderr);
+        mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv, nullptr);
+        if(!mutatee)
+        {
+            verbprintf(-1, "Failed to create process: '%s'\n", _cmd_msg.c_str());
+            throw std::runtime_error("Failed to create process");
+        }
+        verbprintf_bare(1, "Done\n");
     }
 
     return mutatee;
-}
-//
-//======================================================================================//
-//
-TIMEMORY_NOINLINE inline void
-rocprofsys_thread_exit(thread_t* thread, BPatch_exitType exit_type)
-{
-    if(!thread) return;
-
-    ROCPROFSYS_ADD_LOG_ENTRY("Executing the thread callback");
-
-    BPatch_process* app = thread->getProcess();
-
-    if(!terminate_expr)
-    {
-        fprintf(stderr, "[rocprof-sys][exe] continuing execution\n");
-        app->continueExecution();
-        return;
-    }
-
-    switch(exit_type)
-    {
-        case ExitedNormally:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] Thread exited normally\n");
-            break;
-        }
-        case ExitedViaSignal:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] Thread terminated unexpectedly\n");
-            break;
-        }
-        case NoExit:
-        default:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] %s invoked with NoExit\n", __FUNCTION__);
-            break;
-        }
-    }
-
-    // terminate_expr = nullptr;
-    thread->oneTimeCode(*terminate_expr);
-
-    fprintf(stderr, "[rocprof-sys][exe] continuing execution\n");
-    app->continueExecution();
-}
-//
-//======================================================================================//
-//
-TIMEMORY_NOINLINE inline void
-rocprofsys_fork_callback(thread_t* parent, thread_t* child)
-{
-    ROCPROFSYS_ADD_LOG_ENTRY("Executing the fork callback");
-
-    if(child)
-    {
-        auto* app = child->getProcess();
-        if(app)
-        {
-            verbprintf(4, "Stopping execution and detaching child fork...\n");
-            app->stopExecution();
-            app->detach(true);
-            // app->terminateExecution();
-            // app->continueExecution();
-        }
-    }
-
-    if(parent)
-    {
-        auto* app = parent->getProcess();
-        if(app)
-        {
-            verbprintf(4, "Continuing execution on parent after fork callback...\n");
-            app->continueExecution();
-        }
-    }
 }
 //
 //======================================================================================//
@@ -367,9 +268,10 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
             if(itr && itr->getFunction()) _v.emplace(get_name(itr->getFunction()));
         return _v;
     }();
+    auto _names_str = fmt::format("[{}]", fmt::join(_names, ", "));
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserting", _points.size(),
-                             "instrumentation points into function(s)", _names);
+                             "instrumentation points into function(s)", _names_str);
 
     auto _trace = traceFunc.get();
     auto _traps = std::set<point_t*>{};
@@ -382,7 +284,8 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     }
 
     ROCPROFSYS_ADD_LOG_ENTRY("Found", _traps.size(),
-                             "instrumentation points using traps in function(s)", _names);
+                             "instrumentation points using traps in function(s)",
+                             _names_str);
 
     size_t _n = 0;
     for(const auto& itr : _points)
@@ -393,7 +296,7 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     }
 
     ROCPROFSYS_ADD_LOG_ENTRY("Inserted", _n, "instrumentation points in function(s)",
-                             _names);
+                             _names_str);
 
     return (_n > 0);
 }

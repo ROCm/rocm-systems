@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/containers/aligned_static_vector.hpp"
 #include "core/containers/stable_vector.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -14,7 +15,6 @@
 #include "library/thread_data_growth.hpp"
 #include "library/thread_deleter.hpp"
 
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <array>
@@ -80,7 +80,7 @@ struct thread_data : base_thread_data<thread_data<Tp, Tag, MaxThreads>>
     using this_type  = thread_data<Tp, Tag, MaxThreads>;
     using value_type = unique_ptr_t<Tp>;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
     using functor_type = std::function<value_type()>;
 
     template <typename... Args>
@@ -125,10 +125,9 @@ struct thread_data : base_thread_data<thread_data<Tp, Tag, MaxThreads>>
     void resize(size_t _n) { container::resize(m_data, _n, m_init()); }
 
     template <typename Up>
+        requires std::is_assignable_v<value_type, Up>
     void resize(size_t _n, Up&& _v)
     {
-        static_assert(std::is_assignable<value_type, Up>::value,
-                      "value is not assignable to optional<Tp>");
         container::resize(m_data, _n, std::forward<Up>(_v));
     }
 
@@ -224,7 +223,7 @@ struct thread_data<std::optional<Tp>, Tag, MaxThreads>
     using value_type   = std::optional<Tp>;
     using functor_type = std::function<value_type()>;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
 
     thread_data()  = default;
     ~thread_data() = default;
@@ -277,10 +276,9 @@ struct thread_data<std::optional<Tp>, Tag, MaxThreads>
     void resize(size_t _n) { container::resize(m_data, _n, m_init()); }
 
     template <typename Up>
+        requires std::is_assignable_v<value_type, Up>
     void resize(size_t _n, Up&& _v)
     {
-        static_assert(std::is_assignable<value_type, Up>::value,
-                      "value is not assignable to optional<Tp>");
         container::resize(m_data, _n, std::forward<Up>(_v));
     }
 
@@ -346,7 +344,7 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
     // construct outside of lambda to prevent data-race
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
-        container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
+        container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
@@ -394,7 +392,7 @@ struct thread_data<identity<Tp>, Tag, MaxThreads>
     using this_type  = thread_data<identity<Tp>, Tag, MaxThreads>;
     using value_type = Tp;
     using array_type =
-        container::stable_vector<value_type, MaxThreads, container::cacheline_align_v>;
+        container::stable_vector<value_type, MaxThreads, container::k_cacheline_align>;
     using functor_type = std::function<value_type()>;
 
     thread_data()  = default;
@@ -514,7 +512,7 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
     // construct outside of lambda to prevent data-race
     static auto& _instance = instance(construct_on_init{});
     static auto  _constructed =
-        container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
+        container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
         grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {

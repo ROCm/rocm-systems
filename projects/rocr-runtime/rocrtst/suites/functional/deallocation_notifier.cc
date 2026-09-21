@@ -77,6 +77,15 @@ struct callback_status {
 static callback_status notifiers[2];
 static hsa_amd_memory_pool_t pool;
 
+#ifdef ROCRTST_ASAN
+// ASAN defers the real free (and thus the notifier) via its quarantine; drain
+// it so callbacks have run before we check them.
+extern "C" void __sanitizer_purge_allocator(void);
+static inline void DrainAsanQuarantine() { __sanitizer_purge_allocator(); }
+#else
+static inline void DrainAsanQuarantine() {}
+#endif
+
 #define REGISTER(ptr, callback, i)                                                                 \
   do {                                                                                             \
     notifiers[i].callback_status = 0;                                                              \
@@ -94,8 +103,12 @@ static void call(void* ptr, void* user) {
 static void doublefree(void* ptr, void* user) {
   call(ptr, user);
 
+#ifndef ROCRTST_ASAN
+  // Skip under ASAN: this runs during a quarantine drain, where a second free
+  // trips the sanitizer's own double-free report before ROCr can return.
   hsa_status_t status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, status) << "Double free did not return an error.";
+#endif
 }
 
 static void recursive(void* ptr, void* user) {
@@ -106,7 +119,11 @@ static void recursive(void* ptr, void* user) {
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory allocation failure.";
   REGISTER(ptr, call, 1);
   hsa_amd_memory_pool_free(ptr);
+#ifndef ROCRTST_ASAN
+  // Skip under ASAN: the inner free can't be drained re-entrantly from within
+  // a drain, so its notifier fires later (at the next drain/teardown).
   ASSERT_EQ(1, notifiers[1].callback_status) << "Callback not executed.";
+#endif
 }
 
 DeallocationNotifierTest::DeallocationNotifierTest() : TestBase() {
@@ -147,6 +164,7 @@ void DeallocationNotifierTest::Run(void) {
 
   TestBase::Run();
   TestDeallocationNotifier();
+  TestDeallocationNotifierVmem();
 }
 
 void DeallocationNotifierTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
@@ -187,6 +205,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, call, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Re-allocate, free.  No callback should be invoked.
@@ -203,6 +222,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER((char*)ptr + 1024, call, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate, Register, Deregister, Free.  No callback should be invoked.
@@ -222,6 +242,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER((char*)ptr + 1024, call, 1);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
   ASSERT_EQ(1, notifiers[1].callback_status) << "Callback not executed.";
 
@@ -242,6 +263,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, call, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate multiple fragments, register, free.  Free order should be respected by callbacks.
@@ -252,10 +274,12 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr0, call, 1);
   status = hsa_amd_memory_pool_free(ptr0);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[1].callback_status) << "Callback not executed.";
   ASSERT_EQ(0, notifiers[0].callback_status) << "Callback executed improperly.";
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate, register, free, with double free in callback.  Callbacks should not be able to free
@@ -265,6 +289,7 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, doublefree, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
 
   // Allocate, register, free, with allocate, register, free in callback.  Callbacks should nest and
@@ -274,5 +299,143 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   REGISTER(ptr, recursive, 0);
   status = hsa_amd_memory_pool_free(ptr);
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
+  DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
+}
+
+void DeallocationNotifierTest::TestDeallocationNotifierVmem(void) {
+  hsa_status_t status;
+
+  // Skip vmem tests if API not supported
+  bool vmem_supported = false;
+  status = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported);
+  if (status != HSA_STATUS_SUCCESS || !vmem_supported) {
+    return;  // Vmem API not available or not supported on this platform
+  }
+
+  // Basic vmem callback test: reserve, register, free
+  hsa_amd_vmem_alloc_handle_t handle;
+  void* va = nullptr;
+  size_t size = 2 * 1024 * 1024;  // 2MB
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+  if (va == nullptr) {
+    FAIL() << "Vmem address is null.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem callback not executed.";
+
+  // Vmem callback with mapping: full lifecycle
+  va = nullptr;
+  status = hsa_amd_vmem_handle_create(device_pool(), size, MEMORY_TYPE_NONE, 0, &handle);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem handle creation failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_map(va, size, 0, handle, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(va, size);
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem map failure.";
+    return;
+  }
+
+  hsa_amd_memory_access_desc_t desc;
+  desc.permissions = HSA_ACCESS_PERMISSION_RW;
+  desc.agent_handle = *gpu_device1();
+  status = hsa_amd_vmem_set_access(va, size, &desc, 1);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_unmap(va, size);
+    hsa_amd_vmem_address_free(va, size);
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem set access failure.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+
+  status = hsa_amd_vmem_unmap(va, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(va, size);
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem unmap failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_address_free(va, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem address free failure.";
+    return;
+  }
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem callback not executed.";
+
+  status = hsa_amd_vmem_handle_release(handle);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem handle release failure.";
+
+  // Vmem callback deregister test
+  va = nullptr;
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+  status = hsa_amd_deregister_deallocation_callback(va, call);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(va, size);
+    FAIL() << "Vmem deregister callback failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(0, notifiers[0].callback_status) << "Vmem callback executed after deregister.";
+
+  // Vmem callback with offset pointer
+  va = nullptr;
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  void* offset_ptr = (char*)va + 65536;  // 64KB offset
+  REGISTER(offset_ptr, call, 0);
+
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem offset callback not executed.";
+
+  // Vmem multiple callbacks on same allocation
+  va = nullptr;
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+  REGISTER((char*)va + 65536, call, 1);
+
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem callback 0 not executed.";
+  ASSERT_EQ(1, notifiers[1].callback_status) << "Vmem callback 1 not executed.";
 }

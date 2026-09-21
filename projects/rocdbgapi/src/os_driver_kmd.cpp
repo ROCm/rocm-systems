@@ -307,13 +307,8 @@ os_exception_mask (ULONG64 kmd_mask)
 {
   os_exception_mask_t mask{};
 
-  if (kmd_mask == 0)
-    return mask;
-
-  while (kmd_mask != 0)
+  utils::for_each_flag (kmd_mask, [&] (ULONG64 one_bit)
     {
-      ULONG64 one_bit = kmd_mask ^ (kmd_mask & (kmd_mask - 1));
-
       auto code = os_exception_code (
         excp_mask_to_excp_code<KMD_DBGR_EXCEPTIONS> (one_bit));
 
@@ -322,9 +317,7 @@ os_exception_mask (ULONG64 kmd_mask)
       else
         warning ("Unknown KMD exception code %" PRIx64,
                  static_cast<uint64_t> (one_bit));
-
-      kmd_mask ^= one_bit;
-    }
+    });
 
   return mask;
 }
@@ -336,20 +329,11 @@ kmd_exception_mask (os_exception_mask_t mask)
 {
   ULONG64 kmd_mask = 0;
 
-  if (mask == os_exception_mask_t::none)
-    return kmd_mask;
-
-  while (mask != os_exception_mask_t::none)
+  utils::for_each_flag (mask, [&] (os_exception_mask_t one_bit)
     {
-      os_exception_mask_t one_bit = mask ^ (mask & (mask - 1));
-
       kmd_mask |= kmd_code_to_mask (
         kmd_exception (excp_mask_to_excp_code<os_exception_code_t> (one_bit)));
-
-      mask ^= one_bit;
-    }
-
-  dbgapi_assert (mask == 0);
+    });
 
   return kmd_mask;
 }

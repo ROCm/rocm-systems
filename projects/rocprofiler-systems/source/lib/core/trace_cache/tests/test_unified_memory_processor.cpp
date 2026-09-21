@@ -4,7 +4,7 @@
 // Unit tests for unified_memory_processor_t using synthetic agents and a
 // recording output sink.
 
-#include "common/tests/filesystem.hpp"
+#include "common/env_vars.hpp"
 #include "core/categories.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -41,6 +42,8 @@ using rocprofsys::trace_cache::test::make_kfd_page_migrate_sample;
 using rocprofsys::trace_cache::test::make_kfd_page_migrate_sample_raw_args;
 
 using ::testing::HasSubstr;
+
+namespace env_vars = rocprofsys::env_vars;
 
 namespace
 {
@@ -90,6 +93,33 @@ struct ScopedOutputPath
     ~ScopedOutputPath() { tim::settings::output_path() = previous; }
 };
 
+struct ScopedEnv
+{
+    explicit ScopedEnv(std::string name, std::string desired)
+    : env_name(std::move(name))
+    {
+        const auto* current = getenv(env_name.c_str());
+        if(current != nullptr)
+        {
+            previous = current;
+            had_env  = true;
+        }
+        setenv(env_name.c_str(), desired.c_str(), 1);
+    }
+
+    ~ScopedEnv()
+    {
+        if(had_env)
+            setenv(env_name.c_str(), previous.c_str(), 1);
+        else
+            unsetenv(env_name.c_str());
+    }
+
+    std::string env_name;
+    std::string previous;
+    bool        had_env = false;
+};
+
 class UnifiedMemoryProcessorTest : public ::testing::Test
 {
 protected:
@@ -124,7 +154,7 @@ protected:
         if(!tmp_dir.empty())
         {
             std::error_code ec;
-            test_common::fs::remove_all(tmp_dir, ec);
+            std::filesystem::remove_all(tmp_dir, ec);
         }
     }
 
@@ -244,10 +274,10 @@ TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     ASSERT_TRUE(j.contains("devices"));
     ASSERT_EQ(j["devices"].size(), 1u);
-    auto const& migrations = j["devices"][0]["migrations"];
+    const auto& migrations = j["devices"][0]["migrations"];
 
     for(const char* dir : { "host_to_device", "device_to_host", "device_to_device" })
     {
@@ -275,7 +305,7 @@ TEST_F(UnifiedMemoryProcessorTest, ClassifyDirectionFromTopology)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& m = (*j_opt)["devices"][0]["migrations"];
+    const auto& m = (*j_opt)["devices"][0]["migrations"];
     EXPECT_EQ(m["host_to_device"]["count"], 1u);
     EXPECT_EQ(m["host_to_device"]["total_size_bytes"], 1024u);
     EXPECT_EQ(m["device_to_host"]["count"], 1u);
@@ -288,23 +318,23 @@ TEST_F(UnifiedMemoryProcessorTest,
        HostToDeviceMigrationsBucketByDestinationGpuUnderProducerSemantics)
 {
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/kCpu0,
-                                                   agent_type::CPU));
+                                                   agent_type::cpu));
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu2, 2048, 200, /*dev=*/kCpu0,
-                                                   agent_type::CPU));
+                                                   agent_type::cpu));
 
     processor->finalize_processing();
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     ASSERT_EQ(j["devices"].size(), 2u);
 
     bool saw_gpu1 = false;
     bool saw_gpu2 = false;
-    for(auto const& dev : j["devices"])
+    for(const auto& dev : j["devices"])
     {
         auto        device_id = dev["device_id"].get<std::uint32_t>();
-        auto const& h2d       = dev["migrations"]["host_to_device"];
+        const auto& h2d       = dev["migrations"]["host_to_device"];
 
         if(device_id == kGpu1)
         {
@@ -339,14 +369,14 @@ TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     ASSERT_EQ(j["devices"].size(), 2u);
 
     bool saw_resolved = false;
     bool saw_fallback = false;
-    for(auto const& dev : j["devices"])
+    for(const auto& dev : j["devices"])
     {
-        std::string name = dev["device_name"];
+        const std::string name = dev["device_name"];
         if(dev["device_id"] == kGpu1)
         {
             EXPECT_THAT(name, HasSubstr("gfx950")) << "name=" << name;
@@ -366,16 +396,16 @@ TEST_F(UnifiedMemoryProcessorTest, AgentLookupThrowFallsBackSafely)
 {
     auto sample =
         make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
-                                     /*duration=*/100, /*device_id=*/42, agent_type::CPU);
+                                     /*duration=*/100, /*device_id=*/42, agent_type::cpu);
     EXPECT_NO_THROW(processor->handle(sample));
 
     processor->finalize_processing();
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     ASSERT_EQ(j["devices"].size(), 1u);
-    std::string name = j["devices"][0]["device_name"];
+    const std::string name = j["devices"][0]["device_name"];
     EXPECT_THAT(name, HasSubstr("CPU 42"));
 }
 
@@ -405,6 +435,84 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
     EXPECT_TRUE(saw_json) << "json file not registered";
 }
 
+TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath)
+{
+    auto explicit_dir = tmp_dir + "/ump-explicit";
+    ASSERT_FALSE(std::filesystem::exists(explicit_dir));
+    const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, explicit_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(explicit_dir));
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+}
+
+TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
+{
+    const auto  relative_dir = std::string{ "ump-relative" };
+    const auto* pwd          = getenv("PWD");
+    const auto  base_dir =
+        (pwd != nullptr) ? std::filesystem::path{ pwd } : std::filesystem::current_path();
+    const auto expected_dir = (base_dir / relative_dir).string();
+    std::filesystem::remove_all(expected_dir);
+    ASSERT_FALSE(std::filesystem::exists(expected_dir));
+    const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, relative_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(expected_dir));
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+
+    std::filesystem::remove_all(expected_dir);
+}
+
+TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
+{
+    auto nested_dir = tmp_dir + "/ump-nested/a/b/c";
+    ASSERT_FALSE(std::filesystem::exists(nested_dir));
+    const ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, nested_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    EXPECT_TRUE(std::filesystem::exists(nested_dir)) << "nested dir not created";
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(nested_dir));
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+}
+
 TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
 {
     processor->handle(make_kfd_page_fault_sample(/*agent=*/kGpu1, /*read=*/true));
@@ -420,7 +528,7 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
     bool saw_json = false;
     for(const auto& e : files)
     {
-        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
         if(e.format == output_format::text) saw_txt = true;
         if(e.format == output_format::json) saw_json = true;
     }
@@ -429,7 +537,7 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     EXPECT_EQ(j["summary"]["total_page_faults"], 3u);
     EXPECT_EQ(j["devices"].size(), 0u);
 }
@@ -446,11 +554,11 @@ TEST_F(UnifiedMemoryProcessorTest, MalformedArgsStringSkipsEvent)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     EXPECT_EQ(j["summary"]["total_page_faults"], 1u);
     EXPECT_EQ(j["devices"].size(), 0u)
         << "Malformed migrate event was incorrectly recorded as a device";
-    auto const& triggers = j["summary"]["migration_triggers"];
+    const auto& triggers = j["summary"]["migration_triggers"];
     for(const auto& row : kTriggerTable)
     {
         EXPECT_EQ(triggers[row.json_key], 0u)
@@ -467,14 +575,14 @@ TEST_F(UnifiedMemoryProcessorTest, TriggerTableCoversAllKfdNames)
         const char* name = (row.kfd_name != nullptr) ? row.kfd_name : kSentinelFedName;
         processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/1024,
                                                        /*duration=*/100, /*device_id=*/0,
-                                                       agent_type::CPU, name));
+                                                       agent_type::cpu, name));
     }
 
     processor->finalize_processing();
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& triggers = (*j_opt)["summary"]["migration_triggers"];
+    const auto& triggers = (*j_opt)["summary"]["migration_triggers"];
     for(const auto& row : kTriggerTable)
     {
         EXPECT_EQ(triggers[row.json_key], 1u)
@@ -489,7 +597,7 @@ TEST_F(UnifiedMemoryProcessorTest, JsonReportsXnackFlag)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& summary = (*j_opt)["summary"];
+    const auto& summary = (*j_opt)["summary"];
     ASSERT_TRUE(summary.contains("xnack_enabled"));
     ASSERT_TRUE(summary["xnack_enabled"].is_boolean());
     EXPECT_EQ(summary["xnack_enabled"].get<bool>(), expected_xnack_enabled);
@@ -507,14 +615,14 @@ TEST_F(UnifiedMemoryProcessorTest, FloatSanitizationProducesZeroSize)
             std::numeric_limits<std::uint64_t>::max()),  // = 2^64 (UB if cast)
     };
 
-    for(double v : rejected_values)
+    for(const double v : rejected_values)
         feed_h2d_migrate_with_value(v);
 
     processor->finalize_processing();
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& h2d = (*j_opt)["devices"][0]["migrations"]["host_to_device"];
+    const auto& h2d = (*j_opt)["devices"][0]["migrations"]["host_to_device"];
     EXPECT_EQ(h2d["count"], rejected_values.size());
     EXPECT_EQ(h2d["total_size_bytes"], 0u)
         << "no rejected value should have contributed nonzero bytes";
@@ -534,7 +642,7 @@ TEST_F(UnifiedMemoryProcessorTest, FloatJustBelowBoundaryIsAccepted)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& h2d = (*j_opt)["devices"][0]["migrations"]["host_to_device"];
+    const auto& h2d = (*j_opt)["devices"][0]["migrations"]["host_to_device"];
     EXPECT_EQ(h2d["count"], 1u);
     for(const char* k : { "total_size_bytes", "min_size_bytes", "max_size_bytes" })
     {
@@ -557,7 +665,7 @@ TEST_F(UnifiedMemoryProcessorTest, NodeIdsExceedingUint32AreRejected)
 
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
-    auto const& j = *j_opt;
+    const auto& j = *j_opt;
     EXPECT_EQ(j["devices"].size(), 0u);
 }
 

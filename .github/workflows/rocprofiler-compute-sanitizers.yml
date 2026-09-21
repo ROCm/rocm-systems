@@ -1,0 +1,225 @@
+name: rocprofiler-compute Sanitizers
+run-name: rocprofiler-compute-sanitizers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - rocprofiler-compute-develop
+    paths:
+      - ".github/workflows/rocprofiler-compute-sanitizers.yml"
+      - "projects/rocprofiler-compute/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.markdownlint-ci2.yaml"
+      - "!**/.readthedocs.yaml"
+      - "!**/.spellcheck.local.yaml"
+      - "!**/.wordlist.txt"
+      - "!projects/rocprofiler-compute/docs/**"
+      - "!projects/rocprofiler-compute/source/docs/**"
+      - "!projects/rocprofiler-compute/source/python/gui/**"
+      - "!projects/rocprofiler-compute/docker/**"
+      - "!projects/rocprofiler-compute/CMakePresets.json"
+  pull_request:
+    paths:
+      - ".github/workflows/rocprofiler-compute-sanitizers.yml"
+      - "projects/rocprofiler-compute/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.markdownlint-ci2.yaml"
+      - "!**/.readthedocs.yaml"
+      - "!**/.spellcheck.local.yaml"
+      - "!**/.wordlist.txt"
+      - "!projects/rocprofiler-compute/docs/**"
+      - "!projects/rocprofiler-compute/source/docs/**"
+      - "!projects/rocprofiler-compute/source/python/gui/**"
+      - "!projects/rocprofiler-compute/docker/**"
+      - "!projects/rocprofiler-compute/CMakePresets.json"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  ROCPROFSYS_CI: ON
+  # ROCM_PATH is discovered from the venv at runtime, see "Install nightly ROCm
+  # wheels".
+  ROCM_VENV: "/opt/rocm-venv"
+  WHEEL_INDEX_URL: "https://nightly.repo.amd.com/rocm/whl-next/"
+  GFX_TARGET: "gfx950"
+
+jobs:
+  ci_config:
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  sanitizer:
+    name: ${{ matrix.sanitizer.name }}
+    needs: ci_config
+    runs-on: ${{ needs.ci_config.outputs.gfx950_runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          - name: asan
+            enable_sanitizer: ASAN
+          - name: tsan
+            enable_sanitizer: TSAN
+          - name: ubsan
+            enable_sanitizer: UBSAN
+    env:
+      HIP_PLATFORM: "amd"
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    container:
+      image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
+      options: >-
+        --privileged
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --cap-add CAP_SYS_ADMIN
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y pkg-config
+          # Drop this once the nightly image carries the Dockerfile.ubuntu.ci change.
+          apt-get install -y python3-venv python3-dev
+          echo "✅ Dependencies Installed!"
+
+      - name: Install nightly ROCm wheels
+        shell: bash
+        run: |
+          set -e
+          python3 -m venv "${ROCM_VENV}"
+          "${ROCM_VENV}/bin/pip" install --upgrade pip
+
+          # cmake 3.21 finds the ROCm root only via hipcc. Drop once the nightly image has this.
+          "${ROCM_VENV}/bin/pip" install 'cmake==3.28.*'
+
+          # No torch here. Sanitizing a stock libtorch build is out of scope, so
+          # the trace collector stays unbuilt in these jobs.
+          "${ROCM_VENV}/bin/pip" install \
+            --index-url "${WHEEL_INDEX_URL}" \
+            --timeout 600 \
+            "rocm[libraries,profiler,devel,device-${GFX_TARGET}]"
+
+          "${ROCM_VENV}/bin/rocm-sdk" init
+
+          # pip only warns on an unknown extra, so assert the device wheel landed.
+          "${ROCM_VENV}/bin/pip" show "rocm-sdk-device-${GFX_TARGET}" > /dev/null
+
+          # $GITHUB_ENV is a file; every later step in this job starts with these
+          # set. A plain export would not outlive this step.
+          rocm_path="$("${ROCM_VENV}/bin/rocm-sdk" path --root)"
+          {
+            echo "ROCM_PATH=${rocm_path}"
+            echo "HIP_PATH=${rocm_path}"
+            echo "HIP_DEVICE_LIB_PATH=${rocm_path}/lib/llvm/amdgcn/bitcode"
+            echo "PATH=${ROCM_VENV}/bin:${rocm_path}/bin:${rocm_path}/lib/llvm/bin:${PATH}"
+            echo "LD_LIBRARY_PATH=${rocm_path}/lib:${rocm_path}/lib/llvm/lib:${rocm_path}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          } >> "${GITHUB_ENV}"
+
+          echo "ROCm installed to: ${rocm_path}"
+          echo "✅ ROCm Installation Complete!"
+
+      - name: Output TheRock manifest
+        run: cat "${ROCM_PATH}/share/therock/therock_manifest.json"
+
+      - name: Install Python requirements
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          set -e
+          pip install -r requirements.txt -r requirements-test.txt --timeout 300
+          echo "✅ pip requirements installed!"
+
+      - name: Configure, build, and test
+        id: test
+        continue-on-error: true
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          set -e
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --global --add safe.directory "${PWD}"
+
+          c_compiler="$(command -v amdclang)"
+          cxx_compiler="$(command -v amdclang++)"
+
+          python3 ./tools/run-ci.py \
+            --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-24.04-${{ matrix.sanitizer.name }}" \
+            --actor "${{ github.actor }}" \
+            --site ${{ needs.ci_config.outputs.gfx950_runner }} \
+            --mode Continuous \
+            --build-jobs 16 \
+            --repeat-until-pass 1 \
+            --repeat-after-timeout 1 \
+            -- \
+            "-DCMAKE_C_COMPILER=${c_compiler}" \
+            "-DCMAKE_CXX_COMPILER=${cxx_compiler}" \
+            "-DCMAKE_HIP_COMPILER=${cxx_compiler}" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_PREFIX_PATH=${ROCM_PATH}" \
+            -DENABLE_TESTS=ON \
+            -DINSTALL_TESTS=ON \
+            "-DENABLE_SANITIZER=${{ matrix.sanitizer.enable_sanitizer }}" \
+            -- \
+            -L sanitizer
+
+      - name: Output logs
+        if: steps.test.outcome == 'failure'
+        working-directory: projects/rocprofiler-compute
+        shell: bash
+        run: |
+          echo "❌ Run Failed: Outputting available log files..."
+          for log in build/Testing/Temporary/LastTest*.log \
+            build/Testing/Temporary/LastConfigure*.log; do
+            if [ -f "${log}" ]; then
+              echo "=== ${log} ==="
+              cat "${log}"
+            fi
+          done
+
+      - name: Check test results
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.test.outcome }}" = "failure" ]; then
+            echo "❌ Tests failed - see CDash for details: https://my.cdash.org/index.php?project=rocprofiler-compute"
+            exit 1
+          fi
+          echo "✅ All tests passed!"

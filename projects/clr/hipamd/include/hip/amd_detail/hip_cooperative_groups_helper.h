@@ -108,6 +108,22 @@ __CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(unsigned long long base_m
   return out;
 }
 }  // namespace helper
+
+/**
+ * @brief Drain the asynchronous global<->LDS copies issued by this wave.
+ *
+ * The copies behind `cooperative_groups::memcpy_async` complete out of band and are tracked by
+ * ASYNCcnt, which is per-wave and is not drained by a barrier. Each wave therefore has to drain
+ * its own counter, and it has to do so before the group barrier, so that the barrier is what
+ * publishes the data to the rest of the group.
+ */
+__CG_STATIC_QUALIFIER__ void wait_async_copies() {
+#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
+}
+
 /**
  *
  * @brief  Functionalities related to multi-grid cooperative group type
@@ -134,7 +150,10 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_multi_grid_is_valid()); }
 
-__CG_STATIC_QUALIFIER__ void sync() { __ockl_multi_grid_sync(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __ockl_multi_grid_sync();
+}
 
 }  // namespace multi_grid
 
@@ -173,16 +192,25 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
-__CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __ockl_grid_sync();
+}
 
 __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
   return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
-__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() { return __ockl_grid_bar_arrive(); }
+__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() {
+  wait_async_copies();
+  return __ockl_grid_bar_arrive();
+}
 
-__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() {
+  wait_async_copies();
+  return __ockl_grid_bar_arrive();
+}
 
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
@@ -220,7 +248,10 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
-__CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __syncthreads();
+}
 
 __CG_STATIC_QUALIFIER__ dim3 block_dim() {
   return (dim3(static_cast<__hip_uint32_t>(blockDim.x), static_cast<__hip_uint32_t>(blockDim.y),
@@ -228,35 +259,42 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
-    __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
-#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+  wait_async_copies();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
+    __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait() {
-#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
-    __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  __builtin_amdgcn_s_barrier_wait(-1);
-#else
-  __builtin_amdgcn_s_barrier();
-#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait))
+    __builtin_amdgcn_s_barrier_wait(-1);
+  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 }
 }  // namespace workgroup
 
 namespace tiled_group {
 
 // enforce ordering for memory instructions
-__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront"); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
+}
 
 }  // namespace tiled_group
 
 namespace coalesced_group {
 
 // enforce ordering for memory instructions
-__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront"); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
+}
 
 // Masked bit count
 //
@@ -264,13 +302,16 @@ __CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "
 // have i-th bit of x set and come before the current thread.
 __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int add = 0) {
   unsigned int counter = 0;
+  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo)) __builtin_trap();
   if (static_cast<int>(warpSize) == 32) {
     counter = __builtin_amdgcn_mbcnt_lo(static_cast<unsigned int>(x), add);
   } else {
     unsigned int lo = static_cast<unsigned int>(x & 0xFFFFFFFF);
     unsigned int hi = static_cast<unsigned int>((x >> 32) & 0xFFFFFFFF);
     counter = __builtin_amdgcn_mbcnt_lo(lo, add);
-    counter = __builtin_amdgcn_mbcnt_hi(hi, counter);
+    counter = __builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi)
+                  ? __builtin_amdgcn_mbcnt_hi(hi, counter)
+                  : counter;
   }
 
   return counter;
@@ -280,57 +321,71 @@ __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int 
 
 namespace cluster {
 __CG_STATIC_QUALIFIER__ void sync() {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
-#if __has_builtin(__builtin_amdgcn_s_cluster_barrier)
-  // Generates a signal + wait combination for cluster barrier
-  __builtin_amdgcn_s_cluster_barrier();
-#else
-  __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
-#endif
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+  wait_async_copies();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
+    // Generates a signal + wait combination for cluster barrier
+    __builtin_amdgcn_s_cluster_barrier();
+  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
-#if __has_builtin(__builtin_amdgcn_s_barrier_signal) and                                           \
-    __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  bool isfirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);  // -1 is workgroup barrier
-  __builtin_amdgcn_s_barrier_wait(-1);
+  wait_async_copies();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait)) {
+    bool isfirst = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal_isfirst)
+                       ? __builtin_amdgcn_s_barrier_signal_isfirst(-1)  // -1 is workgroup barrier
+                       : false;
+    __builtin_amdgcn_s_barrier_wait(-1);
 
-  if (isfirst) {
-    // Signal the cluster barrier, -3 means user cluster barrier
-    __builtin_amdgcn_s_barrier_signal(-3);
+    if (isfirst) {
+      // Signal the cluster barrier, -3 means user cluster barrier
+      __builtin_amdgcn_s_barrier_signal(-3);
+    }
   }
-#endif
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait() {
-#if __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  // wait on the cluster barrier, -3 means user cluster barrier
-  __builtin_amdgcn_s_barrier_wait(-3);
-#else
-  __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
-#endif
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait))
+    // wait on the cluster barrier, -3 means user cluster barrier
+    __builtin_amdgcn_s_barrier_wait(-3);
+  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
 }
 
 __CG_STATIC_QUALIFIER__ dim3 block_index() {
-#if __has_builtin(__builtin_amdgcn_cluster_workgroup_id_x)
-  return dim3(__builtin_amdgcn_cluster_workgroup_id_x(), __builtin_amdgcn_cluster_workgroup_id_y(),
-              __builtin_amdgcn_cluster_workgroup_id_z());
-#else
-  return dim3{0, 0, 0};
-#endif
+  return dim3(__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_x)
+                  ? __builtin_amdgcn_cluster_workgroup_id_x()
+                  : 0,
+              __builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_y)
+                  ? __builtin_amdgcn_cluster_workgroup_id_y()
+                  : 0,
+              __builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_z)
+                  ? __builtin_amdgcn_cluster_workgroup_id_z()
+                  : 0);
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
-#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_x)
-  return dim3(__builtin_amdgcn_cluster_workgroup_max_id_x() + 1,
-              __builtin_amdgcn_cluster_workgroup_max_id_y() + 1,
-              __builtin_amdgcn_cluster_workgroup_max_id_z() + 1);
-#else
-  return dim3{1, 1, 1};
-#endif
+  return dim3((__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_x)
+                   ? __builtin_amdgcn_cluster_workgroup_max_id_x()
+                   : 0) +
+                  1,
+              (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_y)
+                   ? __builtin_amdgcn_cluster_workgroup_max_id_y()
+                   : 0) +
+                  1,
+              (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_z)
+                   ? __builtin_amdgcn_cluster_workgroup_max_id_z()
+                   : 0) +
+                  1);
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int block_rank() {
@@ -346,11 +401,10 @@ __CG_STATIC_QUALIFIER__ dim3 thread_index() {
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
-#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_flat_id)
-  return __builtin_amdgcn_cluster_workgroup_max_flat_id() + 1;
-#else
-  return 1;
-#endif
+  return (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_flat_id)
+              ? __builtin_amdgcn_cluster_workgroup_max_flat_id()
+              : 0) +
+         1;
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_threads() {
@@ -373,7 +427,9 @@ __CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
 
 template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
 #if __has_builtin(__builtin_amdgcn_map_shared_rank)
-  return (T*)(__builtin_amdgcn_map_shared_rank((void*)in, rank));
+  return (T*)(__builtin_amdgcn_is_invocable(__builtin_amdgcn_map_shared_rank)
+                  ? __builtin_amdgcn_map_shared_rank((void*)in, rank)
+                  : nullptr);
 #else
   return nullptr;
 #endif
@@ -381,6 +437,7 @@ template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank
 
 __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
 #if __has_builtin(__builtin_amdgcn_query_shared_rank)
+  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank)) __builtin_trap();
   return static_cast<unsigned int>(
       __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
 #else

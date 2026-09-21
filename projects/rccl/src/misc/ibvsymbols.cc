@@ -13,23 +13,16 @@
 #ifdef NCCL_BUILD_RDMA_CORE
 /* RDMA-core linking mode. Symbols are pointers to linked IB Verbs */
 
-#define ASSIGN_SYM(container, symbol, name) container->name= &symbol;
+#define ASSIGN_SYM(container, symbol, name) container->name = &symbol;
 
 // Passthrough function for ibv_reg_mr macro in verbs.h
-struct ibv_mr* ibv_internal_reg_mr(
-      struct ibv_pd* pd,
-      void* addr,
-      size_t length,
-      int access) {
-    return ibv_reg_mr(pd, addr, length, access);
-  }
+struct ibv_mr* ibv_internal_reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
+  return ibv_reg_mr(pd, addr, length, access);
+}
 
 // Passthrough function for ibv_internal_query_port macro in verbs.h
-int ibv_internal_query_port(
-      struct ibv_context* context,
-      uint8_t port_num,
-      struct ibv_port_attr* port_attr) {
-    return ibv_query_port(context, port_num, port_attr);
+int ibv_internal_query_port(struct ibv_context* context, uint8_t port_num, struct ibv_port_attr* port_attr) {
+  return ibv_query_port(context, port_num, port_attr);
 }
 
 ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
@@ -42,6 +35,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   ASSIGN_SYM(ibvSymbols, ibv_ack_async_event, ibv_internal_ack_async_event);
   ASSIGN_SYM(ibvSymbols, ibv_query_device, ibv_internal_query_device);
   ASSIGN_SYM(ibvSymbols, ibv_query_gid, ibv_internal_query_gid);
+  ASSIGN_SYM(ibvSymbols, ibv_query_pkey, ibv_internal_query_pkey);
   ASSIGN_SYM(ibvSymbols, ibv_query_qp, ibv_internal_query_qp);
   ASSIGN_SYM(ibvSymbols, ibv_alloc_pd, ibv_internal_alloc_pd);
   ASSIGN_SYM(ibvSymbols, ibv_dealloc_pd, ibv_internal_dealloc_pd);
@@ -60,6 +54,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
 
   ASSIGN_SYM(ibvSymbols, ibv_query_ece, ibv_internal_query_ece);
   ASSIGN_SYM(ibvSymbols, ibv_set_ece, ibv_internal_set_ece);
+  ASSIGN_SYM(ibvSymbols, ibv_query_port_speed, ibv_internal_query_port_speed);
 
   ibvSymbols->ibv_internal_reg_mr = &ibv_internal_reg_mr;
   ibvSymbols->ibv_internal_query_port = &ibv_internal_query_port;
@@ -82,8 +77,9 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   void* tmp;
   void** cast;
   const char* envIbVerbsLib = ncclGetEnv("NCCL_IBVERBS_LIB");
-  const char* ibVerbsLib[NCCL_IBVERBS_LIBS] = { envIbVerbsLib, "libibverbs.so", "libibverbs.so.1" };
-  if (envIbVerbsLib) INFO(NCCL_ENV|NCCL_INIT, "NCCL_IBVERBS_LIB set by environment to %s", envIbVerbsLib);
+  if (!envIbVerbsLib) envIbVerbsLib = ncclGetEnv("NCCL_LIBIBVERBS_SO");
+  const char* ibVerbsLib[NCCL_IBVERBS_LIBS] = {envIbVerbsLib, "libibverbs.so", "libibverbs.so.1"};
+  if (envIbVerbsLib) INFO(NCCL_ENV | NCCL_INIT, "NCCL_IBVERBS_LIB set by environment to %s", envIbVerbsLib);
 
   for (int i = 0; i < NCCL_IBVERBS_LIBS; i++) {
     if (ibVerbsLib[i] == nullptr) continue;
@@ -93,20 +89,22 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   }
   if (ibvhandle == nullptr) goto teardown;
 
-#define LOAD_SYM(handle, symbol, funcptr) do {           \
-    cast = (void**)&funcptr;                             \
-    tmp = dlvsym(handle, symbol, IBVERBS_VERSION);       \
-    if (tmp == NULL) {                                   \
-      WARN("dlvsym failed on %s - %s version %s", symbol, dlerror(), IBVERBS_VERSION);  \
-      goto teardown;                                     \
-    }                                                    \
-    *cast = tmp;                                         \
+#define LOAD_SYM(handle, symbol, funcptr) \
+  do { \
+    cast = (void**)&funcptr; \
+    tmp = dlvsym(handle, symbol, IBVERBS_VERSION); \
+    if (tmp == NULL) { \
+      WARN("dlvsym failed on %s - %s version %s", symbol, dlerror(), IBVERBS_VERSION); \
+      goto teardown; \
+    } \
+    *cast = tmp; \
   } while (0)
 
 // Attempt to load a specific symbol version - fail silently
-#define LOAD_SYM_VERSION(handle, symbol, funcptr, version) do {  \
-    cast = (void**)&funcptr;                                     \
-    *cast = dlvsym(handle, symbol, version);                     \
+#define LOAD_SYM_VERSION(handle, symbol, funcptr, version) \
+  do { \
+    cast = (void**)&funcptr; \
+    *cast = dlvsym(handle, symbol, version); \
   } while (0)
 
   LOAD_SYM(ibvhandle, "ibv_get_device_list", ibvSymbols->ibv_internal_get_device_list);
@@ -119,6 +117,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   LOAD_SYM(ibvhandle, "ibv_query_device", ibvSymbols->ibv_internal_query_device);
   LOAD_SYM(ibvhandle, "ibv_query_port", ibvSymbols->ibv_internal_query_port);
   LOAD_SYM(ibvhandle, "ibv_query_gid", ibvSymbols->ibv_internal_query_gid);
+  LOAD_SYM(ibvhandle, "ibv_query_pkey", ibvSymbols->ibv_internal_query_pkey);
   LOAD_SYM(ibvhandle, "ibv_query_qp", ibvSymbols->ibv_internal_query_qp);
   LOAD_SYM(ibvhandle, "ibv_alloc_pd", ibvSymbols->ibv_internal_alloc_pd);
   LOAD_SYM(ibvhandle, "ibv_dealloc_pd", ibvSymbols->ibv_internal_dealloc_pd);
@@ -137,7 +136,8 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   LOAD_SYM(ibvhandle, "ibv_event_type_str", ibvSymbols->ibv_internal_event_type_str);
 
   LOAD_SYM_VERSION(ibvhandle, "ibv_query_ece", ibvSymbols->ibv_internal_query_ece, "IBVERBS_1.10");
-  LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece",   ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
+  LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece", ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
+  LOAD_SYM_VERSION(ibvhandle, "ibv_query_port_speed", ibvSymbols->ibv_internal_query_port_speed, "IBVERBS_1.16");
 
   return ncclSuccess;
 
@@ -152,6 +152,7 @@ teardown:
   ibvSymbols->ibv_internal_query_device = NULL;
   ibvSymbols->ibv_internal_query_port = NULL;
   ibvSymbols->ibv_internal_query_gid = NULL;
+  ibvSymbols->ibv_internal_query_pkey = NULL;
   ibvSymbols->ibv_internal_query_qp = NULL;
   ibvSymbols->ibv_internal_alloc_pd = NULL;
   ibvSymbols->ibv_internal_dealloc_pd = NULL;
@@ -168,6 +169,7 @@ teardown:
   ibvSymbols->ibv_internal_event_type_str = NULL;
   ibvSymbols->ibv_internal_query_ece = NULL;
   ibvSymbols->ibv_internal_set_ece = NULL;
+  ibvSymbols->ibv_internal_query_port_speed = NULL;
 
   if (ibvhandle != NULL) dlclose(ibvhandle);
   return ncclSystemError;

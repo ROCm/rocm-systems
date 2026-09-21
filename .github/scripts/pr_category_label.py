@@ -31,6 +31,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -38,14 +40,30 @@ from github_cli_client import GitHubCLIClient
 
 logger = logging.getLogger(__name__)
 
+
+def assert_valid_commit_sha(sha: str) -> str:
+    """Ensure only full commit SHAs are passed to git subprocesses."""
+    assert re.fullmatch(r"[0-9a-f]{40}", sha), f"Invalid commit SHA: {sha!r}"
+    return sha
+
+
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Apply labels based on PR's changed files.")
-    parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
+    parser = argparse.ArgumentParser(
+        description="Apply labels based on PR's changed files."
+    )
+    parser.add_argument(
+        "--repo", required=True, help="Full repository name (e.g., org/repo)"
+    )
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
-    parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print results without writing to GITHUB_OUTPUT.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args(argv)
+
 
 def compute_desired_labels(file_paths: list) -> set:
     """Determine the desired labels based on the changed files."""
@@ -57,10 +75,15 @@ def compute_desired_labels(file_paths: list) -> set:
                 desired_labels.add(f"project: {parts[1]}")
             elif parts[0] == "shared":
                 desired_labels.add(f"shared: {parts[1]}")
+            elif parts[0] == "profilers":
+                desired_labels.add(f"project: {parts[1]}")
     logger.debug(f"Desired labels based on changes: {desired_labels}")
     return desired_labels
 
-def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run: bool) -> None:
+
+def output_labels(
+    existing_labels: List[str], desired_labels: List[str], dry_run: bool
+) -> None:
     """Output the labels to add/remove to GITHUB_OUTPUT or log them in dry-run mode."""
     to_add = sorted(desired_labels - set(existing_labels))
     logger.debug(f"Labels to add: {to_add}")
@@ -69,32 +92,41 @@ def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run
     else:
         output_file = os.environ.get("GITHUB_OUTPUT")
         if output_file:
-            with open(output_file, 'a') as f:
+            with open(output_file, "a") as f:
                 print(f"label_add={','.join(to_add)}", file=f)
             logger.info(f"Wrote to GITHUB_OUTPUT: add={','.join(to_add)}")
         else:
-            print("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.")
+            print(
+                "GITHUB_OUTPUT environment variable not set. Outputs cannot be written."
+            )
             sys.exit(1)
+
 
 def main(argv=None) -> None:
     """Main function to execute the PR auto label logic."""
     args = parse_arguments(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.INFO
-    )
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
     client = GitHubCLIClient()
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
 
     if not changed_files:
-        logger.warning("REST API failed or returned no changed files. Falling back to SHA-based Git diff...")
+        logger.warning(
+            "REST API failed or returned no changed files. Falling back to SHA-based Git diff..."
+        )
         try:
-            pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
+            pr_data = subprocess.check_output(
+                ["gh", "api", f"repos/{args.repo}/pulls/{args.pr}"],
+                text=True,
+            )
             pr = json.loads(pr_data)
-            base_sha = pr["base"]["sha"]
-            head_sha = pr["head"]["sha"]
+            base_sha = assert_valid_commit_sha(pr["base"]["sha"])
+            head_sha = assert_valid_commit_sha(pr["head"]["sha"])
             logger.debug(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
-            os.system(f"git fetch origin {base_sha} {head_sha}")
-            result = os.popen(f"git diff --name-only {base_sha} {head_sha}").read()
+            subprocess.check_call(["git", "fetch", "origin", base_sha, head_sha])
+            result = subprocess.check_output(
+                ["git", "diff", "--name-only", base_sha, head_sha],
+                text=True,
+            )
             changed_files = result.strip().splitlines()
             logger.info(f"Fallback changed files (SHA-based): {changed_files}")
         except Exception as e:
@@ -104,6 +136,7 @@ def main(argv=None) -> None:
     existing_labels = client.get_existing_labels_on_pr(args.repo, int(args.pr))
     desired_labels = compute_desired_labels(changed_files)
     output_labels(existing_labels, desired_labels, args.dry_run)
+
 
 if __name__ == "__main__":
     main()

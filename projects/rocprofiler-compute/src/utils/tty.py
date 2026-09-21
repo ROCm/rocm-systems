@@ -6,17 +6,22 @@ import copy
 import math
 import shutil
 import textwrap
+from io import StringIO
 from typing import Any, Optional, TextIO
 
 import pandas as pd
+from rich.console import Console as RichConsole
+from rich.panel import Panel as RichPanel
+from rich.table import Table as RichTable
+from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
-from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
-from utils.kernel_name_shortener import (
-    kernel_name_shortener,
-)
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
 from utils.logger import console_error, console_log, console_warning
+from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
+from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
@@ -25,10 +30,13 @@ from utils.utils_analysis import (
     simplify_kernel_name,
 )
 from utils.utils_common import (
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
-    get_arch_alias_to_panel_id,
+    convert_filter_blocks_to_panel_ids,
+    is_gfx9,
+    is_gfx115x,
+    is_gfx1250,
 )
+
+_GUIDANCE_PANEL_MIN_WIDTH = 100
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -38,44 +46,23 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 
 KERNEL_NAME_WRAP_WIDTH = 40
 
+PC_SAMPLING_TABLE_ID = "21.1"
+
+PC_SAMPLING_STALL_REASON_REFERENCE = (
+    "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+    "rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons"
+)
+
 
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
 
 
-def _recalculate_pct_of_peak(
-    df: pd.DataFrame,
-    idx: Any,  # noqa: ANN401
-    value_col: str,
-    peak_col: str,
-    pct_cols: list[str],
-    decimal: int,
-) -> None:
-    """Recalculate Pct of Peak = (value / peak) * 100 after BW scaling."""
-    for pct_col in pct_cols:
-        if pct_col not in df.columns:
-            continue
-        try:
-            val = df.loc[idx, value_col]
-            peak = df.loc[idx, peak_col]
-            if (
-                pd.notna(val)
-                and pd.notna(peak)
-                and val != "N/A"
-                and peak != "N/A"
-                and float(peak) != 0
-            ):
-                pct = (float(val) / float(peak)) * 100
-                df.loc[idx, pct_col] = round(pct, decimal)
-        except (ValueError, TypeError, ZeroDivisionError):
-            pass
-
-
 def scale_bw_columns(
     df: pd.DataFrame, value_columns: list[str], decimal: int = 2
 ) -> pd.DataFrame:
-    """Scale Bytes/s rows to human-readable units; recalculate Pct of Peak."""
+    """Scale Bytes/s rows to human-readable units; recalculate Percent of Peak."""
     if "Unit" not in df.columns:
         return df
 
@@ -85,7 +72,7 @@ def scale_bw_columns(
     if not bw_rows.any():
         return df_copy
 
-    pct_cols = ["Pct of Peak", "PoP"]
+    pct_cols = ["Percent of Peak"]
     value_col = "Value" if "Value" in df_copy.columns else "Avg"
     peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
 
@@ -118,7 +105,13 @@ def scale_bw_columns(
             except (ValueError, TypeError):
                 pass
 
-        _recalculate_pct_of_peak(df_copy, idx, value_col, peak_col, pct_cols, decimal)
+        for pct_col in pct_cols:
+            if pct_col in df_copy.columns:
+                pct = calc_pct_of_peak(
+                    df_copy.loc[idx, value_col], df_copy.loc[idx, peak_col]
+                )
+                if pct is not None:
+                    df_copy.loc[idx, pct_col] = round(pct, decimal)
 
         df_copy.loc[idx, "Unit"] = unit
 
@@ -259,8 +252,6 @@ def is_roofline_shown(
             )
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
-            if not kernel_top_df.empty:
-                kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
             # Display roofline metrics
             for kernel_id, metrics in workload.roofline_metrics.items():
@@ -324,18 +315,23 @@ def is_roofline_shown(
     return True
 
 
-def list_torch_operators(
+def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
+    framework_label: str = "PyTorch",
 ) -> None:
-    """Display PyTorch operators as a unified call tree grouped by source location."""
+    """Display operators as a unified call tree grouped by source location.
+
+    ``framework_label`` sets the heading text (for example "PyTorch" or
+    "Triton").
+    """
     if not call_trees:
-        print(f"\nPyTorch Operators in: {workload_path}")
+        print(f"\n{framework_label} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print(f"{framework_label} Operator Call Tree: {workload_path}")
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
@@ -679,6 +675,9 @@ def process_table_data(
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
 
+                if header not in cur_df.columns:
+                    continue
+
                 if (table_type == "raw_csv_table") or (
                     table_type == "metric_table" and header not in hidden_cols
                 ):
@@ -741,12 +740,6 @@ def process_table_data(
     return result_df
 
 
-def _gfx115_mem_chart_heading(panel: Optional[dict[str, Any]], normal_unit: str) -> str:
-    """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
-    panel_id = int((panel or {}).get("id", 300))
-    return mem_chart_gfx11.format_mem_chart_heading(normal_unit, panel_id=panel_id)
-
-
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
     """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
     sources = panel.get("data source") or []
@@ -775,8 +768,9 @@ def format_table_output(
         for col_idx in range(len(df.columns))
     )
 
-    # Do not print the table if any column is empty
-    if is_empty_columns_exist:
+    # Do not print the table if any column is empty. PC sampling table 21.1 is
+    # exempt: its source column is all N/A when the workload lacks debug info.
+    if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
@@ -788,6 +782,9 @@ def format_table_output(
     ) == "mem_chart" and not _tty_view_is_table(args)
     if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
+
+    if table_id_str == PC_SAMPLING_TABLE_ID:
+        content += f"{PC_SAMPLING_STALL_REASON_REFERENCE}\n"
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -805,12 +802,17 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
+    # For a single run, format Bytes/s metrics with human-readable units.
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
-    is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
 
-    if is_single_run and is_gfx115x and "Unit" in df.columns:
+    # Capture raw metric values before human-readable BW scaling so the chart
+    # renderer still receives Bytes/s floats.
+    raw_chart_values: Optional[dict[str, Any]] = None
+    if "Metric" in df.columns and "Value" in df.columns:
+        raw_chart_values = dict(zip(df["Metric"], df["Value"]))
+
+    if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
@@ -822,37 +824,169 @@ def format_table_output(
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
+        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
     )
 
     if use_mem_chart:
         if mem_data_override is not None:
             mem_data = mem_data_override
         else:
-            mem_data = (
-                pd
-                .DataFrame([df["Metric"], df["Value"]])
-                .transpose()
-                .set_index("Metric")
-                .to_dict()["Value"]
-            )
+            mem_data = raw_chart_values or {}
 
-        if gpu_arch and gpu_arch.startswith("gfx115"):
+        if is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
-                    args.normal_unit,
                     mem_data,
-                    chart_title=_gfx115_mem_chart_heading(None, args.normal_unit),
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                )
+                + "\n"
+            )
+        elif is_gfx1250(gpu_arch):
+            content += (
+                mem_chart_gfx1250.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
                 )
                 + "\n"
             )
         else:
-            content += mem_chart_gfx9.plot_mem_chart(args.normal_unit, mem_data) + "\n"
+            content += (
+                mem_chart_gfx9.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                    gpu_arch=gpu_arch,
+                )
+                + "\n"
+            )
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
         )
 
     return content
+
+
+def _max_line_width(rendered: str) -> int:
+    """Return the longest line width after stripping ANSI codes."""
+    stripped = strip_ansi(rendered)
+    if not stripped.strip():
+        return 0
+    return max(len(line) for line in stripped.splitlines())
+
+
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
+    """Render membw guidance text to append below the memory chart."""
+    if not _has_active_nodes(membw_result.nodes):
+        return _render_membw_status_line(membw_result)
+    panel_output = _render_membw_guidance_panel(
+        membw_result.guidance_blocks,
+        chart_width=chart_width,
+    )
+    if panel_output:
+        return panel_output
+    return "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations).\n"
+
+
+def _has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
+    """True when any node in the tree is active."""
+    for node in nodes:
+        if node.state == "active":
+            return True
+        if _has_active_nodes(node.children):
+            return True
+    return False
+
+
+def _all_nodes_indeterminate(
+    nodes: tuple[BottleneckNode, ...],
+) -> bool:
+    """True when every root node is indeterminate."""
+    return bool(nodes) and all(n.state == "indeterminate" for n in nodes)
+
+
+def _render_membw_status_line(
+    membw_result: MemBwAnalysisResult,
+) -> str:
+    """Render a single status line when no bottlenecks are active."""
+    if membw_result.availability == "unavailable":
+        return (
+            "Memory Bandwidth Analysis: Unavailable "
+            f"({membw_result.availability_reason or 'no data'}).\n"
+        )
+    if membw_result.availability == "partial":
+        return (
+            "Memory Bandwidth Analysis: Partial data "
+            f"({membw_result.availability_reason}).\n"
+        )
+    if _all_nodes_indeterminate(membw_result.nodes):
+        return "Memory Bandwidth Analysis: Inconclusive (insufficient counter data).\n"
+    return "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).\n"
+
+
+def _style_guidance_block(block: str) -> RichText:
+    """Apply Rich styling to a single guidance block."""
+    text = RichText(block.rstrip())
+    first_newline = block.find("\n")
+    if first_newline > 0:
+        text.stylize("bold indian_red", 0, first_newline)
+    text.highlight_regex(
+        r"  (Condition|Measured|Impact)\s*:",
+        style="dim",
+    )
+    return text
+
+
+def _render_membw_guidance_panel(
+    guidance_blocks: tuple[str, ...],
+    chart_width: int = 0,
+) -> str:
+    """Render active guidance blocks in a styled Rich panel."""
+    sections = [_style_guidance_block(block) for block in guidance_blocks if block]
+    if not sections:
+        return ""
+
+    panel_width = max(chart_width, _GUIDANCE_PANEL_MIN_WIDTH)
+    col_gap = 4
+    # 2 border + 2*2 padding = 6; minus column gap
+    col_width = (panel_width - 6 - col_gap) // 2
+
+    grid = RichTable.grid(padding=(1, col_gap))
+    grid.add_column(width=col_width)
+    grid.add_column(width=col_width)
+
+    for i in range(0, len(sections), 2):
+        left = sections[i]
+        right = sections[i + 1] if i + 1 < len(sections) else RichText()
+        grid.add_row(left, right)
+
+    panel = RichPanel(
+        grid,
+        title="[bold]Memory Bandwidth Guided Analysis[/bold]",
+        border_style="indian_red",
+        width=panel_width,
+        padding=(1, 2),
+    )
+
+    buf = StringIO()
+    console = RichConsole(
+        file=buf,
+        force_terminal=True,
+        width=panel_width,
+    )
+    console.print(panel)
+    return buf.getvalue()
 
 
 def show_all(
@@ -867,37 +1001,16 @@ def show_all(
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
-    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
 
-    # Get gpu_arch from the first run's sys_info
     first_run = next(iter(runs.values()))
     gpu_arch = (
         first_run.sys_info.iloc[0]["gpu_arch"]
         if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
         else None
     )
-
-    if isinstance(raw_filter_panel_ids, dict):
-        # For backward compatibility
-        raw_filter_panel_ids = [
-            name
-            for name, table_type in raw_filter_panel_ids.items()
-            if table_type == "metric_id"
-        ]
-
-    panel_alias = get_arch_alias_to_panel_id(gpu_arch) if gpu_arch else {}
-    filter_panel_ids: set[int] = set()
-    for bid in raw_filter_panel_ids:
-        bid_s = str(bid)
-
-        if not METRIC_ID_RE.match(bid_s):
-            if bid_s not in panel_alias:
-                raise KeyError(f"Unknown panel alias: {bid_s!r}")
-            bid_s = str(panel_alias[bid_s])
-
-        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
-        if file_id is not None:
-            filter_panel_ids.add(int(file_id))
+    filter_panel_ids = convert_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", []), gpu_arch
+    )
 
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
@@ -920,11 +1033,6 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # NOTE: Experimental Feature Toggle
-        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
-        if panel_id == 3000 and not args.membw_analysis:
-            continue
-
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
@@ -939,6 +1047,13 @@ def show_all(
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
+                # Skip tables that were filtered out at build_dfs time
+                # (e.g. analyze-mode -b dropped this block). In baseline mode
+                # require the table in every run so per-run dfs[id] lookups
+                # downstream stay safe.
+                if not all(table_config["id"] in run.dfs for run in runs.values()):
+                    continue
+
                 # Emit warnings for roofline tables (401, 402)
                 # if roofline data is invalid
                 if table_config["id"] in [401, 402] and not has_valid_roofline:
@@ -1011,14 +1126,21 @@ def show_all(
                 if processed_df.empty:
                     continue
 
-                # For gfx115x mem_chart panels, collect all tables and merge
-                # into a single chart on the first table; skip subsequent ones.
-                is_mem_chart = table_config.get(
-                    "cli_style"
-                ) == "mem_chart" and not _tty_view_is_table(args)
-                is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
+                # For mem_chart panels, collect all tables and merge
+                # into a single chart; skip individual table output.
+                # Gate to architectures with a renderer; unsupported arches fall back to
+                # normal table output.
+                is_mem_chart = (
+                    table_config.get("cli_style") == "mem_chart"
+                    and not _tty_view_is_table(args)
+                    and (
+                        is_gfx9(gpu_arch)
+                        or is_gfx115x(gpu_arch)
+                        or is_gfx1250(gpu_arch)
+                    )
+                )
 
-                if is_mem_chart and is_gfx115x and len(runs) == 1:
+                if is_mem_chart and len(runs) == 1:
                     has_cols = (
                         "Metric" in processed_df.columns
                         and "Value" in processed_df.columns
@@ -1040,23 +1162,50 @@ def show_all(
                     gpu_arch,
                 )
 
-        # Emit merged gfx115x mem_chart for the panel
+        # Emit the merged memory chart for the panel.
         if mem_chart_data and not _tty_view_is_table(args):
-            heading = _gfx115_mem_chart_heading(panel, args.normal_unit)
-            panel_content += (
-                mem_chart_gfx11.plot_mem_chart(
-                    args.normal_unit,
+            heading = format_mem_chart_heading(
+                args.normal_unit,
+                panel_id=int((panel or {}).get("id", 300)),
+            )
+            if is_gfx115x(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx11.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
+                )
+            elif is_gfx1250(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx1250.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
+                )
+            else:
+                membw_result = getattr(first_run, "membw_result", None)
+                chart_output = mem_chart_gfx9.plot_mem_chart(
                     mem_chart_data,
                     chart_title=heading,
+                    gpu_arch=gpu_arch,
+                    membw=membw_result,
                 )
-                + "\n"
-            )
+                panel_content += chart_output + "\n"
+                if membw_result is not None:
+                    panel_content += _render_membw_guidance(
+                        membw_result,
+                        chart_width=_max_line_width(chart_output),
+                    )
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
+            if not hasattr(output, "isatty") or not output.isatty():
+                panel_content = strip_ansi(panel_content)
             if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
                 print(panel_content, file=output)
             else:
@@ -1093,6 +1242,8 @@ def show_kernel_stats(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 for run, data in runs.items():
+                    if table_config["id"] not in data.dfs:
+                        continue
                     single_df = data.dfs[table_config["id"]]
                     # NB:
                     #   For pmc_kernel_top.csv, have to sort here if not

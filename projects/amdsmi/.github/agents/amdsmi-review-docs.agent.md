@@ -2,7 +2,7 @@
 name: amdsmi-review-docs
 description: "Documentation review subagent. Checks docs, comments, help text, docstrings. Use when: documentation review, docs check, help text."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4.6"
+model: "Claude Sonnet 5"
 user-invocable: false
 ---
 
@@ -21,7 +21,7 @@ Project structure and API cascade path are stored in repo memories.
 3. Check that comments explain *why*, not *what*
 4. Identify stale or misleading docs/comments in changed code
 5. Verify docs are updated when APIs are renamed or added (architecture subagent owns the full cascade — you only check the docs leg: CLI help text, docstrings, `docs/` content)
-6. **Load `changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes
+6. **Load `amdsmi-changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes
 
 ## Severity
 

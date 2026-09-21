@@ -106,6 +106,9 @@ class Os : AllStatic {
   static void cpuid(int regs[4], int info);
   //! Get value of extended control register
   static uint64_t xgetbv(uint32_t which);
+  //! CPU supports MOVDIR64B (atomic 64-byte store with WC buffer close).
+  //! Result is cached on first call.
+  static bool hasMovdir64b();
 #endif  // ATI_ARCH_X86
 
   // Stack helper routines:

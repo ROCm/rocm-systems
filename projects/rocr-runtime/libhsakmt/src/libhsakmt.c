@@ -5,10 +5,42 @@
  */
  
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/ioctl.h>
 
 #include "libhsakmt.h"
 #include "hsakmt/hsakmtmodel.h"
+
+int hsakmt_safe_env_to_int(const char* envvar, int default_val) {
+  if (envvar == NULL) return default_val;
+  char* endptr;
+  errno = 0;
+  long val = strtol(envvar, &endptr, 10);
+  if (errno == ERANGE) return default_val;
+  if (endptr == envvar) return default_val;
+  // Allow trailing whitespace from shell/.env files; reject other trailing content.
+  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') {
+    ++endptr;
+  }
+  if (*endptr != '\0') return default_val;
+  if (val < INT_MIN || val > INT_MAX) return default_val;
+  return (int)val;
+}
+
+/* Call open, restarting if it is interrupted by a signal (EINTR).
+ * Used for device nodes such as /dev/kfd and /dev/dri/renderD* whose open()
+ * can be interrupted by signal-based sampling (e.g. rocprofiler-systems).
+ */
+int hsakmt_open(const char *path, int flags)
+{
+	int ret;
+
+	do {
+		ret = open(path, flags);
+	} while (ret == -1 && errno == EINTR);
+
+	return ret;
+}
 
 /* Call ioctl, restarting if it is interrupted */
 int hsakmt_ioctl(int fd, unsigned long request, void *arg)

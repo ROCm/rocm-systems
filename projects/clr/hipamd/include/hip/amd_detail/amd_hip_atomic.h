@@ -597,11 +597,15 @@ __device__ inline double atomicMax_system(double* addr, double val) {
 }
 
 __device__ inline unsigned int atomicInc(unsigned int* address, unsigned int val) {
-  return __builtin_amdgcn_atomic_inc32(address, val, __ATOMIC_RELAXED, "agent");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_inc32))
+    return __builtin_amdgcn_atomic_inc32(address, val, __ATOMIC_RELAXED, "agent");
+  return 0;
 }
 
 __device__ inline unsigned int atomicDec(unsigned int* address, unsigned int val) {
-  return __builtin_amdgcn_atomic_dec32(address, val, __ATOMIC_RELAXED, "agent");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_dec32))
+    return __builtin_amdgcn_atomic_dec32(address, val, __ATOMIC_RELAXED, "agent");
+  return 0;
 }
 
 __device__ inline int atomicAnd(int* address, int val) {

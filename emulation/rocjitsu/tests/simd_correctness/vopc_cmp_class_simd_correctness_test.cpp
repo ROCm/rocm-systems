@@ -10,7 +10,7 @@
 /// the scalar body, once the SIMD fast path, with identical inputs/EXEC/VCC-in
 /// -- and the full 64-bit VCC results are asserted equal with EXPECT_EQ
 /// (util::set_force_scalar_for_testing flips the gate in-process). In-process
-/// inactive-lane VCC bits must stay preserved under full and partial EXEC.
+/// inactive-lane VCC bits must be zeroed under full and partial EXEC.
 ///
 /// f16 and f32 read src0 as 32-bit raw bits; f64 reads src0 as a 64-bit VGPR pair
 /// while vsrc1 stays a 32-bit mask (the mixed-width class glue). The
@@ -18,10 +18,11 @@
 /// outcomes for every input incl. NaN payload), so the compare is bit-exact with
 /// no carve-out.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -196,7 +197,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, Kind k, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(k, rot, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };
@@ -221,7 +222,7 @@ void check_all(uint64_t exec) {
       uint32_t vsrc1 = (c.kind == Kind::F64) ? 2u : 1u; // f64 src0 spans v0:v1
       uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
       uint32_t words[4] = {enc, 0u, 0u, 0u};
-      Instruction *inst = fx.decoder->decode(words);
+      Instruction *inst = decode_valid(*fx.decoder, words);
       EXPECT_NE(inst, nullptr) << c.name << " decode failed";
       uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
       delete inst;
@@ -236,10 +237,10 @@ void check_all(uint64_t exec) {
                                         << vcc_in << ": SIMD VCC diverged from scalar body";
 
         const uint64_t inactive = ~exec;
-        EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-            << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
-        EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-            << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
+        EXPECT_EQ(simd_vcc & inactive, 0ULL)
+            << c.name << " rot=" << rot << ": inactive-lane VCC bit not zeroed";
+        EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+            << c.name << " rot=" << rot << ": inactive-lane VCC bit not zeroed";
       }
     }
   }
@@ -273,7 +274,7 @@ void check_all_vop3(uint64_t exec) {
           EXPECT_NE(fx.wf, nullptr);
           uint32_t words[4] = {0u, 0u, 0u, 0u};
           vop3_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256, src1, abs, neg, words);
-          Instruction *inst = fx.decoder->decode(words);
+          Instruction *inst = decode_valid(*fx.decoder, words);
           EXPECT_NE(inst, nullptr) << c.name << " decode failed";
           uint64_t vcc = fx.run(inst, c.kind, rot, exec, vcc_in);
           delete inst;
@@ -289,10 +290,10 @@ void check_all_vop3(uint64_t exec) {
                 << std::hex << vcc_in << ": SIMD VCC diverged from scalar body";
 
             const uint64_t inactive = ~exec;
-            EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-                << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
-            EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-                << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
+            EXPECT_EQ(simd_vcc & inactive, 0ULL)
+                << c.name << " abs=" << abs << " neg=" << neg << ": inactive VCC bit not zeroed";
+            EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+                << c.name << " abs=" << abs << " neg=" << neg << ": inactive VCC bit not zeroed";
           }
         }
       }

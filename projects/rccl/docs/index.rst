@@ -13,7 +13,7 @@ that provides multi-GPU and multi-node collective communication primitives
 optimized for AMD GPUs. It uses PCIe and xGMI high-speed interconnects.
 To learn more, see :doc:`what-is-rccl`
 
-The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
+The RCCL public repository is located within the rocm-systems repo at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -26,21 +26,27 @@ The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
 
   .. grid-item-card:: How to
 
+    * :doc:`Use the device API and GIN <./how-to/device-api-gin>`
     * :doc:`Using the RCCL Tuner plugin <./how-to/using-rccl-tuner-plugin-api>`
+    * :doc:`Using the RCCL environment plugin <./how-to/using-rccl-env-plugin-api>`
     * :doc:`Using the NCCL Net plugin <./how-to/using-nccl>`
+    * :doc:`Using the RCCL Inspector plugin <./how-to/using-rccl-inspector-plugin>`
+    * :doc:`Fault tolerance in RCCL <./how-to/fault-tolerance>`
     * :doc:`Troubleshoot RCCL <./how-to/troubleshooting-rccl>`
     * :doc:`RCCL usage tips <./how-to/rccl-usage-tips>`
+    * :doc:`RCCL network telemetry <./how-to/network-telemetry>`
 
 
   .. grid-item-card:: Examples
 
-    * `RCCL Tuner plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example>`_
-    * `NCCL Net plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/net/example>`_
+    * `RCCL Tuner plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example>`_
+    * `NCCL Net plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example>`_
 
   .. grid-item-card:: API reference
 
     * :ref:`Library specification<library-specification>`
     * :ref:`api-library`
+    * :doc:`Precision support <./api-reference/data-type-support>`
     * :ref:`Environment variables<env-variables>`
 
 To contribute to the documentation, see

@@ -31,20 +31,19 @@ struct CollStats;
 // 4) Report to scuba when results buffer is full or every few minutes
 
 class CollTrace {
- public:
+public:
   CollTrace(ncclComm* comm);
   __attribute__((visibility("default"))) ~CollTrace();
 
   void enqueueEvent(std::unique_ptr<CollTraceEvent> event);
 
-  std::unique_ptr<CollTraceEvent> createEvent(
-      CollTraceEvent::EventType type = CollTraceEvent::EventType::COMM);
+  std::unique_ptr<CollTraceEvent> createEvent(CollTraceEvent::EventType type = CollTraceEvent::EventType::COMM);
 
   void recordCurCollResult(int rank, float latencyMs);
 
   void reportIfNeeded(bool checkInterval);
 
- private:
+private:
   EventQueue<CollTraceEvent> eventQueue_;
   std::thread profilingWorkerThread_;
   void* collTraceThreadFn(int cudaDev);

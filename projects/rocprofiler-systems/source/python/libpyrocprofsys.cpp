@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "libpyrocprofsys.hpp"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
-#include "rocprofiler-systems/categories.h"
-#include "rocprofiler-systems/user.h"
+#include "rocprofiler-systems/annotation.h"
 
 #include "common/environment.hpp"
+#include <fmt/format.h>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 // Provides inline tim::get_env<bool>/<std::string> specialization definitions before
@@ -20,14 +22,13 @@
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic/macros.hpp>
 
 #include <pybind11/detail/common.h>
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pyerrors.h>
 
 #include <atomic>
@@ -72,11 +73,6 @@ namespace pycoverage
 py::module
 generate(py::module& _pymod);
 }
-namespace pyuser
-{
-py::module
-generate(py::module& _pymod);
-}
 }  // namespace pyrocprofsys
 
 template <typename... Tp>
@@ -103,8 +99,13 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         }
         return _use_mpi;
     };
-    rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
-                                                 &pyrocprofsys_resume_callback);
+    // Deferred out of module init: this is the first call into the dl layer and it
+    // dlopens librocprof-sys.so, so registering here would load the whole runtime on
+    // `import rocprofsys`.
+    static auto _register_pause_callbacks = []() {
+        rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
+                                                     &pyrocprofsys_resume_callback);
+    };
 
     omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
@@ -116,7 +117,8 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
-            rocprofsys_set_mpi(_get_use_mpi(), false);
+            _register_pause_callbacks();
+            rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
         "Initialize rocprofsys");
@@ -127,9 +129,10 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_instrumented(
-                static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
-            rocprofsys_set_mpi(_get_use_mpi(), false);
+                static_cast<int>(rocprofsys::dl::instrument_mode::python_profile));
+            rocprofsys_set_mpi(_get_use_mpi());
             std::string _cmd      = {};
             std::string _cmd_line = {};
             for(auto&& itr : _v)
@@ -140,7 +143,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(!_cmd_line.empty())
             {
                 _cmd_line = _cmd_line.substr(_cmd_line.find_first_not_of(' '));
-                rocprofsys::set_env("ROCPROFSYS_COMMAND_LINE", _cmd_line, 0);
+                rocprofsys::set_env(rocprofsys::env_vars::COMMAND_LINE, _cmd_line, 0);
             }
             rocprofsys_init("trace", false, _cmd.c_str());
         },
@@ -158,19 +161,17 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
 
     pyprofile::generate(omni);
     pycoverage::generate(omni);
-    pyuser::generate(omni);
 
-    auto _python_path = rocprofsys::get_env("ROCPROFSYS_PATH", std::string{});
+    auto _python_path = rocprofsys::get_env(rocprofsys::env_vars::PATH, std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
-    if(!_python_path.empty()) _libpath = TIMEMORY_JOIN("/", _python_path, _libpath);
+    if(!_python_path.empty()) _libpath = fmt::format("{}/{}", _python_path, _libpath);
     // permit env override if default path fails/is wrong
-    _libpath = rocprofsys::get_env("ROCPROFSYS_DL_LIBRARY", _libpath);
+    _libpath = rocprofsys::get_env(rocprofsys::env_vars::DL_LIBRARY, _libpath);
     // this is necessary when building with -static-libstdc++
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
     {
-        auto _msg =
-            TIMEMORY_JOIN("", "dlopen(\"", _libpath, "\", RTLD_NOW | RTLD_GLOBAL)");
+        auto _msg = fmt::format(R"(dlopen("{}", RTLD_NOW | RTLD_GLOBAL))", _libpath);
         perror(_msg.c_str());
         fprintf(stderr, "[rocprofsys][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
                 dlerror());
@@ -300,7 +301,7 @@ get_frame_code(PyFrameObject* frame)
 }
 //
 void
-profiler_function(py::object pframe, const char* swhat, py::object arg)
+profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::object arg)
 {
     if(get_paused() > 0 || g_library_paused.load(std::memory_order_relaxed)) return;
 
@@ -310,7 +311,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_disable) return;
 
     _disable = true;
-    tim::scope::destructor _dtor{ []() { _disable = false; } };
+    const tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
     if(pframe.is_none() || pframe.ptr() == nullptr) return;
@@ -319,11 +320,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
-    int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
-               : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
-               : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
-               : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
-                                                  : -1;
+    const int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
+                     : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
+                     : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
+                     : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
+                                                        : -1;
     // only support PyTrace_{CALL,C_CALL,RETURN,C_RETURN}
     if(what < 0)
     {
@@ -391,15 +392,15 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         if(_config.include_filename)
         {
             if(_config.full_filepath)
-                _funcname.append(TIMEMORY_JOIN("", '[', std::move(_fullpath)));
+                _funcname.append(fmt::format("[{}", _fullpath));
             else
-                _funcname.append(TIMEMORY_JOIN("", '[', std::move(_filename)));
+                _funcname.append(fmt::format("[{}", _filename));
         }
         // append the line number
         if(_config.include_line && _config.include_filename)
-            _funcname.append(TIMEMORY_JOIN("", ':', get_frame_lineno(frame), ']'));
+            _funcname.append(fmt::format(":{}]", get_frame_lineno(frame)));
         else if(_config.include_line)
-            _funcname.append(TIMEMORY_JOIN("", ':', get_frame_lineno(frame)));
+            _funcname.append(fmt::format(":{}", get_frame_lineno(frame)));
         else if(_config.include_filename)
             _funcname += "]";
         return _funcname;
@@ -453,9 +454,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto& _incl_files = _config.include_filenames;
     auto& _skip_files = _config.exclude_filenames;
     auto  _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
-    auto  _file       = (_full.find('/') != std::string::npos)
-                            ? _full.substr(_full.find_last_of('/') + 1)
-                            : _full;
+    auto  _file       = rocprofsys::path::filename(_full);
 
     if(!_config.include_internal &&
        strncmp(_full.c_str(), _rocprofsys_path.c_str(), _rocprofsys_path.length()) == 0)
@@ -518,15 +517,13 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         }
 
         _config.records.emplace_back([&_label_ref, _annotate]() {
-            rocprofsys_pop_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                           (_annotate) ? _config.annotations.data()
-                                                       : nullptr,
-                                           _config.annotations.size());
+            rocprofsys_pop_category_region_python(
+                _label_ref.c_str(), _annotate ? _config.annotations.data() : nullptr,
+                _config.annotations.size());
         });
-        rocprofsys_push_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                        (_annotate) ? _config.annotations.data()
-                                                    : nullptr,
-                                        _config.annotations.size());
+        rocprofsys_push_category_region_python(
+            _label_ref.c_str(), _annotate ? _config.annotations.data() : nullptr,
+            _config.annotations.size());
     };
 
     // stop function
@@ -547,9 +544,6 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         case PyTrace_C_RETURN: _profiler_return(); break;
         default: break;
     }
-
-    // don't do anything with arg
-    tim::consume_parameters(arg);
 }
 //
 py::module
@@ -814,10 +808,10 @@ generate(py::module& _pymod)
             ar->finishNode();
             ar->finishNode();
         }
-        _name = TIMEMORY_JOIN(
-            '.', std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"), "json");
+        _name = fmt::format(
+            "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _name))
+        if(rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _name))
         {
             tim::operation::file_output_message<rocprofsys::coverage::code_coverage>{}(
                 _name, std::string{ "coverage" });
@@ -825,8 +819,7 @@ generate(py::module& _pymod)
         }
         else
         {
-            throw std::runtime_error(
-                TIMEMORY_JOIN("", "Error opening coverage output file: ", _name));
+            throw std::runtime_error("Error opening coverage output file: " + _name);
         }
     };
 
@@ -930,32 +923,6 @@ generate(py::module& _pymod)
 }
 }  // namespace pycoverage
 
-namespace pyuser
-{
-py::module
-generate(py::module& _pymod)
-{
-    py::module _pyuser = _pymod.def_submodule("user", "User instrumentation");
-
-    _pyuser.def("start_trace", &rocprofsys_user_start_trace,
-                "Enable tracing on this thread and all subsequently created threads");
-    _pyuser.def("stop_trace", &rocprofsys_user_stop_trace,
-                "Disable tracing on this thread and all subsequently created threads");
-    _pyuser.def(
-        "start_thread_trace", &rocprofsys_user_start_thread_trace,
-        "Enable tracing on this thread. Does not apply to subsequently created threads");
-    _pyuser.def(
-        "stop_thread_trace", &rocprofsys_user_stop_thread_trace,
-        "Enable tracing on this thread. Does not apply to subsequently created threads");
-    _pyuser.def("push_region", &rocprofsys_user_push_region,
-                "Start a user-defined region");
-    _pyuser.def("pop_region", &rocprofsys_user_pop_region, "Start a user-defined region");
-    _pyuser.def("error_string", &rocprofsys_user_error_string,
-                "Return a descriptor for the provided error code");
-
-    return _pyuser;
-}
-}  // namespace pyuser
 }  // namespace pyrocprofsys
 //
 //======================================================================================//

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -183,6 +183,12 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,      ///< @see ::rocprofiler_hip_graph_operation_t
+    ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,   ///< rocSHMEM API tracing
+    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,    ///< hipFILE API Tracing
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,  ///< EXPERIMENTAL: @see
+                                                 ///< ::rocprofiler_kernel_replay_operation_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,      ///< @see ::rocprofiler_hip_event_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -204,7 +210,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,         ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,     ///< Buffer kernel dispatch info
-    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
+    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclamation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
     ROCPROFILER_BUFFER_TRACING_OMPT,                       ///< @see ::rocprofiler_ompt_operation_t
@@ -234,6 +240,12 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                        ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,              ///< One record per hipGraphLaunch invocation
+    ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API,           ///< rocSHMEM tracing
+    ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
+    ROCPROFILER_BUFFER_TRACING_HIPFILE_API,  ///< hipFILE tracing
+    ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
+    ROCPROFILER_BUFFER_TRACING_HIP_EVENT,  ///< @see ::rocprofiler_hip_event_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -244,6 +256,12 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     /// contains the function argument(s) and return value
     /// @var ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT
     /// @brief Similar to ROCPROFILER_BUFFER_TRACING_ROCDECODE_API except the buffer record
+    /// contains the function argument(s) and return value
+    /// @var ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT
+    /// @brief Similar to ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API except the buffer record
+    /// contains the function argument(s) and return value
+    /// @var ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT
+    /// @brief Similar to ROCPROFILER_BUFFER_TRACING_HIPFILE_API except the buffer record
     /// contains the function argument(s) and return value
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -276,6 +294,26 @@ typedef enum rocprofiler_hip_stream_operation_t  // NOLINT(performance-enum-size
     /// operation that has a stream handle associated with it. HIP API calls will always have a
     /// stream, but kernel dispatches and memory copy operations may or may not.
 } rocprofiler_hip_stream_operation_t;
+
+/**
+ * @brief ROCProfiler HIP Graph Operations. These operations can be used to associate subsequent
+ * information with a HIP executable graph (::hipGraphExec_t).
+ */
+typedef enum rocprofiler_hip_graph_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_HIP_GRAPH_OPERATION_NONE = 0,      ///< Unknown HIP graph operation
+    ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_CREATE,   ///< A hipGraphExec_t is created
+    ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_DESTROY,  ///< A hipGraphExec_t is destroyed
+    ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH,
+    ROCPROFILER_HIP_GRAPH_OPERATION_LAST,
+
+    /// @var ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH
+    /// @brief Invokes callbacks before and after a hipGraphLaunch / hipGraphLaunch_spt
+    /// invocation. Between the ENTER and EXIT phases, kernel dispatches and memory copies
+    /// generated by the graph may be attributed to the launching graph_exec by tools that
+    /// maintain a per-thread (graph_exec_id, node_counter) stack and consult it from an
+    /// external correlation id request callback.
+} rocprofiler_hip_graph_operation_t;
 
 /**
  * @brief Memory Copy Operations.
@@ -327,7 +365,7 @@ typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum
     /// captured and it is safe to disable those contexts without affecting the delivery of the
     /// requested data when the kernel completes. It is important to note that, even if the context
     /// associated with the kernel dispatch callback tracing service is disabled in between the
-    /// enter and exit phase, the exit phase callback is still delievered but that context will not
+    /// enter and exit phase, the exit phase callback is still delivered but that context will not
     /// be captured when the kernel is enqueued and therefore will not provide a
     /// ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE callback. Furthermore, it should be
     /// noted that if a tool encodes information into the `::rocprofiler_user_data_t` output
@@ -348,6 +386,23 @@ typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum
     /// resulting in rocprofiler-sdk invoking this operation callback for kernel B before invoking
     /// the callback for kernel A.
 } rocprofiler_kernel_dispatch_operation_t;
+
+/**
+ * @brief ROCProfiler Kernel Replay Tracing Operation Types.
+ *
+ * CONFIG is delivered once per replayed dispatch (enter before replay begins,
+ * exit after all passes complete). PASS is delivered once per replay iteration
+ * (enter before kernel submission, exit after kernel completion).
+ */
+typedef enum rocprofiler_kernel_replay_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_KERNEL_REPLAY_NONE   = 0,  ///< Unknown kernel replay operation
+    ROCPROFILER_KERNEL_REPLAY_CONFIG = 1,  ///< Replay configuration (pass count, loop control)
+    ROCPROFILER_KERNEL_REPLAY_PASS,        ///< Per-pass begin/end notification
+    // TODO: ROCPROFILER_KERNEL_REPLAY_SNAPSHOT  -- memory snapshot enter/exit
+    // TODO: ROCPROFILER_KERNEL_REPLAY_RESTORE   -- memory restore enter/exit
+    ROCPROFILER_KERNEL_REPLAY_LAST,
+} rocprofiler_kernel_replay_operation_t;
 
 /**
  * @brief PC Sampling Method.
@@ -396,6 +451,32 @@ typedef enum rocprofiler_scratch_memory_operation_t
 } rocprofiler_scratch_memory_operation_t;
 
 /**
+ * @brief ROCProfiler HIP Event Tracing Operation Types.
+ */
+typedef enum rocprofiler_hip_event_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_HIP_EVENT_NONE   = 0,  ///< Unknown HIP event operation
+    ROCPROFILER_HIP_EVENT_RECORD = 1,  ///< hipEventRecord barrier
+    ROCPROFILER_HIP_EVENT_WAIT,        ///< hipStreamWaitEvent barrier
+    ROCPROFILER_HIP_EVENT_LAST,
+
+    /// @var ROCPROFILER_HIP_EVENT_RECORD
+    /// @brief Invoke callback when a HIP event record barrier is enqueued and when it completes.
+    /// When the phase is ::ROCPROFILER_CALLBACK_PHASE_ENTER, this is an opportunity to push an
+    /// external correlation id before the barrier is submitted. When the phase is
+    /// ::ROCPROFILER_CALLBACK_PHASE_EXIT, the barrier has been submitted and contexts have been
+    /// captured. The ::ROCPROFILER_CALLBACK_PHASE_NONE callback fires after the barrier completes
+    /// on the GPU. Buffer records are emitted after the barrier completes on the GPU; enqueue
+    /// is already captured by HIP API buffer tracing.
+    ///
+    /// @var ROCPROFILER_HIP_EVENT_WAIT
+    /// @brief Invoke callback when a HIP stream wait event barrier is enqueued and when it
+    /// completes. Follows the same phase semantics as RECORD. Not all hipStreamWaitEvent calls
+    /// produce a barrier (e.g. same-stream, already-complete, or never-recorded events); in those
+    /// cases no enqueue or complete callback is generated.
+} rocprofiler_hip_event_operation_t;
+
+/**
  * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is
  * used for thread creation callbacks. @see INTERNAL_THREADING.
  */
@@ -408,7 +489,10 @@ typedef enum rocprofiler_runtime_library_t
     ROCPROFILER_RCCL_LIBRARY      = (1 << 4),
     ROCPROFILER_ROCDECODE_LIBRARY = (1 << 5),
     ROCPROFILER_ROCJPEG_LIBRARY   = (1 << 6),
-    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_ROCJPEG_LIBRARY,
+    ROCPROFILER_OMPT_LIBRARY      = (1 << 7),
+    ROCPROFILER_ROCSHMEM_LIBRARY  = (1 << 8),
+    ROCPROFILER_HIPFILE_LIBRARY   = (1 << 9),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_HIPFILE_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -426,7 +510,9 @@ typedef enum rocprofiler_intercept_table_t
     ROCPROFILER_RCCL_TABLE           = (1 << 6),
     ROCPROFILER_ROCDECODE_TABLE      = (1 << 7),
     ROCPROFILER_ROCJPEG_TABLE        = (1 << 8),
-    ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCJPEG_TABLE,
+    ROCPROFILER_ROCSHMEM_TABLE       = (1 << 9),
+    ROCPROFILER_HIPFILE_TABLE        = (1 << 10),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_HIPFILE_TABLE,
 } rocprofiler_intercept_table_t;
 
 /**
@@ -441,6 +527,9 @@ typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performan
     ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,       ///< Application loaded RCCL runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE,  ///< Application loaded rocDecoder runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG,    ///< Application loaded rocJPEG runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_OMPT,       ///< Application loaded OMPT runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_ROCSHMEM,   ///< Application loaded rocSHMEM runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_HIPFILE,    ///< Application loaded hipFILE runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 
@@ -516,7 +605,7 @@ typedef uint64_t rocprofiler_thread_id_t;
  * @brief Tracing Operation ID. Depending on the kind, operations can be determined.
  * If the value is equal to zero that means all operations will be considered
  * for tracing. Detailed API tracing operations can be found at associated header file
- * for that partiular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
+ * for that particular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
  * operations, look at source/include/rocprofiler-sdk/hsa/amd_ext_api_id.h
  */
 typedef int32_t rocprofiler_tracing_operation_t;
@@ -542,7 +631,7 @@ typedef uint64_t rocprofiler_counter_instance_id_t;
 /**
  * @brief A dimension for counter instances. Some example
  *        dimensions include XCC, SM (Shader), etc. This
- *        value represents the dimension beind described
+ *        value represents the dimension behind described
  *        or queried about.
  */
 typedef uint64_t rocprofiler_counter_dimension_id_t;
@@ -569,7 +658,7 @@ typedef union rocprofiler_user_data_t
  */
 typedef union rocprofiler_address_t
 {
-    uint64_t    handle;  ///< compatability
+    uint64_t    handle;  ///< compatibility
     uint64_t    value;   ///< usage example: store address in uint64_t format
     const void* ptr;     ///< usage example: generic form of address
 } rocprofiler_address_t;
@@ -622,6 +711,24 @@ typedef struct rocprofiler_stream_id_t
 {
     uint64_t handle;
 } rocprofiler_stream_id_t;
+
+/**
+ * @brief HIP graph executable instance ID. Process-monotonic identifier assigned by
+ * rocprofiler-sdk for each successful hipGraphInstantiate* call.
+ */
+typedef struct rocprofiler_graph_exec_id_t
+{
+    uint64_t handle;
+} rocprofiler_graph_exec_id_t;
+
+/**
+ * @brief Zero-based HIP graph node ordinal within a graph launch. A handle of 0
+ * can be the first node when paired with a nonzero rocprofiler_graph_exec_id_t.
+ */
+typedef struct rocprofiler_graph_node_id_t
+{
+    uint64_t handle;
+} rocprofiler_graph_node_id_t;
 
 /**
  * @brief ROCProfiler Record Correlation ID.

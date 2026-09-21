@@ -90,7 +90,7 @@ You can save the configuration parameter settings in a configuration file. For e
   ROCPROFSYS_SAMPLING_FREQ=10
   ROCPROFSYS_SAMPLING_DELAY=0.05
   ROCPROFSYS_SAMPLING_CPUS=0-9
-  ROCPROFSYS_SAMPLING_GPUS=$env:HIP_VISIBLE_DEVICES
+  ROCPROFSYS_SAMPLING_GPUS=all
   ROCPROFSYS_TRACE=ON
   ROCPROFSYS_PROFILE=ON
   ROCPROFSYS_USE_SAMPLING=ON
@@ -114,9 +114,10 @@ This setting defines the location of the ROCm Systems Profiler configuration fil
 
 .. note::
 
-   To collect network counters using Performance Application Programming Interface (PAPI), ensure that
-   ``/proc/sys/kernel/perf_event_paranoid`` has a value <= 2. See
-   :ref:`rocprof-sys_papi_events` for details.
+   PAPI network counters (``net:::`` events) read ``/proc/net/dev`` directly and
+   do not require kernel perf event access. They work regardless of the value of
+   ``/proc/sys/kernel/perf_event_paranoid``, so no special privileges or kernel
+   configuration changes are needed.
 
 Instrument and run the binary
 -------------------------------------
@@ -130,7 +131,7 @@ Instrument and run the binary
     "--print-instrumented" "functions" "-e" "-v" "2" "--caller-include" \
     "inner" "-i" "4096" "--" ./foo
 
-This command generates an instrumented binary ``foo.inst``. 
+This command generates an instrumented binary ``foo.inst``.
 
 2. Run the instrumented binary using the following command:
 
@@ -142,11 +143,11 @@ This command generates an instrumented binary ``foo.inst``.
 Visualize the event-based profiling results
 ---------------------------------------------
 
-To view the generated ``.proto`` file in the browser, follow the steps:
+To view the generated ``.pftrace`` file in the browser, follow the steps:
 
-1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_. 
+1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_.
 
-2. Click ``Open trace file`` and select the ``.proto`` file. In the browser, it looks like:
+2. Click ``Open trace file`` and select the ``.pftrace`` file. In the browser, it looks like:
 
 .. image:: ../data/rocprof-sys-perfetto-nic-trace.png
    :alt: Visualization of a performance graph in Perfetto with network tracks
@@ -172,11 +173,37 @@ On a host system that has AI network interface cards, ROCm Systems Profiler can 
 
 AI NIC support in ROCm Systems Profiler
 ---------------------------------------
-AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA enables one computer to access another computer’s memory directly, without operating-system involvement. This capability provides high-throughput, low‑latency data transfer, which is needed for large-scale clusters and high-performance networking. You can measure AI NIC network performance by using ``amd-smi``. By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can disable it by setting:
+AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA
+enables one computer to access another computer’s memory directly, without
+operating-system involvement. This capability provides high-throughput, low‑latency
+data transfer, which is needed for large-scale clusters and high-performance
+networking. You can measure AI NIC network performance by using ``amd-smi``.
+By default, AI NIC support is enabled in ROCm Systems Profiler. However, you
+can disable it by setting:
 
 .. code-block:: shell
 
    -D ROCPROFSYS_USE_AINIC=OFF
+
+Verifying AI NIC compile-time support
+---------------------------------------
+
+AI NIC metric collection requires ``ROCPROFSYS_BUILD_AINIC=ON`` at build time.
+This flag is set automatically when the AMD SMI library version is 26.3 or
+later and ``ROCPROFSYS_USE_AINIC=ON`` (the default).
+
+The AI NIC settings (such as ``ROCPROFSYS_USE_AINIC``) are only available when
+the ROCm Systems Profiler is compiled with ``ROCPROFSYS_BUILD_AINIC=ON``. Their
+presence in the output of ``rocprof-sys-avail --settings`` is therefore a direct
+indicator of whether AI NIC support was compiled in. This check requires no AI NIC
+hardware.
+
+.. code-block:: shell
+
+   rocprof-sys-avail --settings | grep ROCPROFSYS_USE_AINIC
+
+If ``ROCPROFSYS_USE_AINIC`` is listed, AI NIC support is compiled in. If the
+command produces no output, the binaries were built without AI NIC support.
 
 List available AI NICs
 ------------------------
@@ -222,8 +249,9 @@ the AI NIC.
 Sampling the AI NICs
 -----------------------
 
-After the AI NIC support is enabled, specify the names of the AI NICs for which you want
-to track the values. For example, if the host has an AI NIC named ``enp229s0`` there are multiple options to track its performance:
+After the AI NIC support is enabled, specify the names of the AI NICs for which
+you want to track the values. For example, if the host has an AI NIC named ``enp229s0``
+there are multiple options to track its performance:
 
 * **Option 1:** Set ``ROCPROFSYS_SAMPLING_AINICS`` in the configuration file.
 
@@ -251,7 +279,7 @@ to track the values. For example, if the host has an AI NIC named ``enp229s0`` t
 
      rocprof-sys-sample --ai-nics=enp229s0 -- <your command>
 
-  * If you use ``rocprof-sys-sample`` to profile the AI NIC interface ``enp229s0`` while running the command  
+  * If you use ``rocprof-sys-sample`` to profile the AI NIC interface ``enp229s0`` while running the command
     ``wget -O /dev/null --no-check-certificate https://example.com``, the full command is:
 
     .. code-block:: shell
@@ -273,11 +301,11 @@ to track the values. For example, if the host has an AI NIC named ``enp229s0`` t
 Visualize the AI NIC profiling results
 ------------------------------------------
 
-To view the ``.proto`` file generated by ``rocprof-sys-sample`` in the browser, follow the steps :
+To view the ``.pftrace`` file generated by ``rocprof-sys-sample`` in the browser, follow the steps :
 
-1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_. 
+1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_.
 
-2. Click ``Open trace file`` and select the ``.proto`` file. The tracks for AI NIC in the generated ``.proto`` file look like:
+2. Click ``Open trace file`` and select the ``.pftrace`` file. The tracks for AI NIC in the generated ``.pftrace`` file look like:
 
 .. image:: ../data/rocprof-sys-ai-nic-perfetto.png
    :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
@@ -286,15 +314,13 @@ To view the ``.proto`` file generated by ``rocprof-sys-sample`` in the browser, 
 Save the profiling output to rocpd
 -------------------------------------
 
-To save the output to ``rocpd``, follow the steps:
+To save the output to ``rocpd``, run ``rocprof-sys-sample`` as described above in
+:ref:`Option 3 <ai_nics_option_3>` with the ``--output-format rocpd`` argument. This
+generates a ``.db`` file, for example ``rocpd-2594634.db``.
 
-1. Set the environment variable ``ROCPROFSYS_USE_ROCPD`` to ``ON``.
+.. code-block:: shell
 
-   .. code-block:: shell
-
-      export ROCPROFSYS_USE_ROCPD=ON
-
-2. Run ``rocprof-sys-sample`` as described above in :ref:`Option 3 <ai_nics_option_3>`. This generates a ``.db`` file, for example ``rocpd-2594634.db``.
+   rocprof-sys-sample --output-format rocpd -- ./your_application
 
 You can view the generated file in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 The AI NIC tracks look like this:

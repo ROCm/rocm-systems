@@ -9,6 +9,9 @@ import glob
 import re
 import sys
 import textwrap
+import tempfile
+import stat
+import shutil
 from enum import Enum
 from pathlib import Path
 
@@ -1619,7 +1622,10 @@ class ROCMHealthCheck:
                 self.logger.warning(
                     f"!!! Failed to get atomic operations info for device {pci_address}"
                 )
-                self.logger.warning(f"!!! Try running the test with 'sudo -E' ")
+                if os.geteuid() != 0:
+                    self.logger.warning(
+                        f"!!! Try running as root or use --skip-atomic-operations"
+                    )
                 return pci_address, "check_failed", f"{pci_address}: Check failed"
 
             # Parse AtomicOpsCap and AtomicOpsCtl
@@ -2073,34 +2079,79 @@ class ROCMHealthCheck:
 
         return results
 
-    def run_tests(self, run_all=False, temp_dir="/tmp/rdhc/"):
-        """Run tests based on the run_all flag"""
+    def run_tests(self, run_all=False, temp_dir=None, cleanup=False):
+        """Run tests based on the run_all flag
+
+        Args:
+            run_all: If True, run component tests by building rocm-examples
+            temp_dir: Directory for temporary files. None = auto-generate
+            cleanup: If True and temp_dir was auto-generated, remove it after tests
+
+        Returns:
+            tuple: (results, actual_temp_dir) where actual_temp_dir is None if not created,
+                   or the path to the temporary directory if run_all=True
+        """
         # Always run default tests
         self.results = self.run_default_tests()
+        actual_temp_dir = None
+        temp_dir_was_auto_generated = False
 
         # Run component tests if run_all is True
         if run_all:
-            # Clone and configure rocm-examples repository if its not already done.
-            # self.logger.info("Cloning rocm-examples repository...")
-
             # Store original directory
             original_dir = os.getcwd()
+            setup_failed = False
 
             try:
-                # Ensure temp directory exists
-                os.makedirs(temp_dir, exist_ok=True)
+                # Create or validate temp directory
+                if temp_dir is None:
+                    actual_temp_dir = tempfile.mkdtemp(prefix="rdhc-")
+                    temp_dir = actual_temp_dir
+                    temp_dir_was_auto_generated = True
+                    self.logger.info(f"Created temporary directory: {temp_dir}")
+                else:
+                    # User-specified directory - create safely
+                    try:
+                        os.makedirs(temp_dir, mode=0o700, exist_ok=False)
+                        actual_temp_dir = temp_dir
+                        self.logger.info(
+                            f"Created user-specified directory: {temp_dir}"
+                        )
+                    except FileExistsError:
+                        self.logger.error(
+                            f"Directory already exists: {temp_dir}\n"
+                            f"For security reasons, --dir requires a non-existent directory.\n"
+                            f"Please remove the directory first: rm -rf {temp_dir}\n"
+                            f"Or omit -d to use an auto-generated temp directory."
+                        )
+                        raise
+
+                # Validate directory ownership and permissions
+                st = os.lstat(temp_dir)
+                if st.st_uid != os.geteuid():
+                    raise PermissionError(
+                        f"{temp_dir} is not owned by the current user (UID mismatch)"
+                    )
+                if stat.S_ISLNK(st.st_mode):
+                    raise PermissionError(f"{temp_dir} is a symbolic link")
+                if st.st_mode & 0o022:
+                    raise PermissionError(
+                        f"{temp_dir} has insecure permissions (world/group writable)"
+                    )
 
                 # Check if rocm-examples already exists
                 examples_dir = os.path.join(temp_dir, "rocm-examples")
                 if not os.path.exists(examples_dir):
-                    # Navigate to temp directory
-                    os.chdir(temp_dir)
-
-                    # Clone repository
+                    # Clone repository with safe command arguments
                     self.logger.info("Cloning rocm-examples repository...")
                     stdout, stderr, ret_code = run_command(
-                        "git clone https://github.com/ROCm/rocm-examples.git",
-                        shell=True,
+                        [
+                            "git",
+                            "clone",
+                            "--depth=1",
+                            "https://github.com/ROCm/rocm-examples.git",
+                            examples_dir,
+                        ]
                     )
                     if ret_code != 0:
                         self.logger.error(f"Failed to clone rocm-examples: \n{stderr}")
@@ -2120,7 +2171,9 @@ class ROCMHealthCheck:
                 if not os.path.exists(os.path.join(examples_dir, "build")):
                     # Configure with cmake
                     self.logger.info("Configuring rocm-examples with cmake...")
-                    stdout, stderr, ret_code = run_command("cmake -S . -B build")
+                    stdout, stderr, ret_code = run_command(
+                        ["cmake", "-S", ".", "-B", "build"]
+                    )
                     if ret_code != 0:
                         self.logger.error(
                             f"Failed to configure rocm-examples: \n{stderr}"
@@ -2135,7 +2188,7 @@ class ROCMHealthCheck:
                 # Get the avilabale build targets dynamically.
                 self.logger.info("Retrieving available build targets...")
                 stdout, stderr, ret_code = run_command(
-                    "cmake --build build --target help", shell=True
+                    ["cmake", "--build", "build", "--target", "help"]
                 )
                 if ret_code != 0:
                     self.logger.error(f"Failed to retrieve build targets: \n{stderr}")
@@ -2150,19 +2203,35 @@ class ROCMHealthCheck:
 
             except Exception as e:
                 self.logger.error(f"Error during rocm-examples setup: \n{str(e)}")
+                setup_failed = True
             finally:
-                # Run component tests
-                component_results = self.run_component_tests()
-                self.results.update(component_results)
+                if not setup_failed:
+                    # Run component tests
+                    component_results = self.run_component_tests()
+                    self.results.update(component_results)
 
-                # Run Simple Application tests
-                app_results = self.run_applications_tests()
-                self.results.update(app_results)
+                    # Run Simple Application tests
+                    app_results = self.run_applications_tests()
+                    self.results.update(app_results)
 
                 # Return to original directory
                 os.chdir(original_dir)
 
-        return self.results
+                # Clean up auto-generated temp directory if requested
+                if cleanup and temp_dir_was_auto_generated and actual_temp_dir:
+                    try:
+                        self.logger.info(
+                            f"Cleaning up auto-generated temp directory: {actual_temp_dir}"
+                        )
+                        shutil.rmtree(actual_temp_dir)
+                        self.logger.info("Cleanup completed successfully")
+                        actual_temp_dir = None
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Failed to clean up temp directory {actual_temp_dir}: {e}"
+                        )
+
+        return self.results, actual_temp_dir
 
     def _parse_rocm_example_targets(self, cmake_target_help_output):
         """Parse cmake target help output and categorize targets by component.
@@ -2244,39 +2313,45 @@ def main():
     parser = argparse.ArgumentParser(
         description="ROCm Deployment Health Check Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        usage="sudo -E ./rdhc.py [options]",
+        usage="./rdhc.py [options]",
         epilog="Refer the README @<ROCM_INSTALL_PATH>/share/rdhc/README.md \n"
         + "Usage examples:\n"
         + "# Run quick test (default tests only)\n"
-        + "sudo -E ./rdhc.py\n"
+        + "./rdhc.py\n"
         + "\n"
         + "# Run all tests including compile and execute the rocm-example program for each component\n"
-        + "sudo -E ./rdhc.py --all\n"
+        + "./rdhc.py --all\n"
         + "\n"
         + "# Run all tests with verbose output\n"
-        + "sudo -E ./rdhc.py --all -v\n"
+        + "./rdhc.py --all -v\n"
         + "\n"
         + "# Enable verbose output\n"
-        + "sudo -E ./rdhc.py -v\n"
+        + "./rdhc.py -v\n"
         + "\n"
         + "# Run in silent mode (only errors shown)\n"
-        + "sudo -E ./rdhc.py -s\n"
+        + "./rdhc.py -s\n"
         + "\n"
         + "# Export results to a specific JSON file\n"
-        + "sudo -E ./rdhc.py --all --json rdhc-results.json\n"
+        + "./rdhc.py --all --json rdhc-results.json\n"
         + "\n"
-        + "# Specify a directory for temp files and logs (default: /tmp/rdhc/)\n"
-        + "sudo -E ./rdhc.py -d /home/user/rdhc-dir/\n"
+        + "# Specify a directory for temp files (directory must not exist)\n"
+        + "./rdhc.py --all -d /home/user/rdhc-dir/\n"
+        + "\n"
+        + "# Auto-generate temp directory and clean it up after tests\n"
+        + "./rdhc.py --all --cleanup\n"
         + "\n"
         + "# Use a custom ROCm install prefix\n"
-        + "sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm\n"
+        + "./rdhc.py --rocm-install-prefix /usr/local/rocm\n"
         + "\n"
         + "# Skip optional checks (e.g. single-node, containers without full PCI/RDMA)\n"
-        + "sudo -E ./rdhc.py --skip-optional-cluster-checks\n"
+        + "./rdhc.py --skip-optional-cluster-checks\n"
         + "# (or: --skip-multinode-readiness --skip-atomic-operations)\n"
         + "\n"
         + "# Kernel cmdline/sysctl checks: failures as warnings only (no FAIL on mismatch)\n"
-        + "sudo -E ./rdhc.py --kernel-params-warnings-only\n"
+        + "./rdhc.py --kernel-params-warnings-only\n"
+        + "\n"
+        + "NOTE: Some checks require root privileges (e.g., lspci -vvv for atomic operations).\n"
+        + "Run as root when necessary, or use --skip-atomic-operations if running unprivileged.\n"
         + "\n"
         + "NOTE for Ubuntu 24.04 (Python 3.12) users:\n"
         + "Due to enhanced security policies, you must use a virtual environment:\n"
@@ -2285,9 +2360,9 @@ def main():
         + "  source ~/rdhc-venv/bin/activate\n"
         + "  pip3 install -r requirements.txt\n"
         + "\n"
-        + "  # Run the tool (use --preserve-env=PATH instead of -E)\n"
-        + "  sudo --preserve-env=PATH ./rdhc.py\n"
-        + "  sudo --preserve-env=PATH ./rdhc.py --all\n"
+        + "  # Run the tool\n"
+        + "  ./rdhc.py\n"
+        + "  ./rdhc.py --all\n"
         + " ",
     )
 
@@ -2316,8 +2391,15 @@ def main():
         "-d",
         "--dir",
         metavar="DIR",
-        help="Directory path for temporary files (default: /tmp/rdhc/)",
-        default="/tmp/rdhc/",
+        help="Directory path for temporary files. Must not already exist; will be created with mode 0700. "
+        "Default: auto-generated secure temp directory in /tmp (not auto-cleaned). "
+        "To reuse a directory, remove it first: rm -rf <dir>",
+        default=None,
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove auto-generated temp directory after tests complete (only applies when -d is not specified)",
     )
     parser.add_argument(
         "--rocm-install-prefix",
@@ -2354,15 +2436,23 @@ def main():
     # Setup logger
     logger = setup_logger(args.verbose, args.silent)
 
-    # Ensure temp directory exists
+    # Handle temp directory (None means auto-generate in run_tests)
     temp_dir = args.dir
-    try:
-        os.makedirs(temp_dir, exist_ok=True)
-        logger.debug(f"Using temporary directory: {temp_dir}")
-    except Exception as e:
-        logger.error(f"Failed to create temporary directory {temp_dir}: {e}")
-        logger.info("Falling back to current directory")
-        temp_dir = "./"
+    if temp_dir is not None:
+        # Validate user-specified directory
+        try:
+            # Check if it's a valid path
+            if not os.path.isabs(temp_dir):
+                logger.warning(f"Relative path provided for temp directory: {temp_dir}")
+                temp_dir = os.path.abspath(temp_dir)
+                logger.info(f"Using absolute path: {temp_dir}")
+            logger.debug(f"Will use user-specified directory: {temp_dir}")
+        except Exception as e:
+            logger.error(f"Invalid temporary directory path {temp_dir}: {e}")
+            logger.info("Falling back to auto-generated temp directory")
+            temp_dir = None
+    else:
+        logger.debug("Will use auto-generated secure temporary directory")
 
     # If --rocm-install-prefix was passed and is non-empty; else keep current logic
     rocm_path = None
@@ -2391,11 +2481,20 @@ def main():
     )
 
     # Run tests with the temp_dir
-    health_check.run_tests(run_all=args.all, temp_dir=temp_dir)
+    results, actual_temp_dir = health_check.run_tests(
+        run_all=args.all, temp_dir=temp_dir, cleanup=args.cleanup
+    )
 
     # Generate and print report
     print("\nROCm Deployment Health Check Results:")
-    health_check.system_info["RDHC directory"] = temp_dir
+    if actual_temp_dir is not None:
+        health_check.system_info["RDHC directory"] = actual_temp_dir
+    elif args.all and args.cleanup:
+        health_check.system_info["RDHC directory"] = "auto-generated (cleaned up)"
+    elif args.all:
+        health_check.system_info["RDHC directory"] = "N/A (creation failed)"
+    else:
+        health_check.system_info["RDHC directory"] = "N/A (quick mode)"
     health_check.system_info["Json output file"] = args.json
 
     table = generate_table_system_info(health_check.system_info)
@@ -2412,10 +2511,14 @@ def main():
 
     # Export results to JSON if requested
     if args.json:
-        # If json path is not absolute, place it in the specified temp directory
+        # If json path is not absolute, use current directory or temp directory
         json_path = args.json
         if not os.path.isabs(json_path):
-            json_path = os.path.join(temp_dir, json_path)
+            if temp_dir is not None:
+                json_path = os.path.join(temp_dir, json_path)
+            else:
+                # Use current directory if no temp_dir specified
+                json_path = os.path.join(os.getcwd(), json_path)
 
         logger.info(f"Exporting results to JSON file: {json_path}")
         # Create a combined data dictionary with all information

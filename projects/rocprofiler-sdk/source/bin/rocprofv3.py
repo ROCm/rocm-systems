@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,17 @@ CONST_VERSION_INFO = {
     "compiler_version": "@CMAKE_CXX_COMPILER_VERSION@",
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
+
+# Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
+# tracing service allocates size_kb * 1024 bytes and rejects the config when
+# that byte count does not fit in a uint32_t. So although the option is named
+# in "KB", the value is treated as KiB (multiplied by 1024). The usable range
+# is 1 KiB up to floor((2^32 - 1) / 1024) = 4,194,303 KiB. These bounds mirror
+# the C++ limits (defaults::perfetto_buffer_size_{min,max}_kb in
+# source/lib/output/output_config.hpp) so both validation paths agree.
+PERFETTO_BUFFER_SIZE_KB_MIN = 1
+PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
+DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 
 
 class dotdict(dict):
@@ -90,6 +101,30 @@ def warning(msg, *args):
     sys.stderr.flush()
 
 
+def warn_deprecated_output_formats(output_formats):
+    requested_formats = {
+        str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
+    }
+    deprecated_formats = [
+        itr for itr in DEPRECATED_DIRECT_OUTPUT_FORMATS if itr in requested_formats
+    ]
+
+    if deprecated_formats:
+        display_names = {
+            "csv": "CSV",
+            "pftrace": "PFTrace (Perfetto)",
+            "otf2": "OTF2",
+        }
+        warning(
+            "The following direct rocprofv3 output format(s) are deprecated: "
+            f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
+            "Some tracing features, including hipFILE, rocSHMEM, and HIP event tracing, might not "
+            "produce output in these formats. Use `--output-format rocpd` (the default), "
+            "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
+            "output is needed."
+        )
+
+
 def format_help(formatter, w=120, h=40):
     """Return a wider HelpFormatter, if possible."""
     try:
@@ -122,6 +157,24 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+def perfetto_buffer_size_kb(val):
+    if isinstance(val, bool) or not isinstance(val, (int, str)):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    try:
+        value = int(val)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    if not PERFETTO_BUFFER_SIZE_KB_MIN <= value <= PERFETTO_BUFFER_SIZE_KB_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be between {PERFETTO_BUFFER_SIZE_KB_MIN} and "
+            f"{PERFETTO_BUFFER_SIZE_KB_MAX} KB"
+        )
+
+    return value
 
 
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
@@ -299,7 +352,12 @@ def get_att_paths(args):
     if args.att_library_path:
         library_paths.extend(args.att_library_path)
     elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
-        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
+        # Return a list (not a bare str) so the caller iterates over paths and
+        # not over the individual characters of the string. Support a
+        # colon-separated list for consistency with LD_LIBRARY_PATH.
+        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(":"):
+            if itr and itr not in library_paths:
+                library_paths += [itr]
     else:
         default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
             f"{ROCM_DIR}/lib"
@@ -316,6 +374,11 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
     library_paths = get_att_paths(args)
 
     for path in library_paths:
+        # Skip entries that are not existing directories so a stray value (e.g.
+        # an empty string, a file, or a bad path) cannot become an os.walk()
+        # root and silently trigger a full "/" scan.
+        if not path or not os.path.isdir(path):
+            continue
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
                 if att_lib_name in itr:
@@ -330,6 +393,81 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
 class booleanArgAction(argparse.Action):
     def __call__(self, parser, args, value, option_string=None):
         setattr(args, self.dest, strtobool(value))
+
+
+# Categories recognized by --ompt-trace
+OMPT_TRACE_CATEGORIES = (
+    "all",
+    "thread",
+    "parallel",
+    "task",
+    "sync",
+    "mutex",
+    "target",
+    "device",
+    "error",
+)
+
+
+class omptTraceArgAction(argparse.Action):
+    def __call__(self, parser, args, values, option_string=None):
+        # nargs="*" with no value -> values is an empty list -> bare bool
+        if not values:
+            setattr(args, self.dest, True)
+            setattr(args, f"{self.dest}_operations", "")
+            return
+
+        tokens = [str(v).strip().lower() for v in values if str(v).strip()]
+
+        # Reject comma-containing tokens with an explicit migration hint, so users
+        # who tried 'parallel,task,target' (a natural-looking but inconsistent
+        # spelling) get an actionable error instead of "unknown category".
+        bad_commas = [t for t in tokens if "," in t]
+        if bad_commas:
+            parser.error(
+                "--ompt-trace: tokens must be space-separated, not comma-separated; "
+                "use e.g. '--ompt-trace parallel task target' (got {bad!r})".format(
+                    bad=" ".join(bad_commas),
+                )
+            )
+
+        # Single bool-like token preserves the historical --ompt-trace=true/false contract
+        if len(tokens) == 1:
+            try:
+                bool_val = strtobool(tokens[0])
+                setattr(args, self.dest, bool_val)
+                setattr(args, f"{self.dest}_operations", "")
+                return
+            except (ValueError, AttributeError):
+                pass
+
+        unknown = [t for t in tokens if t not in OMPT_TRACE_CATEGORIES]
+        if unknown:
+            parser.error(
+                "--ompt-trace: unknown categor{plural} {bad!r}; "
+                "valid categories: {good}".format(
+                    plural="ies" if len(unknown) > 1 else "y",
+                    bad=" ".join(unknown),
+                    good=" ".join(OMPT_TRACE_CATEGORIES),
+                )
+            )
+
+        # "all" is the natural superset and is equivalent to no filter
+        if "all" in tokens:
+            extra = [t for t in tokens if t != "all"]
+            if extra:
+                warning(
+                    "--ompt-trace: 'all' already selects every category; ignoring "
+                    "additional categor{plural} {extra}".format(
+                        plural="ies" if len(extra) > 1 else "y",
+                        extra=" ".join(extra),
+                    )
+                )
+            tokens = []
+        setattr(args, self.dest, True)
+        # The tool-side env var still uses comma separation (env vars are single
+        # strings; the rest of the SDK uses comma for list-valued env vars).
+        setattr(args, f"{self.dest}_operations", ",".join(tokens))
 
 
 def parse_arguments(args=None):
@@ -412,7 +550,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd). Direct csv, pftrace, and otf2 output is deprecated; use rocpd and rocpd convert",
         nargs="+",
         default=None,
         choices=("csv", "json", "pftrace", "otf2", "rocpd"),
@@ -444,13 +582,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -459,7 +597,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--hip-trace",
-        help="Combination of --hip-runtime-trace and --hip-compiler-trace. This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
+        help="Combination of --hip-runtime-trace and --hip-compiler-trace (which in turn enables --hip-event-trace and --hip-graph-trace). This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -470,6 +608,16 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--kernel-trace",
         help="For collecting Kernel Dispatch Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-graph-trace",
+        help="For collecting one record per hipGraphLaunch invocation. Emits graph launch records to JSON and rocpd with the graph_exec_id and kernel_dispatch_count for each launch. Independent of --kernel-trace; kernel-dispatch records are emitted by --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-event-trace",
+        help="Trace GPU-side HIP event barriers produced by hipEventRecord and hipStreamWaitEvent. Emits hip_event records to JSON and rocpd with the operation, event handle, queue, and source queue for cross-stream dependencies. Independent of --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace. Use rocpd convert for CSV or Perfetto output.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -501,6 +649,21 @@ For attachment profiling of running processes:
         "--rccl-trace",
         help="For collecting RCCL(ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces",
     )
+    basic_tracing_options.add_argument(
+        "--ompt-trace",
+        action=omptTraceArgAction,
+        nargs="*",
+        type=str,
+        required=False,
+        default=None,
+        metavar="CATEGORY",
+        help=(
+            "For collecting OMPT (OpenMP Tools) Traces. With no value (or "
+            "'true'/'all') collects every OMPT operation. Pass a space-separated "
+            "list of categories to filter, e.g. '--ompt-trace parallel task "
+            "target'. Categories: " + " ".join(OMPT_TRACE_CATEGORIES)
+        ),
+    )
     add_parser_bool_argument(
         basic_tracing_options,
         "--kokkos-trace",
@@ -515,6 +678,16 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--rocjpeg-trace",
         help="For collecting rocJPEG Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocshmem-trace",
+        help="For collecting rocSHMEM (ROCm SHared MEMory) host-stream API Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hipfile-trace",
+        help="For collecting hipFILE Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -588,6 +761,32 @@ For attachment profiling of running processes:
         default=None,
         nargs="*",
         action="append",
+    )
+
+    kernel_replay_options = parser.add_argument_group("Kernel replay options (beta)")
+
+    kernel_replay_options.add_argument(
+        "--replay-mode",
+        help=(
+            "Select the counter-collection replay strategy. "
+            "'kernel' collects all counter groups within a single application run via in-process "
+            "kernel replay: each dispatch is replayed once per counter group, with device-memory "
+            "snapshot/restore between passes, instead of re-running the whole application per "
+            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "'application' (default) re-runs the whole application once per counter group."
+        ),
+        choices=("kernel", "application"),
+        default=None,
+    )
+
+    add_parser_bool_argument(
+        kernel_replay_options,
+        "--kernel-replay-beta-enabled",
+        help=(
+            "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
+            "behaviour may change in a future release. Required when --replay-mode kernel is "
+            "specified."
+        ),
     )
 
     spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
@@ -803,9 +1002,9 @@ For attachment profiling of running processes:
     )
     perfetto_options.add_argument(
         "--perfetto-buffer-size",
-        help="Size of buffer for perfetto output in KB. default: 1 GB",
+        help=f"Size of buffer for perfetto output in KB ({PERFETTO_BUFFER_SIZE_KB_MIN}-{PERFETTO_BUFFER_SIZE_KB_MAX}). default: 1 GB",
         default=None,
-        type=int,
+        type=perfetto_buffer_size_kb,
         metavar="KB",
     )
     perfetto_options.add_argument(
@@ -935,13 +1134,13 @@ For attachment profiling of running processes:
         When --process-sync is set to true,
         and rocprofv3 tool will force process to wait for its peer processes finishing write the trace data,
         then they proceed.
-        Note: some workloads will teminate the process group when one of the process is finished""",
+        Note: some workloads will terminate the process group when one of the processes is finished""",
     )
 
     advanced_options.add_argument(
         "--minimum-output-data",
         help="""Output files are generated only if output data size > minimum output data".
-        It can be used for controlling the generation of output files so that user don't recieve empty files.
+        It can be used for controlling the generation of output files so that user don't receive empty files.
         The input is in KB units.""",
         default=None,
         type=int,
@@ -999,6 +1198,12 @@ For attachment profiling of running processes:
         help="Enables thread trace",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-intercept",
+        help="Enables ATT quick-scan mode without kernel-dispatch interception.",
+    )
+
     att_options.add_argument(
         "--att-library-path",
         help="Search path to decoder library.",
@@ -1028,7 +1233,7 @@ For attachment profiling of running processes:
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 256MB",
+        help="Thread trace buffer size. Default 384MB",
         default=None,
         type=str,
     )
@@ -1080,6 +1285,12 @@ For attachment profiling of running processes:
         "--att-serialize-all",
         default=False,
         help="Serialize all kernels, not just the traced ones.",
+    )
+
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-detail",
+        help="Collect occupancy data without instruction-level detail.",
     )
 
     return (parser.parse_args(rocp_args), app_args)
@@ -1210,8 +1421,46 @@ def has_set_attr(obj, key):
         return False
 
 
+def services_conflicting_with_kernel_replay(args, environ=None):
+    """Services that kernel replay cannot collect correctly in the same run.
+
+    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
+    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
+    picks a different group on each pass. Every other service is simply left enabled for the whole
+    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
+    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+
+    Returns the display names of the conflicting services, in the order they are reported.
+    """
+    environ = os.environ if environ is None else environ
+    conflicts = []
+
+    if getattr(args, "advanced_thread_trace", None):
+        conflicts.append("--att")
+
+    if (
+        getattr(args, "pc_sampling_beta_enabled", None)
+        or environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+    ):
+        conflicts.append("PC sampling")
+
+    # SPM is rejected alongside counter collection further down, but that check only looks at
+    # --pmc. Counter groups can also arrive from an input file, which is the form kernel replay
+    # takes, so name SPM here too rather than letting it through to fail inside the SDK.
+    if getattr(args, "spm", None):
+        conflicts.append("--spm")
+
+    return conflicts
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
+
+    if hasattr(data, "perfetto_buffer_size") and data.perfetto_buffer_size is not None:
+        try:
+            data.perfetto_buffer_size = perfetto_buffer_size_kb(data.perfetto_buffer_size)
+        except argparse.ArgumentTypeError as err:
+            fatal_error(f"Invalid perfetto_buffer_size: {err}")
 
     if hasattr(data, "kernel_iteration_range") and isinstance(
         data.kernel_iteration_range, str
@@ -1549,9 +1798,12 @@ def run(app_args, args, **kwargs):
     if not args.output_format:
         args.output_format = ["rocpd"]
 
-    update_env(
-        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+    effective_output_formats = list(args.output_format)
+    effective_output_formats.extend(
+        re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
     )
+    if args.hipfile_trace or args.rocshmem_trace:
+        warn_deprecated_output_formats(effective_output_formats)
 
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
@@ -1572,8 +1824,12 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1587,14 +1843,27 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
+
+    update_env(
+        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+    )
 
     if args.hip_trace:
         for itr in ("compiler", "runtime"):
             setattrifnone(args, f"hip_{itr}_trace", True)
+
+    if args.hip_runtime_trace:
+        # HIP graphs and HIP events are part of the HIP runtime
+        setattrifnone(args, "hip_graph_trace", True)
+        setattrifnone(args, "hip_event_trace", True)
 
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
@@ -1603,6 +1872,9 @@ def run(app_args, args, **kwargs):
     if args.kfd_trace:
         for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
+
+    if args.att_no_intercept:
+        args.advanced_thread_trace = True
 
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
@@ -1616,9 +1888,13 @@ def run(app_args, args, **kwargs):
             ["hsa_finalizer_trace", "HSA_FINALIZER_EXT_API_TRACE"],
             ["marker_trace", "MARKER_API_TRACE"],
             ["rccl_trace", "RCCL_API_TRACE"],
+            ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
+            ["rocshmem_trace", "ROCSHMEM_API_TRACE"],
+            ["hipfile_trace", "HIPFILE_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
+            ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
             ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],
@@ -1626,6 +1902,7 @@ def run(app_args, args, **kwargs):
             ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
             ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
+            ["hip_event_trace", "HIP_EVENT_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
     ).items():
@@ -1648,6 +1925,14 @@ def run(app_args, args, **kwargs):
     # to override the roctx symbols of an app linked to the old roctracer roctx
     if args.marker_trace and not args.suppress_marker_preload:
         update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
+
+    # Propagate the optional OMPT category filter (set by omptTraceArgAction)
+    if getattr(args, "ompt_trace_operations", ""):
+        update_env(
+            "ROCPROF_OMPT_TRACE_OPERATIONS",
+            args.ompt_trace_operations,
+            overwrite_if_true=True,
+        )
 
     if trace_count == 0 and len(app_args) != 0:
         warning("No tracing options were enabled.")
@@ -1926,6 +2211,34 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
+    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
+
+    if kernel_replay_mode:
+        if not getattr(args, "kernel_replay_beta_enabled", None):
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if not args.pmc and not args.pmc_groups:
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc or pmc_groups)"
+            )
+        replay_conflicts = services_conflicting_with_kernel_replay(args)
+        if replay_conflicts:
+            fatal_error(
+                "--replay-mode kernel cannot be combined with "
+                + " or ".join(replay_conflicts)
+                + ". Kernel replay only varies counter groups from one pass to the next; "
+                "every other service stays on for all of the passes and would report each "
+                "kernel once per pass. Collect them in a separate run."
+            )
+
+        # Route counter collection through the in-process kernel-replay service. The SDK derives
+        # the pass count from the number of counter groups via the tool's pass-count callback, so
+        # there is nothing else to communicate.
+        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
 
@@ -2065,6 +2378,7 @@ def run(app_args, args, **kwargs):
     if args.advanced_thread_trace:
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
+        update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
         if args.att_target_cu is not None:
             update_env(
@@ -2103,6 +2417,12 @@ def run(app_args, args, **kwargs):
                 args.att_serialize_all,
                 overwrite=True,
             )
+        if args.att_no_detail:
+            update_env(
+                "ROCPROF_ATT_PARAM_NO_DETAIL",
+                args.att_no_detail,
+                overwrite=True,
+            )
         if args.att_gpu_index:
             update_env(
                 "ROCPROF_ATT_PARAM_GPU_INDEX",
@@ -2115,7 +2435,7 @@ def run(app_args, args, **kwargs):
                 args.att_library_path,
                 overwrite=True,
             )
-        else:
+        elif not args.att_no_intercept:
             fatal_error(
                 f"rocprof-trace-decoder library path not found in {get_att_paths(args)}"
             )
@@ -2222,16 +2542,27 @@ def main(argv=None):
                     "Each --pmc must specify at least one counter."
                 )
 
-    # Validate incompatible options
-    if cli_multipass and cmd_args.pid:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
-        )
-
-    if cli_multipass and cmd_args.collection_period:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
-        )
+    def validate_selected_regions_conflicts(_args):
+        if getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_no_intercept", False
+        ):
+            warning(
+                "--selected-regions does not control --att-no-intercept captures; "
+                "ATT no-intercept will quick-scan after each selected GPU agent's "
+                "first code-object upload"
+            )
+        elif getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_consecutive_kernels", None
+        ):
+            fatal_error(
+                "--selected-regions and --att-consecutive-kernels are mutually exclusive"
+            )
+        if getattr(_args, "selected_regions", False) and getattr(
+            _args, "collection_period", None
+        ):
+            fatal_error(
+                "--selected-regions and --collection-period are mutually exclusive"
+            )
 
     # Check if we should use multi-pass mode:
     # 1. Multiple --pmc flags on CLI (cli_multipass)
@@ -2239,6 +2570,77 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    # pmc_groups only ever arrives from an input file, so look for it there rather than on
+    # cmd_args, where it is never set.
+    input_has_counters = any(
+        has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
+    )
+
+    replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
+    if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
+        fatal_error(
+            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+            "feature via --kernel-replay-beta-enabled"
+        )
+    if replay_enabled and not (cli_has_pmc or input_has_counters):
+        fatal_error(
+            "--replay-mode kernel requires counter collection "
+            "(--pmc, input-file pmc, or pmc_groups)"
+        )
+
+    # Kernel replay replays each dispatch once per counter group within one application run, so
+    # the groups given on the command line are passes of a single run rather than the per-group
+    # child-process relaunch application replay uses. Normalize them to the list-of-lists shape
+    # process_args turns into ROCPROF_COUNTER_GROUPS. Input-file jobs are left alone: a job is a
+    # unit of configuration in its own right, so each one still runs as its own job with its own
+    # output configuration, kernel filters and ranges, and replay applies to the groups that job
+    # asks for.
+    if replay_enabled and cli_has_pmc:
+        cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
+        cli_multipass = False
+
+    def multipass_source(cmd_args, inp_args):
+        """Return why the arguments request application-replay counter multi-pass."""
+        cli_pmc = getattr(cmd_args, "pmc", None)
+        input_pmc_jobs = [itr for itr in inp_args if has_set_attr(itr, "pmc")]
+
+        if (
+            cli_pmc is not None
+            and len(cli_pmc) > 1
+            and getattr(cmd_args, "replay_mode", None) != "kernel"
+        ):
+            return "multiple --pmc flags"
+        if len(input_pmc_jobs) > 1:
+            return "multiple input-file jobs"
+        if cli_pmc is not None and input_pmc_jobs:
+            return "--pmc combined with input-file pmc"
+        return None
+
+    def multipass_incompatible_message(cmd_args, inp_args):
+        """Return an error for options incompatible with counter multi-pass."""
+        source = multipass_source(cmd_args, inp_args)
+        if source is None:
+            return None
+        if has_set_attr(cmd_args, "pid") or any(
+            has_set_attr(itr, "pid") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with attach mode (--pid)"
+            )
+        if has_set_attr(cmd_args, "collection_period") or any(
+            has_set_attr(itr, "collection_period") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with --collection-period"
+            )
+        return None
+
+    incompatible = multipass_incompatible_message(cmd_args, inp_args)
+    if incompatible is not None:
+        fatal_error(incompatible)
+
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:
@@ -2249,6 +2651,7 @@ def main(argv=None):
             cmd_args.pmc = cmd_args.pmc[0]
 
         args = get_args(cmd_args, inp_args[0])
+        validate_selected_regions_conflicts(args)
 
         if args.pid:
             # For reattachment support, args must be the same as previous rocprofv3 sessions
@@ -2259,17 +2662,52 @@ def main(argv=None):
             if args.collection_period:
                 fatal_error("--collection-period is not compatible with attach mode")
 
+            # SECURITY: this cache file lives at a predictable path in a world-writable
+            # directory (/tmp) and is deserialized with pickle, which would execute
+            # arbitrary code if another user on a shared system planted a malicious
+            # payload. To prevent this, the file is created exclusively (O_EXCL) with
+            # 0600 permissions and is only ever read back if it is owned by the current
+            # user; O_NOFOLLOW prevents symlink redirection attacks. As a result, we only
+            # ever unpickle a file that we created ourselves.
             fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
-            if not os.path.exists(fname):
-                # if this is the first attachment, write the temp configuration file for future attachments
-                with open(fname, "wb") as ofs:
+            try:
+                # if this is the first attachment, exclusively create the temp
+                # configuration file for future attachments
+                fd = os.open(
+                    fname, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+                )
+            except FileExistsError:
+                fd = None
+
+            if fd is not None:
+                with os.fdopen(fd, "wb") as ofs:
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Saving attach configuration to {fname}...")
                     pickle.dump(args, ofs)
             else:
                 # if this is not the first attachment
-                # load the configuration from the previous attachment
-                with open(fname, "rb") as ifs:
+                # load the configuration from the previous attachment.
+                # O_NOFOLLOW rejects symlinks; a stale file owned by another user (from a
+                # crashed session that reused this PID) surfaces here as PermissionError
+                # (0600) or via the ownership check below. Translate any such failure into a
+                # clear, actionable message instead of an unhandled traceback.
+                try:
+                    rfd = os.open(fname, os.O_RDONLY | os.O_NOFOLLOW)
+                except OSError as _e:
+                    fatal_error(
+                        f"Could not open attach configuration file {fname}: {_e}. "
+                        "It may be stale or owned by another user; remove it and retry "
+                        "(or wait for the target PID's previous session to clean it up)."
+                    )
+                with os.fdopen(rfd, "rb") as ifs:
+                    # refuse to unpickle a configuration file that is not owned by the
+                    # current user (e.g. planted by another user on a shared system)
+                    if os.fstat(rfd).st_uid != os.getuid():
+                        fatal_error(
+                            f"Refusing to load attach configuration from {fname}: "
+                            f"file is not owned by the current user (uid={os.getuid()}). "
+                            "It may be stale or owned by another user; remove it and retry."
+                        )
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Loading attach configuration from {fname}...")
                     prev_args = pickle.load(ifs)
@@ -2307,6 +2745,10 @@ def main(argv=None):
             # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
             if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
                 all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            elif replay_enabled:
+                # Replay covers every command-line group inside one run, so they are one config
+                # here rather than one per group.
+                all_pass_configs.append({"pmc": cli_pmc_groups, "from_cli": True})
             else:
                 # Multiple --pmc flags: already a list of lists
                 for pmc_group in cli_pmc_groups:
@@ -2330,6 +2772,8 @@ def main(argv=None):
             else:
                 # Input file pass: merge cmd_args with the full job config
                 pass_args = get_args(cmd_args, pass_config["config"])
+
+            validate_selected_regions_conflicts(pass_args)
 
             _ec = run(
                 app_args,

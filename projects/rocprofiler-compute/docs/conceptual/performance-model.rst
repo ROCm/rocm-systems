@@ -6,9 +6,9 @@
 Performance model
 *****************
 
-ROCm Compute Profiler exposes detailed metrics for AMD Instinct™ / CDNA™ architecture-based
-MI-series GPUs and for select AMD Ryzen™ / RDNA™ architecture-based APUs with
-supported analysis configurations.
+ROCm Compute Profiler exposes detailed metrics for CDNA™ architecture-based AMD Instinct™
+MI-series GPUs and for select RDNA™ architecture-based AMD Ryzen™ APUs with
+the supported analysis configurations.
 
 Use the following pages for architecture-specific naming, panel layout, and conceptual
 overview:
@@ -16,6 +16,7 @@ overview:
 * **Instinct (CDNA)** - :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
   Architecture and data-type tables, top-level CDNA block diagrams, MI-series terminology,
   and chapters for:
+
   * :doc:`cdna/system-speed-of-light`
 
   * :doc:`cdna/compute-unit`
@@ -28,7 +29,8 @@ overview:
 
   * :doc:`cdna/references`
 
-* **Ryzen APU (RDNA)** - :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx1151 panels, and chapters for:
+* **Ryzen APU (RDNA)** - :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx115x panels, and chapters for:
+
   * :doc:`rdna/system-speed-of-light`
 
   * :doc:`rdna/shader-engine` (overview)

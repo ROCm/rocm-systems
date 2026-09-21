@@ -6,7 +6,7 @@ import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from utils.logger import (
     console_debug,
@@ -183,6 +183,16 @@ def get_gpu_vram_size(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
 
 
 @functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU VRAM bit width"
+)
+def get_gpu_vram_bit_width(device: Any, amdsmi: Any) -> Optional[int]:  # noqa: ANN401
+    """Get the GPU memory bus width in bits."""
+    bit_width = amdsmi.amdsmi_get_gpu_vram_info(device).get("vram_bit_width")
+    console_debug(f"GPU VRAM bit width: {bit_width}")
+    return bit_width
+
+
+@functools.partial(
     _per_device_query, default_return=None, warning_label="GPU cache info"
 )
 def get_gpu_cache_info(device: Any, amdsmi: Any) -> dict[str, Any]:  # noqa: ANN401
@@ -202,3 +212,13 @@ def get_gpu_num_compute_units(device: Any, amdsmi: Any) -> int:  # noqa: ANN401
     cu_count = int(amdsmi.amdsmi_get_gpu_asic_info(device)["num_compute_units"])
     console_debug(f"GPU compute units count: {cu_count}")
     return cu_count
+
+
+@functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU performance level"
+)
+def get_gpu_perf_level(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
+    """Get the GPU PowerPlay performance level (AUTO, STABLE_STD, ...)."""
+    perf_level = str(amdsmi.amdsmi_get_gpu_perf_level(device))
+    console_debug(f"GPU performance level: {perf_level}")
+    return perf_level

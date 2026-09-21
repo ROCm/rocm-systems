@@ -8,6 +8,7 @@
 #include "hipfile.h"
 #include "hipfile-test.h"
 #include "hipfile-warnings.h"
+#include "invalid-enum.h"
 #include "msys.h"
 #include "mmountinfo.h"
 #include "mountinfo.h"
@@ -310,6 +311,19 @@ TEST_F(HipFileHandle, register_handle_userspace_fs_not_supported)
     hipFileDescr_t  rfd{};
 
     rfd.type      = hipFileHandleTypeUserspaceFS;
+    rfd.handle.fd = 0xBADF00D;
+
+    ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HipFileOpError(hipFileIONotSupported));
+}
+
+// A type outside the enum's valid range must be rejected, not crash or invoke
+// undefined behavior when loaded.
+TEST_F(HipFileHandle, register_handle_invalid_type_not_supported)
+{
+    hipFileHandle_t fh{};
+    hipFileDescr_t  rfd{};
+
+    rfd.type      = invalidEnum<hipFileFileHandleType_t>(maxEnum<hipFileFileHandleType_t>());
     rfd.handle.fd = 0xBADF00D;
 
     ASSERT_EQ(hipFileHandleRegister(&fh, &rfd), HipFileOpError(hipFileIONotSupported));

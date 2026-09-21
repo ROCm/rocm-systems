@@ -3,7 +3,7 @@
 #
 
 CC := gcc
-CFLAGS := -Wall -Wextra -g -std=c99 -fPIC
+CFLAGS := -Wall -Wextra -g -std=c99 -fPIC -pthread
 INC := -I. -I../nccl
 TARGET := test_plugin
 SOURCES := test_plugin.c

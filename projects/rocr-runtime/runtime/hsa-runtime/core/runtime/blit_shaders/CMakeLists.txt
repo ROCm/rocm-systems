@@ -142,25 +142,13 @@ endfunction(build_kernels_for_devices)
 function(generate_bytecodeStrm HeaderFILE)
 	set(ARG_LIST "${CMAKE_CURRENT_BINARY_DIR}/${HeaderFILE}.h")
 
-	# Copy the shell script to the build directory
-	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/create_blit_shader_header.sh
-		${CMAKE_CURRENT_BINARY_DIR}/create_blit_shader_header.sh
-		COPYONLY)
-
 	# Add a custom command to generate the header file
-if (UNIX)
-	add_custom_command(OUTPUT ${HeaderFILE}.h
-		COMMAND ${CMAKE_CURRENT_BINARY_DIR}/create_blit_shader_header.sh ${ARG_LIST} ${HSACO_TARG_LIST}
-		COMMENT "Collating blit shaders..."
-		DEPENDS ${HSACO_TARG_LIST} ${CMAKE_CURRENT_BINARY_DIR}/create_blit_shader_header.sh)
-else()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_custom_command(
     OUTPUT ${HeaderFILE}.h
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/create_blit_shader_header.py ${ARG_LIST} ${HSACO_TARG_LIST}
     COMMENT "Collating blit shaders..."
-    DEPENDS ${HSACO_TARG_LIST} create_blit_shader_header.py)
-endif()
+    DEPENDS ${HSACO_TARG_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/create_blit_shader_header.py)
 	# Add a custom target that depends on the header file
 	add_custom_target(${HeaderFILE} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${HeaderFILE}.h)
 

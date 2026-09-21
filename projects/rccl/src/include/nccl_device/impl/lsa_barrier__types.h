@@ -15,8 +15,8 @@ struct ncclLsaBarrierHandle {
   int nBarriers;
 };
 
-#if NCCL_CHECK_CUDACC
-template<typename Coop>
+#ifdef __CUDACC__
+template <typename Coop>
 struct ncclLsaBarrierSession_internal {
   Coop coop;
   ncclDevComm const& comm;
@@ -29,18 +29,23 @@ struct ncclLsaBarrierSession_internal {
 
   NCCL_DEVICE_INLINE uint32_t* mcInbox(bool multimem) {
     uint32_t* state;
-    if (multimem) { // multicast
+    if (multimem) {
+      // multicast
       state = (uint32_t*)ncclGetResourceBufferMultimemPointer(comm, handle.bufHandle, mmHandle);
-    } else { // unicast
+    } else {
+      // unicast
       state = (uint32_t*)ncclGetResourceBufferLocalPointer(comm, handle.bufHandle);
     }
-    return state + 2*handle.nBarriers + index;
+    return state + 2 * handle.nBarriers + index;
   }
 
   NCCL_DEVICE_INLINE uint32_t* ucInbox(int owner, int peer) {
     uint32_t* state = (uint32_t*)ncclGetResourceBufferPeerPointer(comm, handle.bufHandle, team, owner);
-    return state + 3*handle.nBarriers + index*team.nRanks + peer;
+    return state + 3 * handle.nBarriers + index * team.nRanks + peer;
   }
+
+  template <bool EnableTimeout>
+  NCCL_DEVICE_INLINE ncclResult_t waitInternal(Coop, cuda::memory_order order, uint64_t timeoutCycles);
 };
 #endif
 

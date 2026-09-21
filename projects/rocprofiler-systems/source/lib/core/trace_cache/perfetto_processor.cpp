@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "common/units/data_size.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common.hpp"
@@ -10,15 +11,21 @@
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto.hpp"
+#include "core/perfetto/category_registry.hpp"
+#include "core/perfetto/counter_track.hpp"
+#include "core/perfetto/emitter.hpp"
+#include "core/perfetto/engine.hpp"
+#include "core/track_registry.hpp"
 #include "core/utility.hpp"
-#include "library/tracing.hpp"
+#include "library/thread_info.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 
 #include "logger/debug.hpp"
 #include <charconv>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -30,13 +37,20 @@
 #include <string_view>
 #include <utility>
 
-#include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
+
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::gigabytes;
+using rocprofsys::common::units::kilobytes;
+using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys::trace_cache
 {
 namespace
 {
+constexpr const char* ROCM_COUNTER_UNIT = "Unit Count";
+
 struct annotation_entry
 {
     std::string key;
@@ -52,13 +66,15 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
     for(const auto& ann : annotations)
     {
         std::visit(
-            [&](auto&& val) { tracing::add_perfetto_annotation(ctx, ann.key, val); },
+            [&](auto&& val) {
+                core::perfetto::add_perfetto_annotation(ctx, ann.key, val);
+            },
             ann.value);
     }
 }  // close annotate_perfetto
 
 [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
-parse_kfd_migration_node_pair(const std::string& args_str)
+parse_kfd_migration_node_pair(std::string_view args_str)
 {
     std::string src_agent;
     std::string dst_agent;
@@ -98,7 +114,7 @@ parse_kfd_migration_node_pair(const std::string& args_str)
 
 [[nodiscard]] std::optional<std::uint32_t>
 resolve_kfd_migration_gpu_bucket(
-    const std::string&                                   args_str,
+    std::string_view                                     args_str,
     const std::unordered_map<std::uint32_t, agent_type>& node_type_cache)
 {
     auto ids = parse_kfd_migration_node_pair(args_str);
@@ -113,26 +129,38 @@ resolve_kfd_migration_gpu_bucket(
 
     const auto src_type = find_type(src_node_id);
     const auto dst_type = find_type(dst_node_id);
-    if(!src_type.has_value() || !dst_type.has_value()) return std::nullopt;
+    if(!src_type.has_value() || !dst_type.has_value())
+    {
+        return std::nullopt;
+    }
 
-    if(*src_type == agent_type::CPU && *dst_type == agent_type::GPU) return dst_node_id;
-    if(*src_type == agent_type::GPU) return src_node_id;
+    if(*src_type == agent_type::cpu && *dst_type == agent_type::gpu)
+    {
+        return dst_node_id;
+    }
+    if(*src_type == agent_type::gpu)
+    {
+        return src_node_id;
+    }
 
     return std::nullopt;
 }
 
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, std::uint64_t hash_arg)
+get_track(CategoryT, const std::string& name, std::uint64_t hash_arg)
 {
-    auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
+    auto _uuid = core::perfetto::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
-    std::lock_guard<std::mutex> _lk{ tracing::get_perfetto_track_uuids_mutex() };
-    auto&                       _track_uuids = tracing::get_perfetto_track_uuids();
+    const std::lock_guard<std::mutex> _lk{
+        core::perfetto::get_perfetto_track_uuids_mutex()
+    };
+    auto& _track_uuids = core::perfetto::get_perfetto_track_uuids();
 
+    const auto _parent = core::perfetto::get_active_process_track();
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
-        const auto _track = ::perfetto::Track(_uuid, ::perfetto::ProcessTrack::Current());
+        const auto _track = ::perfetto::Track(_uuid, _parent);
         auto       _desc  = _track.Serialize();
 
         _desc.set_name(name);
@@ -140,61 +168,64 @@ get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 
         _track_uuids.emplace(_uuid, name);
     }
-    return ::perfetto::Track(_uuid, ::perfetto::ProcessTrack::Current());
+    return ::perfetto::Track(_uuid, _parent);
 }
 
-using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
-using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
-using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
-using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
-using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
-using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
-using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
-using amd_smi_jpeg_track  = perfetto_counter_track<category::amd_smi_jpeg_activity>;
+using amd_smi_gfx_track   = core::perfetto::counter_track<category::amd_smi_gfx_busy>;
+using amd_smi_umc_track   = core::perfetto::counter_track<category::amd_smi_umc_busy>;
+using amd_smi_mm_track    = core::perfetto::counter_track<category::amd_smi_mm_busy>;
+using amd_smi_temp_track  = core::perfetto::counter_track<category::amd_smi_temp>;
+using amd_smi_power_track = core::perfetto::counter_track<category::amd_smi_power>;
+using amd_smi_mem_track   = core::perfetto::counter_track<category::amd_smi_memory_usage>;
+using amd_smi_vcn_track   = core::perfetto::counter_track<category::amd_smi_vcn_activity>;
+using amd_smi_jpeg_track = core::perfetto::counter_track<category::amd_smi_jpeg_activity>;
 using amd_smi_xgmi_link_width_track =
-    perfetto_counter_track<category::amd_smi_xgmi_link_width>;
+    core::perfetto::counter_track<category::amd_smi_xgmi_link_width>;
 using amd_smi_xgmi_link_speed_track =
-    perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
-using amd_smi_xgmi_read_track = perfetto_counter_track<category::amd_smi_xgmi_read_data>;
+    core::perfetto::counter_track<category::amd_smi_xgmi_link_speed>;
+using amd_smi_xgmi_read_track =
+    core::perfetto::counter_track<category::amd_smi_xgmi_read_data>;
 using amd_smi_xgmi_write_track =
-    perfetto_counter_track<category::amd_smi_xgmi_write_data>;
+    core::perfetto::counter_track<category::amd_smi_xgmi_write_data>;
 using amd_smi_pcie_link_width_track =
-    perfetto_counter_track<category::amd_smi_pcie_link_width>;
+    core::perfetto::counter_track<category::amd_smi_pcie_link_width>;
 using amd_smi_pcie_link_speed_track =
-    perfetto_counter_track<category::amd_smi_pcie_link_speed>;
+    core::perfetto::counter_track<category::amd_smi_pcie_link_speed>;
 using amd_smi_pcie_bandwidth_acc_track =
-    perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
+    core::perfetto::counter_track<category::amd_smi_pcie_bandwidth_acc>;
 using amd_smi_pcie_bandwidth_inst_track =
-    perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
-using amd_smi_sdma_track      = perfetto_counter_track<category::amd_smi_sdma_usage>;
-using amd_smi_gfx_clock_track = perfetto_counter_track<category::amd_smi_gfx_clock>;
-using amd_smi_mem_clock_track = perfetto_counter_track<category::amd_smi_mem_clock>;
+    core::perfetto::counter_track<category::amd_smi_pcie_bandwidth_inst>;
+using amd_smi_sdma_track = core::perfetto::counter_track<category::amd_smi_sdma_usage>;
+using amd_smi_gfx_clock_track =
+    core::perfetto::counter_track<category::amd_smi_gfx_clock>;
+using amd_smi_mem_clock_track =
+    core::perfetto::counter_track<category::amd_smi_mem_clock>;
 using amd_smi_nic_rx_cnp_pkts_track =
-    perfetto_counter_track<category::amd_smi_nic_rx_cnp_pkts>;
+    core::perfetto::counter_track<category::amd_smi_nic_rx_cnp_pkts>;
 using amd_smi_nic_tx_cnp_pkts_track =
-    perfetto_counter_track<category::amd_smi_nic_tx_cnp_pkts>;
+    core::perfetto::counter_track<category::amd_smi_nic_tx_cnp_pkts>;
 using amd_smi_nic_rx_ucast_bytes_track =
-    perfetto_counter_track<category::amd_smi_nic_rx_ucast_bytes>;
+    core::perfetto::counter_track<category::amd_smi_nic_rx_ucast_bytes>;
 using amd_smi_nic_tx_ucast_bytes_track =
-    perfetto_counter_track<category::amd_smi_nic_tx_ucast_bytes>;
+    core::perfetto::counter_track<category::amd_smi_nic_tx_ucast_bytes>;
 using amd_smi_nic_rx_ucast_pkts_track =
-    perfetto_counter_track<category::amd_smi_nic_rx_ucast_pkts>;
+    core::perfetto::counter_track<category::amd_smi_nic_rx_ucast_pkts>;
 using amd_smi_nic_tx_ucast_pkts_track =
-    perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
+    core::perfetto::counter_track<category::amd_smi_nic_tx_ucast_pkts>;
 using amd_smi_nic_tx_rdma_ack_timeout_track =
-    perfetto_counter_track<category::amd_smi_nic_tx_rdma_ack_timeout>;
+    core::perfetto::counter_track<category::amd_smi_nic_tx_rdma_ack_timeout>;
 using amd_smi_nic_resp_tx_pkt_seq_err_track =
-    perfetto_counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
+    core::perfetto::counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
 using amd_smi_nic_req_rx_pkt_seq_err_track =
-    perfetto_counter_track<category::amd_smi_nic_req_rx_pkt_seq_err>;
+    core::perfetto::counter_track<category::amd_smi_nic_req_rx_pkt_seq_err>;
 using amd_smi_nic_req_rx_impl_nak_seq_err_track =
-    perfetto_counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
+    core::perfetto::counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
 
 // Unified Memory counter tracks
 using unified_memory_migration_throughput_track =
-    perfetto_counter_track<category::unified_memory_migration_throughput>;
+    core::perfetto::counter_track<category::unified_memory_migration_throughput>;
 using unified_memory_fault_rate_track =
-    perfetto_counter_track<category::unified_memory_fault_rate>;
+    core::perfetto::counter_track<category::unified_memory_fault_rate>;
 
 template <typename Track>
 bool
@@ -316,11 +347,10 @@ void
 write_sampling_track_data(const struct backtrace_region_sample& _sample,
                           bool                                  use_annotations)
 {
-    auto _track_name = _sample.track_name;
-    auto _thread_id  = _sample.thread_id;
-    auto _main_name  = _sample.name;
+    auto thread_id = _sample.thread_id;
+    auto main_name = _sample.name;
 
-    auto _track = get_track(Category{}, _track_name, _thread_id);
+    auto track = get_track(Category{}, std::string{ _sample.track_name }, thread_id);
 
     auto add_annotations = [&](::perfetto::EventContext& ctx) {
         if(!use_annotations) return;
@@ -337,8 +367,7 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
                 auto backtrace = nlohmann::json::parse(_call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back(
-                        { key.c_str(), val.template get<std::string>() });
+                    annotations.push_back({ key, val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -348,10 +377,10 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
         annotate_perfetto(ctx, annotations);
     };
 
-    tracing::push_perfetto_track(Category{}, _main_name.c_str(), _track,
-                                 _sample.start_timestamp, add_annotations);
-    tracing::pop_perfetto_track(Category{}, _main_name.c_str(), _track,
-                                _sample.end_timestamp);
+    core::perfetto::push_perfetto_track(Category{}, main_name.data(), track,
+                                        _sample.start_timestamp, add_annotations);
+    core::perfetto::pop_perfetto_track(Category{}, main_name.data(), track,
+                                       _sample.end_timestamp);
 }
 
 template <typename CategoryT>
@@ -360,26 +389,26 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
 {
     const auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
 
-    const auto _track_name = _sample.track_name;
-    const auto _timestamp  = _sample.timestamp_ns;
+    const auto track_name = std::string(_sample.track_name);
+    const auto timestamp  = _sample.timestamp_ns;
 
     const std::string _name       = event_metadata.value("name", "");
     const std::string _event_type = event_metadata.value("event_type", "");
     const std::string _target     = event_metadata.value("target", "");
 
-    const auto _track_uuid = std::hash<std::string>{}(_track_name);
+    const auto track_uuid = std::hash<std::string>{}(track_name);
 
-    auto _track                   = get_track(CategoryT{}, _track_name, _track_uuid);
+    auto track                    = get_track(CategoryT{}, track_name, track_uuid);
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!use_annotations) return;
 
-        annotate_perfetto(ctx, { { "timestamp_ns", _timestamp },
+        annotate_perfetto(ctx, { { "timestamp_ns", timestamp },
                                  { "event_type", _event_type },
                                  { "target", _target } });
     };
 
     TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::DynamicString{ _name },
-                        _track, _timestamp, add_perfetto_annotations);
+                        track, timestamp, add_perfetto_annotations);
 }
 
 // Dispatch to write_in_time_sample_data with the correct category type
@@ -423,293 +452,73 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
     if(group_by_queue)
     {
         const auto _track = std::forward<QueueTrackFactory>(make_queue_track)();
-        tracing::push_perfetto(queue_cat, push_name, _track, beg_ts, _flow, annotate);
-        tracing::pop_perfetto(queue_cat, pop_name, _track, end_ts);
+        core::perfetto::push_perfetto(queue_cat, push_name, _track, beg_ts, _flow,
+                                      annotate);
+        core::perfetto::pop_perfetto(queue_cat, pop_name, _track, end_ts);
     }
     else
     {
-        const auto _track = tracing::get_perfetto_track(
+        const auto _track = core::perfetto::get_perfetto_track(
             category::rocm_hip_stream{}, hip_activity_stream_track_desc, stream_id);
-        tracing::push_perfetto(category::rocm_hip_stream{}, push_name, _track, beg_ts,
-                               _flow, annotate);
-        tracing::pop_perfetto(category::rocm_hip_stream{}, pop_name, _track, end_ts);
+        core::perfetto::push_perfetto(category::rocm_hip_stream{}, push_name, _track,
+                                      beg_ts, _flow, annotate);
+        core::perfetto::pop_perfetto(category::rocm_hip_stream{}, pop_name, _track,
+                                     end_ts);
     }
 }
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-    output_file_registry& output_registry)
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid, [[maybe_unused]] int ppid,
+    [[maybe_unused]] output_file_registry& output_registry,
+    rocprofsys::track_registry&            tracks)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
-, m_parrent_pid(ppid)
 , m_agent_manager(*agent_mngr)
-, m_tmp_file(nullptr)
-, m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
-, m_output_registry(output_registry)
+, m_tracks(tracks)
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
     {
         if(!agent_ptr) continue;
         m_kfd_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
-        if(agent_ptr->type == agent_type::GPU)
+        if(agent_ptr->type == agent_type::gpu)
+        {
             m_kfd_node_to_gpu_index_cache[agent_ptr->node_id] =
                 static_cast<std::uint32_t>(agent_ptr->device_type_index);
-    }
-}
-
-void
-perfetto_processor_t::initialize_perfetto()
-{
-    static std::once_flag init_flag;
-    std::call_once(init_flag, []() {
-        LOG_DEBUG("Initializing perfetto tracing backend");
-        auto args               = ::perfetto::TracingInitArgs{};
-        args.backends           = ::perfetto::kInProcessBackend;
-        args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
-
-        // Silence all Perfetto log output on log-disabled ranks with empty callback
-        if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
-        {
-            args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
-        }
-
-        ::perfetto::Tracing::Initialize(args);
-        ::perfetto::TrackEvent::Register();
-        LOG_TRACE("Perfetto tracing backend initialized");
-    });
-}
-
-void
-perfetto_processor_t::setup_perfetto()
-{
-    LOG_DEBUG("Setting up perfetto configuration for pid={}", m_process_id);
-
-    auto  track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
-    auto& cfg             = m_session_config;
-
-    auto perfetto_buffer_size = config::get_perfetto_buffer_size();
-    auto flush_period         = config::get_perfetto_flush_period();
-
-    LOG_TRACE("Perfetto buffer size: {} KB, flush period: {} ms", perfetto_buffer_size,
-              flush_period);
-
-    auto _policy =
-        config::get_perfetto_fill_policy() == "discard"
-            ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
-            : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
-    auto* buffer_config = cfg.add_buffers();
-    buffer_config->set_size_kb(perfetto_buffer_size);
-    buffer_config->set_fill_policy(_policy);
-
-    for(const auto& itr : config::get_disabled_categories())
-    {
-        LOG_TRACE("Disabling perfetto track event category: {}", itr);
-        track_event_cfg.add_disabled_categories(itr);
-    }
-
-    cfg.set_flush_period_ms(flush_period);
-
-    auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-    ds_cfg->set_name("track_event");
-    ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
-
-    LOG_TRACE("Perfetto configuration setup complete");
-}
-
-void
-perfetto_processor_t::start_session()
-{
-    if(config::get_perfetto_backend() != "inprocess")
-    {
-        LOG_TRACE("Perfetto backend is not 'inprocess', skipping session start");
-        return;
-    }
-
-    LOG_DEBUG("Starting perfetto tracing session for pid={}", m_process_id);
-
-    if(!m_tracing_session)
-    {
-        m_tracing_session = ::perfetto::Tracing::NewTrace();
-        LOG_TRACE("Created new perfetto trace");
-    }
-
-    int temp_fd = -1;
-    if(config::get_use_tmp_files())
-    {
-        auto _base = fmt::format("cached-perfetto-trace-{}", m_process_id);
-        m_tmp_file = config::get_tmp_file(_base, "proto");
-        m_tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
-        temp_fd = m_tmp_file->fd;
-        LOG_TRACE("Using temp file for perfetto trace: {}", m_tmp_file->filename);
-    }
-    m_tracing_session->Setup(m_session_config, temp_fd);
-    m_tracing_session->StartBlocking();
-
-    LOG_TRACE("Perfetto tracing session started for pid={}", m_process_id);
-}
-
-void
-perfetto_processor_t::stop_session()
-{
-    if(!m_tracing_session)
-    {
-        LOG_TRACE("No active perfetto session to stop");
-        return;
-    }
-
-    LOG_DEBUG("Stopping perfetto tracing session for pid={}", m_process_id);
-    ::perfetto::TrackEvent::Flush();
-    m_tracing_session->FlushBlocking();
-    m_tracing_session->StopBlocking();
-    LOG_TRACE("Perfetto tracing session stopped");
-}
-
-char_vec_t
-perfetto_processor_t::get_session_data()
-{
-    auto _data = char_vec_t{};
-    if(m_tmp_file && *m_tmp_file)
-    {
-        m_tmp_file->close();
-        FILE* _fdata = ::fopen(m_tmp_file->filename.c_str(), "rb");
-
-        if(!_fdata)
-        {
-            LOG_ERROR("Perfetto temp trace file '{}' could not be read",
-                      m_tmp_file->filename);
-            return char_vec_t{ m_tracing_session->ReadTraceBlocking() };
-        }
-
-        ::fseek(_fdata, 0, SEEK_END);
-        size_t _fnum_elem = ::ftell(_fdata);
-        ::fseek(_fdata, 0, SEEK_SET);
-
-        _data.resize(_fnum_elem, '\0');
-        auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
-        ::fclose(_fdata);
-
-        if(_fnum_read != _fnum_elem)
-        {
-            throw std::runtime_error(fmt::format(
-                "Error! read {} elements from perfetto trace file '{}'. Expected {}",
-                _fnum_read, m_tmp_file->filename, _fnum_elem));
         }
     }
-    else
-    {
-        _data = char_vec_t{ m_tracing_session->ReadTraceBlocking() };
-    }
-
-    return _data;
-}
-
-void
-perfetto_processor_t::flush(bool& _perfetto_output_error)
-{
-    if(!m_tracing_session) return;
-
-    stop_session();
-
-    auto trace_data = char_vec_t{};
-    trace_data      = get_session_data();
-
-    // If processing parrent process, use default filename (respects MPI rank/USE_PID
-    // settings) Otherwise, use PID-based suffix for child process traces
-    auto _filename = (m_process_id == m_parrent_pid)
-                         ? config::get_perfetto_output_filename()
-                         : config::get_perfetto_output_filename_with_suffix(
-                               std::to_string(m_process_id));
-
-    if(!trace_data.empty())
-    {
-        const bool logs_enabled =
-            config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
-        operation::file_output_message<tim::project::rocprofsys> _fom{};
-        // Write the trace into a file.
-        if(config::get_verbose() >= 0 && logs_enabled)
-        {
-            _fom(_filename, std::string{ "perfetto" },
-                 " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
-        }
-        std::ofstream ofs{};
-        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
-        {
-            _fom.append("Error opening '%s'...", _filename.c_str());
-            _perfetto_output_error = true;
-        }
-        else
-        {
-            // Write the trace into a file.
-            ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0 && logs_enabled)
-            {
-                _fom.append("%s", "Done");  // NOLINT
-            }
-            m_output_registry.register_file(_filename, output_format::perfetto);
-        }
-        ofs.close();
-    }
-    else
-    {
-        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                  _filename.c_str());
-    }
-
-    if(m_tmp_file)
-    {
-        m_tmp_file->close();
-        m_tmp_file->remove();
-        m_tmp_file.reset();
-    }
-
-    m_tracing_session.reset();
 }
 
 void
 perfetto_processor_t::prepare_for_processing()
 {
     LOG_DEBUG("Preparing perfetto processor for pid={}", m_process_id);
-    initialize_perfetto();
-    setup_perfetto();
-    start_session();
-    initialize_pmc_track_map();
-    LOG_TRACE("Perfetto processor prepared for processing");
-}
-
-void
-perfetto_processor_t::finalize_processing()
-{
-    LOG_DEBUG("Finalizing perfetto processor for pid={}", m_process_id);
-    bool _perfetto_output_error = false;
-    flush(_perfetto_output_error);
-
-    if(_perfetto_output_error)
-    {
-        LOG_ERROR("Perfetto trace generation failed for pid={}", m_process_id);
-    }
-    else
-    {
-        LOG_DEBUG("Perfetto processing finalized successfully for pid={}", m_process_id);
-    }
+    // Bind this parser thread to the engine-owned registry so track-uuid
+    // creates land in the engine's registry instead of the lazy
+    // process-global default. Tag the thread's emissions with our pid so
+    // the cached interceptor TLS keys them correctly.
+    set_active_track_registry(&m_tracks);
+    core::set_emitting_pid(static_cast<int>(m_process_id));
+    // Emit the per-pid ProcessTrack descriptor up front so every per-pid
+    // sink carries it (and so single_file concat shows the cached pid as
+    // its own process, not the post-processing OS pid).
+    core::perfetto::ensure_synthetic_process_track_emitted(
+        static_cast<int>(m_process_id));
 }
 
 template <typename CategoryT, typename FuncT, typename... Args>
 ::perfetto::Track
 perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args)
 {
-    const auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(args...);
+    const auto _uuid = core::perfetto::get_perfetto_category_uuid<CategoryT>(args...);
     auto       it    = m_track_cache.find(_uuid);
     if(it != m_track_cache.end()) return it->second;
-    auto _track = tracing::get_perfetto_track(CategoryT{}, std::forward<FuncT>(desc_gen),
-                                              std::forward<Args>(args)...);
+    auto _track = core::perfetto::get_perfetto_track(
+        CategoryT{}, std::forward<FuncT>(desc_gen), std::forward<Args>(args)...);
     m_track_cache.emplace(_uuid, _track);
     return _track;
 }
@@ -723,17 +532,35 @@ perfetto_processor_t::get_thread_track(std::uint64_t thread_id)
     auto _track = ::perfetto::ThreadTrack::ForThread(
         static_cast<::perfetto::base::PlatformThreadId>(thread_id));
 
-    // - Worker threads (sequent_value > 0) get a "Thread N" descriptor.
-    // - The main thread (sequent_value == 0) is intentionally left with its
-    //   default descriptor.
+    auto _desc = _track.Serialize();
+
+    // ThreadTrack::ForThread anchors the descriptor's pid to the post-processor's
+    // own OS pid (ProcessTrack::Current().pid). Re-anchor it to the cached process
+    // so the thread is grouped under the correct (synthetic) ProcessTrack that the
+    // parallel cached-Perfetto path emits, rather than the post-processor process.
+    _desc.mutable_thread()->set_pid(static_cast<std::int32_t>(m_process_id));
+
     const auto& _info = thread_info::get(static_cast<std::int64_t>(thread_id), SystemTID);
-    if(_info && _info->index_data && _info->index_data->sequent_value > 0)
+    if(_info && _info->index_data)
     {
-        auto _desc = _track.Serialize();
-        _desc.mutable_thread()->set_thread_name(
-            fmt::format("Thread {}", _info->index_data->sequent_value));
-        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+        if(_info->index_data->sequent_value > 0)
+        {
+            // Worker threads (sequent_value > 0) get a "Thread N" descriptor.
+            _desc.mutable_thread()->set_thread_name(
+                fmt::format("Thread {}", _info->index_data->sequent_value));
+        }
+        else
+        {
+            // Main thread (sequent_value == 0): Perfetto labels a thread as the
+            // process "main thread" (and sorts it to the top) when its descriptor
+            // has thread.tid == thread.pid. Force that relationship so the
+            // application's main thread is identified correctly under the cached
+            // process.
+            _desc.mutable_thread()->set_tid(static_cast<std::int32_t>(m_process_id));
+        }
     }
+
+    ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
     m_thread_track_cache.emplace(thread_id, _track);
     return _track;
@@ -816,7 +643,7 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 // allocation_size field, so counter tracks are not needed
 #if ROCPROFSYS_ROCM_VERSION >= 70002
     using counter_track =
-        perfetto_counter_track<rocprofiler_buffer_tracing_scratch_memory_record_t>;
+        core::perfetto::counter_track<rocprofiler_buffer_tracing_scratch_memory_record_t>;
 
     if(!counter_track::exists(_agent_device_id))
     {
@@ -951,9 +778,9 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
         auto _agent_logical_node_id =
             m_agent_manager.get_agent_by_handle(_mas.agent_id_handle).logical_node_id;
 
-        const auto _track =
-            tracing::get_perfetto_track(category::rocm_memory_allocate{}, _track_desc,
-                                        _agent_logical_node_id, _thrd_id);
+        const auto _track = core::perfetto::get_perfetto_track(
+            category::rocm_memory_allocate{}, _track_desc, _agent_logical_node_id,
+            _thrd_id);
 
         auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
             if(!m_use_annotations) return;
@@ -967,10 +794,11 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
                                      { "address", _addr_val } });
         };
 
-        tracing::push_perfetto(category::rocm_memory_allocate{}, operation, _track,
-                               _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
-                               add_perfetto_annotations);
-        tracing::pop_perfetto(category::rocm_memory_allocate{}, "", _track, _end_ts);
+        core::perfetto::push_perfetto(category::rocm_memory_allocate{}, operation, _track,
+                                      _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
+                                      add_perfetto_annotations);
+        core::perfetto::pop_perfetto(category::rocm_memory_allocate{}, "", _track,
+                                     _end_ts);
     }
 #endif
 }
@@ -993,7 +821,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                                                       { "corr_id", _corr_id } };
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            annotations.push_back({ arg.arg_name, arg.arg_value });
         }
 
         if(!_rs.call_stack.empty())
@@ -1003,8 +831,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                 auto backtrace = nlohmann::json::parse(_rs.call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back(
-                        { key.c_str(), val.template get<std::string>() });
+                    annotations.push_back({ key, val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -1018,23 +845,27 @@ perfetto_processor_t::handle(const region_sample& _rs)
     // Emit on the originating thread's track so multi-threaded runs keep one track
     // per thread (as the live path does implicitly via the calling thread), instead
     // of collapsing every thread onto the single replay thread.
-    auto _thread_track = get_thread_track(_rs.thread_id);
+    // ThreadTrack -> Track slicing here is the intended Perfetto SDK usage: Track
+    // is the plain uuid carrier that all concrete track types decay to.
+    // NOLINTNEXTLINE(cppcoreguidelines-slicing)
+    const ::perfetto::Track thread_track = get_thread_track(_rs.thread_id);
 
     auto emit_trace = [&](auto category_tag) {
         using CategoryT = decltype(category_tag);
         if(_corr_id != 0)
         {
-            tracing::push_perfetto_track(
-                CategoryT{}, _name.c_str(), _thread_track, _beg_ts,
+            core::perfetto::push_perfetto_track(
+                CategoryT{}, _name.data(), thread_track, _beg_ts,
                 ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
         }
         else
         {
-            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
-                                         _beg_ts, add_annotations);
+            core::perfetto::push_perfetto_track(CategoryT{}, _name.data(), thread_track,
+                                                _beg_ts, add_annotations);
         }
 
-        tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _thread_track, _end_ts);
+        core::perfetto::pop_perfetto_track(CategoryT{}, _name.data(), thread_track,
+                                           _end_ts);
     };
 
     auto try_category = [&](auto category_tag) {
@@ -1047,7 +878,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
         return false;
     };
 
-    bool dispatched =
+    const bool dispatched =
         (try_category(category::host{}) || try_category(category::user{}) ||
          try_category(category::python{}) || try_category(category::mpi{}) ||
          try_category(category::pthread{}) || try_category(category::kokkos{}) ||
@@ -1056,7 +887,9 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_marker_api{}) ||
          try_category(category::rocm_ompt_api{}) || try_category(category::rocm_rccl{}) ||
          try_category(category::rocm_rocdecode_api{}) ||
-         try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
+         try_category(category::rocm_rocjpeg_api{}) ||
+         try_category(category::rocm_rocshmem_api{}) ||
+         try_category(category::rocm_hipfile_api{}) || try_category(category::ucx{}) ||
          try_category(category::shmem{}) || try_category(category::vaapi{}));
 
     if(!dispatched)
@@ -1069,15 +902,19 @@ perfetto_processor_t::handle(const region_sample& _rs)
 void
 perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 {
-    using process_page_track = perfetto_counter_track<category::process_page>;
-    using process_virt_track = perfetto_counter_track<category::process_virt>;
-    using process_peak_track = perfetto_counter_track<category::process_peak>;
-    using process_cntx_track = perfetto_counter_track<category::process_context_switch>;
-    using process_flts_track = perfetto_counter_track<category::process_page_fault>;
-    using process_user_track = perfetto_counter_track<category::process_user_mode_time>;
-    using process_kern_track = perfetto_counter_track<category::process_kernel_mode_time>;
-    using cpu_freq_track     = perfetto_counter_track<category::cpu_freq>;
-    using cpu_load_track     = perfetto_counter_track<category::cpu_load>;
+    using process_page_track = core::perfetto::counter_track<category::process_page>;
+    using process_virt_track = core::perfetto::counter_track<category::process_virt>;
+    using process_peak_track = core::perfetto::counter_track<category::process_peak>;
+    using process_cntx_track =
+        core::perfetto::counter_track<category::process_context_switch>;
+    using process_flts_track =
+        core::perfetto::counter_track<category::process_page_fault>;
+    using process_user_track =
+        core::perfetto::counter_track<category::process_user_mode_time>;
+    using process_kern_track =
+        core::perfetto::counter_track<category::process_kernel_mode_time>;
+    using cpu_freq_track = core::perfetto::counter_track<category::cpu_freq>;
+    using cpu_load_track = core::perfetto::counter_track<category::cpu_load>;
 
     struct core_freq_sample
     {
@@ -1123,8 +960,8 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         return result;
     };
 
-    static std::once_flag init_flag;
-    std::call_once(init_flag, []() {
+    if(!m_cpu_pmc_initialized)
+    {
         process_page_track::emplace(0, "CPU Memory Usage (S)", "MB");
         process_virt_track::emplace(0, "CPU Virtual Memory (S)", "MB");
         process_peak_track::emplace(0, "CPU Peak Memory (S)", "MB");
@@ -1132,34 +969,45 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         process_flts_track::emplace(0, "CPU Page Faults (S)", "");
         process_user_track::emplace(0, "CPU User Time (S)", "sec");
         process_kern_track::emplace(0, "CPU Kernel Time (S)", "sec");
-    });
+        m_cpu_pmc_initialized = true;
+    }
 
     const auto  _ts        = _cpu_sample.timestamp;
     const auto& _em        = _cpu_sample.enabled_metric;
     const auto  _device_id = _cpu_sample.device_id;
 
-    // Process-level metrics are global — emit once from the lowest selected socket
-    static auto s_process_device_id = _device_id;
-    const bool  _is_process_owner   = (_device_id == s_process_device_id);
+    if(!m_cpu_pmc_owner_device_id.has_value()) m_cpu_pmc_owner_device_id = _device_id;
+    const bool _is_process_owner = (_device_id == *m_cpu_pmc_owner_device_id);
 
     if(_is_process_owner)
     {
         if(_em.bits.page_rss)
+        {
+            const auto page_rss_b =
+                bytes{ static_cast<double>(_cpu_sample.process_data.page_rss) };
+
             TRACE_COUNTER(trait::name<category::process_page>::value,
                           process_page_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.page_rss) /
-                              units::megabyte);
+                          data_size_cast<megabytes>(page_rss_b).count());
+        }
 
         if(_em.bits.virt_mem)
+        {
+            const auto virt_mem_b =
+                bytes{ static_cast<double>(_cpu_sample.process_data.virt_mem) };
+
             TRACE_COUNTER(trait::name<category::process_virt>::value,
                           process_virt_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.virt_mem) /
-                              units::megabyte);
+                          data_size_cast<megabytes>(virt_mem_b).count());
+        }
         if(_em.bits.peak_rss)
+        {
+            const auto peak_rss_b =
+                bytes{ static_cast<double>(_cpu_sample.process_data.peak_rss) };
             TRACE_COUNTER(trait::name<category::process_peak>::value,
                           process_peak_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.peak_rss) /
-                              units::megabyte);
+                          data_size_cast<megabytes>(peak_rss_b).count());
+        }
 
         if(_em.bits.ctx_switches)
             TRACE_COUNTER(trait::name<category::process_context_switch>::value,
@@ -1172,16 +1020,26 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
                           static_cast<double>(_cpu_sample.process_data.page_faults));
 
         if(_em.bits.user_time)
+        {
+            const auto user_mode_time_us =
+                std::chrono::microseconds{ _cpu_sample.process_data.user_mode_time };
+            const auto user_mode_time_s =
+                std::chrono::duration<double>{ user_mode_time_us };
+
             TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
-                          process_user_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.user_mode_time) /
-                              units::sec);
+                          process_user_track::at(0, 0), _ts, user_mode_time_s.count());
+        }
 
         if(_em.bits.kernel_time)
+        {
+            const auto kernel_mode_time_us =
+                std::chrono::microseconds{ _cpu_sample.process_data.kernel_mode_time };
+            const auto kernel_mode_time_s =
+                std::chrono::duration<double>{ kernel_mode_time_us };
+
             TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
-                          process_kern_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
-                              units::sec);
+                          process_kern_track::at(0, 0), _ts, kernel_mode_time_s.count());
+        }
     }
 
     if(_em.bits.frequency)
@@ -1223,6 +1081,31 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 }
 
 void
+perfetto_processor_t::handle(const gpu_perf_counter_sample& _gpu_perf_counter)
+{
+    using counter_collection_track =
+        core::perfetto::counter_track<category::rocm_counter_collection>;
+
+    const auto _ts        = _gpu_perf_counter.timestamp;
+    const auto _device_id = _gpu_perf_counter.device_id;
+
+    for(const auto& entry : _gpu_perf_counter.entries)
+    {
+        const auto _name_info =
+            m_metadata.find_gpu_perf_counter_by_id(_device_id, entry.counter_id);
+        if(!_name_info) continue;
+
+        const auto& _track_name = _name_info->get().track_name;
+        const auto  _track_key  = std::hash<std::string>{}(_track_name);
+
+        if(!counter_collection_track::exists(_track_key))
+            counter_collection_track::emplace(_track_key, _track_name, ROCM_COUNTER_UNIT);
+        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
+                      counter_collection_track::at(_track_key, 0), _ts, entry.value);
+    }
+}
+
+void
 perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
 {
     (_bts.category == trait::name<category::timer_sampling>::value)
@@ -1231,22 +1114,26 @@ perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bt
 }
 
 void
-perfetto_processor_t::initialize_pmc_track_map()
+perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 {
     using counter_collection_track =
-        perfetto_counter_track<category::rocm_counter_collection>;
-    using thread_cpu_time_track    = perfetto_counter_track<category::thread_cpu_time>;
-    using thread_peak_memory_track = perfetto_counter_track<category::thread_peak_memory>;
+        core::perfetto::counter_track<category::rocm_counter_collection>;
+    using thread_cpu_time_track =
+        core::perfetto::counter_track<category::thread_cpu_time>;
+    using thread_peak_memory_track =
+        core::perfetto::counter_track<category::thread_peak_memory>;
     using thread_context_switch_track =
-        perfetto_counter_track<category::thread_context_switch>;
-    using thread_page_fault_track = perfetto_counter_track<category::thread_page_fault>;
+        core::perfetto::counter_track<category::thread_context_switch>;
+    using thread_page_fault_track =
+        core::perfetto::counter_track<category::thread_page_fault>;
     using thread_hardware_counter_track =
-        perfetto_counter_track<category::thread_hardware_counter>;
-    using comm_data_track = perfetto_counter_track<category::comm_data>;
+        core::perfetto::counter_track<category::thread_hardware_counter>;
+    using comm_data_track = core::perfetto::counter_track<category::comm_data>;
 
-    m_pmc_track_map = {
+    static const std::unordered_map<size_t, pmc_track_info> PMC_TRACK_MAP = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
-          { "Unit Count", [](auto id) { return counter_collection_track::exists(id); },
+          { ROCM_COUNTER_UNIT,
+            [](auto id) { return counter_collection_track::exists(id); },
             [](auto id, auto& n, auto& u) {
                 counter_collection_track::emplace(id, n, u.c_str());
             },
@@ -1321,34 +1208,30 @@ perfetto_processor_t::initialize_pmc_track_map()
                               comm_data_track::at(id, idx), ts, val);
             } } }
     };
-}
 
-void
-perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
-{
-    const auto _track_name = _pmc.track_name;
-    const auto _value      = _pmc.value;
-    const auto _beg_ts     = _pmc.timestamp_ns;
-    const auto _device_id  = _pmc.device_id;
+    const auto track_name = std::string(_pmc.track_name);
+    const auto value      = _pmc.value;
+    const auto beg_ts     = _pmc.timestamp_ns;
+    const auto device_id  = _pmc.device_id;
 
-    auto track_key = std::hash<std::string>{}(_track_name + std::to_string(_device_id));
+    auto track_key = std::hash<std::string>{}(track_name + std::to_string(device_id));
 
-    auto track_it = m_pmc_track_map.find(_pmc.category_enum_id);
-    if(track_it != m_pmc_track_map.end())
+    auto track_it = PMC_TRACK_MAP.find(_pmc.category_enum_id);
+    if(track_it != PMC_TRACK_MAP.end())
     {
         const auto& track_info = track_it->second;
 
         if(!track_info.exists_fn(track_key))
         {
-            track_info.emplace_fn(track_key, _track_name, track_info.default_units);
+            track_info.emplace_fn(track_key, track_name, track_info.default_units);
         }
 
-        track_info.trace_fn(track_key, 0, _beg_ts, _value);
+        track_info.trace_fn(track_key, 0, beg_ts, value);
     }
     else
     {
         LOG_WARNING("Unknown PMC event category_enum_id: {} for track '{}'",
-                    _pmc.category_enum_id, _track_name);
+                    _pmc.category_enum_id, track_name);
     }
 }
 
@@ -1380,7 +1263,7 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     emit_gpu_scalar<amd_smi_mem_track>(
         _device_id, _ts, _em.bits.memory_usage, "Memory Usage", "megabytes",
-        _m.memory_usage / static_cast<double>(units::megabyte));
+        data_size_cast<megabytes>(bytes{ static_cast<double>(_m.memory_usage) }).count());
 
     emit_gpu_scalar<amd_smi_sdma_track>(_device_id, _ts, _em.bits.sdma_usage,
                                         "SDMA Usage", "%", _m.sdma_usage);
@@ -1558,36 +1441,6 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-perfetto_processor_t::handle(
-    [[maybe_unused]] const gpu_perf_counter_sample& _gpu_perf_counter)
-{
-    const auto _ts        = _gpu_perf_counter.timestamp;
-    const auto _device_id = _gpu_perf_counter.device_id;
-
-    auto track_it = m_pmc_track_map.find(
-        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value));
-    if(track_it == m_pmc_track_map.end()) return;
-
-    const auto& track_info = track_it->second;
-
-    for(const auto& entry : _gpu_perf_counter.entries)
-    {
-        auto name_info =
-            m_metadata.find_gpu_perf_counter_by_id(_device_id, entry.counter_id);
-        if(!name_info) continue;
-
-        const auto& track_name = name_info->get().track_name;
-        auto        track_key  = std::hash<std::string>{}(track_name);
-
-        if(!track_info.exists_fn(track_key))
-        {
-            track_info.emplace_fn(track_key, track_name, track_info.default_units);
-        }
-        track_info.trace_fn(track_key, 0, _ts, entry.value);
-    }
-}
-
-void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
 {
     // Dispatch based on category_enum_id using the category type mapping
@@ -1603,8 +1456,10 @@ template <typename CategoryT>
 void
 perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 {
-    const auto _track_hash = std::hash<std::string>{}(sample.track_name);
-    auto       _track      = get_track(CategoryT{}, sample.track_name, _track_hash);
+    const auto track_name = std::string(sample.track_name);
+    const auto name       = sample.name;
+    const auto track_hash = std::hash<std::string>{}(track_name);
+    auto       track      = get_track(CategoryT{}, track_name, track_hash);
 
     auto add_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -1617,7 +1472,7 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
         auto args = process_arguments_string(sample.args_str);
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            annotations.push_back({ arg.arg_name, arg.arg_value });
         }
 
         annotate_perfetto(ctx, annotations);
@@ -1625,16 +1480,16 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 
     if(sample.start_timestamp == sample.end_timestamp)
     {
-        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                            ::perfetto::DynamicString{ sample.name }, _track,
+        const ::perfetto::DynamicString dynamic_name{ name.data(), name.size() };
+        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, dynamic_name, track,
                             sample.start_timestamp, add_annotations);
     }
     else
     {
-        tracing::push_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
-                                     sample.start_timestamp, add_annotations);
-        tracing::pop_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
-                                    sample.end_timestamp);
+        core::perfetto::push_perfetto_track(CategoryT{}, name.data(), track,
+                                            sample.start_timestamp, add_annotations);
+        core::perfetto::pop_perfetto_track(CategoryT{}, name.data(), track,
+                                           sample.end_timestamp);
     }
 }
 
@@ -1712,7 +1567,7 @@ perfetto_processor_t::handle(const kfd_sample& sample)
 {
     using handler_fn = void (perfetto_processor_t::*)(const kfd_sample&);
 
-    static const std::array<std::pair<std::string_view, handler_fn>, 6> dispatch{ {
+    static const std::array<std::pair<std::string_view, handler_fn>, 8> k_dispatch{ {
         { trait::name<category::rocm_kfd_page_fault>::value,
           &perfetto_processor_t::handle_kfd_page_fault },
         { trait::name<category::rocm_kfd_page_migrate>::value,
@@ -1727,12 +1582,15 @@ perfetto_processor_t::handle(const kfd_sample& sample)
         { trait::name<category::rocm_kfd_event_dropped_events>::value,
           &perfetto_processor_t::emit_kfd_event<
               category::rocm_kfd_event_dropped_events> },
+        { trait::name<category::rocm_kfd_event_page_fault>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_page_fault> },
+        { trait::name<category::rocm_kfd_event_page_migrate>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_page_migrate> },
     } };
 
-    const auto entry =
-        std::find_if(dispatch.begin(), dispatch.end(),
-                     [&](const auto& row) { return row.first == sample.category; });
-    if(entry == dispatch.end())
+    const auto entry = std::ranges::find_if(
+        k_dispatch, [&](const auto& row) { return row.first == sample.category; });
+    if(entry == k_dispatch.end())
     {
         LOG_WARNING("Unknown KFD category: {}", sample.category);
         return;

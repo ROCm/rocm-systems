@@ -91,7 +91,7 @@ Constructed via:
 
   thread_block g = this_thread_block();
 
-The ``group_index()`` , ``thread_index()`` , ``thread_rank()`` , ``size()``, ``cg_type()``, ``is_valid()`` , ``sync()`` and ``group_dim()`` member functions are public of the thread_block class. For further details, check the :ref:`thread_block references <thread_block_ref>` .
+The ``group_index()`` , ``thread_index()`` , ``thread_rank()`` , ``size()``, ``cg_type()``, ``is_valid()`` , ``sync()``, ``barrier_arrive()``, ``barrier_wait()`` and ``group_dim()`` member functions are public of the thread_block class. For further details, check the :ref:`thread_block references <thread_block_ref>` .
 
 Grid group
 ------------
@@ -108,7 +108,7 @@ Constructed via:
 
   grid_group g = this_grid();
 
-The ``thread_rank()`` , ``size()``, ``cg_type()``, ``is_valid()`` and ``sync()`` member functions
+The ``thread_rank()`` , ``size()``, ``cg_type()``, ``is_valid()``, ``sync()``, ``barrier_arrive()`` and ``barrier_wait()`` member functions
 are public of the ``grid_group`` class. For further details, check the :ref:`grid_group references <grid_group_ref>`.
 
 Multi-grid group
@@ -191,6 +191,48 @@ Constructed via:
   ``shfl()`` functions support integer or float type.
 
 The ``thread_rank()`` , ``size()``, ``cg_type()``, ``is_valid()``, ``sync()``, ``meta_group_rank()``, ``meta_group_size()``, ``shfl()``, ``shfl_down()``, ``shfl_up()``, ``ballot()``, ``any()``, ``all()``, ``match_any()`` and ``match_all()`` member functions are public of the ``coalesced_group`` class. For more information, see :ref:`coalesced_group references <coalesced_group_ref>` .
+
+.. _coop_cluster_group:
+
+Cluster group
+-------------
+
+Represents a group of thread blocks that execute together on the device. A cluster
+can be 1D, 2D, or 3D and can contain up to 15 workgroups. Each block in the cluster
+runs on a separate Workgroup Processor (WGP). The cluster group provides
+synchronization and shared-memory mapping across those blocks.
+
+.. code-block:: cpp
+
+  class cluster_group;
+
+Constructed via:
+
+.. code-block:: cpp
+
+  cluster_group g = this_cluster();
+
+The following member functions are public on the ``cluster_group`` class:
+
+* ``sync()`` — synchronizes all threads in the cluster.
+* ``barrier_arrive()`` — arrives at the cluster barrier and returns an ``arrival_token``.
+* ``barrier_wait(arrival_token&&)`` — waits on the token returned by ``barrier_arrive()``.
+* ``block_index()`` — returns the 3D index of the calling block within the cluster.
+* ``block_rank()`` — returns the rank of the calling block within ``[0, num_blocks())``.
+* ``thread_index()`` — returns the 3D index of the calling thread within the cluster.
+* ``thread_rank()`` — returns the rank of the calling thread within ``[0, num_threads())``.
+* ``dim_blocks()`` — returns the dimensions of the launched cluster in units of blocks.
+* ``num_blocks()`` — returns the total number of blocks in the cluster.
+* ``dim_threads()`` — returns the dimensions of the launched cluster in units of threads.
+* ``num_threads()`` (alias: ``size()``) — returns the total number of threads in the cluster.
+* ``map_shared_rank<T>(T* addr, int rank)`` — returns the address of a shared-memory variable in the block with the given rank.
+* ``query_shared_rank(const void* addr)`` — returns the block rank that owns the given shared-memory address.
+
+.. note::
+
+  ``map_shared_rank()`` and ``query_shared_rank()`` require a device that reports
+  multi-block cluster support. Check ``hipDeviceProp_t::clusterLaunch`` at
+  runtime before relying on these functions.
 
 Cooperative groups simple example
 =================================
@@ -476,20 +518,64 @@ With each group type, the synchronization requires using the correct cooperative
       multi_grid_group multi_grid = this_multi_grid();
       multi_grid.sync();
 
-Operations
-==========
+Split barrier
+-------------
 
-HIP has one group-wide operation for now: ``reduce()``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+``barrier_arrive()`` and ``barrier_wait()`` split synchronization into two
+separate steps, allowing useful work to be performed in between. This is
+supported on ``thread_block``, ``grid_group``, and ``cluster_group``.
+
+``barrier_arrive()`` signals that the calling thread has reached the barrier
+and returns an ``arrival_token``. The thread can then continue executing
+work that does not depend on other threads. ``barrier_wait()`` consumes the
+token and blocks until all threads in the group have called
+``barrier_arrive()``, at which point it is safe to read results written by
+other threads.
 
 .. code-block:: cpp
 
-  auto reduce(const TyGroup& group, T&& val, Operation&& op)
+  auto tok = g.barrier_arrive();
 
-Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`` on the specified group, contributing the value ``val``
+  // Work that does not depend on other threads' results can go here.
+
+  g.barrier_wait(std::move(tok));
+
+The following example uses a split barrier on a ``thread_block`` to overlap
+a write to shared memory with a global memory write, avoiding an idle wait:
+
+.. code-block:: cpp
+
+  __global__ void split_barrier_example(float* out, float* in) {
+      namespace cg = cooperative_groups;
+
+      __shared__ float mid[32];
+      size_t i = threadIdx.x;
+      auto tb = cg::this_thread_block();
+
+      out[i] = in[i] * 2.0f;
+
+      auto tok = tb.barrier_arrive();
+
+      if (i == 0) {
+          for (size_t j = 0; j < 32; j++)
+              mid[j] = in[j];
+      }
+
+      tb.barrier_wait(std::move(tok));
+
+      out[i] += mid[i];
+  }
+
+.. _cg_operations:
+
+Operations
+==========
+
+All cooperative groups operations receive the same arguments:
 
 * ``group`` is either a ``coalesced_group`` or a ``thread_block_tile``
 
-* ``val`` needs to be a type ``T`` that is trivially copyable and up to 32 bytes in size.
+* ``val`` needs to be a type ``T`` that is trivially copyable, default constructible, and up to 32 bytes in size.
 
 * ``op`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the ``cooperative_groups`` namespace:
 
@@ -505,40 +591,150 @@ Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`
 
   + ``cooperative_groups::bit_xor`` (bitwise xor)
 
-Performance
---------------
+Overloads without the ``op`` parameter use ``cooperative_groups::plus``.
+
+Reduce
+---------
+Performs a group-wide reduce. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+
+.. code-block:: cpp
+
+  auto reduce(const TyGroup& group, T&& val, Operation&& op)
+
+Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`` on the specified group, contributing the value ``val``
+The parameters are described here: :ref:`cg_operations`
+
+**Performance**
 
 On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
 
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
-* On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
+* Nvidia: there is hardware acceleration for ``int``, ``unsigned int``
 
-* On AMD platform: there is hardware acceleration for ``int`` or ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``single``/``double`` precision floating point types will also receive hardware acceleration.
+* AMD: there is hardware acceleration for ``int``, ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision floating point types will also receive hardware acceleration.
 
 For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
 
-* On Nvidia platform: ``unsigned int``
+* Nvidia: ``unsigned int``
 
-* On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelerated.
+* AMD: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelerated.
+
+inclusive_scan
+-----------------
+
+.. code-block:: cpp
+
+  auto inclusive_scan(const TyGroup& group, TyVal&& val, Operation&& op)
+  auto inclusive_scan(const TyGroup& group, TyVal&& val)
+
+Defined in cooperative_groups/hip_scan.h. Performs an inclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+
+The parameters are described here: :ref:`cg_operations`
+
+**Performance**
+
+On AMD, when ``group`` is of the same size as the warp size and ``T`` a primitive type, DPP instructions are used, resulting in significantly faster execution than with other group sizes. The primitive types are:
+
+For arithmetic scans (``plus``, ``less`` and ``greater``):
+
+* Nvidia: there is hardware acceleration for ``int``, ``unsigned int``
+
+* AMD: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
+
+For bitwise-scans: (``bit_and``, ``bit_or``, ``bit_xor``)
+
+* Nvidia: ``unsigned int``
+
+* AMD: ``unsigned int``, ``int``, ``unsigned long long``, ``long long``
+
+exclusive_scan
+-----------------
+.. code-block:: cpp
+
+  auto exclusive_scan(const TyGroup& group, TyVal&& val, Operation&& op)
+  auto exclusive_scan(const TyGroup& group, TyVal&& val)
+
+Defined in cooperative_groups/hip_scan.h. Performs an exclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+
+The parameters are described here: :ref:`cg_operations`
+
+ The value returned for the first active lane is platform-dependent and may change in future releases. As a reference: 
+
+* AMD - the "identity" value is returned, according to the operation:
+  * ``plus``: always 0
+  * ``less``:
+    * for integer types: the maximum value for the type, i.e. ``std::numeric_limits<T>::max()``
+    * for floating point types: ``inf``
+  * ``greater``:
+    * for integer types: the minimum value for the type, i.e. ``std::numeric_limits<T>::lowest()``
+    * for floating point types: ``-inf``
+  * ``bit_and``: a value with all the bits set to 1
+  * ``bit_or``: always 0
+  * ``bit_xor``: always 0
+
+* NVIDIA - returns T {} (i.e. 0)
+
+**Performance**
+
+On AMD, when ``group`` is of the same size as the warp size and ``T`` a primitive type, DPP instructions are used, resulting in significantly faster execution than with other group sizes. The primitive types are:
+
+For arithmetic scans (``plus``, ``less`` and ``greater``):
+
+* Nvidia: there is hardware acceleration for ``int`` or ``unsigned int``
+
+* AMD: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
+
+For bitwise-scans: (``bit_and``, ``bit_or``, ``bit_xor``)
+
+* Nvidia: ``unsigned int``
+
+* AMD: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
+
+memcpy_async
+------------
+
+To use ``memcpy_async``, include the optional header:
+
+  .. code-block:: cpp
+
+    #include <hip/cooperative_groups/memcpy_async.h>
+
+Cooperatively copies memory between global and shared (LDS) memory, distributing
+the work across all threads in the group. The copy is completed before the function
+returns; no separate ``wait`` call is needed.
+
+Two overloads are available:
+
+.. code-block:: cpp
+
+  // Byte-count overload
+  void memcpy_async(const TyGroup& group,
+                    TyElem* dst,
+                    const TyElem* src,
+                    const TySizeT& count);
+
+  // Layout overload: copies min(dstLayout, srcLayout) elements
+  void memcpy_async(const TyGroup& group,
+                    TyElem* dst, const DstLayout& dstLayout,
+                    const TyElem* src, const SrcLayout& srcLayout);
+
+The supported group types are ``thread_block``, ``coalesced_group``, and
+``thread_block_tile<N>``.
+
+**Performance**
+
+On devices that support hardware-accelerated asynchronous copies, ``memcpy_async``
+uses dedicated global-to-LDS and LDS-to-global transfer paths in widths of 4, 8,
+or 16 bytes. On other devices, the implementation falls back to a software copy
+loop with equivalent semantics.
 
 Unsupported NVIDIA CUDA features
 ================================
 
-HIP doesn't support the following NVIDIA CUDA optional headers:
-
-* ``cooperative_groups/memcpy_async.h``
-* ``cooperative_groups/scan.h``
-
-HIP doesn't support the following CUDA class in ``cooperative_groups`` namespace:
-
-* ``cluster_group``
-
 HIP doesn't support the following CUDA functions/operators in ``cooperative_groups`` namespace:
 
 * ``synchronize``
-* ``memcpy_async``
 * ``wait`` and ``wait_prior``
 * ``invoke_one`` and ``invoke_one_broadcast``
 * ``reduce_update_async`` and ``reduce_store_async``
-* ``inclusive_scan`` and ``exclusive_scan``

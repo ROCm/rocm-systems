@@ -10,9 +10,6 @@ namespace amd::device {
 
 const char* BlitLinearSourceCode = BLIT_KERNELS(
     // Extern
-    extern void __amd_fillBufferAligned(__global uchar*, __global ushort*, __global uint*,
-                                        __global ulong*, __constant uchar*, uint, ulong, ulong);
-
     extern void __amd_fillBufferAligned2D(__global uchar*, __global ushort*, __global uint*,
                                           __global ulong*, __constant uchar*, uint, ulong, ulong,
                                           ulong, ulong);
@@ -37,62 +34,59 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
 
-    __kernel void __amd_rocclr_fillBufferAligned(__global void* buf, __constant uchar* pattern,
-                                                 uint pattern_size, uint alignment, ulong end_ptr,
-                                                 uint next_chunk, uint workgroup_size) {
-      uint l = __builtin_amdgcn_workitem_id_x();
-      uint g = __builtin_amdgcn_workgroup_id_x();
-      ulong id = (g * workgroup_size + l);
-      long cur_id = id * pattern_size;
-      if (alignment == sizeof(ulong2)) {
-        __global ulong2* bufULong2 = (__global ulong2*)buf;
-        __global ulong2* element = &bufULong2[cur_id];
-        __constant ulong2* pt = (__constant ulong2*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
+    extern void __amd_fillBufferUnAligned(
+        __global void* __restrict buf, __constant uchar* __restrict pattern,
+        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
+        ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
+        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
+        __global ulong2* __restrict element_tiled, ushort4 counts);
+
+    __kernel void __amd_rocclr_fillBufferUnAligned(
+        __global void* __restrict buf, __constant uchar* __restrict pattern,
+        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
+        ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
+        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
+        __global ulong2* __restrict element_tiled, ushort4 counts) {
+      ulong id = get_global_id(0);
+
+      // Cleanup region: lanes 0..15 of group 0 wave 0 handle head/body/body_tail/tail.
+      // Body and body_tail are always uint64 stores (always either 0 or 1 element).
+      // Aligned-buffer case: counts are all zero, predicates fall through with no work.
+      // body_pattern and body_tail_pattern are host-rotated u64 payloads (rotated by their
+      // byte-offset-from-fill-start mod patternSize), so the unaligned-base case is byte-correct.
+      if (id < 16) {
+        __global uchar* head_ptr = (__global uchar*)buf;
+        const uint lane = (uint)id;
+        const uint head_end = (uint)counts.s0;
+        const uint body_end = head_end + (uint)counts.s1;
+        const uint body_tail_end = body_end + (uint)counts.s2;
+        const uint tail_end = body_tail_end + (uint)counts.s3;
+
+        if (lane < head_end) {
+          head_ptr[lane] = pattern[lane & (pattern_size - 1)];
+        } else if (lane < body_end) {
+          *(__global ulong*)body_ptr = body_pattern;
+        } else if (lane < body_tail_end) {
+          *(__global ulong*)body_tail_ptr = body_tail_pattern;
+        } else if (lane < tail_end) {
+          const ulong tail_byte_idx = (ulong)(lane - body_tail_end);
+          tail_ptr[tail_byte_idx] =
+              pattern[(tail_offset + tail_byte_idx) & (pattern_size - 1)];
         }
-      } else if (alignment == sizeof(ulong)) {
-        __global ulong* bufULong = (__global ulong*)buf;
-        __global ulong* element = &bufULong[cur_id];
-        __constant ulong* pt = (__constant ulong*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else if (alignment == sizeof(uint)) {
-        __global uint* bufUInt = (__global uint*)buf;
-        __global uint* element = &bufUInt[cur_id];
-        __constant uint* pt = (__constant uint*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else if (alignment == sizeof(ushort)) {
-        __global ushort* bufUShort = (__global ushort*)buf;
-        __global ushort* element = &bufUShort[cur_id];
-        __constant ushort* pt = (__constant ushort*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else {
-        __global uchar* bufUChar = (__global uchar*)buf;
-        __global uchar* element = &bufUChar[cur_id];
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pattern[i];
-          }
-          element += next_chunk;
-        }
+      }
+
+      // Tile region: split-last-pass. Bulk passes have unconditional stores
+      // (host guarantees they are in-bounds); only the tail pass is per-lane guarded.
+      // body_tile_passes is a CPU-known bound for codegen.
+      ulong j = 0;
+      ulong idx = id;
+      for (; j + 1 < body_tile_passes; ++j, idx += stride) {
+        element_tiled[idx] = body_tile_pattern;
+      }
+      if (j < body_tile_passes && idx < body_tile_count) {
+        element_tiled[idx] = body_tile_pattern;
       }
     }
 
@@ -198,8 +192,67 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       __amd_copyBufferRectAligned(src, dst, srcRect, dstRect, size);
     }
 
+    // TODO: Once the sequential for-loop fix lands in llvm-project/amd/device-libs/opencl/src/misc/amdblit.cl
+    // (replacing get_global_id(0) with a for loop), revert this back to:
+    //   __amd_batchMemOp(params, count);
+    //
+    // Local definitions mirroring BatchMemOpType and BatchMemOpParams from
+    // amd/device-libs/opencl/src/misc/amdblit.cl. Defined here because blitcl.cpp
+    // kernels are JIT-compiled by COMGR in OpenCL C 1.x mode, which does not have
+    // access to amdblit.cl's types. Values match hipStreamBatchMemOpType in hip_runtime_api.h.
+    typedef enum {
+      ROCCLR_STREAM_WAIT_VALUE_32  = 0x1,
+      ROCCLR_STREAM_WRITE_VALUE_32 = 0x2,
+      ROCCLR_STREAM_WAIT_VALUE_64  = 0x4,
+      ROCCLR_STREAM_WRITE_VALUE_64 = 0x5,
+    } RocclrBatchMemOpType;
+
+    // Mirrors BatchMemOpParams in amdblit.cl — uses __global ulong* instead of
+    // atomic_ulong* since atomic_ulong requires OpenCL C 2.0 unavailable here.
+    typedef union {
+      RocclrBatchMemOpType operation;
+      struct {
+        RocclrBatchMemOpType  operation;
+        __global ulong*       address;
+        union { uint value; ulong value64; };
+        uint                  flags;
+        __global ulong*       alias;
+      } waitValue;
+      struct {
+        RocclrBatchMemOpType  operation;
+        __global ulong*       address;
+        union { uint value; ulong value64; };
+        uint                  flags;
+        __global ulong*       alias;
+      } writeValue;
+      ulong pad[6];
+    } RocclrBatchMemOpParams;
     __kernel void __amd_rocclr_batchMemOp(__global void* params, uint count) {
-      __amd_batchMemOp(params, count);
+      __global RocclrBatchMemOpParams* param = (__global RocclrBatchMemOpParams*)params;
+      for (uint i = 0; i < count; i++) {
+        switch (param[i].operation) {
+          case ROCCLR_STREAM_WAIT_VALUE_32:
+            __amd_streamOpsWait((__global uint*)param[i].waitValue.address, NULL,
+                                (uint)param[i].waitValue.value, (uint)param[i].waitValue.flags,
+                                (ulong)~0UL);
+            break;
+          case ROCCLR_STREAM_WRITE_VALUE_32:
+            __amd_streamOpsWrite((__global uint*)param[i].writeValue.address, NULL,
+                                 (uint)param[i].writeValue.value);
+            break;
+          case ROCCLR_STREAM_WAIT_VALUE_64:
+            __amd_streamOpsWait(NULL, (__global ulong*)param[i].waitValue.address,
+                                param[i].waitValue.value64,
+                                (uint)param[i].waitValue.flags, (ulong)~0UL);
+            break;
+          case ROCCLR_STREAM_WRITE_VALUE_64:
+            __amd_streamOpsWrite(NULL, (__global ulong*)param[i].writeValue.address,
+                                 param[i].writeValue.value64);
+            break;
+          default:
+            break;
+        }
+      }
     });
 
 const char* HipExtraSourceCode = BLIT_KERNELS(

@@ -53,7 +53,7 @@
 #include "os.h"
 namespace rocr {
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 /// @brief Converts @ref hsa_access_permission_t to mmap memory protection
 ///        flags.
 __forceinline int PermissionsToMmapFlags(hsa_access_permission_t perms) {

@@ -13,9 +13,6 @@
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
-#undef hipGetDeviceProperties
-#undef hipDeviceProp_t
-
 namespace hip {
 
 // ================================================================================================
@@ -111,9 +108,15 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool 
 
 // ================================================================================================
 void Device::ReleaseFreedMemory() {
-  std::scoped_lock lock(lock_);
-  for (auto* pool : mem_pools_) {
+  std::vector<MemoryPool*> pools;
+  {
+    std::scoped_lock lock(lock_);
+    pools.assign(mem_pools_.begin(), mem_pools_.end());
+    for (auto* pool : pools) pool->retain();
+  }
+  for (auto* pool : pools) {
     pool->ReleaseFreedMemory();
+    pool->release();
   }
 }
 
@@ -135,6 +138,8 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
+  // Free any deferred IPC-event signals before tearing the device down.
+  DrainDeferredIpcSignals();
   {
     std::scoped_lock lock(lock_);
     auto pools_to_delete = std::exchange(mem_pools_, {});
@@ -184,7 +189,11 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    activeQueues = blocking_stream->device().getActiveQueues();
+    // Wait on the active streams of this device, not blocking_stream->device().
+    // blocking_stream is only where the barrier gets enqueued and it can be on a
+    // different device. (e.g. hipMemcpyPeer is the cross-device caller waiting on peer
+    // device while enqueuing the barrier on the current device's null stream).
+    activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one
@@ -283,6 +292,87 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   }
   // Release freed memory for all memory pools on the device
   ReleaseFreedMemory();
+  // All of this device's work has been waited on, so the deferred IPC signals' barriers are
+  // complete; freeing them here won't block.
+  DrainDeferredIpcSignals();
+}
+
+// ================================================================================================
+hipError_t Device::GetAndClearBlockingStreamsAsyncError() {
+  hipError_t async_error = hipSuccess;
+  bool saw_null_stream = false;
+
+  auto update_async_error = [&async_error](hip::Stream* stream) {
+    // Always drain each stream's error so a later one isn't stranded because an
+    // earlier stream in this scan already reported one.
+    hipError_t err = stream->GetAndClearAsyncError();
+    if (async_error == hipSuccess) {
+      async_error = err;
+    }
+  };
+
+  std::shared_lock lock(streamSetLock_);
+  auto* null_stream = GetNullStream();
+  for (auto* stream : streamSet_) {
+    if (stream == null_stream) {
+      saw_null_stream = true;
+    }
+    if (stream == null_stream || (stream->Flags() & hipStreamNonBlocking) == 0) {
+      update_async_error(stream);
+    }
+  }
+  if (null_stream != nullptr && !saw_null_stream) {
+    update_async_error(null_stream);
+  }
+  return async_error;
+}
+
+// ================================================================================================
+void Device::CleanupDeferredIpcSignal(const DeferredIpcSignal& item) {
+  if (item.signal != nullptr) {
+    // Only armed signals (event != null) have an in-flight barrier to wait on; waiting on a
+    // never-recorded signal (still at its initial value) would hang forever.
+    if (item.event != nullptr) {
+      item.signal->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+    }
+    delete item.signal;
+  }
+  if (item.event != nullptr) {
+    item.event->release();
+  }
+}
+
+// ================================================================================================
+void Device::EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event) {
+  std::vector<DeferredIpcSignal> overflow;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    // The queue is bounded by kDeferredIpcDrainThreshold; reserve up front (the buffer is
+    // moved out on each drain/overflow swap, so reserve again whenever it is empty) to avoid
+    // repeated reallocations as events are destroyed between drains.
+    if (deferredIpcSignals_.empty()) {
+      deferredIpcSignals_.reserve(kDeferredIpcDrainThreshold);
+    }
+    deferredIpcSignals_.push_back({signal, event});
+    if (deferredIpcSignals_.size() >= kDeferredIpcDrainThreshold) {
+      overflow.swap(deferredIpcSignals_);  // bounded: drain inline on overflow
+    }
+  }
+  for (const auto& item : overflow) {
+    CleanupDeferredIpcSignal(item);
+  }
+}
+
+// ================================================================================================
+void Device::DrainDeferredIpcSignals() {
+  std::vector<DeferredIpcSignal> pending;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    pending.swap(deferredIpcSignals_);
+  }
+  for (const auto& item : pending) {
+    CleanupDeferredIpcSignal(item);
+  }
 }
 
 // ================================================================================================
@@ -346,6 +436,10 @@ const ResourceMeta* Device::lookupResource(uint32_t resId) {
 }
 
 Device::~Device() {
+  // Free any IPC signals still queued for deferred cleanup (e.g. events destroyed without a
+  // subsequent device sync) so they don't leak when the device goes away.
+  DrainDeferredIpcSignals();
+
   if ((IS_LINUX || !DEBUG_HIP_MEM_POOL_VMHEAP) && (default_mem_pool_ != nullptr)) {
     default_mem_pool_->release();
   }
@@ -504,7 +598,39 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
 }
 
 // ================================================================================================
-hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  HIP_INIT_API(hipDeviceGetLuid, reinterpret_cast<void*>(luid),
+               reinterpret_cast<void*>(deviceNodeMask), device);
+
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  if (luid == nullptr || deviceNodeMask == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (IS_LINUX) {
+    // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
+    // output parameters are left untouched.
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  auto* deviceHandle = g_devices[device]->devices()[0];
+  const auto& info = deviceHandle->info();
+
+  // The LUID is an 8-byte value formed from the low and high parts reported by the backend.
+  static_assert(sizeof(info.luidLowPart_) + sizeof(info.luidHighPart_) == 8,
+                "LUID is expected to be 8 bytes");
+  memcpy(&luid[0], &info.luidLowPart_, sizeof(info.luidLowPart_));
+  memcpy(&luid[sizeof(info.luidLowPart_)], &info.luidHighPart_, sizeof(info.luidHighPart_));
+  *deviceNodeMask = info.luidDeviceNodeMask_;
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -523,8 +649,10 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
+  const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
+      (deviceHandle->settings().enableWgpMode_ ? 2 : 1);
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
-  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;
+  deviceProps.sharedMemPerMultiprocessor = ldsPerMultiprocessor;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
   deviceProps.maxThreadsPerBlock = info.maxWorkGroupSize_;
@@ -568,7 +696,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.pciDomainID = info.pciDomainID;
   deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
   deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
-  deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
+  deviceProps.maxSharedMemoryPerMultiProcessor = ldsPerMultiprocessor;
   deviceProps.canMapHostMemory = 1;
   deviceProps.regsPerMultiprocessor = info.availableRegistersPerCU_;
   snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", isa.targetId());
@@ -677,13 +805,17 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
+  // A cluster of size 1 is a regular single-block launch (legal on all GPUs); clusterLaunch
+  // advertises multi-block cluster support, which only devices reporting a max size > 1 have.
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 1;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
   deviceProps.gpuDirectRDMASupported = 0;
   deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
   deviceProps.gpuDirectRDMAWritesOrdering = 0;
+  // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
+  // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[sizeof(uint32_t)]) = info.luidHighPart_;
   deviceProps.luidDeviceNodeMask = info.luidDeviceNodeMask_;
@@ -702,6 +834,8 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int device) {
   HIP_INIT_API(hipGetDevicePropertiesR0600, prop, device);
 
+  // For now, we can forward to the internal/unstable API. In the future, if
+  // hipDeviceProp_t is different, this will fail to compile.
   HIP_RETURN(ihipGetDeviceProperties(prop, device));
 }
 
@@ -726,6 +860,8 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   const auto& isa = deviceHandle->isa();
   ::strncpy(deviceProps.name, info.boardName_, sizeof(deviceProps.name));
   deviceProps.totalGlobalMem = info.globalMemSize_;
+  const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
+      (deviceHandle->settings().enableWgpMode_ ? 2 : 1);
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
@@ -768,7 +904,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.pciDomainID = info.pciDomainID;
   deviceProps.pciBusID = info.deviceTopology_.pcie.bus;
   deviceProps.pciDeviceID = info.deviceTopology_.pcie.device;
-  deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
+  deviceProps.maxSharedMemoryPerMultiProcessor = ldsPerMultiprocessor;
   deviceProps.canMapHostMemory = 1;
   // FIXME: This should be removed, targets can have character names as well.
   deviceProps.gcnArch = isa.versionMajor() * 100 + isa.versionMinor() * 10 + isa.versionStepping();
@@ -895,8 +1031,3 @@ hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion,
 }
 
 }  // namespace hip
-
-// ================================================================================================
-extern "C" hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
-  return hip::hipGetDevicePropertiesR0000(props, device);
-}

@@ -5,12 +5,12 @@
 
 #include "common/defines.h"
 #include "common/join.hpp"
-#include <cstdint>
 
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <functional>
-#include <string>
+#include <type_traits>
 #include <unistd.h>
 
 #if !defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
@@ -62,7 +62,7 @@ ignore(const char* _name, int _verbose, int _value, const char* _reason, Args...
                 "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                 "][%i][%li] %s(%s) was ignored :: %s\n",
                 getpid(), get_thread_index(), _name,
-                join(QuoteStrings{}, ", ", _args...).c_str(), _reason);
+                join_with_strings_quoted(", ", _args...).c_str(), _reason);
         fflush(stderr);
     }
 }
@@ -94,7 +94,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                         "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                         "][%i][%li][%i] %s(%s)\n",
                         getpid(), get_thread_index(), _lk, _name,
-                        join(QuoteStrings{}, ", ", _args...).c_str());
+                        join_with_strings_quoted(", ", _args...).c_str());
                 ROCPROFSYS_COMMON_LIBRARY_LOG_END
                 fflush(stderr);
             }
@@ -108,7 +108,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                     "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                     "][%i][%li] %s(%s) was guarded :: value = %i\n",
                     getpid(), get_thread_index(), _name,
-                    join(QuoteStrings{}, ", ", _args...).c_str(), _lk);
+                    join_with_strings_quoted(", ", _args...).c_str(), _lk);
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
             fflush(stderr);
         }
@@ -120,7 +120,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                 "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                 "][%i][%li] %s(%s) ignored :: null function pointer\n",
                 getpid(), get_thread_index(), _name,
-                join(QuoteStrings{}, ", ", _args...).c_str());
+                join_with_strings_quoted(", ", _args...).c_str());
         ROCPROFSYS_COMMON_LIBRARY_LOG_END
     }
 

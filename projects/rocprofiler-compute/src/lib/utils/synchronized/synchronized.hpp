@@ -1,0 +1,141 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <cstddef>
+#include <functional>
+#include <mutex>
+#include <shared_mutex>
+#include <type_traits>
+
+namespace rocprofiler_compute_tool
+{
+inline namespace common
+{
+/**
+ * Synchronized is a wrapper that adds lock based write/read
+ * protection around a datatype. The protected data is accessed
+ * only by rlock/wlock. rlock(lambda) gets a reader lock of the
+ * protected value, passing the protected value to the lambda as a
+ * const. wlock(lambda) gets a writer lock on the protective value
+ * and does the same. The reason for this class is to make it less
+ * error prone to access shared data and more obvious when a lock
+ * is being held.
+ *
+ * Example usage:
+ *
+ * synchronized_t<int> x(9);
+ * x.rlock([](const auto& data){
+ *  // data = 9
+ * });
+ *
+ * x.wlock([](auto& data){
+ *  // set data to new value
+ * });
+ */
+template<typename LockedType, bool IsMappedTypeV = false>
+class synchronized_t
+{
+public:
+    using value_type = LockedType;
+    using this_type  = synchronized_t<value_type, IsMappedTypeV>;
+
+    synchronized_t()  = default;
+    ~synchronized_t() = default;
+
+    explicit synchronized_t(value_type&& data)
+        : m_data{std::move(data)}
+    {
+    }
+
+    synchronized_t(synchronized_t&& data) noexcept            = default;
+    synchronized_t& operator=(synchronized_t&& data) noexcept = default;
+
+    // Do not allow this data structure to be copied, std::move only.
+    synchronized_t(const synchronized_t&) = delete;
+
+    template<typename FuncT, typename... Args>
+    decltype(auto) rlock(FuncT&& lambda, Args&&... args) const;
+
+    template<typename FuncT, typename... Args>
+    decltype(auto) wlock(FuncT&& lambda, Args&&... args);
+
+    // This overload to wlock allows a synchronized map whose keys map to synchronized
+    // data to use a read lock on the key data and then a write lock on the mapped data.
+    template<typename FuncT, typename... Args, bool EnableForMappedType = IsMappedTypeV, std::enable_if_t<EnableForMappedType, int> = 0>
+    decltype(auto) wlock(FuncT&& lambda, Args&&... args) const;
+
+    // Upgradable lock. If read returns false, write will be called with a unique_lock.
+    // Essentially a helper function that does .rlock() followed by .wlock().
+    template<typename ReadFuncT, typename WriteFuncT, typename... Args>
+    bool ulock(ReadFuncT&& read, WriteFuncT&& write, Args&&... args);
+
+private:
+    mutable std::shared_mutex m_mutex = {};
+    value_type                m_data  = {};
+};
+
+//
+//      member definitions
+//
+template<typename LockedType, bool IsMappedTypeV>
+template<typename FuncT, typename... Args>
+decltype(auto) synchronized_t<LockedType, IsMappedTypeV>::rlock(FuncT&& lambda, Args&&... args) const
+{
+    static_assert(std::is_invocable<FuncT, const value_type&, Args...>::value,
+                  "function must accept const reference to locked type");
+
+    auto lock = std::shared_lock{m_mutex};
+    return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
+}
+
+template<typename LockedType, bool IsMappedTypeV>
+template<typename FuncT, typename... Args>
+decltype(auto) synchronized_t<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args)
+{
+    static_assert(std::is_invocable<FuncT, value_type&, Args...>::value,
+                  "function must accept reference to locked type");
+
+    auto lock = std::unique_lock{m_mutex};
+    return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
+}
+
+// This overload to wlock allows a synchronized map whose keys map to synchronized data to
+// use a read lock on the key data and then a write lock on the mapped data.
+template<typename LockedType, bool IsMappedTypeV>
+template<typename FuncT, typename... Args, bool EnableForMappedType, std::enable_if_t<EnableForMappedType, int>>
+decltype(auto) synchronized_t<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) const
+{
+    return const_cast<this_type*>(this)->wlock(std::forward<FuncT>(lambda), std::forward<Args>(args)...);
+}
+
+// Upgradable lock. If read returns false, write will be called with a unique_lock.
+// Essentially a helper function that does .rlock() followed by .wlock().
+template<typename LockedType, bool IsMappedTypeV>
+template<typename ReadFuncT, typename WriteFuncT, typename... Args>
+bool synchronized_t<LockedType, IsMappedTypeV>::ulock(ReadFuncT&& read, WriteFuncT&& write, Args&&... args)
+{
+    static_assert(std::is_invocable<ReadFuncT, const value_type&, Args...>::value,
+                  "read function must accept const reference to locked type");
+    static_assert(std::is_invocable<WriteFuncT, value_type&, Args...>::value,
+                  "write function must accept reference to locked type");
+
+    using read_return_type  = std::invoke_result_t<ReadFuncT, const value_type&, Args...>;
+    using write_return_type = std::invoke_result_t<WriteFuncT, value_type&, Args...>;
+
+    static_assert(std::is_same<read_return_type, write_return_type>::value,
+                  "read and write functions must return same type");
+    static_assert(std::is_same<read_return_type, bool>::value, "read/write functions must return bool");
+
+    {
+        auto lock = std::shared_lock{m_mutex};
+        if (read(m_data, std::forward<Args>(args)...))
+            return true;
+    }
+
+    auto lock = std::unique_lock{m_mutex};
+    return write(m_data, std::forward<Args>(args)...);
+}
+}  // namespace common
+}  // namespace rocprofiler_compute_tool

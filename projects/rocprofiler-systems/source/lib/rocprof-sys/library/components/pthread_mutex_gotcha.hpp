@@ -21,6 +21,11 @@
 namespace rocprofsys::component
 {
 
+template <typename Lock>
+concept pthread_lock_type =
+    std::is_same_v<Lock, pthread_mutex_t> || std::is_same_v<Lock, pthread_spinlock_t> ||
+    std::is_same_v<Lock, pthread_rwlock_t> || std::is_same_v<Lock, pthread_barrier_t>;
+
 template <typename Policy>
 struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>, void>
 {
@@ -93,12 +98,7 @@ struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>,
 
     static void resume() { s_is_paused.store(false, std::memory_order_relaxed); }
 
-    template <typename Lock,
-              std::enable_if_t<std::disjunction_v<std::is_same<Lock, pthread_mutex_t>,
-                                                  std::is_same<Lock, pthread_spinlock_t>,
-                                                  std::is_same<Lock, pthread_rwlock_t>,
-                                                  std::is_same<Lock, pthread_barrier_t>>,
-                               int> = 0>
+    template <pthread_lock_type Lock>
     [[nodiscard]] int operator()(int (*_callee)(Lock*), Lock* _lock) const
     {
         return (Policy::inactive_state() || m_protect)

@@ -48,6 +48,7 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
                    : architecture->get_apertures (os_agent_info)),
     m_architecture (architecture), m_process (process),
     m_memory_cache (
+      *this,
       [this] (agent_address_t address, void *read, const void *write,
               size_t size)
       {

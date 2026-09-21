@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
-#include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter_types.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -34,6 +33,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -140,7 +140,7 @@ get_ioctl_version(rocprofiler_ioctl_version_info_t& ioctl_version)
     struct kfd_ioctl_get_version_args args = {.major_version = 0, .minor_version = 0};
     if(ioctl(get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
     {
-        // An error occured while querying KFD IOCTL version.
+        // An error occurred while querying KFD IOCTL version.
         return ROCPROFILER_STATUS_ERROR;
     }
 
@@ -193,7 +193,7 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioct
     }
     else if(ret != 0)
     {
-        // An unexpected error occured, so we cannot be sure if the
+        // An unexpected error occurred, so we cannot be sure if the
         // context of the `version` is valid.
         return ROCPROFILER_STATUS_ERROR;
     }
@@ -240,24 +240,137 @@ is_pc_sampling_supported()
 }
 
 /**
- * @brief Check if PC sampling method is supported on the agent.
+ * @brief Returns the PC sampling IOCTL version if the PC sampling feature is supported in the
+ * driver.
  *
- * The function complements the @ref is_pc_sampling_supported function.
- * It introduces a strict check against the PC sampling IOCTL version
- * that tells us whether a certain PC sampling method is safe to be used
- * on the specific device architecture.
+ * First, check the minimal driver version via @ref is_pc_sampling_supported.
+ * Then, determines the PC sampling IOCTL version via @ref get_pc_sampling_ioctl_version.
  *
- * @param method - PC sampling method to be checked
- * @param agent - The agent to be checked
- * @param pcs_ioctl_version - The PC sampling IOCTL version
+ * @param [in] kfd_gpu_id - The KFD GPU identifier
+ * @param [out] pcs_ioctl_version_t - The PC sampling IOCTL version
  * @return ::rocprofiler_status_t
- * @retval ::ROCPROFILER_STATUS_SUCCESS - The method is supported
- * Other values informs users about the reason why the method is not supported.
  */
+rocprofiler_status_t
+get_pcs_ioctl_version_if_kfd_supports(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioctl_version)
+{
+    // Check if the PC sampling feature is supported in the driver
+    auto status = is_pc_sampling_supported();
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
+    // Get the PC sampling IOCTL version
+    status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);
+    return status;
+}
+
+/**
+ * @kfd_gpu_id represents the gpu identifier read from the content of the
+ * /sys/class/kfd/kfd/topology/nodes/<node-id>/gpu_id.
+ */
+rocprofiler_ioctl_status_t
+ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
+                                     void*     sample_info,
+                                     uint32_t  sample_info_sz,
+                                     uint32_t* size)
+{
+    int                             ret;
+    struct kfd_ioctl_pc_sample_args args;
+
+    assert(sizeof(rocprofiler_ioctl_pc_sampling_info_t) == sizeof(struct kfd_pc_sample_info));
+
+    ret                  = ROCPROFILER_IOCTL_STATUS_SUCCESS;
+    args.op              = KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES;
+    args.gpu_id          = kfd_gpu_id;
+    args.sample_info_ptr = (uint64_t) sample_info;
+    args.num_sample_info = sample_info_sz;
+    args.flags           = 0;
+
+    ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+
+    if(ret != 0)
+    {
+        if(ret == -EBUSY)
+        {
+            // Querying PC sampling capabilities is requested from within the ROCgdb
+            // which is not supported.
+            return ROCPROFILER_IOCTL_STATUS_UNAVAILABLE;
+        }
+        ROCP_WARNING << "IOCTL failed to query PC sampling configs: " << ret << "\n";
+    }
+    *size = args.num_sample_info;
+
+    if(ret == -ENOSPC) return ROCPROFILER_IOCTL_STATUS_BUFFER_TOO_SMALL;
+
+    return ret != 0 ? ROCPROFILER_IOCTL_STATUS_ERROR : ROCPROFILER_IOCTL_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioctl_pcs_config,
+                                 rocprofiler_pc_sampling_configuration_t&    rocp_pcs_config)
+{
+    // Sometimes, the KFD returns 0 for `method` and `units` as an error.
+    // Note: the 0 is not of the matching enumeration.
+    // Thus, the default case remains here to indicate that KFD edge case
+    // and prevents failures inside rocprofiler.
+
+    switch(ioctl_pcs_config.method)
+    {
+        case ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_HOSTTRAP_V1:
+            rocp_pcs_config.method = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+            break;
+        case ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1:
+            rocp_pcs_config.method = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+            break;
+        default:
+            // Sampling method unsupported, return the error
+            return ROCPROFILER_STATUS_ERROR;
+    }
+
+    switch(ioctl_pcs_config.units)
+    {
+        case ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_MICROSECONDS:
+            rocp_pcs_config.unit = ROCPROFILER_PC_SAMPLING_UNIT_TIME;
+            break;
+        case ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_CYCLES:
+            rocp_pcs_config.unit = ROCPROFILER_PC_SAMPLING_UNIT_CYCLES;
+            break;
+        case ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_INSTRUCTIONS:
+            rocp_pcs_config.unit = ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS;
+            break;
+        default:
+            // Sampling unit unsupported, return error
+            return ROCPROFILER_STATUS_ERROR;
+    }
+
+    if(ioctl_pcs_config.interval != 0)
+    {
+        // The pc sampling is configured on the corresponding device.
+        // The `interval` contains the value of the interval used for delivering samples.
+        // Values of `interval_min` and `interval_max` are irrelevant.
+        rocp_pcs_config.min_interval = ioctl_pcs_config.interval;
+        rocp_pcs_config.max_interval = ioctl_pcs_config.interval;
+    }
+    else
+    {
+        // No one configured PC sampling on the corresponding device.
+        // Read the values of min and max interval provided by the KFD
+        rocp_pcs_config.min_interval = ioctl_pcs_config.interval_min;
+        rocp_pcs_config.max_interval = ioctl_pcs_config.interval_max;
+        if(rocp_pcs_config.unit == ROCPROFILER_PC_SAMPLING_UNIT_CYCLES)
+        {
+            rocp_pcs_config.max_interval = std::min(rocp_pcs_config.max_interval, 1ul << 20);
+        }
+    }
+
+    rocp_pcs_config.flags = ioctl_pcs_config.flags;
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+}  // namespace
+
 rocprofiler_status_t
 is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
                                 const rocprofiler_agent_t*       agent,
-                                pcs_ioctl_version_t              pcs_ioctl_version)
+                                uint32_t                         pcs_ioctl_version)
 {
     std::string_view agent_name = agent->name;
     if(method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
@@ -318,9 +431,10 @@ is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
             else
                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
         }
-        else if(agent_name.find("gfx1250") == 0)
+        else if(agent_name == "gfx1250")
         {
-            // 1.7 version enables stochastic PC sampling on gfx1250
+            // 1.7 version enables stochastic PC sampling on gfx1250.
+            // Exact match is intentional.
             if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 7))
                 return ROCPROFILER_STATUS_SUCCESS;
             else
@@ -336,141 +450,14 @@ is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
     return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 }
 
-/**
- * @brief Returns the PC sampling IOCTL version if the PC sampling feature is supported in the
- * driver.
- *
- * First, check the minimal driver version via @ref is_pc_sampling_supported.
- * Then, determines the PC sampling IOCTL version via @ref get_pc_sampling_ioctl_version.
- *
- * @param [in] kfd_gpu_id - The KFD GPU identifier
- * @param [out] pcs_ioctl_version_t - The PC sampling IOCTL version
- * @return ::rocprofiler_status_t
- */
-rocprofiler_status_t
-get_pcs_ioctl_version_if_kfd_supports(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioctl_version)
-{
-    // Check if the PC sampling feature is supported in the driver
-    auto status = is_pc_sampling_supported();
-    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
-
-    // Get the PC sampling IOCTL version
-    status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);
-    return status;
-}
-
-/**
- * @brief Same as @ref is_pc_sampling_method_supported.
- */
 rocprofiler_status_t
 is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioctl_method,
                                 const rocprofiler_agent_t*                  agent,
-                                pcs_ioctl_version_t                         pcs_ioctl_version)
+                                uint32_t                                    pcs_ioctl_version)
 {
     auto rocp_method = get_rocp_pcs_method_from_kfd(ioctl_method);
     return is_pc_sampling_method_supported(rocp_method, agent, pcs_ioctl_version);
 }
-
-/**
- * @kfd_gpu_id represents the gpu identifier read from the content of the
- * /sys/class/kfd/kfd/topology/nodes/<node-id>/gpu_id.
- */
-rocprofiler_ioctl_status_t
-ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
-                                     void*     sample_info,
-                                     uint32_t  sample_info_sz,
-                                     uint32_t* size)
-{
-    int                             ret;
-    struct kfd_ioctl_pc_sample_args args;
-
-    assert(sizeof(rocprofiler_ioctl_pc_sampling_info_t) == sizeof(struct kfd_pc_sample_info));
-
-    ret                  = ROCPROFILER_IOCTL_STATUS_SUCCESS;
-    args.op              = KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES;
-    args.gpu_id          = kfd_gpu_id;
-    args.sample_info_ptr = (uint64_t) sample_info;
-    args.num_sample_info = sample_info_sz;
-    args.flags           = 0;
-
-    ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
-
-    if(ret != 0)
-    {
-        if(ret == -EBUSY)
-        {
-            // Querying PC sampling capabilities is requsted from within the ROCgdb
-            // which is not supported.
-            return ROCPROFILER_IOCTL_STATUS_UNAVAILABLE;
-        }
-        ROCP_WARNING << "IOCTL failed to query PC sampling configs: " << ret << "\n";
-    }
-    *size = args.num_sample_info;
-
-    if(ret == -ENOSPC) return ROCPROFILER_IOCTL_STATUS_BUFFER_TOO_SMALL;
-
-    return ret != 0 ? ROCPROFILER_IOCTL_STATUS_ERROR : ROCPROFILER_IOCTL_STATUS_SUCCESS;
-}
-
-rocprofiler_status_t
-convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioctl_pcs_config,
-                                 rocprofiler_pc_sampling_configuration_t&    rocp_pcs_config)
-{
-    // Sometimes, the KFD returns 0 for `method` and `units` as an error.
-    // Note: the 0 is not of the matching enumeration.
-    // Thus, the default case remains here to indicate that KFD edge case
-    // and prevents failures inside rocprofiler.
-
-    switch(ioctl_pcs_config.method)
-    {
-        case ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_HOSTTRAP_V1:
-            rocp_pcs_config.method = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
-            break;
-        case ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1:
-            rocp_pcs_config.method = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
-            break;
-        default:
-            // Sampling method unsupported, return the error
-            return ROCPROFILER_STATUS_ERROR;
-    }
-
-    switch(ioctl_pcs_config.units)
-    {
-        case ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_MICROSECONDS:
-            rocp_pcs_config.unit = ROCPROFILER_PC_SAMPLING_UNIT_TIME;
-            break;
-        case ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_CYCLES:
-            rocp_pcs_config.unit = ROCPROFILER_PC_SAMPLING_UNIT_CYCLES;
-            break;
-        case ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_INSTRUCTIONS:
-            rocp_pcs_config.unit = ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS;
-            break;
-        default:
-            // Sampling unit unsupported, return error
-            return ROCPROFILER_STATUS_ERROR;
-    }
-
-    if(ioctl_pcs_config.interval != 0)
-    {
-        // The pc sampling is configured on the corresponding device.
-        // The `interval` contains the value of the interval used for deliverying samples.
-        // Values of `interval_min` and `interval_max` are irrelevant.
-        rocp_pcs_config.min_interval = ioctl_pcs_config.interval;
-        rocp_pcs_config.max_interval = ioctl_pcs_config.interval;
-    }
-    else
-    {
-        // No one configured PC sampling on the corresponding device.
-        // Read the values of min and max interval provided by the KFD
-        rocp_pcs_config.min_interval = ioctl_pcs_config.interval_min;
-        rocp_pcs_config.max_interval = ioctl_pcs_config.interval_max;
-    }
-
-    rocp_pcs_config.flags = ioctl_pcs_config.flags;
-
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-}  // namespace
 
 int
 get_kfd_fd()
@@ -633,7 +620,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
         if(errno == EBUSY || errno == EEXIST)
         {
             // Currently, KFD uses EBUSY when e.g., PC sampling create is requested from
-            // withing the ROCgdb.
+            // within the ROCgdb.
             // On the other hand, EEXIST is used when one tries to create a PC sampling
             // with a configuration different than the one already active.
             return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;

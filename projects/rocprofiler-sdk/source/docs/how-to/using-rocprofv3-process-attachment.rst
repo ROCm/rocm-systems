@@ -11,6 +11,30 @@ Dynamic process attachment using rocprofv3
 
 For profiling long-running applications or services where restarting the application is not feasible, ``rocprofv3`` provides dynamic process attachment using the ``--attach`` option. This feature facilitates attaching the profiler to a running application without the need to restart it. The attachment is performed using the ``ptrace`` system call, which enables the profiler to monitor and collect performance data from the target process.
 
+Prerequisites
+--------------
+
+Complete the following steps before using ``rocprofv3 --attach``.
+
+#. **Enable attachment support in the target process**
+
+   Start the target process with ``ROCP_TOOL_ATTACH=1`` set in its environment. For other ways to enable attachment, see :ref:`enabling attachment support <process_attachment_enable>`.
+
+#. **Obtain permission to trace the target process**
+
+   Run ``rocprofv3`` as the user owning the target process or as root. On distributions that enable the Yama security module, including recent Ubuntu releases, also set the ptrace scope to ``0``. For Docker requirements and other restrictions, see :ref:`trace permissions <process_attachment_permissions>`.
+
+   .. code-block:: shell
+
+      $ sudo sysctl kernel.yama.ptrace_scope=0
+
+   .. warning::
+
+      ``kernel.yama.ptrace_scope`` is a system-wide setting. Setting it to ``0`` allows any process to ``ptrace`` any other process running under the same user, not just ``rocprofv3``.
+
+Basic usage
+------------
+
 Here is an example syntax for dynamic process attachment:
 
 .. code-block:: bash
@@ -24,6 +48,10 @@ Here are the options used in the preceding example:
 - ``--hip-trace``: This optional flag enables HIP API tracing.
 
 - ``--output-format``: The desired output format such as rocpd, csv, or json.
+
+.. note::
+
+   In process-attachment mode, ``rocprofv3`` may generate output files asynchronously during detachment. As a result, output files might not be fully written immediately when ``rocprofv3`` returns. If your workflow needs output files to be complete before continuing, for example, if a script processes or removes the output directory right after detach, use ``--attach-sync-output``. This makes detach wait for output generation to finish, which can increase detach time.
 
 **Basic attachment syntax:**
 
@@ -117,8 +145,6 @@ There are some restrictions on what the options are allowed to change when reatt
 
 By default, the output file generation runs asynchronously after detachment, allowing for faster tool detachment. This implies that the output files might not be immediately available when ``rocprofv3`` exits. If the output file generation from the previous attachment is still in progress, ``rocprofv3`` blocks reattachment until the ongoing output generation completes.
 
-For use cases requiring output files to be fully written before detachment completes, such as scripts that process or delete output directories immediately after detachment, you can enable synchronous output generation using the ``--attach-sync-output`` flag. This causes ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
-
 .. class:: details
 
    Full list of options that mustn't change:
@@ -133,6 +159,40 @@ For use cases requiring output files to be fully written before detachment compl
    - ``kernel_include_regex``
    - ``kernel_exclude_regex``
    - ``kernel_iteration_range``
+
+Synchronous output generation for scripts
+------------------------------------------
+
+For use cases requiring output files to be fully written before detachment completes, such as scripts that process or delete output directories immediately after detachment, you can enable synchronous output generation using the ``--attach-sync-output`` flag. This causes ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
+
+For example, consider a script that attaches for a fixed duration and then terminates the workload as soon as ``rocprofv3`` returns:
+
+.. code-block:: bash
+
+   # Start the workload in the background
+   ./myapp &
+   WL_PID=$!
+
+   # Attach for 5 seconds, then detach
+   rocprofv3 --pid "$WL_PID" --attach-duration-msec 5000 \
+       --output-format csv -o profile -d "$PWD"
+
+   # Workload is killed immediately after rocprofv3 returns
+   kill "$WL_PID"
+
+With the default asynchronous output generation, the output thread runs inside the target process. Killing the workload right after ``rocprofv3`` returns can terminate that thread before it finishes writing, producing truncated or incomplete output files. Add ``--attach-sync-output`` so that detachment waits for output generation to finish before returning:
+
+.. code-block:: bash
+
+   ./myapp &
+   WL_PID=$!
+
+   rocprofv3 --pid "$WL_PID" --attach-duration-msec 5000 \
+       --attach-sync-output \
+       --output-format csv -o profile -d "$PWD"
+
+   # Safe: output files are fully written before rocprofv3 returns
+   kill "$WL_PID"
 
 Attaching to a process tree
 ----------------------------
@@ -159,10 +219,6 @@ Key considerations
 Here are some important points to be noted while using dynamic process attachment:
 
 - The target process must be running and actively using GPU resources for meaningful profiling data.
-
-- Attachment requires appropriate system permissions. It might even need elevated privileges depending on the target process.
-
-- To use attachment in a docker container, add the ``ptrace`` capability to the container (``SYS_PTRACE``).
 
 - The profiler collects data for the entire remaining lifetime of the process or until the configured collection period expires. To learn how to configure the collection period, see :ref:`duration-specific`.
 

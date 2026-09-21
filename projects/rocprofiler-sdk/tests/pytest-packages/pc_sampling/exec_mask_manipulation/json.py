@@ -55,7 +55,7 @@ def validate_json_exec_mask_manipulation(
     # Although, it would be more elegant to wrap some of the checks in dedicated functions,
     # I noticed that it can introduce significant overhead, so I decided to inline those checks.
 
-    # the function assume homogenous system
+    # the function assumes homogeneous system
     agents = data_json["agents"]
     gpu_agents = list(filter(lambda agent: agent["type"] == 2, agents))
     # There should be at least one GPU agent
@@ -125,7 +125,7 @@ def validate_json_exec_mask_manipulation(
 
         if cid == 0:
             # Samples originates either from a blit kernel or self-modifying code.
-            # Thus, code object is uknown, as well as the instruction.
+            # Thus, code object is unknown, as well as the instruction.
             assert record["pc"]["code_object_id"] == 0
             assert inst_index == -1
         else:
@@ -138,7 +138,7 @@ def validate_json_exec_mask_manipulation(
             assert inst_index != -1
 
             wgid = record["wrkgrp_id"]
-            # check corrdinates of the workgroup
+            # check coordinates of the workgroup
             assert wgid["x"] >= 0 and wgid["x"] <= 1023
             # FIXME: Navi4x wgid is currently broken
             # assert wgid["y"] == 0
@@ -179,7 +179,7 @@ def validate_json_exec_mask_manipulation(
                 assert cid == unique_kernels_num
                 # Monitor wave_in_group being sampled
                 last_kernel_sampled_wave_in_grp.add(wave_in_grp)
-                # chekcs specific for samples from the last kernel
+                # checks specific for samples from the last kernel
                 assert wave_in_grp >= 0 and wave_in_grp <= 3
 
                 # validate instruction decoding

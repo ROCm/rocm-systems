@@ -8,6 +8,7 @@ ROCM_PATH=${ROCM_PATH:="/opt/rocm"}
 
 # Default values
 build_address_sanitizer=false
+build_all_unrolls=false
 build_bfd=false
 build_freorg_bkwdcomp=false
 build_local_gpu_only=false
@@ -19,30 +20,50 @@ build_static=false
 build_tests=false
 build_verbose=false
 clean_build=true
-collective_trace=true
 dump_asm=false
 enable_code_coverage=false
+enable_full_coverage=false
 enable_ninja=""
 install_dependencies=false
 install_library=false
 install_prefix="${ROCM_PATH}"
 log_trace=false
 num_parallel_jobs=$(nproc)
-npkit_enabled=false
 openmp_test_enabled=false
 enable_mpi_tests=false
+enable_rccl_ep_tests=false
 kernel_resource_use=false
 roctx_enabled=true
 run_tests=false
 run_tests_all=false
 time_trace=false
+use_ninja=false
 force_reduce_pipeline=false
+enable_tdm_simple=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
+kernarg_preload=true
 quiet_warnings=false
+# rocSHMEM integration modes (mutually exclusive — mixing causes duplicate
+# rocshmem state between librccl.so and the executable):
+#   --rocshmem      Alltoall_wg offload: builds rocshmem from source and links
+#                   librocshmem.a into librccl.so with -fgpu-rdc --hip-link.
+#                   All rocshmem device+host symbols are resolved inside
+#                   librccl.so.  The executable must NOT link librocshmem.a.
+#                   Does NOT enable GIN plugins.
+#   --rocshmem-gin  GIN plugins (GDA, SDMA): builds rocshmem from source for
+#                   its headers, device bitcode, and host libraries, but does
+#                   NOT link librocshmem.a into librccl.so.  GIN device
+#                   templates (GDA QueuePair, SDMA) are resolved via per-arch
+#                   bitcode injection in the device linker pipeline.  GIN host
+#                   plugin symbols are left unresolved in librccl.so
+#                   (--allow-shlib-undefined) and resolved at runtime from the
+#                   executable, which owns the single librocshmem.a instance.
+#                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
-rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
+build_rocshmem_gin=false
+rocshmem_mono_hash="33d980d7ca1f0bf90cfe4ff9106310abcf47b550"
 custom_cmake_options=""
 
 # #################################################
@@ -53,21 +74,25 @@ function display_help()
     echo "RCCL build & installation helper script"
     echo " Options:"
     echo "       --address-sanitizer     Build with address sanitizer enabled"
+    echo "       --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
-    echo "       --disable-colltrace     Build without collective trace"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
+    echo "       --disable-kernarg-preload  Disable -mllvm --amdgpu-kernarg-preload-count=16 compile/link flag"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
-    echo "    -c|--enable-code-coverage  Enable code coverage"
+    echo "    -c|--enable-code-coverage  Enable host-side code coverage instrumentation (requires --debug)"
+    echo "       --enable-full-coverage  Enable host + device code coverage (requires --debug and ROCm 7.15+)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
-    echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)"
+    echo "       --enable-rccl-ep-tests  Build the rccl_ep multi-GPU tests (requires --enable-mpi-tests and a runtime with working cuMem symmetric memory)"
+    echo "       --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path"
+    echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
     echo "    -i|--install               Install RCCL library (see --prefix argument below)"
@@ -77,26 +102,30 @@ function display_help()
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
     echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
-    echo "       --npkit-enable          Compile with npkit enabled"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
-    echo "       --rocshmem              Build with rocSHMEM support"
+    echo "       --rocshmem              Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)"
+    echo "       --rocshmem-gin          GIN plugins only: device bitcode injected at build, host symbols"
+    echo "                                resolved at runtime from the executable (no librocshmem in librccl)"
     echo "       --run_tests_all         Run all rccl unit tests (must be built already)"
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
+    echo "       --sqtt-enable           Enable SQTT instrumentation (requires ROCm >= 7.13)"
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
+    echo "       --ninja                 Use the Ninja generator instead of Make (requires \`ninja-build\`; recommended for multi-arch builds)"
     echo "       --verbose               Show compile commands"
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
-    echo "    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)"
+    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
+    echo "    -DENABLE_RCCL_EP_IN_LIBRCCL=ON        Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
-    echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
+    echo "    -DRCCL_POISON_HIP_ATOMICS=OFF         Allow __hip_atomic_* builtins in RCCL sources (default: ON)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
@@ -119,7 +148,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -135,21 +164,25 @@ eval set -- "${GETOPT_PARSE}"
 while true; do
     case "${1}" in
          --address-sanitizer)        build_address_sanitizer=true;                                                                     shift ;;
+         --all_unrolls)              build_all_unrolls=true;                                                                           shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
          --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
          --debug)                    build_release=false;                                                                              shift ;;
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
-         --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
+         --disable-kernarg-preload)  kernarg_preload=false;                                                                            shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
+         --enable-full-coverage)     enable_code_coverage=true; enable_full_coverage=true;                                              shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
-    -f | --fast)                     build_local_gpu_only=true; collective_trace=false;                                                shift ;;
+         --enable-rccl-ep-tests)     enable_rccl_ep_tests=true;                                                                        shift ;;
+         --enable-tdm-simple)        enable_tdm_simple=true;                                                                           shift ;;
+    -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
     -i | --install)                  install_library=true;                                                                             shift ;;
@@ -157,16 +190,18 @@ while true; do
          --kernel-resource-use)      kernel_resource_use=true;                                                                         shift ;;
     -l | --local_gpu_only)           build_local_gpu_only=true;                                                                        shift ;;
          --log-trace)                log_trace=true;                                                                                   shift ;;
+         --ninja)                    use_ninja=true;                                                                                   shift ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
          --no-device-linker)         device_linker=false;                                                                              shift ;;
-         --npkit-enable)             npkit_enabled=true;                                                                               shift ;;
          --openmp-test-enable)       openmp_test_enabled=true;                                                                         shift ;;
     -p | --package_build)            build_package=true;                                                                               shift ;;
          --prefix)                   install_library=true; install_prefix=${2};                                                        shift 2 ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
          --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
+         --rocshmem-gin)             build_rocshmem_gin=true;                                                                          shift ;;
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
+         --sqtt-enable)              sqtt_enabled=true;                                                                                shift ;;
          --static)                   build_static=true;                                                                                shift ;;
     -t | --tests_build)              build_tests=true;                                                                                 shift ;;
          --time-trace)               time_trace=true;                                                                                  shift ;;
@@ -177,6 +212,20 @@ while true; do
         ;;
     esac
 done
+
+if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]]; then
+    echo "Error: --rocshmem and --rocshmem-gin are mutually exclusive"
+    exit 1
+fi
+
+# Coverage requires the Debug-only symbol visibility contract used by the tests.
+# Validate up front (before any build/release tree is removed below) so a bad
+# invocation like `./install.sh -c` without --debug fails fast instead of first
+# wiping the existing build tree.
+if [[ "${enable_code_coverage}" == true && "${build_release}" == true ]]; then
+    echo "ERROR: code coverage requires --debug. Please re-run with --debug."
+    exit 1
+fi
 
 # /etc/*-release files describe the system
 if [[ -e "/etc/os-release" ]]; then
@@ -279,8 +328,15 @@ fi
 # rocSHMEM worktree setup (must run before cd-ing into the build directory)
 # #################################################
 rocshmem_source_dir=""
-if [[ "${build_rocshmem_support}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
-    setup_rocshmem_worktree
+if [[ "${build_rocshmem_support}" == true || "${build_rocshmem_gin}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
+    # Prefer mono-repo layout (projects/rocshmem alongside projects/rccl)
+    mono_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [[ -n "$mono_root" ]] && [[ -f "$mono_root/projects/rocshmem/CMakeLists.txt" ]]; then
+        rocshmem_source_dir="$mono_root/projects/rocshmem"
+        echo "=== Using rocSHMEM from mono-repo: ${rocshmem_source_dir} ==="
+    else
+        setup_rocshmem_worktree
+    fi
 fi
 
 # #################################################
@@ -326,6 +382,11 @@ if [[ "${enable_code_coverage}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_CODE_COVERAGE=ON"
 fi
 
+# Enable host and device code coverage
+if [[ "${enable_full_coverage}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_FULL_COVERAGE=ON"
+fi
+
 # Backtrace support
 if [[ "${build_bfd}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_BFD=ON"
@@ -336,6 +397,11 @@ if [[ "${build_local_gpu_only}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_LOCAL_GPU_TARGET_ONLY=ON"
 fi
 
+# Build every unroll factor for the targeted arch(es)
+if [[ "${build_all_unrolls}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DBUILD_ALL_UNROLLS=ON"
+fi
+
 # Build for specified GPU target(s) only
 if [[ ! -z "${build_amdgpu_targets}" ]]; then
     cmake_common_options="${cmake_common_options} -DGPU_TARGETS=${build_amdgpu_targets}"
@@ -344,11 +410,6 @@ fi
 # shared vs static
 if [[ "${build_static}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_SHARED_LIBS=OFF"
-fi
-
-# Disable collective trace
-if [[ "${collective_trace}" == false ]]; then
-    cmake_common_options="${cmake_common_options} -DCOLLTRACE=OFF"
 fi
 
 # Install dependencies
@@ -375,6 +436,11 @@ if [[ "${roctx_enabled}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DROCTX=OFF"
 fi
 
+# Enable SQTT instrumentation
+if [[ "${sqtt_enabled}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DSQTT_ENABLED=ON"
+fi
+
 # Dump ASM files from GPU compilation
 if [[ "${dump_asm}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DDUMP_ASM=ON"
@@ -394,9 +460,23 @@ if [[ "${enable_mpi_tests}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_MPI_TESTS=ON"
 fi
 
+# rccl_ep's multi-GPU tests live in the MPI test binary, so they need it built too.
+if [[ "${enable_rccl_ep_tests}" == true ]]; then
+    if [[ "${enable_mpi_tests}" != true ]]; then
+        echo "ERROR: --enable-rccl-ep-tests requires --enable-mpi-tests. Please re-run with both."
+        exit 1
+    fi
+    cmake_common_options="${cmake_common_options} -DENABLE_RCCL_EP_TESTS=ON"
+fi
+
 # Force Reduce pipeline
 if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
+fi
+
+# Experimental gfx1250 TDM SIMPLE copy path
+if [[ "${enable_tdm_simple}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_TDM_SIMPLE=ON"
 fi
 
 # Disable symmetric memory kernels
@@ -410,14 +490,14 @@ if [[ "${device_linker}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=OFF"
 fi
 
-# Enable NPKit
-if [[ "${npkit_enabled}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_NPKIT=ON"
-fi
-
 # Enable WARP_SPEED only on MI350/MI300 platforms
 if [[ "${warp_speed_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=ON"
+fi
+
+# Disable amdgpu-kernarg-preload-count compile/link flag
+if [[ "${kernarg_preload}" == false ]]; then
+    cmake_common_options="${cmake_common_options} -DDISABLE_KERNARG_PRELOAD=ON"
 fi
 
 # Suppress Warnings
@@ -434,23 +514,43 @@ if [[ "${build_rocshmem_support}" == true ]]; then
     elif [[ -n "${rocshmem_source_dir}" ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
     fi
+elif [[ "${build_rocshmem_gin}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF -DENABLE_ROCSHMEM_GIN=ON"
+    if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    elif [[ -n "${rocshmem_source_dir}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
+    fi
 else
-    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF"
+    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF -DENABLE_ROCSHMEM_GIN=OFF"
 fi
 
 check_exit_code "$?"
 
-# Build system selection.  Ninja is used only when explicitly requested via
-# --time-trace (which requires it).  Default is Make for broadest compatibility
+# Build system selection.  Default is Make for broadest compatibility
 # (Jenkins CI runs `make package` directly in the build directory).
-if [[ "${time_trace}" == true ]]; then
+# Ninja is enabled when explicitly requested via --ninja or --time-trace
+# (the latter requires it).  Ninja parallelizes the multi-arch device
+# pipeline considerably better than Make, so it's the recommended generator
+# for builds that target many GPU architectures at once.
+if [[ "${time_trace}" == true || "${use_ninja}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
-        echo "ninja could not be found (required for --time-trace)"
-        echo "Use \"${time_trace_ninja_msg}\" to install ninja"
-        exit 1
+        if [[ "${time_trace}" == true ]]; then
+            # Ninja is mandatory for --time-trace (the trace post-processing
+            # consumes Ninja's .ninja_log), so this is a hard error.
+            echo "ninja could not be found (required for --time-trace)"
+            echo "Use \"${time_trace_ninja_msg}\" to install ninja"
+            exit 1
+        fi
+        # --ninja is only a build-speed opt-in, so degrade gracefully to Make
+        # rather than aborting when ninja is unavailable.
+        echo "WARNING: ninja could not be found; falling back to the Make generator for --ninja"
+        echo "         Use \"${time_trace_ninja_msg}\" to install ninja"
+        build_system="make"
+    else
+        build_system="ninja"
+        enable_ninja="-GNinja"
     fi
-    build_system="ninja"
-    enable_ninja="-GNinja"
 else
     build_system="make"
 fi
@@ -477,9 +577,13 @@ fi
 ${cmake_executable} ${cmake_common_options} -DONLY_FUNCS="${ONLY_FUNCS}" ../../.
 check_exit_code "$?"
 
-# Enable verbose output from Makefile
+# Enable verbose output from the build system
 if [[ "${build_verbose}" == true ]]; then
-    build_system="${build_system} VERBOSE=1"
+    if [[ "${build_system}" == "ninja" ]]; then
+        build_system="${build_system} -v"
+    else
+        build_system="${build_system} VERBOSE=1"
+    fi
 fi
 
 # Initiate RCCL build (and install)
@@ -490,9 +594,13 @@ else
 fi
 check_exit_code "$?"
 
-# Initiate package build with `make package`, if enabled
+# Initiate package build (`make package` or `ninja package`), if enabled
 if [[ "${build_package}" == true ]]; then
-    make package
+    if [[ "${build_system}" == "ninja"* ]]; then
+        ninja package
+    else
+        make package
+    fi
     check_exit_code "$?"
 fi
 

@@ -15,8 +15,8 @@ struct ncclLLA2AHandle {
   uint32_t nSlots;
 };
 
-#if NCCL_CHECK_CUDACC
-template<typename Coop>
+#ifdef __CUDACC__
+template <typename Coop>
 struct ncclLLA2ASession_internal {
   Coop coop;
   ncclDevComm const& comm;
@@ -30,7 +30,7 @@ struct ncclLLA2ASession_internal {
   uint32_t slotsOffset;
 
   NCCL_DEVICE_INLINE uint32_t calcSlotOffset() const {
-    return block*(1 + 2*handle.nSlots) + 1 + (epoch & 1)*handle.nSlots;
+    return block * (1 + 2 * handle.nSlots) + 1 + (epoch & 1) * handle.nSlots;
   }
 };
 #endif

@@ -44,7 +44,7 @@ typedef struct {
     } p2p;
 
     struct {
-      pid_t pid;                // pid of the originating process
+      ncclPid_t pid;            // pid of the originating process
       uint8_t channelId;        // channel id for this proxy operation
       int peer;                 // remote rank for send/recv
       int nSteps;               // number of steps for this proxy operation
@@ -97,7 +97,8 @@ typedef struct {
   //  - eHandle   : handle to event object created through startEvent
   //  - eStateArgs: optional argument used to capture event attribute updates associated with the state transition
   //  - eState    : event state transition
-  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v1_t eState, ncclProfilerEventStateArgs_v1_t* eStateArgs);
+  ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v1_t eState,
+                                   ncclProfilerEventStateArgs_v1_t* eStateArgs);
 
   // finalize - finalize the profiler plugin
   // Input

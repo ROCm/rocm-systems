@@ -19,6 +19,7 @@ from amdisa.sema_ast import (
     SemaNode,
     SemaNodeKind,
 )
+from amdisa.sema_effects import inline_binary_op_effects
 
 
 class InstructionProperty(Flag):
@@ -32,6 +33,7 @@ class InstructionProperty(Flag):
     CROSS_LANE = auto()
     DS_PERMUTE = auto()
     WRITES_SCC = auto()
+    READS_SCC = auto()
     WRITES_VCC = auto()
     WRITES_EXEC = auto()
     READS_EXEC = auto()
@@ -84,6 +86,8 @@ _ADDR_CALC_CALLS: frozenset[str] = frozenset(
     }
 )
 
+_EXEC_CONTEXT_IDS: frozenset[str] = frozenset({'EXEC', 'EXEC_RAW'})
+
 
 def derive_properties(block: SemaBlock) -> InstructionProperty:
     """Derive instruction properties by walking the SemaAST.
@@ -98,6 +102,7 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
         return InstructionProperty.NONE
 
     props = InstructionProperty.NONE
+    nodes = tuple(block.body.walk())
 
     if block.pragma == ExecModel.VECTOR:
         props |= InstructionProperty.EXEC_MASKED
@@ -105,24 +110,29 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
         props |= InstructionProperty.IS_BRANCH
         props |= InstructionProperty.IGNORES_EXEC
 
-    for node in block.body.walk():
+    for node in nodes:
         if node.kind == SemaNodeKind.ASSIGN and node.children:
             lhs = _unwrap_cast(node.children[0])
             if lhs.kind == SemaNodeKind.ID and lhs.id_name:
                 if lhs.id_name == 'SCC':
                     props |= InstructionProperty.WRITES_SCC
-                elif lhs.id_name == 'EXEC':
+                elif lhs.id_name in _EXEC_CONTEXT_IDS:
                     props |= InstructionProperty.WRITES_EXEC
             if lhs.kind == SemaNodeKind.ARRAYDEREF and lhs.children:
                 arr = _unwrap_cast(lhs.children[0])
                 if arr.kind == SemaNodeKind.ID:
                     if arr.id_name == 'VCC':
                         props |= InstructionProperty.WRITES_VCC
-                    elif arr.id_name == 'EXEC':
+                    elif arr.id_name in _EXEC_CONTEXT_IDS:
                         props |= InstructionProperty.WRITES_EXEC
 
         if node.kind == SemaNodeKind.CALL and node.call_name:
             cn = node.call_name
+            effects = inline_binary_op_effects(cn)
+            if effects.reads_scc:
+                props |= InstructionProperty.READS_SCC
+            if effects.writes_scc:
+                props |= InstructionProperty.WRITES_SCC
             if cn in _CROSS_LANE_CALLS:
                 props |= InstructionProperty.CROSS_LANE
             if cn in _MATRIX_CALLS:
@@ -145,8 +155,13 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
                     props |= InstructionProperty.IS_MEMORY
                 elif arr.id_name == 'VCC':
                     props |= InstructionProperty.READS_VCC
-                elif arr.id_name == 'EXEC':
+                elif arr.id_name in _EXEC_CONTEXT_IDS:
                     props |= InstructionProperty.READS_EXEC
+
+    if _reads_context_ids(block.body, frozenset({'SCC'})):
+        props |= InstructionProperty.READS_SCC
+    if _reads_context_ids(block.body, _EXEC_CONTEXT_IDS):
+        props |= InstructionProperty.READS_EXEC
 
     return props
 
@@ -157,6 +172,20 @@ def _unwrap_cast(node: SemaNode) -> SemaNode:
     return node
 
 
+def _reads_context_ids(node: SemaNode, names: frozenset[str]) -> bool:
+    if node.kind == SemaNodeKind.ASSIGN and node.children:
+        lhs = _unwrap_cast(node.children[0])
+        lhs_reads = not (
+            lhs.kind == SemaNodeKind.ID and lhs.id_name in names
+        ) and _reads_context_ids(node.children[0], names)
+        return lhs_reads or any(
+            _reads_context_ids(child, names) for child in node.children[1:]
+        )
+    if node.kind == SemaNodeKind.ID and node.id_name in names:
+        return True
+    return any(_reads_context_ids(child, names) for child in node.children)
+
+
 @dataclass
 class PropertySummary:
     """Summary of derived properties for a set of instructions."""
@@ -164,6 +193,7 @@ class PropertySummary:
     total: int = 0
     exec_masked: int = 0
     writes_scc: int = 0
+    reads_scc: int = 0
     writes_vcc: int = 0
     writes_exec: int = 0
     cross_lane: int = 0
@@ -188,6 +218,8 @@ def summarize_properties(
             s.exec_masked += 1
         if InstructionProperty.WRITES_SCC in props:
             s.writes_scc += 1
+        if InstructionProperty.READS_SCC in props:
+            s.reads_scc += 1
         if InstructionProperty.WRITES_VCC in props:
             s.writes_vcc += 1
         if InstructionProperty.WRITES_EXEC in props:

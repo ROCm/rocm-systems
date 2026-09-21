@@ -31,7 +31,7 @@
 namespace DevDriver
 {
 // A String class that stores the string inline with a compile-time maximum size.
-// This class facilitates passing bounded sized C Strings around without dynamic allocation. It has POD semantics
+// This class facilitiates passing bounded sized C Strings around without dynamic allocation. It has POD semantics
 // when copied or passed by value into functions, and can be stored in a vector.
 template<size_t FixedSize>
 class FixedString
@@ -195,7 +195,7 @@ inline uint8 HexDigitToValue(char c)
         case '1': case '2': case '3':
         case '4': case '5': case '6':
         case '7': case '8': case '9':
-                                    return c - '0';
+                                    return static_cast<uint8>(c - '0');
 
         case 'a': case 'A':         return 0xa;
         case 'b': case 'B':         return 0xb;
@@ -247,46 +247,6 @@ inline uint8 HexDigitToValue(char c)
 // such as Json.
 //
 // Returns the number of bytes written out through `pBytesOut`.
-inline size_t DecodeFromHexString(const char* pStrBuff, size_t strLength, void* pBytesOut, size_t numBytes)
-{
-    uint8* pBytes = static_cast<uint8*>(pBytesOut);
-
-    // Byte offset that we've written into pBytes
-    size_t bytesProcessed = 0;
-
-    // Note: Only even-length hex strings are supported
-    if ((strLength % 2 == 0) && (pBytes != nullptr) && (numBytes != 0) && (pStrBuff != nullptr) && (strLength != 0))
-    {
-        size_t byteIdx = 0;
-
-        // Process two characters (one byte) per iteration.
-        // This loop is bounded on two sizes: the string buffer and the byte buffer
-        for (size_t strIdx = 0;
-            ((strIdx + 1) < strLength) && (byteIdx < numBytes);
-            strIdx += 2, byteIdx += 1)
-        {
-            const uint8 hi = HexDigitToValue(pStrBuff[strIdx + 0]); // High nibble first
-            const uint8 lo = HexDigitToValue(pStrBuff[strIdx + 1]); // Low nibble
-
-            if ((lo != 0xff) && (hi != 0xff))
-            {
-                pBytes[byteIdx] = (hi << 4) | lo;
-                bytesProcessed += 1;
-            }
-            else
-            {
-                // Non-hex digit encountered, this is a parsing error.
-                // This log statement is compiled out, but may be useful for debugging something funny.
-                DD_PRINT(LogLevel::Never,
-                    "[DecodeFromHexString] Expected hex digits ([0-9a-fA-F]), but found \"%c%c\"",
-                    pStrBuff[strIdx + 0],
-                    pStrBuff[strIdx + 1]);
-                break;
-            }
-        }
-    }
-
-    return bytesProcessed;
-}
+size_t DecodeFromHexString(const char* pStrBuff, size_t strLength, void* pBytesOut, size_t numBytes);
 
 } // namespace DevDriver

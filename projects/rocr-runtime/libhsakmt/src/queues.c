@@ -25,7 +25,7 @@
 
 #include "libhsakmt.h"
 #include "fmm.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -112,15 +112,16 @@ static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gf
 	HSAuint32 num_waves_per_simd = node->MaxWavesPerSIMD;
 	HSAuint32 bytes_per_wave = 128;
 
+	if (gfxv < GFX_VERSION_GFX1250) {
+		return 0x1000;
+	}
+
 	if (gfxv == GFX_VERSION_GFX1250) {
 		bytes_per_wave = 512;  // per HW design; GFX_SHARED__HWREG_SPACE_USED
 	}
 
 	hwreg_size_bytes = num_waves_per_simd * simd_per_cu * bytes_per_wave;
 
-	assert(hwreg_size_bytes == (
-		gfxv == GFX_VERSION_GFX1250 ?	0x8000 :
-										0x1000));
 	return hwreg_size_bytes;
 }
 
@@ -358,8 +359,8 @@ static void *allocate_exec_aligned_memory_cpu(uint32_t size)
 	 *
 	 * MAP_ANONYMOUS initializes the memory to zero.
 	 */
-	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
-				MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+			MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
 	if (ptr == MAP_FAILED)
 		return NULL;
@@ -455,10 +456,9 @@ void *hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 
 	if (NodeId != 0) {
 		uint32_t nodes_array[1] = {NodeId};
-		HsaMemMapFlags map_flags = {0};
 		HSAKMT_STATUS result;
 
-		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, map_flags, 1, nodes_array);
+		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, flags, 1, nodes_array);
 		if (result != HSAKMT_STATUS_SUCCESS) {
 			hsaKmtFreeMemoryCtx(ctx, mem, size);
 			return NULL;
@@ -629,10 +629,16 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 		q->total_mem_alloc_size = (q->ctx_save_restore_size +
 					q->debug_memory_size) * node.NumXcc;
 
+		/* GPU_ALWAYS_MAPPED is rejected in recoverable-fault mode, and
+		 * without it an SVM save area cannot satisfy
+		 * kfd_queue_buffer_svm_get().
+		 */
+		bool svm_save_area = !node.Capability2.ui32.StallOnRetryFault;
+
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
 		 */
-		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported) {
+		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported && svm_save_area) {
 			uint32_t size = PAGE_ALIGN_UP(q->total_mem_alloc_size);
 
 			pr_info("Allocating GTT for CWSR\n");
@@ -669,7 +675,9 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 			q->ctx_save_restore = allocate_exec_aligned_memory(ctx,
 							q->total_mem_alloc_size,
 							q->use_ats, gpu_id, NodeId,
-							false, false, false);
+							/* nonPaged */ true,
+							/* DeviceLocal */ false,
+							/* Uncached */ false);
 
 			if (!q->ctx_save_restore)
 				return HSAKMT_STATUS_NO_MEMORY;
@@ -805,8 +813,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_QUEUE, &args);
 
 	if (err == -1) {
+		int saved_errno = errno;
 		free_queue(ctx, q);
-		return HSAKMT_STATUS_ERROR;
+      	
+		/* Return specific error code based on errno */
+      	if (saved_errno == ENOMEM)
+			return HSAKMT_STATUS_NO_MEMORY;
+      	else if (saved_errno == EINVAL)
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+      	else
+			return HSAKMT_STATUS_ERROR;
 	}
 
 	q->queue_id = args.queue_id;
@@ -993,6 +1009,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
 	QueueInfo->QueueDetailError = 0;
 	QueueInfo->QueueTypeExtended = 0;
 	QueueInfo->SaveAreaHeader = q->ctx_save_restore;
+	QueueInfo->SaveAreaAllocSize = q->ctx_save_restore_size;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
@@ -1157,6 +1174,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(
 						 HsaQueueInfo *QueueInfo)
 {
 	return hsaKmtGetQueueInfoCtx(&hsakmt_primary_kfd_ctx, QueueId, QueueInfo);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(
+						 HSA_QUEUEID QueueId,
+						 HSAuint32 *KernelInternalQueueId)
+{
+	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
+
+	if (!q || !KernelInternalQueueId)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	*KernelInternalQueueId = q->queue_id;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,

@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -1555,32 +1556,44 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     return false;
   }
 
-  if (!clBinary()->setElfIn()) {
-    LogError("Setting input OCL binary failed");
+  // Do not rely on amd::Elf to do validations here since it makes copies
+  // and depending on the binary size, that might be costly.
+  auto [binary, binSize] = clBinary()->data();
+  if (binSize < sizeof(amd::Elf64_Ehdr)) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+            "The elf size is way too small to validate: %d \n", binSize);
     return false;
   }
-  uint16_t type;
-  if (!clBinary()->elfIn()->getType(type)) {
-    LogError("Bad OCL Binary: error loading ELF type!");
-    return false;
-  }
+
+  // So we do the validation by explicitly getting the ELF header. Copy it into an
+  // aligned local, since the binary buffer has no alignment guarantee.
+  amd::Elf64_Ehdr ehdr;
+  std::memcpy(&ehdr, binary, sizeof(ehdr));
+  uint16_t type = ehdr.e_type;
+
   switch (type) {
     case ET_NONE: {
       setType(TYPE_NONE);
       break;
     }
     case ET_REL: {
+      // isSPIR()/isSPIRV() inspect ELF sections, which requires elfIn_ to be
+      // set up. Do it only for this (relocatable) case so the common
+      // executable path avoids the amd::Elf copy cost.
+      if (!clBinary()->setElfIn()) {
+        // setElfIn() already logs on the amd::Elf failure path.
+        return false;
+      }
       if (clBinary()->isSPIR() || clBinary()->isSPIRV()) {
         setType(TYPE_INTERMEDIATE);
       } else {
         setType(TYPE_COMPILED);
       }
+      clBinary()->resetElfIn();
       break;
     }
     case ET_DYN: {
-      char* sect = nullptr;
-      size_t sz = 0;
-      if (clBinary()->elfIn()->isHsaCo()) {
+      if (ehdr.e_machine == EM_AMDGPU) {
         setType(TYPE_EXECUTABLE);
       } else {
         setType(TYPE_LIBRARY);
@@ -1604,7 +1617,6 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
     linkOptions_.clear();
   }
 
-  clBinary()->resetElfIn();
   return true;
 }
 

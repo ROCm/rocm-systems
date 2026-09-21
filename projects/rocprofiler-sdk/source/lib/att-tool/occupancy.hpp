@@ -37,9 +37,11 @@ namespace OccupancyFile
 using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 void
-OccupancyFile(const Fspath&                                     dir,
-              std::shared_ptr<AddressTable>&                    table,
-              const std::map<size_t, std::vector<occupancy_t>>& occ);
+OccupancyFile(const Fspath&                                       dir,
+              std::shared_ptr<AddressTable>&                      table,
+              const std::map<size_t, std::vector<occupancy_t>>&   occ,
+              const std::map<size_t, std::vector<trace_event_t>>& events,
+              const std::map<size_t, std::vector<dispatch_t>>&    dispatches);
 };  // namespace OccupancyFile
 
 }  // namespace att_wrapper

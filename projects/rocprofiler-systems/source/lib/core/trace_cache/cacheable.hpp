@@ -55,16 +55,18 @@ const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
 };
 
 template <typename Type>
-__attribute__((always_inline)) inline constexpr size_t
+    requires type_traits::supported_cache_type<Type>
+__attribute__((always_inline)) constexpr size_t
 get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::is_supported_type_v<DecayedType>,
-                  "Unsupported type in get_size");
 
-    if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 type_traits::is_vector_v<DecayedType> ||
-                 type_traits::is_span_v<DecayedType>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    {
+        return val.size() + sizeof(char) + sizeof(size_t);
+    }
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(val)>;
         const size_t item_size  = sizeof(typename ContainerType::value_type);
@@ -86,25 +88,32 @@ get_size(Type&& val)
 }
 
 template <typename Type, typename... Types>
-__attribute__((always_inline)) inline constexpr size_t
+__attribute__((always_inline)) constexpr size_t
 get_size(Type&& val, Types&&... vals)
 {
     return get_size(std::forward<Type>(val)) + get_size(std::forward<Types>(vals)...);
 }
 
 template <typename Type>
+    requires type_traits::supported_cache_type<Type>
 __attribute__((always_inline)) inline void
 store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::is_supported_type_v<DecayedType>,
-                  "Unsupported type in store_value");
 
     auto* dest = buffer + position;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 type_traits::is_vector_v<DecayedType> ||
-                 type_traits::is_span_v<DecayedType>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    {
+        const size_t data_size  = value.size();
+        const size_t entry_size = sizeof(size_t) + data_size + sizeof(char);
+        std::memcpy(dest, &data_size, sizeof(size_t));
+        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        dest[entry_size - sizeof(char)] = '\0';
+        position += entry_size;
+    }
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
         const size_t total_size  = get_size(value);
         const size_t header_size = sizeof(size_t);
@@ -140,12 +149,11 @@ store_value(std::uint8_t* buffer, const Types&... values)
 }
 
 template <typename Type>
+    requires type_traits::supported_cache_type<Type>
 __attribute__((always_inline)) inline static void
 parse_value(std::uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::is_supported_type_v<DecayedType>,
-                  "Unsupported type in parse_value");
 
     if constexpr(type_traits::is_string_view_v<DecayedType>)
     {
@@ -153,7 +161,7 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
         std::memcpy(&string_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
         arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
-        data_pos += string_size;
+        data_pos += string_size + sizeof(char);
     }
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)

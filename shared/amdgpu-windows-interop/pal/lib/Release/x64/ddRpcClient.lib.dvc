@@ -1,5 +1,5 @@
 outs:
-- md5: a6bda1a1cf0834c498996a0ebd6f7e2a
-  size: 22940
+- md5: a72a0f5acd1ba1b18f9bdbfebfe4f85a
+  size: 22698
   hash: md5
   path: ddRpcClient.lib

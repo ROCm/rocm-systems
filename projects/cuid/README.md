@@ -52,7 +52,7 @@ revision_id=01
 family=0019
 model=0074
 unit_id=0004
-package_core_id=0:0
+package_id=0
 last_update=6980d761
 
 [NIC:0]
@@ -71,7 +71,7 @@ last_update=1753987166
 ```
 
 - **GPU:** `device_node` links the CUID to hardware.
-- **CPU:** `package_core_id` identifies cores (`package_id:core_id`).
+- **CPU:** `package_id` identifies physical CPU package, akin to the socket.
 - **NIC:** `device_node` links to the network device.
 - **PLATFORM:** Only the derived CUID is listed.
 
@@ -113,17 +113,35 @@ The CUID tool supports both privileged and non-privileged users:
 - Allows creation of primary/derived CUIDs (if privileged).
 - Simplifies device management and integration.
 
-### Build Instructions
+### Build and Install Instructions
+
+The below instructions allow the building of the CUID project and also the installation of its files and services:
 
 ```sh
 mkdir build
 cd build
-cmake ..
+# Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
+# Add -DBUILD_DAEMON=ON to also build the daemon (optional)
+cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
 make
-make install
+# Use sudo if installing to a system prefix like /opt
+sudo make install
+# Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
+sudo <install-prefix>/share/amdcuid/amdcuid_postinst.sh
 ```
 
-Both static and shared libraries are built.
+Both static and shared libraries are built. The post-install script is a unified entry point: it always provisions the HMAC key required by the library, and automatically configures the `systemd` service and `udev` rules if the daemon was also installed.
+
+If users need to uninstall the CUID project, they can do so with the following instructions:
+
+```sh
+cd build
+# Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
+sudo <install-prefix>/share/amdcuid/amdcuid_prerm.sh
+sudo make uninstall
+```
+
+The pre-removal script automatically stops and removes the `systemd` service and `udev` rules if the daemon is installed, and skips those steps otherwise. The HMAC key and daemon config in `/etc/amdcuid/` are intentionally preserved so that reinstalls keep the same CUID values. To fully purge all configuration, run `sudo rm -rf /etc/amdcuid` after uninstalling.
 
 Documentation can be built using the following instructions:
 
@@ -138,9 +156,8 @@ sphinx-build docs docs/_build/html
 
 | Component | Minimum Version | Notes |
 |-----------|-----------------|-------|
-| **OpenSSL** | 1.1.0 | Uses `HMAC_CTX_new()`/`HMAC_CTX_free()` (1.1.x) or `EVP_MAC` API (3.0+) |
 | **CMake** | 3.14 | Build system requirement |
-| **GCC** | 5.0 | C++14 standard required |
+| **GCC** | 7.0 | C++17 standard required |
 | **Kernel** | 2.6+ | Standard sysfs interfaces |
 | **Architecture** | x86_64 required for CPUID-based CPU fields | Limited fallback via `/proc/cpuinfo` on other architectures |
 
@@ -166,7 +183,7 @@ sphinx-build docs docs/_build/html
 
 #### Notes
 
-- **LibreSSL** and **BoringSSL** are supported via the HMAC_CTX backend
+- No third-party crypto dependency: SHA-256 and HMAC-SHA-256 are built from `lib/src/sha256.cc`, so the library links no TLS stack on any platform
 - Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID, PCI config space access)
 - systemd is only needed for `udevd` reloads and optional service management; the daemon can also be started using other mechanisms such as an `@reboot` cron job
 

@@ -5,13 +5,22 @@ ROCm Communication Collectives Library
 [![RCCL](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frccl?repoName=ROCm%2Frccl&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=107&repoName=ROCm%2Frccl&branchName=develop)
 [![TheRock CI](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml)
 
-> **Note:** The published documentation is available at [RCCL](https://rocm.docs.amd.com/projects/rccl/en/latest/index.html) in an organized easy-to-read format that includes a table of contents and search functionality. The documentation source files reside in the [rccl/docs](https://github.com/ROCm/rccl/tree/develop/docs) folder in this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+> **Note:** The published documentation is available at [RCCL](https://rocm.docs.amd.com/projects/rccl/en/latest/index.html) in an organized easy-to-read format that includes a table of contents and search functionality. The documentation source files reside in the [rccl/docs](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/docs) folder in this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## Introduction
 
 RCCL (pronounced "Rickle") is a stand-alone library of standard collective communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, gather, scatter, and all-to-all. There is also initial support for direct GPU-to-GPU send and receive operations.  It has been optimized to achieve high bandwidth on platforms using PCIe, xGMI as well as networking using InfiniBand Verbs or TCP/IP sockets. RCCL supports an arbitrary number of GPUs installed in a single node or multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
 
 The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
+
+Additionally, RCCL supports zero-CU (zero-CTA) collectives for selected operations,
+including all-gather, all-to-all, gather, and scatter. These collectives use SDMA/Copy
+Engine (CE) hardware to offload data movement, enabling communication without consuming
+GPU compute units. This path is opt-in: initialize the communicator with
+NCCL_CTA_POLICY_ZERO and register symmetric buffers via ncclCommWindowRegister
+with NCCL_WIN_COLL_SYMMETRIC (single-node only; requires ROCm 7.12+). On MI350,
+CE collectives can outperform CU-based collectives for large message sizes and improve
+overlap when computation and communication run concurrently.
 
 ## Requirements
 
@@ -42,14 +51,14 @@ RCCL build & installation helper script
        --debug                 Build debug library
        --debug-fast            Build debug library with lto optimization disabled (fast build times)
     -d|--dependencies          Install RCCL dependencies
-       --disable-colltrace     Build without collective trace
        --disable-roctx         Build without ROCTX logging
        --disable-warp-speed    Disable WARP_SPEED kernel optimizations
        --dump-asm              Disassemble code and dump assembly with inline code
-    -c|--enable-code-coverage  Enable code coverage
+    -c|--enable-code-coverage  Enable host-side code coverage instrumentation (requires --debug)
+       --enable-full-coverage   Enable host + device code coverage (requires --debug and ROCm 7.15+)
        --enable_backtrace      Build with custom backtrace support
        --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
-    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
+    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
        --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
        --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)
     -h|--help                  Prints this help message
@@ -59,7 +68,6 @@ RCCL build & installation helper script
     -l|--local_gpu_only        Only compile for local GPU architecture
        --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
        --openmp-test-enable    Enable OpenMP in rccl unit tests
     -p|--package_build         Build RCCL package
        --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
@@ -73,12 +81,12 @@ RCCL build & installation helper script
        --verbose               Show compile commands
 
   Available RCCL-specific CMake options for --cmake-options:
-    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)
+    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)
     -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
     -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
     -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
-    -DPROFILE=ON                          Enable profiling (default: OFF)
+    -DRCCL_POISON_HIP_ATOMICS=OFF         Allow __hip_atomic_* builtins in RCCL sources (default: ON)
     -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
     -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
 
@@ -134,6 +142,16 @@ RCCL package install requires sudo/root access because it installs under `/opt/r
 
 Refer to [docker/README.md](docker/README.md "docker/README.md")
 
+Python wheel :
+```shell
+$ # Install uv to create the Python wheel (uv manages Python deps in a venv)
+$ # See: https://docs.astral.sh/uv/getting-started/installation/
+$ curl -LsSf https://astral.sh/uv/install.sh | sh
+$ # Build NCCL Python wheel (this also builds the .txz archive as an intermediate)
+$ make pkg.python_wheel.build
+$ ls build/pkg/python_wheel/
+```
+
 ## Tests
 
 There are rccl unit tests implemented with the Googletest framework in RCCL.  The rccl unit tests require Googletest 1.10 or higher to build and execute properly (installed with the -d option to install.sh).
@@ -158,7 +176,7 @@ See the rccl-tests README for more information on how to build and run those tes
 
 RCCL can use rocSHMEM's GPU Direct Async (GDA) backend to accelerate the **AllToAll** collective on supported multi-node setups. This is the only collective that currently uses rocSHMEM GDA inside RCCL.
 
-Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support. 
+Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support.
 
 **Building with rocSHMEM**
 
@@ -168,7 +186,7 @@ Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/r
   ```
   By default (without `ROCSHMEM_INSTALL_DIR`), the script creates a sparse git worktree of the mono-repo at a pinned commit and passes that rocSHMEM tree to CMake as `ROCSHMEM_SOURCE_DIR`, so RCCL builds rocSHMEM via CMake `ExternalProject`. To use an already-built rocSHMEM instead, set `ROCSHMEM_INSTALL_DIR` to its install prefix before running the script.
 
-- **Manual CMake (without `install.sh`)**  
+- **Manual CMake (without `install.sh`)**
   You need InfiniBand Verbs development libraries on the system (`libibverbs`; e.g. `rdma-core` / `libibverbs-dev` on Debian/Ubuntu). Then enable rocSHMEM and supply **either** a pre-built install prefix **or** a path to the rocSHMEM CMake source tree (the directory that contains rocSHMEM’s top-level `CMakeLists.txt`, e.g. `projects/rocshmem` in the rocm-systems mono-repo):
 
   ```shell

@@ -6,20 +6,20 @@
 /// compares wired into SIMD_VOPC / SIMD_VOPC64: the f32/f16/f64 relations
 /// (eq/ge/gt/le/lg/lt/neq/nge/ngt/nle/nlg/nlt/o/u/f/tru) and the
 /// i32/u32/i16/u16/i64/u64 relations (eq/ge/gt/le/lt/ne/f/t). Each writes one bit
-/// per active EXEC lane into VCC, preserving inactive bits. Each (opcode,
+/// per active EXEC lane into VCC, zeroing inactive-lane bits. Each (opcode,
 /// vcc_in) runs TWICE in the same process -- once forcing the scalar body, once
 /// the SIMD fast path, with identical inputs/EXEC/VCC-in -- and the full 64-bit
 /// VCC compare results are asserted equal with EXPECT_EQ
-/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
-/// inactive-lane VCC bits must stay
-/// preserved under full and partial EXEC. The 64-bit relations exercise the
+/// (util::set_force_scalar_for_testing flips the gate in-process). Inactive-lane
+/// VCC bits are zeroed under full and partial EXEC. The 64-bit relations exercise the
 /// split lo/hi VGPR-pair read path. Inputs seed NaN/±Inf/±0/denorm (floats) and
 /// signed/extreme boundaries (ints); float compares are bit-exact in both modes.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -126,7 +126,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, Kind k, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(k, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };
@@ -181,7 +181,7 @@ void check_all(uint64_t exec) {
     uint32_t vsrc1 = is_64bit(c.kind) ? 2u : 1u;
     uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "VOPC opcode " << c.opcode << " decode failed";
     uint64_t vcc = fx.run(inst, c.kind, exec, vcc_in);
     delete inst;
@@ -198,10 +198,10 @@ void check_all(uint64_t exec) {
                                       << vcc_in << ": SIMD VCC diverged from scalar body";
 
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-          << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
-      EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-          << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
+      EXPECT_EQ(simd_vcc & inactive, 0ULL)
+          << "VOPC opcode " << c.opcode << ": inactive-lane VCC bit not zeroed";
+      EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+          << "VOPC opcode " << c.opcode << ": inactive-lane VCC bit not zeroed";
     }
   }
 }

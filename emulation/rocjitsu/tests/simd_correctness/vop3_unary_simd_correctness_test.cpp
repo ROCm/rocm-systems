@@ -13,10 +13,11 @@
 /// (util::set_force_scalar_for_testing flips the gate in-process). In-process
 /// inactive lanes must stay preserved under full/partial EXEC.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -152,7 +153,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -180,7 +181,7 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, exec);
     delete inst;
@@ -261,23 +262,28 @@ TEST(Vop3UnarySimdCorrectness, MovB32_PreservesBits) {
   struct Sub {
     uint32_t abs, neg, omod, clamp, in, expect;
   };
+  // v_mov_b32 is an integer bit-move (D.u = S0.u): its generated scalar body is
+  // a raw copy that ignores the VOP3 float modifiers (abs/neg are float input
+  // modifiers, omod/clamp float output modifiers — none apply to a .u move). So
+  // every modifier combination must preserve the source bits exactly; the SIMD
+  // fast path (plain VOP1 unary copy) must match.
   const std::array<Sub, 4> subs = {{
       {0, 0, 0, 0, 0x3F000000u, 0x3F000000u}, // 0.5 -> 0.5 (bits preserved)
       {0, 0, 0, 0, 0x12345678u, 0x12345678u}, // arbitrary bits preserved
-      {0, 1, 0, 0, 0x3F000000u, 0xBF000000u}, // neg: flip sign -> -0.5
-      {1, 0, 0, 0, 0xBF000000u, 0x3F000000u}, // abs: clear sign -> 0.5
+      {0, 1, 0, 0, 0x3F000000u, 0x3F000000u}, // neg modifier ignored -> bits preserved
+      {1, 0, 0, 0, 0xBF000000u, 0xBF000000u}, // abs modifier ignored -> bits preserved
   }};
   for (const auto &s : subs) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*op=v_mov_b32=*/321, /*vdst=*/kDstVgpr, /*src0=*/256, s.abs, s.neg, s.omod,
                 s.clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     ASSERT_NE(inst, nullptr);
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       fx.cu->write_vgpr(vb + 0, lane, s.in);
     fx.wf->set_exec(~0ULL);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     EXPECT_EQ(fx.cu->read_vgpr(vb + kDstVgpr, 0), s.expect)
         << "v_mov_b32 abs=" << s.abs << " neg=" << s.neg << " in=0x" << std::hex << s.in;
     delete inst;

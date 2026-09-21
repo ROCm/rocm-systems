@@ -50,9 +50,18 @@ void ReportActivity(const amd::Command& command) {
   assert(command.profilingInfo().enabled_ && "Profiling must be enabled for this command");
   activity_op_t operation_id = OperationId(command.type());
   if (operation_id >= OP_ID_NUMBER) {
-    // This command does not translate into a profiler activity (dispatch, memcopy, etc...), there
-    // is nothing to report to the profiler.
-    return;
+    // hipEventRecord enqueues an EventMarker with command type 0 (internal marker) rather than
+    // CL_COMMAND_MARKER, so OperationId() can't classify it. It still dispatches a real barrier
+    // packet carrying a GPU timestamp (marker_ts_), so report it as a barrier to surface
+    // event-record sync points on the GPU timeline. Generic internal markers (batch-flush) have
+    // marker_ts_ == false and stay unreported.
+    if (command.type() == 0 && command.profilingInfo().marker_ts_) {
+      operation_id = OP_ID_BARRIER;
+    } else {
+      // This command does not translate into a profiler activity (dispatch, memcopy, etc...),
+      // there is nothing to report to the profiler.
+      return;
+    }
   }
 
   auto function = report_activity.load(std::memory_order_acquire);
@@ -101,25 +110,43 @@ void ReportActivity(const amd::Command& command) {
       record.bytes = total;
       break;
     }
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER: {
+      const std::vector<amd::BatchWriteMemoryOp>& ops =
+          static_cast<const amd::BatchWriteMemoryCommand&>(command).WriteOps();
+      size_t total = 0;
+      for (const amd::BatchWriteMemoryOp& op : ops) {
+        total += op.size;
+      }
+      record.bytes = total;
+      break;
+    }
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER: {
+      const std::vector<amd::BatchReadMemoryOp>& ops =
+          static_cast<const amd::BatchReadMemoryCommand&>(command).ReadOps();
+      size_t total = 0;
+      for (const amd::BatchReadMemoryOp& op : ops) {
+        total += op.size;
+      }
+      record.bytes = total;
+      break;
+    }
     default:
       break;
   }
 
   if (command.type() == CL_COMMAND_TASK) {
-    auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
-    const auto& kernel_names =
-        static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    // timestamps has one entry per HSA_PACKET_TYPE_KERNEL_DISPATCH packet only.
-    // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
-    // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
-    // the next timestamp.
-    uint32_t ti = 0;
-    for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
-      if (kernel_names[ki] == nullptr) continue;
-      auto it = timestamps[ti++];
-      record.begin_ns = it.first;
-      record.end_ns = it.second;
-      record.kernel_name = kernel_names[ki]->c_str();
+    const auto& kernel_dispatches =
+        static_cast<const amd::AccumulateCommand&>(command).getKernelDispatches();
+    for (const auto& dispatch : kernel_dispatches) {
+      // Missing or invalid signal timing leaves this dispatch's slot empty
+      // instead of shifting every later kernel onto the wrong timestamp.
+      if (dispatch.end_ns == 0) {
+        continue;
+      }
+      record.begin_ns = dispatch.start_ns;
+      record.end_ns = dispatch.end_ns;
+      record.kernel_name = dispatch.kernel_name;
+      record.queue_id = static_cast<uint64_t>(dispatch.queue_index);
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {
@@ -171,6 +198,8 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
     CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
     CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_WRITE_BUFFER, BatchWriteBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_READ_BUFFER, BatchReadBuffer);
     default:
       break;
   };

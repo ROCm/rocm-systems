@@ -154,7 +154,7 @@ const ImageProperty ImageLutKv::kPropLut_[ORDER_COUNT][TYPE_COUNT] = {
      {0, 0, 0, 0},
      {0, 0, 0, 0},
      {0, 0, 0, 0},
-     {0, 0, 0, 0},
+     {RW, 4, FMT_2_10_10_10, TYPE_UNORM}, // big endian
      {RW, 4, FMT_8_8_8_8, TYPE_SINT},
      {RW, 8, FMT_16_16_16_16, TYPE_SINT},
      {RW, 16, FMT_32_32_32_32, TYPE_SINT},

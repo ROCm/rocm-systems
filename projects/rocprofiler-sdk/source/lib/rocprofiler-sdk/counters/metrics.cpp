@@ -49,6 +49,7 @@
 #include <dlfcn.h>  // for dladdr
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <system_error>
@@ -68,7 +69,7 @@ getCustomCounterDefinition()
 }
 
 /**
- * Constant/speical metrics are treated as psudo-metrics in that they
+ * Constant/special metrics are treated as pseudo-metrics in that they
  * are given their own metric id. MAX_WAVE_SIZE for example is not collected
  * by AQL Profiler but is a constant from the topology. It will still have
  * a counter associated with it. Nearly all metrics contained in
@@ -100,14 +101,14 @@ get_constants(uint64_t starting_id)
  * Expected YAML Format:
  * COUNTER_NAME:
  *  architectures:
- *   gfxXX: // Can be more than one, / deliminated if they share idential data
+ *   gfxXX: // Can be more than one, / delimited if they share identical data
  *     block: <Optional>
  *     event: <Optional>
  *     expression: <optional>
  *     description: <Optional>
  *   gfxYY:
  *      ...
- *  description: General counter desctiption
+ *  description: General counter description
  */
 counter_metrics_t
 loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)

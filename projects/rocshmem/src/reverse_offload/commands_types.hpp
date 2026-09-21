@@ -45,6 +45,7 @@ enum ro_net_cmds {
   RO_NET_TEAM_BROADCAST,
   RO_NET_ALLTOALL,
   RO_NET_FCOLLECT,
+  RO_NET_TEAM_REDUCE_SCATTER,
 };
 
 enum ro_net_types {

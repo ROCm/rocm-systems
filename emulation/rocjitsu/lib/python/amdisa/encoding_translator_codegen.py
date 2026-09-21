@@ -5,7 +5,9 @@
 
 For each (src_ISA, dst_ISA) pair, emits C++ functions that translate
 instructions by decoding fields from the source ISA's machine_insts.h
-bitfield struct and re-encoding into the target ISA's struct.
+bitfield struct and re-encoding with the target ISA's generated builders.
+Decoder-only alternate target encodings, which do not yet have standalone
+builders, retain the existing MachineInst serialization path.
 
 Fields are classified as:
 - COPY:   same name, same width -- bitfield value is copied directly.
@@ -16,10 +18,10 @@ Fields are classified as:
 Usage::
 
     from amdisa import Parser
-    from amdisa.isa_profile import CdnaProfile, Rdna4Profile
+    from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
     from amdisa.encoding_translator_codegen import generate_encoding_translators
 
-    cdna4 = Parser('amdgpu_isa_cdna4.xml', CdnaProfile()).parse()
+    cdna4 = Parser('amdgpu_isa_cdna4.xml', Cdna4Profile()).parse()
     rdna4 = Parser('amdgpu_isa_rdna4.xml', Rdna4Profile()).parse()
     generate_encoding_translators(cdna4, rdna4, 'cdna4', 'rdna4', 'output/')
 """
@@ -32,6 +34,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from amdisa.codegen.config import CodegenConfig
 
 
 def _clang_format(path: Path) -> None:
@@ -230,6 +234,7 @@ class EncodingTranslation:
     src_dt_index: int = 0  # primary decode table index (for dispatch)
     src_enc_field_bit_cnt: int = 9  # encoding field width in bits
     dst_enc_field_val: int = 0  # actual encoding bitfield value (for dst.encoding)
+    dst_has_builder: bool = False  # target is emitted by gen_instruction_builders
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +258,18 @@ def _struct_name(enc_name: str) -> str:
     if parts[0] == 'ENC':
         parts = parts[1:]
     return ''.join(p.capitalize() for p in parts) + 'MachineInst'
+
+
+def _builder_fields_name(enc_name: str) -> str:
+    """Derive the C++ generated-builder field structure name."""
+    return _struct_name(enc_name).replace('MachineInst', 'BuilderFields')
+
+
+def _builder_function_name(enc_name: str) -> str:
+    """Derive the generated format-builder function name."""
+    if enc_name.startswith('ENC_'):
+        enc_name = enc_name[len('ENC_') :]
+    return f'build_{enc_name.lower()}'
 
 
 def _dt_index(enc: InstEncoding, spec: IsaSpec) -> int:
@@ -461,7 +478,7 @@ def _all_field_names_from_encodings(encodings):
     multiple ISAs' encodings for the same format.
 
     Returned sorted alphabetically so the emitted struct layout is stable
-    across `--multi` argument orderings. Field order in these structs is
+    across ISA argument orderings. Field order in these structs is
     cosmetic (every read/write in the generated code is by name) but a
     deterministic order avoids gratuitous diff churn on regeneration.
     """
@@ -618,7 +635,11 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     base = trans.src_enc_name.lower().replace('enc_', '')
     fn = f'encode_{base}_{dst_name}'
     fsname = _fields_struct_name(trans.src_enc_name)
-    full_type = f'{dst_ns}::{trans.dst_struct}'
+    full_type = (
+        f'{dst_ns}::{_builder_fields_name(trans.dst_enc_name)}'
+        if trans.dst_has_builder
+        else f'{dst_ns}::{trans.dst_struct}'
+    )
     bit_cnt = trans.dst_bit_cnt
 
     lines = []
@@ -626,8 +647,9 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
         f'inline TranslationResult {fn}(const {fsname} &f, uint16_t dst_op) {{'
     )
     lines.append(f'    {full_type} dst{{}};')
-    lines.append(f'    dst.encoding = 0x{trans.dst_enc_field_val:X};')
-    lines.append(f'    dst.op = dst_op;')
+    if not trans.dst_has_builder:
+        lines.append(f'    dst.encoding = 0x{trans.dst_enc_field_val:X};')
+        lines.append(f'    dst.op = dst_op;')
 
     # Coherency remap
     if trans.has_coherency_remap:
@@ -676,8 +698,20 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
             if any(m.src_name == 'soffset_en' for m in trans.mappings):
                 lines.append('    if (f.soffset_en == 0) dst.soffset = 0x7C;')
 
-    # Return
-    if bit_cnt <= 32:
+    # Builders are the canonical target-layout encoder. Alternate decoder-only
+    # formats do not have builders yet because their selector conditions are
+    # not represented by a single fixed encoding field; keep their generated
+    # MachineInst path until selector-aware builders are available.
+    if trans.dst_has_builder:
+        builder = _builder_function_name(trans.dst_enc_name)
+        n = (bit_cnt + 31) // 32
+        lines.append(f'    const auto words = {dst_ns}::{builder}(dst_op, dst);')
+        lines.append(f'    TranslationResult r{{}};')
+        lines.append(f'    r.word_count = uint8_t{{{n}}};')
+        for word in range(n):
+            lines.append(f'    r.words[{word}] = words[{word}];')
+        lines.append(f'    return r;')
+    elif bit_cnt <= 32:
         lines.append(
             f'    return TranslationResult{{{{std::bit_cast<uint32_t>(dst), 0u, 0u}}, uint8_t{{1}}}};'
         )
@@ -693,7 +727,7 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     return lines
 
 
-def _emit_dispatch(translations, src_name, dst_name):
+def _emit_dispatch(translations, src_name, dst_name, src_spec, dst_spec):
     val_groups: dict[int, list[EncodingTranslation]] = {}
     for t in translations:
         val_groups.setdefault(t.src_dt_index, []).append(t)
@@ -743,8 +777,41 @@ def _emit_dispatch(translations, src_name, dst_name):
                 if t.src_bit_cnt <= 32
                 else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
             )
-            lines.append(f'    case kEnc_{cn}:')
-            lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
+            swap_compare_data = (
+                t.src_enc_name in ('ENC_DS', 'ENC_VDS')
+                and src_spec.profile.ds_compare_store_compare_first
+                != dst_spec.profile.ds_compare_store_compare_first
+            )
+            if swap_compare_data:
+                opcodes = sorted(
+                    {
+                        inst.opcode
+                        for inst in src_spec.encoding_map[t.src_enc_name].insts
+                        if inst.name.startswith(('DS_CMPST_', 'DS_CMPSTORE_'))
+                    }
+                )
+                fields_type = _fields_struct_name(t.src_enc_name)
+                lines.append(f'    case kEnc_{cn}: {{')
+                lines.append(f'        {fields_type} fields = {dec_fn}({args});')
+                lines.append('        switch (fields.op) {')
+                for opcode in opcodes:
+                    lines.append(f'        case {opcode}:')
+                if opcodes:
+                    lines.append('        {')
+                    lines.append(
+                        '            const uint32_t comparison = fields.data0;'
+                    )
+                    lines.append('            fields.data0 = fields.data1;')
+                    lines.append('            fields.data1 = comparison;')
+                    lines.append('            break;')
+                    lines.append('        }')
+                lines.append('        default: break;')
+                lines.append('        }')
+                lines.append(f'        return {enc_fn}(fields, dst_op);')
+                lines.append('    }')
+            else:
+                lines.append(f'    case kEnc_{cn}:')
+                lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
         else:
             lines.append(f'    case kEnc_{cn}: {{')
             lines.append(f'        const uint8_t seg = (w0 >> 14) & 0x3;')
@@ -827,7 +894,15 @@ def _extract_enc_field_values(spec, enc_names):
 # ---------------------------------------------------------------------------
 
 
-def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output_dir):
+def generate_encoding_translators(
+    src_spec,
+    dst_spec,
+    src_name,
+    dst_name,
+    output_dir,
+    config: CodegenConfig | None = None,
+):
+    config = config if config is not None else CodegenConfig()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -883,6 +958,11 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
                 src_dt_index=src_dts.get(se, 0),
                 src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
                 dst_enc_field_val=dst_evs.get(de, 0),
+                # Keep this predicate identical to gen_instruction_builders:
+                # only concrete encodings with their own instruction list get
+                # a builder. Alternate decoder-only formats need condition-aware
+                # construction before they can safely use this path.
+                dst_has_builder=bool(dst_enc.insts),
             )
         )
     translations.sort(key=lambda t: (t.src_bit_cnt, t.src_enc_name))
@@ -901,8 +981,9 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         '#include <cstdint>',
         '#include <cstring>',
         '',
-        f'#include "rocjitsu/isa/arch/amdgpu/{src_name}/machine_insts.h"',
-        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/machine_insts.h"',
+        f'#include "{config.generated_include(src_name, "machine_insts.h")}"',
+        f'#include "{config.generated_include(dst_name, "builders.h")}"',
+        f'#include "{config.generated_include(dst_name, "machine_insts.h")}"',
         '#include "rocjitsu/code/dbt/encoding_translator.h"',
         '#include "encoding_fields.h"',
         '',
@@ -919,7 +1000,9 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         pair_lines.extend(_emit_decode_fn(t, src_ns, src_name))
     for t in translations:
         pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name))
-    pair_lines.extend(_emit_dispatch(translations, src_name, dst_name))
+    pair_lines.extend(
+        _emit_dispatch(translations, src_name, dst_name, src_spec, dst_spec)
+    )
 
     pair_lines += [
         f'}}  // namespace {src_name}_to_{dst_name}',

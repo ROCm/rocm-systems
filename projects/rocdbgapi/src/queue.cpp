@@ -95,7 +95,7 @@ compute_queue_t::terminating_instruction_address ()
   return m_terminating_instruction_ptr->get ();
 }
 
-compute_queue_t::displaced_instruction_ptr_t
+queue_t::displaced_instruction_ptr_t
 compute_queue_t::allocate_displaced_instruction (
   const instruction_t &instruction)
 {
@@ -565,7 +565,7 @@ compute_queue_t::refresh_scratch_on_suspend ()
 }
 
 std::pair<agent_address_t /* address */, amd_dbgapi_size_t /* size */>
-compute_queue_t::scratch_memory_region (
+queue_t::scratch_memory_region (
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
   if (!architecture ().has_architected_flat_scratch ())
@@ -1111,6 +1111,15 @@ public:
   void active_packets_bytes (amd_dbgapi_os_queue_packet_id_t read_packet_id,
                              amd_dbgapi_os_queue_packet_id_t write_packet_id,
                              void *memory, size_t memory_size) const override;
+
+  agent_address_t park_instruction_address () override;
+
+  agent_address_t terminating_instruction_address () override;
+
+  void wave_state_changed (const wave_t &wave) override;
+
+  displaced_instruction_ptr_t
+  allocate_displaced_instruction (const instruction_t &) override;
 };
 
 amd_dbgapi_os_queue_type_t
@@ -1149,6 +1158,30 @@ unsupported_queue_t::active_packets_bytes (
   amd_dbgapi_os_queue_packet_id_t /* read_packet_id  */,
   amd_dbgapi_os_queue_packet_id_t /* write_packet_id  */, void * /* memory  */,
   size_t /* memory_size  */) const
+{
+  throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+}
+
+agent_address_t
+unsupported_queue_t::park_instruction_address ()
+{
+  throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+}
+
+agent_address_t
+unsupported_queue_t::terminating_instruction_address ()
+{
+  throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+}
+
+void
+unsupported_queue_t::wave_state_changed (const wave_t &)
+{
+  throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+}
+
+queue_t::displaced_instruction_ptr_t
+unsupported_queue_t::allocate_displaced_instruction (const instruction_t &)
 {
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
 }

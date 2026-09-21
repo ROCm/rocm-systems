@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -39,12 +40,40 @@ typedef std::shared_mutex SharedMutex;
 
 struct assemblyLine
 {
+    assemblyLine() = default;
+    assemblyLine(assemblyLine&& other)
+    {
+        line = std::move(other.line);
+        loc = std::move(other.loc);
+        cat = other.cat;
+        addr = other.addr;
+        next = other.next;
+        to_line = other.to_line;
+        taken = other.taken.load();
+        not_taken = other.not_taken.load();
+        parsed = other.parsed;
+    };
+    assemblyLine(const assemblyLine& other)
+    {
+        line = other.line;
+        loc = other.loc;
+        cat = other.cat;
+        addr = other.addr;
+        next = other.next;
+        to_line = other.to_line;
+        taken = other.taken.load();
+        not_taken = other.not_taken.load();
+        parsed = other.parsed;
+    };
+
     String line{};
     String loc{};
     InstCategory cat{};
     pcinfo_t addr{};
     pcinfo_t next{};
     pcinfo_t to_line{};
+    std::atomic<size_t> taken{};
+    std::atomic<size_t> not_taken{};
     bool parsed{};
 };
 typedef std::shared_ptr<assemblyLine> assemblyLinePtr;
@@ -165,17 +194,25 @@ public:
         sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
     };
     void sendEvent(
-        rocprofiler_thread_trace_decoder_event_type_t type, int64_t time, uint8_t me, uint8_t pipe, uint32_t payload
+        rocprofiler_thread_trace_decoder_event_type_t type,
+        int64_t time,
+        uint8_t me,
+        uint8_t pipe,
+        uint32_t payload,
+        bool bop,
+        bool per_pipe
     )
     {
         rocprofiler_thread_trace_decoder_event_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_event_t);
         event.time = time;
         event.type = type;
-        event.me_id = me;
+        event.me_id = me & 1;
         event.pipe_id = pipe;
-        event.reserved = 0;
-        event.payload = payload;
+        event.flags = 0;
+        event.payload.raw = payload;
+        if (per_pipe) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
+        if (bop) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
         callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);
     };
     void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe)

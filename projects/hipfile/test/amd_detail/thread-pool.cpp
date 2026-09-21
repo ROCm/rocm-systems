@@ -3,77 +3,141 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "context.h"
 #include "hipfile-warnings.h"
-#include "mthread-pool.h"
 #include "thread-pool.h"
 
 #include <atomic>
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include <chrono>
+#include <future>
 #include <memory>
 
-using namespace hipFile;
-using ::testing::ByMove;
-using ::testing::Return;
-using ::testing::StrictMock;
+#include <gtest/gtest.h>
 
-// Put tests inside the macros to suppress the global constructor
-// warnings
+using namespace hipFile;
+using namespace std::chrono_literals;
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
-TEST(HipFileThreadPool, ConstructorUsesDefaultArenaConcurrency)
+TEST(HipFileThreadPool, RunExecutesWork)
 {
-    ThreadPool pool{};
-    ASSERT_GT(pool.threadCount(), 0);
+    ThreadPool        pool{1};
+    auto              group = pool.makeTaskGroup();
+    std::atomic<bool> ran{false};
+
+    group->run([&ran]() { ran = true; });
+    group->wait();
+
+    ASSERT_TRUE(ran);
 }
 
-TEST(HipFileThreadPool, ContextDefaultUsesThreadPool)
+TEST(HipFileThreadPool, WaitBlocksUntilRunningWorkCompletes)
 {
-    IThreadPool *thread_pool = Context<IThreadPool>::get();
+    ThreadPool        pool{1};
+    auto              group = pool.makeTaskGroup();
+    std::atomic<bool> gate{false};
+    std::atomic<bool> started{false};
 
-    ASSERT_NE(dynamic_cast<ThreadPool *>(thread_pool), nullptr);
-    ASSERT_GT(thread_pool->threadCount(), 0);
+    group->run([&gate, &started]() {
+        started.store(true);
+        started.notify_all();
+        gate.wait(false);
+    });
+    started.wait(false);
+
+    auto wait_result = std::async(std::launch::async, [&group]() { group->wait(); });
+    ASSERT_EQ(wait_result.wait_for(20ms), std::future_status::timeout);
+
+    gate.store(true);
+    gate.notify_all();
+    ASSERT_EQ(wait_result.wait_for(1s), std::future_status::ready);
 }
 
-TEST(HipFileThreadPool, ContextCanUseMockThreadPool)
+TEST(HipFileThreadPool, CancelSkipsPendingWork)
 {
-    StrictMock<MThreadPool> thread_pool;
-    auto                    task_group = std::make_unique<StrictMock<MTaskGroup>>();
+    ThreadPool        pool{1};
+    auto              group = pool.makeTaskGroup();
+    std::atomic<bool> gate{false};
+    std::atomic<bool> started{false};
+    std::atomic<bool> pending_ran{false};
 
-    EXPECT_CALL(thread_pool, makeTaskGroup).WillOnce(Return(ByMove(std::move(task_group))));
+    group->run([&gate, &started]() {
+        started.store(true);
+        started.notify_all();
+        gate.wait(false);
+    });
+    started.wait(false);
 
-    ASSERT_NE(Context<IThreadPool>::get()->makeTaskGroup(), nullptr);
+    group->run([&pending_ran]() { pending_ran = true; });
+    group->cancel();
+    gate.store(true);
+    gate.notify_all();
+    group->wait();
+
+    ASSERT_FALSE(pending_ran);
 }
 
-TEST(HipFileThreadPool, TaskGroupWorkRuns)
+TEST(HipFileThreadPool, CancelDoesNotStopRunningWork)
 {
-    ThreadPool       pool{};
-    auto             task_group = pool.makeTaskGroup();
-    std::atomic<int> completed{0};
+    ThreadPool        pool{1};
+    auto              group = pool.makeTaskGroup();
+    std::atomic<bool> gate{false};
+    std::atomic<bool> started{false};
+    std::atomic<bool> completed{false};
 
-    task_group->run([&completed]() { completed.fetch_add(1, std::memory_order_relaxed); });
-    task_group->run([&completed]() { completed.fetch_add(1, std::memory_order_relaxed); });
+    group->run([&gate, &started, &completed]() {
+        started.store(true);
+        started.notify_all();
+        gate.wait(false);
+        completed = true;
+    });
+    started.wait(false);
 
-    task_group->wait();
+    group->cancel();
+    gate.store(true);
+    gate.notify_all();
+    group->wait();
 
-    ASSERT_EQ(completed.load(std::memory_order_relaxed), 2);
+    ASSERT_TRUE(completed);
 }
 
-TEST(HipFileThreadPool, TaskGroupCanOutliveThreadPoolObject)
+TEST(HipFileThreadPool, CanSubmitAfterCancel)
 {
-    std::unique_ptr<ITaskGroup> task_group;
-    std::atomic<int>            completed{0};
+    ThreadPool        pool{1};
+    auto              group = pool.makeTaskGroup();
+    std::atomic<bool> ran{false};
 
-    {
-        ThreadPool pool{};
-        task_group = pool.makeTaskGroup();
-        task_group->run([&completed]() { completed.fetch_add(1, std::memory_order_relaxed); });
-    }
+    group->cancel();
+    group->run([&ran]() { ran = true; });
+    group->wait();
 
-    task_group->wait();
+    ASSERT_TRUE(ran);
+}
 
-    ASSERT_EQ(completed.load(std::memory_order_relaxed), 1);
+TEST(HipFileThreadPool, DestructorCancelsAndWaits)
+{
+    ThreadPool        pool{1};
+    auto              group = pool.makeTaskGroup();
+    std::atomic<bool> gate{false};
+    std::atomic<bool> started{false};
+    std::atomic<bool> pending_ran{false};
+
+    group->run([&gate, &started]() {
+        started.store(true);
+        started.notify_all();
+        gate.wait(false);
+    });
+    started.wait(false);
+
+    group->run([&pending_ran]() { pending_ran = true; });
+
+    auto destroy_result =
+        std::async(std::launch::async, [owned_group = std::move(group)]() mutable { owned_group.reset(); });
+    ASSERT_EQ(destroy_result.wait_for(20ms), std::future_status::timeout);
+
+    gate.store(true);
+    gate.notify_all();
+    ASSERT_EQ(destroy_result.wait_for(1s), std::future_status::ready);
+    ASSERT_FALSE(pending_ran);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

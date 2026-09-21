@@ -131,7 +131,7 @@ TEST(metrics, derived_load)
 {
     auto loaded_metrics = counters::loadMetrics();
     auto rocp_data      = [&]() {
-        // get only derrived metrics
+        // get only derived metrics
         std::unordered_map<std::string, std::vector<counters::Metric>> ret;
         for(const auto& [gfx, metrics] : loaded_metrics->arch_to_metric)
         {

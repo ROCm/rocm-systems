@@ -6,19 +6,24 @@
 /// no rocjitsu Operand/Wavefront fixture.
 
 #include "util/simd.h"
+#include "util/simd_test_hooks.h"
 
 #include "util/data_types.h"
 
 #include <gtest/gtest.h>
 
+#include <dlfcn.h>
+
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <string>
 #include <thread>
 
 namespace {
@@ -46,6 +51,21 @@ inline int sweep_iters() {
   }
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
+
+TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
+  constexpr int workaround = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+  constexpr int user_override = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
+  static_assert(workaround == 0 || workaround == 1);
+  static_assert(user_override == 0 || user_override == 1);
+
+  if constexpr (!user_override) {
+#if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
+    EXPECT_EQ(workaround, 1);
+#else
+    EXPECT_EQ(workaround, 0);
+#endif
+  }
+}
 
 TEST(UtilSimd, Load_Contiguous_U32) {
   SKIP_IF_NO_SIMD();
@@ -222,23 +242,89 @@ TEST(UtilSimd, NarrowBridgeCast_DoubleToFromB32) {
     EXPECT_EQ(dd[i], static_cast<double>(iv[i])) << "i32->f64 lane " << i;
 }
 
-TEST(UtilSimd, ForceScalar_ImmutableProcessWide) {
-  // force_scalar() is seeded once from RJ_FORCE_SCALAR at startup. Absent the
-  // test-only setter (util/simd_test_hooks.h), it is stable across calls and
-  // identical on every thread; this test exercises that steady-state behaviour
-  // without flipping the gate.
+TEST(UtilSimd, ForceScalar_StableAcrossThreadsWithinImage) {
+  // force_scalar() is seeded once from RJ_FORCE_SCALAR at image load. Absent
+  // the test-only setter (util/simd_test_hooks.h), it is stable across calls
+  // and identical on every thread; this test exercises that steady-state
+  // behaviour without flipping the gate.
+  //
+  // Scope note: the gate has local binding per shared object (see
+  // util::detail::g_force_scalar), so this only covers the copy linked into
+  // this test executable. It deliberately does NOT assert process-wide
+  // behaviour -- a same-image thread check cannot observe the DSO boundary,
+  // where each image carries its own copy.
   const bool v = util::force_scalar();
-  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within a process";
+  EXPECT_EQ(util::force_scalar(), v) << "force_scalar() must be stable within an image";
 
   std::atomic<bool> other{!v};
   std::thread t([&]() { other.store(util::force_scalar()); });
   t.join();
-  EXPECT_EQ(other.load(), v) << "force_scalar() must be process-wide (identical on all threads)";
+  EXPECT_EQ(other.load(), v) << "force_scalar() must be identical on all threads in this image";
+}
 
-  // Value reflects the env parse: unset/empty/"0" => false, else true.
-  const char *e = std::getenv("RJ_FORCE_SCALAR");
-  const bool expected = e && e[0] && !(e[0] == '0' && e[1] == '\0');
-  EXPECT_EQ(v, expected);
+// The documented contract for RJ_FORCE_SCALAR, driven through the parser with
+// literal expectations. Restating the parser to compute the expected value
+// cannot fail, so these cases name the answers instead.
+TEST(UtilSimd, ForceScalar_EnvContract) {
+  struct EnvCase {
+    const char *value; // nullptr means unset.
+    bool expected;
+  };
+  static constexpr EnvCase kCases[] = {
+      {nullptr, false}, {"", false}, {"0", false}, {"1", true}, {"00", true}, {"false", true},
+  };
+
+  const char *saved = std::getenv("RJ_FORCE_SCALAR");
+  const bool was_set = saved != nullptr;
+  const std::string saved_value = was_set ? saved : std::string();
+
+  for (const EnvCase &test_case : kCases) {
+    SCOPED_TRACE(test_case.value ? test_case.value : "<unset>");
+    if (test_case.value == nullptr)
+      ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+    else
+      ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", test_case.value, 1), 0);
+    EXPECT_EQ(util::detail::init_force_scalar(), test_case.expected);
+  }
+
+  if (was_set)
+    ASSERT_EQ(::setenv("RJ_FORCE_SCALAR", saved_value.c_str(), 1), 0);
+  else
+    ASSERT_EQ(::unsetenv("RJ_FORCE_SCALAR"), 0);
+}
+
+// Positive control for the test seam. Without this, a setter that did nothing
+// would leave every scalar/SIMD comparison in this suite passing, because both
+// halves of each comparison would run the same path.
+TEST(UtilSimd, ForceScalar_SeamActuallyMovesTheGate) {
+  const bool original = util::force_scalar();
+
+  util::set_force_scalar_for_testing(!original);
+  EXPECT_EQ(util::force_scalar(), !original) << "the seam must move the gate";
+
+  util::set_force_scalar_for_testing(original);
+  EXPECT_EQ(util::force_scalar(), original) << "the seam must restore the gate";
+}
+
+// The gate is an inline variable with hidden visibility, so a module the process
+// loads carries its own copy and the seam cannot reach it. This is the scope the
+// headers document; pinning it here keeps a later test from flipping the gate and
+// expecting a loaded module to follow, which would silently assert nothing.
+TEST(UtilSimd, ForceScalarOverrideDoesNotReachADlopenedModule) {
+  void *module = ::dlopen(RJ_FORCE_SCALAR_PROBE_MODULE, RTLD_NOW | RTLD_LOCAL);
+  ASSERT_NE(module, nullptr) << ::dlerror();
+  auto *probe = reinterpret_cast<bool (*)()>(::dlsym(module, "rj_probe_force_scalar"));
+  ASSERT_NE(probe, nullptr) << ::dlerror();
+
+  const bool original = util::force_scalar();
+  const bool module_before = probe();
+
+  util::set_force_scalar_for_testing(!original);
+  EXPECT_EQ(util::force_scalar(), !original) << "the host gate must have moved";
+  EXPECT_EQ(probe(), module_before) << "a loaded module must keep its own gate";
+
+  util::set_force_scalar_for_testing(original);
+  ::dlclose(module);
 }
 
 // Toolchain guard for the SIMD fast path of v_exp_f32 (stdx::exp2) and
@@ -327,12 +413,10 @@ TEST(UtilSimd, Fma_VectorMatchesScalar_BitExact) {
   }
 }
 
-// Toolchain guard for the 64-bit-lane VOP2 FMA SIMD fast path (v_fmac_f64,
-// SIMD_VOP2_FMA_F64). Same contract as the f32 Fma guard above, over
-// native<double>: util::stdx::fma must be the single-rounded fused operation
-// matching the scalar std::fma in the generated body. Sweeps full-range random
-// 64-bit patterns for all three operands, EXCLUDING NaN-input lanes (accepted
-// payload divergence). If a finite/Inf lane diverges, drop SIMD_VOP2_FMA_F64.
+// Toolchain guard for the native<double> stdx::fma primitive. Architectural
+// F64 execution declines this SIMD operation because MODE cannot be represented
+// exactly; this test documents the utility's narrower host-default rounding
+// contract. It excludes NaN-input lanes because payload propagation may differ.
 TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   using V = util::native<double>;
@@ -545,6 +629,47 @@ TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {
   }
 }
 
+TEST(UtilSimd, F32ToF16Rtz_VectorMatchesScalar_Sweep) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = util::native_width_v<float>;
+  for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
+    alignas(V) float in[W];
+    for (std::size_t i = 0; i < W; ++i)
+      in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+    V v(in, util::stdx::element_aligned);
+    util::native<uint32_t> rv = util::f32_to_f16_rtz_simd(v);
+    alignas(util::native<uint32_t>) uint32_t out[W];
+    rv.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t i = 0; i < W; ++i) {
+      const uint32_t s = util::f32_to_f16_rtz(in[i]);
+      ASSERT_EQ(s, out[i]) << "f32=0x" << std::hex << std::bit_cast<uint32_t>(in[i]);
+    }
+  }
+}
+
+TEST(UtilSimd, F32ToF16Mode_VectorMatchesScalar_Sweep) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = util::native_width_v<float>;
+  for (bool fp16_ovfl : {false, true}) {
+    for (uint64_t u = 0; u < 0x100000000ULL; u += 997ULL * W) {
+      alignas(V) float in[W];
+      for (std::size_t i = 0; i < W; ++i)
+        in[i] = std::bit_cast<float>(static_cast<uint32_t>(u + 997ULL * i));
+      V v(in, util::stdx::element_aligned);
+      util::native<uint32_t> rv = util::f32_to_f16_mode_simd(v, fp16_ovfl);
+      alignas(util::native<uint32_t>) uint32_t out[W];
+      rv.copy_to(out, util::stdx::element_aligned);
+      for (std::size_t i = 0; i < W; ++i) {
+        const uint32_t s = util::f32_to_f16_mode(in[i], fp16_ovfl);
+        ASSERT_EQ(s, out[i]) << "fp16_ovfl=" << fp16_ovfl << " f32=0x" << std::hex
+                             << std::bit_cast<uint32_t>(in[i]);
+      }
+    }
+  }
+}
+
 // Guard for util::flush_denorm_f32_simd: denormals flush to sign-preserving
 // zero (FTZ); every other class (±0, normal, ±Inf, NaN payloads) passes through
 // bit-for-bit. The f32 rcp/rsq/exp/log SIMD ports funnel through this helper.
@@ -575,6 +700,271 @@ TEST(UtilSimd, FlushDenormF32) {
     r.copy_to(out, util::stdx::element_aligned);
     for (std::size_t i = 0; i < W; ++i)
       EXPECT_EQ(std::bit_cast<uint32_t>(out[i]), c.out) << "in=0x" << std::hex << c.in;
+  }
+}
+
+// --- IEEE-2019 maximum / minimum (NaN-propagating, signed-zero-ordered) ------
+//
+// util::ieee_{maximum,minimum}_simd back the v_maximum_*/v_minimum_* gap ops.
+// They must be bit-identical to the scalar bodies the generator emits, which is
+// the exact expression below. The grid pairs every IEEE class against every
+// other so ±0 ties, NaN-in-either, Inf, and ordinary compares are all covered.
+
+// Bit pattern of a float/double as an unsigned integer, for exact lane-value
+// comparison (EXPECT_EQ on the raw bits distinguishes NaN payloads and ±0,
+// which == on the float values would not).
+//
+// Both overloads share a single uint64_t return type so the helper is
+// type-generic at the call sites. The float overload therefore zero-extends
+// its 32-bit pattern into the 64-bit result; this is intentional and safe
+// because only same-type lanes are ever compared (float-vs-float or
+// double-vs-double), so the high 32 zero bits are present on both sides of any
+// float comparison and never change the result.
+inline uint64_t bits_of(float v) { return std::bit_cast<uint32_t>(v); }
+inline uint64_t bits_of(double v) { return std::bit_cast<uint64_t>(v); }
+
+// Scalar references — literally the generated VOP3 body's inner expression.
+template <typename T> T scalar_ieee_maximum(T a, T b) {
+  if (std::isnan(a) || std::isnan(b))
+    return std::numeric_limits<T>::quiet_NaN();
+  if (a == b)
+    return std::signbit(a) ? b : a;
+  return a > b ? a : b;
+}
+template <typename T> T scalar_ieee_minimum(T a, T b) {
+  if (std::isnan(a) || std::isnan(b))
+    return std::numeric_limits<T>::quiet_NaN();
+  if (a == b)
+    return std::signbit(a) ? a : b;
+  return a < b ? a : b;
+}
+
+template <typename T> std::array<T, 13> ieee_minmax_grid() {
+  const T inf = std::numeric_limits<T>::infinity();
+  const T qnan = std::numeric_limits<T>::quiet_NaN();
+  const T den = std::numeric_limits<T>::denorm_min();
+  return {T(0), -T(0), T(1), -T(1), T(2), -T(2), T(0.5), inf, -inf, qnan, -qnan, den, -den};
+}
+
+template <typename V, typename T, typename SimdFn, typename ScalarFn>
+void check_ieee_minmax(SimdFn simd_fn, ScalarFn scalar_fn) {
+  constexpr std::size_t W = V::size();
+  const auto grid = ieee_minmax_grid<T>();
+  for (T bv : grid) {
+    // Fill a vector with `bv` in every lane and sweep `av` across the grid so
+    // both same-class (ties) and cross-class pairs are exercised per lane.
+    for (T av : grid) {
+      alignas(V) T abuf[W];
+      alignas(V) T bbuf[W];
+      for (std::size_t i = 0; i < W; ++i) {
+        abuf[i] = av;
+        bbuf[i] = bv;
+      }
+      V a(abuf, util::stdx::vector_aligned);
+      V b(bbuf, util::stdx::vector_aligned);
+      V r = simd_fn(a, b);
+      const T expect = scalar_fn(av, bv);
+      for (std::size_t i = 0; i < W; ++i) {
+        const T rv = r[i];
+        EXPECT_EQ(bits_of(rv), bits_of(expect)) << "av=" << av << " bv=" << bv << " lane=" << i;
+      }
+    }
+  }
+}
+
+TEST(UtilSimd, IeeeMaximum_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<float>, float>(
+      [](auto a, auto b) { return util::ieee_maximum_simd(a, b); }, scalar_ieee_maximum<float>);
+}
+TEST(UtilSimd, IeeeMinimum_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<float>, float>(
+      [](auto a, auto b) { return util::ieee_minimum_simd(a, b); }, scalar_ieee_minimum<float>);
+}
+TEST(UtilSimd, IeeeMaximum_F64_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<double>, double>(
+      [](auto a, auto b) { return util::ieee_maximum_simd(a, b); }, scalar_ieee_maximum<double>);
+}
+TEST(UtilSimd, IeeeMinimum_F64_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<double>, double>(
+      [](auto a, auto b) { return util::ieee_minimum_simd(a, b); }, scalar_ieee_minimum<double>);
+}
+
+// The 3-input / combined gap ops are exact nested compositions of the binary
+// helper; verify the composition matches the nested scalar reference too.
+TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = V::size();
+  const auto grid = ieee_minmax_grid<float>();
+  for (float cv : grid)
+    for (float bv : grid)
+      for (float av : grid) {
+        alignas(V) float a_[W], b_[W], c_[W];
+        for (std::size_t i = 0; i < W; ++i) {
+          a_[i] = av;
+          b_[i] = bv;
+          c_[i] = cv;
+        }
+        V a(a_, util::stdx::vector_aligned), b(b_, util::stdx::vector_aligned),
+            c(c_, util::stdx::vector_aligned);
+        // maximumminimum = minimum(maximum(a,b), c) — exercises both helpers.
+        V r = util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c);
+        float expect = scalar_ieee_minimum(scalar_ieee_maximum(av, bv), cv);
+        for (std::size_t i = 0; i < W; ++i) {
+          const float rv = r[i];
+          EXPECT_EQ(bits_of(rv), bits_of(expect))
+              << "av=" << av << " bv=" << bv << " cv=" << cv << " lane=" << i;
+        }
+      }
+}
+
+// --- Cubemap face ops (v_cube{id,ma,sc,tc}_f32) ------------------------------
+//
+// util::cube_{id,sc,tc}_f32_simd back the v_cube* gap ops; they must be
+// bit-identical to the generated scalar bodies (transcribed verbatim below).
+// Sweep every sign/magnitude/tie/zero/Inf/NaN triple.
+
+float scalar_cubeid(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  if (ax >= ay && ax >= az)
+    return x >= 0 ? 0.0f : 1.0f;
+  if (ay >= ax && ay >= az)
+    return y >= 0 ? 2.0f : 3.0f;
+  return z >= 0 ? 4.0f : 5.0f;
+}
+float scalar_cubesc(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  if (ax >= ay && ax >= az)
+    return x >= 0 ? z : -z;
+  if (ay >= ax && ay >= az)
+    return x;
+  return z >= 0 ? -x : x;
+}
+float scalar_cubetc(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  if (ax >= ay && ax >= az)
+    return -y;
+  if (ay >= ax && ay >= az)
+    return y >= 0 ? -z : z;
+  return -y;
+}
+float scalar_cubema(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  return 2.0f * std::fmax(ax, std::fmax(ay, az));
+}
+
+template <typename SimdFn, typename ScalarFn> void check_cube(SimdFn simd_fn, ScalarFn scalar_fn) {
+  using V = util::native<float>;
+  constexpr std::size_t W = V::size();
+  const std::array<float, 9> grid = {{-2.0f, -1.0f, -0.0f, 0.0f, 0.5f, 1.0f, 2.0f,
+                                      std::numeric_limits<float>::infinity(),
+                                      std::numeric_limits<float>::quiet_NaN()}};
+  for (float zv : grid)
+    for (float yv : grid)
+      for (float xv : grid) {
+        alignas(V) float xb[W], yb[W], zb[W];
+        for (std::size_t i = 0; i < W; ++i) {
+          xb[i] = xv;
+          yb[i] = yv;
+          zb[i] = zv;
+        }
+        V x(xb, util::stdx::vector_aligned), y(yb, util::stdx::vector_aligned),
+            z(zb, util::stdx::vector_aligned);
+        V r = simd_fn(x, y, z);
+        const float expect = scalar_fn(xv, yv, zv);
+        for (std::size_t i = 0; i < W; ++i) {
+          const float rv = r[i];
+          EXPECT_EQ(bits_of(rv), bits_of(expect))
+              << "x=" << xv << " y=" << yv << " z=" << zv << " lane=" << i;
+        }
+      }
+}
+
+TEST(UtilSimd, CubeId_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube([](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }, scalar_cubeid);
+}
+TEST(UtilSimd, CubeSc_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube([](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }, scalar_cubesc);
+}
+TEST(UtilSimd, CubeTc_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube([](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }, scalar_cubetc);
+}
+TEST(UtilSimd, CubeMa_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube(
+      [](auto x, auto y, auto z) {
+        return 2.0f * util::stdx::fmax(util::stdx::abs(x),
+                                       util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z)));
+      },
+      scalar_cubema);
+}
+
+// --- Normalized pack-convert lanes (v_cvt_pk[_]norm_{i16,u16}_*) -------------
+
+int16_t scalar_cvt_pknorm_i16(float f) {
+  if (std::isnan(f))
+    return 0;
+  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<int16_t>(lower);
+}
+uint16_t scalar_cvt_pknorm_u16(float f) {
+  if (std::isnan(f))
+    return 0;
+  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
+  float lower = std::floor(scaled);
+  float fraction = scaled - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return static_cast<uint16_t>(lower);
+}
+
+TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
+  SKIP_IF_NO_SIMD();
+  const int original_mode = std::fegetround();
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(mode), 0);
+    EXPECT_EQ(util::round_to_nearest_even(16383.5f), 16384.0f);
+    EXPECT_EQ(util::round_to_nearest_even(-16383.5f), -16384.0f);
+    util::native<float> input(32767.5f);
+    auto result = util::round_to_nearest_even_simd(input);
+    for (std::size_t lane = 0; lane < result.size(); ++lane)
+      EXPECT_EQ(result[lane], 32768.0f);
+  }
+  EXPECT_EQ(std::fesetround(original_mode), 0);
+}
+
+TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = V::size();
+  const std::array<float, 14> grid = {{0.0f, -0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 2.0f, -2.0f, 0.99999f,
+                                       1e30f, -1e30f, std::numeric_limits<float>::infinity(),
+                                       -std::numeric_limits<float>::infinity(),
+                                       std::numeric_limits<float>::quiet_NaN()}};
+  for (float fv : grid) {
+    alignas(V) float fb[W];
+    for (std::size_t i = 0; i < W; ++i)
+      fb[i] = fv;
+    V f(fb, util::stdx::vector_aligned);
+    auto ri = util::cvt_pknorm_i16_f32_simd(f);
+    auto ru = util::cvt_pknorm_u16_f32_simd(f);
+    for (std::size_t i = 0; i < W; ++i) {
+      EXPECT_EQ(static_cast<uint16_t>(static_cast<int32_t>(ri[i])),
+                static_cast<uint16_t>(scalar_cvt_pknorm_i16(fv)))
+          << "i16 f=" << fv << " lane=" << i;
+      EXPECT_EQ(static_cast<uint16_t>(ru[i]), scalar_cvt_pknorm_u16(fv)) << "u16 f=" << fv;
+    }
   }
 }
 

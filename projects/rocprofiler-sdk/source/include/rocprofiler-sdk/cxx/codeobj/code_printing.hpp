@@ -37,6 +37,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -155,11 +156,14 @@ class CodeobjDecoderComponent
         int m_fd{-1};
     };
 
-public:
-    CodeobjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size)
+    void loadDebugLineInfo()
     {
+        if(!disassembly) throw std::runtime_error("No disassembly available!");
+
         ProtectedFd prot("");
-        if(::write(prot.m_fd, codeobj_data, codeobj_size) != static_cast<int64_t>(codeobj_size))
+        auto&       codeobj_data = disassembly->buffer;
+        if(::write(prot.m_fd, codeobj_data.data(), codeobj_data.size()) !=
+           static_cast<int64_t>(codeobj_data.size()))
             throw std::runtime_error("Could not write to temporary file!");
 
         ::lseek(prot.m_fd, 0, SEEK_SET);
@@ -276,7 +280,11 @@ public:
                 m_line_number_map.emplace(segment, std::move(entry.text));
             }
         }
+    }
 
+public:
+    CodeobjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size)
+    {
         // Can throw
         disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size);
         try
@@ -374,6 +382,20 @@ public:
         inst->faddr = faddr;
         inst->vaddr = vaddr;
 
+        std::call_once(m_debug_line_info_once, [this]() {
+            try
+            {
+                loadDebugLineInfo();
+            } catch(std::exception& e)
+            {
+                std::cerr << "rocprofiler-sdk: failed to parse DWARF line info: " << e.what()
+                          << '\n';
+            } catch(...)
+            {
+                std::cerr << "rocprofiler-sdk: failed to parse DWARF line info\n";
+            }
+        });
+
         auto it = m_line_number_map.find({vaddr, 0, 0});
         if(it != m_line_number_map.end()) inst->comment = it->second;
 
@@ -390,6 +412,7 @@ public:
     std::unique_ptr<DisassemblyInstance>      disassembly{};
 
     std::map<segment::address_range_t, std::string> m_line_number_map{};
+    std::once_flag                                  m_debug_line_info_once{};
 };
 
 class LoadedCodeobjDecoder

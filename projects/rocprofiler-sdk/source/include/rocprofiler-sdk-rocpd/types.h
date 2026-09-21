@@ -59,6 +59,7 @@ typedef enum rocpd_status_t  // NOLINT(performance-enum-size)
     ROCPD_STATUS_ERROR_SQL_INVALID_SCHEMA_KIND,       ///< SQL schema kind not found
     ROCPD_STATUS_ERROR_SQL_SCHEMA_NOT_FOUND,          ///< SQL schema does not exist
     ROCPD_STATUS_ERROR_SQL_SCHEMA_PERMISSION_DENIED,  ///< SQL schema not accessible
+    ROCPD_STATUS_ERROR_SQL_SCHEMA_INVALID_VERSION,    ///< Unsupported SQL schema version
     ROCPD_STATUS_LAST,
 } rocpd_status_t;
 

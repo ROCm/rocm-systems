@@ -463,7 +463,11 @@ set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable hwloc membind nodese
 
 include_directories(${ROCRTST_ROOT})
 include_directories(${ROCRTST_ROOT}/gtest/include)
-include_directories(${ROCRTST_ROOT}/thirdparty/include/)
+# NOTE: ${ROCRTST_ROOT}/thirdparty/include holds a bundled hwloc 1.x header only.
+# It must NOT be on the global include path when we link a system/TheRock hwloc
+# 2.x library, otherwise the stale 1.x header shadows the 2.x one and enum/flag
+# values (e.g. HWLOC_TOPOLOGY_FLAG_IO_DEVICES) silently mismatch the runtime lib.
+# It is added below only in the bundled-hwloc fallback branch.
 
 # Custom command set for code objects.
 set (HSACO_TARG_LIST "")
@@ -592,6 +596,11 @@ build_sample_for_devices("groupMemoryDynamic")
 set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
+
+# Trap Handler Test Kernels
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/trap_handler_test_kernels.cl")
+build_sample_for_devices("trap_handler_test")
 
 # Configure RPATH settings before creating executable target
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
@@ -753,8 +762,13 @@ if(NOT HAVE_HWLOC)
 
   if(HWLOC_LIBRARY)
     add_library(hwloc_imported SHARED IMPORTED)
+    # The bundled thirdparty hwloc is 1.x; expose its matching header through the
+    # imported target's usage requirements so it propagates via
+    # target_link_libraries(${ROCRTST} ${HWLOC_TARGET}) below, independent of
+    # directory/target ordering (and without a global include_directories()).
     set_target_properties(hwloc_imported PROPERTIES
       IMPORTED_LOCATION "${HWLOC_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${ROCRTST_ROOT}/thirdparty/include"
     )
     set(HWLOC_TARGET hwloc_imported)
     set(HAVE_HWLOC TRUE)
@@ -777,6 +791,26 @@ if(HAVE_HWLOC)
   target_link_libraries(${ROCRTST} ${HWLOC_TARGET})
 endif()
 
+enable_testing()
+
+get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
+
+# GPU-free InterceptQueue retry/overflow slot-accounting logic unit tests. These exercise
+# the pure header logic in hsa-runtime's core/inc/intercept_queue_logic.h + GoogleTest, so
+# they need no GPU or hsa-runtime library. ${GOOGLE_TEST_FRWK_NAME} (google-test-frwk64) is a
+# single static lib that compiles src/gtest_main.cpp (see rocrtst/gtest/CMakeLists.txt).
+set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
+add_executable(intercept_queue_logic_test
+  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
+target_include_directories(intercept_queue_logic_test PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(intercept_queue_logic_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME intercept_queue_logic_test COMMAND intercept_queue_logic_test)
+set_tests_properties(intercept_queue_logic_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
+  TIMEOUT 60)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -794,6 +828,9 @@ set_target_properties(${ROCRTST} PROPERTIES
 install(TARGETS ${ROCRTST}
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
+
+install(TARGETS intercept_queue_logic_test
         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
@@ -840,6 +877,14 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
       "${TEST_CATEGORIES_YAML}"
       "${PROJECT_BINARY_DIR}"
       "${INSTALL_TEST_FILE}"
+    )
+
+    file(
+        APPEND
+        "${INSTALL_TEST_FILE}"
+        "\n"
+        "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
+        "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )
 
     install(

@@ -239,6 +239,18 @@ __host__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
 }
 
 template <typename T, ROCSHMEM_OP Op>
+__host__ int Context::reduce_scatter(rocshmem_team_t team, T *dest,
+                                     const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  ctxHostStats.incStat(NUM_HOST_TO_ALL);
+
+  HOST_DISPATCH_RET(reduce_scatter<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
 __host__ int Context::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
                                 int nreduce, hipStream_t stream) {
   if (nreduce == 0) return ROCSHMEM_SUCCESS;

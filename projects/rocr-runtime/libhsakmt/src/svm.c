@@ -23,9 +23,9 @@
  * DEALINGS IN THE SOFTWARE.
  */
 #include "libhsakmt.h"
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <alloca.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <inttypes.h>
@@ -56,8 +56,14 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 	if (size & (PAGE_SIZE - 1))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + nattr * sizeof(*attrs) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
 	s_attr = sizeof(*attrs) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
 
 	args->start_addr = (uint64_t)start_addr;
 	args->size = size;
@@ -82,13 +88,14 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 		r = hsakmt_validate_nodeid(ctx, attrs[i].value, &args->attrs[i].value);
 		if (r != HSAKMT_STATUS_SUCCESS) {
 			pr_debug("invalid node ID: %d\n", attrs[i].value);
-			return r;
+			goto out;
 		} else if (!args->attrs[i].value &&
 			   (attrs[i].type == KFD_IOCTL_SVM_ATTR_ACCESS ||
 			    attrs[i].type == KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE ||
 			    attrs[i].type == KFD_IOCTL_SVM_ATTR_NO_ACCESS)) {
 			pr_debug("CPU node invalid for access attribute\n");
-			return HSAKMT_STATUS_INVALID_NODE_UNIT;
+			r = HSAKMT_STATUS_INVALID_NODE_UNIT;
+			goto out;
 		}
 	}
 
@@ -96,10 +103,15 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
 	if (r) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		r = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	r = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return r;
 }
 
 HSAKMT_STATUS HSAKMTAPI
@@ -124,8 +136,14 @@ hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
 	if (size & (PAGE_SIZE - 1))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
+	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
+	if (sizeof(*args) + nattr * sizeof(*attrs) > ((1UL << _IOC_SIZEBITS) - 1))
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
 	s_attr = sizeof(*attrs) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
 
 	args->start_addr = (uint64_t)start_addr;
 	args->size = size;
@@ -142,10 +160,11 @@ hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
 		r = hsakmt_validate_nodeid(ctx, attrs[i].value, &args->attrs[i].value);
 		if (r != HSAKMT_STATUS_SUCCESS) {
 			pr_debug("invalid node ID: %d\n", attrs[i].value);
-			return r;
+			goto out;
 		} else if (!args->attrs[i].value) {
 			pr_debug("CPU node invalid for access attribute\n");
-			return HSAKMT_STATUS_INVALID_NODE_UNIT;
+			r = HSAKMT_STATUS_INVALID_NODE_UNIT;
+			goto out;
 		}
 	}
 
@@ -153,7 +172,8 @@ hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
 	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
 	if (r) {
 		pr_debug("op get range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		r = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
 	memcpy(attrs, args->attrs, s_attr);
@@ -178,12 +198,16 @@ hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
 			if (r != HSAKMT_STATUS_SUCCESS) {
 				pr_debug("invalid GPU ID: %d\n",
 					 attrs[i].value);
-				return r;
+				goto out;
 			}
 		}
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	r = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return r;
 }
 
 static HSAKMT_STATUS

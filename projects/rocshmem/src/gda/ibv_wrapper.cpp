@@ -41,16 +41,10 @@ IBVWrapper ibv;
 IBVWrapper::IBVWrapper() {
   int err;
 
-  ibv_handle = dlopen("libibverbs.so", RTLD_NOW);
-
+  ibv_handle = dlopen("libibverbs.so.1", RTLD_NOW);
   if (!ibv_handle) {
-    // Try hard-coded PATH
-    ibv_handle = dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
-
-    if (!ibv_handle) {
-      LOG_WARN("Could not open libibverbs. Disabled.");
-      return;
-    }
+    LOG_WARN("Could not open libibverbs. Disabled.");
+    return;
   }
 
   err = init_function_table();
@@ -265,10 +259,19 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
   }
 }
 
+struct ibv_mr* IBVWrapper::reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access) {
+  return ibv.reg_mr_iova2(pd, addr, length, iova, access);
+}
+
+struct ibv_mr* IBVWrapper::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access) {
+  return ibv.reg_dmabuf_mr(pd, offset, length, iova, fd, access);
+}
+
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
-  if (is_dmabuf_supported()) {
-    int fd = dmabuf_fd_map.erase((uintptr_t) mr);
-    close(fd);
+  auto it = dmabuf_fd_map.find((uintptr_t) mr);
+  if (it != dmabuf_fd_map.end()) {
+    close(it->second);
+    dmabuf_fd_map.erase(it);
   }
   return ibv.dereg_mr(mr);
 }

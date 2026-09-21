@@ -63,6 +63,8 @@ BASE_BRANCH="origin/develop"
 BASELINE_DIR=""
 BRANCH_DIR=""
 OUTDIR=""
+BASELINE_LABEL=""
+BRANCH_LABEL_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,6 +78,8 @@ while [[ $# -gt 0 ]]; do
     --base-branch)   BASE_BRANCH="$2";                     shift 2 ;;
     --baseline-dir)  BASELINE_DIR="$2";                    shift 2 ;;
     --branch-dir)    BRANCH_DIR="$2";                      shift 2 ;;
+    --baseline-label) BASELINE_LABEL="$2";                 shift 2 ;;
+    --branch-label)  BRANCH_LABEL_OVERRIDE="$2";           shift 2 ;;
     --skip-build)    SKIP_BUILD=1;                         shift ;;
     --skip-baseline) SKIP_BASELINE=1;                      shift ;;
     --skip-develop)  SKIP_BASELINE=1;                      shift ;;
@@ -107,9 +111,11 @@ export LD_LIBRARY_PATH="${OMPI_HOME:-$HOME/ompi}/lib:${LD_LIBRARY_PATH:-}"
 # ---------------------------------------------------------------------------
 cd "$ROCSHMEM_DIR"
 
+BASELINE_LABEL="${BASELINE_LABEL:-baseline}"
+
 if [[ -n "$PR_NUM" ]]; then
   # PR mode: compare PR branch against develop baseline
-  BRANCH_LABEL="pr${PR_NUM}"
+  BRANCH_LABEL="${BRANCH_LABEL_OVERRIDE:-pr${PR_NUM}}"
   BRANCH_SAFE="pr${PR_NUM}"
   BUILD_BASELINE="${BASELINE_DIR:-$PROJECTS_DIR/build-develop}"
   BUILD_BRANCH="${BRANCH_DIR:-$PROJECTS_DIR/build-${BRANCH_SAFE}}"
@@ -139,7 +145,7 @@ else
     exit 1
   }
   MERGE_BASE_SHORT="$(git rev-parse --short "$MERGE_BASE")"
-  BRANCH_LABEL="$BRANCH_NAME"
+  BRANCH_LABEL="${BRANCH_LABEL_OVERRIDE:-$BRANCH_NAME}"
   BRANCH_SAFE="$(echo "$BRANCH_NAME" | tr '/' '-' | tr -cd '[:alnum:]-_.')"
 
   BUILD_BASELINE="${BASELINE_DIR:-$PROJECTS_DIR/build-baseline-$MERGE_BASE_SHORT}"
@@ -324,7 +330,7 @@ run_iterations() {
 }
 
 if [[ $SKIP_BASELINE -eq 0 ]]; then
-  run_iterations "$BUILD_BASELINE" "logs-${SUITE}" "baseline"
+  run_iterations "$BUILD_BASELINE" "logs-${SUITE}" "$BASELINE_LABEL"
 else
   echo "  Skipping baseline test runs (--skip-baseline)"
 fi
@@ -363,6 +369,7 @@ done
 
 "$PYTHON" "$COMPARE" \
   --baseline "$BUILD_BASELINE/logs-${SUITE}-*" \
+  --baseline-label "$BASELINE_LABEL" \
   --variants "${VARIANT_ARGS[@]}" \
   --outdir "$OUTDIR"
 

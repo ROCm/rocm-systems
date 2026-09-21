@@ -8,64 +8,100 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG UBUNTU_CODENAME
 ARG UBUNTU_MAJOR_VERSION=24
 ARG UBUNTU_MINOR_VERSION=04
-ARG ROCM_VERSION=7.2.2
-ARG ONETBB_VERSION=2023.0.0
+ARG ROCM_VERSION=7.14.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
 # Ex. Package 7.0_alpha installs 7.0.0
 ARG ROCM_PKG_REPO_OVERRIDE
 
+# Nightly ROCm build id (YYYYMMDD-<gha_run_id>). When set, ROCm is installed from
+# the unsigned nightly repo at
+# nightly.repo.amd.com/rocm/core/packages/<distro>/<ROCM_NIGHTLY_BUILD>
+# and ROCM_VERSION is expected to be the clean MAJOR.MINOR.PATCH that build pins.
+ARG ROCM_NIGHTLY_BUILD
+
 RUN apt update && \
     apt install -y \
         curl \
         gpg
 
-# Cache MAJOR/MINOR and a 'use new repo' flag for use by later RUN steps.
-# Threshold: ROCm 7.11+ ships from repo.amd.com to /opt/rocm/core-<MAJOR>.<MINOR>;
-# earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
+# Cache MAJOR/MINOR and the ROCm build type for use by later RUN steps.
+# ROCm 7.11+ ships from repo.amd.com/stable.repo.amd.com to
+# /opt/rocm/core-<MAJOR>.<MINOR>, split across three release bands:
+#   7.11-7.12  repo.amd.com/rocm/packages
+#   7.13-7.14  repo.amd.com/rocm/packages-multi-arch
+#   10.0+      stable.repo.amd.com/rocm/core/packages  (ROCm jumped 7.14 -> 10.0)
+# Earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
+# A non-empty ROCM_NIGHTLY_BUILD selects the nightly repo and shares the 7.11+
+# install layout (ROCM_VERSION must be the clean version that build pins).
 RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
     ROCM_MINOR=$(echo "${ROCM_VERSION}" | cut -d. -f2); \
-    if [ "${ROCM_MAJOR}" -gt 7 ] || { [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; }; then \
-        ROCM_USE_NEW_REPO=1; \
-        ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
+    ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
+    if [ -n "${ROCM_NIGHTLY_BUILD}" ]; then \
+        ROCM_BUILD_TYPE=nightly; \
+    elif [ "${ROCM_MAJOR}" -gt 7 ]; then \
+        ROCM_BUILD_TYPE=stable; \
+    elif [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 13 ]; then \
+        ROCM_BUILD_TYPE=multiarch; \
+    elif [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; then \
+        ROCM_BUILD_TYPE=packages; \
     else \
-        ROCM_USE_NEW_REPO=0; \
+        ROCM_BUILD_TYPE=legacy; \
         ROCM_INSTALL_PATH="/opt/rocm"; \
     fi; \
-    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_USE_NEW_REPO=%s\nROCM_INSTALL_PATH=%s\n' \
-        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_USE_NEW_REPO}" "${ROCM_INSTALL_PATH}" \
+    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_BUILD_TYPE=%s\nROCM_INSTALL_PATH=%s\nROCM_NIGHTLY_BUILD=%s\n' \
+        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_BUILD_TYPE}" "${ROCM_INSTALL_PATH}" "${ROCM_NIGHTLY_BUILD}" \
         > /etc/rocm-build.env
 
-# Retrieve ROCm GPG key
+# Retrieve ROCm GPG key. Each band fetches the key from its own repo root. The
+# nightly repo is unsigned, so no key is fetched.
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
-        curl https://repo.amd.com/rocm/packages/gpg/rocm.gpg | \
-            gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg; \
-    else \
-        curl https://repo.radeon.com/rocm/rocm.gpg.key | \
-            gpg --dearmor >> /etc/apt/keyrings/rocm.gpg; \
-    fi
+    case "${ROCM_BUILD_TYPE}" in \
+        packages) \
+            curl https://repo.amd.com/rocm/packages/gpg/rocm.gpg | \
+                gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg;; \
+        multiarch) \
+            curl https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg | \
+                gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg;; \
+        stable) \
+            curl https://stable.repo.amd.com/rocm/gpg/packages.gpg | \
+                gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg;; \
+        legacy) \
+            curl https://repo.radeon.com/rocm/rocm.gpg.key | \
+                gpg --dearmor >> /etc/apt/keyrings/rocm.gpg;; \
+    esac
 
-# Manually setup ROCm Package Repos
-# ROCM_PKG_REPO_VERSION normalizes the legacy ROCm version used in the package repo URL.
-# If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
-# modification is made.
+# Manually setup ROCm Package Repos. Every 7.11+ band serves suite "stable",
+# component "main"; only the host and path prefix differ. ROCM_PKG_REPO_VERSION
+# normalizes the legacy ROCm version used in the package repo URL: if the PATCH
+# component is 0, the PATCH of the version is dropped. Otherwise no modification
+# is made. No 7.11+ band URL carries a version component, so that normalization
+# (and ROCM_PKG_REPO_OVERRIDE) applies to the legacy repo only.
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
-            > /etc/apt/sources.list.d/amdrocm.list; \
-    else \
+    UBUNTU_SLUG="ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION}" && \
+    case "${ROCM_BUILD_TYPE}" in \
+        packages)  ROCM_REPO_BASE="https://repo.amd.com/rocm/packages";; \
+        multiarch) ROCM_REPO_BASE="https://repo.amd.com/rocm/packages-multi-arch";; \
+        stable)    ROCM_REPO_BASE="https://stable.repo.amd.com/rocm/core/packages";; \
+    esac && \
+    if [ "${ROCM_BUILD_TYPE}" = "nightly" ]; then \
+        echo "deb [arch=amd64 trusted=yes] https://nightly.repo.amd.com/rocm/core/packages/${UBUNTU_SLUG}/${ROCM_NIGHTLY_BUILD} stable main" \
+            > /etc/apt/sources.list.d/amdrocm-nightly.list; \
+    elif [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then \
         ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_PKG_REPO_VERSION} ${UBUNTU_CODENAME} main" \
             > /etc/apt/sources.list.d/rocm.list; \
+    else \
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] ${ROCM_REPO_BASE}/${UBUNTU_SLUG} stable main" \
+            > /etc/apt/sources.list.d/amdrocm.list; \
     fi
 
 # Apt pinning is required for the legacy repo only; 7.11+ does not need it.
 # Outer EOT is a Dockerfile-level heredoc delimiter, kept distinct from the inner shell EOF.
 RUN <<"EOT"
 . /etc/rocm-build.env
-if [ "${ROCM_USE_NEW_REPO}" = "0" ]; then
+if [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then
     cat <<EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
@@ -87,15 +123,17 @@ RUN apt update && \
         python3.12-dev \
         python3.12-venv
 
-# ROCm dev packages
+# Install ROCm dev runtime packages.
+# Every 7.11+ and nightly ships as amdrocm-runtime-dev<MAJOR>.<MINOR> package;
+# hip-dev & rocm-llvm-dev exists on the legacy repo only.
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
-        apt install -y \
-            amdrocm-runtime-dev${ROCM_MAJOR}.${ROCM_MINOR}; \
-    else \
+    if [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then \
         apt install -y \
             hip-dev \
             rocm-llvm-dev; \
+    else \
+        apt install -y \
+            amdrocm-runtime-dev${ROCM_MAJOR}.${ROCM_MINOR}; \
     fi
 
 # Configure system linker for ROCm
@@ -121,25 +159,6 @@ RUN printf '%s\n' \
         > /etc/bash_env.sh && \
     echo '. /etc/bash_env.sh' >> /etc/bash.bashrc
 ENV BASH_ENV="/etc/bash_env.sh"
-
-# Build and install a fixed oneTBB release.
-RUN curl -L --fail \
-        "https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v${ONETBB_VERSION}.tar.gz" \
-        -o /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
-    tar -xzf /tmp/oneTBB-${ONETBB_VERSION}.tar.gz -C /tmp && \
-    cmake -S /tmp/oneTBB-${ONETBB_VERSION} \
-        -B /tmp/oneTBB-${ONETBB_VERSION}-build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=clang \
-        -DCMAKE_CXX_COMPILER=clang++ \
-        -DTBB_TEST=OFF \
-        -DTBB_STRICT=OFF && \
-    cmake --build /tmp/oneTBB-${ONETBB_VERSION}-build --parallel && \
-    cmake --install /tmp/oneTBB-${ONETBB_VERSION}-build && \
-    rm -rf /tmp/oneTBB-${ONETBB_VERSION} \
-        /tmp/oneTBB-${ONETBB_VERSION}-build \
-        /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
-    ldconfig
 
 # Environment Build Arg for ROCm
 ENV ROCM_VERSION="${ROCM_VERSION}"

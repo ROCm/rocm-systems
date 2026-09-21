@@ -79,9 +79,10 @@ namespace DevDriver
             Clear();
         }
 
-        void operator=(Vector&& rhs)
+        Vector& operator=(Vector&& rhs)
         {
             Swap(rhs);
+            return *this;
         }
 
         // Convenience methods
@@ -476,9 +477,10 @@ namespace DevDriver
 
     private:
         // Disallow copy construct.
-        Vector(Vector& rhs) = delete;
+        Vector(const Vector& rhs) = delete;
+        Vector& operator=(const Vector& rhs) = delete;
 
-        // This indirection fixes the warning comparison of a constant with another constant. This should be
+        // This indirection fixes the warning comparision of a constant with another constant. This should be
         // replace with `if constexpr` once AMDLog upgrades to support C++17.
         constexpr bool is_type_trivial()
         {
@@ -589,10 +591,7 @@ namespace DevDriver
 
     // Specialized functions for using Vector<> like a String
     template <>
-    inline bool Vector<char>::Append(const char* pStr)
-    {
-        return Append(pStr, Platform::Strlen_s(pStr, SIZE_MAX));
-    }
+    bool Vector<char>::Append(const char* pStr);
 
     template <>
     template <size_t Len>

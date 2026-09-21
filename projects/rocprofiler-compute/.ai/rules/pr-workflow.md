@@ -41,7 +41,9 @@ approval. Do NOT create the PR without confirmation.
 
 **Title rules:**
 
-- Prefix with the project name: `[rocprofiler-compute]`
+- Prefix with `<type>(rocprofiler-compute): `, the conventional-commit form the
+  PR quality bot enforces. `<type>` is one of `feat`, `fix`, `docs`, `test`,
+  `refactor`, `chore`, or `ci`.
 - Keep under 72 characters
 - Use imperative mood ("Add X" not "Added X")
 
@@ -100,7 +102,7 @@ review it.
 ## What NOT to do
 
 - Do not create a PR without user confirmation of title and body.
-- Do not create a PR to the wrong base branch (default: `develop`).
+- Do not create a PR to the wrong base branch (default: `rocprofiler-compute-develop`).
 - Do not create a PR on the wrong repository.
 - Do not use escaped `\n` in PR body strings passed to MCP tools.
 - Do not hardcode the PR template — always infer it from recent PRs.

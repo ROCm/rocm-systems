@@ -11,7 +11,7 @@
 /// -- once forcing the scalar body, once the SIMD fast path, with identical
 /// inputs/EXEC/VCC-in -- and the 64-bit compare results are asserted equal with
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
-/// In-process inactive SGPR-pair bits must be preserved.
+/// In-process inactive SGPR-pair bits must be zeroed.
 ///
 /// Coverage: every (rel, suffix) pair routed through try_execute_vopc_vop3_*_int_simd
 /// — 8 rels × {i16,u16,i32,u32,i64,u64} = 48 ops, full + partial EXEC. Each lane
@@ -19,10 +19,11 @@
 /// over the test loop so eq/lt/gt/le/ge/ne all fire on real boundary cases (incl.
 /// signed-negative vs unsigned wrap).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -206,7 +207,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, Width w, uint32_t rot, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(w, rot, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };
@@ -232,7 +233,7 @@ void check_case(const Case &c, uint64_t exec) {
     const uint32_t src1_vgpr = (c.width == Width::B64) ? 2u : 2u; // v2:v3 / v2
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256u, /*src1=*/256u + src1_vgpr, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     uint64_t vcc = fx.run(inst, c.width, rot, exec, vcc_in);
     delete inst;
@@ -250,10 +251,10 @@ void check_case(const Case &c, uint64_t exec) {
                                       << vcc_in << ": SIMD result diverged from scalar body";
 
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-          << c.name << " rot=" << rot << ": altered inactive-lane dst bit";
-      EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-          << c.name << " rot=" << rot << ": altered inactive-lane dst bit";
+      EXPECT_EQ(simd_vcc & inactive, 0ULL)
+          << c.name << " rot=" << rot << ": inactive-lane dst bit not zeroed";
+      EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+          << c.name << " rot=" << rot << ": inactive-lane dst bit not zeroed";
     }
   }
 }

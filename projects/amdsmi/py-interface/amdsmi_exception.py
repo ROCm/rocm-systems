@@ -1,21 +1,5 @@
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 from enum import IntEnum
 from . import amdsmi_wrapper
@@ -87,12 +71,12 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE: "AMDSMI_STATUS_UNEXPECTED_SIZE - unexpected size of data was read",
             amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA: "AMDSMI_STATUS_UNEXPECTED_DATA - The data read or provided was unexpected",
             amdsmi_wrapper.AMDSMI_STATUS_NON_AMD_CPU: "AMDSMI_STATUS_NON_AMD_CPU - System has non-AMD CPU",
-            amdsmi_wrapper.AMDSMI_STATUS_NO_ENERGY_DRV: "AMD_SMI_NO_ENERGY_DRV - Energy driver not found",
+            amdsmi_wrapper.AMDSMI_STATUS_NO_ENERGY_DRV: "AMDSMI_STATUS_NO_ENERGY_DRV - Energy driver not found",
             amdsmi_wrapper.AMDSMI_STATUS_NO_MSR_DRV: "AMDSMI_STATUS_NO_MSR_DRV - MSR driver not found",
-            amdsmi_wrapper.AMDSMI_STATUS_NO_HSMP_DRV: "AMD_SMI_NO_HSMP_DRV - HSMP driver not found",
-            amdsmi_wrapper.AMDSMI_STATUS_NO_HSMP_SUP: "AMD_SMI_NO_HSMP_SUP - HSMP not supported",
-            amdsmi_wrapper.AMDSMI_STATUS_NO_HSMP_MSG_SUP: "AMD_SMI_NO_HSMP_MSG_SUP - HSMP message/feature not supported",
-            amdsmi_wrapper.AMDSMI_STATUS_HSMP_TIMEOUT: "AMD_SMI_HSMP_TIMEOUT - HSMP message timeout",
+            amdsmi_wrapper.AMDSMI_STATUS_NO_HSMP_DRV: "AMDSMI_STATUS_NO_HSMP_DRV - HSMP driver not found",
+            amdsmi_wrapper.AMDSMI_STATUS_NO_HSMP_SUP: "AMDSMI_STATUS_NO_HSMP_SUP - HSMP not supported",
+            amdsmi_wrapper.AMDSMI_STATUS_NO_HSMP_MSG_SUP: "AMDSMI_STATUS_NO_HSMP_MSG_SUP - HSMP message/feature not supported",
+            amdsmi_wrapper.AMDSMI_STATUS_HSMP_TIMEOUT: "AMDSMI_STATUS_HSMP_TIMEOUT - HSMP message timeout",
             amdsmi_wrapper.AMDSMI_STATUS_NO_DRV: "AMDSMI_STATUS_NO_DRV - No Energy and HSMP driver present",
             amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND: "AMDSMI_STATUS_FILE_NOT_FOUND - File or directory not found",
             amdsmi_wrapper.AMDSMI_STATUS_ARG_PTR_NULL: "AMDSMI_STATUS_ARG_PTR_NULL - Parsed argument is invalid",

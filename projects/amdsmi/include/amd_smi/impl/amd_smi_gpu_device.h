@@ -1,44 +1,24 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
-#include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_drm.h"
-#include "amd_smi/impl/amd_smi_processor.h"
-
-extern "C" {
-#include "ualoe_lib/ualoe_lib.h"
-}
-
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
-// decouple the dependency to ualoe_lib.h by using a typedef for the handle
+#include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_backend.h"
+#include "amd_smi/impl/amd_smi_processor.h"
+
+// Forward declaration of UALoE handle type to keep ualoe_lib/ualoe_lib.h out
+// of the public install tree. Implementation file pulls in ualoe_lib.h.
 typedef int ualoe_handle_t;
 
 namespace amd::smi {
@@ -135,41 +115,14 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
  public:
   // UALoE requires a matching IFoE BDF under /sys/bus/pci/drivers/ifoe/;
   // otherwise ualoe_open is skipped and fabric queries return NOT_SUPPORTED.
-  AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
-        gpu_id_(gpu_id),
-        path_(path),
-        bdf_(bdf),
-        drm_(drm) {
-    populate_ifoe_fabric_bdf_list();
-    if (has_ifoe_related_bdf() && device_has_ualink()) {
-      auto ifoe_bdf_str = get_ifoe_bdf_string();
-      if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
-        ualoe_handle_ = (-1);
-      }
-    }
-  }
+  AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm);
+  AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm);
+  ~AMDSmiGPUDevice();
 
-  AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
-    if (check_if_drm_is_supported()) this->get_drm_data();
-
-    populate_ifoe_fabric_bdf_list();
-    if (has_ifoe_related_bdf() && device_has_ualink()) {
-      auto ifoe_bdf_str = get_ifoe_bdf_string();
-      if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
-        ualoe_handle_ = (-1);
-      }
-    }
-  }
-
-  ~AMDSmiGPUDevice() {
-    if (ualoe_handle_ != -1) {
-      ualoe_close(ualoe_handle_);
-      ualoe_handle_ = -1;
-    }
-  }
-
+  // Non-null only on non-Linux backends (e.g. WSL). amd_smi.cc checks this
+  // before falling through to the Linux rsmi/libdrm path.
+  IGPUBackend* backend() const { return backend_; }
+  void set_backend(IGPUBackend* b) { backend_ = b; }
   amdsmi_status_t get_drm_data();
   pthread_mutex_t* get_mutex();
   uint32_t get_gpu_id() const;
@@ -189,9 +142,15 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   std::string bdf_to_string() const;  // -e feature
   std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
   std::vector<uint64_t> get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const;
+  // Set the bit for every CPU named by a sysfs cpulist ("0-3,8") that the
+  // bitmask can hold. Malformed entries are skipped.
+  static void parse_cpulist(const std::string& cpulist, std::vector<uint64_t>& bitmask);
 
-  // Get the UALoE handle
-  ualoe_handle_t get_ualoe_handle() const { return ualoe_handle_; }
+  // Get the UALoE handle, opening the IFoE/UALoE session on first use.
+  // Deferred out of the constructor so amdsmi_init() and non-fabric queries
+  // never block on the IFoE driver; a wedged IFoE driver would otherwise hang
+  // initialization in an uninterruptible generic-netlink wait.
+  ualoe_handle_t get_ualoe_handle();
 
   /** UALoE fabric sysfs:
    *    - partial reads; see amdsmi_get_gpu_fabric_info() for status info
@@ -205,6 +164,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   bool device_has_ualink() const;
 
  private:
+  IGPUBackend* backend_ = nullptr;
   uint32_t gpu_id_;
   std::string path_;
   amdsmi_bdf_t bdf_;
@@ -219,8 +179,10 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                         ComputeProcessListType_t list_type);
   void populate_ifoe_fabric_bdf_list();
-  // UALoE
+  // UALoE — session is opened lazily on the first get_ualoe_handle() call
+  void open_ualoe_session();
   ualoe_handle_t ualoe_handle_ = (-1);
+  std::once_flag ualoe_open_once_;
 };
 
 }  // namespace amd::smi

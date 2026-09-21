@@ -37,30 +37,34 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
 
   while (bytes_left > 0) {
     if (bytes_left >= 16) {
-      __builtin_amdgcn_global_load_async_to_lds_b128(
-          (__attribute__((address_space(1))) vint4*)c_src,
-          (__attribute__((address_space(3))) vint4*)c_dst, 0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128))
+        __builtin_amdgcn_global_load_async_to_lds_b128(
+            (__attribute__((address_space(1))) vint4*)c_src,
+            (__attribute__((address_space(3))) vint4*)c_dst, 0 /* offset */, 0 /* cache policy */);
       bytes_left -= 16;
       c_src += 16;
       c_dst += 16;
     } else if (bytes_left >= 8) {
-      __builtin_amdgcn_global_load_async_to_lds_b64((__attribute__((address_space(1))) vint2*)c_src,
-                                                    (__attribute__((address_space(3))) vint2*)c_dst,
-                                                    0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b64))
+        __builtin_amdgcn_global_load_async_to_lds_b64(
+            (__attribute__((address_space(1))) vint2*)c_src,
+            (__attribute__((address_space(3))) vint2*)c_dst, 0 /* offset */, 0 /* cache policy */);
       bytes_left -= 8;
       c_src += 8;
       c_dst += 8;
     } else if (bytes_left >= 4) {
-      __builtin_amdgcn_global_load_async_to_lds_b32((__attribute__((address_space(1))) int*)c_src,
-                                                    (__attribute__((address_space(3))) int*)c_dst,
-                                                    0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b32))
+        __builtin_amdgcn_global_load_async_to_lds_b32(
+            (__attribute__((address_space(1))) int*)c_src,
+            (__attribute__((address_space(3))) int*)c_dst, 0 /* offset */, 0 /* cache policy */);
       bytes_left -= 4;
       c_src += 4;
       c_dst += 4;
     } else {
-      __builtin_amdgcn_global_load_async_to_lds_b8((__attribute__((address_space(1))) char*)c_src,
-                                                   (__attribute__((address_space(3))) char*)c_dst,
-                                                   0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b8))
+        __builtin_amdgcn_global_load_async_to_lds_b8(
+            (__attribute__((address_space(1))) char*)c_src,
+            (__attribute__((address_space(3))) char*)c_dst, 0 /* offset */, 0 /* cache policy */);
       bytes_left--;
       c_src++;
       c_dst++;
@@ -82,30 +86,34 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_lds_to_global(TyElem* __restrict
 
   while (bytes_left > 0) {
     if (bytes_left >= 16) {
-      __builtin_amdgcn_global_store_async_from_lds_b128(
-          (__attribute__((address_space(1))) vint4*)c_dst,
-          (__attribute__((address_space(3))) vint4*)c_src, 0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b128))
+        __builtin_amdgcn_global_store_async_from_lds_b128(
+            (__attribute__((address_space(1))) vint4*)c_dst,
+            (__attribute__((address_space(3))) vint4*)c_src, 0 /* offset */, 0 /* cache policy */);
       bytes_left -= 16;
       c_src += 16;
       c_dst += 16;
     } else if (bytes_left >= 8) {
-      __builtin_amdgcn_global_store_async_from_lds_b64(
-          (__attribute__((address_space(1))) vint2*)c_dst,
-          (__attribute__((address_space(3))) vint2*)c_src, 0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b64))
+        __builtin_amdgcn_global_store_async_from_lds_b64(
+            (__attribute__((address_space(1))) vint2*)c_dst,
+            (__attribute__((address_space(3))) vint2*)c_src, 0 /* offset */, 0 /* cache policy */);
       bytes_left -= 8;
       c_src += 8;
       c_dst += 8;
     } else if (bytes_left >= 4) {
-      __builtin_amdgcn_global_store_async_from_lds_b32(
-          (__attribute__((address_space(1))) int*)c_dst,
-          (__attribute__((address_space(3))) int*)c_src, 0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b32))
+        __builtin_amdgcn_global_store_async_from_lds_b32(
+            (__attribute__((address_space(1))) int*)c_dst,
+            (__attribute__((address_space(3))) int*)c_src, 0 /* offset */, 0 /* cache policy */);
       bytes_left -= 4;
       c_src += 4;
       c_dst += 4;
     } else {
-      __builtin_amdgcn_global_store_async_from_lds_b8(
-          (__attribute__((address_space(1))) char*)c_dst,
-          (__attribute__((address_space(3))) char*)c_src, 0 /* offset */, 0 /* cache policy */);
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b8))
+        __builtin_amdgcn_global_store_async_from_lds_b8(
+            (__attribute__((address_space(1))) char*)c_dst,
+            (__attribute__((address_space(3))) char*)c_src, 0 /* offset */, 0 /* cache policy */);
       bytes_left--;
       c_src++;
       c_dst++;
@@ -151,20 +159,20 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
       details::accelerated_memcpy_global_to_lds(dst, src, bytes_copied, count - bytes_copied);
     }
   }
+
+  // Deliberately no wait here: the copies above are tracked by ASYNCcnt and the caller's group
+  // sync drains it before releasing the barrier, which is what keeps the copy overlappable.
 }
 #endif
 
-template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof(TyElem)>
-__CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
-                                                const TyElem* __restrict__ src,
-                                                const TySize& count) {
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
-    __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-  details::dispatch_async_memcpy(group, dst, src, count);
-#else
-  // Traditional Copy since we do not have memcpy_async builtins
-  // Partition the memory in group of segments which each thread will copy portion of
-  // Similar to what we do in accelerated copy
+// Traditional Copy used when memcpy_async builtins are unavailable or not invocable on the target.
+// Partition the memory into segments which each thread copies a portion of, similar to the
+// accelerated copy.
+template <class TyGroup, typename TyElem, typename TySize>
+__CG_STATIC_QUALIFIER__ void traditional_memcpy_bytes(const TyGroup& group,
+                                                      TyElem* __restrict__ dst,
+                                                      const TyElem* __restrict__ src,
+                                                      const TySize& count) {
   size_t group_size = group.size();
   size_t bytes_per_thread = count / group_size; /* each thread will copy this much */
   unsigned char *c_src = ((unsigned char*)src) + (group.thread_rank() * bytes_per_thread),
@@ -180,12 +188,40 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
       ((unsigned char*)dst)[i] = ((unsigned char*)src)[i];
     }
   }
+}
+
+template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof(TyElem)>
+__CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
+                                                const TyElem* __restrict__ src,
+                                                const TySize& count) {
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+    __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+  // Use the async path only when the builtins are actually invocable on the target, otherwise the
+  // accelerated loop would advance offsets without issuing any load/store and silently drop data.
+  // It also only implements global<->LDS, so anything else (global->global,
+  // LDS->LDS) has to take the traditional copy or no data would be moved at all.
+  const bool src_is_shared =
+      __builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)src);
+  const bool dst_is_shared =
+      __builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)dst);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b128) &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128) &&
+      src_is_shared != dst_is_shared) {
+    details::dispatch_async_memcpy(group, dst, src, count);
+  } else {
+    traditional_memcpy_bytes(group, dst, src, count);
+  }
+#else
+  traditional_memcpy_bytes(group, dst, src, count);
 #endif
 }
 }  // namespace details
 
 /*
- * Enqueue memcpy async of `count` bytes and await for completion
+ * Enqueue memcpy async of `count` bytes.
+ *
+ * The copy is not complete when this returns. Call `group.sync()` before reading `dst`; the sync
+ * both waits for the copy and makes it visible to the rest of the group.
  */
 template <class TyGroup, typename TyElem, typename TySizeT>
 __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restrict__ dst,
@@ -194,7 +230,9 @@ __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restri
 }
 
 /*
- * Enqueue memcpy async min(dstLayout, srcLayout) elements bytes and await for completion
+ * Enqueue memcpy async of min(dstLayout, srcLayout) elements.
+ *
+ * As above, the caller must `group.sync()` before reading `dst`.
  */
 template <class TyGroup, class TyElem, typename DstLayout, typename SrcLayout>
 __CG_STATIC_QUALIFIER__ void memcpy_async(const TyGroup& group, TyElem* __restrict__ dst,

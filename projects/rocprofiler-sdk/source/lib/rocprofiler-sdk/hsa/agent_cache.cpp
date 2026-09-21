@@ -24,7 +24,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <stdexcept>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"

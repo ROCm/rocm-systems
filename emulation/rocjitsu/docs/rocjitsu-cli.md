@@ -15,6 +15,62 @@ the simulated GPU. It operates in two modes:
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
 
+### The fork boundary
+
+A child created with `fork()` before the parent has started a GPU backend can
+initialize its own rocJITsu context. This supports Python forkserver workers.
+The child handler replaces unused interposer bookkeeping and the host mapping
+lock, while preserving the invocation metadata used to find the configuration
+and daemon. It does not acquire or destroy inherited locks.
+
+**After the parent starts a backend, forked children must `exec` before using
+rocJITsu.** The child may inherit locks held by threads that no longer exist, so
+GPU endpoint opens fail with `ENODEV` until `exec` initializes a fresh context.
+This restriction applies to local and daemon clients, including after their GPU
+descriptors have been closed. Inheriting real GPU descriptors also prevents
+unused-context initialization.
+
+`vfork()` and `posix_spawn()` do not run this child handler and require `exec`
+before GPU access. The usual fork/spawn followed by exec, including Python's
+`subprocess`, continues to work.
+
+Use daemon mode (`--daemon`) when multiple processes need to share a simulated
+GPU. Each client still needs a fresh context: a process forked after its parent
+used a backend must exec before attaching to the daemon. These restrictions are
+a cooperative API contract; interposition does not prevent raw syscalls or
+receiving real GPU descriptors over a Unix socket.
+
+## Command-Line Options
+
+```
+Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--config <path>` | Path to simulation config JSON (required) |
+| `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
+| `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
+| `--help`, `-h` | Print usage and exit |
+| `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
+| `--` | Separator between rocjitsu options and the target application command line |
+
+### Usage Examples
+
+```bash
+# Local mode: in-process simulation
+rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+
+# Daemon mode: fork daemon + launch app
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
+
+# Daemon-only: run server (no app launched)
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
+
+# Attach to running daemon
+rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
+```
+
 ## Architecture
 
 ```
@@ -235,12 +291,6 @@ protected fds.
 
 ## Limitations
 
-### Single Client
-
-The daemon uses an atomic guard to reject concurrent connections. Same-VA
-mapping prevents multiple clients from using overlapping GPUVM ranges.
-Multi-client support requires per-client VA translation tables in the CP.
-
 ### Kernel 6.17 shmem Bug
 
 MAP_SHARED at GPUVM addresses can trigger SIGBUS on kernel 6.17 due to a
@@ -255,7 +305,7 @@ kernel 6.12.59+ and 6.15+.
 | `rpc.h` | Protocol types, send/recv helpers |
 | `transport.h/.cpp` | Abstract transport + Unix socket implementation |
 | `remote_driver.h/.cpp` | Client-side RPC stub |
-| `simulated_driver.h/.cpp` | KFD ioctl dispatch, allocation table, events |
+| `simulated_kfd.h/.cpp` | KFD ioctl dispatch, allocation table, events |
 | `interposer.cpp` | LD_PRELOAD syscall intercepts |
 | `events.h/.cpp` | KFD event subsystem (create, set, wait, destroy) |
 | `tools/rocjitsu/main.cpp` | CLI entry point, RPC dispatch loop (daemon mode) |
@@ -264,7 +314,6 @@ kernel 6.12.59+ and 6.15+.
 
 ## Future Work
 
-- **Multi-client**: Per-client state isolation, VA translation tables
 - **Windows**: Named pipe transport, KMD escape driver backend
 - **RDMA**: Rack-scale transport for distributed simulation
 - **Platform-independent commands**: Abstract command enum for cross-platform

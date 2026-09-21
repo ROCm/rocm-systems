@@ -1,11 +1,9 @@
 # Transport sources
 set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/nvls.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/profiler.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net_socket.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/coll_net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/shm.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc
@@ -25,3 +23,6 @@ set(DOCA_SOURCES ${DOCA_SOURCES} PARENT_SCOPE)
 
 # Add DOCA_HOME to parent scope
 set(DOCA_HOME ${DOCA_HOME} PARENT_SCOPE)
+
+# Add EFA-DP-Direct device headers to parent scope
+set(DEVICE_EFA_DP_HEADERS ${DEVICE_EFA_DP_HEADERS} PARENT_SCOPE)

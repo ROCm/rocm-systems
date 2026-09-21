@@ -56,7 +56,7 @@ typedef enum rocprofiler_ioctl_status_t
     ROCPROFILER_IOCTL_STATUS_BUFFER_TOO_SMALL =
         7,  /// A buffer needed to handle a request is too small                     //USED
     ROCPROFILER_IOCTL_STATUS_NOT_IMPLEMENTED =
-        10,  /// KFD function is not implemented for this set of paramters
+        10,  /// KFD function is not implemented for this set of parameters
     ROCPROFILER_IOCTL_STATUS_UNAVAILABLE = 12,  /// KFD function is not available currently on this
                                                 /// // USED node (but may be at a later time)
     ROCPROFILER_IOCTL_STATUS_OUT_OF_RESOURCES =

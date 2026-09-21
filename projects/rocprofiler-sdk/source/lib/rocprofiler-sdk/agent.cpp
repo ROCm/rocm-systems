@@ -41,7 +41,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
@@ -85,7 +84,7 @@ void
 update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 {
     //
-    //      https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+    //      https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html
     //
     //
     // ROCR_VISIBLE_DEVICES
@@ -155,9 +154,10 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         auto set_hip_visibility = [&agent_info](bool is_hip_visible) {
             if(is_hip_visible && agent_info.runtime_visibility.hsa == 0)
             {
-                ROCP_WARNING << fmt::format("Attempt to enable hip visiblity for agent-{} which is "
-                                            "not visible to HSA (ROCR)",
-                                            agent_info.node_id);
+                ROCP_WARNING << fmt::format(
+                    "Attempt to enable hip visibility for agent-{} which is "
+                    "not visible to HSA (ROCR)",
+                    agent_info.node_id);
                 return;
             }
 
@@ -217,7 +217,7 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         };
 
         static_assert(
-            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCJPEG_LIBRARY,
+            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_HIPFILE_LIBRARY,
             "Since a new library was added to rocprofiler_runtime_library_t, please make sure "
             "rocprofiler_agent_runtime_visiblity_t has an entry for this library (if "
             "necessary) and make the necessary updates to the logic below has been updated");
@@ -248,13 +248,13 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
             }
             else if(secondary_visible && hip_visible && *secondary_visible != *hip_visible)
             {
-                ROCP_CI_LOG(WARNING) << fmt::format("Conflicting visibility of agent-{} between "
-                                                    "{} and {}. Assuming {} supersedes {}",
-                                                    agent_info.node_id,
-                                                    env_primary,
-                                                    env_secondary,
-                                                    env_primary,
-                                                    env_secondary);
+                ROCP_WARNING << fmt::format("Conflicting visibility of agent-{} between "
+                                            "{} and {}. Assuming {} supersedes {}",
+                                            agent_info.node_id,
+                                            env_primary,
+                                            env_secondary,
+                                            env_primary,
+                                            env_secondary);
             }
             return env_primary;
         };
@@ -567,7 +567,7 @@ get_agents()
     pointers.reserve(agents.size());
     for(auto& agent : agents)
     {
-        pointers.emplace_back(agent.get());
+        pointers.emplace_back(&agent->public_info);
     }
     return pointers;
 }
@@ -579,6 +579,14 @@ get_agent(rocprofiler_agent_id_t id)
     {
         if(itr && itr->id.handle == id.handle) return itr;
     }
+    return nullptr;
+}
+
+const platform::agent_info*
+get_agent_info(rocprofiler_agent_id_t id)
+{
+    for(const auto& itr : get_agent_topology())
+        if(itr && itr->public_info.id.handle == id.handle) return itr.get();
     return nullptr;
 }
 

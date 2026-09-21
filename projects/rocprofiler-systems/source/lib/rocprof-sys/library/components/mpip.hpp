@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/delimit.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
 #include <cstdint>
@@ -13,7 +14,6 @@
 #include <timemory/manager/declaration.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include "logger/debug.hpp"
@@ -45,21 +45,28 @@ namespace component
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE void configure_mpip(const std::set<std::string>& permit = {},
-                                      const std::set<std::string>& reject = {});
+void
+configure_mpip(const std::set<std::string>& permit = {},
+               const std::set<std::string>& reject = {});
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t activate_mpip();
+std::uint64_t
+activate_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t deactivate_mpip(std::uint64_t);
+std::uint64_t deactivate_mpip(std::uint64_t);
+//
+//--------------------------------------------------------------------------------------//
+//
+void
+pause_mpip();
+
+void
+resume_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
@@ -734,7 +741,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
             auto reject_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
-            for(const auto& itr : tim::delimit(reject_list))
+            for(const auto& itr : rocprofsys::delimit(reject_list))
                 _reject.insert(itr);
             return _reject;
         };
@@ -746,7 +753,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
             auto permit_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
-            for(const auto& itr : tim::delimit(permit_list))
+            for(const auto& itr : rocprofsys::delimit(permit_list))
                 _permit.insert(itr);
             return _permit;
         };

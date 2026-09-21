@@ -40,6 +40,28 @@ default_environ_filter(std::string_view, const parser_data&);
 bool
 default_grouping_filter(std::string_view, const parser_data&);
 
+struct output_format_selection
+{
+    bool perfetto = false;  // ROCPROFSYS_TRACE
+    bool rocpd    = false;  // ROCPROFSYS_USE_ROCPD
+    bool json     = false;  // ROCPROFSYS_JSON_OUTPUT
+    bool text     = false;  // ROCPROFSYS_TEXT_OUTPUT
+
+    // ROCPROFSYS_PROFILE: derived — any Timemory profile sub-format implies profiling.
+    [[nodiscard]] bool profile() const { return json || text; }
+};
+
+/**
+ * Map selected --output-format tokens to the authoritative backend/sub-format set.
+ * Unlisted formats resolve to false so the returned selection fully defines the
+ * active outputs, which is required because ROCPROFSYS_TRACE and ROCPROFSYS_PROFILE
+ * otherwise derive their defaults from each other.
+ * @param tokens pftrace | rocpd | json | text | txt (proto aliases pftrace, txt aliases
+ * text)
+ */
+[[nodiscard]] output_format_selection
+resolve_output_format(const strset_t& tokens);
+
 struct env_snapshot
 {
     std::unordered_set<std::string> initial = {};
@@ -55,7 +77,7 @@ struct env_snapshot
     template <typename Tp>
     void set(
         std::string_view key, Tp&& value,
-        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::REPLACE,
+        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::replace,
         std::string_view                join_delim = ":")
     {
         rocprofsys::common::update_env(current, key, std::forward<Tp>(value), mode,

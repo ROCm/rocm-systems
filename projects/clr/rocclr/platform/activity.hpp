@@ -56,6 +56,8 @@ constexpr OpId OperationId(cl_command_type commandType) {
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE:
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
     case ROCCLR_COMMAND_BATCH_COPY_BUFFER:
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER:
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER:
       return OP_ID_COPY;
     case CL_COMMAND_MARKER:
       return OP_ID_BARRIER;
