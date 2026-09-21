@@ -131,6 +131,14 @@ elseif(HIP_PLATFORM STREQUAL "amd")
 endif()
 if(CLR_BUILD_HIP)
     add_subdirectory(hipamd)
+    # Fortran bindings, generated from the HIP headers and committed next to them
+    # in HIP_COMMON_DIR rather than here, because that is where the headers live.
+    # Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS is
+    # OFF or when no Fortran compiler is available, so a C-only site is unaffected.
+    # HIP_COMMON_DIR is outside this source tree, hence the explicit binary dir.
+    if(EXISTS "${HIP_COMMON_DIR}/fortran/CMakeLists.txt")
+        add_subdirectory("${HIP_COMMON_DIR}/fortran" hip-fortran)
+    endif()
 endif()
 if(CLR_BUILD_OCL)
     add_subdirectory(opencl)
