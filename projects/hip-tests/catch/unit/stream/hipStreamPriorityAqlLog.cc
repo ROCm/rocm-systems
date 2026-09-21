@@ -139,7 +139,9 @@ std::string runBarrierScenarioChild(const std::string& scenario) {
     setenv("GPU_MAX_HW_QUEUES", "1", 1);
     setenv("DEBUG_CLR_AQL_BARRIER_OPT", "1", 1);
     setenv("AMD_LOG_LEVEL", "5", 1);
-    setenv("AMD_LOG_MASK", "8", 1);
+    // LOG_AQL (8) carries the packet trace; LOG_INIT (2048) carries the ordering edge state
+    // line the expected barrier packet count depends on.
+    setenv("AMD_LOG_MASK", "2056", 1);
 
     const int log_fd = open(log_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (log_fd < 0) _exit(127);
@@ -185,6 +187,16 @@ int dispatchBarrierBitForWorkgroup(const std::string& log, uint32_t workgroup_si
     }
   }
   return -1;
+}
+
+// The runtime reports at initialization whether it publishes cross queue ordering edges from
+// device resident signals. Arming one appends a barrier packet to the recording stream, so the
+// packets a scenario emits depend on this state rather than on a fixed count.
+bool orderingEdgeSignalsEnabled(const std::string& log) {
+  const std::string state_token = "Ordering edge signals: ";
+  const size_t pos = log.find(state_token);
+  REQUIRE(pos != std::string::npos);
+  return log.compare(pos + state_token.size(), 7, "enabled") == 0;
 }
 
 }  // namespace
@@ -393,9 +405,15 @@ HIP_TEST_CASE(Unit_hipStreamAqlBarrierBit_Scenarios) {
         barrier_bits.push_back(1);
       }
     }
-    REQUIRE(barrier_bits.size() == 2);
-    REQUIRE(barrier_bits[0] == 1);
-    REQUIRE(barrier_bits[1] == 0);
+    // The event record's own barrier, then the wait's. An ordering edge, when the runtime
+    // publishes one, arms on the record and adds its barrier between the two.
+    const bool ordering_edge = orderingEdgeSignalsEnabled(log);
+    REQUIRE(barrier_bits.size() == (ordering_edge ? 3u : 2u));
+    REQUIRE(barrier_bits.front() == 1);
+    if (ordering_edge) {
+      REQUIRE(barrier_bits[1] == 1);
+    }
+    REQUIRE(barrier_bits.back() == 0);
   }
 }
 
