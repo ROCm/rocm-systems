@@ -56,6 +56,7 @@
 #include "MPITestBase.hpp"
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "HostApiHelpers.hpp"
 #include "TestChecks.hpp"
 
@@ -143,12 +144,14 @@ constexpr unsigned int kFlags  = 0;
 //   NCCL_CUMEM_ENABLE=0 -> NCCL_WIN_DEFAULT         (non-symmetric fallback)
 inline int winMode()
 {
-    static int cumem_ = -1;
-    if (cumem_ < 0) {
+    static int mode = -2;
+    if (mode == -2) {
         const char* e = getenv("NCCL_CUMEM_ENABLE");
-        cumem_ = e ? (atoi(e) != 0) : true; 
+        const bool wantSymmetric = e ? (atoi(e) != 0) : true;
+        mode = (wantSymmetric && ncclCuMemRuntimeSupported()) ? NCCL_WIN_COLL_SYMMETRIC
+                                                              : NCCL_WIN_DEFAULT;
     }
-    return cumem_ ? NCCL_WIN_COLL_SYMMETRIC : NCCL_WIN_DEFAULT;
+    return mode;
 }
 
 // Calibrate how many clock64() cycles approximate targetMs of GPU busy wait.
@@ -301,6 +304,9 @@ TEST_F(HostApiTest, GraphCaptureReplayPutWait)
     {
         GTEST_SKIP() << "Need exactly 2 MPI processes";
     }
+
+    if (auto reason = symmetricMemEnvAndRuntimeSkipReason(); !reason.empty())
+        GTEST_SKIP() << reason;
 
     const int   myRank = rank();
     ncclComm_t  comm   = getActiveCommunicator();

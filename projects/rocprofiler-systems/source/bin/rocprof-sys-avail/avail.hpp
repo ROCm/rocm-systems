@@ -122,7 +122,7 @@ public:
 
 public:
     template <typename Tp>
-    inline void saveValue(Tp _val)
+    void saveValue(Tp _val)
     {
         std::stringstream ssval;
         ssval << std::boolalpha << _val;
