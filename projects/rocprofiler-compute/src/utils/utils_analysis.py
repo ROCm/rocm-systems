@@ -395,19 +395,14 @@ def nest_marker_intervals(
                 open_ranges.pop()
             if open_ranges and end > open_ranges[-1][2]:
                 parent_node, parent_start, parent_end = open_ranges[-1]
-                console_error(
-                    "analysis",
-                    str(
-                        OverlappingMarkerRangeError(
-                            thread_id=thread_key,
-                            first_name=parent_node.name,
-                            first_start=parent_start,
-                            first_end=parent_end,
-                            second_name=str(row.Operator_Name),
-                            second_start=start,
-                            second_end=end,
-                        )
-                    ),
+                raise OverlappingMarkerRangeError(
+                    thread_id=thread_key,
+                    first_name=parent_node.name,
+                    first_start=parent_start,
+                    first_end=parent_end,
+                    second_name=str(row.Operator_Name),
+                    second_start=start,
+                    second_end=end,
                 )
             node = _call_tree_node_from_marker_row(row)
             if open_ranges:
@@ -481,49 +476,31 @@ def attach_unlocated_trees_by_forward_thread(
         end = float(root.end_timestamp or 0.0)
         f_tid = _forward_tid_from_tree(root)
         if f_tid is None:
-            console_error(
-                "analysis",
-                str(
-                    MissingSourceLocationError(
-                        operator_name=root.name,
-                        thread_id=thread_id,
-                        start_timestamp=start,
-                    )
-                ),
+            raise MissingSourceLocationError(
+                operator_name=root.name,
+                thread_id=thread_id,
+                start_timestamp=start,
             )
-            continue
         matches = _thread_ids_with_pytorch_tid(forest, f_tid)
         if len(matches) != 1:
-            console_error(
-                "analysis",
-                str(
-                    ForwardThreadNotFoundError(
-                        operator_name=root.name,
-                        thread_id=thread_id,
-                        start_timestamp=start,
-                        f_tid=f_tid,
-                    )
-                ),
+            raise ForwardThreadNotFoundError(
+                operator_name=root.name,
+                thread_id=thread_id,
+                start_timestamp=start,
+                f_tid=f_tid,
             )
-            continue
         forward_thread_id = matches[0]
         dest_roots = [node for node in forest[forward_thread_id] if node is not root]
         parent = _deepest_containing_node(dest_roots, start, end)
         if parent is None:
-            console_error(
-                "analysis",
-                str(
-                    UncorrelatedForwardIntervalError(
-                        operator_name=root.name,
-                        thread_id=thread_id,
-                        start_timestamp=start,
-                        end_timestamp=end,
-                        f_tid=f_tid,
-                        forward_thread_id=forward_thread_id,
-                    )
-                ),
+            raise UncorrelatedForwardIntervalError(
+                operator_name=root.name,
+                thread_id=thread_id,
+                start_timestamp=start,
+                end_timestamp=end,
+                f_tid=f_tid,
+                forward_thread_id=forward_thread_id,
             )
-            continue
         parent.children.append(root)
         forest[thread_id] = [node for node in forest[thread_id] if node is not root]
     for thread_id in [tid for tid, roots in forest.items() if not roots]:
@@ -555,7 +532,7 @@ def _nested_invocation_keys(
 def _validate_all_markers_nested(
     trace_df: pd.DataFrame, forest: dict[str, list[CallTreeNode]]
 ) -> None:
-    """Exit if a consolidated marker row is missing from the nested forest."""
+    """Raise if a consolidated marker row is missing from the nested forest."""
     if trace_df.empty:
         return
     nested_keys = _nested_invocation_keys(forest)
@@ -563,15 +540,10 @@ def _validate_all_markers_nested(
         thread_id = str(row.Thread_Id)
         start_key = str(row.Start_Timestamp)
         if (thread_id, start_key) not in nested_keys:
-            console_error(
-                "analysis",
-                str(
-                    MarkerNotNestedError(
-                        operator_name=str(row.Operator_Name),
-                        thread_id=thread_id,
-                        start_timestamp=row.Start_Timestamp,
-                    )
-                ),
+            raise MarkerNotNestedError(
+                operator_name=str(row.Operator_Name),
+                thread_id=thread_id,
+                start_timestamp=row.Start_Timestamp,
             )
 
 
@@ -1107,15 +1079,10 @@ def _collapse_matching_markers_across_passes(
     else:
         pass_counts = [len(frame) for frame in pass_frames]
         if len(set(pass_counts)) != 1:
-            console_error(
-                "analysis",
-                str(
-                    PassMarkerMismatchError(
-                        stitch_key="",
-                        function_ordinal=None,
-                        disagreeing_values=f"per-pass marker counts {pass_counts}",
-                    )
-                ),
+            raise PassMarkerMismatchError(
+                stitch_key="",
+                function_ordinal=None,
+                disagreeing_values=f"per-pass marker counts {pass_counts}",
             )
         expected_passes = set(range(len(pass_frames)))
         records: list[dict[str, Any]] = []
@@ -1126,15 +1093,10 @@ def _collapse_matching_markers_across_passes(
             present_passes = set(group["_pass_id"].tolist())
             missing_passes = sorted(expected_passes - present_passes)
             if missing_passes:
-                console_error(
-                    "analysis",
-                    str(
-                        PassMarkerMismatchError(
-                            stitch_key=str(stitch_key),
-                            function_ordinal=int(ordinal),
-                            disagreeing_values=f"missing passes {missing_passes}",
-                        )
-                    ),
+                raise PassMarkerMismatchError(
+                    stitch_key=str(stitch_key),
+                    function_ordinal=int(ordinal),
+                    disagreeing_values=f"missing passes {missing_passes}",
                 )
             kernel_name_sets = [
                 _kernel_names_as_set(
@@ -1143,15 +1105,10 @@ def _collapse_matching_markers_across_passes(
                 for pass_id in range(len(pass_frames))
             ]
             if len(set(kernel_name_sets)) != 1:
-                console_error(
-                    "analysis",
-                    str(
-                        PassMarkerMismatchError(
-                            stitch_key=str(stitch_key),
-                            function_ordinal=int(ordinal),
-                            disagreeing_values=f"Kernel_Names {list(kernel_name_sets)}",
-                        )
-                    ),
+                raise PassMarkerMismatchError(
+                    stitch_key=str(stitch_key),
+                    function_ordinal=int(ordinal),
+                    disagreeing_values=f"Kernel_Names {list(kernel_name_sets)}",
                 )
             first = group[group["_pass_id"] == 0].iloc[0]
             records.append({
@@ -1257,12 +1214,7 @@ def process_ml_api_trace_output(
     workload.unmatched_kernel_frames = unmatched_kernel_frames
     nonempty_unmatched = [frame for frame in unmatched_kernel_frames if not frame.empty]
     if nonempty_unmatched:
-        console_error(
-            "analysis",
-            str(
-                UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True))
-            ),
-        )
+        raise UnaccountedKernelError(pd.concat(nonempty_unmatched, ignore_index=True))
     for pair in workload.ml_api_trace_pairs:
         marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()
         pair.joined_df = _add_stitch_key_and_ordinal(

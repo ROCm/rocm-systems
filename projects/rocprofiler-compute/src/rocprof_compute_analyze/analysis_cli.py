@@ -12,6 +12,7 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.ml_api_trace_errors import MlApiTraceError
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -190,7 +191,10 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
             if _ml_api_operator_cli_requested(args):
-                process_ml_api_trace_output(workload, path_info[0])
+                try:
+                    process_ml_api_trace_output(workload, path_info[0])
+                except MlApiTraceError as exc:
+                    console_warning("analysis", str(exc))
 
             for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
                 if getattr(args, cli["list_attr"], False):
