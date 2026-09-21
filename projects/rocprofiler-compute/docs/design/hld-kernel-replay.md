@@ -390,7 +390,7 @@ flowchart TD
 | ID | Requirement |
 | --- | --- |
 | **FR-16** | An SDK below the supported version floor is a hard error stating the required version. |
-| **FR-17** | If the SDK declines a device-memory snapshot, abandon the profile without retry and recommend application replay in the diagnostic. Detect incomplete replay through requested and completed passes, independently of SDK warning text or subprocess status. |
+| **FR-17** | If the SDK declines a device-memory snapshot, abandon the profile without retry and recommend application replay in the diagnostic. |
 | **FR-18** | If the upstream replay mechanism aborts, report the failed run without attempting recovery. |
 | **FR-19** | If counters were requested but an agent has no usable counter profiles, do not silently degrade the dispatch to one pass. |
 | **FR-20** | A second `KERNEL_REPLAY` service configuration is a hard error naming `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
@@ -548,8 +548,7 @@ flowchart TD
 
 | Pass count returned | When | What the execution selects |
 | --- | --- | --- |
-| `1` — filtered | A confirmed filter miss — the kernel or dispatch is excluded. | Not profiled. |
-| `1` — admitted | The dispatch is admitted and its agent's profile vector contains exactly one bucket, no PC sampling. | The native tool selects the sole profile through ordinary dispatch counting; no `PASS` callback occurs. |
+| `1` | The dispatch is admitted and its agent's profile vector contains exactly one bucket, no PC sampling. | The native tool selects the sole profile through ordinary dispatch counting; no `PASS` callback occurs. |
 | *N*, where *N* > 1 | Admitted, no PC sampling. *N* is the size of the profile vector for this dispatch's agent. | Pass *i* selects entry *i* of that vector. |
 | *N*+1 | Admitted, PC sampling selected. *N* is the non-zero size of the profile vector. | Passes 0 through *N*−1 map one-to-one onto the vector. Pass *N* selects no counter profile and runs counter-disabled. |
 
