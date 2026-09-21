@@ -446,6 +446,25 @@ struct read_statements
                                                                         size_t,
                                                                         size_t)>;
 
+    // Bind (nid, agent_id, queue_id) -- optiq-parity agent+queue category
+    // tracks (see schema_v3::read_statements::track_category_statement_set).
+    using timeline_event_agent_queue_filtered_func_t = std::function<
+        sqlite_backend::result_set<timeline_event_result>(size_t, size_t, size_t)>;
+
+    // Bind (nid, pid, stream_id) -- optiq-parity stream category tracks.
+    using timeline_event_stream_filtered_func_t = std::function<
+        sqlite_backend::result_set<timeline_event_result>(size_t, size_t, size_t)>;
+
+    // Bind (nid, agent_id, queue_id, window_end, window_start).
+    using timeline_event_agent_queue_time_filtered_func_t =
+        std::function<sqlite_backend::result_set<
+            timeline_event_result>(size_t, size_t, size_t, size_t, size_t)>;
+
+    // Bind (nid, pid, stream_id, window_end, window_start).
+    using timeline_event_stream_time_filtered_func_t =
+        std::function<sqlite_backend::result_set<
+            timeline_event_result>(size_t, size_t, size_t, size_t, size_t)>;
+
     // Detail statement func types (parameterized by id)
     using region_detail_func_t =
         std::function<sqlite_backend::result_set<region_detail_result>(size_t)>;
@@ -569,6 +588,13 @@ struct read_statements
         timeline_event_time_filtered_func_t           time_filtered;
         timeline_event_track_filtered_func_t          track_filtered;
         timeline_event_track_and_time_filtered_func_t track_and_time_filtered;
+
+        // Only set for kernel_dispatch/memory_allocate/memory_copy (region
+        // has no agent_id/queue_id/stream_id columns).
+        timeline_event_agent_queue_filtered_func_t      agent_queue_filtered;
+        timeline_event_stream_filtered_func_t           stream_filtered;
+        timeline_event_agent_queue_time_filtered_func_t agent_queue_time_filtered;
+        timeline_event_stream_time_filtered_func_t      stream_time_filtered;
     };
 
     [[nodiscard]] const timeline_event_statement_set& region_statements() const
@@ -1217,9 +1243,11 @@ private:
     }
 
     template <typename JoinBuilder>
-    void initialize_timeline_event_variants(JoinBuilder&                  base,
-                                            std::string_view              alias,
-                                            timeline_event_statement_set& out)
+    void initialize_timeline_event_variants(
+        JoinBuilder&                  base,
+        std::string_view              alias,
+        timeline_event_statement_set& out,
+        std::optional<std::string>    agent_id_column = std::nullopt)
     {
         const auto a = std::string(alias);
 
@@ -1308,6 +1336,70 @@ private:
             &timeline_event_result::pid,
             &timeline_event_result::tid,
             &timeline_event_result::track_id);
+
+        if(!agent_id_column.has_value()) return;
+
+        const auto agent_col = a + "." + agent_id_column.value();
+
+        out.agent_queue_filtered =
+            m_backend->create_read_statement_executor<timeline_event_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                unfiltered_sql + " WHERE " + a + ".nid = ? AND " + agent_col +
+                    " = ? AND " + a + ".queue_id = ?",
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_id,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+
+        out.stream_filtered =
+            m_backend->create_read_statement_executor<timeline_event_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                unfiltered_sql + " WHERE " + a + ".nid = ? AND " + a + ".pid = ? AND " +
+                    a + ".stream_id = ?",
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_id,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+
+        out.agent_queue_time_filtered = m_backend->create_read_statement_executor<
+            timeline_event_result,
+            bind_types<size_t, size_t, size_t, size_t, size_t>>(
+            unfiltered_sql + " WHERE " + a + ".nid = ? AND " + agent_col + " = ? AND " +
+                a + ".queue_id = ?" + time_where,
+            &timeline_event_result::id,
+            &timeline_event_result::start_timestamp,
+            &timeline_event_result::end_timestamp,
+            &timeline_event_result::display_name_id,
+            &timeline_event_result::category_id,
+            &timeline_event_result::nid,
+            &timeline_event_result::pid,
+            &timeline_event_result::tid,
+            &timeline_event_result::track_id);
+
+        out.stream_time_filtered = m_backend->create_read_statement_executor<
+            timeline_event_result,
+            bind_types<size_t, size_t, size_t, size_t, size_t>>(
+            unfiltered_sql + " WHERE " + a + ".nid = ? AND " + a + ".pid = ? AND " + a +
+                ".stream_id = ?" + time_where,
+            &timeline_event_result::id,
+            &timeline_event_result::start_timestamp,
+            &timeline_event_result::end_timestamp,
+            &timeline_event_result::display_name_id,
+            &timeline_event_result::category_id,
+            &timeline_event_result::nid,
+            &timeline_event_result::pid,
+            &timeline_event_result::tid,
+            &timeline_event_result::track_id);
     }
 
     void initialize_region_timeline_event_statements()
@@ -1347,7 +1439,8 @@ private:
                          .inner_join("rocpd_event", "E", "E.id = K.event_id")
                          .left_join("rocpd_sample", "S", "S.event_id = K.event_id");
 
-        initialize_timeline_event_variants(base, "K", m_kernel_dispatch_statements);
+        initialize_timeline_event_variants(
+            base, "K", m_kernel_dispatch_statements, std::string("agent_id"));
     }
 
     void initialize_memory_allocate_timeline_event_statements()
@@ -1367,7 +1460,8 @@ private:
                          .inner_join("rocpd_event", "E", "E.id = MA.event_id")
                          .left_join("rocpd_sample", "S", "S.event_id = MA.event_id");
 
-        initialize_timeline_event_variants(base, "MA", m_memory_allocate_statements);
+        initialize_timeline_event_variants(
+            base, "MA", m_memory_allocate_statements, std::string("agent_id"));
     }
 
     void initialize_memory_copy_timeline_event_statements()
@@ -1387,7 +1481,8 @@ private:
                          .inner_join("rocpd_event", "E", "MC.event_id = E.id")
                          .left_join("rocpd_sample", "S", "S.event_id = MC.event_id");
 
-        initialize_timeline_event_variants(base, "MC", m_memory_copy_statements);
+        initialize_timeline_event_variants(
+            base, "MC", m_memory_copy_statements, std::string("dst_agent_id"));
     }
 
     void initialize_detail_statements()

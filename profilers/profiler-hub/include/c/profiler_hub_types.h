@@ -45,6 +45,18 @@ extern "C"
         uint32_t patch;
     } ph_version_t;
 
+    /** @brief Distinguishes the identity columns a track was derived from. */
+    typedef enum
+    {
+        PH_TRACK_CATEGORY_THREAD,    /**< (nid,pid,tid)-based. */
+        PH_TRACK_CATEGORY_PMC_AGENT, /**< PMC/counter samples split by agent_id. */
+        PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
+        PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
+        PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE,     /**< By (nid,agent_id,queue_id). */
+        PH_TRACK_CATEGORY_STREAM, /**< Merged kernel-dispatch/memory-allocate/
+                                       memory-copy, by (nid,pid,stream_id). */
+    } ph_track_category_t;
+
     /**
      * @brief A single track in a trace.
      * @note track_name points into memory owned by the ph_ctx_t that
@@ -61,6 +73,12 @@ extern "C"
         uint32_t    event_count; /**< Total events recorded on this track. */
         uint32_t    agent_id;    /**< Owning device (agent) id, or 0 if not
                                        device-specific. */
+        ph_track_category_t category; /**< What identity columns this track was
+                                            derived from. */
+        uint32_t queue_id;            /**< Owning queue id. Only meaningful for
+                                       *_AGENT_QUEUE categories, else 0. */
+        uint32_t stream_id;           /**< Owning stream id. Only meaningful for
+                                            PH_TRACK_CATEGORY_STREAM, else 0. */
     } ph_track_t;
 
     /**
@@ -117,12 +135,31 @@ extern "C"
         ph_agent_t* agents;
     } ph_agent_list_t;
 
-    /** @brief Node info bundled with its agents and tracks. */
+    /**
+     * @brief A process belonging to a node.
+     * @note command points into memory owned by the producing ph_ctx_t; may
+     *       be empty if the trace did not record it.
+     */
     typedef struct
     {
-        ph_node_info_t  info;
-        ph_agent_list_t agents;
-        ph_track_list_t track_list;
+        uint32_t    id; /**< Process id. */
+        const char* command;
+    } ph_process_t;
+
+    /** @brief A list of processes; same lifetime rule as ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t      list_size;
+        ph_process_t* processes;
+    } ph_process_list_t;
+
+    /** @brief Node info bundled with its agents, processes, and tracks. */
+    typedef struct
+    {
+        ph_node_info_t    info;
+        ph_agent_list_t   agents;
+        ph_process_list_t process_list;
+        ph_track_list_t   track_list;
     } ph_node_t;
 
     /** @brief A single duration event (region/kernel dispatch/memory

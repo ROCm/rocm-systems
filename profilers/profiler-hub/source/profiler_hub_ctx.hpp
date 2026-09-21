@@ -49,6 +49,7 @@ private:
     void initialize_track_list();
     void initilaize_node_info();
     void initialize_node_agents();
+    void initialize_node_processes();
 
     ph_event_list_t  core_get_track_events(profiler_hub::common::connection& conn,
                                            uint32_t                          track_id,
@@ -75,6 +76,9 @@ private:
 
     profiler_hub::reader_types::agent_info_list_t m_agents;
     std::vector<ph_agent_t>                       m_c_agents;
+
+    profiler_hub::reader_types::process_info_list_t m_processes;
+    std::vector<ph_process_t>                       m_c_processes;
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;

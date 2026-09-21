@@ -21,6 +21,25 @@ find_track(profiler_hub::reader_t& reader, uint32_t track_id)
     return track != tracks.end() ? std::make_optional(*track) : std::nullopt;
 }
 
+ph_track_category_t
+to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
+{
+    using profiler_hub::reader_types::track_kind_t;
+    switch(kind)
+    {
+        case track_kind_t::thread: return PH_TRACK_CATEGORY_THREAD;
+        case track_kind_t::pmc_agent: return PH_TRACK_CATEGORY_PMC_AGENT;
+        case track_kind_t::kernel_dispatch_agent_queue:
+            return PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE;
+        case track_kind_t::memory_allocate_agent_queue:
+            return PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE;
+        case track_kind_t::memory_copy_agent_queue:
+            return PH_TRACK_CATEGORY_MEMORY_COPY_AGENT_QUEUE;
+        case track_kind_t::stream: return PH_TRACK_CATEGORY_STREAM;
+    }
+    return PH_TRACK_CATEGORY_THREAD;
+}
+
 }  // namespace
 
 size_t
@@ -41,6 +60,7 @@ ph_ctx::ph_ctx(std::string_view trace_path)
 
     initialize_track_list();
     initialize_node_agents();
+    initialize_node_processes();
     initilaize_node_info();
 }
 
@@ -228,6 +248,9 @@ ph_ctx::initialize_track_list()
                                : 0,
             .event_count = static_cast<std::uint32_t>(track->event_count),
             .agent_id    = static_cast<std::uint32_t>(track->agent_id),
+            .category    = to_c_track_category(track->category),
+            .queue_id    = static_cast<std::uint32_t>(track->queue_id),
+            .stream_id   = static_cast<std::uint32_t>(track->stream_id),
         });
     }
 }
@@ -256,6 +279,10 @@ ph_ctx::initilaize_node_info()
         ph_agent_list_t{ .list_size = static_cast<std::uint32_t>(m_c_agents.size()),
                          .agents    = m_c_agents.data() };
 
+    m_c_node->process_list =
+        ph_process_list_t{ .list_size = static_cast<std::uint32_t>(m_c_processes.size()),
+                           .processes = m_c_processes.data() };
+
     m_c_node->track_list = get_track_list();
 }
 
@@ -281,6 +308,23 @@ ph_ctx::initialize_node_agents()
             .vendor_name   = agent->vendor_name.c_str(),
             .product_name  = agent->product_name.c_str(),
             .user_name     = agent->user_name.c_str(),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_node_processes()
+{
+    m_processes = m_connection_pool.run_sync([](profiler_hub::common::connection& conn) {
+        return conn.reader().get_all_processes();
+    });
+    m_c_processes.reserve(m_processes.size());
+
+    for(const auto& process : m_processes)
+    {
+        m_c_processes.push_back(ph_process_t{
+            .id      = static_cast<std::uint32_t>(process->pid),
+            .command = process->command.c_str(),
         });
     }
 }
