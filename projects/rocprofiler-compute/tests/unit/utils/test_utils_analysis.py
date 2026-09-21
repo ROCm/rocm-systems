@@ -17,8 +17,35 @@ from utils.utils_analysis import (
     KernelStats,
     NodeRollup,
     build_operator_summary,
+    fold_identical_sibling_subtrees,
     rollup_node_stats,
 )
+
+
+def leaf_operator(
+    name: str,
+    start: str,
+    duration_ns: float,
+    kernel: str = "k",
+    file_name: str = "net.py",
+    line_number: int = 10,
+    backend: str = "torch",
+) -> CallTreeNode:
+    node = CallTreeNode(
+        name=name,
+        file_name=file_name,
+        line_number=line_number,
+        backend=backend,
+    )
+    node.invocation_ids.add(start)
+    node.kernels[kernel] = KernelStats(
+        launches=1,
+        total_duration_ns=duration_ns,
+        min_duration_ns=duration_ns,
+        max_duration_ns=duration_ns,
+    )
+    rollup_node_stats(node)
+    return node
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
@@ -794,6 +821,82 @@ def test_call_tree_node_call_count_is_property_of_invocation_ids():
     node.invocation_ids.add("ctx1")
     node.invocation_ids.add("ctx2")
     assert node.call_count == 2
+
+
+def test_fold_identical_sibling_subtrees_empty():
+    assert fold_identical_sibling_subtrees([]) == []
+
+
+def test_fold_identical_sibling_subtrees_merges_matching_leaves():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 2_000_000.0),
+        leaf_operator("aten::addmm", "2", 3_000_000.0),
+    ])
+    assert len(folded) == 1
+    node = folded[0]
+    assert node.call_count == 2
+    assert node.kernels["k"].launches == 2
+    assert node.kernels["k"].total_duration_ns == 5_000_000.0
+    assert node.kernels["k"].min_duration_ns == 2_000_000.0
+    assert node.kernels["k"].max_duration_ns == 3_000_000.0
+    assert node.kernel_launches == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_kernels_apart():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 1_000_000.0, kernel="addmm"),
+        leaf_operator("aten::addmm", "2", 1_000_000.0, kernel="copy"),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_locations_apart():
+    folded = fold_identical_sibling_subtrees([
+        leaf_operator("aten::addmm", "1", 1_000_000.0, line_number=10),
+        leaf_operator("aten::addmm", "2", 1_000_000.0, line_number=20),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_keeps_different_child_shapes_apart():
+    nested = CallTreeNode(
+        name="aten::addmm", file_name="net.py", line_number=10, backend="torch"
+    )
+    nested.invocation_ids.add("1")
+    nested.children = [leaf_operator("aten::relu", "1a", 500_000.0)]
+    rollup_node_stats(nested)
+    folded = fold_identical_sibling_subtrees([
+        nested,
+        leaf_operator("aten::addmm", "2", 1_000_000.0),
+    ])
+    assert len(folded) == 2
+
+
+def test_fold_identical_sibling_subtrees_does_not_mutate_input():
+    first = leaf_operator("aten::addmm", "1", 1_000_000.0)
+    second = leaf_operator("aten::addmm", "2", 1_000_000.0)
+    original = [first, second]
+    fold_identical_sibling_subtrees(original)
+    assert original == [first, second]
+    assert first.call_count == 1
+    assert second.call_count == 1
+
+
+def test_fold_identical_sibling_subtrees_merges_nested_children():
+    parent = CallTreeNode(name="forward", backend="torch")
+    parent.invocation_ids.add("0")
+    parent.children = [
+        leaf_operator("aten::addmm", "1", 1_000_000.0),
+        leaf_operator("aten::addmm", "2", 2_000_000.0),
+    ]
+    rollup_node_stats(parent)
+    folded = fold_identical_sibling_subtrees([parent])
+    assert len(folded) == 1
+    assert folded[0].call_count == 1
+    assert len(parent.children) == 2
+    assert len(folded[0].children) == 1
+    assert folded[0].children[0].call_count == 2
+    assert folded[0].children[0].kernels["k"].launches == 2
 
 
 def test_rollup_leaf_node():

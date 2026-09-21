@@ -563,6 +563,93 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
     return copied
 
 
+def _subtree_shape_key(node: CallTreeNode) -> tuple:
+    line_number = "" if node.line_number is None else str(node.line_number)
+    child_keys = tuple(sorted(_subtree_shape_key(child) for child in node.children))
+    kernel_names = tuple(sorted(node.kernels))
+    return (
+        node.name,
+        node.file_name or "",
+        line_number,
+        node.backend or "",
+        kernel_names,
+        child_keys,
+    )
+
+
+def _add_kernel_stats(
+    destination: dict[str, KernelStats], name: str, stats: KernelStats
+) -> None:
+    existing = destination.get(name)
+    if existing is None:
+        destination[name] = KernelStats(
+            launches=stats.launches,
+            total_duration_ns=stats.total_duration_ns,
+            min_duration_ns=stats.min_duration_ns,
+            max_duration_ns=stats.max_duration_ns,
+            kernel_id=stats.kernel_id,
+        )
+        return
+    mins = [
+        duration
+        for duration in (existing.min_duration_ns, stats.min_duration_ns)
+        if duration is not None
+    ]
+    maxes = [
+        duration
+        for duration in (existing.max_duration_ns, stats.max_duration_ns)
+        if duration is not None
+    ]
+    existing.launches += stats.launches
+    existing.total_duration_ns += stats.total_duration_ns
+    existing.min_duration_ns = min(mins) if mins else None
+    existing.max_duration_ns = max(maxes) if maxes else None
+    if existing.kernel_id is None:
+        existing.kernel_id = stats.kernel_id
+
+
+def _merge_identical_sibling_group(group: list[CallTreeNode]) -> CallTreeNode:
+    first = group[0]
+    kernels: dict[str, KernelStats] = {}
+    for node in group:
+        for kernel_name, stats in node.kernels.items():
+            _add_kernel_stats(kernels, kernel_name, stats)
+    merged = CallTreeNode(
+        name=first.name,
+        children=fold_identical_sibling_subtrees(
+            [child for node in group for child in node.children]
+        ),
+        kernels=kernels,
+        file_name=first.file_name,
+        line_number=first.line_number,
+        backend=first.backend,
+        t_tid=first.t_tid,
+        f_tid=first.f_tid,
+        thread_id=first.thread_id,
+    )
+    for node in group:
+        merged.invocation_ids.update(node.invocation_ids)
+    rollup_node_stats(merged)
+    return merged
+
+
+def fold_identical_sibling_subtrees(
+    nodes: list[CallTreeNode],
+) -> list[CallTreeNode]:
+    """Merge siblings that share operator, kernel names, and child shape.
+
+    Returns new nodes sorted by total GPU duration. Does not mutate nodes.
+    """
+    if not nodes:
+        return []
+    groups: dict[tuple, list[CallTreeNode]] = {}
+    for node in nodes:
+        groups.setdefault(_subtree_shape_key(node), []).append(node)
+    folded = [_merge_identical_sibling_group(group) for group in groups.values()]
+    folded.sort(key=lambda node: node.total_duration_ms, reverse=True)
+    return folded
+
+
 def filter_forest_by_backend(
     forest: dict[str, list[CallTreeNode]],
     backend: Optional[str],

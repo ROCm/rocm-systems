@@ -26,6 +26,7 @@ from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
+    fold_identical_sibling_subtrees,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -464,16 +465,19 @@ def print_wrapped_kernel_line(
 
 
 def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
-    """Print top-level marker nodes sorted by total GPU duration."""
-    roots = [node for nodes in call_trees.values() for node in nodes]
+    """Print top-level marker nodes sorted by total GPU duration.
+
+    Identical sibling subtrees are folded. The input forest is not mutated.
+    """
+    roots: list[CallTreeNode] = []
+    for thread_roots in call_trees.values():
+        roots.extend(fold_identical_sibling_subtrees(thread_roots))
     roots.sort(key=lambda node: node.total_duration_ms, reverse=True)
     for i, root in enumerate(roots):
         if i > 0:
             print(f"\n{'- ' * 40}")
         print(f"\n{_operator_display_name(root)} {format_node_stats(root)}")
-        for child in sorted(
-            root.children, key=lambda node: node.total_duration_ms, reverse=True
-        ):
+        for child in root.children:
             print_operator_node(child)
 
 
@@ -580,7 +584,7 @@ def print_operator_node(
         new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
 
     # Process child nodes
-    children = sorted(node.children, key=lambda c: c.total_duration_ms, reverse=True)
+    children = fold_identical_sibling_subtrees(node.children)
     for i, child in enumerate(children):
         # A child is last if it's the final child AND there are no kernels after it
         child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)

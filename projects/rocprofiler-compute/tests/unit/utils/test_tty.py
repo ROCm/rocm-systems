@@ -22,11 +22,13 @@ from utils.tty import (
     has_time_data,
     print_operator_node,
     show_all,
+    show_call_tree,
     show_operator_summary,
 )
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
+    rollup_node_stats,
 )
 from utils.utils_common import is_gfx115x, is_gfx1250
 
@@ -790,6 +792,90 @@ def test_print_operator_node_long_kernel_wraps(capsys):
     ]
     assert wrapped_kernel_lines
     assert not any(line.strip().startswith("(id 7)") for line in output_lines)
+
+
+def test_print_operator_node_folds_identical_children(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    parent = CallTreeNode(name="forward")
+    parent.invocation_ids.add("0")
+    parent.children = [first, second]
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    rollup_node_stats(parent)
+    print_operator_node(parent)
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 1
+    assert "calls: 2" in output
+    assert parent.children == [first, second]
+
+
+def test_show_call_tree_folds_identical_sibling_leaves(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    parent = CallTreeNode(name="forward")
+    parent.invocation_ids.add("0")
+    parent.children = [first, second]
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    rollup_node_stats(parent)
+    show_call_tree({"1": [parent]})
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 1
+    assert "calls: 2" in output
+    assert parent.children == [first, second]
+
+
+def test_show_call_tree_does_not_fold_roots_across_threads(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    show_call_tree({"1": [first], "2": [second]})
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 2
 
 
 # ---------------------------------------------------------------------------
