@@ -25,6 +25,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
+    rocjitsu_ip_discovery
     rocjitsu_pci
 )
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
@@ -91,7 +92,7 @@ if(RJ_INSTALL_TESTS)
         set(multiValueArgs COMMAND ENVIRONMENT LABELS)
         cmake_parse_arguments(
             ARG
-            ""
+            "RUN_SERIAL"
             "${oneValueArgs}"
             "${multiValueArgs}"
             ${ARGN}
@@ -119,6 +120,9 @@ if(RJ_INSTALL_TESTS)
         if(ARG_LABELS)
             list(JOIN ARG_LABELS ";" _labels)
             string(APPEND _props " \"LABELS\" \"${_labels}\"")
+        endif()
+        if(ARG_RUN_SERIAL)
+            string(APPEND _props " \"RUN_SERIAL\" \"TRUE\"")
         endif()
         if(ARG_ENVIRONMENT)
             list(JOIN ARG_ENVIRONMENT ";" _env)
@@ -160,6 +164,10 @@ if(RJ_INSTALL_TESTS)
     install(FILES "${RJ_INSTALL_CTEST_FILE}" DESTINATION ${RJ_INSTALL_TEST_DIR})
     install(
         FILES "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+        DESTINATION ${RJ_INSTALL_TEST_DIR}
+    )
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/tsan_hip_runtime.supp"
         DESTINATION ${RJ_INSTALL_TEST_DIR}
     )
 endif()
@@ -221,8 +229,8 @@ endfunction()
 # installed CTest tree. COMMAND is the normal build-tree command passed to
 # add_test(). INSTALL_COMMAND is optional and should use paths relative to the
 # installed test directory, e.g. bin/my_test or ${RJ_INSTALLED_BINDIR}/rocjitsu.
-# Shared properties TIMEOUT, SKIP_REGULAR_EXPRESSION, and LABELS are applied to
-# both registrations. ENVIRONMENT applies only to the build-tree test;
+# Shared properties TIMEOUT, SKIP_REGULAR_EXPRESSION, RUN_SERIAL, and LABELS are
+# applied to both registrations. ENVIRONMENT applies only to the build-tree test;
 # INSTALL_ENVIRONMENT adds to the default installed test environment, which
 # points installed tests at packaged configs, kernels, binaries, and runtimes.
 function(rj_add_test)
@@ -234,7 +242,13 @@ function(rj_add_test)
         INSTALL_ENVIRONMENT
         LABELS
     )
-    cmake_parse_arguments(ARG "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    cmake_parse_arguments(
+        ARG
+        "RUN_SERIAL"
+        "${oneValueArgs}"
+        "${multiValueArgs}"
+        ${ARGN}
+    )
     if(NOT ARG_NAME)
         message(FATAL_ERROR "rj_add_test requires NAME")
     endif()
@@ -272,6 +286,9 @@ function(rj_add_test)
         list(JOIN ARG_LABELS ";" _labels)
         set_tests_properties("${ARG_NAME}" PROPERTIES LABELS "${_labels}")
     endif()
+    if(ARG_RUN_SERIAL)
+        set_tests_properties("${ARG_NAME}" PROPERTIES RUN_SERIAL TRUE)
+    endif()
     if(ARG_ENVIRONMENT)
         list(JOIN ARG_ENVIRONMENT ";" _env)
         set_tests_properties("${ARG_NAME}" PROPERTIES ENVIRONMENT "${_env}")
@@ -291,6 +308,9 @@ function(rj_add_test)
         endif()
         if(ARG_LABELS)
             list(APPEND _install_args LABELS ${ARG_LABELS})
+        endif()
+        if(ARG_RUN_SERIAL)
+            list(APPEND _install_args RUN_SERIAL)
         endif()
         set(_install_env
             "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
@@ -376,6 +396,50 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME VfioGuestRunUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
+    )
+endif()
+
+add_test(
+    NAME RocjitsuVfioCapabilityCheck
+    COMMAND $<TARGET_FILE:rocjitsu_bin> --check-vfio-user
+)
+if(NOT ROCJITSU_ENABLE_VFIO)
+    set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+endif()
+
+add_test(
+    NAME CommandProcessorSdmaBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_cp_sdma_boundary.cmake
+)
+
+add_test(
+    NAME SdmaFrontendBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_sdma_frontend_boundary.cmake
+)
+
+add_test(
+    NAME MesFrontendBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_mes_frontend_boundary.cmake
+)
+
+add_test(
+    NAME GpuMemoryBackingBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_gpu_memory_boundary.cmake
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
@@ -436,6 +500,10 @@ add_executable(
     rocjitsu_tests
     rvsim_test.cpp
     amdgpu_vm_test.cpp
+    gpu_queue_registry_test.cpp
+    gpu_vm_pipeline_test.cpp
+    gpu_vm_service_test.cpp
+    gpu_vm_translation_test.cpp
     config_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -449,6 +517,15 @@ add_executable(
     cdna5_execution_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
+    completion_tracker_test.cpp
+    mes_engine_test.cpp
+    aql_packet_processor_test.cpp
+    pm4_ring_consumer_test.cpp
+    pm4_packet_processor_test.cpp
+    pm4_queue_controller_test.cpp
+    sdma_queue_scheduler_test.cpp
+    sdma_packet_processor_test.cpp
+    sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     lds_test.cpp
     l2_cache_test.cpp
@@ -566,6 +643,8 @@ add_executable(
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_f32_selection_test.cpp
+    simd_correctness/vop3p_pk_f32_scalar_sources_test.cpp
     simd_correctness/vop3p_pk_inline_constant_correctness_test.cpp
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
@@ -584,6 +663,7 @@ add_executable(
     pci/gpu_pci_device_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
+    pci/ip_block_model_test.cpp
 )
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
@@ -619,6 +699,13 @@ if(ROCJITSU_ENABLE_VFIO)
     target_link_libraries(
         rocjitsu_tests
         PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
+    )
+    # Serving now builds a whole machine, so a test that drives the server end to
+    # end needs a real config rather than a synthesized one.
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE
+            RJ_VFU_TEST_CONFIG_PATH="${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json"
     )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
@@ -1203,6 +1290,37 @@ if(RJ_ASAN_SHARED_LIBRARY)
     set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_ASAN_SHARED_LIBRARY}:")
 elseif(RJ_TSAN_SHARED_LIBRARY)
     set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_TSAN_SHARED_LIBRARY}:")
+endif()
+
+# ROCr retains process-global allocations after HIP and DBT guest processes
+# exit. DBT guests additionally need the ASan shadow gap unprotected so ROCr can
+# reserve its contiguous SVM aperture. RCCL has an external allocator/deallocator
+# mismatch. TSan cannot observe the shutdown of ROCr's process-lifetime worker
+# in short-lived DBT guests. Keep each compatibility override scoped to the
+# affected clients so the rest of each sanitizer suite retains full checking.
+set(RJ_HIP_ASAN_ENV)
+set(RJ_DBT_GUEST_ASAN_ENV)
+set(RJ_RCCL_ASAN_ENV)
+set(RJ_DBT_GUEST_TSAN_ENV)
+set(RJ_HIP_TSAN_ENV)
+set(RJ_HIP_TSAN_INSTALL_ENV)
+if(RJ_ENABLE_ASAN)
+    set(RJ_HIP_ASAN_ENV "ASAN_OPTIONS=detect_leaks=0")
+    set(RJ_DBT_GUEST_ASAN_ENV
+        "ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=0"
+    )
+    set(RJ_RCCL_ASAN_ENV "ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0")
+endif()
+if(RJ_ENABLE_TSAN)
+    set(RJ_DBT_GUEST_TSAN_ENV
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan_rocr_thread.supp"
+    )
+    set(RJ_HIP_TSAN_ENV
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan_hip_runtime.supp"
+    )
+    set(RJ_HIP_TSAN_INSTALL_ENV
+        "TSAN_OPTIONS=suppressions=tsan_hip_runtime.supp"
+    )
 endif()
 
 set(RJ_KMD_PRELOAD_ENV
@@ -1879,6 +1997,29 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
                 "DbtGuestRocminfoTest.ReportsWavefrontSize"
         )
             rj_set_default_runtime_dir("${_dbt_guest_rocminfo_test}")
+            if(RJ_DBT_GUEST_ASAN_ENV OR RJ_DBT_GUEST_TSAN_ENV)
+                get_property(
+                    _dbt_guest_rocminfo_env
+                    TEST "${_dbt_guest_rocminfo_test}"
+                    PROPERTY ENVIRONMENT
+                )
+                if(RJ_DBT_GUEST_ASAN_ENV)
+                    list(
+                        APPEND _dbt_guest_rocminfo_env
+                        "${RJ_DBT_GUEST_ASAN_ENV}"
+                    )
+                endif()
+                if(RJ_DBT_GUEST_TSAN_ENV)
+                    list(
+                        APPEND _dbt_guest_rocminfo_env
+                        "${RJ_DBT_GUEST_TSAN_ENV}"
+                    )
+                endif()
+                set_tests_properties(
+                    "${_dbt_guest_rocminfo_test}"
+                    PROPERTIES ENVIRONMENT "${_dbt_guest_rocminfo_env}"
+                )
+            endif()
         endforeach()
         message(
             STATUS
@@ -2091,6 +2232,7 @@ if(HSA_RUNTIME64)
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 60
+                ENVIRONMENT ${RJ_DBT_GUEST_ASAN_ENV}
                 INSTALL_COMMAND
                     "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                     "--config"
@@ -2098,6 +2240,7 @@ if(HSA_RUNTIME64)
                     "--"
                     "bin/hsa_hooks_test"
                     "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                INSTALL_ENVIRONMENT ${RJ_DBT_GUEST_ASAN_ENV}
             )
         endif()
 
@@ -2233,6 +2376,7 @@ if(HSA_RUNTIME64)
                     --gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 300
+                ENVIRONMENT ${RJ_DBT_GUEST_ASAN_ENV}
                 INSTALL_COMMAND
                     "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                     "--config"
@@ -2240,6 +2384,7 @@ if(HSA_RUNTIME64)
                     "--"
                     "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
                     "--gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}"
+                INSTALL_ENVIRONMENT ${RJ_DBT_GUEST_ASAN_ENV}
             )
         endforeach()
 
@@ -2374,12 +2519,30 @@ if(HSA_RUNTIME64)
             if(RJ_DBI_TIMEOUT)
                 set(_timeout TIMEOUT ${RJ_DBI_TIMEOUT})
             endif()
+            set(_run_serial)
+            if(
+                policy STREQUAL "Hardware"
+                AND (
+                    NOT RJ_DBI_SIM
+                    OR RJ_ENABLE_ASAN
+                    OR RJ_ENABLE_UBSAN
+                    OR RJ_ENABLE_TSAN
+                    OR RJ_ENABLE_MSAN
+                )
+            )
+                # Real-device queue teardown is unsafe to overlap across these
+                # short-lived processes. Sanitized simulator dispatches are
+                # CPU-heavy enough that suite-wide parallelism can starve one
+                # past its otherwise generous timeout.
+                set(_run_serial RUN_SERIAL)
+            endif()
             rj_add_test(
                 NAME "${_ctest_name}"
                 COMMAND ${_command}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 INSTALL_COMMAND ${_install_command}
                 ${_timeout}
+                ${_run_serial}
             )
         endfunction()
 
@@ -2698,12 +2861,26 @@ if(HSA_RUNTIME64)
                 if(RJ_DBIP_TIMEOUT)
                     set(_timeout TIMEOUT ${RJ_DBIP_TIMEOUT})
                 endif()
+                set(_run_serial)
+                if(
+                    policy STREQUAL "Hardware"
+                    AND (
+                        NOT RJ_DBIP_SIM
+                        OR RJ_ENABLE_ASAN
+                        OR RJ_ENABLE_UBSAN
+                        OR RJ_ENABLE_TSAN
+                        OR RJ_ENABLE_MSAN
+                    )
+                )
+                    set(_run_serial RUN_SERIAL)
+                endif()
                 rj_add_test(
                     NAME "${_ctest_name}"
                     COMMAND ${_command}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     INSTALL_COMMAND ${_install_command}
                     ${_timeout}
+                    ${_run_serial}
                 )
             endfunction()
 
@@ -3044,6 +3221,30 @@ if(RJ_ENABLE_HIP_TESTS)
         if(NOT ARG_NAME)
             set(ARG_NAME ${TEST_CASE})
         endif()
+        if(RJ_HIP_ASAN_ENV)
+            set(_has_asan_options FALSE)
+            foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
+                if(_env_entry MATCHES "^ASAN_OPTIONS=")
+                    set(_has_asan_options TRUE)
+                    break()
+                endif()
+            endforeach()
+            if(NOT _has_asan_options)
+                list(APPEND ARG_ENVIRONMENT ${RJ_HIP_ASAN_ENV})
+            endif()
+        endif()
+        if(RJ_HIP_TSAN_ENV)
+            set(_has_tsan_options FALSE)
+            foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
+                if(_env_entry MATCHES "^TSAN_OPTIONS=")
+                    set(_has_tsan_options TRUE)
+                    break()
+                endif()
+            endforeach()
+            if(NOT _has_tsan_options)
+                list(APPEND ARG_ENVIRONMENT ${RJ_HIP_TSAN_ENV})
+            endif()
+        endif()
         if(ARG_INSTALL_CONFIG)
             set(_install_config "${ARG_INSTALL_CONFIG}")
         else()
@@ -3089,6 +3290,8 @@ if(RJ_ENABLE_HIP_TESTS)
                 else()
                     list(APPEND _install_env "${_env_entry}")
                 endif()
+            elseif(_env_entry STREQUAL "${RJ_HIP_TSAN_ENV}")
+                list(APPEND _install_env "${RJ_HIP_TSAN_INSTALL_ENV}")
             else()
                 list(APPEND _install_env "${_env_entry}")
             endif()
@@ -3252,15 +3455,18 @@ if(RJ_ENABLE_HIP_TESTS)
         if(RJ_INSTALL_TESTS)
             rj_install_test_target(daemon_test)
         endif()
-        set(RJ_DAEMON_TESTS
+        set(RJ_DAEMON_HSA_TESTS
             RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
-            DaemonTest.ForkserverChildrenInitializeIndependentBackends
-            DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
             DaemonTest.HipMemcpyDeviceToDevice
             DaemonTest.TwoIndependentClients
+        )
+        set(RJ_DAEMON_TESTS
+            ${RJ_DAEMON_HSA_TESTS}
+            DaemonTest.ForkserverChildrenInitializeIndependentBackends
+            DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.InterposerDupReopenAfterPrimaryOverwriteRemote
             DaemonTest.InterposerDupSerializedReopenUnderContentionRemote
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
@@ -3270,6 +3476,7 @@ if(RJ_ENABLE_HIP_TESTS)
         # ROCr leaks also affect masked LDS reuse in daemon mode. Its TSan
         # case passes, so keep that coverage as well as regular builds.
         if(NOT RJ_ENABLE_ASAN)
+            list(APPEND RJ_DAEMON_HSA_TESTS DaemonTest.HipMaskedStreamLdsReuse)
             list(APPEND RJ_DAEMON_TESTS DaemonTest.HipMaskedStreamLdsReuse)
         endif()
         # Excluded under sanitizers for the reason given at its local-mode
@@ -3278,19 +3485,29 @@ if(RJ_ENABLE_HIP_TESTS)
         # infers and the allocations LSan finds are that library's.
         if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
             list(
+                APPEND RJ_DAEMON_HSA_TESTS
+                DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
+            )
+            list(
                 APPEND RJ_DAEMON_TESTS
                 DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
             )
         endif()
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
+            set(_daemon_test_env)
+            if(TC IN_LIST RJ_DAEMON_HSA_TESTS)
+                list(APPEND _daemon_test_env ${RJ_HIP_ASAN_ENV})
+            endif()
             rj_add_test(
                 NAME ${TC}
                 COMMAND daemon_test --gtest_filter=${TC}
                 TIMEOUT 120
                 LABELS daemon
+                ENVIRONMENT ${_daemon_test_env}
                 INSTALL_COMMAND
                     "bin/daemon_test"
                     "--gtest_filter=${TC}"
+                INSTALL_ENVIRONMENT ${_daemon_test_env}
             )
         endforeach()
 
@@ -3299,9 +3516,11 @@ if(RJ_ENABLE_HIP_TESTS)
             COMMAND daemon_test --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
             TIMEOUT 120
             LABELS daemon
+            ENVIRONMENT ${RJ_HIP_ASAN_ENV}
             INSTALL_COMMAND
                 "bin/daemon_test"
                 "--gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged"
+            INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV}
         )
 
         # --- RCCL collective test ---
@@ -3322,9 +3541,13 @@ if(RJ_ENABLE_HIP_TESTS)
                     COMMAND daemon_test --gtest_filter=${TC}
                     TIMEOUT 180
                     LABELS daemon rccl
+                    ENVIRONMENT ${RJ_RCCL_ASAN_ENV} ${RJ_HIP_TSAN_ENV}
                     INSTALL_COMMAND
                         "bin/daemon_test"
                         "--gtest_filter=${TC}"
+                    INSTALL_ENVIRONMENT
+                        ${RJ_RCCL_ASAN_ENV}
+                        ${RJ_HIP_TSAN_INSTALL_ENV}
                 )
             endforeach()
             message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
@@ -3396,6 +3619,7 @@ if(RJ_ENABLE_HIP_TESTS)
                     CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
                     NAME "HipLdsCopyDbtTest.${TC}"
                     TIMEOUT 120
+                    ENVIRONMENT ${RJ_DBT_GUEST_ASAN_ENV}
                 )
             endforeach()
             foreach(
@@ -3411,7 +3635,9 @@ if(RJ_ENABLE_HIP_TESTS)
                     CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
                     NAME "HipKittensBf16MatmulDbtTest.${TC}"
                     TIMEOUT 240
-                    ENVIRONMENT "ROCJITSU_HIPKITTENS_KERNEL_DIR=${KERNEL_OUTPUT_DIR}"
+                    ENVIRONMENT
+                        ${RJ_DBT_GUEST_ASAN_ENV}
+                        "ROCJITSU_HIPKITTENS_KERNEL_DIR=${KERNEL_OUTPUT_DIR}"
                 )
             endforeach()
         endif()
@@ -3508,12 +3734,14 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         NAME "CvtNarrow.AllTests"
         COMMAND ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} -- ${CVT_NARROW_BIN}
         TIMEOUT 300
+        ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${RJ_HIP_TSAN_ENV}
         INSTALL_COMMAND
             "\${RJ_INSTALLED_BINDIR}/rocjitsu"
             "--config"
             "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
             "--"
             "bin/hip_cvt_narrow_test"
+        INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${RJ_HIP_TSAN_INSTALL_ENV}
     )
 endif()
 

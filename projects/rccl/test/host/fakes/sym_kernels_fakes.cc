@@ -20,6 +20,7 @@ ASSERT_HOOK_MATCHES_PROD(g_symkDynamicSmemKernelMask, ncclSymkDynamicSmemKernelM
 ASSERT_HOOK_MATCHES_PROD(g_symkGetKernelIndex, ncclSymkGetKernelIndex);
 ASSERT_HOOK_MATCHES_PROD(g_symkKernelIdToString, ncclSymkKernelIdToString);
 ASSERT_HOOK_MATCHES_PROD(g_symkMakeDevWork, ncclSymkMakeDevWork);
+ASSERT_HOOK_MATCHES_PROD(g_symkFinalize, ncclSymkFinalize);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 ncclSymRegType_t g_symRegType = ncclSymSendNonregRecvNonreg;
@@ -86,6 +87,10 @@ void* ncclSymkKernelList[ncclSymkKernelId_Count] = {nullptr};
 void* ncclSymkKernelListProfile[ncclSymkKernelId_Count] = {nullptr};
 int ncclSymkKernelMaxDynamicSmem[ncclSymkKernelId_Count] = {0};
 
+static ncclResult_t DefaultSymkFinalize(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize = DefaultSymkFinalize;
+ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_symkFinalize(comm); }
+
 void ResetSymKernelsFakes() {
   g_symRegType = ncclSymSendNonregRecvNonreg;
   g_getSymRegTypeResult = ncclSuccess;
@@ -104,4 +109,5 @@ void ResetSymKernelsFakes() {
     ncclSymkKernelListProfile[i] = nullptr;
     ncclSymkKernelMaxDynamicSmem[i] = 0;
   }
+  g_symkFinalize = DefaultSymkFinalize;
 }

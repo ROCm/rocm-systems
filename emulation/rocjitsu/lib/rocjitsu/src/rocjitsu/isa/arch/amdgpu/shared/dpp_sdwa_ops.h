@@ -16,6 +16,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -711,6 +712,102 @@ inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
 
 inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf);
 
+/// @brief Return the enabled output modifier for the SDWA result format.
+template <ResultFormat Format, typename Inst>
+inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
+  if constexpr (Format != ResultFormat::NONE && requires {
+                  inst.sdwa_omod_;
+                  inst.inst_.src0;
+                }) {
+    if (inst.inst_.src0 != SRC_SDWA)
+      return 0;
+    const uint32_t denorm_mode = (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16)
+                                     ? wf.fp_denorm_mode_f16_f64()
+                                     : wf.fp_denorm_mode_f32();
+    if constexpr (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16)
+      return fp_mode::effective_f16_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(),
+                                         Format == ResultFormat::PK_F16, inst.sdwa_omod_);
+    return fp_mode::effective_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(), inst.sdwa_omod_);
+  }
+  return 0;
+}
+
+/// @brief Apply SDWA scaling before narrowing a semantic F16 result.
+template <typename Inst>
+inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
+                                 bool fp16_ovfl) {
+  const uint32_t omod = output_modifier<ResultFormat::F16>(inst, wf);
+  if (omod == 0)
+    return util::f32_to_f16_mode(value, fp16_ovfl);
+  return fp_mode::finalize_omod_f16(pseudo_scalar::round_f16_result(value,
+                                                                    wf.fp_round_mode_f16_f64(),
+                                                                    omod, false, fp16_ovfl, false),
+                                    omod);
+}
+
+/// @brief Scale F32 bits with explicit rounding and OMOD output finalization.
+/// @details Powers of two only change the exponent, except at the format limits.
+/// Integer arithmetic keeps rounding and denormal handling independent of the host.
+inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
+  if (omod == 0)
+    return value;
+  const uint32_t sign = value & 0x80000000u;
+  int exponent = static_cast<int>((value >> 23) & 0xffu);
+  uint32_t significand = value & 0x007fffffu;
+  if (exponent == 255)
+    return significand == 0 ? value : value | 0x00400000u;
+  if (exponent == 0) {
+    if (significand == 0)
+      return 0;
+    exponent = 1;
+    while ((significand & 0x00800000u) == 0) {
+      significand <<= 1;
+      --exponent;
+    }
+  } else {
+    significand |= 0x00800000u;
+  }
+  exponent += omod == 3 ? -1 : static_cast<int>(omod);
+  if (exponent >= 255) {
+    const bool infinity =
+        round_mode == 0 || (round_mode == 1 && sign == 0) || (round_mode == 2 && sign != 0);
+    return sign | (infinity ? 0x7f800000u : 0x7f7fffffu);
+  }
+  if (exponent <= 0) {
+    const uint32_t shift = static_cast<uint32_t>(1 - exponent);
+    const uint32_t discarded = significand & ((1u << shift) - 1u);
+    uint32_t rounded = significand >> shift;
+    const uint32_t halfway = 1u << (shift - 1);
+    const bool increment =
+        round_mode == 0
+            ? discarded > halfway || (discarded == halfway && (rounded & 1u))
+            : discarded != 0 && ((round_mode == 1 && sign == 0) || (round_mode == 2 && sign != 0));
+    rounded += static_cast<uint32_t>(increment);
+    // Round first: a value just below minimum normal may round up to it.
+    return rounded == 0x00800000u ? sign | rounded : 0;
+  }
+  return sign | (static_cast<uint32_t>(exponent) << 23) | (significand & 0x007fffffu);
+}
+
+/// @brief Scale a floating-point SDWA result before destination placement.
+template <ResultFormat Format, typename Inst>
+inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t value) {
+  const uint32_t omod = output_modifier<Format>(inst, wf);
+  if (omod == 0)
+    return value;
+  if constexpr (Format == ResultFormat::F16) {
+    // F16 scaling precedes narrowing in the semantic result producer.
+    return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
+  } else if constexpr (Format == ResultFormat::PK_F16) {
+    const uint32_t low = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
+    const uint32_t high = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value >> 16), omod);
+    return low | (high << 16);
+  } else if constexpr (Format == ResultFormat::F32) {
+    return scale_f32(value, omod, wf.fp_round_mode_f32());
+  }
+  return value;
+}
+
 /// @brief Whether a generated SIMD path can store its result without a
 /// destination transform.
 template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst) {
@@ -718,18 +815,19 @@ template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst
                   inst.inst_.src0;
                   inst.sdwa_dst_sel_;
                   inst.sdwa_clamp_;
+                  inst.sdwa_omod_;
                 }) {
     return inst.inst_.src0 != amdgpu::SRC_SDWA ||
-           (inst.sdwa_dst_sel_ == DWORD && !inst.sdwa_clamp_);
+           (inst.sdwa_dst_sel_ == DWORD && !inst.sdwa_clamp_ && !inst.sdwa_omod_);
   }
   return true;
 }
 
 /// @brief Store one semantic result with destination modifiers applied.
 ///
-/// Destination preservation and optional clamp are part of one architectural
-/// write.
-template <bool ApplyFloatClamp, typename Inst, typename Op>
+/// Scaling, destination preservation and optional clamp are part of one
+/// architectural write.
+template <ResultFormat Format, typename Inst, typename Op>
 inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
                        uint32_t value) {
   if constexpr (requires {
@@ -741,7 +839,8 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
                 }) {
     if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
         inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
-      const bool clamp = ApplyFloatClamp && inst.sdwa_clamp_;
+      value = scale_result<Format>(inst, wf, value);
+      const bool clamp = Format != ResultFormat::NONE && inst.sdwa_clamp_;
       const uint8_t update_byte_mask =
           sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
       const uint8_t observed_byte_mask =
@@ -756,10 +855,10 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
   amdgpu::RegisterAccess(wf).write_lane(op, lane, value);
 }
 
-template <bool ApplyFloatClamp, typename Inst, typename Op>
+template <ResultFormat Format, typename Inst, typename Op>
 inline void write_lane64(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
                          uint64_t value) {
-  (void)ApplyFloatClamp;
+  (void)Format;
   (void)inst;
   amdgpu::RegisterAccess(wf).write_lane64(op, lane, value);
 }

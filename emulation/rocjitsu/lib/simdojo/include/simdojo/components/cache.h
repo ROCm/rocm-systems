@@ -10,6 +10,7 @@
 #include "util/bit.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -77,6 +78,9 @@ enum class CoherenceState : uint8_t {
 struct CacheTag {
   uint64_t tag = 0;
   uint64_t coherence_epoch = 0; ///< Controller-defined lazy-invalidation generation.
+  /// Byte-validity mask for partial-line fills. Current cache geometries use
+  /// at most 128-byte lines, so two words cover every byte.
+  std::array<uint64_t, 2> valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
   uint32_t vmid = 0;
   bool valid = false;
   bool dirty = false;
@@ -112,6 +116,26 @@ public:
 
   Cache() : tags_(static_cast<size_t>(NumSets) * Associativity), touched_sets_(NumSets, 0) {
     static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
+    static_assert(LINE_SIZE <= 128, "Cache byte-validity mask supports lines up to 128 bytes");
+  }
+
+  /// @brief Return whether every byte in one line-relative range is present.
+  static bool bytes_valid(const CacheTag &tag, uint32_t offset, uint32_t size) {
+    assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
+    for (uint32_t byte = offset; byte < offset + size; ++byte)
+      if ((tag.valid_bytes[byte / 64] & (uint64_t{1} << (byte % 64))) == 0)
+        return false;
+    return true;
+  }
+
+  /// @brief Mark every byte of a newly allocated line absent.
+  static void clear_valid_bytes(CacheTag &tag) { tag.valid_bytes = {}; }
+
+  /// @brief Mark one line-relative byte range present.
+  static void mark_valid_bytes(CacheTag &tag, uint32_t offset, uint32_t size) {
+    assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
+    for (uint32_t byte = offset; byte < offset + size; ++byte)
+      tag.valid_bytes[byte / 64] |= uint64_t{1} << (byte % 64);
   }
 
   /// @brief Look up an address in the cache.
@@ -167,6 +191,7 @@ public:
           touched_sets_[set] = 1;
         t.tag = tag;
         t.coherence_epoch = 0;
+        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
         t.vmid = vmid;
         t.valid = true;
         t.dirty = false;
@@ -188,6 +213,7 @@ public:
 
     vt.tag = tag;
     vt.coherence_epoch = 0;
+    vt.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
     vt.vmid = vmid;
     vt.valid = true;
     vt.dirty = false;
@@ -259,6 +285,7 @@ public:
       const auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
         assert(offset + size <= LINE_SIZE);
+        assert(bytes_valid(t, offset, size) && "read_line called for absent bytes");
         std::memcpy(dst, line_data(set, w) + offset, size);
         return;
       }
@@ -297,6 +324,7 @@ public:
       if (t.valid && t.tag == tag && t.vmid == vmid) {
         assert(offset + size <= LINE_SIZE);
         std::memcpy(line_data(set, w) + offset, src, size);
+        mark_valid_bytes(t, offset, size);
         return;
       }
     }
@@ -313,10 +341,31 @@ public:
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid) {
         std::memcpy(line_data(set, w), data, LINE_SIZE);
+        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
         return;
       }
     }
     assert(false && "fill_line called on a miss");
+  }
+
+  /// @brief Fill only bytes that are absent from a resident partial line.
+  /// @details Preserves bytes already supplied by stores or earlier partial
+  /// reads while completing the line from a backing-level snapshot.
+  void fill_missing_bytes(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
+    uint32_t set = set_index(addr);
+    uint64_t tag = tag_bits(addr);
+    for (uint32_t w = 0; w < Associativity; ++w) {
+      auto &t = tag_at(set, w);
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
+        uint8_t *line = line_data(set, w);
+        for (uint32_t byte = 0; byte < LINE_SIZE; ++byte)
+          if (!bytes_valid(t, byte, 1))
+            line[byte] = data[byte];
+        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
+        return;
+      }
+    }
+    assert(false && "fill_missing_bytes called on a miss");
   }
 
   /// @brief Return a mutable pointer to the data for a cache line (must be a hit).
