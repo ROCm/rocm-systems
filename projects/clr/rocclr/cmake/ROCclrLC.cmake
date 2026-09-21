@@ -2,23 +2,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-find_package(amd_comgr 2.9 CONFIG
+find_package(amd_comgr 3.2 REQUIRED CONFIG
   PATHS
-    /opt/rocm/
+    ${ROCM_PATH}
     ${ROCM_INSTALL_PATH}
   PATH_SUFFIXES
     cmake/amd_comgr
     lib/cmake/amd_comgr)
-
-if (NOT amd_comgr_FOUND)
-  find_package(amd_comgr 3.0 REQUIRED CONFIG
-    PATHS
-      /opt/rocm/
-      ${ROCM_INSTALL_PATH}
-    PATH_SUFFIXES
-      cmake/amd_comgr
-      lib/cmake/amd_comgr)
-endif()
 
 get_target_property(_amd_comgr_lib_type amd_comgr TYPE)
 target_compile_definitions(rocclr PUBLIC)
@@ -27,12 +17,8 @@ if(_amd_comgr_lib_type STREQUAL "SHARED_LIBRARY")
 endif()
 target_link_libraries(rocclr PUBLIC amd_comgr)
 
-if(CLR_BUILD_HIP)
-  # Temporary hack for versioned comgr needed by hiprtc
-  file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")
-  list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
-  list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
-
-  add_definitions(-DHIP_MAJOR_VERSION=${HIP_VERSION_MAJOR})
-  add_definitions(-DHIP_MINOR_VERSION=${HIP_VERSION_MINOR})
+# Comgr DLL name for Windows dynamic loading
+if(WIN32)
+  set(COMGR_DLL_NAME "amd_comgr.dll" CACHE STRING "Windows Comgr DLL name for dynamic loading")
+  target_compile_definitions(rocclr PRIVATE COMGR_DLL_NAME="${COMGR_DLL_NAME}")
 endif()

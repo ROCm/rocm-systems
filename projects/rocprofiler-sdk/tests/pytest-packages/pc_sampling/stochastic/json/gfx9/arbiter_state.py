@@ -77,7 +77,7 @@ def validate_arbiter_state(snapshot):
     # According to Joe's slides, the misc_stall cannot be 0.
     # However, the condition representing this case fails for `transpose` application
     #   assert((samples['Arbiter_State_Stall_Misc'] == 0).all())
-    # Instead, I had to replace is with the condition belowe
+    # Instead, I had to replace is with the condition below
     #   misc_issue = 0 & misc_stall = 1 is not allowed
     assert not (
         snapshot["arb_state_issue_misc"] == 0 and snapshot["arb_state_stall_misc"] == 1

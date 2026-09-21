@@ -157,7 +157,7 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned in
 *  - Fine grain access supported on devices and host
 *  - HIP_VERSION >= 5.7
 */
-HIP_TEST_CASE(test_svm_shared_address_space_fine_grain_buffers) {
+HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_buffers) {
   const unsigned int num_elements = 1024;
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
@@ -166,9 +166,7 @@ HIP_TEST_CASE(test_svm_shared_address_space_fine_grain_buffers) {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {
-      fprintf(stderr, "Device %d doesn't support pcie atomic, Skipped\n", id);
-      REQUIRE(true);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     }
   }
 
@@ -247,7 +245,7 @@ HIP_TEST_CASE(test_svm_shared_address_space_fine_grain_buffers) {
 *  - System fine grain access supported on devices
 *  - HIP_VERSION >= 5.7
 */
-HIP_TEST_CASE(test_svm_shared_address_space_fine_grain_system) {
+HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
@@ -255,18 +253,14 @@ HIP_TEST_CASE(test_svm_shared_address_space_fine_grain_system) {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {
-      fprintf(stderr, "Device %d doesn't support pcie atomic, Skipped\n", id);
-      REQUIRE(true);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     }
 
     int pageableAccess = 0;
     // This need xnack+ on MiXXX. If xnack is off on MiXXX, try ENV HSA_XNACK=1
     HIP_CHECK(hipDeviceGetAttribute(&pageableAccess, hipDeviceAttributePageableMemoryAccess, id));
     if (!pageableAccess) {
-      fprintf(stderr, "Device %d doesn't support access to pageable address. Skipped\n", id);
-      REQUIRE(true);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     }
   }
 

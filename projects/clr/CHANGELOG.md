@@ -2,10 +2,158 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 7.12 for ROCm 7.12
+## HIP 10.1.0 for ROCm 10.1.0
+
+### Added
+* New HIP APIs
+    - Device Management: support for querying a device identifier.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+    - Device Management: support for API parity with corresponding CUDA API.
+      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
+
+## HIP 10.0.0 for ROCm 10.0.0
+
+### Added
+* New HIP APIs
+    - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.
+      * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
+    - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.
+      * `cooperative_groups::exclusive_scan` performs an exclusive prefix scan across the threads in a cooperative group. For each thread, the result is computed from the values of all preceding threads using a binary operation (addition by default), excluding the current thread's own value.
+      * `cooperative_groups::inclusive_scan` performs an inclusive prefix scan across the threads in a cooperative group. For each thread, the result includes the current thread's value in addition to the values of all preceding threads.
+* Added stream capture support for the following APIs, enabling `BatchMemOp` operations to be captured as graph nodes instead of executing immediately. Also improved `BatchMemOp` graph replay reliability through fixes to parameter handling and operation ordering, aligning behavior more closely with CUDA.
+    - `hipStreamWaitValue32`
+    - `hipStreamWaitValue64`
+    - `hipStreamWriteValue32`
+    - `hipStreamWriteValue64`
+    - `hipStreamBatchMemOp`
+* Support Non-Uniform Memory Access (NUMA) in `hipMemCreate` related APIs. HIP runtime added virtual memory support for `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent` APIs. This enables NUMA-aware memory allocations backed by host CPU NUMA pools and aligns HIP virtual memory management behavior with CUDA host and host-NUMA VMM expectations.
+
+### Resolved issues
+
+* Resolved library loading error messages thrown by `rocminfo` during driver initialization in WSL (Windows Subsystem for Linux) environment due to failure in loading the HSA runtime library `libhsa-runtime64.so`
+since it is not available in the dynamic linker search path. Since `rocminfo` already links against `libhsa-runtime64.so`, the runtime now correctly locates and loads the HSA runtime library using `RTLD_NOLOAD` option,
+enabling successful ROCm initialization, HSA agent discovery, and subsequent ROCm operations.
+* Fixed a segmentation fault in HIP queue idle detection caused by referencing a recycled completion signal. Idle state is now derived from a queue-owned signal with a safe lifetime.
+* Resolved incorrect NaN handling in the ordered not-equal comparison intrinsics `__hne` (for `__half`) and `__hne` (for `__hip_bfloat16`), along with their vector forms. Being *ordered* predicates, they now correctly return `false` when either operand is NaN.
+* Resolved memory-safety issues in the ROCm code object and ELF loader by adding validation checks during code object module loading, preventing segmentation faults and improving runtime stability.
+* Resolved a memory leak affecting mipmapped arrays when using `hipMemcpy2DToArray` with levels obtained via `hipGetMipmappedArrayLevel`. Mipmap level references are now properly released, ensuring that memory is correctly freed when `hipFreeMipmappedArray` is called.
+* Fixed a deadlock that could occur when using rocprofiler-sdk with ROCm-aware MVAPICH and MPICH. HIP runtime now performs profiler registration after dispatch table initialization, ensuring proper initialization ordering and guard release. This prevents hangs caused by reentrant initialization during profiler startup.
+* Fixed a deadlock caused by `hipMemMap`/`hipMemUnmap` operations on the null stream that could lead to hangs. The HIP runtime now implements proper synchronization to all devices with access to a mapped pointer before unmapping it.
+* Fixed an issue in `cooperative_groups::reduce()` that could cause incorrect results or kernel launch failures when block dimensions had .y or .z components not equal to 1.
+
+### Optimized
+
+* Improved `hipMemcpy2D()` and `hipMemcpy2DAsync()` performance for copy operations with very small row widths and large row counts.
+Previously, non-4-byte-aligned row or slice pitches could cause the runtime to issue a separate copy for each row, resulting in significant
+performance degradation for workloads such as 1-byte-wide transfers with millions of rows.
+These transfers are now handled using a single shader-based copy operation, dramatically reducing transfer times.
+Copy operations at or below the 256-row threshold are unchanged.
+* Improved `hipEventRecord` performance by using the `hipEventDisableTiming` flag to avoid unnecessary profiling when timing information is not required. Event operations are now coalesced to eliminate redundant barrier submissions, reducing runtime overhead and improving execution efficiency.
+* Improved batch copy performance: optimized `hipMemcpyBatchAsync` by splitting batch operations into per-device commands.
+    - Simplified `rocrCopyBufferBatch` by using a single `src_agent` per engine group (H2D, D2H, and D2D).
+    - Streamlined batch grouping:
+      * Removed the `AgentGroup/src_agent` mapping for D2D broadcasts.
+      * Processed `H2D` and `D2H` LINEAR operations directly, bypassing the broadcast map.
+      
+## HIP 8.0 for ROCm 8.0
+
+### Added
+* An optional `HIP_FORCE_API_VERSION` macro can be used to select an older version of the HIP APIs. For example, `HIP_FORCE_API_VERSION=600` selects the HIP 6.0 APIs. This macro must be defined before including `hip_runtime_api.h`.
+
+### Deprecated
+
+* `hipMemAdvise` is now an alias for `hipMemAdvise_v2`. To use the previous version of `hipMemAdvise`, define `HIP_FORCE_API_VERSION` as a non-zero value less than 800.
+
+## HIP 7.14 for ROCm 7.14
+
+### Added
+* New HIP APIs
+    - Execution Context Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipDeviceGetDevResource` returns the device resource of a given type for a device
+      * `hipDevSmResourceSplitByCount` splits SM resources into groups with at least a minimum SM count
+      * `hipDevSmResourceSplit` splits SM resources into groups with configurable per-group parameters
+      * `hipDevResourceGenerateDesc` generates a resource descriptor from one or more device resources
+      * `hipGreenCtxCreate` creates a green context from a resource descriptor
+      * `hipExecutionCtxDestroy` destroys an execution context
+      * `hipDeviceGetExecutionCtx` returns the default execution context for a device
+      * `hipExecutionCtxStreamCreate` creates a stream on an execution context with specified flags and priority
+      * `hipExecutionCtxGetDevResource` returns the device resource of a given type for an execution context
+      * `hipExecutionCtxGetDevice` returns the device associated with an execution context
+      * `hipExecutionCtxGetId` returns a unique identifier for an execution context
+      * `hipStreamGetDevResource` returns the device resource of a given type for a stream
+      * `hipExecutionCtxRecordEvent` records an event on an execution context
+      * `hipExecutionCtxSynchronize` blocks until all work on an execution context has completed
+      * `hipExecutionCtxWaitEvent` makes an execution context wait on an event
+    - Module Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
+      * `hipLibraryGetManaged` returns the host pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
+    - Memory Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipMemDiscardBatchAsync` discards a batch of memory ranges asynchronously, allowing the runtime to reclaim resources. Mirrors `cudaMemDiscardBatchAsync`.
+      * `hipDrvMemDiscardBatchAsync` driver API variant of `hipMemDiscardBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardBatchAsync`.
+      * `hipMemDiscardAndPrefetchBatchAsync` combines discard and prefetch in a single call, enabling the runtime to optimize data movement. Mirrors `cudaMemDiscardAndPrefetchBatchAsync`.
+      * `hipDrvMemDiscardAndPrefetchBatchAsync` driver API variant of `hipMemDiscardAndPrefetchBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardAndPrefetchBatchAsync`.
+* Support for non-Host Transparent (nHT) fabric handles in HIP Virtual Memory Management (VMM) APIs, enabling efficient cross-device memory sharing over IFoE (Infinity Fabric over Ethernet).
+This allows peer devices to directly access shared memory without host staging, reducing data movement overhead and improving performance for multi-GPU and distributed workloads.
+* Introduced an exported no-op function `__hipOnError(void *err_info)`, invoked from `HIP_UPDATE_ERROR_STATE` when an API returns a non-success status,
+enabling debuggers to set breakpoints on a stable symbol. The symbol is exported on ELF (Executable and Linkable Format) platforms via a version script and on Windows via amdhip.def.
+The `err_info` parameter is a pointer to a struct containing the error code, name, and descriptive string.
+
+### Resolved issues
+
+* Resolved an issue where graph allocations that escape their originating graph (i.e., allocation nodes without a corresponding free node) failed to remain valid after the graph and its executable
+instance were destroyed. Allocations created via stream capture were not properly tracked and were incorrectly classified as reusable, leading to premature unmapping during `hipGraphExecDestroy` and resulting in memory faults on subsequent access.
+* Resolved an issue where an error propagated from the `hipModuleGetFunction` API, causing behavior inconsistent with the corresponding CUDA API. The HIP runtime now suppresses this propagated error to align with expected behavior.
+* Resolved an issue where a stream entering an invalid state during capture could not recover, even after calling `hipStreamEndCapture`. The stream failed to return to a clean (None) state,
+and subsequent calls to `hipStreamIsCapturing` continued to report an invalidated state, preventing reuse. This behavior is now aligned with CUDA semantics.
+* Resolved a race condition in HIP graph nodes. The HIP runtime now correctly manages graph node IDs within each `GraphNode` constructor to ensure thread safety.
+This prevents duplicate ID assignment when multiple threads concurrently construct graph nodes (for example, during XLA command-buffer fusion).
+As a result, nodes are no longer silently dropped from dispatched packets, eliminating uninitialized output buffers and preventing out-of-bounds or corrupted values.
+* Fixed a segmentation fault in the `hipMemRetainAllocationHandle` API when a pointer allocated with `hipMalloc` was passed. The HIP runtime now validates non-VMM allocations and returns an appropriate error instead.
+* Resolved an issue where `__managed__` global variables were misclassified by the `hipPointerGetAttributes` API both before and after kernel access. This behavior has been corrected to align with CUDA semantics.
+* Resolved an issue in the classic graph execution path (RunOneNode / RunNodes) where missing synchronization for child graph nodes caused data races and incorrect results when executing graphs with child nodes under multi-stream parallelism.
+The HIP runtime now properly synchronizes child graph nodes within the execution path.
+* Fixed an issue in `hipGraphMemsetNode` that caused incorrect validation for flat allocations. For 2D `memsets`, the `userData` `width/height/depth` extents are only initialized by `hipMallocPitch` and `hipMalloc3D`;
+allocations from `hipMalloc` leave these fields unset, leading to spurious validation failures. The HIP runtime now skips `userData`-based checks when extents are zero and relies on `ihipMemset3D_validate`
+for accurate size validation. Additionally, the exec flag is propagated through `ihipGraphNodeSetParams` to ensure executable graph updates use the correct validation path.
+* Fixed a deadlock caused by `hipMemMap`/`hipMemUnmap` operations on the null stream that could lead to hangs. The HIP runtime now implements proper synchronization to all devices with access to a mapped pointer before unmapping it.
+* Resolved an issue where streams created within an execution context remained usable after the context was destroyed, which did not align with CUDA behavior. The HIP runtime now flags such streams as detached when their execution context is destroyed and returns `hipErrorStreamDetached` if they are subsequently used.
+
+### Optimized
+
+* Enhanced HIP graph replay performance for asynchronous memory allocations. HIP graph replay now reduces overhead for graphs that interleave asynchronous memory allocations with compute. Allocation nodes no longer block during replay — physical memory is reused across nodes instead of being mapped and unmapped on each launch, eliminating the gaps between kernels this pattern previously caused.
+* Enhanced debug information for illegal memory access errors. In multi-node and multi-GPU environments, it can be difficult to identify the source of a fault.
+The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fault error messages, improving issue identification and debugging.
+
+## Known issues
+
+* Kernels using `cooperative_groups::reduce()` with block dimensions whose .y or .z component is different from 1 may produce incorrect results or fail to launch.
+
+## HIP 7.13 for ROCm 7.13
 
 ### Added
 
+* New HIP APIs
+    - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+* New device attribute `hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported`, indicating support for GPU Direct RDMA when using HIP VMM. This attribute corresponds to CUDA’s `CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`.
+
+### Resolved issues
+
+* A segmentation fault that occurred in child graphs during the graph‑launch phase. The issue originated from the entire graph being launched solely according to the parent graph’s scheduling logic. The HIP runtime now introduces a per‑graph segment‑scheduling control flag and propagates the parent graph’s scheduling mode to its child graphs, ensuring consistent scheduling behavior (classic vs. segment) and preventing failures when the parent falls back to classic scheduling.
+* A segmentation fault caused by passing a null pointer to the hipMemGetAddressRange API. The function now handles null pointers correctly, matching the behavior of the corresponding CUDA API.
+
+### Changed
+
+* `__reduce_and_sync()`, `__reduce_or_sync()` and `__reduce_xor_sync()` now provide a consistent behavior for all masks values and with CUDA. Before, some masks would be translated to bitwise operations but other would not (like the ones containing "holes"). Now all masks cause bitwise instructions to be emitted. This is a change of behavior from previous versions.
+
+### Optimized
+
+* Improves HIP runtime error logging when an application's fat binary does not include a compatible code object for the detected GPU architecture, offering clearer guidance to rebuild with the appropriate `--offload-arch=gfxXXXX` option.
+
+* Enables in‑memory and background‑thread asynchronous logging in the HIP runtime by default to improve overall logging capability. This behavior can be disabled by setting the environment variable `AMD_LOG_ASYNC=0`.
+
+## HIP 7.12 for ROCm 7.12
+
+### Added
 * New HIP APIs
     - Library Management
     Support for the following APIs for parity with the corresponding CUDA APIs.
@@ -25,6 +173,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP device attributes
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
+
+### Removed
+* roc-obj* tools and Perl dependency.
 
 ### Resolved issues
 
@@ -69,6 +221,16 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 * Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
 * Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
 
+## HIP 7.2.4 for ROCm 7.2.4
+
+### Resolved issues
+
+* Fixed H2D memory copy latency regression in CPX mode. HIP runtime synchronization behavior has been corrected on AMD Instinct MI300 Series GPUs in CPX mode, restoring latency to previous levels for inference workloads that run multiple HIP streams with concurrent memory copies.
+
+### Optimized
+
+* Reduced `hipGraphLaunch` latency for multi-list graphs. The HIP runtime’s graph dispatch mechanism has been optimized, reducing launch latency for workloads using `hipGraphLaunch` with multi-list graph topologies.
+
 ## HIP 7.2.1 for ROCm 7.2.1
 
 ### Resolved issues
@@ -99,6 +261,7 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
     - `hipOccupancyAvailableDynamicSMemPerBlock` returns dynamic shared memory available per block when launching numBlocks blocks on CU.
     - `hipMemSetMemPool`        Sets the current memory pool for a memory location and allocation type
     - `hipMemGetMemPool`        Gets the current memory pool for a memory location and of a particular allocation type
+    - `hipMemPrefetchBatchAsync` Prefetches a batch of memory ranges to the specified locations
 * New HIP flags
     - `hipMemLocationTypeHost`, enables handling virtual memory management in host memory location, in addition to device memory.
     - Support for flags in `hipGetProcAddress`, enables searching for the per-thread version symbols.
@@ -108,12 +271,12 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 
 ### Resolved issues
 
-* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties. 
+* Corrected the calculation of the value of maximum shared memory per multiprocessor, in HIP device properties.
 
 ### Optimized
 
 * Graph node scaling:
-HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations. 
+HIP runtime implements optimized doorbell ring mechanism for certain topologies of graph execution. It enables efficient batching of graph nodes. This enhancement provides better alignment with CUDA Graph optimizations.
 HIP also adds a new performance test for HIP graphs with programmable topologies to measure graph performance across different structures. The test evaluates graph instantiation time, first launch time, repeat launch times, and end-to-end execution for various graph topologies. The test implements comprehensive timing measurements including CPU overhead and device execution time.
 * Back memory set (`memset`) optimization:
 HIP runtime now implements a back memory set (memset) optimization to improve how `memset` nodes are processed during graph execution. This enhancement specifically handles varying number of AQL (Architected Queue Language) packets for `memset` graph node due to graph node set params for AQL batch submission approach.

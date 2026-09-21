@@ -1,35 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "link_map.hpp"
-#include "core/common.hpp"
+#include "common/path.hpp"
 #include "core/config.hpp"
-#include "core/timemory.hpp"
-
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 
-#include <cstdint>
 #include <dlfcn.h>
 #include <link.h>
 #include <set>
@@ -68,7 +45,7 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -139,7 +116,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        LOG_DEBUG("[linkmap][{}]: {}", filepath::basename(_name), itr.real());
+        LOG_DEBUG("[linkmap][{}]: {}", path::filename(_name), itr.real());
     }
 
     for(const auto& itr : _excl_chain)
@@ -165,16 +142,16 @@ link_file::operator<(const link_file& _rhs) const
     return (_lhs_real < _rhs_real);
 }
 
-std::string_view
+std::string
 link_file::base() const
 {
-    return std::string_view{ filepath::basename(name) };
+    return path::filename(name);
 }
 
 std::string
 link_file::real() const
 {
-    return filepath::realpath(name, nullptr, false);
+    return path::realpath(name);
 }
 }  // namespace binary
 }  // namespace rocprofsys

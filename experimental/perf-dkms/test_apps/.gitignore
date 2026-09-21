@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+*.o
+*.a
+
+# Executables
+valu_heavy/valu_heavy
+salu_heavy/salu_heavy
+lds_basic/lds_basic
+lds_conflicts/lds_conflicts
+smem/smem
+buffer_read/buffer_read
+buffer_write/buffer_write
+flat_memory/flat_memory
+mem_sizes/mem_sizes
+cache_hit/cache_hit
+cache_miss/cache_miss
+wave_modes/wave_modes
+waits_stalls/waits_stalls
+basic_activity/basic_activity
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt

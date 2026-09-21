@@ -74,6 +74,9 @@ class DeallocationNotifierTest : public TestBase {
 
   // @Brief: Tests deallocation notifier callbacks.
   void TestDeallocationNotifier(void);
+
+  // @Brief: Tests deallocation notifier callbacks for vmem allocations.
+  void TestDeallocationNotifierVmem(void);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_DEALLOCATION_NOTIFIER_H_

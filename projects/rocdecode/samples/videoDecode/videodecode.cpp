@@ -84,6 +84,7 @@ int main(int argc, char **argv) {
     bool b_extract_sei_messages = false;
     bool b_generate_md5 = false;
     bool b_md5_check = false;
+    bool b_md5_check_failed = false;
     bool b_flush_frames_during_reconfig = true;
     Rect crop_rect = {};
     Rect *p_crop_rect = nullptr;
@@ -279,8 +280,8 @@ int main(int argc, char **argv) {
         }
 
         if(!viddec->CodecSupported(device_id, rocdec_codec_id, bit_depth)) {
-            std::cerr << "rocDecode doesn't support codec!" << std::endl;
-            return 0;
+            std::cerr << "Error: rocDecode doesn't support codec!" << std::endl;
+            return 1;
         }
         std::string device_name, gcn_arch_name;
         int pci_bus_id, pci_domain_id, pci_device_id;
@@ -364,7 +365,7 @@ int main(int argc, char **argv) {
                 std::cerr << "Error: Failed to get Output Surface Info!" << std::endl;
                 break;
             }
-            for (int i = 0; i < n_frame_returned; i++) {
+            for (int i = 0; i < n_frame_returned && (!num_decoded_frames || n_frame < num_decoded_frames); i++) {
                 pframe = viddec->GetFrame(&pts);
                 if (b_generate_md5 && pframe) {
                     md5_generator->UpdateMd5ForFrame(pframe, surf_info);
@@ -374,11 +375,11 @@ int main(int argc, char **argv) {
                 }
                 // release frame
                 viddec->ReleaseFrame(pts);
+                n_frame++;
             }
             auto end_time = std::chrono::high_resolution_clock::now();
             auto time_per_decode = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             total_dec_time += time_per_decode;
-            n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
             if (num_decoded_frames && num_decoded_frames <= n_frame) {
                 break;
@@ -388,6 +389,10 @@ int main(int argc, char **argv) {
         n_frame += viddec->GetNumOfFlushedFrames();
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::cout << "info: avg decoding time per picture: " << total_dec_time / n_pic_decoded << " ms" <<std::endl;
             std::cout << "info: avg decode FPS: " << (n_pic_decoded / total_dec_time) * 1000 << std::endl;
@@ -429,6 +434,7 @@ int main(int argc, char **argv) {
                     std::cout << "MD5 digest matches the reference MD5 digest: ";
                 } else {
                     std::cout << "MD5 digest does not match the reference MD5 digest: ";
+                    b_md5_check_failed = true;
                 }
                 std::cout << ref_md5_string.c_str() << std::endl;
                 ref_md5_file.close();
@@ -449,5 +455,5 @@ int main(int argc, char **argv) {
       exit(1);
     }
 
-    return 0;
+    return b_md5_check_failed ? 1 : 0;
 }

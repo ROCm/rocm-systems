@@ -245,8 +245,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipGraphAddMemsetNode_ptr = nullptr;
   void* hipGraphAddMemcpyNode_ptr = nullptr;
 
@@ -341,8 +339,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipGraphMemsetNodeSetParams_ptr = nullptr;
   void* hipGraphMemsetNodeGetParams_ptr = nullptr;
   void* hipGraphMemcpyNodeSetParams_ptr = nullptr;
@@ -1258,8 +1254,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipGraphExecMemsetNodeSetParams_ptr = nullptr;
   void* hipGraphExecMemcpyNodeSetParams_ptr = nullptr;
 

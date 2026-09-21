@@ -66,9 +66,9 @@ bool is_rocprofiler_metrics_path_set() {
 rdc_status_t rdc_module_init(uint64_t /*flags*/) {
   if (is_rocp_disabled()) {
     // rocprofiler does NOT work in gtest.
-    // GTest starts up multiple instances of the progam under test,
+    // GTest starts up multiple instances of the program under test,
     // however HSA does not allow for multiple instances. Since hsa_init() is called at the very
-    // top of RdcRocpBase constructor - easiest to disable it alltogether when RDC_DISABLE_ROCP is
+    // top of RdcRocpBase constructor - easiest to disable it altogether when RDC_DISABLE_ROCP is
     // set.
     //
     // We cannot rely on GTEST_DECLARE_bool_ variable because RDC is compiled

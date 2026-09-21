@@ -34,8 +34,6 @@
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipGraphMemsetNodeGetParams_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
   LinearAllocGuard2D<int> alloc(1, 1);
   hipMemsetParams params = {};
   params.dst = alloc.ptr();

@@ -19,7 +19,7 @@
 namespace amd::device {
 
 //! Blit Manager Abstraction class
-class BlitManager : public amd::HeapObject {
+class BlitManager {
  public:
   //! HW accelerated setup
   union Setup {
@@ -147,7 +147,17 @@ class BlitManager : public amd::HeapObject {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+  ) const = 0;
+
+  //! Copies pageable host-to-device operations in a batch
+  virtual bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const = 0;
+
+  //! Copies device-to-pageable-host operations in a batch
+  virtual bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
   ) const = 0;
 
   //! Copies an image object to a buffer object
@@ -211,6 +221,13 @@ class BlitManager : public amd::HeapObject {
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const = 0;
 
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const = 0;
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const = 0;
 
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(
@@ -345,7 +362,17 @@ class HostBlitManager : public device::BlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+  ) const;
+
+  //! Copies pageable host-to-device operations in a batch
+  virtual bool WriteBufferBatch(
+      const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
+  ) const;
+
+  //! Copies device-to-pageable-host operations in a batch
+  virtual bool ReadBufferBatch(
+      const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
   ) const;
 
   //! Copies an image object to a buffer object

@@ -67,6 +67,9 @@ size_t amd_dbgapi_get_build_id();
 #include <cmath>
 #include <cstdint>
 #include <tuple>
+#include <array>
+#include <utility>
+#include <type_traits>
 #else
 #include <math.h>
 #include <stdint.h>
@@ -165,15 +168,14 @@ __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
 
 typedef int hipLaunchParm;
 
-template <std::size_t n, typename... Ts,
-          typename std::enable_if<n == sizeof...(Ts)>::type* = nullptr>
-void pArgs(const std::tuple<Ts...>&, void*) {}
+template <typename... Formals, typename... Actuals>
+std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...),
+                                             Actuals... actuals) {
+  static_assert(sizeof...(Formals) == sizeof...(Actuals), "Argument Count Mismatch");
+  return {std::move(actuals)...};
+}
 
-template <std::size_t n, typename... Ts,
-          typename std::enable_if<n != sizeof...(Ts)>::type* = nullptr>
-void pArgs(const std::tuple<Ts...>& formals, void** _vargs) {
-  using T = typename std::tuple_element<n, std::tuple<Ts...>>::type;
-
+template <typename T> constexpr bool validateArgType() {
   static_assert(!std::is_reference<T>{},
                 "A __global__ function cannot have a reference as one of its "
                 "arguments.");
@@ -182,30 +184,38 @@ void pArgs(const std::tuple<Ts...>& formals, void** _vargs) {
                 "Only TriviallyCopyable types can be arguments to a __global__ "
                 "function");
 #endif
-  _vargs[n] = const_cast<void*>(reinterpret_cast<const void*>(&std::get<n>(formals)));
-  return pArgs<n + 1>(formals, _vargs);
+  return !std::is_reference<T>{} && std::is_trivially_copyable<T>{};
 }
 
-template <typename... Formals, typename... Actuals>
-std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...),
-                                             std::tuple<Actuals...>(actuals)) {
-  static_assert(sizeof...(Formals) == sizeof...(Actuals), "Argument Count Mismatch");
-  std::tuple<Formals...> to_formals{std::move(actuals)};
-  return to_formals;
+template <typename... Ts> constexpr bool validateArgs(void (*)(Ts...)) {
+  return (validateArgType<Ts>() && ... && true);
+}
+
+template <typename... Ts, size_t... Is>
+std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals,
+                                       __hip_internal::index_sequence<Is...>) {
+  return {(static_cast<void*>(&std::get<Is>(formals)))...};
+}
+
+template <typename... Ts> std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals) {
+  return pArgs(formals, __hip_internal::make_index_sequence<sizeof...(Ts)>());
 }
 
 #if defined(HIP_TEMPLATE_KERNEL_LAUNCH)
 template <typename... Args, typename F = void (*)(Args...)>
 void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
                         std::uint32_t sharedMemBytes, hipStream_t stream, Args... args) {
-  constexpr size_t count = sizeof...(Args);
-  auto tup_ = std::tuple<Args...>{args...};
-  auto tup = validateArgsCountType(kernel, tup_);
-  void* _Args[count];
-  pArgs<0>(tup, _Args);
-
+  validateArgs(kernel);
   auto k = reinterpret_cast<void*>(kernel);
-  hipLaunchKernel(k, numBlocks, dimBlocks, _Args, sharedMemBytes, stream);
+
+  if constexpr (std::is_same_v<F, void (*)(Args...)>) {
+    std::array<void*, sizeof...(Args)> ptrArgsArr{static_cast<void*>(&args)...};
+    hipLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream);
+  } else {
+    auto formals = validateArgsCountType(kernel, args...);
+    auto ptrArgsArr = pArgs(formals);
+    hipLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream);
+  }
 }
 #else
 #define hipLaunchKernelGGLInternal(kernelName, numBlocks, numThreads, memPerBlock, streamId, ...)  \
@@ -234,20 +244,17 @@ typedef struct dim3 {
 #pragma push_macro("__DEVICE__")
 #define __DEVICE__ static __device__ __forceinline__
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
-__DEVICE__ unsigned int __hip_get_thread_idx_x() { return __ockl_get_local_id(0); }
-__DEVICE__ unsigned int __hip_get_thread_idx_y() { return __ockl_get_local_id(1); }
-__DEVICE__ unsigned int __hip_get_thread_idx_z() { return __ockl_get_local_id(2); }
+__DEVICE__ unsigned int __hip_get_thread_idx_x() { return __builtin_amdgcn_workitem_id_x(); }
+__DEVICE__ unsigned int __hip_get_thread_idx_y() { return __builtin_amdgcn_workitem_id_y(); }
+__DEVICE__ unsigned int __hip_get_thread_idx_z() { return __builtin_amdgcn_workitem_id_z(); }
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
-__DEVICE__ unsigned int __hip_get_block_idx_x() { return __ockl_get_group_id(0); }
-__DEVICE__ unsigned int __hip_get_block_idx_y() { return __ockl_get_group_id(1); }
-__DEVICE__ unsigned int __hip_get_block_idx_z() { return __ockl_get_group_id(2); }
+__DEVICE__ unsigned int __hip_get_block_idx_x() { return __builtin_amdgcn_workgroup_id_x(); }
+__DEVICE__ unsigned int __hip_get_block_idx_y() { return __builtin_amdgcn_workgroup_id_y(); }
+__DEVICE__ unsigned int __hip_get_block_idx_z() { return __builtin_amdgcn_workgroup_id_z(); }
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-__DEVICE__ unsigned int __hip_get_block_dim_x() { return __ockl_get_local_size(0); }
-__DEVICE__ unsigned int __hip_get_block_dim_y() { return __ockl_get_local_size(1); }
-__DEVICE__ unsigned int __hip_get_block_dim_z() { return __ockl_get_local_size(2); }
+__DEVICE__ unsigned int __hip_get_block_dim_x() { return __builtin_amdgcn_workgroup_size_x(); }
+__DEVICE__ unsigned int __hip_get_block_dim_y() { return __builtin_amdgcn_workgroup_size_y(); }
+__DEVICE__ unsigned int __hip_get_block_dim_z() { return __builtin_amdgcn_workgroup_size_z(); }
 
 extern "C" __device__ __attribute__((const)) size_t __ockl_get_num_groups(unsigned int);
 __DEVICE__ unsigned int __hip_get_grid_dim_x() { return __ockl_get_num_groups(0); }
@@ -258,10 +265,37 @@ __DEVICE__ unsigned int __hip_get_grid_dim_z() { return __ockl_get_num_groups(2)
   __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
   __DEVICE__ unsigned int __get_##DIMENSION(void) { return FUNCTION; }
 
+// Give the (block-size bounded) built-in index accessors internal linkage so
+// that IPSCCP can attach the range() return attribute inferred from the
+// underlying __ockl_get_local_* / workgroup-size builtins. As linkonce_odr the
+// accessors are not exact definitions, so IPSCCP refuses to track their return
+// values; under full device LTO the missing range lets strided GEPs lose
+// inbounds, which blocks offset folding (extra v_lshl_add_u64, higher VGPR
+// pressure, lower occupancy). Only dimensions bounded by the block size
+// (threadIdx, blockDim) use this variant. Probe internal_linkage with a nested
+// __has_attribute check -- the combined "defined(__has_attribute) &&
+// __has_attribute(...)" form is not portable (see the GCC __has_attribute
+// docs) -- and fall back to the existing accessor when it is unavailable.
+#if defined(__has_attribute)
+#if __has_attribute(internal_linkage)
+#define __HIP_HAS_INTERNAL_LINKAGE 1
+#endif
+#endif
+
+#if defined(__HIP_HAS_INTERNAL_LINKAGE)
+#define __HIP_DEVICE_BUILTIN_INTERNAL(DIMENSION, FUNCTION)                                         \
+  __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
+  __attribute__((internal_linkage)) __DEVICE__ unsigned int __get_##DIMENSION(void) {              \
+    return FUNCTION;                                                                               \
+  }
+#else
+#define __HIP_DEVICE_BUILTIN_INTERNAL(DIMENSION, FUNCTION) __HIP_DEVICE_BUILTIN(DIMENSION, FUNCTION)
+#endif
+
 struct __hip_builtin_threadIdx_t {
-  __HIP_DEVICE_BUILTIN(x, __hip_get_thread_idx_x());
-  __HIP_DEVICE_BUILTIN(y, __hip_get_thread_idx_y());
-  __HIP_DEVICE_BUILTIN(z, __hip_get_thread_idx_z());
+  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_thread_idx_x());
+  __HIP_DEVICE_BUILTIN_INTERNAL(y, __hip_get_thread_idx_y());
+  __HIP_DEVICE_BUILTIN_INTERNAL(z, __hip_get_thread_idx_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
@@ -277,9 +311,9 @@ struct __hip_builtin_blockIdx_t {
 };
 
 struct __hip_builtin_blockDim_t {
-  __HIP_DEVICE_BUILTIN(x, __hip_get_block_dim_x());
-  __HIP_DEVICE_BUILTIN(y, __hip_get_block_dim_y());
-  __HIP_DEVICE_BUILTIN(z, __hip_get_block_dim_z());
+  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_block_dim_x());
+  __HIP_DEVICE_BUILTIN_INTERNAL(y, __hip_get_block_dim_y());
+  __HIP_DEVICE_BUILTIN_INTERNAL(z, __hip_get_block_dim_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
@@ -295,6 +329,8 @@ struct __hip_builtin_gridDim_t {
 };
 
 #undef __HIP_DEVICE_BUILTIN
+#undef __HIP_DEVICE_BUILTIN_INTERNAL
+#undef __HIP_HAS_INTERNAL_LINKAGE
 #pragma pop_macro("__DEVICE__")
 
 extern const __device__ __attribute__((weak)) __hip_builtin_threadIdx_t threadIdx;
@@ -341,9 +377,30 @@ __DEFINE_HCC_FUNC(group_size, blockDim)
 __DEFINE_HCC_FUNC(num_groups, gridDim)
 #pragma pop_macro("__DEFINE_HCC_FUNC")
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_global_id(unsigned int);
 inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_absolute_id(int dim) {
-  return (unsigned int)__ockl_get_global_id(dim);
+  unsigned int local_id, group_id, group_size;
+
+  switch (dim) {
+    case 0:
+      local_id = __builtin_amdgcn_workitem_id_x();
+      group_id = __builtin_amdgcn_workgroup_id_x();
+      group_size = __builtin_amdgcn_workgroup_size_x();
+      break;
+    case 1:
+      local_id = __builtin_amdgcn_workitem_id_y();
+      group_id = __builtin_amdgcn_workgroup_id_y();
+      group_size = __builtin_amdgcn_workgroup_size_y();
+      break;
+    case 2:
+      local_id = __builtin_amdgcn_workitem_id_z();
+      group_id = __builtin_amdgcn_workgroup_id_z();
+      group_size = __builtin_amdgcn_workgroup_size_z();
+      break;
+    default:
+      return 0;
+  }
+
+  return group_id * group_size + local_id;
 }
 
 #endif
@@ -355,13 +412,13 @@ inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_ab
 #pragma push_macro("__CUDA__")
 #define __CUDA__
 #include <__clang_cuda_math_forward_declares.h>
-#include <__clang_cuda_complex_builtins.h>
 // Workaround for using libc++ with HIP-Clang.
 // The following headers requires clang include path before standard C++ include path.
 // However libc++ include path requires to be before clang include path.
 // To workaround this, we pass -isystem with the parent directory of clang include
 // path instead of the clang include path itself.
 #include <include/cuda_wrappers/algorithm>
+#include <__clang_cuda_complex_builtins.h>
 #include <include/cuda_wrappers/complex>
 #include <include/cuda_wrappers/new>
 #undef __CUDA__

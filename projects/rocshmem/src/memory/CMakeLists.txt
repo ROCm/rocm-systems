@@ -33,11 +33,20 @@ target_sources(
     dlmalloc.cpp
 )
 
-# Add VMM POSIX allocator for ROCm 7.0+
-if(USE_HEAP_DEVICE_VMM_POSIX)
+# Add VMM POSIX allocator when the HIP version supports it (ROCm 7.2+)
+if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 2))
   target_sources(
     ${PROJECT_NAME}
     PRIVATE
       hip_allocator_vmm_posix.cpp
+  )
+endif()
+
+# Add VMM Fabric allocator when AMD SMI fabric support is available (ROCm 7.14+)
+if(HAVE_AMDSMI_GPU_FABRIC_INFO)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      hip_allocator_vmm_fabric.cpp
   )
 endif()

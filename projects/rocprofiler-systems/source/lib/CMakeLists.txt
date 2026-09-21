@@ -1,16 +1,20 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ----------------------------------------------------------------------------- #
 #
 # rocprofiler-systems: contains all instrumentation functionality
 #
 # rocprofiler-systems-dl: contains minimal symbols and dlopen's rocprofiler-systems
 #
-# rocprofiler-systems-user: contains symbols for user API
+# rocprofiler-systems-common-api: shared public API headers (rocprofsys_category_t,
+# rocprofsys_annotation_t)
+#
+# rocprofiler-systems-causal-api: minimal library backing ROCPROFSYS_CAUSAL_*
 #
 # ----------------------------------------------------------------------------- #
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
-    cmake_policy(SET CMP0115 NEW)
-endif()
+cmake_policy(SET CMP0115 NEW)
 
 set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 
@@ -40,7 +44,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
@@ -49,7 +52,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ucx>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-libva>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
@@ -63,8 +65,10 @@ target_link_libraries(
 #
 # ------------------------------------------------------------------------------#
 
+add_subdirectory(policies)
 add_subdirectory(common)
 add_subdirectory(core)
+add_subdirectory(backends)
 add_subdirectory(binary)
 add_subdirectory(logger)
 
@@ -74,7 +78,8 @@ add_subdirectory(logger)
 #
 # ------------------------------------------------------------------------------#
 
+add_subdirectory(rocprof-sys-common-api)
+add_subdirectory(rocprof-sys-causal-api)
 add_subdirectory(rocprof-sys)
 add_subdirectory(rocprof-sys-dl)
 add_subdirectory(rocprof-sys-rt)
-add_subdirectory(rocprof-sys-user)

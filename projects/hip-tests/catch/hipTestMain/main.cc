@@ -7,17 +7,11 @@
 #define CATCH_CONFIG_RUNNER
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
-#include <iostream>
 
 CmdOptions cmd_options;
 
 int main(int argc, char** argv) {
-  auto& context = TestContext::get(argc, argv);
-  if (context.skipTest()) {
-    // CTest uses this regex to figure out if the test has been skipped
-    std::cout << "HIP_SKIP_THIS_TEST" << std::endl;
-    return 0;
-  }
+  auto& context = TestContext::get();
 
   Catch::Session session;
 
@@ -69,6 +63,6 @@ int main(int argc, char** argv) {
   session.cli(cli);
 
   int out = session.run(argc, argv);
-  TestContext::get().cleanContext();
+  context.cleanContext();
   return out;
 }

@@ -107,8 +107,14 @@ size_t nsync    = 10;
 }  // namespace
 
 void
-run(int rank, int tid, hipStream_t stream, int argc, char** argv)
+run(int rank, int tid, int devid, hipStream_t stream, int argc, char** argv)
 {
+    // HIP tracks the active device per host thread, so each worker thread must
+    // select the same device its stream was created on. Otherwise kernel
+    // launches fail with "invalid resource handle" whenever a rank is mapped to
+    // a non-zero device (e.g. rank 1 -> device 1 under MPI).
+    HIP_API_CALL(hipSetDevice(devid));
+
     unsigned int M = 4960 * 2;
     unsigned int N = 4960 * 2;
     if(argc > 2) nitr = atoll(argv[2]);
@@ -228,7 +234,9 @@ main(int argc, char** argv)
 #else
     (void) size;
 #endif
-    // this is a temporary workaround in rocprof-sys when HIP + MPI is enabled
+    // Map each rank round-robin onto the available GPUs. When there are more
+    // ranks than devices, multiple ranks share a device (e.g. 2 ranks on 1 GPU
+    // both use device 0), so every rank performs GPU work under MPI.
     int ndevice = 0;
     int devid   = rank;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));
@@ -238,16 +246,14 @@ main(int argc, char** argv)
         devid = rank % ndevice;
         HIP_API_CALL(hipSetDevice(devid));
         printf("[transpose] Rank %i assigned to device %i\n", rank, devid);
-    }
-    if(rank == devid && rank < ndevice)
-    {
+
         std::vector<std::thread> _threads{};
         std::vector<hipStream_t> _streams(nthreads);
         for(size_t i = 0; i < nthreads; ++i)
             HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
         for(size_t i = 1; i < nthreads; ++i)
-            _threads.emplace_back(run, rank, i, _streams.at(i), argc, argv);
-        run(rank, 0, _streams.at(0), argc, argv);
+            _threads.emplace_back(run, rank, i, devid, _streams.at(i), argc, argv);
+        run(rank, 0, devid, _streams.at(0), argc, argv);
         for(auto& itr : _threads)
             itr.join();
         for(size_t i = 0; i < nthreads; ++i)

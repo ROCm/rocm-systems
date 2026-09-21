@@ -40,17 +40,18 @@ HIP_TEST_CASE(Unit_threadfence_system) {
   HIP_CHECK(hipGetDeviceCount(&num_gpus));
   REQUIRE(num_gpus > 0);
 
-  volatile int* data;
+  volatile int* data = nullptr;
   if (hipHostMalloc(&data, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
   }
 
   constexpr int init_data = 1000;
   *data = init_data;
 
-  volatile int* flag;
+  volatile int* flag = nullptr;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HIP_CHECK(hipHostFree((void*)data));
+    HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
   }
   *flag = 0;
 
@@ -73,17 +74,19 @@ HIP_TEST_CASE(Unit_threadfence_system) {
   // launch one kernel per device for the round robin
   for (; next_id < num_dev; ++next_id) {
     threads.push_back(std::thread([=]() {
-      HIP_CHECK(hipSetDevice(next_id - 1));
+      HIP_CHECK_THREAD(hipSetDevice(next_id - 1));
       hipLaunchKernelGGL(gpu_round_robin, dim_grid, dim_block, 0, 0x0, next_id, num_dev, num_iter,
                          data, flag);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK_THREAD(hipGetLastError());
+      HIP_CHECK_THREAD(hipDeviceSynchronize());
     }));
   }
 
   for (auto& t : threads) {
     t.join();
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   int expected_data = init_data + num_dev * num_iter;
   int expected_flag = num_dev * num_iter;

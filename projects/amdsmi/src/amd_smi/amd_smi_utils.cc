@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_utils.h"
 
@@ -32,8 +13,8 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <climits>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -42,12 +23,17 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <sstream>
+#include <string>
+#include <string_view>
 
+#include "amd_smi/impl/amd_smi_clk_testing.h"
+#include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -79,6 +65,24 @@ std::string trim(const std::string& s) {
     return leftTrim(rightTrim(noNewLines));
   }
   return s;
+}
+
+std::string_view trim(std::string_view str) {
+  if (str.empty()) {
+    return str;
+  }
+
+  auto first_itr = std::find_if_not(
+      str.begin(), str.end(), [](unsigned char character) { return std::isspace(character); });
+  if (first_itr == str.end()) {
+    return {};
+  }
+
+  auto last_itr = std::find_if_not(str.rbegin(), str.rend(),
+                                   [](unsigned char character) { return std::isspace(character); });
+
+  return str.substr(static_cast<size_t>(first_itr - str.begin()),
+                    static_cast<size_t>(last_itr.base() - first_itr));
 }
 
 // Given original string and string to remove (removeMe)
@@ -272,25 +276,157 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
+                                   unsigned int* max_freq, unsigned int* min_freq) {
+  // Section header (and its GFXCLK/MCLK/FCLK alias) whose levels feed this
+  // domain's user-defined range.
+  const char* od_header = nullptr;
+  const char* alias_header = nullptr;
+  switch (domain) {
+    case AMDSMI_CLK_TYPE_GFX:
+      od_header = "OD_SCLK:";
+      alias_header = "GFXCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      od_header = "OD_MCLK:";
+      alias_header = "MCLK:";
+      break;
+    case AMDSMI_CLK_TYPE_DF:
+      od_header = "OD_FCLK:";
+      alias_header = "FCLK:";
+      break;
+    default:
+      return false;
+  }
+
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  bool in_domain = false;
+  bool found = false;
+  char str[10];
+  unsigned int dpm_level, freq;
+  for (std::string line; getline(od_stream, line);) {
+    // Section headers end with ':'. This domain's header (or its alias) starts
+    // capture; any other header ends it, so an adjacent section such as
+    // OD_VDDC_CURVE is not folded into the range.
+    if (!line.empty() && line.back() == ':') {
+      in_domain = line.compare(od_header) == 0 || line.compare(alias_header) == 0;
+      continue;
+    }
+    if (!in_domain) {
+      continue;
+    }
+    if (sscanf(line.c_str(), "%u: %u%9s", &dpm_level, &freq, str) <= 2) {
+      continue;  // skip lines that don't conform to the format
+    }
+    found = true;
+    if (freq > max) max = freq;
+    if (freq < min) min = freq;
+  }
+
+  if (!found || max == 0) {
+    return false;
+  }
+  *max_freq = max;
+  *min_freq = min;
+  return true;
+}
+
+// Finish smi_amdgpu_get_ranges() from an already-open pp_dpm_* stream: fold the
+// dpm levels (and the optional "S:" sleep line) into the SmiAmdgpuClkRanges
+// output. Split out as a library-local test seam (see amd_smi_clk_testing.h) so
+// the folding and the bounds guard can be exercised over in-memory streams.
+//
+// od_range carries the pp_od_clk_voltage range the caller parsed; when it is not
+// present, min/max are derived from the dpm levels instead. A domain with no
+// minimum level or no sleep state keeps its UINT_MAX "unavailable" sentinel,
+// which callers surface as the unavailable marker; only genuinely out-of-range
+// (> INT_MAX and not the sentinel) values are rejected.
+amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
+                                            const SmiAmdgpuOdClkRange& od_range,
+                                            SmiAmdgpuClkRanges& ranges) {
+  unsigned int max = od_range.present ? od_range.max : 0;
+  unsigned int min = od_range.present ? od_range.min : UINT_MAX;
+  unsigned int dpm = 0;
+  unsigned int sleep_freq = UINT_MAX;
+  unsigned int current_freq = 0;
+  char str[10];
+  char single_char;
+  for (std::string line; getline(dpm_stream, line);) {
+    unsigned int dpm_level, freq;
+
+    char firstChar = line[0];
+    if (firstChar == 'S') {
+      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
+        return AMDSMI_STATUS_NO_DATA;
+      }
+    } else {
+      /**
+       * if the first line contains '*', then
+       * we are saving that value as current_freq then checking
+       * for other dpm levels if none are found then we
+       * set min and max to current_freq as per Driver
+       * We then skip to the next line to avoid getting
+       * incorrect min value.
+       */
+
+      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
+        return AMDSMI_STATUS_IO;
+      }
+
+      char lastChar = line.back();
+      if (lastChar == '*') {
+        current_freq = freq;
+      }
+
+      // Domains without an OD range derive min/max from the dpm levels here.
+      if (!od_range.present) {
+        max = freq > max ? freq : max;
+        min = freq < min ? freq : min;
+      }
+      dpm = dpm_level > dpm ? dpm_level : dpm;
+    }
+  }
+  if (dpm == 0 && current_freq > 0) {
+    // if the dpm level is 0, then the current frequency is the min/max frequency
+    max = current_freq;
+    min = current_freq;
+  }
+  // Reject genuinely out-of-range values, but let the UINT_MAX "unavailable"
+  // sentinel through: a domain with no minimum level or no sleep state keeps it,
+  // and callers (e.g. amdsmi_get_clock_info) surface it as the unavailable marker.
+  if ((dpm != UINT_MAX && dpm > static_cast<unsigned int>(INT_MAX)) ||
+      (max != UINT_MAX && max > static_cast<unsigned int>(INT_MAX)) ||
+      (min != UINT_MAX && min > static_cast<unsigned int>(INT_MAX)) ||
+      (sleep_freq != UINT_MAX && sleep_freq > static_cast<unsigned int>(INT_MAX))) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+  ranges.max_freq = static_cast<int>(max);
+  ranges.min_freq = static_cast<int>(min);
+  ranges.num_dpm = static_cast<int>(dpm);
+  ranges.sleep_state_freq = static_cast<int>(sleep_freq);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+
   std::string smclk_min_max_fullpath = "";
 
-  bool sclk = false;
-  bool mclk = false;
+  bool use_od_range = false;
   switch (domain) {
     case AMDSMI_CLK_TYPE_GFX:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_sclk";
-      sclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_MEM:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_mclk";
-      mclk = true;
+      use_od_range = true;
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
       fullpath += "/pp_dpm_vclk";
@@ -308,124 +444,37 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
       fullpath += "/pp_dpm_socclk";
       break;
     case AMDSMI_CLK_TYPE_DF:
+      smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_fclk";
+      use_od_range = true;
       break;
     default:
       return AMDSMI_STATUS_INVAL;
   }
 
   std::ifstream ranges(fullpath.c_str());
-
   if (ranges.fail()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  unsigned int max, min, dpm, sleep_freq, current_freq;
-  char str[10];
-  char single_char;
-  max = 0;
-  min = UINT_MAX;
-  dpm = 0;
-  sleep_freq = UINT_MAX;
-  current_freq = 0;
-
-  // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
-  if (sclk || mclk) {
+  SmiAmdgpuOdClkRange od_range;
+  // GFX/MEM/DF expose a user-defined range in pp_od_clk_voltage; when it omits
+  // this domain's section (e.g. no OD_FCLK on MI45x) fall back to the pp_dpm_*
+  // levels parsed by smi_amdgpu_parse_dpm_ranges().
+  if (use_od_range) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-    unsigned int smax = 0;
-    unsigned int mmax = 0;
-    unsigned int smin = UINT_MAX;
-    unsigned int mmin = UINT_MAX;
-
-    // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
-    if (!smclk_ranges.is_open()) {
-      sclk = false;
-      mclk = false;
-    } else {
-      // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
-      bool s_or_m = true;
-      unsigned int dpm_level, freq;
-      for (std::string line; getline(smclk_ranges, line);) {
-        if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          s_or_m = true;
-          continue;
-        } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          s_or_m = false;
-          continue;
-        }
-        if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
-          // skip lines that don't conform to the format
-          continue;
-        }
-        if (s_or_m) {
-          if (freq > smax) smax = freq;
-          if (freq < smin) smin = freq;
-        } else {
-          if (freq > mmax) mmax = freq;
-          if (freq < mmin) mmin = freq;
-        }
-      }
-
-      if (sclk) {
-        max = smax;
-        min = smin;
-      } else if (mclk) {
-        max = mmax;
-        min = mmin;
-      }
-
-      smclk_ranges.close();
-    }
+    od_range.present =
+        smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &od_range.max, &od_range.min);
   }
-  // obtain rest of info from regular pp_dpm_* files.
-  for (std::string line; getline(ranges, line);) {
-    unsigned int dpm_level, freq;
-
-    char firstChar = line[0];
-    if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%s", &single_char, &sleep_freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_NO_DATA;
-      }
-    } else {
-      /**
-       * if the first line contains '*', then
-       * we are saving that value as current_freq then checking
-       * for other dpm levels if none are found then we
-       * set min and max to current_freq as per Driver
-       * We then skip to the next line to avoid getting
-       * incorrect min value.
-       */
-
-      if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_IO;
-      }
-
-      char lastChar = line.back();
-      if (lastChar == '*') {
-        current_freq = freq;
-      }
-
-      // not * was detected so check for the min max if not s or mclk, which are user defined
-      if (!sclk && !mclk) {
-        max = freq > max ? freq : max;
-        min = freq < min ? freq : min;
-      }
-      dpm = dpm_level > dpm ? dpm_level : dpm;
-    }
+  SmiAmdgpuClkRanges parsed;
+  amdsmi_status_t status = smi_amdgpu_parse_dpm_ranges(ranges, od_range, parsed);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
-  if (dpm == 0 && current_freq > 0) {
-    // if the dpm level is 0, then the current frequency is the min/max frequency
-    max = current_freq;
-    min = current_freq;
-  }
-  if (num_dpm) *num_dpm = dpm;
-  if (max_freq) *max_freq = max;
-  if (min_freq) *min_freq = min;
-  if (sleep_state_freq) *sleep_state_freq = sleep_freq;
-
-  ranges.close();
+  if (max_freq) *max_freq = parsed.max_freq;
+  if (min_freq) *min_freq = parsed.min_freq;
+  if (num_dpm) *num_dpm = parsed.num_dpm;
+  if (sleep_state_freq) *sleep_state_freq = parsed.sleep_state_freq;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -478,7 +527,7 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   }
 
   if (badPagesVec.size() == 0) {
-    num_pages = 0;
+    *num_pages = 0;
     return AMDSMI_STATUS_SUCCESS;
   }
   // Remove any *trailing* empty (whitespace) lines
@@ -579,10 +628,10 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 
   std::string line;
   getline(f, line);
-  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->uncorrectable_count));
+  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
 
   getline(f, line);
-  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->correctable_count));
+  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
 
   f.close();
 
@@ -602,7 +651,10 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   std::string empty = "";
   std::strncpy(version, empty.c_str(), len - 1);
   openFileAndModifyBuffer("/sys/module/amdgpu/version", version, static_cast<size_t>(len));
-  if (version[0] == '\0') return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+  if (version[0] == '\0') {
+    std::strncpy(version, "N/A", len - 1);
+    version[len - 1] = '\0';
+  }
 
   return status;
 }
@@ -660,7 +712,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm_amdgpu_.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm_amdgpu_.unload();
     return status;
@@ -756,6 +808,41 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,
+                                                uint32_t* vcn_busy_percent) {
+  if (vcn_busy_percent == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+
+  std::ifstream fs(fullpath.c_str());
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string line;
+  if (std::getline(fs, line)) {
+    try {
+      uint32_t line_value = static_cast<uint32_t>(std::stoul(std::string(trim(line))));
+      if (line_value > 100) {
+        // max of uint32_t is used to indicate the erroneous value
+        *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+      }
+      *vcn_busy_percent = line_value;
+      return AMDSMI_STATUS_SUCCESS;
+    } catch (const std::exception&) {
+      *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+  }
+
+  *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+  return AMDSMI_STATUS_UNEXPECTED_DATA;
+}
+
 std::string smi_amdgpu_split_string(std::string str, char delim) {
   std::vector<std::string> tokens;
   std::stringstream ss(str);
@@ -795,7 +882,7 @@ std::vector<std::string> split_string(const std::string& line, char delim) {
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'
@@ -846,7 +933,9 @@ amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::s
   char buffer[128];
 
   // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), pclose);
+  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
+    if (f) pclose(f);
+  });
   if (!pipe) {
     return AMDSMI_STATUS_API_FAILED;
   }
@@ -878,7 +967,7 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
   }
   // allocate memory
   sockets.resize(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -898,7 +987,7 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles.data());
     ss << __PRETTY_FUNCTION__ << " | Processor Count: " << device_count << "\n";
     LOG_DEBUG(ss);
 
@@ -938,7 +1027,7 @@ amdsmi_status_t smi_amdgpu_get_device_count(uint32_t* total_num_devices) {
   }
   // allocate memory
   sockets.resize(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -958,7 +1047,7 @@ amdsmi_status_t smi_amdgpu_get_device_count(uint32_t* total_num_devices) {
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(processor_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &processor_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &processor_count, processor_handles.data());
     ss << __PRETTY_FUNCTION__ << " | Processor Count: " << processor_count << "\n";
     LOG_DEBUG(ss);
 
@@ -1008,7 +1097,7 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
   }
   // allocate memory
   sockets.resize(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1028,7 +1117,7 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles.data());
     ss << __PRETTY_FUNCTION__ << " | Processor Count: " << device_count << "\n";
     LOG_DEBUG(ss);
 
@@ -1053,6 +1142,28 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
   return AMDSMI_STATUS_API_FAILED;
 }
 
+amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_handle,
+                                           amd::smi::AMDSmiGPUDevice** gpudevice) {
+  AMDSMI_CHECK_INIT();
+  std::ostringstream ss;
+  if (processor_handle == nullptr || gpudevice == nullptr) {
+    ss << __PRETTY_FUNCTION__ << " | processor_handle is NULL; returning: AMDSMI_STATUS_INVAL";
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_INVAL;
+  }
+  amd::smi::AMDSmiProcessor* device = nullptr;
+  amdsmi_status_t r =
+      amd::smi::AMDSmiSystem::getInstance().handle_to_processor(processor_handle, &device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (device->get_processor_type() == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+    *gpudevice = static_cast<amd::smi::AMDSmiGPUDevice*>(device);
+    return AMDSMI_STATUS_SUCCESS;
+  }
+  ss << __PRETTY_FUNCTION__ << " | returning AMDSMI_STATUS_NOT_SUPPORTED";
+  LOG_ERROR(ss);
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
 int read_env_ms(const char* name, int def) {
   if (const char* s = std::getenv(name)) {
     try {
@@ -1063,12 +1174,6 @@ int read_env_ms(const char* name, int def) {
   }
   return def;
 }
-
-struct CperFileCtx {
-  amdsmi_status_t status = AMDSMI_STATUS_FILE_ERROR;
-  std::unique_ptr<char[]> buffer;
-  long file_size = 0;
-};
 
 uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
   uint64_t serial_number = 0;
@@ -1105,10 +1210,271 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
   return serial_number;
 }
 
+/**
+ *  Important points to be pay attention to:
+ *      - BDF is a struct in AMDSMI (amdsmi_bdf_t), and a char* in HIP (hipDeviceGetPCIBusId())
+ *      - To convert from BDF to string, use: AMDSmiGPUDevice::bdf_to_string()
+ *      - For HIP, UUID seems to be the best approach to identify the device, use:
+ *        amdsmi_get_processor_handle_from_uuid()
+
+ */
+
+/**
+ * Returns a pointer to the raw 16 bytes of the UUID.
+ *
+ *  Note:
+ *      - This is NOT a null-terminated C string. The pointer refers to exactly
+ *        HIP_UUID_BYTES_SIZE (16) bytes
+ *      - Do not use with strlen(), printf("%s", ...), or APIs that expect a null-terminated string
+ */
+const char* from_uuid_to_cstring(const hipUUID_t& uuid) noexcept { return uuid.bytes; }
+
+std::optional<amdsmi_bdf_t> from_cstring_to_bdf(const char* bdf_str) noexcept {
+  if (!bdf_str) {
+    return std::nullopt;
+  }
+
+  using uchar_t = unsigned char;
+  constexpr auto HEX_BASE = std::int32_t(16);
+  auto bdf = amdsmi_bdf_t{};
+  bdf.as_uint = 0;
+
+  const auto* ptr_str_bdf = bdf_str;
+  /* Try parsing the domain (optional) */
+  auto domain = std::uint64_t(0);
+  auto [ptr_domain, error_code_domain] =
+      std::from_chars(ptr_str_bdf, std::strchr(ptr_str_bdf, '\0'), domain, HEX_BASE);
+  if ((error_code_domain == std::errc{}) && (ptr_domain != ptr_str_bdf) && (*ptr_domain == ':')) {
+    bdf.bdf.domain_number = static_cast<std::uint64_t>((domain) & ((1ULL << 48) - 1));
+    ptr_str_bdf = (ptr_domain + 1); /* If ':' is present, skip it */
+  } else {
+    ptr_str_bdf = bdf_str;
+    bdf.bdf.domain_number = 0;
+  }
+
+  /* Try parsing the bus */
+  auto bus = std::uint64_t(0);
+  auto [ptr_bus, error_code_bus] =
+      std::from_chars(ptr_str_bdf, std::strchr(ptr_str_bdf, '\0'), bus, HEX_BASE);
+  /* If the bus is not valid (including only 8 bits) return nullopt */
+  if (((error_code_bus != std::errc{}) || (ptr_bus == ptr_str_bdf) || (*ptr_bus != ':')) ||
+      (bus > std::uint8_t(0xFF))) {
+    return std::nullopt;
+  }
+  bdf.bdf.bus_number = static_cast<std::uint8_t>(bus);
+  ptr_str_bdf = (ptr_bus + 1); /* If ':' is present, skip it */
+
+  /* Try parsing the device */
+  auto device = std::uint64_t(0);
+  auto [ptr_device, error_code_device] =
+      std::from_chars(ptr_str_bdf, std::strchr(ptr_str_bdf, '\0'), device, HEX_BASE);
+  /* If the device is not valid (including only 5 bits) return nullopt */
+  if (((error_code_device != std::errc{}) || (ptr_device == ptr_str_bdf) || (*ptr_device != '.')) ||
+      (device > std::uint8_t(0x1F))) {
+    return std::nullopt;
+  }
+  bdf.bdf.device_number = static_cast<std::uint8_t>((device) & ((1ULL << 5) - 1));
+  ptr_str_bdf = (ptr_device + 1); /* If '.' is present, skip it */
+
+  /* Try parsing the function */
+  auto function = std::uint64_t(0);
+  auto [ptr_function, error_code_function] =
+      std::from_chars(ptr_str_bdf, std::strchr(ptr_str_bdf, '\0'), function, HEX_BASE);
+  /* If the function is not valid (including only 3 bits) return nullopt */
+  if (((error_code_function != std::errc{}) || (ptr_function == ptr_str_bdf)) ||
+      (function > std::uint8_t(0x7))) {
+    return std::nullopt;
+  }
+  bdf.bdf.function_number = static_cast<std::uint8_t>((function) & ((1ULL << 3) - 1));
+  ptr_str_bdf = ptr_function;
+
+  /* Allow trailing whitespace or nothing, but nothing else (optional) */
+  while (*ptr_str_bdf != '\0') {
+    /* Anything after the function is garbage */
+    if (!std::isspace(static_cast<uchar_t>(*ptr_str_bdf))) {
+      return std::nullopt;
+    }
+    ++ptr_str_bdf;
+  }
+
+  return bdf;
+}
+
+std::optional<hipUUID_t> from_cstring_to_uuid(const char* uuid_str) noexcept {
+  if (!uuid_str) {
+    return std::nullopt;
+  }
+
+  using uchar_t = unsigned char;
+  auto hip_uuid = hipUUID_t{};
+  auto char_pos = size_t(0);
+  auto half_byte = std::size_t(0);
+
+  /*
+   *  So when we count half_bytes (nibbles; each valid hex character = one nibble),
+   *  we expect exactly 32 of them after skipping all formatting characters (-, {, }, spaces, ...)
+   */
+  while ((uuid_str[char_pos] != '\0') && (half_byte < HIP_UUID_STRING_FULL_SIZE)) {
+    auto character = char(uuid_str[char_pos++]);
+    if (character == '-' || character == '{' || character == '}' ||
+        std::isspace(static_cast<uchar_t>(character))) {
+      continue;
+    }
+
+    if (!std::isxdigit(static_cast<uchar_t>(character))) {
+      return std::nullopt;
+    }
+
+    auto character_value = static_cast<std::uint8_t>(
+        (character >= '0' && character <= '9')   ? (character - '0')
+        : (character >= 'a' && character <= 'f') ? (10 + (character - 'a'))
+                                                 : (10 + (character - 'A')));
+
+    /*
+     *  Each half_byte corresponds to one byte in the UUID.
+     *  - If the half_byte is even, we are processing the high nibble of the byte
+     *  - If the half_byte is odd, we are processing the low nibble of the byte
+     */
+    constexpr auto HALF_BYTE_IN_BITS = static_cast<std::size_t>(CHAR_BIT / 2);
+
+    /*
+     *  (half_byte / 2) is the index of the byte in the UUID
+     *  ((half_byte % 2) == 0) is where check for even/odd so high nibble or low nibble
+     */
+    auto* byte = reinterpret_cast<uchar_t*>(&hip_uuid.bytes[(half_byte / 2)]);
+    if ((half_byte % 2) == 0) {
+      *byte = static_cast<uchar_t>(character_value << HALF_BYTE_IN_BITS);
+    } else {
+      *byte |= character_value;
+    }
+
+    half_byte++;
+  }
+
+  return (half_byte == HIP_UUID_STRING_FULL_SIZE) ? std::optional<hipUUID_t>{hip_uuid}
+                                                  : std::nullopt;
+}
+
+std::string stringify_bdf(const amdsmi_bdf_t& bdf) {
+  std::ostringstream bdf_outstream;
+  bdf_outstream << std::setfill('0') << std::hex << std::setw(4) << bdf.domain_number << ":"
+                << std::setw(2) << static_cast<uint32_t>(bdf.bus_number) << ":" << std::setw(2)
+                << static_cast<uint32_t>(bdf.device_number) << "."
+                << static_cast<uint32_t>(bdf.function_number);
+  return bdf_outstream.str();
+}
+
 std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid) {
   uint64_t domain = (bdfid >> 32) & 0xffffffff;
   uint64_t bus = (bdfid >> 8) & 0xff;
   uint64_t device_id = (bdfid >> 3) & 0x1f;
   uint64_t function = bdfid & 0x7;
   return std::tuple<uint64_t, uint64_t, uint64_t, uint64_t>(domain, bus, device_id, function);
+}
+
+amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* device,
+                                                     const char* pp_dpm_file,
+                                                     amdsmi_frequencies_t* f) {
+  if (f == nullptr || device == nullptr || pp_dpm_file == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  uint32_t drm_render = device->get_drm_render_minor();
+  std::string sysfs_path =
+      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+
+  std::ifstream file(sysfs_path);
+  if (!file.good()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  f->num_supported = 0;
+  f->current = 0;
+  f->has_deep_sleep = 0;
+
+  std::string line;
+  uint32_t level_index = 0;
+
+  while (std::getline(file, line) && level_index < AMDSMI_MAX_NUM_FREQUENCIES) {
+    // Parse line format: "0: 200Mhz" or "1: 400Mhz *"
+    size_t colon_pos = line.find(':');
+    if (colon_pos == std::string::npos) {
+      continue;
+    }
+
+    std::string freq_str = line.substr(colon_pos + 1);
+
+    // Check if this is the current level (marked with *)
+    bool is_current = (freq_str.find('*') != std::string::npos);
+    if (is_current) {
+      f->current = level_index;
+    }
+
+    // Remove asterisk and surrounding whitespace
+    freq_str.erase(std::remove(freq_str.begin(), freq_str.end(), '*'), freq_str.end());
+    freq_str.erase(0, freq_str.find_first_not_of(" \t"));
+    size_t end = freq_str.find_last_not_of(" \t");
+    if (end != std::string::npos) {
+      freq_str.erase(end + 1);
+    }
+
+    // Parse "200Mhz" / "200 Mhz" / "200MHz"
+    uint64_t freq_value = 0;
+    char unit = 'M';  // Default to MHz
+
+    size_t unit_pos = freq_str.find_first_not_of("0123456789 ");
+    if (unit_pos != std::string::npos) {
+      std::string value_str = freq_str.substr(0, unit_pos);
+      value_str.erase(std::remove(value_str.begin(), value_str.end(), ' '), value_str.end());
+      try {
+        freq_value = std::stoull(value_str);
+      } catch (...) {
+        continue;  // Skip invalid lines
+      }
+      std::string unit_str = freq_str.substr(unit_pos);
+      if (!unit_str.empty()) {
+        unit = static_cast<char>(std::toupper(static_cast<unsigned char>(unit_str[0])));
+      }
+    }
+
+    f->frequency[level_index] = freq_value * amd::smi::get_multiplier_from_char(unit);
+    level_index++;
+  }
+
+  f->num_supported = level_index;
+  return (f->num_supported > 0) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) {
+  switch (clk_type) {
+    case AMDSMI_CLK_TYPE_VCLK0:
+      return "pp_dpm_vclk";
+    case AMDSMI_CLK_TYPE_VCLK1:
+      return "pp_dpm_vclk1";
+    case AMDSMI_CLK_TYPE_DCLK0:
+      return "pp_dpm_dclk";
+    case AMDSMI_CLK_TYPE_DCLK1:
+      return "pp_dpm_dclk1";
+    default:
+      return nullptr;
+  }
+}
+
+void init_asic_info_defaults(amdsmi_asic_info_t* info) {
+  if (info == nullptr) {
+    return;
+  }
+  std::memset(info, 0, sizeof(*info));
+  info->vendor_id = std::numeric_limits<uint32_t>::max();
+  info->subvendor_id = std::numeric_limits<uint32_t>::max();
+  info->device_id = std::numeric_limits<uint64_t>::max();
+  info->rev_id = std::numeric_limits<uint32_t>::max();
+  std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "ffffffffffffffff");
+  info->oam_id = std::numeric_limits<uint32_t>::max();
+  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
+  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
+  info->subsystem_id = std::numeric_limits<uint32_t>::max();
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  info->chip_rev_id = std::numeric_limits<uint32_t>::max();
+  info->external_rev_id = std::numeric_limits<uint32_t>::max();
 }

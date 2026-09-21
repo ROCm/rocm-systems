@@ -731,17 +731,12 @@ class elfio {
 
     //------------------------------------------------------------------------------
     section* operator[](const std::string& name) const {
-      section* sec = 0;
-
-      std::vector<section*>::const_iterator it;
-      for (it = parent->sections_.begin(); it != parent->sections_.end(); ++it) {
-        if ((*it)->get_name() == name) {
-          sec = *it;
-          break;
-        }
-      }
-
-      return sec;
+      std::vector<section*>::const_iterator it =
+          std::find_if(parent->sections_.begin(), parent->sections_.end(),
+                       std::bind(std::equal_to<std::string>(),
+                                 std::bind(&section::get_name, std::placeholders::_1), name));
+      if (it != parent->sections_.end()) return *it;
+      return nullptr;
     }
 
     //------------------------------------------------------------------------------

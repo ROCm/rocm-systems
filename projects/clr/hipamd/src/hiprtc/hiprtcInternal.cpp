@@ -57,6 +57,11 @@ RTCCompileProgram::RTCCompileProgram(std::string name_) : hip::RTCProgram(name_)
   compile_options_.push_back("-fms-extensions");
   compile_options_.push_back("-fms-compatibility");
 #endif
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+  compile_options_.push_back("-fsanitize=address");
+#endif
+#endif
   AppendCompileOptions();
 }
 
@@ -73,7 +78,7 @@ bool RTCCompileProgram::addSource(const std::string& source, const std::string& 
 // addSource_impl is a different function because we need to add source when we track mangled
 // objects
 bool RTCCompileProgram::addSource_impl() {
-  std::vector<char> vsource(source_code_.begin(), source_code_.end());
+  std::string_view vsource(source_code_.data(), source_code_.size());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_,
                                     AMD_COMGR_DATA_KIND_SOURCE)) {
     return false;
@@ -86,7 +91,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
     LogError("Error in hiprtc: source or name is of size 0 in addHeader");
     return false;
   }
-  std::vector<char> vsource(source.begin(), source.end());
+  std::string_view vsource(source.data(), source.size());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
   }
@@ -94,7 +99,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
 }
 
 bool RTCCompileProgram::addBuiltinHeader() {
-  std::vector<char> source(__hipRTC_header, __hipRTC_header + __hipRTC_header_size);
+  std::string_view source(__hipRTC_header, __hipRTC_header_size);
   std::string name{"hiprtc_runtime.h"};
   if (!hip::helpers::addCodeObjData(compile_input_, source, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
@@ -153,6 +158,8 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
   compile_options.erase(
       std::remove(compile_options.begin(), compile_options.end(), std::string("")),
       compile_options.end());
+  
+  ir_kind_ = AMD_COMGR_DATA_KIND_BC;
 
   if (auto res = std::find_if(
           compile_options.begin(), compile_options.end(),
@@ -160,6 +167,11 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
       res != compile_options.end()) {
     auto isaName = getValueOf(*res);
     isa_ = "amdgcn-amd-amdhsa--" + isaName;
+    // check if spirv output is requested
+    if (isaName == "amdgcnspirv") {
+      isa_ = "spirv64-amd-amdhsa-unknown-" + isaName;
+      ir_kind_ = AMD_COMGR_DATA_KIND_SPIRV;
+    }
     settings_.offloadArchProvided = true;
     return true;
   }
@@ -175,6 +187,7 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
 
   fgpu_rdc_ = fgpu_rdc;
 
+
   // Append compile options
   std::vector<std::string> compileOpts(compile_options_);
   compileOpts.reserve(compile_options_.size() + options.size() + 2);
@@ -184,11 +197,17 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
     LogError("Error in hiprtc: unable to transform options");
     return false;
   }
+  
+  if (ir_kind_ == AMD_COMGR_DATA_KIND_SPIRV && fgpu_rdc_) {
+    LogError("Error in hiprtc: SPIRV output is not supported with fgpu-rdc");
+    return false;
+  }
 
-  if (fgpu_rdc_) {
-    if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
-                                        LLVMBitcode_)) {
-      LogError("Error in hiprtc: unable to compile source to bitcode");
+  if (ir_kind_ == AMD_COMGR_DATA_KIND_SPIRV || fgpu_rdc_) {
+    // Generate SPIRV or Bitcode binary
+    if (!hip::helpers::compileToIR(compile_input_, isa_, compileOpts, build_log_,
+                                   ir_, ir_kind_)) {
+      LogError("Error in hiprtc: unable to compile source to SPIRV or Bitcode binary");
       return false;
     }
   } else {
@@ -201,7 +220,12 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
   }
 
   if (!mangled_names_.empty()) {
-    auto& compile_step_output = fgpu_rdc_ ? LLVMBitcode_ : executable_;
+    if (ir_kind_ == AMD_COMGR_DATA_KIND_SPIRV) {
+      // COMGR's name-expression map does not accept raw SPIRV.
+      LogError("Error in hiprtc: name expressions are not supported with SPIRV output");
+      return false;
+    }
+    auto& compile_step_output = fgpu_rdc_ ? ir_ : executable_;
     if (!hip::helpers::fillMangledNames(compile_step_output, mangled_names_, fgpu_rdc_)) {
       LogError("Error in hiprtc: unable to fill mangled names");
       return false;
@@ -259,20 +283,20 @@ bool RTCCompileProgram::getMangledName(const char* name_expression, const char**
 }
 
 bool RTCCompileProgram::GetBitcode(char* bitcode) {
-  if (!fgpu_rdc_ || LLVMBitcode_.size() <= 0) {
+  if (ir_.size() <= 0 || ir_kind_ == AMD_COMGR_DATA_KIND_UNDEF) {
     return false;
   }
 
-  std::copy(LLVMBitcode_.begin(), LLVMBitcode_.end(), bitcode);
+  std::copy(ir_.begin(), ir_.end(), bitcode);
   return true;
 }
 
 bool RTCCompileProgram::GetBitcodeSize(size_t* bitcode_size) {
-  if (!fgpu_rdc_ || LLVMBitcode_.size() <= 0) {
+  if (ir_.size() <= 0 || ir_kind_ == AMD_COMGR_DATA_KIND_UNDEF) {
     return false;
   }
 
-  *bitcode_size = LLVMBitcode_.size();
+  *bitcode_size = ir_.size();
   return true;
 }
 }  // namespace hiprtc

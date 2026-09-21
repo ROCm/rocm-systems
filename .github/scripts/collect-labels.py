@@ -4,6 +4,7 @@ import sys
 import requests
 import yaml
 
+
 def get_labels(repo, token):
     headers = {"Authorization": f"token {token}"}
     labels = []
@@ -19,6 +20,7 @@ def get_labels(repo, token):
         labels.extend(data)
         page += 1
     return labels
+
 
 def main(file_path):
     with open(file_path, "r") as f:
@@ -36,13 +38,14 @@ def main(file_path):
                 all_labels[name] = {
                     "name": name,
                     "color": label["color"],
-                    "description": label.get("description", "")
+                    "description": label.get("description", ""),
                 }
 
     sorted_labels = sorted(all_labels.values(), key=lambda l: l["name"].lower())
     os.makedirs(".github", exist_ok=True)  # Ensure the .github directory exists
     with open(".github/labels.yml", "w") as out:
         yaml.dump(sorted_labels, out, sort_keys=False)
+
 
 if __name__ == "__main__":
     main(sys.argv[1])

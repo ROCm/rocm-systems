@@ -1,3 +1,4 @@
+{% if data %}
 .. list-table::
     :header-rows: 1
 
@@ -7,6 +8,9 @@
 
     {% for metric, metric_info in data.items() %}
     * - {{ metric }}
-      - {{ metric_info.rst }}
-      - {{ metric_info.unit }}
+      - {{ metric_info.rst | trim | replace('\n', '\n        ') }}
+      - {{ metric_info.unit | default('', true) }}
     {% endfor %}
+{% else %}
+No documented metrics are currently available for this section.
+{% endif %}

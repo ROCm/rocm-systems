@@ -30,6 +30,7 @@
 #include "device_proxy.hpp"
 #include "memory/window_info.hpp"
 #include "memory/symmetric_heap.hpp"
+#include "memory/hip_allocator.hpp"
 #include "stats.hpp"
 #include "queue.hpp"
 
@@ -45,15 +46,16 @@ struct BackendRegister {
   SymmetricHeap *heap_ptr{nullptr};
 };
 
-template <typename ALLOCATOR>
 class BackendProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, BackendRegister>;
+  using ProxyT = DeviceProxy<BackendRegister>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  BackendProxy(size_t num_elems = 1) : proxy_{num_elems} {
+  BackendProxy(const HIPHostAllocator& alloc = HIPHostAllocator(),
+               size_t num_elems = 1)
+    : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) BackendRegister();
   }
 
@@ -69,13 +71,12 @@ class BackendProxy {
   __host__ __device__ BackendRegister *get() { return proxy_.get(); }
 
  private:
+  HIPHostAllocator alloc_{};
   /*
    * @brief Memory managed by the lifetime of this object
    */
   ProxyT proxy_{};
 };
-
-using BackendProxyT = BackendProxy<HIPHostAllocator>;
 
 }  // namespace rocshmem
 

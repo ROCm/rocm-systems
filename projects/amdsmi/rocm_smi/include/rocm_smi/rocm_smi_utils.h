@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
@@ -66,7 +47,6 @@ int ReadSysfsStr(std::string path, std::string* retStr);
 int WriteSysfsStr(std::string path, std::string val);
 bool IsInteger(const std::string& n_str);
 bool stringToInteger(const std::string& n_str, int& value);
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut = true);
 rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::string stateName,
                            std::string storageData);
 std::vector<std::string> getListOfAppTmpFiles();
@@ -83,6 +63,9 @@ rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type, uint32_t dv_ind,
 rsmi_status_t GetDevBinaryBlob(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::size_t b_size,
                                void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
+int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm);
+int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm);
+rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value);
 [[nodiscard]] rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err);
 std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus = true);
 std::tuple<bool, std::string, std::string, std::string, std::string, std::string, std::string,
@@ -205,7 +188,7 @@ struct ScopedPthread {
  private:
   ScopedPthread(const ScopedPthread&);
   pthread_wrap& pthrd_ref_;
-  bool mutex_not_acquired_;  // Use for AcquireNB (not for Aquire())
+  bool mutex_not_acquired_;  // Use for AcquireNB (not for Acquire())
 };
 
 #define PASTE2(x, y) x##y
@@ -408,9 +391,11 @@ class TagTextContents_t {
   }
 
   decltype(auto) get_structured_data_subkey_last(const PrimaryKeyType& prim_key) {
+    auto size = get_structured_subkeys_size(prim_key);
+    // Avoid wrap-around on an empty subkey list.
+    uint32_t last_index = (size > 0) ? static_cast<uint32_t>(size - 1) : 0;
     return (get_structured_value_by_keys(
-        prim_key, get_structured_data_subkey_by_position(
-                      prim_key, static_cast<int>((get_structured_subkeys_size(prim_key) - 1)))));
+        prim_key, get_structured_data_subkey_by_position(prim_key, last_index)));
   }
 
   void reset() {
@@ -628,6 +613,12 @@ inline ostream_joiner<std::decay_t<DelimiterType>, CharType, TraitsType> make_os
 }
 
 uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain);
+
+// Sleep for the given number of whole seconds, retrying on signal interruption
+// (EINTR) so the full duration is always served.
+void sleep_interruptible(uint32_t seconds);
+// Sleep for the given timespec duration, retrying on EINTR.
+void sleep_interruptible(const struct timespec& duration);
 }  // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_

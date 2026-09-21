@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <rocprofiler-sdk/agent.h>
 
@@ -159,7 +141,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
 #endif
 
     data["mem_banks"] = nlohmann::json::array();
-    for(uint32_t i = 0; i < agent_data.mem_banks_count; ++i)
+    for(std::uint32_t i = 0; i < agent_data.mem_banks_count; ++i)
     {
         nlohmann::json bank;
         bank["heap_type"]             = agent_data.mem_banks[i].heap_type;
@@ -172,7 +154,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     }
 
     data["caches"] = nlohmann::json::array();
-    for(uint32_t i = 0; i < agent_data.caches_count; ++i)
+    for(std::uint32_t i = 0; i < agent_data.caches_count; ++i)
     {
         nlohmann::json cache;
         cache["processor_id_low"]    = agent_data.caches[i].processor_id_low;
@@ -190,7 +172,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     }
 
     data["io_links"] = nlohmann::json::array();
-    for(uint32_t i = 0; i < agent_data.io_links_count; ++i)
+    for(std::uint32_t i = 0; i < agent_data.io_links_count; ++i)
     {
         nlohmann::json link;
         link["type"]          = agent_data.io_links[i].type;

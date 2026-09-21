@@ -415,7 +415,7 @@ hsa_status_t DumpMemoryPoolInfo(const pool_info_t* pool_i, uint32_t indent) {
   std::string al_str = std::to_string(pool_i->alloc_alignment / 1024) + "KB";
   RDC_LOG(RDC_DEBUG, ind_lvl << " Pool Alloc Alignment:" << al_str);
   RDC_LOG(RDC_DEBUG,
-          ind_lvl << " Pool Acessible by all:" << (pool_i->accessible_by_all ? "TRUE" : "FALSE"));
+          ind_lvl << " Pool Accessible by all:" << (pool_i->accessible_by_all ? "TRUE" : "FALSE"));
 
   std::string agg_str = std::to_string(pool_i->aggregate_alloc_max / 1024) + "KB";
   RDC_LOG(RDC_DEBUG, ind_lvl << "Pool Aggregate Alloc Size:" << agg_str);

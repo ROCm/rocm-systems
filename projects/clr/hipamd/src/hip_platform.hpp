@@ -11,22 +11,14 @@
 #include "device/device.hpp"
 #include "hip_code_object.hpp"
 
+#include <unordered_set>
+
 namespace hip_impl {
 
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz);
 }  // namespace hip_impl
-
-// Unique file descriptor class
-struct UniqueFD {
-  UniqueFD(const std::string& fpath, amd::Os::FileDesc fdesc, size_t fsize)
-      : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
-
-  const std::string fpath_;        //!< File path of this unique file
-  const amd::Os::FileDesc fdesc_;  //!< File Descriptor
-  const size_t fsize_;             //!< File Size
-};
 
 namespace hip {
 class PlatformState {
@@ -36,7 +28,24 @@ class PlatformState {
   // Dynamic Code Objects functions
   hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
   hipError_t UnloadModule(hipModule_t hmod);
-  bool IsValidDynFunc(const void* hfunc);
+
+  //! Tracks kernel handles from creation to release, so IsValidFuncHandle() can
+  //! reject a pointer that never came from the runtime.
+  void RegisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.insert(hfunc);
+  }
+
+  void UnregisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.erase(hfunc);
+  }
+
+  bool IsValidFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    return funcHandles_.find(hfunc) != funcHandles_.end();
+  }
+
   hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
   hipError_t GetFuncCount(unsigned int* count, hipModule_t hmod);
   hipError_t GetDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
@@ -65,9 +74,6 @@ class PlatformState {
   void SetupArgument(const void* arg, size_t size, size_t offset);
   void ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
   void PopExec(ihipExec_t& exec);
-
-  std::shared_ptr<UniqueFD> GetUniqueFileHandle(const std::string& file_path);
-  bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
 
   // Logging lock accessor
   std::recursive_mutex& GetLogLock() { return lg_lock_; }
@@ -105,18 +111,17 @@ class PlatformState {
   ~PlatformState() {}
 
   std::recursive_mutex lock_;       //!< Guards PlatformState globals
-  std::recursive_mutex ufd_lock_;   //!< Unique FD Store Lock
   std::recursive_mutex lg_lock_;    //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
+  std::mutex funcHandleLock_;
+  std::unordered_set<const void*> funcHandles_;
   hip::StatCO statCO_;              //!< Static Code object var
   bool initialized_{false};         //!< Platform initialization state
   //! Texture reference map: texRef -> (module, name)
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
-  //! Unique File Descriptor Map
-  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;
   void* dynamicLibraryHandle_{nullptr};  //!< Handle to dynamic library
   //! Library function map: kernel -> library
   std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;

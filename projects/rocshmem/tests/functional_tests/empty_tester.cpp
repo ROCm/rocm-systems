@@ -31,8 +31,8 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void EmptyTest(int loop, int skip, long long int *start_time,
-                          long long int *end_time, int size, TestType type,
+__global__ void EmptyTest([[maybe_unused]] int loop, [[maybe_unused]] int skip, [[maybe_unused]] long long int *start_time,
+                          [[maybe_unused]] long long int *end_time, [[maybe_unused]] int size, [[maybe_unused]] TestType type,
                           ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
@@ -47,7 +47,7 @@ EmptyTester::EmptyTester(TesterArguments args) : Tester(args) {}
 
 EmptyTester::~EmptyTester() {}
 
-void EmptyTester::resetBuffers(size_t size) {}
+void EmptyTester::resetBuffers([[maybe_unused]] size_t size) {}
 
 void EmptyTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                size_t size) {
@@ -58,4 +58,4 @@ void EmptyTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                      _shmem_context);
 }
 
-void EmptyTester::verifyResults(size_t size) {}
+void EmptyTester::verifyResults([[maybe_unused]] size_t size) {}

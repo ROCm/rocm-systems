@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <hsa/hsa_api_trace.h>
@@ -35,6 +35,11 @@
 
 namespace rocprofiler
 {
+namespace platform
+{
+struct agent_info;
+}
+
 namespace agent
 {
 struct uuid_view_t
@@ -88,6 +93,9 @@ get_agents();
 const rocprofiler_agent_t*
 get_agent(rocprofiler_agent_id_t id);
 
+const platform::agent_info*
+get_agent_info(rocprofiler_agent_id_t id);
+
 void
 construct_agent_cache(::HsaApiTable* table);
 
@@ -123,5 +131,11 @@ construct_agent_cache(::HsaApiTable* table);
 
 void
 internal_refresh_topology();  // only for internal testing
+
+// Apply ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES / ... policy. Pure function
+// of env vars + agent type. Called by per-platform enumerators as they
+// materialize agents. Defined in agent.cpp.
+void
+update_agent_runtime_visibility(rocprofiler_agent_t& agent_info);
 }  // namespace agent
 }  // namespace rocprofiler

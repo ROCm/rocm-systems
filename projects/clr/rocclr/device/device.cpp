@@ -245,7 +245,10 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
+      {"gfx1250-strict", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx12-5-generic", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
 }
@@ -335,7 +338,7 @@ Context* Device::glb_ctx_ = nullptr;
 std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
-cl_int Device::gpu_error_ = CL_SUCCESS;
+std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -359,11 +362,10 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
-  std::shared_lock lock(AllocatedLock_);
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 
-  // First search the global map
+  // First search the global map using upper_bound
   auto it = MemObjMap_.upper_bound(key);
   if (it != MemObjMap_.begin()) {
     --it;
@@ -372,19 +374,138 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
                           ? sizeof(mem->getUserData().hsa_handle)
                           : mem->getSize();
     if (key >= it->first && key < (it->first + mem_size)) {
-      if (offset != nullptr) {
-        *offset = key - it->first;
-      }
-      return mem;
+      return {it->second, key - it->first};
     }
   }
 
   // Search per-device va maps on Windows (due to overlapping ranges)
   if (IS_WINDOWS && dev != nullptr) {
-    return dev->FindDevMemObj(k, offset);
+    size_t offset = 0;
+    amd::Memory* mem = dev->FindDevMemObj(ptr, &offset);
+    return {mem, offset};
   }
 
+  return {nullptr, 0};
+}
+
+amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
+  std::shared_lock lock(AllocatedLock_);
+  auto result = findMemObjNoLock(k, dev);
+  if (offset != nullptr) {
+    *offset = result.offset;
+  }
+  return result.memory;
+}
+
+amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
+  if (size == 0) {
+    return nullptr;
+  }
+  std::shared_lock lock(AllocatedLock_);
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t end = start + size;  // exclusive
+
+  auto it = MemObjMap_.upper_bound(end - 1);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if ((it->first + mem_size) > start) {
+      return mem;
+    }
+  }
   return nullptr;
+}
+
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+
+  // Find the memory object in the map using upper_bound
+  auto it = MemObjMap_.upper_bound(key);
+  if (it == MemObjMap_.begin()) {
+    return nullptr;
+  }
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key < it->first || key >= (it->first + mem_size)) {
+    return nullptr;
+  }
+
+  // Found - remove and return
+  MemObjMap_.erase(it);
+  return mem;
+}
+
+void MemObjMap::FindMemObjBatch(const void* const* ptrs, size_t count,
+                                 std::vector<amd::Memory*>& memories,
+                                 std::vector<size_t>& offsets, Device* dev) {
+  if (memories.size() != count) {
+    memories.resize(count);
+  }
+  if (offsets.size() != count) {
+    offsets.resize(count);
+  }
+
+  std::shared_lock lock(AllocatedLock_);
+
+  for (size_t i = 0; i < count; ++i) {
+    auto result = findMemObjNoLock(ptrs[i], dev);
+    memories[i] = result.memory;
+    offsets[i] = result.offset;
+  }
+}
+
+void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const* dsts,
+                                      size_t count,
+                                      std::vector<amd::Memory*>& src_memories,
+                                      std::vector<amd::Memory*>& dst_memories,
+                                      std::vector<size_t>& src_offsets,
+                                      std::vector<size_t>& dst_offsets, Device* dev) {
+  if (src_memories.size() != count) {
+    src_memories.resize(count);
+  }
+  if (dst_memories.size() != count) {
+    dst_memories.resize(count);
+  }
+  if (src_offsets.size() != count) {
+    src_offsets.resize(count);
+  }
+  if (dst_offsets.size() != count) {
+    dst_offsets.resize(count);
+  }
+
+  std::shared_lock lock(AllocatedLock_);
+
+  for (size_t i = 0; i < count; ++i) {
+    auto src_result = findMemObjNoLock(srcs[i], dev);
+    src_memories[i] = src_result.memory;
+    src_offsets[i] = src_result.offset;
+
+    auto dst_result = findMemObjNoLock(dsts[i], dev);
+    dst_memories[i] = dst_result.memory;
+    dst_offsets[i] = dst_result.offset;
+  }
+}
+
+void MemObjMap::FindMemObjPairs(const void* src, const void* dst,
+                                 amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                                 size_t& src_offset, size_t& dst_offset, Device* dev) {
+  std::shared_lock lock(AllocatedLock_);
+
+  auto src_result = findMemObjNoLock(src, dev);
+  src_memory = src_result.memory;
+  src_offset = src_result.offset;
+
+  auto dst_result = findMemObjNoLock(dst, dev);
+  dst_memory = dst_result.memory;
+  dst_offset = dst_result.offset;
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -572,6 +693,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
+      vaddr_sub_obj->release();
       return nullptr;
     }
   }
@@ -606,6 +728,50 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   return true;
 }
 
+//==================================================================================================
+amd::Memory* Device::MapMemObjBookkeeping(amd::Memory* phys, void* va_ptr, size_t va_size) const {
+  if (phys == nullptr) {
+    LogError("MapMemObjBookkeeping: phys is nullptr");
+    return nullptr;
+  }
+  constexpr bool kParent = false;
+  return phys->getContext().devices()[0]->CreateVirtualBuffer(
+      phys->getContext(), va_ptr, va_size, phys->getUserData().deviceId,
+      phys->getUserData().locationType, kParent);
+}
+
+//==================================================================================================
+void Device::FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys,
+                                          void* va_ptr, bool import_vmm_for_interprocess) const {
+  assert(vaddr_sub_obj != nullptr);
+  assert(phys != nullptr);
+  assert(amd::MemObjMap::FindMemObj(va_ptr) == nullptr);
+  amd::MemObjMap::AddMemObj(va_ptr, vaddr_sub_obj);
+  vaddr_sub_obj->getUserData().phys_mem_obj = phys;
+  phys->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+  if (import_vmm_for_interprocess && (phys->getMemFlags() & ROCCLR_MEM_INTERPROCESS)) {
+    vaddr_sub_obj->setVmmImported(true);
+  }
+}
+
+//==================================================================================================
+void Device::UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr,
+                                    bool destroy_virtual_buffer, bool release_sub_obj) const {
+  assert(vaddr_sub_obj != nullptr);
+  if (destroy_virtual_buffer) {
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+  }
+  amd::MemObjMap::RemoveMemObj(va_ptr);
+  if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
+    vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
+    vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
+  }
+  if (release_sub_obj) {
+    // ~Memory releases parent va_ via parent_->release().
+    vaddr_sub_obj->release();
+  }
+}
+
 Device::BlitProgram::~BlitProgram() {
   if (program_ != nullptr) {
     program_->release();
@@ -614,8 +780,7 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices;
-  devices.push_back(device);
+  std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
@@ -674,12 +839,30 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
+  // Check if GPU_ENABLE_PAL env var is empty string, consider it as default
+  const char* gpu_enable_pal_env = getenv("GPU_ENABLE_PAL");
+  bool gpu_enable_pal_is_empty_string = (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
+
+  // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
+  if (gpu_enable_pal_is_empty_string) {
+    if (IS_WINDOWS) {
+      // Windows default: PAL path
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // Linux default: ROCr path
+      GPU_ENABLE_PAL = 0;
+    }
+  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
+    // Without this, roc::Device::init() returns true & disables PAL path in below code
+    GPU_ENABLE_PAL = 1;
+  }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL != 1) || flagIsDefault(GPU_ENABLE_PAL)) {
+  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
@@ -705,6 +888,7 @@ bool Device::init() {
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
     }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "ROCr backend initialized");
   }
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
@@ -716,6 +900,7 @@ bool Device::init() {
       }
     }
     ret |= PalDeviceLoad();
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "PAL backend initialized");
   }
 #endif  // WITH_PAL_DEVICE
   return ret;
@@ -723,6 +908,12 @@ bool Device::init() {
 
 // ================================================================================================
 void Device::tearDown() {
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  // Scan for device-side leaks before ~Device frees the heap slabs.
+  reportAllDeviceMemoryLeaks();
+#endif
+#endif
   if (devices_ != nullptr) {
     for (uint i = 0; i < devices_->size(); ++i) {
       delete devices_->at(i);
@@ -793,9 +984,7 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // use versioned comgr for HIP, unversioned for Opencl
-  const bool kComgrVersioned = amd::IS_HIP;
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
   return amd::Comgr::IsReady();
 }
 
@@ -1050,6 +1239,13 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
     return false;
   }
 
+  // VMM allocations must use hipMemExportToShareableHandle for IPC.
+  if (amd_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "IPC is not supported for VMM allocations (dev_ptr: %p)", dev_ptr);
+    return false;
+  }
+
   // Get the original pointer from the amd::Memory object
   void* orig_dev_ptr = nullptr;
   if (amd_mem_obj->getSvmPtr() != nullptr) {
@@ -1102,6 +1298,23 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   if (mem_obj_exist == nullptr) {
     // Add the original mem_ptr to the MemObjMap with newly created amd_mem_obj
     amd::MemObjMap::AddMemObj(amd_mem_obj->getSvmPtr(), amd_mem_obj);
+  } else if (mem_obj_exist->ipcShared()) {
+    // Stale IPC import at the same VA. The app freed memory on the
+    // exporter side and reallocated at the same VA without the importer calling
+    // hipIpcCloseMemHandle. Replace the stale object with the new mapping.
+    void* old_ptr = mem_obj_exist->getSvmPtr();
+    void* new_ptr = amd_mem_obj->getSvmPtr();
+    amd::MemObjMap::RemoveIpcHandleMemObj(mem_obj_exist);
+    amd::MemObjMap::RemoveMemObj(old_ptr);
+
+    if (old_ptr == new_ptr) {
+      // Clear ipcShared to prevent the destructor from calling ipc_memory_detach,
+      // which would unmap the new (valid) mapping at this VA.
+      mem_obj_exist->setIpcShared(false);
+    }
+    // Different VA: destructor will call ipc_memory_detach to unmap the old VA.
+    mem_obj_exist->release();
+    amd::MemObjMap::AddMemObj(new_ptr, amd_mem_obj);
   } else {
     amd_mem_obj->release();
     amd_mem_obj = mem_obj_exist;
@@ -1131,23 +1344,34 @@ void Device::IpcDetach(amd::Memory* amd_mem_obj) const {
 }
 
 std::vector<amd::CommandQueue*> Device::getActiveQueues() {
+  std::vector<amd::CommandQueue*> result;
+  result.reserve(activeQueues.size());
+
   amd::ScopedLock lock(activeQueuesLock_);
-  for (auto it = activeQueues.begin(); it != activeQueues.end();) {
-    if ((*it)->referenceCount() == 0) {
+  for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (!it->second) {
+      // An inactive queue might have been releeased already, so dereferencing
+      // it->first isn't safe
+      continue;
+    }
+    if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
-      it = activeQueues.erase(it);
+      it->second = false;
     } else {
+      assert(it->second);
       // In case the queue will be destroyed in Stream::Destroy().
-      (*it)->retain();
-      ++it;
+      it->first->retain();
+      result.push_back(it->first);
     }
   }
-  return std::vector<amd::CommandQueue*>(activeQueues.begin(), activeQueues.end());
+
+  return result;
 }
 
 // =================================================================================================
-bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) {
+bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                      unsigned long long flags) {
   // Check if the ptr is created through VMM APIs, if true we use different ROCr APIs.
   amd::Memory* amd_base_obj = amd::MemObjMap::FindVirtualMemObj(dev_ptr);
   bool VmmPtr = (amd_base_obj != nullptr) ? true : false;
@@ -1160,9 +1384,9 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
   }
-
+  
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
-  return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle);
+  return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle, flags);
 }
 
 // ================================================================================================
@@ -1180,6 +1404,200 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
 }
 
 void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
+
+// ================================================================================================
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+
+extern "C" void __asan_report_nonself_leak(uint64_t alloc_pc, uint64_t alloc_size,
+                                           int device_id, const char* device_name,
+                                           int64_t vma_adjust, int fd,
+                                           uint64_t file_extent_size,
+                                           uint64_t file_extent_start);
+
+// Helper structures and functions for leak detection.
+//
+// Symbolization is best-effort: the header records only the allocating PC, resolved via
+// the URI recorded when its code object loaded. An unloaded memory:// object resolves to
+// "<unavailable>", and a reused address range may resolve to the wrong module. The leak
+// itself (size, count, device, PC) is reported regardless.
+namespace {
+  struct CachedUri {
+    amd::Os::FileDesc fd;
+    uint64_t offset;
+    uint64_t size;
+  };
+
+  constexpr uint64_t kAllocMagic = 0xfedcba1ee1abcdefULL;
+  constexpr uint32_t kAllocHeaderBytes = 32;
+  constexpr size_t   kSlabBytes = 2u * Mi;
+  constexpr uint32_t kSlabHeaderBytes = 32;
+  constexpr uint32_t kSlabAlign = 4096;
+  constexpr uint32_t kMinAlign = 16;
+  constexpr uint32_t kAsanShadow = 3;
+  constexpr uint8_t  kHeapFreeMagic = 0xfd;
+  constexpr uint8_t  kHeapLeftRedzoneMagic = 0xfa;
+  constexpr uint64_t kShadowOffset = 0x7FFFFFFF & (~0xFFFULL << kAsanShadow);
+
+  inline uint8_t* memToShadow(uint64_t addr) {
+    return reinterpret_cast<uint8_t*>((addr >> kAsanShadow) + kShadowOffset);
+  }
+
+  __attribute__((no_sanitize("address")))
+  bool scanSlabForLeaks(uint64_t va, device::UriLocator* uriLocator, int devIdx,
+                        std::map<std::string, CachedUri>& uriCache) {
+    auto base = reinterpret_cast<uint8_t*>(va);
+    auto usable = base + kSlabHeaderBytes;
+    auto end = base + kSlabBytes;
+    bool foundLeak = false;
+
+    for (auto p = usable; p + kAllocHeaderBytes <= end; p += kMinAlign) {
+      auto words = reinterpret_cast<uint64_t*>(p);
+      if (words[0] != kAllocMagic || words[1] != va)
+        continue;
+
+      uint64_t pc  = words[2];
+      uint32_t usz = reinterpret_cast<uint32_t*>(p)[7];
+
+      uint64_t ret_addr = reinterpret_cast<uint64_t>(p) + kAllocHeaderBytes;
+      uint8_t shadow = *memToShadow(ret_addr);
+      if (shadow == kHeapFreeMagic || shadow == kHeapLeftRedzoneMagic)
+        continue;
+
+      foundLeak = true;
+      auto uri_fd = amd::Os::FDescInit();
+      uint64_t offset = 0, size = 0;
+      int64_t loadAddrAdjust = 0;
+      std::string uriPath;
+      if (uriLocator) {
+        device::UriLocator::UriInfo uri_info = uriLocator->lookUpUri(pc);
+        uriPath = uri_info.uriPath;
+        loadAddrAdjust = uri_info.loadAddressDiff;
+
+        auto it = uriCache.find(uriPath);
+        if (it != uriCache.end()) {
+          uri_fd = it->second.fd;
+          offset = it->second.offset;
+          size = it->second.size;
+        } else {
+          auto extent = uriLocator->decodeUriAndGetFd(uri_info, &uri_fd);
+          offset = extent.first;
+          size = extent.second;
+          if (uri_fd != amd::Os::FDescInit()) {
+            uriCache[uriPath] = {uri_fd, offset, size};
+          }
+        }
+      }
+      __asan_report_nonself_leak(pc, usz, devIdx, "amdgpu",
+                                 loadAddrAdjust, uri_fd, size, offset);
+    }
+    return foundLeak;
+  }
+
+  __attribute__((no_sanitize("address")))
+  bool scanLargeAllocationForLeaks(uint64_t va, device::UriLocator* uriLocator, int devIdx,
+                                    std::map<std::string, CachedUri>& uriCache) {
+    auto header = reinterpret_cast<uint64_t*>(va + kSlabAlign - kAllocHeaderBytes);
+    if (header[0] != kAllocMagic || header[1] != 0)
+      return false;
+
+    uint64_t pc  = header[2];
+    uint32_t usz = reinterpret_cast<uint32_t*>(header)[7];
+    auto uri_fd = amd::Os::FDescInit();
+    uint64_t offset = 0, size = 0;
+    int64_t loadAddrAdjust = 0;
+    std::string uriPath;
+    if (uriLocator) {
+      device::UriLocator::UriInfo uri_info = uriLocator->lookUpUri(pc);
+      uriPath = uri_info.uriPath;
+      loadAddrAdjust = uri_info.loadAddressDiff;
+
+      auto it = uriCache.find(uriPath);
+      if (it != uriCache.end()) {
+        uri_fd = it->second.fd;
+        offset = it->second.offset;
+        size = it->second.size;
+      } else {
+        auto extent = uriLocator->decodeUriAndGetFd(uri_info, &uri_fd);
+        offset = extent.first;
+        size = extent.second;
+        if (uri_fd != amd::Os::FDescInit()) {
+          uriCache[uriPath] = {uri_fd, offset, size};
+        }
+      }
+    }
+    __asan_report_nonself_leak(pc, usz, devIdx, "amdgpu",
+                               loadAddrAdjust, uri_fd, size, offset);
+    return true;
+  }
+}  // anonymous namespace
+
+void Device::reportDeviceMemoryLeaks() {
+  if (hostcall_allocated_memories_.empty() && initial_heap_buffer_ == nullptr) {
+    return;
+  }
+
+  device::UriLocator* uriLocator = createUriLocator();
+  int devIdx = static_cast<int>(index());
+  bool hasLeaks = false;
+  std::map<std::string, CachedUri> uriCache;
+
+  // Scan initial heap buffer if present
+  if (initial_heap_buffer_ != nullptr) {
+    uint64_t va = initial_heap_buffer_->virtualAddress();
+    if (va != 0 && initial_heap_size_ > 0) {
+      size_t numSlabs = initial_heap_size_ / kSlabBytes;
+      for (size_t i = 0; i < numSlabs; ++i) {
+        hasLeaks |= scanSlabForLeaks(va + i * kSlabBytes, uriLocator, devIdx, uriCache);
+      }
+    }
+  }
+
+  // Scan hostcall-allocated memories
+  for (auto memory : hostcall_allocated_memories_) {
+    if (memory == nullptr) continue;
+
+    device::Memory* dm = memory->getDeviceMemory(*this, false);
+    if (dm == nullptr) continue;
+
+    uint64_t va = dm->virtualAddress();
+    if (va == 0) continue;
+
+    size_t bufSize = memory->getSize();
+
+    if (bufSize == kSlabBytes) {
+      hasLeaks |= scanSlabForLeaks(va, uriLocator, devIdx, uriCache);
+    } else {
+      hasLeaks |= scanLargeAllocationForLeaks(va, uriLocator, devIdx, uriCache);
+    }
+  }
+
+  if (hasLeaks) {
+    __asan_report_nonself_leak(0, 0, -1, "amdgpu", 0, -1, 0, 0);
+  }
+
+  for (const auto& pair : uriCache) {
+    amd::Os::CloseFileHandle(pair.second.fd);
+  }
+
+  delete uriLocator;
+}
+
+void Device::reportAllDeviceMemoryLeaks() {
+  if (devices_ == nullptr) {
+    return;
+  }
+
+  for (uint i = 0; i < devices_->size(); ++i) {
+    Device* device = devices_->at(i);
+    if (device != nullptr) {
+      device->reportDeviceMemoryLeaks();
+    }
+  }
+}
+
+#endif
+#endif
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {
@@ -1244,6 +1662,7 @@ Settings::Settings() : value_(0) {
   }
 
   gwsInitSupported_ = true;
+  groupMemCarveout_ = false;
 }
 
 void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,

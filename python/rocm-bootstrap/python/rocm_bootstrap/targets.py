@@ -10,7 +10,7 @@ literals derived from LLVM's canonical definitions:
 
 Every GFX target maps to a 3-level packaging hierarchy:
   target     -> sub-family -> family
-  gfx1151    -> gfx11_5    -> gfx11
+  gfx1151    -> gfx115x    -> gfx11
 
 Packages can exist at any level. A complete installation uses packages
 from all applicable levels (some may be empty/omitted).
@@ -19,6 +19,7 @@ from all applicable levels (some may be empty/omitted).
 from dataclasses import dataclass
 from enum import Enum
 
+from .package_metadata import group_package_targets
 
 # ---------------------------------------------------------------------------
 # Public types
@@ -73,7 +74,7 @@ class PackagingLevel(Enum):
     """Level in the 3-tier packaging hierarchy."""
 
     FAMILY = "family"  # gfx11   (major only)
-    SUB_FAMILY = "sub_family"  # gfx11_5 (major + minor)
+    SUB_FAMILY = "sub_family"  # gfx115x or gfx12_5 (major + minor)
     TARGET = "target"  # gfx1151 (specific)
 
 
@@ -81,16 +82,16 @@ class PackagingLevel(Enum):
 class TargetBundle:
     """A named group of targets at one level of the packaging hierarchy.
 
-    Bundles are structural — derived from the GFX version number encoding:
+    Bundles are structural groups derived from the GFX version number encoding:
 
     * **Family**: all targets sharing a major version.
     * **Sub-family**: all targets sharing major + minor.
     * **Target**: one specific target.
 
     Attributes:
-        key: Python module-safe identifier (e.g., ``"gfx11_5"``).
-            Uses underscores. The corresponding dist-safe name replaces
-            ``_`` with ``-`` (e.g., ``"gfx11-5"``).
+        key: Python module-safe identifier (e.g., ``"gfx115x"`` or
+            ``"gfx12_5"``). The corresponding dist-safe name replaces ``_``
+            with ``-`` (e.g., ``"gfx12-5"``).
         level: Which tier of the hierarchy this bundle represents.
         display_name: Human-readable label (e.g., ``"GFX11.5 (RDNA 3.5)"``).
         llvm_generic: LLVM generic target name if one covers this level
@@ -171,6 +172,9 @@ GFX1201 = GfxTarget(name="gfx1201", major=12, minor=0, stepping=1, xnack=_U)
 
 # -- GFX12.5 --
 GFX1250 = GfxTarget(name="gfx1250", major=12, minor=5, stepping=0, xnack=_D)
+GFX1250_STRICT = GfxTarget(
+    name="gfx1250-strict", major=12, minor=5, stepping=0, xnack=_D
+)
 GFX1251 = GfxTarget(name="gfx1251", major=12, minor=5, stepping=1, xnack=_D)
 
 
@@ -402,7 +406,7 @@ BUNDLE_GFX1250 = TargetBundle(
     level=_TARGET,
     display_name="gfx1250",
     llvm_generic=None,
-    members=(GFX1250,),
+    members=(GFX1250, GFX1250_STRICT),
 )
 BUNDLE_GFX1251 = TargetBundle(
     key="gfx1251",
@@ -461,16 +465,16 @@ BUNDLE_GFX10_3 = TargetBundle(
     members=(GFX1030, GFX1031, GFX1032, GFX1033, GFX1034, GFX1035, GFX1036),
 )
 
-BUNDLE_GFX11_0 = TargetBundle(
-    key="gfx11_0",
+BUNDLE_GFX110X = TargetBundle(
+    key="gfx110x",
     level=_SF,
     display_name="RDNA3",
     llvm_generic=None,
     members=(GFX1100, GFX1101, GFX1102, GFX1103),
 )
 
-BUNDLE_GFX11_5 = TargetBundle(
-    key="gfx11_5",
+BUNDLE_GFX115X = TargetBundle(
+    key="gfx115x",
     level=_SF,
     display_name="RDNA3.5",
     llvm_generic=None,
@@ -491,7 +495,7 @@ BUNDLE_GFX12_5 = TargetBundle(
     level=_SF,
     display_name="GFX12.5",
     llvm_generic=None,
-    members=(GFX1250, GFX1251),
+    members=(GFX1250, GFX1250_STRICT, GFX1251),
 )
 
 
@@ -554,7 +558,7 @@ BUNDLE_GFX12 = TargetBundle(
     level=_F,
     display_name="RDNA4",
     llvm_generic=None,
-    members=(GFX1200, GFX1201, GFX1250, GFX1251),
+    members=(GFX1200, GFX1201, GFX1250, GFX1250_STRICT, GFX1251),
 )
 
 
@@ -595,6 +599,7 @@ ALL_TARGETS: tuple[GfxTarget, ...] = (
     GFX1200,
     GFX1201,
     GFX1250,
+    GFX1250_STRICT,
     GFX1251,
 )
 
@@ -611,8 +616,8 @@ ALL_SUB_FAMILIES: tuple[TargetBundle, ...] = (
     BUNDLE_GFX9_5,
     BUNDLE_GFX10_1,
     BUNDLE_GFX10_3,
-    BUNDLE_GFX11_0,
-    BUNDLE_GFX11_5,
+    BUNDLE_GFX110X,
+    BUNDLE_GFX115X,
     BUNDLE_GFX12_0,
     BUNDLE_GFX12_5,
 )
@@ -621,8 +626,15 @@ ALL_SUB_FAMILIES: tuple[TargetBundle, ...] = (
 _FAMILY_TO_SUB_FAMILIES: dict[str, tuple[TargetBundle, ...]] = {
     "gfx9": (BUNDLE_GFX9_0, BUNDLE_GFX9_4, BUNDLE_GFX9_5),
     "gfx10": (BUNDLE_GFX10_1, BUNDLE_GFX10_3),
-    "gfx11": (BUNDLE_GFX11_0, BUNDLE_GFX11_5),
+    "gfx11": (BUNDLE_GFX110X, BUNDLE_GFX115X),
     "gfx12": (BUNDLE_GFX12_0, BUNDLE_GFX12_5),
+}
+
+# Legacy sub-family keys retained for callers that used the structural
+# major_minor spelling before the ROCm package naming converged on gfx*X.
+_BUNDLE_KEY_ALIASES: dict[str, str] = {
+    "gfx11_0": "gfx110x",
+    "gfx11_5": "gfx115x",
 }
 
 
@@ -656,7 +668,17 @@ def _build_target_bundle_map() -> dict[str, TargetBundle]:
 _TARGET_BY_NAME: dict[str, GfxTarget] = {t.name: t for t in ALL_TARGETS}
 
 # Map: gfx_target_version int -> GfxTarget
-_TARGET_BY_GTV: dict[int, GfxTarget] = {t.gfx_target_version: t for t in ALL_TARGETS}
+# Preserve GFX1250 for numeric lookup while keeping gfx1250-strict available
+# through name lookup. Exclude GFX1250_STRICT from this map and reject any
+# remaining duplicate numeric versions.
+_TARGET_BY_GTV: dict[int, GfxTarget] = {}
+for _target in ALL_TARGETS:
+    if _target is GFX1250_STRICT:
+        continue
+    if _target.gfx_target_version in _TARGET_BY_GTV:
+        raise RuntimeError(f"Duplicate numeric ISA version: {_target.name}")
+    _TARGET_BY_GTV[_target.gfx_target_version] = _target
+_TARGET_BUNDLE_BY_TARGET: dict[str, TargetBundle] = {}
 
 # Map: bundle key -> TargetBundle (all levels)
 _BUNDLE_BY_KEY: dict[str, TargetBundle] = {}
@@ -685,22 +707,30 @@ def _build_lookups() -> None:
                 )
             _SUB_FAMILY_BY_TARGET[t.name] = sf
 
-    # Register target-level bundles
-    for t in ALL_TARGETS:
+    # Multiple targets can share a package owner.
+    for owner, names in group_package_targets(t.name for t in ALL_TARGETS).items():
         bundle = TargetBundle(
-            key=t.name,
+            key=owner,
             level=PackagingLevel.TARGET,
-            display_name=t.name,
+            display_name=owner,
             llvm_generic=None,
-            members=(t,),
+            members=tuple(_TARGET_BY_NAME[name] for name in names),
         )
-        _BUNDLE_BY_KEY[t.name] = bundle
+        _BUNDLE_BY_KEY[owner] = bundle
+        for name in names:
+            _TARGET_BUNDLE_BY_TARGET[name] = bundle
 
     # Build sub-family -> family mapping
     for fam_key, sfs in _FAMILY_TO_SUB_FAMILIES.items():
         fam = _BUNDLE_BY_KEY[fam_key]
         for sf in sfs:
             _FAMILY_BY_SUB_FAMILY[sf.key] = fam
+
+    # Register compatibility aliases after canonical keys are present.
+    for alias, canonical_key in _BUNDLE_KEY_ALIASES.items():
+        if alias in _BUNDLE_BY_KEY:
+            raise RuntimeError(f"Bundle alias {alias} conflicts with a canonical key")
+        _BUNDLE_BY_KEY[alias] = _BUNDLE_BY_KEY[canonical_key]
 
 
 _build_lookups()
@@ -738,7 +768,7 @@ def lookup_bundle(key: str) -> TargetBundle:
     Works for all levels (family, sub-family, target).
 
     Args:
-        key: Bundle key (e.g., ``"gfx11"``, ``"gfx11_5"``, ``"gfx1151"``).
+        key: Bundle key (e.g., ``"gfx11"``, ``"gfx115x"``, ``"gfx1151"``).
 
     Returns:
         The :class:`TargetBundle` instance.
@@ -767,7 +797,7 @@ def packaging_chain(
 
         packaging_chain("gfx1151") == (
             TargetBundle("gfx1151", TARGET, ...),
-            TargetBundle("gfx11_5", SUB_FAMILY, ...),
+            TargetBundle("gfx115x", SUB_FAMILY, ...),
             TargetBundle("gfx11", FAMILY, ...),
         )
 
@@ -784,7 +814,7 @@ def packaging_chain(
         target = lookup_target(target)
     name = target.name
 
-    target_bundle = _BUNDLE_BY_KEY[name]
+    target_bundle = _TARGET_BUNDLE_BY_TARGET[name]
     sf_bundle = _SUB_FAMILY_BY_TARGET[name]
     fam_bundle = _FAMILY_BY_SUB_FAMILY[sf_bundle.key]
 
@@ -823,14 +853,17 @@ def all_bundles(level: PackagingLevel | None = None) -> tuple[TargetBundle, ...]
     Returns:
         Tuple of :class:`TargetBundle` instances.
     """
+    target_bundles = tuple(
+        dict.fromkeys(_TARGET_BUNDLE_BY_TARGET[t.name] for t in ALL_TARGETS)
+    )
     if level is None:
-        return tuple(_BUNDLE_BY_KEY.values())
+        return ALL_FAMILIES + ALL_SUB_FAMILIES + target_bundles
     if level == PackagingLevel.FAMILY:
         return ALL_FAMILIES
     if level == PackagingLevel.SUB_FAMILY:
         return ALL_SUB_FAMILIES
     # TARGET level
-    return tuple(b for b in _BUNDLE_BY_KEY.values() if b.level == PackagingLevel.TARGET)
+    return target_bundles
 
 
 def parse_gfx_target_version(gtv: int) -> GfxTarget:

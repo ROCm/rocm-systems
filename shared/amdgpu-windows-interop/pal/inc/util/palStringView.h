@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,7 @@ public:
         PAL_CONSTEXPR_ASSERT((s != nullptr) || (count == 0));
     }
 
-    StringView(
+    constexpr StringView(
         const CharT* s)
         :
         StringView()
@@ -147,6 +147,28 @@ public:
     /// @returns True if the view points to an empty or non-existing data storage.
     constexpr bool IsEmpty() const { return (m_length == 0); }
 
+    /// Returns a new StringView that excludes the first "count" characters in the string or an empty StringView if
+    /// "count" is greater than or equal to the length of the string.
+    ///
+    /// @param [in] count   The number of characters to exclude from the front of this view.
+    ///
+    /// @returns Returns a new StringView that excludes the first "count" characters in the string.
+    constexpr StringView<CharT> DropFront(uint32 count) const
+    {
+        return (count < m_length) ? StringView<CharT>(m_pData + count, m_length - count) : StringView<CharT>();
+    }
+
+    /// Returns a new StringView that excludes the last "count" characters in the string or an empty StringView if
+    /// "count" is greater than or equal to the length of the string.
+    ///
+    /// @param [in] count   The number of characters to exclude from the back of this view.
+    ///
+    /// @returns Returns a new StringView that excludes the last "count" characters in the string.
+    constexpr StringView<CharT> DropBack(uint32 count) const
+    {
+        return (count < m_length) ? StringView<CharT>(m_pData, m_length - count) : StringView<CharT>();
+    }
+
     ///@{
     /// @internal Satisfies concept `range_expression`, using CharT* as `iterator`.
     ///
@@ -172,8 +194,9 @@ constexpr bool operator==(
     bool equal = (x.Length() == y.Length());
     if (equal)
     {
-        if (x.Data() != y.Data())
+        if (std::is_constant_evaluated() || (x.Data() != y.Data()))
         {
+            // Either it's going to be constant-evaluated anyways (and GCC11 doesn't support the data check) or
             // they are not pointing to the same storage, so we need to compare the contents
             for (uint32 index = 0; equal && (index < x.Length()); ++index)
             {

@@ -271,7 +271,6 @@ static void hipGraphDebugDotPrint_Functional(const char* fName, unsigned int fla
 
 HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
   CHECK_IMAGE_SUPPORT
-
   SECTION("Call with hipGraphDebugDotFlagsVerbose flag") {
     hipGraphDebugDotPrint_Functional("./graphDotFileFuncVerbose.dot", hipGraphDebugDotFlagsVerbose);
   }

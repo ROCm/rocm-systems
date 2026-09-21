@@ -31,6 +31,7 @@ from .phdr_manager import (
     ProgramHeaderManager,
     PhdrResizeResult,
     create_load_segment,
+    normalize_phdr_vaddr,
 )
 from .operations import (
     map_section_to_load,
@@ -146,6 +147,7 @@ __all__ = [
     "SetPointerResult",
     "UpdateRelocationResult",
     "create_load_segment",
+    "normalize_phdr_vaddr",
     # Zero-page operations
     "conservative_zero_page",
     "zero_page_section",

@@ -615,9 +615,9 @@ OPTION(OT_UINT32, \
        5, 4, 5, NULL, \
        "Specify code object ABI version. Allowed values are 4, and 5. Defaults to 5. (COMGR only)")
 
-// -fsanitze=tool
-NOPTION(OT_CSTRING, \
-       OA_CLC|OVA_REQUIRED|OA_SEPARATOR_EQUAL|OFA_PREFIX_F, \
+// -fsanitize=tool
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OA_CLC|OVA_REQUIRED|OA_SEPARATOR_EQUAL|OFA_PREFIX_F, \
        "sanitize", NULL, \
        FSanitize, \
        0, 0, 0, "address", \

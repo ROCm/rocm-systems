@@ -427,6 +427,7 @@ to_string (amd_dbgapi_instruction_kind_t instruction_kind)
       CASE (INSTRUCTION_KIND_BARRIER);
       CASE (INSTRUCTION_KIND_SLEEP);
       CASE (INSTRUCTION_KIND_SPECIAL);
+      CASE (INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR);
     }
   return to_string (make_hex (instruction_kind));
 }
@@ -451,25 +452,8 @@ template <>
 std::string
 to_string (amd_dbgapi_instruction_properties_t instruction_properties)
 {
-  std::string str;
-
-  if (!instruction_properties)
-    return one_instruction_property_to_string (instruction_properties);
-
-  while (instruction_properties)
-    {
-      amd_dbgapi_instruction_properties_t one_bit
-        = instruction_properties
-          ^ (instruction_properties & (instruction_properties - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_instruction_property_to_string (one_bit);
-
-      instruction_properties ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (instruction_properties,
+                                 one_instruction_property_to_string);
 }
 
 namespace
@@ -495,25 +479,8 @@ template <>
 std::string
 to_string (amd_dbgapi_register_properties_t register_properties)
 {
-  std::string str;
-
-  if (!register_properties)
-    return one_register_property_to_string (register_properties);
-
-  while (register_properties)
-    {
-      amd_dbgapi_register_properties_t one_bit
-        = register_properties
-          ^ (register_properties & (register_properties - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_register_property_to_string (one_bit);
-
-      register_properties ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (register_properties,
+                                 one_register_property_to_string);
 }
 
 template <>
@@ -547,6 +514,7 @@ to_string (detail::query_ref<amd_dbgapi_instruction_kind_t> ref)
           information)))));
     case AMD_DBGAPI_INSTRUCTION_KIND_INDIRECT_BRANCH_REGISTER_PAIR:
     case AMD_DBGAPI_INSTRUCTION_KIND_INDIRECT_BRANCH_CONDITIONAL_REGISTER_PAIR:
+    case AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR:
       return to_string (make_ref (
         make_ref (
           static_cast<const amd_dbgapi_register_id_t *const *> (information)),
@@ -621,6 +589,7 @@ to_string (amd_dbgapi_process_info_t process_info)
       CASE (PROCESS_INFO_OS_ID);
       CASE (PROCESS_INFO_CORE_STATE);
       CASE (PROCESS_INFO_PRECISE_ALU_EXCEPTIONS_SUPPORTED);
+      CASE (PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS);
     }
   return to_string (make_hex (process_info));
 }
@@ -652,6 +621,9 @@ to_string (detail::query_ref<amd_dbgapi_process_info_t> ref)
     case AMD_DBGAPI_PROCESS_INFO_PRECISE_ALU_EXCEPTIONS_SUPPORTED:
       return to_string (make_ref (
         static_cast<const amd_dbgapi_alu_exceptions_precision_t *> (value)));
+    case AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS:
+      return to_string (
+        make_ref (static_cast<const amd_dbgapi_segment_address_t *> (value)));
     }
   fatal_error ("unhandled amd_dbgapi_process_info_t query (%s)",
                to_cstring (query));
@@ -979,24 +951,8 @@ template <>
 std::string
 to_string (amd_dbgapi_exceptions_t queue_error_reason)
 {
-  std::string str;
-
-  if (!queue_error_reason)
-    return one_queue_error_reason_to_string (queue_error_reason);
-
-  while (queue_error_reason)
-    {
-      amd_dbgapi_exceptions_t one_bit
-        = queue_error_reason ^ (queue_error_reason & (queue_error_reason - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_queue_error_reason_to_string (one_bit);
-
-      queue_error_reason ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (queue_error_reason,
+                                 one_queue_error_reason_to_string);
 }
 
 template <>
@@ -1234,24 +1190,7 @@ template <>
 std::string
 to_string (amd_dbgapi_wave_stop_reasons_t stop_reason)
 {
-  std::string str;
-
-  if (!stop_reason)
-    return one_stop_reason_to_string (stop_reason);
-
-  while (stop_reason)
-    {
-      amd_dbgapi_wave_stop_reasons_t one_bit
-        = stop_reason ^ (stop_reason & (stop_reason - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_stop_reason_to_string (one_bit);
-
-      stop_reason ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (stop_reason, one_stop_reason_to_string);
 }
 
 template <>
@@ -1683,23 +1622,7 @@ template <>
 std::string
 to_string (os_wave_launch_trap_mask_t value)
 {
-  std::string str;
-
-  if (!value)
-    return one_launch_trap_mask_to_string (value);
-
-  while (value != os_wave_launch_trap_mask_t::none)
-    {
-      os_wave_launch_trap_mask_t one_bit = value ^ (value & (value - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_launch_trap_mask_to_string (one_bit);
-
-      value ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (value, one_launch_trap_mask_to_string);
 }
 
 template <>

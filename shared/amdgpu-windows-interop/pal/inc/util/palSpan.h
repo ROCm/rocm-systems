@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -369,6 +369,12 @@ public:
     /// @param [in] src Other Span<T> to copy from
     template<typename T = void, typename Enabled = IfConst<T, false>>
     Span(const Span<T>& src) : Span(src.Data(), src.NumElements()) {}
+
+    /// Template copy constructor
+    ///
+    /// @param [in] src Other Span<T> to copy from
+    template<typename T = void, typename Enabled = IfConst<T, false>>
+    Span(Span<T>& src) : Span(src.Data(), src.NumElements()) {}
 
     /// Template constructor from any C++ array
     ///

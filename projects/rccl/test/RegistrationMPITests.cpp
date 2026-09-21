@@ -1,0 +1,3040 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+/**
+ * @file RegistrationMPITests.cpp
+ * @brief Tests for buffer registration functionality in RCCL
+ *
+ * This file contains tests for:
+ * 1. User Buffer Registration (UBR) - explicit buffer registration via ncclCommRegister
+ * 2. Graph Capture Registration - automatic buffer registration during HIP graph capture
+ * 3. Symmetric window registration during HIP graph capture (NCCL 2.30.7)
+ *
+ * REQUIRED Environment Variables:
+ *   NCCL_DEBUG=INFO              Enable debug logging
+ *   NCCL_DEBUG_SUBSYS=REG        Enable REG subsystem logging
+ *   NCCL_LOCAL_REGISTER=1        Enable local buffer registration (UBR tests)
+ *   NCCL_GRAPH_REGISTER=1        Enable graph buffer registration (Graph tests)
+ *   RCCL_MPI_LOG_ALL_RANKS=1     Enable per-rank logging for log verification
+ *
+ * Run examples:
+ *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=UBR_*
+ *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=GraphCapture_*
+ */
+
+#include "DeviceBufferHelpers.hpp"
+#include "MPITestBase.hpp"
+#include "MPIHelpers.hpp"
+#include "ResourceGuards.hpp"
+#include "TestChecks.hpp"
+#include "comm.h"
+#include <cstdlib>
+#include <regex>
+#include <sstream>
+#include <string>
+
+#ifdef MPI_TESTS_ENABLED
+
+// Portability shim: hipMemLocationTypeHost was added after ROCm 7.0.x. On older
+// headers the enum only defines Invalid/Device, so provide the CUDA-equivalent
+// value (CU_MEM_LOCATION_TYPE_HOST == 2) to keep this file compiling there. A
+// macro (not a constexpr) is used because the enum's declared value range is
+// [0,1], which makes a constexpr cast of 2 an invalid constant expression.
+#if !defined(ROCM_VERSION) || ROCM_VERSION < 70100
+#define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
+#endif
+
+using namespace MPITestConstants;
+using namespace RCCLTestGuards;
+using namespace RCCLTestHelpers;
+
+// Test Configuration
+namespace RegTestConfig {
+    constexpr size_t SMALL_COUNT  = 1024;           // 4KB for float
+    constexpr size_t MEDIUM_COUNT = 256 * 1024;     // 1MB for float
+    constexpr size_t LARGE_COUNT  = 1024 * 1024;    // 4MB for float
+
+    using DefaultType = hip_bfloat16;
+
+    constexpr int MIN_RANKS_DEFAULT    = 2;
+    constexpr int MIN_RANKS_ALLTOALL   = 4;
+    constexpr int MIN_NODES_MULTINODE  = 2;
+}
+
+// REG Log Checker - Pattern checking for registration debug output
+class REGLogChecker
+{
+public:
+    explicit REGLogChecker(const std::string& logContent)
+        : m_content(logContent) {}
+
+    bool hasIPCRegistration() const
+    {
+        return hasPattern("IPC register buffer") ||
+               hasPattern("IPC registering buffer") ||
+               (hasPattern("Proxy rank") && hasPattern("register success"));
+    }
+
+    bool hasIPCReuse() const
+    {
+        return hasPattern("IPC reuse buffer");
+    }
+
+    bool hasNETReuse() const
+    {
+        return hasPattern("NET reuse buffer");
+    }
+
+    bool hasNumSegments(int n) const
+    {
+        const std::regex re("numSegments\\s*:?\\s*" + std::to_string(n) + "\\b");
+        return std::regex_search(m_content, re);
+    }
+
+    bool hasNETRegistration() const
+    {
+        return hasPattern("NET register userbuff");
+    }
+
+    bool hasAnyRegistrationSuccess() const
+    {
+        return hasIPCRegistration() || hasIPCReuse() || hasNETRegistration() || hasNETReuse();
+    }
+
+    bool hasIPCFailure() const
+    {
+        return hasPattern("failed to IPC register") ||
+               hasPattern("legacy IPC blocked");
+    }
+
+    bool hasNETFailure() const
+    {
+        return hasPattern("failed to NET register");
+    }
+
+    // Direct AllGather path selection (requires NCCL_DEBUG_SUBSYS to include TUNING for
+    // the "used" marker and INIT for the "disabled" markers).
+    bool usedDirectAllGather() const
+    {
+        return hasPattern("RCCL DIRECT ALLGATHER count");
+    }
+
+    bool directAllGatherDisabled() const
+    {
+        return hasPattern("RCCL DIRECT ALLGATHER has been disabled") ||
+               hasPattern("RCCL DIRECT ALLGATHER disabled") ||
+               hasPattern("Direct AllGather disabled");
+    }
+
+    bool usedSymmetricCollective(const std::string& collective) const
+    {
+        return hasPattern(collective + " [Symmetric]:");
+    }
+
+    bool usedLegacyCollective(const std::string& collective) const
+    {
+        const std::regex re(collective + ": [^\\n]*-> Algo ");
+        return std::regex_search(m_content, re);
+    }
+
+    bool usedNonSymmetricWindowRegistration() const
+    {
+        return hasPattern("windowRegisterNonSym:");
+    }
+
+    std::string getSummary() const
+    {
+        std::ostringstream ss;
+        ss << "REG Log: ";
+        if (hasIPCReuse()) ss << "[IPC-REUSE] ";
+        if (hasNETReuse()) ss << "[NET-REUSE] ";
+        if (hasIPCRegistration()) ss << "[IPC-REG] ";
+        if (hasNETRegistration()) ss << "[NET-REG] ";
+        if (hasIPCFailure()) ss << "[IPC-FAIL] ";
+        if (hasNETFailure()) ss << "[NET-FAIL] ";
+        if (usedDirectAllGather()) ss << "[DIRECT-AG] ";
+        if (directAllGatherDisabled()) ss << "[DIRECT-AG-OFF] ";
+        if (!hasAnyRegistrationSuccess() && !hasIPCFailure() && !hasNETFailure()) ss << "[NO-REG]";
+        return ss.str();
+    }
+
+    size_t getContentLength() const { return m_content.size(); }
+
+private:
+    bool hasPattern(const std::string& pattern) const
+    {
+        return m_content.find(pattern) != std::string::npos;
+    }
+
+    std::string m_content;
+};
+
+// Registration Test Base Class
+class RegistrationTestBase : public MPITestBase
+{
+protected:
+    struct RegInfo {
+        void* buffer = nullptr;
+        void* handle = nullptr;
+        size_t size = 0;
+        bool registered = false;
+    };
+
+    // Buffer Management
+    RegInfo allocateAndRegister(size_t size)
+    {
+        RegInfo info;
+        info.size = size;
+
+        // VMM-aware so registration exercises the cuMem path when cuMem is on.
+        if (allocateDeviceBuffer(&info.buffer, size) != ncclSuccess) {
+            return info;
+        }
+
+        ncclResult_t result = ncclCommRegister(getActiveCommunicator(),
+                                                info.buffer, size, &info.handle);
+        info.registered = (result == ncclSuccess && info.handle != nullptr);
+
+        return info;
+    }
+
+    void cleanupRegInfo(RegInfo& info)
+    {
+        if (info.handle) {
+            ncclCommDeregister(getActiveCommunicator(), info.handle);
+            info.handle = nullptr;
+        }
+        if (info.buffer) {
+            (void)freeDeviceBuffer(info.buffer);
+            info.buffer = nullptr;
+        }
+        info.registered = false;
+    }
+
+    // Test Setup
+    bool setupMultiNode(int minRanks = 2, int minNodes = 2)
+    {
+        int nodeCount = MPITestConstants::detectNodeCount();
+        if (nodeCount < minNodes) {
+            return false;
+        }
+        if (!validateTestPrerequisites(minRanks, kNoProcessLimit,
+                                        kNoPowerOfTwoRequired, minNodes, kNoNodeLimit)) {
+            return false;
+        }
+        return (createTestCommunicator() == ncclSuccess);
+    }
+
+    // Environment Checks
+    bool isUBREnabled()
+    {
+        const char* localReg = getenv("NCCL_LOCAL_REGISTER");
+        return (localReg && std::string(localReg) == "1");
+    }
+
+    bool isGraphRegisterEnabled()
+    {
+        const char* graphReg = getenv("NCCL_GRAPH_REGISTER");
+        return (graphReg && std::string(graphReg) == "1");
+    }
+
+    void enableGraphRegisterLogging()
+    {
+        // Registration success is sniffed from NCCL_REG INFO lines. The MPI
+        // harness defaults to NCCL_DEBUG=WARN, which hides them.
+        setenv("NCCL_DEBUG", "INFO", 1);
+        setenv("NCCL_DEBUG_SUBSYS", "REG", 1);
+    }
+
+    bool isCuMemEnabled()
+    {
+        const char* cuMem = getenv("NCCL_CUMEM_ENABLE");
+        return (cuMem && std::string(cuMem) == "1");
+    }
+
+    bool isMultiSegmentRegisterEnabled()
+    {
+        const char* mseg = getenv("NCCL_MULTI_SEGMENT_REGISTER");
+        return (!mseg || std::string(mseg) != "0");
+    }
+
+    bool isWinEnabled()
+    {
+        const char* win = getenv("NCCL_WIN_ENABLE");
+        return (!win || std::string(win) != "0");
+    }
+
+    bool isGinEnabled()
+    {
+        const char* en = getenv("NCCL_GIN_ENABLE");
+        if (en && std::string(en) == "0") return false;
+        const char* type = getenv("NCCL_GIN_TYPE");
+        return (type && std::string(type) == "2");
+    }
+
+    bool isElasticBufferRegisterEnabled()
+    {
+        const char* en = getenv("NCCL_ELASTIC_BUFFER_REGISTER");
+        return (!en || std::string(en) != "0");
+    }
+
+    bool isPerRankLoggingEnabled() { return MPIHelpers::isPerRankLoggingEnabled(); }
+
+    // Log File Access
+    std::string readRankLogFile()
+    {
+        return MPIHelpers::readRankLogFile(getTestMpiRank());
+    }
+
+    REGLogChecker getLogChecker()
+    {
+        return REGLogChecker(readRankLogFile());
+    }
+
+    // Data Initialization and Verification
+    template<typename T>
+    void initSendBuffer(void* buffer, size_t count, int rank)
+    {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(buffer, count,
+            [rank](size_t) { return static_cast<T>(static_cast<float>(rank + 1)); }));
+    }
+
+    template<typename T>
+    bool verifyAllReduceResult(void* buffer, size_t count, int nRanks)
+    {
+        T expected = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
+        return verifyBufferData<T>(buffer, count, [expected](size_t) { return expected; });
+    }
+
+    template<typename T>
+    bool verifyReduceScatterResult(void* buffer, size_t count, int nRanks)
+    {
+        T expected = static_cast<T>(static_cast<float>(nRanks * (nRanks + 1) / 2));
+        return verifyBufferData<T>(buffer, count, [expected](size_t) { return expected; });
+    }
+
+    template<typename T>
+    bool verifyAllGatherResult(void* buffer, size_t countPerRank, int nRanks)
+    {
+        return verifyBufferData<T>(buffer, countPerRank * nRanks,
+            [countPerRank](size_t i) {
+                int srcRank = i / countPerRank;
+                return static_cast<T>(static_cast<float>(srcRank + 1));
+            });
+    }
+
+    template<typename T>
+    bool verifyBroadcastResult(void* buffer, size_t count, T rootValue)
+    {
+        return verifyBufferData<T>(buffer, count,
+            [rootValue](size_t) { return rootValue; });
+    }
+};
+
+// ============================================================================
+// User Buffer Registration (UBR) Tests
+// ============================================================================
+
+class UBR_AllReduce : public RegistrationTestBase {};
+
+TEST_F(UBR_AllReduce, OutOfPlace_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t count = RegTestConfig::MEDIUM_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    RegInfo sendInfo = allocateAndRegister(count * sizeof(T));
+    RegInfo recvInfo = allocateAndRegister(count * sizeof(T));
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    initSendBuffer<T>(sendInfo.buffer, count, rank);
+
+    ncclResult_t result = ncclAllReduce(sendInfo.buffer, recvInfo.buffer, count,
+                                         getNcclDataType<T>(), ncclSum,
+                                         getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvInfo.buffer, count, nRanks));
+}
+
+class UBR_AllGather : public RegistrationTestBase {};
+
+TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t countPerRank = RegTestConfig::SMALL_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    RegInfo sendInfo = allocateAndRegister(countPerRank * sizeof(T));
+    RegInfo recvInfo = allocateAndRegister(countPerRank * nRanks * sizeof(T));
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    initSendBuffer<T>(sendInfo.buffer, countPerRank, rank);
+
+    ncclResult_t result = ncclAllGather(sendInfo.buffer, recvInfo.buffer, countPerRank,
+                                         getNcclDataType<T>(),
+                                         getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(verifyAllGatherResult<T>(recvInfo.buffer, countPerRank, nRanks));
+}
+
+// GDR flush over cuMem/DMA-BUF (regression guard). The NET/IB GDR flush fences
+// relaxed-ordering writes with a RO=0 GPU scratchpad. The pre-fix code also issued
+// an RDMA_WRITE into that scratchpad; on a dma-buf-backed scratchpad (cuMem/UBR)
+// amdgpu can't resolve it as a writable RDMA target, so mlx5 faults the QP
+// ("invalid request local work queue error") and the collective hangs. The fix
+// removes the WRITE and keeps the RO=0 READ fence, so it completes cleanly.
+// Requires NCCL_CUMEM_ENABLE=1 cross-node; if GDR is absent the flush is a no-op.
+class GdrFlush_CuMem : public RegistrationTestBase {};
+
+TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes (cross-node NET/IB GDR path)";
+    }
+
+    ASSERT_TRUE(isCuMemEnabled())
+        << "NCCL_CUMEM_ENABLE must be set to 1 (exercises the cuMem GDR flush path)";
+
+    using T = RegTestConfig::DefaultType;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    // The GDR flush only runs on the SIMPLE protocol (large messages); LL/LL128 used
+    // for small messages skips it. Sweep up to a few MB per rank so the cross-node
+    // recv takes the SIMPLE + GDR-flush path where the pre-fix fault occurs.
+    const std::vector<size_t> countsPerRank = {
+        RegTestConfig::SMALL_COUNT,        // ~2 KB  (LL)
+        RegTestConfig::MEDIUM_COUNT,       // ~512 KB (LL128/SIMPLE)
+        RegTestConfig::LARGE_COUNT,        // ~2 MB  (SIMPLE)
+        4 * RegTestConfig::LARGE_COUNT     // ~8 MB  (SIMPLE)
+    };
+
+    for (size_t countPerRank : countsPerRank) {
+        // Plain (unregistered) device buffers so the transfer takes the base GDR
+        // recv+flush path, independent of user-buffer registration.
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, countPerRank * sizeof(T)));
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, countPerRank * nRanks * sizeof(T)));
+        auto cleanup = makeScopeGuard([&]() {
+            if (sendBuf) (void)freeDeviceBuffer(sendBuf);
+            if (recvBuf) (void)freeDeviceBuffer(recvBuf);
+        });
+
+        initSendBuffer<T>(sendBuf, countPerRank, rank);
+
+        ncclResult_t result = ncclAllGather(sendBuf, recvBuf, countPerRank,
+                                            getNcclDataType<T>(),
+                                            getActiveCommunicator(), getActiveStream());
+        ASSERT_MPI_EQ(ncclSuccess, result);
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        ASSERT_TRUE(verifyAllGatherResult<T>(recvBuf, countPerRank, nRanks))
+            << "AllGather data incorrect over cuMem GDR path (countPerRank=" << countPerRank << ")";
+    }
+}
+
+// Direct AllGather + UBR coexistence: Direct AllGather stays default under
+// NCCL_LOCAL_REGISTER; P2P registration is gated per-op on ncclTaskP2p::allowUB.
+class UBR_DirectAllGather : public RegistrationTestBase
+{
+protected:
+    using T = RegTestConfig::DefaultType;
+
+    // Direct AllGather is pinned only when the launcher/config sets NCCL_LAUNCH_ORDER_IMPLICIT=1
+    // and RCCL_DIRECT_ALLGATHER_THRESHOLD past every swept size; verified below (GTEST_SKIP if not).
+    static constexpr unsigned long long kMinDirectAllGatherThreshold = 2147483648ULL;
+
+    void SetUp() override
+    {
+        RegistrationTestBase::SetUp();
+        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
+            return;
+        }
+
+        const char* launchOrder = getenv("NCCL_LAUNCH_ORDER_IMPLICIT");
+        if (!launchOrder || std::string(launchOrder) != "1") {
+            GTEST_SKIP() << "Requires NCCL_LAUNCH_ORDER_IMPLICIT=1 so the DDA "
+                            "fast-path is disabled and rcclSelectAllGatherAlgo() "
+                            "can select the Direct AllGather path under test. Set "
+                            "it in the test config env_variables.";
+        }
+
+        const char* threshold = getenv("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        const unsigned long long thresholdVal =
+            threshold ? std::strtoull(threshold, nullptr, 10) : 0ULL;
+        if (thresholdVal < kMinDirectAllGatherThreshold) {
+            GTEST_SKIP() << "Requires RCCL_DIRECT_ALLGATHER_THRESHOLD >= "
+                         << kMinDirectAllGatherThreshold << " (raised past every "
+                            "swept size) so Direct AllGather is selected and the "
+                            "user-threshold flag bypasses arch auto-gating. Set it "
+                            "in the test config env_variables.";
+        }
+    }
+
+    // Counts straddle the P2P LL<->SIMPLE boundary and the Direct AllGather
+    // threshold, exercising the registered path on both sides of the transition.
+    static std::vector<size_t> sweepCountsPerRank()
+    {
+        return {256, 4 * 1024, 256 * 1024, 4 * 1024 * 1024};
+    }
+
+    // Out-of-place AllGather + verify. registered=true -> UBR path (allowUB=true),
+    // false -> baseline. Reg-handle guards destruct before buffer guards (dereg then free).
+    void runAllGatherOnce(size_t countPerRank, bool registered)
+    {
+        int rank = 0, nRanks = 0;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+        const size_t sendBytes = countPerRank * sizeof(T);
+        const size_t recvBytes = countPerRank * static_cast<size_t>(nRanks) * sizeof(T);
+
+        // VMM-aware so registration exercises the cuMem path when cuMem is on.
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, sendBytes));
+        auto sendBufGuard = makeHipMemBufferAutoGuard(sendBuf);
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, recvBytes));
+        auto recvBufGuard = makeHipMemBufferAutoGuard(recvBuf);
+
+        // Declared after buffer guards so they destruct first; null handle is a
+        // no-op in the deleter, so these stay empty on the baseline path.
+        NcclRegHandleGuard sendRegGuard;
+        NcclRegHandleGuard recvRegGuard;
+        if (registered) {
+            void* sendH = nullptr;
+            void* recvH = nullptr;
+            ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommRegister(getActiveCommunicator(), sendBuf, sendBytes, &sendH));
+            ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommRegister(getActiveCommunicator(), recvBuf, recvBytes, &recvH));
+            ASSERT_MPI_NE(sendH, nullptr);
+            ASSERT_MPI_NE(recvH, nullptr);
+            sendRegGuard = makeRegHandleGuard(sendH, getActiveCommunicator());
+            recvRegGuard = makeRegHandleGuard(recvH, getActiveCommunicator());
+        }
+
+        initSendBuffer<T>(sendBuf, countPerRank, rank);
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, recvBytes));
+
+        ASSERT_MPI_EQ(ncclSuccess,
+            ncclAllGather(sendBuf, recvBuf, countPerRank, getNcclDataType<T>(),
+                          getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        EXPECT_TRUE(verifyAllGatherResult<T>(recvBuf, countPerRank, nRanks))
+            << "AllGather data incorrect (registered=" << registered
+            << ", countPerRank=" << countPerRank << ")";
+    }
+
+    // Assert the registered Direct AllGather path was selected and engaged IPC (and
+    // NET when expectNetReg) UBR registration. No-op unless per-rank logging is on.
+    void expectDirectAllGatherRegistered(const char* label, bool expectNetReg)
+    {
+        if (!isPerRankLoggingEnabled()) return;
+
+        REGLogChecker checker = getLogChecker();
+        TEST_INFO("%s: %s (log size: %zu bytes)", label,
+                  checker.getSummary().c_str(), checker.getContentLength());
+
+        EXPECT_TRUE(checker.usedDirectAllGather())
+            << label << ": Direct AllGather was not selected, so the registered "
+               "Direct AllGather path is unverified (needs 8 ranks/node and "
+               "NCCL_DEBUG_SUBSYS to include TUNING)";
+        if (expectNetReg) {
+            EXPECT_TRUE(checker.hasNETRegistration())
+                << label << ": expected inter-node P2P NET UBR registration to "
+                   "engage across nodes for the registered Direct AllGather";
+        }
+        EXPECT_TRUE(checker.hasIPCRegistration())
+            << label << ": expected intra-node P2P IPC UBR registration to engage "
+               "for the registered Direct AllGather under NCCL_LOCAL_REGISTER=1";
+    }
+};
+
+// Registered Direct AllGather across the LL<->SIMPLE transition (intra-node IPC
+// path); 2+ ranks on one node. Net path covered by the _MultiNode variant below.
+TEST_F(UBR_DirectAllGather, UbrSizeSweep)
+{
+    if (!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    for (size_t count : sweepCountsPerRank()) {
+        SCOPED_TRACE("countPerRank=" + std::to_string(count));
+        runAllGatherOnce(count, /*registered=*/true);
+    }
+
+    expectDirectAllGatherRegistered("UbrSizeSweep", /*expectNetReg=*/false);
+}
+
+// Same sweep across nodes (exercises the net/DMA-buf registration path).
+TEST_F(UBR_DirectAllGather, UbrSizeSweep_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    for (size_t count : sweepCountsPerRank()) {
+        SCOPED_TRACE("countPerRank=" + std::to_string(count));
+        runAllGatherOnce(count, /*registered=*/true);
+    }
+
+    expectDirectAllGatherRegistered("UbrSizeSweep_MultiNode", /*expectNetReg=*/true);
+}
+
+// Before/after in one process: unregistered (allowUB=false) then registered
+// (allowUB=true) AllGather must both be correct; the allowUB gating changes nothing.
+TEST_F(UBR_DirectAllGather, BaselineVsUbrEquivalence)
+{
+    if (!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    const size_t countPerRank = RegTestConfig::MEDIUM_COUNT;
+
+    // BEFORE: unregistered (baseline path).
+    runAllGatherOnce(countPerRank, /*registered=*/false);
+
+    // AFTER: registered (UBR path).
+    runAllGatherOnce(countPerRank, /*registered=*/true);
+
+    expectDirectAllGatherRegistered("BaselineVsUbrEquivalence", /*expectNetReg=*/false);
+}
+
+class UBR_ReduceScatter : public RegistrationTestBase {};
+
+TEST_F(UBR_ReduceScatter, OutOfPlace_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t countPerRank = RegTestConfig::SMALL_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    RegInfo sendInfo = allocateAndRegister(countPerRank * nRanks * sizeof(T));
+    RegInfo recvInfo = allocateAndRegister(countPerRank * sizeof(T));
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    initSendBuffer<T>(sendInfo.buffer, countPerRank * nRanks, rank);
+
+    ncclResult_t result = ncclReduceScatter(sendInfo.buffer, recvInfo.buffer, countPerRank,
+                                             getNcclDataType<T>(), ncclSum,
+                                             getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(verifyReduceScatterResult<T>(recvInfo.buffer, countPerRank, nRanks));
+}
+
+class UBR_Broadcast : public RegistrationTestBase {};
+
+TEST_F(UBR_Broadcast, NonZeroRoot_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes with 4+ ranks";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t count = RegTestConfig::MEDIUM_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const int root = nRanks - 1;
+
+    RegInfo bufInfo = allocateAndRegister(count * sizeof(T));
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(bufInfo);
+    });
+
+    ASSERT_MPI_NE(bufInfo.buffer, nullptr);
+    ASSERT_MPI_NE(bufInfo.handle, nullptr);
+
+    const T rootValue = static_cast<T>(99.0f);
+    if (rank == root) {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(bufInfo.buffer, count,
+            [rootValue](size_t) { return rootValue; }));
+    } else {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(bufInfo.buffer, count,
+            [](size_t) { return static_cast<T>(0.0f); }));
+    }
+
+    ncclResult_t result = ncclBroadcast(bufInfo.buffer, bufInfo.buffer, count,
+                                         getNcclDataType<T>(), root,
+                                         getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(verifyBroadcastResult<T>(bufInfo.buffer, count, rootValue));
+}
+
+class UBR_AllToAll : public RegistrationTestBase {};
+
+TEST_F(UBR_AllToAll, OutOfPlace_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes with 4+ ranks";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t countPerRank = RegTestConfig::SMALL_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t totalCount = countPerRank * nRanks;
+
+    RegInfo sendInfo = allocateAndRegister(totalCount * sizeof(T));
+    RegInfo recvInfo = allocateAndRegister(totalCount * sizeof(T));
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendInfo.buffer, totalCount,
+        [rank, countPerRank](size_t i) {
+            int destRank = i / countPerRank;
+            return static_cast<T>(static_cast<float>(rank * 100 + destRank));
+        }));
+
+    ncclResult_t result = ncclAllToAll(sendInfo.buffer, recvInfo.buffer, countPerRank,
+                                        getNcclDataType<T>(),
+                                        getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    bool verified = verifyBufferData<T>(recvInfo.buffer, totalCount,
+        [rank, countPerRank](size_t i) {
+            int srcRank = i / countPerRank;
+            return static_cast<T>(static_cast<float>(srcRank * 100 + rank));
+        });
+    ASSERT_TRUE(verified);
+}
+
+class UBR_SendRecv : public RegistrationTestBase {};
+
+TEST_F(UBR_SendRecv, RingPattern_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes for SendRecv UBR";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t count = RegTestConfig::SMALL_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    RegInfo sendInfo = allocateAndRegister(count * sizeof(T));
+    RegInfo recvInfo = allocateAndRegister(count * sizeof(T));
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    int sendPeer = (rank + 1) % nRanks;
+    int recvPeer = (rank - 1 + nRanks) % nRanks;
+
+    initSendBuffer<T>(sendInfo.buffer, count, rank);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ncclResult_t sendResult = ncclSend(sendInfo.buffer, count, getNcclDataType<T>(),
+                                        sendPeer, getActiveCommunicator(), getActiveStream());
+    ncclResult_t recvResult = ncclRecv(recvInfo.buffer, count, getNcclDataType<T>(),
+                                        recvPeer, getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+
+    ASSERT_EQ(ncclSuccess, sendResult);
+    ASSERT_EQ(ncclSuccess, recvResult);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    T expected = static_cast<T>(static_cast<float>(recvPeer + 1));
+    bool verified = verifyBufferData<T>(recvInfo.buffer, count,
+        [expected](size_t) { return expected; });
+    ASSERT_TRUE(verified);
+}
+
+// ============================================================================
+// Multi-Segment Registration Tests
+// ============================================================================
+
+/**
+ * @brief Tests for buffer registration when the user buffer spans multiple
+ *        underlying physical allocations ("multi-segment" buffers).
+ *
+ * A multi-segment buffer is built by mapping N separate physical handles
+ * (hipMemCreate) contiguously into a single reserved virtual address range
+ * (hipMemAddressReserve + hipMemMap). cuMemGetAddressRange() on the head of
+ * such a buffer returns only the first segment, so the registration path
+ * detects the cross-boundary case and walks every segment when both 
+ * ncclCuMemEnable() and NCCL_MULTI_SEGMENT_REGISTER (default 1) are true.
+ *
+ */
+class UBR_MultiSegment : public RegistrationTestBase
+{
+protected:
+    using T = RegTestConfig::DefaultType;
+
+    // Multi-segment registration currently relies on dmabuf support from the
+    // runtime/HSA layer for the inter-node (NET/GIN) path. Until that lands,
+    // restrict every UBR_MultiSegment test to a single node so the multi-node
+    // tests are not exercised.
+    void SetUp() override
+    {
+        RegistrationTestBase::SetUp();
+        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
+            return;
+        }
+        if (MPITestConstants::detectNodeCount() != 1) {
+            GTEST_SKIP() << "UBR_MultiSegment is limited to single node until "
+                            "dmabuf support is available from the HIP/HSA layer";
+        }
+    }
+
+    struct MultiSegmentBuffer
+    {
+        hipDeviceptr_t                                vaBase      = 0;
+        size_t                                        segmentSize = 0;
+        size_t                                        totalSize   = 0;
+        std::vector<hipMemGenericAllocationHandle_t>  handles;
+    };
+
+    void createMultiSegmentBuffer(int dev,
+                                  size_t requestedSegmentSize,
+                                  int numSegments,
+                                  MultiSegmentBuffer& buf)
+    {
+        buf = MultiSegmentBuffer{};
+
+        hipMemAllocationProp prop = {};
+        prop.type                = hipMemAllocationTypePinned;
+        prop.location.type       = hipMemLocationTypeDevice;
+        prop.location.id         = dev;
+        prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+        size_t granularity = 0;
+        HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+        const size_t segSize   = ((requestedSegmentSize + granularity - 1) / granularity) * granularity;
+        const size_t totalSize = segSize * numSegments;
+
+        hipDeviceptr_t vaBase = 0;
+        HIP_CHECK(hipMemAddressReserve(&vaBase, totalSize, granularity, 0, 0));
+
+        std::vector<hipMemGenericAllocationHandle_t> handles(numSegments, 0);
+        char* vaBaseBytes = static_cast<char*>(vaBase);
+        for (int i = 0; i < numSegments; i++) {
+            HIP_CHECK(hipMemCreate(&handles[i], segSize, &prop, 0));
+            HIP_CHECK(hipMemMap(vaBaseBytes + i * segSize, segSize, 0, handles[i], 0));
+        }
+
+        hipMemAccessDesc accessDesc = {};
+        accessDesc.location.type    = hipMemLocationTypeDevice;
+        accessDesc.location.id      = dev;
+        accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
+        HIP_CHECK(hipMemSetAccess(vaBase, totalSize, &accessDesc, 1));
+
+        buf.vaBase      = vaBase;
+        buf.segmentSize = segSize;
+        buf.totalSize   = totalSize;
+        buf.handles     = std::move(handles);
+    }
+
+    void releaseMultiSegmentBuffer(MultiSegmentBuffer& buf)
+    {
+        if (buf.totalSize == 0) return;
+        HIP_EXPECT(hipMemUnmap(buf.vaBase, buf.totalSize));
+        for (auto h : buf.handles) {
+            if (h != 0) HIP_EXPECT(hipMemRelease(h));
+        }
+        HIP_EXPECT(hipMemAddressFree(buf.vaBase, buf.totalSize));
+        buf.vaBase      = 0;
+        buf.segmentSize = 0;
+        buf.totalSize   = 0;
+        buf.handles.clear();
+    }
+
+    /**
+     * @brief Like createMultiSegmentBuffer, but backs the trailing
+     *        `numHostSegments` segments with host memory
+     *        (hipMemLocationTypeHost) rather than device memory, producing a
+     *        mixed device/host "elastic" buffer.
+     *
+     * HIP/CLR has no host-NUMA VMM type and only accepts a plain Host location
+     * (id must be 0). Host VMM is only available on recent runtimes (ROCm >=
+     * 7.12); if it is unsupported, buf.totalSize is left 0 so the caller can
+     * GTEST_SKIP() instead of failing.
+     */
+    void createMixedMultiSegmentBuffer(int dev,
+                                       size_t requestedSegmentSize,
+                                       int numSegments,
+                                       int numHostSegments,
+                                       MultiSegmentBuffer& buf)
+    {
+        buf = MultiSegmentBuffer{};
+#if ROCM_VERSION >= 71200
+        ASSERT_GE(numSegments, 1);
+        ASSERT_GE(numHostSegments, 0);
+        ASSERT_LE(numHostSegments, numSegments);
+
+#if ROCM_VERSION < 71200
+        // hipMemLocationTypeHost is unavailable before ROCm 7.12; leave buf.totalSize 0
+        // so callers GTEST_SKIP() instead of failing at compile or runtime.
+        if (numHostSegments > 0) return;
+#endif
+
+        hipMemAllocationProp devProp = {};
+        devProp.type                = hipMemAllocationTypePinned;
+        devProp.location.type       = hipMemLocationTypeDevice;
+        devProp.location.id         = dev;
+        devProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+        hipMemAllocationProp hostProp = {};
+        hostProp.type                = hipMemAllocationTypePinned;
+#if ROCM_VERSION >= 71200
+        hostProp.location.type       = hipMemLocationTypeHost;
+#else
+        hostProp.location.type       = hipMemLocationTypeDevice; // unused (numHostSegments == 0)
+#endif
+        hostProp.location.id         = 0;
+        hostProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+        size_t devGran = 0;
+        size_t hostGran = 0;
+        HIP_CHECK(hipMemGetAllocationGranularity(&devGran, &devProp, hipMemAllocationGranularityMinimum));
+        if (numHostSegments > 0 &&
+            hipMemGetAllocationGranularity(&hostGran, &hostProp, hipMemAllocationGranularityMinimum) != hipSuccess) {
+            return;
+        }
+        size_t gran = devGran;
+        if (hostGran > gran) gran = hostGran;
+
+        const size_t segSize   = ((requestedSegmentSize + gran - 1) / gran) * gran;
+        const size_t totalSize = segSize * numSegments;
+        const int    numDevSegments = numSegments - numHostSegments;
+
+        hipDeviceptr_t vaBase = 0;
+        HIP_CHECK(hipMemAddressReserve(&vaBase, totalSize, gran, 0, 0));
+        char* vaBaseBytes = static_cast<char*>(vaBase);
+
+        std::vector<hipMemGenericAllocationHandle_t> handles(numSegments, 0);
+        bool hostUnsupported = false;
+        int  mapped          = 0;
+        for (int i = 0; i < numSegments; i++) {
+            const bool isHost = (i >= numDevSegments);
+            hipMemAllocationProp& prop = isHost ? hostProp : devProp;
+            hipError_t err = hipMemCreate(&handles[i], segSize, &prop, 0);
+            if (isHost && err != hipSuccess) {
+                hostUnsupported = true;
+                break;
+            }
+            HIP_CHECK(err);
+            HIP_CHECK(hipMemMap(vaBaseBytes + i * segSize, segSize, 0, handles[i], 0));
+            mapped++;
+        }
+
+        if (hostUnsupported) {
+            for (int i = 0; i < mapped; i++) {
+                HIP_EXPECT(hipMemUnmap(vaBaseBytes + i * segSize, segSize));
+            }
+            for (auto h : handles) {
+                if (h != 0) HIP_EXPECT(hipMemRelease(h));
+            }
+            HIP_EXPECT(hipMemAddressFree(vaBase, totalSize));
+            return;
+        }
+
+        hipMemAccessDesc accessDesc = {};
+        accessDesc.location.type    = hipMemLocationTypeDevice;
+        accessDesc.location.id      = dev;
+        accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
+        HIP_CHECK(hipMemSetAccess(vaBase, totalSize, &accessDesc, 1));
+
+        buf.vaBase      = vaBase;
+        buf.segmentSize = segSize;
+        buf.totalSize   = totalSize;
+        buf.handles     = std::move(handles);
+#else
+        // Host VMM (hipMemLocationTypeHost) is only available on ROCm >= 7.12.
+        // Leave buf.totalSize == 0 so callers GTEST_SKIP().
+        (void)dev;
+        (void)requestedSegmentSize;
+        (void)numSegments;
+        (void)numHostSegments;
+#endif
+    }
+};
+
+/**
+ * @brief Out-of-place AllReduce on a buffer that spans multiple VMM segments.
+ *
+ * Exercises the multi-segment registration branch on Ring AllReduce.
+ *
+ * Layout (N = kSegmentsPerHalf, total 2 * N physical segments allocated):
+ *   Total reserved VA = 2 * N * kSegmentSize
+ *   sendbuff = [0,                  N * kSegmentSize)  covers first N segments
+ *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
+ *
+ * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
+ *   "... numSegments 4"
+ */
+TEST_F(UBR_MultiSegment, Generic)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize     = 32 * 1024 * 1024;
+    constexpr int    kNumSegments     = 8;
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments));
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(
+        createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    if (buf.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    const size_t halfSize = buf.totalSize / 2;
+    ASSERT_EQ(halfSize % sizeof(T), 0u);
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + halfSize;
+    size_t count   = halfSize / sizeof(T);
+
+    void* regHandle = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    auto regCleanup = makeScopeGuard([&]() {
+        if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+    });
+    ASSERT_MPI_NE(regHandle, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    ncclResult_t result = ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    REGLogChecker checker = getLogChecker();
+    TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
+        << "Expected 'numSegments " << (kNumSegments / 2)
+        << "' in log - the multi-segment registration branch did not fire";
+}
+
+/**
+ * @brief Register once, AllReduce twice - exercises the registration reuse fast path.
+ *
+ * After the first collective on a registered multi-segment buffer, a subsequent
+ * collective on the same buffer must hit the cache entry and skip re-registration.
+ *
+ * The fast path is transport-dependent: intra-node ranks reuse via the P2P/IPC
+ * cache (p2p.cc, "IPC reuse buffer"), while the inter-node leg reuses the NIC
+ * MR via the NET cache (net.cc, "NET reuse buffer"). The topology decides which
+ * one fires, so this test asserts on "either IPC or NET" rather than assuming a
+ * transport:
+ *   - the first call performs an initial registration (IPC or NET)
+ *   - a subsequent call hits the cached entry          (IPC or NET reuse)
+ */
+ TEST_F(UBR_MultiSegment, Generic_Reuse)
+ {
+     if (!validateTestPrerequisites(/*min_processes=*/2)) {
+         GTEST_SKIP() << "Requires 2+ ranks";
+     }
+     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+ 
+     ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+     ASSERT_TRUE(isCuMemEnabled())
+         << "NCCL_CUMEM_ENABLE must be set to 1 (gates the multi-segment IPC branch in p2p.cc:1071)";
+     ASSERT_TRUE(isMultiSegmentRegisterEnabled())
+         << "NCCL_MULTI_SEGMENT_REGISTER must not be 0 (gates the multi-segment IPC branch in p2p.cc:1071)";
+     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+ 
+     int dev = 0;
+     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+ 
+     constexpr size_t kRequestedSegmentSize = 128 * 1024 * 1024;
+     constexpr int    kNumSegments          = 4;
+ 
+     MultiSegmentBuffer buf;
+     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
+     if (buf.totalSize == 0) {
+         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+     }
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+ 
+     const size_t halfSize = buf.totalSize / 2;
+     ASSERT_EQ(halfSize % sizeof(T), 0u);
+     char*  base    = reinterpret_cast<char*>(buf.vaBase);
+     void*  sendBuf = base;
+     void*  recvBuf = base + halfSize;
+     size_t count   = halfSize / sizeof(T);
+ 
+     void* regHandle = nullptr;
+     ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+     auto regCleanup = makeScopeGuard([&]() {
+         if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+     });
+     ASSERT_MPI_NE(regHandle, nullptr);
+ 
+     int rank   = 0;
+     int nRanks = 0;
+     ncclCommUserRank(getActiveCommunicator(), &rank);
+     ncclCommCount(getActiveCommunicator(), &nRanks);
+ 
+     initSendBuffer<T>(sendBuf, count, rank);
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count,getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     REGLogChecker checker = getLogChecker();
+     TEST_INFO("RegisterOnceUseTwice: %s (log size: %zu bytes)",
+               checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasIPCRegistration() || checker.hasNETRegistration())
+        << "Expected an initial registration log entry (IPC or NET) from the first AllReduce";
+    ASSERT_TRUE(checker.hasIPCReuse() || checker.hasNETReuse())
+        << "Expected a reuse log entry (IPC or NET) from the second AllReduce - "
+           "the registration cache (p2p.cc / net.cc) was not hit";
+ }
+
+/**
+ * @brief Multi-segment registration on the symmetric-window path.
+ *
+ * Validates GPU-only multi-segment registration for symmetric windows
+ * (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC). The reserved VA spans
+ * several physical cuMem segments, so the LSA team maps each segment
+ * individually (dev_runtime.cc symMemoryMapLsaTeam) and logs, per segment:
+ *   "[<lsaRank>] Segment <i>, Type : <t>, numSegments <N>, Segment size ..."
+ *
+ * Unlike the ncclCommRegister path, the multi-segment registration happens once
+ * at ncclCommWindowRegister time. The two AllReduce calls then reuse the same
+ * window, confirming it stays valid and correct across collectives.
+ */
+ TEST_F(UBR_MultiSegment, Symmetric_Lsa)
+ {
+     if (!validateTestPrerequisites(/*min_processes=*/2)) {
+         GTEST_SKIP() << "Requires 2+ ranks";
+     }
+     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+ 
+     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+ 
+     int dev = 0;
+     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+ 
+     constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+     constexpr int    kNumSegments = 4;
+ 
+     int rank   = 0;
+     int nRanks = 0;
+     ncclCommUserRank(getActiveCommunicator(), &rank);
+     ncclCommCount(getActiveCommunicator(), &nRanks);
+ 
+     SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments));
+ 
+     MultiSegmentBuffer buf;
+     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+     if (buf.totalSize == 0) {
+         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+     }
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+ 
+     const size_t halfSize = buf.totalSize / 2;
+     ASSERT_EQ(halfSize % sizeof(T), 0u);
+     char*  base    = reinterpret_cast<char*>(buf.vaBase);
+     void*  sendBuf = base;
+     void*  recvBuf = base + halfSize;
+     size_t count   = halfSize / sizeof(T);
+ 
+     ncclWindow_t win = nullptr;
+     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+     auto winCleanup = makeScopeGuard([&]() {
+         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+     });
+     ASSERT_MPI_NE(win, nullptr);
+ 
+     initSendBuffer<T>(sendBuf, count, rank);
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     REGLogChecker checker = getLogChecker();
+     TEST_INFO("SymmetricWindow_MultiSegment: %s (log size: %zu bytes)",
+               checker.getSummary().c_str(), checker.getContentLength());
+     ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
+         << "Expected 'numSegments " << kNumSegments
+         << "' in log - the symmetric-window multi-segment LSA registration "
+            "(symMemoryMapLsaTeam) did not fire";
+ }
+
+/**
+ * @brief Multi-segment registration on the combined LSA + GIN symmetric path.
+ *
+ * Cross-node ReduceScatter over symmetric windows (NCCL_WIN_COLL_SYMMETRIC)
+ * whose VA spans several physical cuMem segments.
+ *   - LSA: symMemoryMapLsaTeam maps each segment per peer and logs
+ *     "... numSegments <N>" (dev_runtime.cc).
+ *   - GIN: symMemoryRegisterGin registers the (all-device, contiguous)
+ *     multi-segment buffer for the inter-node proxy.
+ *
+ * Requires >=2 nodes (a GIN inter-node leg) and >=2 ranks per node (an LSA
+ * intra-node leg); otherwise the path under test is not exercised and the
+ * test SKIPs.
+ *
+ */
+TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
+{
+    const int nodeCount = MPITestConstants::detectNodeCount();
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    if (nodeCount < 2) {
+        GTEST_SKIP() << "LSA+GIN ReduceScatter requires >=2 nodes";
+    }
+    if (!isGinEnabled()) {
+        GTEST_SKIP() << "Requires GIN (NCCL_GIN_ENABLE!=0 and NCCL_GIN_TYPE=2)";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    if (nRanks / nodeCount < 2) {
+        GTEST_SKIP() << "LSA+GIN ReduceScatter requires >=2 ranks per node (LSA intra-node leg)";
+    }
+
+    constexpr size_t kSegmentSize = 4 * 1024 * 1024;
+    constexpr int    kNumSegments = 4;
+
+    SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments) +
+                 " nodeCount=" + std::to_string(nodeCount) +
+                 " nRanks=" + std::to_string(nRanks));
+
+    MultiSegmentBuffer recvSeg;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, recvSeg));
+    if (recvSeg.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto recvVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(recvSeg); });
+
+    ASSERT_EQ(recvSeg.totalSize % sizeof(T), 0u);
+    const size_t recvCount = recvSeg.totalSize / sizeof(T);
+
+    MultiSegmentBuffer sendSeg;
+    ASSERT_NO_FATAL_FAILURE(
+        createMultiSegmentBuffer(dev, recvSeg.segmentSize * static_cast<size_t>(nRanks),
+                                 kNumSegments, sendSeg));
+    if (sendSeg.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto sendVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(sendSeg); });
+
+    const size_t sendCount = recvCount * static_cast<size_t>(nRanks);
+    ASSERT_GE(sendSeg.totalSize, sendCount * sizeof(T));
+
+    ncclWindow_t sendWin = nullptr;
+    ncclWindow_t recvWin = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), sendSeg.vaBase, sendSeg.totalSize, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), recvSeg.vaBase, recvSeg.totalSize, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+        if (sendWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
+        if (recvWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
+    });
+    ASSERT_MPI_NE(sendWin, nullptr);
+    ASSERT_MPI_NE(recvWin, nullptr);
+
+    initSendBuffer<T>(sendSeg.vaBase, sendCount, rank);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclReduceScatter(sendSeg.vaBase, recvSeg.vaBase, recvCount, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyReduceScatterResult<T>(recvSeg.vaBase, recvCount, nRanks));
+
+    REGLogChecker checker = getLogChecker();
+    TEST_INFO("LsaGin_MultiSegment_ReduceScatter: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
+        << "Expected 'numSegments " << kNumSegments
+        << "' in log - the symmetric-window multi-segment registration "
+           "(symMemoryMapLsaTeam) did not fire for the LSA+GIN ReduceScatter path";
+}
+
+/**
+ * @brief LSA-only elastic buffer: symmetric window with a
+ *        host-backed segment.
+ *
+ * Builds a multi-segment symmetric window (NCCL_WIN_COLL_SYMMETRIC) whose
+ * trailing segment is CPU memory (hipMemLocationTypeHost). With elastic
+ * registration enabled, ncclCommWindowRegister must accept the mixed buffer,
+ * the LSA team maps every segment (symMemoryMapLsaTeam logs per segment), and
+ * an AllReduce over the window must produce correct results - the symmetric
+ * scheduler falls back to legacy kernels for windows with sysmem segments
+ * (symmetric_sched.cc).
+ *
+ */
+TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+ 
+     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+     ASSERT_TRUE(isElasticBufferRegisterEnabled())
+         << "NCCL_ELASTIC_BUFFER_REGISTER must not be 0 for the elastic (host-backed) path";
+     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+ 
+     int dev = 0;
+     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+ 
+     int rank   = 0;
+     int nRanks = 0;
+     ncclCommUserRank(getActiveCommunicator(), &rank);
+     ncclCommCount(getActiveCommunicator(), &nRanks);
+ 
+     constexpr size_t kSegmentSize     = 4 * 1024 * 1024;
+     constexpr int    kNumSegments     = 4;
+     constexpr int    kNumHostSegments = 1; // trailing segment is host-backed
+ 
+     SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments) +
+                  " kNumHostSegments=" + std::to_string(kNumHostSegments) +
+                  " nRanks=" + std::to_string(nRanks));
+ 
+     MultiSegmentBuffer buf;
+     ASSERT_NO_FATAL_FAILURE(
+         createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
+     if (buf.totalSize == 0) {
+         GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
+     }
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+ 
+     // Split the window into send/recv halves. With kNumHostSegments=1 the recv
+     // half straddles the host-backed trailing segment, exercising host access.
+     const size_t halfSize = buf.totalSize / 2;
+     ASSERT_EQ(halfSize % sizeof(T), 0u);
+     char*  base    = reinterpret_cast<char*>(buf.vaBase);
+     void*  sendBuf = base;
+     void*  recvBuf = base + halfSize;
+     size_t count   = halfSize / sizeof(T);
+ 
+     ncclWindow_t win = nullptr;
+     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+     auto winCleanup = makeScopeGuard([&]() {
+         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+     });
+     ASSERT_MPI_NE(win, nullptr);
+ 
+     initSendBuffer<T>(sendBuf, count, rank);
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     REGLogChecker checker = getLogChecker();
+     TEST_INFO("LsaElastic_MultiSegment_AllReduce: %s (log size: %zu bytes)",
+               checker.getSummary().c_str(), checker.getContentLength());
+     ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
+         << "Expected 'numSegments " << kNumSegments
+         << "' in log - the symmetric-window multi-segment LSA registration "
+            "(symMemoryMapLsaTeam) did not fire for the elastic (host-backed) buffer";
+ }
+ 
+ /**
+  * @brief Elastic buffer registration gating: a host-backed symmetric window must be rejected when
+  *        NCCL_ELASTIC_BUFFER_REGISTER=0.
+  *
+  * Only meaningful when elastic registration is disabled; otherwise SKIPs. The
+  * rejection happens in ncclCommWindowRegister before any collective bootstrap,
+  * so all ranks fail symmetrically.
+  */
+TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    if (isElasticBufferRegisterEnabled()) {
+         GTEST_SKIP() << "Run with NCCL_ELASTIC_BUFFER_REGISTER=0 to exercise the rejection path";
+     }
+ 
+     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+ 
+     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+ 
+     int dev = 0;
+     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+ 
+     constexpr size_t kSegmentSize     = 4 * 1024 * 1024;
+     constexpr int    kNumSegments     = 2;
+     constexpr int    kNumHostSegments = 1;
+ 
+     MultiSegmentBuffer buf;
+     ASSERT_NO_FATAL_FAILURE(
+         createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
+     if (buf.totalSize == 0) {
+         GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
+     }
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+ 
+     SCOPED_TRACE("Host-backed symmetric window registration must be rejected "
+                  "when NCCL_ELASTIC_BUFFER_REGISTER=0");
+     ncclWindow_t win = nullptr;
+     ncclResult_t rc  = ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC);
+     if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+     ASSERT_MPI_NE(rc, ncclSuccess);
+ }
+
+// ============================================================================
+// UBR Concurrent Registration Hang Reproduction Test
+// ============================================================================
+
+/**
+ * @brief Test to reproduce UBR hang with multiple separate buffer registrations
+ *
+ * This test reproduces a hang that occurs when:
+ * 1. Multiple SEPARATE buffers are allocated (not views of a contiguous buffer)
+ * 2. Each buffer is registered with ncclCommRegister
+ * 3. All buffers are used inside ncclGroupStart/ncclGroupEnd with send/recv
+ *
+ * The hang is caused by concurrent blocking IPC registration calls
+ * (ncclProxyCallBlocking) inside the grouped operation creating circular
+ * wait conditions.
+ *
+ * ROOT CAUSE:
+ * - ipcRegisterBuffer() in p2p.cc calls ncclProxyCallBlocking() which is a
+ *   synchronous RPC that blocks waiting for peer to import the IPC handle
+ * - When all ranks simultaneously try to register multiple different buffers
+ *   with each other inside a group, they create circular dependencies
+ * - Rank 0 waits for Rank 1 to import buffer A, while Rank 1 waits for Rank 0
+ *   to import buffer B -> DEADLOCK
+ *
+ * EXPECTED BEHAVIOR:
+ * - SeparateBuffers_Grouped: HANGS (demonstrates the bug)
+ * - ContiguousBuffer_Grouped: WORKS (demonstrates the fix)
+ *
+ * To run this test with a timeout to detect the hang:
+ *   timeout 60 mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=UBR_ConcurrentRegHang*
+ */
+class UBR_ConcurrentRegHang : public RegistrationTestBase
+{
+protected:
+    using T = RegTestConfig::DefaultType;
+    static constexpr size_t ELEMENTS_PER_PEER = 1024;  // Small size to trigger hang quickly
+
+    // Allocate and register multiple SEPARATE buffers (one per peer)
+    // This is the pattern that causes the hang
+    struct MultiBufferInfo {
+        std::vector<void*> buffers;
+        std::vector<void*> handles;
+        size_t countPerBuffer = 0;
+        int nPeers = 0;
+        bool allocated = false;
+    };
+
+    MultiBufferInfo allocateSeparateBuffers(size_t countPerBuffer, int nPeers)
+    {
+        MultiBufferInfo info;
+        info.countPerBuffer = countPerBuffer;
+        info.nPeers = nPeers;
+        info.buffers.resize(nPeers, nullptr);
+        info.handles.resize(nPeers, nullptr);
+
+        size_t bufSize = countPerBuffer * sizeof(T);
+
+        for (int i = 0; i < nPeers; i++) {
+            // Allocate SEPARATE buffer for each peer (VMM-aware for cuMem builds)
+            if (allocateDeviceBuffer(&info.buffers[i], bufSize) != ncclSuccess) {
+                cleanupMultiBuffers(info);
+                return info;
+            }
+
+            // Register each buffer separately
+            ncclResult_t result = ncclCommRegister(getActiveCommunicator(),
+                                                    info.buffers[i], bufSize,
+                                                    &info.handles[i]);
+            if (result != ncclSuccess || info.handles[i] == nullptr) {
+                TEST_WARN("Failed to register buffer %d", i);
+            }
+        }
+
+        info.allocated = true;
+        return info;
+    }
+
+    void cleanupMultiBuffers(MultiBufferInfo& info)
+    {
+        for (int i = 0; i < info.nPeers; i++) {
+            if (info.handles[i]) {
+                ncclCommDeregister(getActiveCommunicator(), info.handles[i]);
+                info.handles[i] = nullptr;
+            }
+            if (info.buffers[i]) {
+                (void)freeDeviceBuffer(info.buffers[i]);
+                info.buffers[i] = nullptr;
+            }
+        }
+        info.allocated = false;
+    }
+
+    // Allocate a SINGLE contiguous buffer and create views (the fix)
+    struct ContiguousBufferInfo {
+        void* contiguousBuffer = nullptr;
+        void* handle = nullptr;
+        std::vector<void*> views;  // Pointers into contiguous buffer
+        size_t countPerView = 0;
+        int nViews = 0;
+        bool allocated = false;
+    };
+
+    ContiguousBufferInfo allocateContiguousWithViews(size_t countPerView, int nViews)
+    {
+        ContiguousBufferInfo info;
+        info.countPerView = countPerView;
+        info.nViews = nViews;
+        info.views.resize(nViews, nullptr);
+
+        size_t totalSize = countPerView * nViews * sizeof(T);
+
+        // Allocate ONE contiguous buffer (VMM-aware for cuMem builds)
+        if (allocateDeviceBuffer(&info.contiguousBuffer, totalSize) != ncclSuccess) {
+            return info;
+        }
+
+        // Register the contiguous buffer ONCE
+        ncclResult_t result = ncclCommRegister(getActiveCommunicator(),
+                                                info.contiguousBuffer, totalSize,
+                                                &info.handle);
+        if (result != ncclSuccess) {
+            (void)freeDeviceBuffer(info.contiguousBuffer);
+            info.contiguousBuffer = nullptr;
+            return info;
+        }
+
+        // Create views (pointers) into the contiguous buffer
+        char* base = static_cast<char*>(info.contiguousBuffer);
+        for (int i = 0; i < nViews; i++) {
+            info.views[i] = base + (i * countPerView * sizeof(T));
+        }
+
+        info.allocated = true;
+        return info;
+    }
+
+    void cleanupContiguousBuffer(ContiguousBufferInfo& info)
+    {
+        if (info.handle) {
+            ncclCommDeregister(getActiveCommunicator(), info.handle);
+            info.handle = nullptr;
+        }
+        if (info.contiguousBuffer) {
+            (void)freeDeviceBuffer(info.contiguousBuffer);
+            info.contiguousBuffer = nullptr;
+        }
+        info.views.clear();
+        info.allocated = false;
+    }
+};
+
+/**
+ * @brief THIS TEST SHOULD HANG - Demonstrates the UBR concurrent registration bug
+ *
+ * Pattern that causes hang:
+ * - N separate send buffers, each registered separately
+ * - N separate recv buffers, each registered separately
+ * - ncclGroupStart()
+ * - N x ncclSend() + N x ncclRecv() with different buffers
+ * - ncclGroupEnd()
+ *
+ * The ncclProxyCallBlocking() calls inside the group create circular waits.
+ *
+ * IMPORTANT: Run with timeout to detect hang:
+ *   timeout 30 mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=*SeparateBuffers_Grouped*
+ */
+TEST_F(UBR_ConcurrentRegHang, SeparateBuffers_Grouped_EXPECTED_HANG)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    TEST_INFO("Rank %d: Testing SEPARATE buffer pattern (expected to HANG)", rank);
+    TEST_INFO("Rank %d: Allocating %d separate send buffers + %d separate recv buffers",
+              rank, nRanks, nRanks);
+
+    // Allocate SEPARATE buffers for each peer (this causes the hang)
+    MultiBufferInfo sendInfo = allocateSeparateBuffers(ELEMENTS_PER_PEER, nRanks);
+    MultiBufferInfo recvInfo = allocateSeparateBuffers(ELEMENTS_PER_PEER, nRanks);
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupMultiBuffers(sendInfo);
+        cleanupMultiBuffers(recvInfo);
+    });
+
+    ASSERT_MPI_TRUE(sendInfo.allocated);
+    ASSERT_MPI_TRUE(recvInfo.allocated);
+
+    // Initialize send buffers
+    for (int peer = 0; peer < nRanks; peer++) {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendInfo.buffers[peer], ELEMENTS_PER_PEER,
+            [rank, peer](size_t) {
+                return static_cast<T>(static_cast<float>(rank * 100 + peer));
+            }));
+    }
+
+    TEST_INFO("Rank %d: Starting ncclGroupStart/ncclGroupEnd with %d send/recv pairs",
+              rank, nRanks);
+    TEST_INFO("Rank %d: >>> If this hangs, the test has reproduced the bug <<<", rank);
+
+    // This grouped operation with separate buffers should HANG
+    // because of concurrent blocking IPC registration
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            ncclSend(sendInfo.buffers[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+            ncclRecv(recvInfo.buffers[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+        }
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());  // THIS IS WHERE IT HANGS
+
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    TEST_INFO("Rank %d: Completed (if you see this, the hang did not occur)", rank);
+
+    // Verify results
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            bool verified = verifyBufferData<T>(recvInfo.buffers[peer], ELEMENTS_PER_PEER,
+                [peer, rank](size_t) {
+                    return static_cast<T>(static_cast<float>(peer * 100 + rank));
+                });
+            ASSERT_TRUE(verified) << "Data verification failed for peer " << peer;
+        }
+    }
+}
+
+/**
+ * @brief THIS TEST SHOULD WORK - Demonstrates the fix using contiguous buffer
+ *
+ * Pattern that works:
+ * - 1 contiguous send buffer with views for each peer
+ * - 1 contiguous recv buffer with views for each peer
+ * - Only 2 buffer registrations total (not 2*N)
+ * - ncclGroupStart()
+ * - N x ncclSend() + N x ncclRecv() with views
+ * - ncclGroupEnd()
+ *
+ * Works because UBR only needs to register 2 buffers, not 2*N.
+ */
+TEST_F(UBR_ConcurrentRegHang, ContiguousBuffer_Grouped_SHOULD_WORK)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    TEST_INFO("Rank %d: Testing CONTIGUOUS buffer pattern (should work)", rank);
+    TEST_INFO("Rank %d: Allocating 1 contiguous send buffer + 1 contiguous recv buffer with %d views each",
+              rank, nRanks);
+
+    // Allocate contiguous buffers with views (this is the fix)
+    ContiguousBufferInfo sendInfo = allocateContiguousWithViews(ELEMENTS_PER_PEER, nRanks);
+    ContiguousBufferInfo recvInfo = allocateContiguousWithViews(ELEMENTS_PER_PEER, nRanks);
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupContiguousBuffer(sendInfo);
+        cleanupContiguousBuffer(recvInfo);
+    });
+
+    ASSERT_MPI_TRUE(sendInfo.allocated);
+    ASSERT_MPI_TRUE(recvInfo.allocated);
+
+    // Initialize send buffer views
+    for (int peer = 0; peer < nRanks; peer++) {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendInfo.views[peer], ELEMENTS_PER_PEER,
+            [rank, peer](size_t) {
+                return static_cast<T>(static_cast<float>(rank * 100 + peer));
+            }));
+    }
+
+    TEST_INFO("Rank %d: Starting ncclGroupStart/ncclGroupEnd with %d send/recv pairs using views",
+              rank, nRanks);
+
+    // This grouped operation with contiguous buffer views should WORK
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            ncclSend(sendInfo.views[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+            ncclRecv(recvInfo.views[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+        }
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    TEST_INFO("Rank %d: Completed successfully", rank);
+
+    // Verify results
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            bool verified = verifyBufferData<T>(recvInfo.views[peer], ELEMENTS_PER_PEER,
+                [peer, rank](size_t) {
+                    return static_cast<T>(static_cast<float>(peer * 100 + rank));
+                });
+            ASSERT_TRUE(verified) << "Data verification failed for peer " << peer;
+        }
+    }
+}
+
+/**
+ * @brief ncclAllToAll with CONTIGUOUS registered buffers - SHOULD WORK
+ *
+ * This test uses ncclAllToAll directly (not grouped send/recv) with
+ * a single contiguous registered buffer. This matches the correct
+ * pattern used after fixing the PARAM benchmark.
+ *
+ * ncclAllToAll internally uses contiguous send/recv buffers, so
+ * only 2 buffer registrations are needed.
+ */
+TEST_F(UBR_ConcurrentRegHang, AllToAll_ContiguousBuffer_SHOULD_WORK)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t countPerRank = ELEMENTS_PER_PEER;
+    const size_t totalCount = countPerRank * nRanks;
+    const size_t totalSize = totalCount * sizeof(T);
+
+    TEST_INFO("Rank %d: Testing ncclAllToAll with CONTIGUOUS registered buffers", rank);
+
+    // Allocate single contiguous buffers
+    RegInfo sendInfo = allocateAndRegister(totalSize);
+    RegInfo recvInfo = allocateAndRegister(totalSize);
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    // Initialize send buffer: each chunk destined for peer i contains (rank*100 + i)
+    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendInfo.buffer, totalCount,
+        [rank, countPerRank](size_t i) {
+            int destRank = i / countPerRank;
+            return static_cast<T>(static_cast<float>(rank * 100 + destRank));
+        }));
+
+    TEST_INFO("Rank %d: Calling ncclAllToAll with registered contiguous buffers", rank);
+
+    ncclResult_t result = ncclAllToAll(sendInfo.buffer, recvInfo.buffer, countPerRank,
+                                        getNcclDataType<T>(),
+                                        getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    TEST_INFO("Rank %d: ncclAllToAll completed successfully", rank);
+
+    // Verify: chunk i should contain (srcRank*100 + myRank) from srcRank=i
+    bool verified = verifyBufferData<T>(recvInfo.buffer, totalCount,
+        [rank, countPerRank](size_t i) {
+            int srcRank = i / countPerRank;
+            return static_cast<T>(static_cast<float>(srcRank * 100 + rank));
+        });
+    ASSERT_TRUE(verified);
+
+    TEST_INFO("Rank %d: Data verification passed", rank);
+}
+
+/**
+ * @brief Stress test: Multiple iterations of ncclAllToAll with contiguous buffers
+ *
+ * This test runs many iterations of ncclAllToAll with registered contiguous
+ * buffers to verify stability under repeated use.
+ */
+TEST_F(UBR_ConcurrentRegHang, AllToAll_ContiguousBuffer_Stress_SHOULD_WORK)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t countPerRank = ELEMENTS_PER_PEER;
+    const size_t totalCount = countPerRank * nRanks;
+    const size_t totalSize = totalCount * sizeof(T);
+    const int NUM_ITERATIONS = 50;
+
+    TEST_INFO("Rank %d: Stress test - %d iterations of ncclAllToAll with contiguous buffers",
+              rank, NUM_ITERATIONS);
+
+    RegInfo sendInfo = allocateAndRegister(totalSize);
+    RegInfo recvInfo = allocateAndRegister(totalSize);
+
+    auto cleanup = makeScopeGuard([&]() {
+        cleanupRegInfo(sendInfo);
+        cleanupRegInfo(recvInfo);
+    });
+
+    ASSERT_MPI_NE(sendInfo.buffer, nullptr);
+    ASSERT_MPI_NE(recvInfo.buffer, nullptr);
+    ASSERT_MPI_NE(sendInfo.handle, nullptr);
+    ASSERT_MPI_NE(recvInfo.handle, nullptr);
+
+    int errors = 0;
+
+    for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+        // Initialize with iteration-dependent pattern
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendInfo.buffer, totalCount,
+            [rank, countPerRank, iter](size_t i) {
+                int destRank = i / countPerRank;
+                return static_cast<T>(static_cast<float>(rank * 100 + destRank + iter));
+            }));
+
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvInfo.buffer, 0, totalSize));
+
+        ncclResult_t result = ncclAllToAll(sendInfo.buffer, recvInfo.buffer, countPerRank,
+                                            getNcclDataType<T>(),
+                                            getActiveCommunicator(), getActiveStream());
+        if (result != ncclSuccess) {
+            errors++;
+            continue;
+        }
+
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        bool verified = verifyBufferData<T>(recvInfo.buffer, totalCount,
+            [rank, countPerRank, iter](size_t i) {
+                int srcRank = i / countPerRank;
+                return static_cast<T>(static_cast<float>(srcRank * 100 + rank + iter));
+            });
+
+        if (!verified) {
+            errors++;
+            if (rank == 0) {
+                TEST_WARN("Iteration %d: verification failed", iter);
+            }
+        }
+
+        if ((iter + 1) % 10 == 0 && rank == 0) {
+            TEST_INFO("Completed %d/%d iterations, errors=%d", iter + 1, NUM_ITERATIONS, errors);
+        }
+    }
+
+    ASSERT_EQ(0, errors);
+    TEST_INFO("Rank %d: Stress test passed - %d iterations with 0 errors", rank, NUM_ITERATIONS);
+}
+
+/**
+ * @brief Side-by-side comparison: Contiguous vs Separate buffer patterns
+ *
+ * This test runs both patterns back-to-back to clearly demonstrate
+ * that the contiguous buffer pattern works while separate buffers
+ * would hang (the separate buffer test is commented out to avoid hang).
+ */
+TEST_F(UBR_ConcurrentRegHang, ContiguousVsSeparate_Comparison_SHOULD_WORK)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    }
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    TEST_INFO("Rank %d: Comparison test - demonstrating contiguous buffer pattern works", rank);
+
+    // ========================================
+    // PATTERN 1: Contiguous buffer (WORKS)
+    // ========================================
+    TEST_INFO("Rank %d: --- PATTERN 1: Contiguous buffer (should work) ---", rank);
+
+    ContiguousBufferInfo sendContig = allocateContiguousWithViews(ELEMENTS_PER_PEER, nRanks);
+    ContiguousBufferInfo recvContig = allocateContiguousWithViews(ELEMENTS_PER_PEER, nRanks);
+
+    auto cleanupContig = makeScopeGuard([&]() {
+        cleanupContiguousBuffer(sendContig);
+        cleanupContiguousBuffer(recvContig);
+    });
+
+    ASSERT_MPI_TRUE(sendContig.allocated);
+    ASSERT_MPI_TRUE(recvContig.allocated);
+
+    // Log buffer info
+    TEST_INFO("Rank %d: Contiguous send buffer: base=%p, handle=%p, %d views",
+              rank, sendContig.contiguousBuffer, sendContig.handle, nRanks);
+    TEST_INFO("Rank %d: Contiguous recv buffer: base=%p, handle=%p, %d views",
+              rank, recvContig.contiguousBuffer, recvContig.handle, nRanks);
+
+    // Initialize
+    for (int peer = 0; peer < nRanks; peer++) {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendContig.views[peer], ELEMENTS_PER_PEER,
+            [rank, peer](size_t) {
+                return static_cast<T>(static_cast<float>(rank * 100 + peer));
+            }));
+    }
+
+    // Execute grouped send/recv with contiguous views
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            ncclSend(sendContig.views[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+            ncclRecv(recvContig.views[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+        }
+    }
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    // Verify
+    bool pattern1_ok = true;
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            bool verified = verifyBufferData<T>(recvContig.views[peer], ELEMENTS_PER_PEER,
+                [peer, rank](size_t) {
+                    return static_cast<T>(static_cast<float>(peer * 100 + rank));
+                });
+            if (!verified) {
+                pattern1_ok = false;
+                TEST_WARN("Rank %d: Contiguous pattern verification failed for peer %d", rank, peer);
+            }
+        }
+    }
+
+    ASSERT_TRUE(pattern1_ok);
+    TEST_INFO("Rank %d: PATTERN 1 (Contiguous) completed successfully!", rank);
+
+    // ========================================
+    // PATTERN 2: Separate buffers (WOULD HANG)
+    // ========================================
+    // NOTE: We skip actually running this pattern because it would hang.
+    // The SeparateBuffers_Grouped_EXPECTED_HANG test demonstrates this.
+    TEST_INFO("Rank %d: --- PATTERN 2: Separate buffers (skipped - would hang) ---", rank);
+    TEST_INFO("Rank %d: To see the hang, run: UBR_ConcurrentRegHang.SeparateBuffers_Grouped_EXPECTED_HANG", rank);
+
+    // Summary
+    TEST_INFO("Rank %d: ===== COMPARISON SUMMARY =====", rank);
+    TEST_INFO("Rank %d: Contiguous buffer pattern: PASSED", rank);
+    TEST_INFO("Rank %d: Separate buffer pattern:   SKIPPED (known to hang)", rank);
+}
+
+/**
+ * @brief Comparison test - Run same operation without UBR registration
+ *
+ * This test allocates separate buffers but does NOT register them.
+ * It should work because without explicit registration, RCCL doesn't
+ * attempt IPC registration during the collective.
+ */
+TEST_F(UBR_ConcurrentRegHang, SeparateBuffers_NoRegistration_SHOULD_WORK)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    }
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    TEST_INFO("Rank %d: Testing SEPARATE buffers WITHOUT registration (baseline)", rank);
+
+    // Allocate separate buffers but DO NOT register them
+    std::vector<void*> sendBufs(nRanks, nullptr);
+    std::vector<void*> recvBufs(nRanks, nullptr);
+    size_t bufSize = ELEMENTS_PER_PEER * sizeof(T);
+
+    auto cleanup = makeScopeGuard([&]() {
+        for (int i = 0; i < nRanks; i++) {
+            if (sendBufs[i]) (void)freeDeviceBuffer(sendBufs[i]);
+            if (recvBufs[i]) (void)freeDeviceBuffer(recvBufs[i]);
+        }
+    });
+
+    for (int i = 0; i < nRanks; i++) {
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBufs[i], bufSize));
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBufs[i], bufSize));
+    }
+
+    // Initialize
+    for (int peer = 0; peer < nRanks; peer++) {
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendBufs[peer], ELEMENTS_PER_PEER,
+            [rank, peer](size_t) {
+                return static_cast<T>(static_cast<float>(rank * 100 + peer));
+            }));
+    }
+
+    TEST_INFO("Rank %d: Starting grouped send/recv without UBR registration", rank);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            ncclSend(sendBufs[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+            ncclRecv(recvBufs[peer], ELEMENTS_PER_PEER, getNcclDataType<T>(),
+                     peer, getActiveCommunicator(), getActiveStream());
+        }
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    TEST_INFO("Rank %d: Completed successfully (no UBR = no hang)", rank);
+
+    // Verify results
+    for (int peer = 0; peer < nRanks; peer++) {
+        if (peer != rank) {
+            bool verified = verifyBufferData<T>(recvBufs[peer], ELEMENTS_PER_PEER,
+                [peer, rank](size_t) {
+                    return static_cast<T>(static_cast<float>(peer * 100 + rank));
+                });
+            ASSERT_TRUE(verified) << "Data verification failed for peer " << peer;
+        }
+    }
+}
+
+// ============================================================================
+// Graph Capture Registration Tests
+// ============================================================================
+
+class GraphCapture_AllToAll : public RegistrationTestBase {};
+
+TEST_F(GraphCapture_AllToAll, MultiNode)
+{
+    enableGraphRegisterLogging();
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    ASSERT_TRUE(isGraphRegisterEnabled()) << "NCCL_GRAPH_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t countPerRank = RegTestConfig::MEDIUM_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t totalCount = countPerRank * nRanks;
+    const size_t bufSize = totalCount * sizeof(T);
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, bufSize));
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, bufSize));
+
+    auto bufCleanup = makeScopeGuard([&]() {
+        if (sendBuf) (void)freeDeviceBuffer(sendBuf);
+        if (recvBuf) (void)freeDeviceBuffer(recvBuf);
+    });
+
+    ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendBuf, totalCount,
+        [rank, countPerRank](size_t i) {
+            int destRank = i / countPerRank;
+            return static_cast<T>(static_cast<float>(rank * 100 + destRank));
+        }));
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+
+    // Graph capture
+    ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+
+    ncclResult_t ncclErr = ncclAlltoAll(sendBuf, recvBuf, countPerRank,
+                                         getNcclDataType<T>(),
+                                         getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, ncclErr);
+
+    ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_MPI_NE(nullptr, graph);
+
+    size_t numNodes = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numNodes));
+    ASSERT_MPI_GT(numNodes, 0u);
+    TEST_INFO("Graph captured with %zu nodes", numNodes);
+
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        if (graphExec) (void)hipGraphExecDestroy(graphExec);
+        if (graph) (void)hipGraphDestroy(graph);
+    });
+
+    // Graph execution
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bufSize));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    // Verify registration
+    REGLogChecker checker = getLogChecker();
+    bool registrationDetected = checker.hasAnyRegistrationSuccess();
+    TEST_INFO("AllToAll_MultiNode: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    if (!registrationDetected) {
+        TEST_INFO("AllToAll graph capture used the unregistered path (HIP sendrecv graph register is skipped)");
+    }
+
+    // Verify results
+    bool resultValid = verifyBufferData<T>(recvBuf, totalCount,
+        [rank, countPerRank](size_t i) {
+            int srcRank = i / countPerRank;
+            return static_cast<T>(static_cast<float>(srcRank * 100 + rank));
+        });
+    ASSERT_TRUE(resultValid);
+    TEST_INFO("AllToAll graph test completed successfully");
+}
+
+class GraphCapture_AllReduce : public RegistrationTestBase {};
+
+TEST_F(GraphCapture_AllReduce, MultiNode)
+{
+    enableGraphRegisterLogging();
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes";
+    }
+
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    ASSERT_TRUE(isGraphRegisterEnabled()) << "NCCL_GRAPH_REGISTER must be set to 1";
+
+    using T = RegTestConfig::DefaultType;
+    const size_t count = RegTestConfig::LARGE_COUNT;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t bufSize = count * sizeof(T);
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, bufSize));
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, bufSize));
+
+    auto bufCleanup = makeScopeGuard([&]() {
+        if (sendBuf) (void)freeDeviceBuffer(sendBuf);
+        if (recvBuf) (void)freeDeviceBuffer(recvBuf);
+    });
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+
+    // Graph capture
+    ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal));
+
+    ncclResult_t ncclErr = ncclAllReduce(sendBuf, recvBuf, count,
+                                          getNcclDataType<T>(), ncclSum,
+                                          getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, ncclErr);
+
+    ASSERT_MPI_EQ(hipSuccess, hipStreamEndCapture(getActiveStream(), &graph));
+    ASSERT_MPI_NE(nullptr, graph);
+
+    size_t numNodes = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numNodes));
+    ASSERT_MPI_GT(numNodes, 0u);
+    TEST_INFO("AllReduce graph captured with %zu nodes", numNodes);
+
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        if (graphExec) (void)hipGraphExecDestroy(graphExec);
+        if (graph) (void)hipGraphDestroy(graph);
+    });
+
+    // Graph execution
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bufSize));
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    // Verify registration
+    REGLogChecker checker = getLogChecker();
+    bool registrationDetected = checker.hasAnyRegistrationSuccess();
+    TEST_INFO("AllReduce_MultiNode: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    if (!registrationDetected) {
+        TEST_INFO("AllReduce graph capture completed without NCCL_REG log markers");
+    }
+
+    // Verify results
+    bool resultValid = verifyAllReduceResult<T>(recvBuf, count, nRanks);
+    ASSERT_TRUE(resultValid);
+    TEST_INFO("AllReduce graph test completed successfully");
+}
+
+// ============================================================================
+// Graph Capture + Symmetric Window Registration
+// ============================================================================
+
+/**
+ * @brief Exercises ncclCommWindowRegister during HIP graph capture.
+ *
+ * NCCL 2.30.7 added support for symmetric window registration while a stream
+ * is capturing. RCCL mirrors this by running host-side registration work in
+ * relaxed capture mode (dev_runtime.cc). These tests register symmetric windows
+ * inside capture, issue each symmetric-kernel-capable collective on those
+ * buffers, and verify correctness after graph replay. The same tests run on
+ * single- and multi-node configurations and validate the selected symmetric or
+ * legacy-fallback scheduler path.
+ *
+ * Requires NCCL_CUMEM_ENABLE=1 and NCCL_WIN_ENABLE!=0.
+ */
+class GraphCapture_WindowRegister : public RegistrationTestBase
+{
+protected:
+    enum class Collective
+    {
+        AllReduce,
+        AllGather,
+        ReduceScatter
+    };
+
+    static const char* collectiveName(Collective collective)
+    {
+        switch(collective)
+        {
+        case Collective::AllReduce:     return "AllReduce";
+        case Collective::AllGather:     return "AllGather";
+        case Collective::ReduceScatter: return "ReduceScatter";
+        }
+        return "Unknown";
+    }
+
+    void runSymmetricCollective(Collective collective)
+    {
+        if(!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT))
+        {
+            GTEST_SKIP() << "Requires 2+ ranks";
+        }
+
+        MPIHelpers::TestLogAssertionContext logCtx(
+            MPIHelpers::makePerRankStderrAssertionOptions(getTestMpiRank()));
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        ASSERT_MPI_TRUE(isCuMemEnabled());
+        ASSERT_MPI_TRUE(isWinEnabled());
+
+        using T = RegTestConfig::DefaultType;
+        const size_t count = RegTestConfig::MEDIUM_COUNT;
+
+        int rank = 0;
+        int nRanks = 0;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+        size_t sendCount = count;
+        size_t recvCount = count;
+        if(collective == Collective::AllGather)
+        {
+            recvCount *= static_cast<size_t>(nRanks);
+        }
+        else if(collective == Collective::ReduceScatter)
+        {
+            sendCount *= static_cast<size_t>(nRanks);
+        }
+
+        const size_t sendBytes = sendCount * sizeof(T);
+        const size_t recvBytes = recvCount * sizeof(T);
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&sendBuf, sendBytes));
+        auto sendBufGuard = makeHipMemBufferAutoGuard(sendBuf);
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recvBuf, recvBytes));
+        auto recvBufGuard = makeHipMemBufferAutoGuard(recvBuf);
+
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            initializeBufferWithPattern<T>(
+                sendBuf,
+                sendCount,
+                [rank](size_t) { return static_cast<T>(static_cast<float>(rank + 1)); }));
+
+        hipGraph_t graph = nullptr;
+        hipGraphExec_t graphExec = nullptr;
+        ncclWindow_t sendWin = nullptr;
+        ncclWindow_t recvWin = nullptr;
+
+        bool captureActive = false;
+
+        auto windowCleanup = makeScopeGuard([&]() {
+            if(sendWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), sendWin);
+            if(recvWin) (void)ncclCommWindowDeregister(getActiveCommunicator(), recvWin);
+        });
+
+        // Declared after windowCleanup so it unwinds first: an early return before
+        // hipStreamEndCapture must leave the stream idle, because the deregisters above cannot
+        // be issued into a capturing stream.
+        auto captureCleanup = makeScopeGuard([&]() {
+            if(captureActive)
+            {
+                hipGraph_t abandonedGraph = nullptr;
+                if(hipStreamEndCapture(getActiveStream(), &abandonedGraph) == hipSuccess && abandonedGraph)
+                    (void)hipGraphDestroy(abandonedGraph);
+            }
+        });
+
+        const hipError_t captureBeginStatus =
+            hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal);
+        captureActive = (captureBeginStatus == hipSuccess);
+        ASSERT_MPI_EQ(hipSuccess, captureBeginStatus);
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), sendBuf, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), recvBuf, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+        ASSERT_MPI_NE(sendWin, nullptr);
+        ASSERT_MPI_NE(recvWin, nullptr);
+
+        switch(collective)
+        {
+        case Collective::AllReduce:
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+            break;
+        case Collective::AllGather:
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(sendBuf, recvBuf, count, getNcclDataType<T>(), getActiveCommunicator(), getActiveStream()));
+            break;
+        case Collective::ReduceScatter:
+            ASSERT_MPI_EQ(ncclSuccess, ncclReduceScatter(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+            break;
+        }
+
+        const hipError_t captureEndStatus = hipStreamEndCapture(getActiveStream(), &graph);
+        if(captureEndStatus == hipSuccess) captureActive = false;
+        ASSERT_MPI_EQ(hipSuccess, captureEndStatus);
+        ASSERT_MPI_NE(nullptr, graph);
+
+        // Guard the graph as soon as it exists; graphExec is null-checked until instantiated.
+        auto graphCleanup = makeScopeGuard([&]() {
+            if(graphExec) (void)hipGraphExecDestroy(graphExec);
+            if(graph) (void)hipGraphDestroy(graph);
+        });
+
+        size_t numGraphNodes = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numGraphNodes));
+        ASSERT_MPI_GT(numGraphNodes, 0u);
+        TEST_INFO("GraphCapture_WindowRegister %s captured graph with %zu nodes", collectiveName(collective), numGraphNodes);
+
+        ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+        constexpr int kGraphLaunches = 2;
+        for(int launch = 0; launch < kGraphLaunches; ++launch)
+        {
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, recvBytes));
+            ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            bool resultValid = false;
+            switch(collective)
+            {
+            case Collective::AllReduce:
+                resultValid = verifyAllReduceResult<T>(recvBuf, count, nRanks);
+                break;
+            case Collective::AllGather:
+                resultValid = verifyAllGatherResult<T>(recvBuf, count, nRanks);
+                break;
+            case Collective::ReduceScatter:
+                resultValid = verifyReduceScatterResult<T>(recvBuf, count, nRanks);
+                break;
+            }
+            ASSERT_MPI_TRUE(resultValid);
+        }
+
+        ncclComm* comm = getActiveCommunicator();
+        const bool ginKernelsEnabled =
+            MPIHelpers::getEnvParam<int>("NCCL_SYM_GIN_KERNELS_ENABLE", 1) != 0;
+        const bool symmetricRuntimeAvailable =
+            comm->symmetricSupport && comm->isAllDirectNvlink;
+
+        bool expectSymmetric = symmetricRuntimeAvailable;
+        if(comm->devrState.lsaSize < comm->nRanks)
+        {
+            switch(collective)
+            {
+            case Collective::AllReduce:
+                // No AllReduce kernel is present in kernelMask_Gin.
+                expectSymmetric = false;
+                break;
+            case Collective::AllGather:
+                // The multi-node AllGather kernel requires LSA store multimem.
+                expectSymmetric = symmetricRuntimeAvailable && ginKernelsEnabled &&
+                                  comm->symkState.hasLsaMultimem;
+                break;
+            case Collective::ReduceScatter:
+                // RailA2A_LsaLD does not require LSA multimem.
+                expectSymmetric = symmetricRuntimeAvailable && ginKernelsEnabled;
+                break;
+            }
+        }
+
+        const REGLogChecker checker(logCtx.readPerRankStderrLog());
+        const bool sawSymmetric = checker.usedSymmetricCollective(collectiveName(collective));
+        const bool sawLegacy = checker.usedLegacyCollective(collectiveName(collective));
+        TEST_INFO("%s path: nNodes=%d lsaSize=%d nRanks=%d symmetricSupport=%d isAllDirectNvlink=%d "
+                  "hasLsaMultimem=%d expected=%s observedSymmetric=%d observedLegacy=%d",
+                  collectiveName(collective), comm->nNodes, comm->devrState.lsaSize, comm->nRanks,
+                  comm->symmetricSupport, static_cast<int>(comm->isAllDirectNvlink),
+                  static_cast<int>(comm->symkState.hasLsaMultimem),
+                  expectSymmetric ? "symmetric" : "legacy", static_cast<int>(sawSymmetric),
+                  static_cast<int>(sawLegacy));
+
+        // Both markers come from NCCL_TUNING on communicator rank 0. Seeing
+        // neither means that subsystem is off (or this rank is not rank 0), so
+        // there is nothing to compare against and only correctness is checked.
+        // Non-fatal: only rank 0 reaches this branch, and the collective
+        // assertions that follow must still be executed by every rank.
+        const bool pathMarkerPresent = sawSymmetric || sawLegacy;
+        if(pathMarkerPresent)
+        {
+            EXPECT_EQ(expectSymmetric, sawSymmetric)
+                << collectiveName(collective) << ": expected the "
+                << (expectSymmetric ? "symmetric" : "legacy fallback") << " path";
+            if(!comm->symmetricSupport)
+            {
+                EXPECT_TRUE(checker.usedNonSymmetricWindowRegistration())
+                    << "symmetricSupport is off, so registration must report windowRegisterNonSym";
+            }
+        }
+        else
+        {
+            TEST_INFO("No TUNING path marker for %s; run with NCCL_DEBUG=INFO, "
+                      "NCCL_DEBUG_SUBSYS including TUNING and RCCL_MPI_LOG_ALL_RANKS=1 to also "
+                      "assert the scheduler path",
+                      collectiveName(collective));
+        }
+
+        // Hand each window off before deregistering it: ASSERT_MPI_EQ returns on every rank when
+        // any one rank fails, so a rank that already succeeded must not leave the handle set for
+        // windowCleanup to deregister a second time.
+        ncclWindow_t sendWinToRelease = sendWin;
+        sendWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(getActiveCommunicator(), sendWinToRelease));
+        ncclWindow_t recvWinToRelease = recvWin;
+        recvWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(getActiveCommunicator(), recvWinToRelease));
+
+        TEST_INFO("GraphCapture_WindowRegister %s completed via %s path",
+                  collectiveName(collective), expectSymmetric ? "symmetric" : "legacy fallback");
+    }
+};
+
+TEST_F(GraphCapture_WindowRegister, SymmetricAllReduce)
+{
+    runSymmetricCollective(Collective::AllReduce);
+}
+
+TEST_F(GraphCapture_WindowRegister, SymmetricAllGather)
+{
+    runSymmetricCollective(Collective::AllGather);
+}
+
+TEST_F(GraphCapture_WindowRegister, SymmetricReduceScatter)
+{
+    runSymmetricCollective(Collective::ReduceScatter);
+}
+
+// ============================================================================
+// AllToAll/AllToAllv Interleaved Stress Test with UBR
+// ============================================================================
+
+/**
+ * @brief Stress test for User Buffer Registration with interleaved AllToAll/AllToAllv
+ *
+ * This test exercises buffer registration under stress conditions:
+ * - Interleaves AllToAll and AllToAllv calls
+ * - Runs hundreds of iterations
+ * - Tests small, medium, and large message sizes
+ * - Uses multiple communicators (primary + split)
+ * - Detects data mismatches, buffer corruption, and hangs
+ */
+class UBR_AllToAllStress : public RegistrationTestBase
+{
+protected:
+    // Use bfloat16 as the test type (same as RegTestConfig::DefaultType)
+    using T = RegTestConfig::DefaultType;  // hip_bfloat16
+
+    // Test parameters
+    static constexpr int ITERATIONS_PER_SIZE = 8;
+    static constexpr size_t STRESS_SMALL_COUNT  = 256;             // 512B for bfloat16
+    static constexpr size_t STRESS_MEDIUM_COUNT = 64 * 1024;       // 128KiB for bfloat16
+    static constexpr size_t STRESS_LARGE_COUNT  = 256 * 1024;      // 512KiB for bfloat16
+
+    struct CommContext {
+        ncclComm_t comm = nullptr;
+        int rank = 0;
+        int nRanks = 0;
+        std::string name;
+    };
+
+    // Create CommContext from a communicator
+    CommContext makeCommContext(ncclComm_t comm, const std::string& name)
+    {
+        CommContext ctx;
+        ctx.comm = comm;
+        ctx.name = name;
+        ncclCommUserRank(comm, &ctx.rank);
+        ncclCommCount(comm, &ctx.nRanks);
+        return ctx;
+    }
+
+    // Allocate and register a pair of send/recv buffers
+    bool allocateBufferPair(size_t size, ncclComm_t comm,
+                            RegInfo& sendInfo, RegInfo& recvInfo)
+    {
+        sendInfo.size = recvInfo.size = size;
+
+        if (allocateDeviceBuffer(&sendInfo.buffer, size) != ncclSuccess) return false;
+        if (allocateDeviceBuffer(&recvInfo.buffer, size) != ncclSuccess) {
+            (void)freeDeviceBuffer(sendInfo.buffer);
+            sendInfo.buffer = nullptr;
+            return false;
+        }
+
+        ncclResult_t r1 = ncclCommRegister(comm, sendInfo.buffer, size, &sendInfo.handle);
+        ncclResult_t r2 = ncclCommRegister(comm, recvInfo.buffer, size, &recvInfo.handle);
+        sendInfo.registered = (r1 == ncclSuccess && sendInfo.handle);
+        recvInfo.registered = (r2 == ncclSuccess && recvInfo.handle);
+
+        return true;
+    }
+
+    void cleanupBufferPair(RegInfo& sendInfo, RegInfo& recvInfo, ncclComm_t comm)
+    {
+        auto cleanup = [&](RegInfo& info) {
+            if (info.handle) { ncclCommDeregister(comm, info.handle); info.handle = nullptr; }
+            if (info.buffer) { (void)freeDeviceBuffer(info.buffer); info.buffer = nullptr; }
+            info.registered = false;
+        };
+        cleanup(sendInfo);
+        cleanup(recvInfo);
+    }
+
+    // Compute pattern value - use integer patterns for bfloat16 precision
+    // Pattern: rank * 100 + dest * 10 + (iter % 10) + offset
+    static float computePattern(int rank, int peerRank, int iter, float offset = 0.0f)
+    {
+        return static_cast<float>(rank * 100 + peerRank * 10 + (iter % 10)) + offset;
+    }
+
+    void initBuffer(void* buffer, size_t countPerRank, int nRanks, int rank, int iter, float offset = 0.0f)
+    {
+        (void)initializeBufferWithPattern<T>(buffer, countPerRank * nRanks,
+            [rank, countPerRank, iter, offset](size_t i) {
+                int dest = static_cast<int>(i / countPerRank);
+                return static_cast<T>(computePattern(rank, dest, iter, offset));
+            });
+    }
+
+    bool verifyBuffer(void* buffer, size_t countPerRank, int nRanks, int myRank, int iter, float offset = 0.0f)
+    {
+        std::vector<T> data(countPerRank * nRanks);
+        if (hipMemcpy(data.data(), buffer, data.size() * sizeof(T), hipMemcpyDeviceToHost) != hipSuccess)
+            return false;
+
+        for (int src = 0; src < nRanks; src++) {
+            T expected = static_cast<T>(computePattern(src, myRank, iter, offset));
+            for (size_t i = 0; i < countPerRank; i++) {
+                // Round the formula through T first. bfloat16 ULP is 8 around 1100,
+                // so comparing the unrounded float (1100) against a stored 1104 fails
+                // even when the collective is correct.
+                if (data[src * countPerRank + i] != expected) {
+                    TEST_WARN("Mismatch src=%d idx=%zu exp=%f got=%f iter=%d",
+                              src, i, static_cast<float>(expected),
+                              static_cast<float>(data[src * countPerRank + i]), iter);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Variable-size init/verify for AllToAllv
+    void initBufferV(void* buffer, const std::vector<size_t>& counts,
+                     const std::vector<size_t>& displs, int nRanks, int rank, int iter)
+    {
+        size_t total = 0;
+        for (auto c : counts) total += c;
+        std::vector<T> data(total);
+
+        for (int dest = 0; dest < nRanks; dest++) {
+            T value = static_cast<T>(computePattern(rank, dest, iter, 0.5f));
+            for (size_t i = 0; i < counts[dest]; i++)
+                data[displs[dest] + i] = value;
+        }
+        (void)hipMemcpy(buffer, data.data(), data.size() * sizeof(T), hipMemcpyHostToDevice);
+    }
+
+    bool verifyBufferV(void* buffer, const std::vector<size_t>& counts,
+                       const std::vector<size_t>& displs, int nRanks, int myRank, int iter)
+    {
+        size_t total = 0;
+        for (auto c : counts) total += c;
+        std::vector<T> data(total);
+        if (hipMemcpy(data.data(), buffer, data.size() * sizeof(T), hipMemcpyDeviceToHost) != hipSuccess)
+            return false;
+
+        for (int src = 0; src < nRanks; src++) {
+            T expected = static_cast<T>(computePattern(src, myRank, iter, 0.5f));
+            for (size_t i = 0; i < counts[src]; i++) {
+                if (data[displs[src] + i] != expected) return false;
+            }
+        }
+        return true;
+    }
+
+    // Core stress test runner
+    bool runInterleavedStress(CommContext& ctx, size_t countPerRank, int iterations, const std::string& label,
+                              hipStream_t stream = nullptr)
+    {
+        RegInfo sendInfo, recvInfo;
+        size_t totalSize = countPerRank * ctx.nRanks * sizeof(T);
+
+        if (!allocateBufferPair(totalSize, ctx.comm, sendInfo, recvInfo)) {
+            TEST_WARN("[%s] Buffer allocation failed", label.c_str());
+            return false;
+        }
+        auto cleanup = makeScopeGuard([&]() { cleanupBufferPair(sendInfo, recvInfo, ctx.comm); });
+
+        // Setup AllToAllv counts
+        std::vector<size_t> sendcounts(ctx.nRanks), sdispls(ctx.nRanks);
+        std::vector<size_t> recvcounts(ctx.nRanks), rdispls(ctx.nRanks);
+        size_t baseCount = countPerRank / 4, sendTotal = 0, recvTotal = 0;
+
+        for (int r = 0; r < ctx.nRanks; r++) {
+            sendcounts[r] = ((ctx.rank + r + 1) % ctx.nRanks + 1) * baseCount;
+            sdispls[r] = sendTotal; sendTotal += sendcounts[r];
+            recvcounts[r] = ((r + ctx.rank + 1) % ctx.nRanks + 1) * baseCount;
+            rdispls[r] = recvTotal; recvTotal += recvcounts[r];
+        }
+
+        RegInfo sendInfoV, recvInfoV;
+        if (!allocateBufferPair(std::max(sendTotal, recvTotal) * sizeof(T), ctx.comm, sendInfoV, recvInfoV)) {
+            TEST_WARN("[%s] AllToAllv buffer allocation failed", label.c_str());
+            return false;
+        }
+        auto cleanupV = makeScopeGuard([&]() { cleanupBufferPair(sendInfoV, recvInfoV, ctx.comm); });
+
+        int errors = 0;
+        if (stream == nullptr) stream = getActiveStream();
+
+        // Debug: Log buffer addresses at start (only rank 0)
+        if (ctx.rank == 0) {
+            TEST_INFO("[%s] Buffer addresses - sendBuf=%p recvBuf=%p sendBufV=%p recvBufV=%p",
+                      label.c_str(), sendInfo.buffer, recvInfo.buffer, sendInfoV.buffer, recvInfoV.buffer);
+        }
+
+        for (int iter = 0; iter < iterations; iter++) {
+            bool ok;
+            const char* opType;
+
+            if (iter % 2 == 0) {
+                opType = "AllToAll";
+                initBuffer(sendInfo.buffer, countPerRank, ctx.nRanks, ctx.rank, iter);
+
+                // Debug: Show sample data before collective (first 2 iterations, rank 0)
+                if (iter < 2 && ctx.rank == 0) {
+                    T sample;
+                    (void)hipMemcpy(&sample, sendInfo.buffer, sizeof(T), hipMemcpyDeviceToHost);
+                    TEST_INFO("[%s] iter=%d PRE-AllToAll: sendBuf[0]=%.1f (expected=%.1f)",
+                              label.c_str(), iter, static_cast<float>(sample),
+                              computePattern(ctx.rank, 0, iter, 0.0f));
+                }
+
+                (void)hipMemset(recvInfo.buffer, 0, totalSize);
+                if (ncclAlltoAll(sendInfo.buffer, recvInfo.buffer, countPerRank,
+                                 getNcclDataType<T>(), ctx.comm, stream) != ncclSuccess) { errors++; continue; }
+                (void)hipStreamSynchronize(stream);
+
+                // Debug: Show sample data after collective (first 2 iterations, rank 0)
+                if (iter < 2 && ctx.rank == 0) {
+                    T recvSample;
+                    (void)hipMemcpy(&recvSample, recvInfo.buffer, sizeof(T), hipMemcpyDeviceToHost);
+                    TEST_INFO("[%s] iter=%d POST-AllToAll: recvBuf[0]=%.1f (expected from rank0=%.1f)",
+                              label.c_str(), iter, static_cast<float>(recvSample),
+                              computePattern(0, ctx.rank, iter, 0.0f));
+                }
+
+                ok = verifyBuffer(recvInfo.buffer, countPerRank, ctx.nRanks, ctx.rank, iter);
+            } else {
+                opType = "AllToAllv";
+                initBufferV(sendInfoV.buffer, sendcounts, sdispls, ctx.nRanks, ctx.rank, iter);
+
+                // Debug: Show sample data before collective (first 2 odd iterations, rank 0)
+                if (iter < 3 && ctx.rank == 0) {
+                    T sample;
+                    (void)hipMemcpy(&sample, sendInfoV.buffer, sizeof(T), hipMemcpyDeviceToHost);
+                    TEST_INFO("[%s] iter=%d PRE-AllToAllv: sendBufV[0]=%.1f (expected=%.1f)",
+                              label.c_str(), iter, static_cast<float>(sample),
+                              computePattern(ctx.rank, 0, iter, 0.5f));
+                }
+
+                (void)hipMemset(recvInfoV.buffer, 0, recvTotal * sizeof(T));
+                if (ncclAlltoAllv(sendInfoV.buffer, sendcounts.data(), sdispls.data(),
+                                  recvInfoV.buffer, recvcounts.data(), rdispls.data(),
+                                  getNcclDataType<T>(), ctx.comm, stream) != ncclSuccess) { errors++; continue; }
+                (void)hipStreamSynchronize(stream);
+
+                // Debug: Show sample data after collective (first 2 odd iterations, rank 0)
+                if (iter < 3 && ctx.rank == 0) {
+                    T recvSample;
+                    (void)hipMemcpy(&recvSample, recvInfoV.buffer, sizeof(T), hipMemcpyDeviceToHost);
+                    TEST_INFO("[%s] iter=%d POST-AllToAllv: recvBufV[0]=%.1f (expected from rank0=%.1f)",
+                              label.c_str(), iter, static_cast<float>(recvSample),
+                              computePattern(0, ctx.rank, iter, 0.5f));
+                }
+
+                ok = verifyBufferV(recvInfoV.buffer, recvcounts, rdispls, ctx.nRanks, ctx.rank, iter);
+            }
+
+            if (!ok) {
+                errors++;
+                if (ctx.rank == 0)
+                    TEST_WARN("[%s] iter=%d %s VERIFICATION FAILED", label.c_str(), iter, opType);
+            }
+
+            // Log progress every 10 iterations (rank 0 only)
+            if ((iter + 1) % 10 == 0 && ctx.rank == 0)
+                TEST_INFO("[%s] Completed %d/%d iterations, errors=%d", label.c_str(), iter + 1, iterations, errors);
+        }
+
+        if (ctx.rank == 0)
+            TEST_INFO("[%s] %s: %d iterations", label.c_str(), errors ? "FAILED" : "PASSED", iterations);
+        return errors == 0;
+    }
+};
+
+TEST_F(UBR_AllToAllStress, InterleavedMultiSize_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE))
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    CommContext ctx = makeCommContext(getActiveCommunicator(), "Primary");
+    TEST_INFO("Starting stress test: %d ranks, %d iterations/size", ctx.nRanks, ITERATIONS_PER_SIZE);
+
+    bool ok = true;
+    const size_t sizes[] = {STRESS_SMALL_COUNT, STRESS_MEDIUM_COUNT, STRESS_LARGE_COUNT};
+    const char* names[] = {"SMALL", "MEDIUM", "LARGE"};
+
+    for (int i = 0; i < 3; i++) {
+        TEST_INFO("--- Testing %s (%zu elements/rank, %zu bytes/rank) ---",
+                  names[i], sizes[i], sizes[i] * sizeof(T));
+        ok &= runInterleavedStress(ctx, sizes[i], ITERATIONS_PER_SIZE, names[i]);
+    }
+    ASSERT_TRUE(ok);
+}
+
+TEST_F(UBR_AllToAllStress, InterleavedWithSplitComm_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE))
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    CommContext primaryCtx = makeCommContext(getActiveCommunicator(), "Primary");
+
+    TEST_INFO("Splitting communicator: primary nRanks=%d", primaryCtx.nRanks);
+    // Split into even/odd groups
+    ncclComm_t splitComm = nullptr;
+    int color = primaryCtx.rank % 2;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(primaryCtx.comm, color, primaryCtx.rank, &splitComm, nullptr));
+    auto splitGuard = makeCommAutoGuard(splitComm);
+    TEST_INFO("ncclCommSplit returned");
+
+    CommContext splitCtx = makeCommContext(splitComm, color == 0 ? "Split-Even" : "Split-Odd");
+    if (splitCtx.nRanks < 2) GTEST_SKIP() << "Split comm too small";
+
+    TEST_INFO("Primary: %d ranks, Split: %d ranks", primaryCtx.nRanks, splitCtx.nRanks);
+
+    bool ok = true;
+    const size_t sizes[] = {STRESS_SMALL_COUNT, STRESS_MEDIUM_COUNT, STRESS_LARGE_COUNT};
+    const char* names[] = {"SMALL", "MEDIUM", "LARGE"};
+
+    // A 16-rank parent plus an 8-rank split holds two full NCCL+cuMem footprints
+    // and OOMs/hangs on this 2n8 cluster (same rationale as ConcurrentMultiComm).
+    // Stress the parent first, drop it, then stress the split comm.
+    const bool dropParent = primaryCtx.nRanks >= 16;
+    const int iters = dropParent ? 2 : ITERATIONS_PER_SIZE / 2;
+    for (int i = 0; i < 3; i++) {
+        TEST_INFO("--- Phase %d: %s (primary) ---", i, names[i]);
+        ok &= runInterleavedStress(primaryCtx, sizes[i], iters, std::string(names[i]) + "-Primary");
+    }
+    hipStream_t splitStream = getActiveStream();
+    hipStream_t ownedStream = nullptr;
+    if (dropParent) {
+        TEST_INFO("Destroying 16-rank parent before split-comm stress");
+        ASSERT_EQ(hipSuccess, hipStreamCreate(&ownedStream));
+        splitStream = ownedStream;
+        ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+        primaryCtx.comm = nullptr;
+    }
+    auto ownedStreamGuard = makeScopeGuard([&]() {
+        if (ownedStream) (void)hipStreamDestroy(ownedStream);
+    });
+    for (int i = 0; i < 3; i++) {
+        TEST_INFO("--- Phase %d: %s (split) ---", i, names[i]);
+        ok &= runInterleavedStress(splitCtx, sizes[i], iters, std::string(names[i]) + "-Split", splitStream);
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+    ASSERT_TRUE(ok);
+}
+
+TEST_F(UBR_AllToAllStress, ConcurrentMultiComm_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_ALLTOALL, RegTestConfig::MIN_NODES_MULTINODE))
+        GTEST_SKIP() << "Requires 4+ ranks across 2+ nodes";
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+
+    int worldRank = 0, worldNRanks = 0;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &worldRank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &worldNRanks));
+
+    // A 16-rank world comm plus any child OOMs at 2n8 (256 MiB cuMem chunks).
+    // Drop the world comm, then build two 2-rank NCCL comms on cross-node MPI
+    // pairs so concurrent multi-comm still crosses the network.
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    const int nPairs = worldNRanks / 2;
+    if (nPairs < 1) GTEST_SKIP() << "Need 2+ ranks for pair communicators";
+    MPI_Comm pairMpi = MPI_COMM_NULL;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Comm_split(MPI_COMM_WORLD, worldRank % nPairs, worldRank, &pairMpi));
+    auto mpiGuard = makeScopeGuard([&]() {
+        if (pairMpi != MPI_COMM_NULL) MPI_Comm_free(&pairMpi);
+    });
+
+    int pairRank = 0, pairSize = 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Comm_rank(pairMpi, &pairRank));
+    ASSERT_EQ(MPI_SUCCESS, MPI_Comm_size(pairMpi, &pairSize));
+    if (pairSize < 2) GTEST_SKIP() << "Pair MPI comm too small";
+
+    auto initPairNccl = [&](ncclComm_t* comm) {
+        ncclUniqueId id{};
+        int idOk = 0;
+        if (pairRank == 0) idOk = (ncclGetUniqueId(&id) == ncclSuccess);
+        ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(&idOk, 1, MPI_INT, 0, pairMpi));
+        ASSERT_TRUE(idOk);
+        ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, pairMpi));
+        ASSERT_EQ(ncclSuccess, ncclCommInitRank(comm, pairSize, id, pairRank));
+    };
+
+    ncclComm_t comm1 = nullptr, comm2 = nullptr;
+    initPairNccl(&comm1);
+    auto comm1Guard = makeCommAutoGuard(comm1);
+    initPairNccl(&comm2);
+    auto comm2Guard = makeCommAutoGuard(comm2);
+
+    CommContext ctx1 = makeCommContext(comm1, "Comm1-Pair");
+    CommContext ctx2 = makeCommContext(comm2, "Comm2-Pair");
+
+    hipStream_t stream1 = nullptr, stream2 = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream1));
+    auto stream1Guard = makeStreamAutoGuard(stream1);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream2));
+    auto stream2Guard = makeStreamAutoGuard(stream2);
+
+    const size_t countPerRank = STRESS_MEDIUM_COUNT;
+    const size_t totalSize1 = countPerRank * ctx1.nRanks * sizeof(T);
+    const size_t totalSize2 = countPerRank * ctx2.nRanks * sizeof(T);
+
+    RegInfo send1, recv1, send2, recv2;
+    ASSERT_MPI_TRUE(allocateBufferPair(totalSize1, comm1, send1, recv1));
+    ASSERT_MPI_TRUE(allocateBufferPair(totalSize2, comm2, send2, recv2));
+    auto bufCleanup = makeScopeGuard([&]() {
+        cleanupBufferPair(send1, recv1, comm1);
+        cleanupBufferPair(send2, recv2, comm2);
+    });
+
+    TEST_INFO("Concurrent multi-comm stress: two %d-rank comms, %d iterations",
+              ctx1.nRanks, ITERATIONS_PER_SIZE);
+
+    int errors = 0;
+    for (int iter = 0; iter < ITERATIONS_PER_SIZE; iter++) {
+        initBuffer(send1.buffer, countPerRank, ctx1.nRanks, ctx1.rank, iter, 0.0f);
+        initBuffer(send2.buffer, countPerRank, ctx2.nRanks, ctx2.rank, iter, 0.5f);
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recv1.buffer, 0, totalSize1, stream1));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recv2.buffer, 0, totalSize2, stream2));
+
+        ncclGroupStart();
+        ncclAlltoAll(send1.buffer, recv1.buffer, countPerRank, getNcclDataType<T>(), comm1, stream1);
+        ncclAlltoAll(send2.buffer, recv2.buffer, countPerRank, getNcclDataType<T>(), comm2, stream2);
+        ncclGroupEnd();
+
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream1));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream2));
+
+        if (!verifyBuffer(recv1.buffer, countPerRank, ctx1.nRanks, ctx1.rank, iter, 0.0f)) errors++;
+        if (!verifyBuffer(recv2.buffer, countPerRank, ctx2.nRanks, ctx2.rank, iter, 0.5f)) errors++;
+    }
+
+    ASSERT_EQ(0, errors);
+    TEST_INFO("Concurrent multi-comm stress test completed successfully");
+}
+
+#endif // MPI_TESTS_ENABLED

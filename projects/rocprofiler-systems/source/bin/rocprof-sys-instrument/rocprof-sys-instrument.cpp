@@ -1,34 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
-#include "common/join.hpp"
+#include "common/delimit.hpp"
+#include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
+
+#include <fmt/ranges.h>
 
 #include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
@@ -39,9 +24,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/delimit.hpp>
-#include <timemory/utility/demangle.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
@@ -51,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iterator>
 #include <map>
@@ -80,7 +63,8 @@ auto
 get_default_min_instructions()
 {
     // default to 1024
-    return tim::get_env<size_t>("ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS", (1 << 10), false);
+    return rocprofsys::get_env<size_t>(rocprofsys::env_vars::DEFAULT_MIN_INSTRUCTIONS,
+                                       (1 << 10));
 }
 auto
 get_default_min_address_range()
@@ -88,9 +72,16 @@ get_default_min_address_range()
     // default to 4096
     return 4 * get_default_min_instructions();
 }
+auto
+get_default_max_library_functions()
+{
+    // default to 20000
+    return rocprofsys::get_env<size_t>(
+        rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
+}
 }  // namespace
 
-using InstrumentMode = ::rocprofsys::dl::InstrumentMode;
+using InstrumentMode = ::rocprofsys::dl::instrument_mode;
 
 bool   use_return_info              = false;
 bool   use_args_info                = false;
@@ -101,20 +92,23 @@ bool   loop_level_instr             = false;
 bool   instr_dynamic_callsites      = false;
 bool   instr_traps                  = false;
 bool   instr_loop_traps             = false;
-bool   parse_all_modules            = false;
-size_t min_address_range            = get_default_min_address_range();  // 4096
-size_t min_loop_address_range       = get_default_min_address_range();  // 4096
-size_t min_instructions             = get_default_min_instructions();   // 1024
-size_t min_loop_instructions        = get_default_min_instructions();   // 1024
+bool   exclude_internal_lib_paths   = false;
+bool   exe_only                     = false;
+size_t min_address_range            = get_default_min_address_range();      // 4096
+size_t min_loop_address_range       = get_default_min_address_range();      // 4096
+size_t min_instructions             = get_default_min_instructions();       // 1024
+size_t min_loop_instructions        = get_default_min_instructions();       // 1024
+size_t max_library_functions        = get_default_max_library_functions();  // 20000
 bool   werror                       = false;
 bool   debug_print                  = false;
 bool   instr_print                  = false;
 bool   simulate                     = false;
 bool   include_uninstr              = false;
 bool   include_internal_linked_libs = false;
-int    verbose_level   = tim::get_env<int>("ROCPROFSYS_VERBOSE_INSTRUMENT", 0);
-int    num_log_entries = tim::get_env<int>(
-    "ROCPROFSYS_LOG_COUNT", tim::get_env<bool>("ROCPROFSYS_CI", false) ? 20 : 50);
+int verbose_level = rocprofsys::get_env<int>(rocprofsys::env_vars::VERBOSE_INSTRUMENT, 0);
+int num_log_entries = rocprofsys::get_env<int>(
+    rocprofsys::env_vars::LOG_COUNT,
+    rocprofsys::get_env<bool>(rocprofsys::env_vars::CI, false) ? 20 : 50);
 string_t main_fname     = "main";
 string_t argv0          = {};
 string_t cmdv0          = {};
@@ -123,7 +117,6 @@ string_t prefer_library = {};
 //  global variables
 //
 patch_pointer_t  bpatch                        = {};
-call_expr_t*     terminate_expr                = nullptr;
 snippet_vec_t    init_names                    = {};
 snippet_vec_t    fini_names                    = {};
 fmodset_t        available_module_functions    = {};
@@ -157,55 +150,53 @@ std::unique_ptr<std::ofstream> log_ofs = {};
 
 namespace
 {
-namespace process  = tim::process;  // NOLINT
-namespace signals  = tim::signals;
-namespace filepath = tim::filepath;
-namespace path     = rocprofsys::common::path;
+namespace process = tim::process;  // NOLINT
+namespace signals = tim::signals;
+namespace path    = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
 
-bool                                       binary_rewrite       = false;
-bool                                       is_attached          = false;
-bool                                       use_mpi              = false;
-bool                                       is_static_exe        = false;
-bool                                       force_config         = false;
-size_t                                     batch_size           = 50;
-strset_t                                   extra_libs           = {};
-std::vector<std::pair<uint64_t, string_t>> hash_ids             = {};
-std::map<string_t, bool>                   use_stubs            = {};
-std::map<string_t, procedure_t*>           beg_stubs            = {};
-std::map<string_t, procedure_t*>           end_stubs            = {};
-strvec_t                                   init_stub_names      = {};
-strvec_t                                   fini_stub_names      = {};
-strset_t                                   used_stub_names      = {};
-strvec_t                                   env_config_variables = {};
-std::vector<call_expr_pointer_t>           env_variables        = {};
-std::map<string_t, call_expr_pointer_t>    beg_expr             = {};
-std::map<string_t, call_expr_pointer_t>    end_expr             = {};
-const auto                                 npos_v               = string_t::npos;
-string_t                                   instr_mode           = "trace";
-string_t                                   print_coverage       = {};
-string_t                                   print_instrumented   = {};
-string_t                                   print_excluded       = {};
-string_t                                   print_available      = {};
-string_t                                   print_overlapping    = {};
-strset_t                                   print_formats        = { "txt", "json" };
-std::string                                modfunc_dump_dir     = {};
+bool                                            binary_rewrite       = false;
+bool                                            use_mpi              = false;
+bool                                            is_static_exe        = false;
+bool                                            force_config         = false;
+size_t                                          batch_size           = 50;
+strset_t                                        extra_libs           = {};
+std::vector<std::pair<std::uint64_t, string_t>> hash_ids             = {};
+std::map<string_t, bool>                        use_stubs            = {};
+std::map<string_t, procedure_t*>                beg_stubs            = {};
+std::map<string_t, procedure_t*>                end_stubs            = {};
+strvec_t                                        init_stub_names      = {};
+strvec_t                                        fini_stub_names      = {};
+strset_t                                        used_stub_names      = {};
+strvec_t                                        env_config_variables = {};
+std::vector<call_expr_pointer_t>                env_variables        = {};
+std::map<string_t, call_expr_pointer_t>         beg_expr             = {};
+std::map<string_t, call_expr_pointer_t>         end_expr             = {};
+const auto                                      npos_v               = string_t::npos;
+string_t                                        instr_mode           = "trace";
+string_t                                        print_coverage       = {};
+string_t                                        print_instrumented   = {};
+string_t                                        print_excluded       = {};
+string_t                                        print_available      = {};
+string_t                                        print_overlapping    = {};
+strset_t                                        print_formats        = { "txt", "json" };
+bool                                            dump_info_enabled    = false;
+std::string                                     modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-strvec_t lib_search_paths =
-    tim::delimit(rocprofsys::join(':', path::get_internal_libdir(),
-                                  tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
-                                  tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
-                                  tim::get_env<std::string>("LD_LIBRARY_PATH")),
-                 ":");
-strvec_t bin_search_paths = tim::delimit(tim::get_env<std::string>("PATH"), ":");
-
-auto _dyn_api_rt_paths = tim::delimit(
-    rocprofsys::join(":", path::get_internal_libdir(),
-                     rocprofsys::join("/", path::get_internal_libdir(), "rocprofsys")),
+strvec_t lib_search_paths = rocprofsys::delimit(
+    fmt::format("{}:{}:{}:{}", path::get_internal_libdir(),
+                rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+                rocprofsys::get_env<std::string>("DYNINST_REWRITER_PATHS"),
+                rocprofsys::get_env<std::string>("LD_LIBRARY_PATH")),
     ":");
+strvec_t bin_search_paths =
+    rocprofsys::delimit(rocprofsys::get_env<std::string>("PATH"), ":");
+
+const auto libdir            = path::get_internal_libdir();
+strvec_t   _dyn_api_rt_paths = { libdir, libdir + "/rocprofsys" };
 
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _paths);
@@ -219,14 +210,8 @@ get_absolute_exe_filepath(std::string exe_name);
 std::string
 get_absolute_lib_filepath(std::string lib_name);
 
-bool
-exists(const std::string& name);
-
-bool
-is_file(std::string _name);
-
-bool
-is_directory(std::string _name);
+std::string
+absolute(std::string _path);
 
 std::string
 get_cwd();
@@ -286,12 +271,6 @@ auto _activate =
                                 sys_signal::FileSize, sys_signal::CPUtime }),
      true);
 
-auto
-find(const std::string& itr, const strvec_t& _data)
-{
-    return std::any_of(_data.begin(), _data.end(),
-                       [itr](const auto& _v) { return (itr == _v); });
-}
 }  // namespace
 
 //======================================================================================//
@@ -305,68 +284,80 @@ main(int argc, char** argv)
 {
     argv0 = argv[0];
 
-    auto _omni_root = tim::get_env<std::string>(
-        "rocprofiler_systems_ROOT", tim::get_env<std::string>("ROCPROFSYS_ROOT", ""));
-    if(!_omni_root.empty() && exists(_omni_root))
+    auto rocprofsys_root_from_env = rocprofsys::get_env<std::string>(
+        "rocprofiler_systems_ROOT",
+        rocprofsys::get_env<std::string>(rocprofsys::env_vars::ROOT, ""));
+    if(!rocprofsys_root_from_env.empty() &&
+       path::is_directory(absolute(rocprofsys_root_from_env)))
     {
-        bin_search_paths.emplace_back(JOIN('/', _omni_root, "bin"));
-        bin_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems"));
-        bin_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems", "bin"));
-        lib_search_paths.emplace_back(JOIN('/', _omni_root, "lib"));
-        lib_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems"));
-        lib_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems", "lib"));
-        lib_search_paths.emplace_back(
-            JOIN('/', _omni_root, "lib", "rocprofiler-systems", "lib64"));
-        ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
-                                 "::", "rocprofiler-systems root path: ", _omni_root);
+        bin_search_paths.emplace_back(rocprofsys_root_from_env + "/bin");
+        bin_search_paths.emplace_back(rocprofsys_root_from_env +
+                                      "/lib/rocprofiler-systems");
+        bin_search_paths.emplace_back(rocprofsys_root_from_env +
+                                      "/lib/rocprofiler-systems/bin");
+
+        lib_search_paths.emplace_back(rocprofsys_root_from_env + "/lib");
+        lib_search_paths.emplace_back(rocprofsys_root_from_env +
+                                      "/lib/rocprofiler-systems");
+        lib_search_paths.emplace_back(rocprofsys_root_from_env +
+                                      "/lib/rocprofiler-systems/lib");
+        lib_search_paths.emplace_back(rocprofsys_root_from_env +
+                                      "/lib/rocprofiler-systems/lib64");
+        ROCPROFSYS_ADD_LOG_ENTRY(
+            argv[0], "::", "rocprofiler-systems root path: ", rocprofsys_root_from_env);
     }
 
-    auto _omni_exe_path = path::realpath(get_absolute_exe_filepath(argv[0]));
-    if(!exists(_omni_exe_path))
-        _omni_exe_path =
+    auto _rocprofsys_exe_filepath = path::realpath(get_absolute_exe_filepath(argv[0]));
+    if(!path::is_regular_file(absolute(_rocprofsys_exe_filepath)))
+        _rocprofsys_exe_filepath =
             path::realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
-    bin_search_paths.emplace_back(filepath::dirname(_omni_exe_path));
+    bin_search_paths.emplace_back(path::parent_path(_rocprofsys_exe_filepath));
 
-    auto _omni_lib_path =
-        JOIN('/', filepath::dirname(filepath::dirname(_omni_exe_path)), "lib");
-    bin_search_paths.emplace_back(JOIN('/', _omni_lib_path, "rocprofiler-systems"));
-    bin_search_paths.emplace_back(
-        JOIN('/', _omni_lib_path, "rocprofiler-systems", "bin"));
-    lib_search_paths.emplace_back(_omni_lib_path);
-    lib_search_paths.emplace_back(JOIN('/', _omni_lib_path, "rocprofiler-systems"));
-    lib_search_paths.emplace_back(
-        JOIN('/', _omni_lib_path, "rocprofiler-systems", "lib"));
-    lib_search_paths.emplace_back(
-        JOIN('/', _omni_lib_path, "rocprofiler-systems", "lib64"));
+    // Strip 2 levels from exe filepath <root>/bin/<exe> to reach <root>
+    auto rocprofsys_root_from_exe = path::parent_path(_rocprofsys_exe_filepath, 2);
 
-    auto _omni_internal_libexec_path =
-        JOIN('/', filepath::dirname(filepath::dirname(_omni_exe_path)), "libexec",
-             "rocprofiler-systems");
+    auto _rocprofsys_lib_path = rocprofsys_root_from_exe + "/lib";
+    bin_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems");
+    bin_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/bin");
 
-    ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys bin path: ", _omni_exe_path);
-    ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys lib path: ", _omni_lib_path);
+    lib_search_paths.emplace_back(_rocprofsys_lib_path);
+    lib_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems");
+    lib_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/lib");
+    lib_search_paths.emplace_back(_rocprofsys_lib_path + "/rocprofiler-systems/lib64");
+
+    auto _rocprofsys_internal_libexec_path =
+        rocprofsys_root_from_exe + "/libexec/rocprofiler-systems";
+
+    ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
+                             "::", "rocprofsys bin path: ", _rocprofsys_exe_filepath);
+    ROCPROFSYS_ADD_LOG_ENTRY(argv[0],
+                             "::", "rocprofsys lib path: ", _rocprofsys_lib_path);
     ROCPROFSYS_ADD_LOG_ENTRY(
-        argv[0], "::", "rocprofsys libexec path: ", _omni_internal_libexec_path);
+        argv[0], "::", "rocprofsys libexec path: ", _rocprofsys_internal_libexec_path);
 
-    for(const auto& itr : rocprofsys_get_link_map(nullptr))
+    const auto libs_regex =
+        std::regex{ "lib(dyninstAPI|stackwalk|pcontrol|patchAPI|parseAPI|"
+                    "instructionAPI|symtabAPI|dynDwarf|common|dynElf|tbb|tbbmalloc|"
+                    "tbbmalloc_proxy|gotcha|libunwind|hsa-runtime|amdhip|"
+                    "amd_comgr|amd_smi|rocprofiler-register|"
+                    "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" };
+
+    auto is_instrumentation_lib = [&libs_regex](const std::string& lib_path) {
+        return lib_path.find("rocprofsys") != std::string::npos ||
+               lib_path.find("rocprof-sys") != std::string::npos ||
+               lib_path.find("rocprofiler-systems") != std::string::npos ||
+               std::regex_search(lib_path, libs_regex);
+    };
+
+    for(const auto& lib_path : rocprofsys_get_link_map(nullptr))
     {
-        if(itr.find("rocprofsys") != std::string::npos ||
-           itr.find("rocprof-sys") != std::string::npos ||
-           itr.find("rocprofiler-systems") != std::string::npos ||
-           std::regex_search(
-               itr, std::regex{
-                        "lib(dyninstAPI|stackwalk|pcontrol|patchAPI|parseAPI|"
-                        "instructionAPI|symtabAPI|dynDwarf|common|dynElf|tbb|tbbmalloc|"
-                        "tbbmalloc_proxy|gotcha|libunwind|hsa-runtime|amdhip|"
-                        "amd_comgr|amd_smi|rocprofiler-register|"
-                        "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" }))
+        if(!is_instrumentation_lib(lib_path)) continue;
+
+        auto lib_dir = path::parent_path(lib_path);
+        if(std::find(lib_search_paths.begin(), lib_search_paths.end(), lib_dir) ==
+           lib_search_paths.end())
         {
-            if(!find(filepath::dirname(itr), lib_search_paths))
-                lib_search_paths.emplace_back(filepath::dirname(itr));
+            lib_search_paths.emplace_back(std::move(lib_dir));
         }
     }
 
@@ -394,7 +385,6 @@ main(int argc, char** argv)
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
     std::vector<string_t> staticlibname = {};
-    process::id_t         _pid          = -1;
 
     fixed_module_functions = {
         { &available_module_functions, false },
@@ -422,7 +412,7 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; ++i)
     {
-        string_t _arg = argv[i];
+        const string_t _arg = argv[i];
         if(_arg.length() == 2 && _arg == "--")
         {
             _argc        = i;
@@ -530,10 +520,17 @@ main(int argc, char** argv)
         .dtype("boolean")
         .action([](parser_t& p) { simulate = p.get<bool>("simulate"); });
     parser
+        .add_argument({ "--dump-info" },
+                      "Write diagnostic module function reports (available, "
+                      "instrumented, excluded, coverage, overlapping) to "
+                      "{print-dir}/instrumentation/. Includes per-function heuristic "
+                      "constraint results in {print-format} formats")
+        .max_count(0)
+        .action([](parser_t&) { dump_info_enabled = true; });
+    parser
         .add_argument({ "--print-format" },
-                      "Output format for diagnostic "
-                      "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. {print-dir}/available.txt")
+                      "Output file format(s) for --dump-info diagnostic reports, "
+                      "e.g. {print-dir}/instrumentation/available.txt")
         .min_count(1)
         .max_count(3)
         .dtype("string")
@@ -541,9 +538,8 @@ main(int argc, char** argv)
         .action([](parser_t& p) { print_formats = p.get<strset_t>("print-format"); });
     parser
         .add_argument({ "--print-dir" },
-                      "Output directory for diagnostic "
-                      "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. {print-dir}/available.txt")
+                      "Output directory for --dump-info diagnostic reports. "
+                      "Files are written to {print-dir}/instrumentation/")
         .count(1)
         .dtype("string")
         .action([](parser_t& p) {
@@ -622,10 +618,6 @@ main(int argc, char** argv)
             binary_rewrite = true;
             outfile        = p.get<string_t>("output");
         });
-    parser.add_argument({ "-p", "--pid" }, "Connect to running process")
-        .dtype("int")
-        .count(1)
-        .action([&_pid](parser_t& p) { _pid = p.get<int>("pid"); });
     parser
         .add_argument({ "-M", "--mode" },
                       "Instrumentation mode. 'trace' mode instruments the selected "
@@ -680,8 +672,8 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "-L", "--library" },
-            TIMEMORY_JOIN("", "Libraries with instrumentation routines (default: \"",
-                          inputlib.front(), "\")"))
+            fmt::format(R"(Libraries with instrumentation routines (default: "{}"))",
+                        inputlib.front()))
         .action([&inputlib](parser_t& p) { inputlib = p.get<strvec_t>("library"); });
     parser
         .add_argument({ "-m", "--main-function" },
@@ -817,9 +809,6 @@ main(int argc, char** argv)
                 _internal.erase(itr);
         });
 
-    using timemory::join::array_config;
-    using timemory::join::join;
-
     auto available_linkage    = std::vector<symbol_linkage_t>{};
     auto available_visibility = std::vector<symbol_visibility_t>{};
 
@@ -840,9 +829,8 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "--linkage" },
-            join("", "Only instrument functions with specified linkage (default: ",
-                 join(array_config{ ", ", "", "" }, _get_strvec(default_enabled_linkage)),
-                 ")"))
+            fmt::format("Only instrument functions with specified linkage (default: {})",
+                        fmt::join(_get_strvec(default_enabled_linkage), ", ")))
         .min_count(1)
         .choices(_get_strvec(available_linkage))
         .set_default(_get_strvec(default_enabled_linkage))
@@ -860,10 +848,9 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "--visibility" },
-            join("", "Only instrument functions with specified visibility (default: ",
-                 join(array_config{ ", ", "", "" },
-                      _get_strvec(default_enabled_visibility)),
-                 ")"))
+            fmt::format(
+                "Only instrument functions with specified visibility (default: {})",
+                fmt::join(_get_strvec(default_enabled_visibility), ", ")))
         .min_count(1)
         .choices(_get_strvec(available_visibility))
         .set_default(_get_strvec(default_enabled_visibility))
@@ -971,6 +958,21 @@ main(int argc, char** argv)
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
         });
     parser
+        .add_argument({ "--max-library-functions" },
+                      "Skip shared libraries whose procedure count exceeds this "
+                      "threshold. Useful for keeping instrumentation overhead "
+                      "manageable. The target executable is never gated by this. "
+                      "This check is bypassed by module include/restrict regexes "
+                      "(--module-include/-MI, --module-restrict/-MR) and function "
+                      "include/restrict regexes (--function-include/-I, "
+                      "--function-restrict/-R). 0 = disabled.")
+        .count(1)
+        .dtype("int")
+        .set_default(max_library_functions)
+        .action([](parser_t& p) {
+            max_library_functions = p.get<size_t>("max-library-functions");
+        });
+    parser
         .add_argument(
             { "--coverage" },
             "Enable recording the code coverage. If instrumenting in coverage mode ('-M "
@@ -1030,17 +1032,25 @@ main(int argc, char** argv)
             [](parser_t& p) { allow_overlapping = p.get<bool>("allow-overlapping"); });
     parser
         .add_argument(
-            { "--parse-all-modules" },
-            "By default, rocprof-sys simply requests Dyninst to provide all the "
-            "procedures "
-            "in the application image. If this option is enabled, rocprof-sys will "
-            "iterate "
-            "over all the modules and extract the functions. Theoretically, it should be "
-            "the same but the data is slightly different, possibly due to weak binding "
-            "scopes. In general, enabling option will probably have no visible effect")
+            { "--exclude-internal-lib-paths" },
+            "By default, each internal library is excluded only at the path linked at "
+            "startup. When enabled, every on-disk path matching an internal library's "
+            "filename is excluded. Useful when the application dlopen()s a different "
+            "copy at runtime.")
         .max_count(1)
-        .action(
-            [](parser_t& p) { parse_all_modules = p.get<bool>("parse-all-modules"); });
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            exclude_internal_lib_paths = p.get<bool>("exclude-internal-lib-paths");
+        });
+    parser
+        .add_argument(
+            { "--exe-only" },
+            "Shorthand for excluding every shared library from instrumentation, leaving "
+            "only the main executable. Only takes effect during runtime instrumentation; "
+            "ignored in binary-rewrite mode.")
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) { exe_only = p.get<bool>("exe-only"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DYNINST OPTIONS]" }, "");
@@ -1108,8 +1118,8 @@ main(int argc, char** argv)
             {
                 if(iitr.second && iitr.second->get_config_updated())
                 {
-                    env_config_variables.emplace_back(TIMEMORY_JOIN(
-                        '=', iitr.second->get_env_name(), iitr.second->as_string()));
+                    env_config_variables.emplace_back(fmt::format(
+                        "{}={}", iitr.second->get_env_name(), iitr.second->as_string()));
                     verbprintf(1, "Exporting known config value :: %s\n",
                                env_config_variables.back().c_str());
                 }
@@ -1117,7 +1127,7 @@ main(int argc, char** argv)
             for(auto&& iitr : _settings->get_unknown_configs())
             {
                 env_config_variables.emplace_back(
-                    TIMEMORY_JOIN('=', iitr.first, iitr.second));
+                    fmt::format("{}={}", iitr.first, iitr.second));
                 verbprintf(1, "Exporting unknown config value :: %s\n",
                            env_config_variables.back().c_str());
             }
@@ -1136,7 +1146,7 @@ main(int argc, char** argv)
                        "Option '--%s' specified but '--%s <N>' was not specified. "
                        "Setting %s to %s...\n",
                        _exists.c_str(), _not_exists.c_str(), _msg.c_str(),
-                       TIMEMORY_JOIN("", _value).c_str());
+                       fmt::format("{}", _value).c_str());
             _field = _value;
         }
     };
@@ -1175,26 +1185,25 @@ main(int argc, char** argv)
                        !parser.exists("min-instructions") &&
                            !parser.exists("min-address-range-loop"));
 
-    auto _rocprofsys_exe_path = tim::dirname(path::realpath("/proc/self/exe"));
+    auto _rocprofsys_exe_path = path::parent_path(path::realpath("/proc/self/exe"));
     verbprintf(4, "rocprof-sys exe path: %s\n", _rocprofsys_exe_path.c_str());
 
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
-        auto _is_executable    = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        std::string _cmdv_base = ::basename(_cmdv[0]);
-        auto        _has_lib_suffix = _cmdv_base.length() > 3 &&
-                               (_cmdv_base.find(".so.") != std::string::npos ||
-                                _cmdv_base.find(".so") == (_cmdv_base.length() - 3) ||
-                                _cmdv_base.find(".a") == (_cmdv_base.length() - 2));
-        auto _has_lib_prefix = _cmdv_base.length() > 3 && _cmdv_base.find("lib") == 0;
+        auto _is_executable = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
+        const std::string cmdv_base      = path::filename(_cmdv[0]);
+        auto              has_lib_suffix = cmdv_base.length() > 3 &&
+                              (cmdv_base.find(".so.") != std::string::npos ||
+                               cmdv_base.ends_with(".so") || cmdv_base.ends_with(".a"));
+        auto has_lib_prefix = cmdv_base.length() > 3 && cmdv_base.starts_with("lib");
         if(!force_config && !_is_executable && !binary_rewrite &&
-           (_has_lib_prefix || _has_lib_suffix))
+           (has_lib_prefix || has_lib_suffix))
         {
             fflush(stdout);
             std::stringstream _separator{};
             // 20 is approximate length of '[rocprof-sys][exe] '
             // 32 is approximate length of 'Warning! "" is not executable!'
-            size_t _width =
+            const size_t _width =
                 std::min<size_t>(std::get<0>(tim::utility::console::get_columns()) - 20,
                                  strlen(_cmdv[0]) + 32);
             _separator.fill('=');
@@ -1207,9 +1216,9 @@ main(int argc, char** argv)
                           "--all-functions'\n");
             verbprintf(
                 0, "(which will provide an approximation for runtime instrumentation)\n");
-            verbprintf(1, "%s :: (^lib)=%s, (.so$|.a$|.so.*)=%s\n", _cmdv_base.c_str(),
-                       (_has_lib_prefix) ? "true" : "false",
-                       (_has_lib_suffix) ? "true" : "false");
+            verbprintf(1, "%s :: (^lib)=%s, (.so$|.a$|.so.*)=%s\n", cmdv_base.c_str(),
+                       (has_lib_prefix) ? "true" : "false",
+                       (has_lib_suffix) ? "true" : "false");
             verbprintf(0, "\n");
             verbprintf(0, "%s\n", _separator.str().c_str());
             verbprintf(0, "\n");
@@ -1221,27 +1230,35 @@ main(int argc, char** argv)
         }
     }
 
+    // --exe-only is only meaningful for runtime instrumentation
+    if(binary_rewrite && exe_only)
+    {
+        verbprintf(0, "Note: '--exe-only' is ignored in binary-rewrite mode. Disabling "
+                      "it...\n");
+        exe_only = false;
+    }
+
     if(binary_rewrite && outfile.empty())
     {
         auto _is_local = (path::realpath(cmdv0) ==
-                          TIMEMORY_JOIN('/', get_cwd(), ::basename(cmdv0.c_str())));
-        auto _cmd      = std::string{ ::basename(cmdv0.c_str()) };
+                          fmt::format("{}/{}", get_cwd(), path::filename(cmdv0)));
+        auto _cmd      = path::filename(cmdv0);
         if(_cmd.find('.') == std::string::npos)
         {
             // there is no extension, assume it is an exe
-            outfile = (_is_local) ? TIMEMORY_JOIN('.', _cmd, "inst") : _cmd;
+            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
         }
-        else if(_cmd.find("lib") == 0 || _cmd.find(".so") != std::string::npos ||
-                _cmd.find(".a") == _cmd.length() - 2)
+        else if(_cmd.starts_with("lib") || _cmd.find(".so") != std::string::npos ||
+                _cmd.ends_with(".a"))
         {
             // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
             // libfoo.so.2), assume it is a library and retain the name but put it in a
             // different directory
-            outfile = (_is_local) ? TIMEMORY_JOIN('/', "instrumented", _cmd) : _cmd;
+            outfile = (_is_local) ? "instrumented/" + _cmd : _cmd;
         }
         else
         {
-            outfile = (_is_local) ? TIMEMORY_JOIN('.', _cmd, "inst") : _cmd;
+            outfile = (_is_local) ? _cmd + ".inst" : _cmd;
         }
         verbprintf(0,
                    "Binary rewrite was activated via '-o' but no filename was provided. "
@@ -1266,8 +1283,10 @@ main(int argc, char** argv)
         log_ofs = std::make_unique<std::ofstream>();
         verbprintf_bare(0, "%s", ::tim::log::color::source());
         verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
-        if(!filepath::open(*log_ofs, logfile))
-            throw std::runtime_error(JOIN(" ", "Error opening log output file", logfile));
+        if(!path::create_parent_dirs_and_open_ofstream(*log_ofs, logfile))
+        {
+            throw std::runtime_error("Error opening log output file " + logfile);
+        }
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
         print_log_entries(*log_ofs, -1, {}, {}, "", false);
     }
@@ -1281,32 +1300,38 @@ main(int argc, char** argv)
     {
         //  Helper function for adding regex expressions
         auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
-            ROCPROFSYS_ADD_DETAILED_LOG_ENTRY("", "Adding regular expression \"",
-                                              regex_expr, "\" to regex_array@",
-                                              &regex_array);
+            ROCPROFSYS_ADD_LOG_ENTRY(
+                fmt::format(R"(Adding regular expression "{}" to regex_array@{})",
+                            regex_expr, fmt::ptr(&regex_array)));
             if(!regex_expr.empty())
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
         };
 
-        add_regex(func_include, tim::get_env<string_t>("ROCPROFSYS_REGEX_INCLUDE", ""));
-        add_regex(func_exclude, tim::get_env<string_t>("ROCPROFSYS_REGEX_EXCLUDE", ""));
-        add_regex(func_restrict, tim::get_env<string_t>("ROCPROFSYS_REGEX_RESTRICT", ""));
-        add_regex(caller_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_CALLER_INCLUDE"));
+        add_regex(func_include,
+                  rocprofsys::get_env<string_t>(rocprofsys::env_vars::REGEX_INCLUDE, ""));
+        add_regex(func_exclude,
+                  rocprofsys::get_env<string_t>(rocprofsys::env_vars::REGEX_EXCLUDE, ""));
+        add_regex(func_restrict, rocprofsys::get_env<string_t>(
+                                     rocprofsys::env_vars::REGEX_RESTRICT, ""));
+        add_regex(caller_include, rocprofsys::get_env<string_t>(
+                                      rocprofsys::env_vars::REGEX_CALLER_INCLUDE));
         add_regex(func_internal_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_INTERNAL_INCLUDE", ""));
+                  rocprofsys::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_INTERNAL_INCLUDE, ""));
 
-        add_regex(file_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_INCLUDE", ""));
-        add_regex(file_exclude,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_EXCLUDE", ""));
-        add_regex(file_restrict,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_RESTRICT", ""));
+        add_regex(file_include, rocprofsys::get_env<string_t>(
+                                    rocprofsys::env_vars::REGEX_MODULE_INCLUDE, ""));
+        add_regex(file_exclude, rocprofsys::get_env<string_t>(
+                                    rocprofsys::env_vars::REGEX_MODULE_EXCLUDE, ""));
+        add_regex(file_restrict, rocprofsys::get_env<string_t>(
+                                     rocprofsys::env_vars::REGEX_MODULE_RESTRICT, ""));
         add_regex(file_internal_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_INTERNAL_INCLUDE", ""));
+                  rocprofsys::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_MODULE_INTERNAL_INCLUDE, ""));
 
         add_regex(instruction_exclude,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_INSTRUCTION_EXCLUDE", ""));
+                  rocprofsys::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_INSTRUCTION_EXCLUDE, ""));
 
         //  Helper function for parsing the regex options
         auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
@@ -1340,7 +1365,7 @@ main(int argc, char** argv)
     for(const auto& itr : _dyn_api_rt_paths)
     {
         lib_search_paths.emplace_back(itr);
-        lib_search_paths.emplace_back(filepath::dirname(itr));
+        lib_search_paths.emplace_back(path::parent_path(itr));
     }
 
     find_dyn_api_rt();
@@ -1353,7 +1378,7 @@ main(int argc, char** argv)
     }
 
     auto get_dyninst_option = [&](const std::string& _opt) {
-        bool _ret = dyninst_defs.find(_opt) != dyninst_defs.end();
+        const bool _ret = dyninst_defs.find(_opt) != dyninst_defs.end();
         verbprintf(dyninst_verb, "[dyninst-option]> %-20s = %4s\n", _opt.c_str(),
                    (_ret) ? "on" : "off");
         return _ret;
@@ -1417,29 +1442,28 @@ main(int argc, char** argv)
 
     //----------------------------------------------------------------------------------//
     //
-    //  Start the instrumentation procedure by opening a file for binary editing,
-    //  attaching to a running process, or starting a process
+    //  Start the instrumentation procedure by opening a file for binary editing
+    //  or starting a process
     //
     //----------------------------------------------------------------------------------//
 
     // prioritize the user environment arguments
-    auto instr_mode_v     = (binary_rewrite) ? InstrumentMode::BinaryRewrite
-                            : (_pid < 0)     ? InstrumentMode::ProcessCreate
-                                             : InstrumentMode::ProcessAttach;
+    auto instr_mode_v =
+        binary_rewrite ? InstrumentMode::binary_rewrite : InstrumentMode::process_create;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());
     for(auto&& itr : env_config_variables)
         env_vars.emplace_back(itr);
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MODE", instr_mode));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::MODE, instr_mode));
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_INSTRUMENT_MODE", instr_mode_v_int));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_INIT", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_FINALIZE", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_CODE_COVERAGE",
-                                        (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
+        fmt::format("{}={}", rocprofsys::env_vars::INSTRUMENT_MODE, instr_mode_v_int));
+    env_vars.emplace_back(fmt::format("{}=OFF", rocprofsys::env_vars::MPI_INIT));
+    env_vars.emplace_back(fmt::format("{}=OFF", rocprofsys::env_vars::MPI_FINALIZE));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_CODE_COVERAGE,
+                                      (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     addr_space = rocprofsys_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
-                                              binary_rewrite, _pid, mutname);
+                                              binary_rewrite, mutname);
 
     // addr_space->allowTraps(instr_traps);
 
@@ -1464,18 +1488,44 @@ main(int argc, char** argv)
                   (binary_rewrite) ? "ON" : "OFF", (_rewrite) ? "ON" : "OFF");
     }
 
-    process_t*     app_thread = nullptr;
-    binary_edit_t* app_binary = nullptr;
+    //----------------------------------------------------------------------------------//
+    //
+    //  Fetch image, objects, modules, and procedures
+    //
+    //----------------------------------------------------------------------------------//
 
-    // get image
-    verbprintf(1, "Getting the address space image, modules, and procedures...\n");
-    image_t*                   app_image     = addr_space->getImage();
-    std::vector<module_t*>*    app_modules   = app_image->getModules();
-    std::vector<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
-    std::unordered_set<module_t*>    modules = {};
+    verbprintf(1, "Getting the address space image...\n");
+    image_t* app_image = addr_space->getImage();
+
+    verbprintf(1, "Getting and filtering the address space objects...\n");
+    // Dyninst indicates that shared libs should have one module, and executables have
+    // one or more. However, if the shared lib has debug info, Dyninst will generate a
+    // module per DWARF compilation unit
+    auto app_objects = std::vector<object_t*>{};
+    app_image->getObjects(app_objects);  // API does not return objects
+    auto filtered_objects = filter_objects(&app_objects);
+
+    verbprintf(1, "Getting and filtering the object modules...\n");
+    auto app_modules      = get_modules(&filtered_objects);
+    auto filtered_modules = filter_modules(app_modules.get());
+    app_modules.reset();
+    process_modules(filtered_modules);
+
+    verbprintf(1, "Getting available procedures from the modules...\n");
+    auto app_functions = get_procedures(&filtered_modules, include_uninstr);
+    // Procedure filtering is applied later when checking whether to instrument the
+    // procedure as we also output information about how the heuristics affected
+    // the set of instrumented procedures
+
+    if(!app_functions || app_functions->empty())
+    {
+        verbprintf(
+            0, "Warning! No functions detected! Fetching from the image directly...\n");
+        app_functions.reset(app_image->getProcedures(include_uninstr));
+    }
+
+    std::unordered_set<object_t*>    objects   = {};
     std::unordered_set<procedure_t*> functions = {};
-
-    if(app_modules) process_modules(*app_modules);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1515,7 +1565,8 @@ main(int argc, char** argv)
             if(itr->getModule())
             {
                 functions.emplace(itr);
-                modules.emplace(itr->getModule());
+                if(itr->getModule()->getObject())
+                    objects.emplace(itr->getModule()->getObject());
             }
         }
         verbprintf(2, "Adding %zu procedures found in the app image...\n",
@@ -1534,47 +1585,12 @@ main(int argc, char** argv)
     }
     else
     {
-        verbprintf(
-            0, "Warning! No functions in application. Enabling parsing all modules...\n");
-        parse_all_modules = true;
+        verbprintf(0, "Warning! No functions in application...\n");
     }
 
-    if(parse_all_modules && app_modules && !app_modules->empty())
-    {
-        for(auto* itr : *app_modules)
-            modules.emplace(itr);
-
-        verbprintf(2,
-                   "Adding the procedures from %zu modules found in the app image...\n",
-                   modules.size());
-        for(auto* itr : modules)
-        {
-            auto* procedures = itr->getProcedures(include_uninstr);
-            if(procedures)
-            {
-                verbprintf(2, "Processing %zu procedures found in the %s module...\n",
-                           procedures->size(), get_name(itr).data());
-                for(auto* pitr : *procedures)
-                {
-                    if(!pitr->isInstrumentable() && !simulate && !include_uninstr)
-                        continue;
-                    functions.emplace(pitr);
-                    auto _modfn = module_function{ itr, pitr };
-                    module_names.insert(_modfn.module_name);
-                    _insert_module_function(available_module_functions, _modfn);
-                    _add_overlapping(itr, pitr);
-                }
-            }
-        }
-    }
-    else if(parse_all_modules)
-    {
-        verbprintf(0, "Warning! No modules in application...\n");
-    }
-
-    verbprintf(1, "\n");
-    verbprintf(1, "Found %zu functions in %zu modules in instrumentation target\n",
-               functions.size(), modules.size());
+    // The procedure pointers have been copied into the objects/modules/functions
+    // sets and module_function entries
+    app_functions.reset();
 
     if(debug_print || verbose_level > 2)
     {
@@ -1603,16 +1619,23 @@ main(int argc, char** argv)
         std::cout << '\n' << std::endl;
     }
 
-    dump_info("available", available_module_functions, 1, werror, "available",
-              print_formats);
-    dump_info("overlapping", overlapping_module_functions, 1, werror,
-              "overlapping_module_functions", print_formats);
+    // Expensive time-wise
+    if(dump_info_enabled)
+    {
+        dump_info("available", available_module_functions, 1, werror, "available",
+                  print_formats);
+        dump_info("overlapping", overlapping_module_functions, 1, werror,
+                  "overlapping_module_functions", print_formats);
+    }
 
     //----------------------------------------------------------------------------------//
     //
     //  Get the derived type of the address space
     //
     //----------------------------------------------------------------------------------//
+
+    process_t*     app_thread = nullptr;
+    binary_edit_t* app_binary = nullptr;
 
     is_static_exe = addr_space->isStaticExecutable();
 
@@ -1622,10 +1645,6 @@ main(int argc, char** argv)
         app_binary = static_cast<BPatch_binaryEdit*>(addr_space);
     else
         app_thread = static_cast<BPatch_process*>(addr_space);
-
-    is_attached = (_pid >= 0 && app_thread != nullptr);
-
-    ROCPROFSYS_ADD_LOG_ENTRY("address space is attached:", is_attached);
 
     if(!app_binary && !app_thread)
     {
@@ -1672,18 +1691,26 @@ main(int argc, char** argv)
     auto get_library_ext = [=](const std::vector<string_t>& linput) {
         auto lnames           = linput;
         auto _get_library_ext = [](string_t lname) {
-            if(lname.find(".so") != string_t::npos ||
-               lname.find(".a") == lname.length() - 2)
+            if(lname.find(".so") != string_t::npos || lname.ends_with(".a"))
+            {
                 return lname;
+            }
             if(!prefer_library.empty())
+            {
                 return (lname +
                         ((prefer_library == "static" || is_static_exe) ? ".a" : ".so"));
+            }
             else
+            {
                 return (lname + ((is_static_exe) ? ".a" : ".so"));
+            }
         };
         for(auto& lname : lnames)
+        {
             lname = _get_library_ext(lname);
-        ROCPROFSYS_ADD_LOG_ENTRY("Using library:", lnames);
+        }
+        ROCPROFSYS_ADD_LOG_ENTRY("Using library:",
+                                 fmt::format("[{}]", fmt::join(lnames, ", ")));
         return lnames;
     };
 
@@ -1705,7 +1732,7 @@ main(int argc, char** argv)
     if(main_fname == "main")
     {
         // _MAIN__, MAIN__, main_, _main_, _QQmain
-        main_func = find_function(app_image, "^_?MAIN__|^_?main_|^_QQmain");
+        main_func = find_function(filtered_modules, "^_?MAIN__|^_?main_|^_QQmain");
     }
     // Note: Some Fortran compilers (e.g. Cray) may name the Fortran main function after
     // the program name in the PROGRAM statement. E.g, "PROGRAM hello" becomes "hello_"
@@ -1714,12 +1741,11 @@ main(int argc, char** argv)
     // symbol that has the same start address, allowing Dyninst to latch onto that.
     // However, if problems persist, users should specify their main with
     // "--main-function"
+    if(!main_func) main_func = find_function(filtered_modules, main_fname);
 
-    if(!main_func) main_func = find_function(app_image, main_fname.c_str());
-    auto* user_start_func = find_function(app_image, "rocprofsys_user_start_trace",
-                                          { "rocprofsys_user_start_thread_trace" });
-    auto* user_stop_func  = find_function(app_image, "rocprofsys_user_stop_trace",
-                                          { "rocprofsys_user_stop_thread_trace" });
+    if(!main_func && main_fname == "main")
+        main_func = find_function(filtered_modules, "_main");
+
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
     for(const auto* itr :
@@ -1727,13 +1753,13 @@ main(int argc, char** argv)
           "MPI_INIT", "mpi_init", "mpi_init_", "mpi_init__", "MPI_INIT_THREAD",
           "mpi_init_thread", "mpi_init_thread_", "mpi_init_thread__" })
     {
-        if(find_function(app_image, itr) != nullptr)
+        if(find_function(filtered_modules, itr) != nullptr)
         {
             verbprintf(0, "Found '%s' in '%s'. Enabling MPI support...\n", itr, _cmdv[0]);
             use_mpi = true;
             break;
         }
-        else if(find_undefined_function_symbol(app_image, itr) != nullptr)
+        else if(find_undefined_function_symbol(objects, itr) != nullptr)
         {
             verbprintf(0,
                        "Found undefined symbol '%s' in '%s'. Enabling MPI support...\n",
@@ -1755,6 +1781,21 @@ main(int argc, char** argv)
     for(const auto& itr : extra_libs)
         load_library(get_library_ext({ itr }));
 
+    // Refresh objects after loading libraries, track newly added ones
+    auto new_objects = std::vector<object_t*>{};
+    {
+        auto all_objs = std::vector<object_t*>{};
+        app_image->getObjects(all_objs);
+        for(auto* obj : all_objs)
+        {
+            if(objects.emplace(obj).second)
+            {
+                new_objects.emplace_back(obj);
+                verbprintf(1, "New object loaded: %s\n", obj->name().c_str());
+            }
+        }
+    }
+
     //----------------------------------------------------------------------------------//
     //
     //  Find the primary functions that will be used for instrumentation
@@ -1763,17 +1804,16 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding instrumentation functions...\n");
 
-    auto* init_func      = find_function(app_image, "rocprofsys_init");
-    auto* fini_func      = find_function(app_image, "rocprofsys_finalize");
-    auto* env_func       = find_function(app_image, "rocprofsys_set_env");
-    auto* mpi_func       = find_function(app_image, "rocprofsys_set_mpi");
-    auto* entr_trace     = find_function(app_image, "rocprofsys_push_trace");
-    auto* exit_trace     = find_function(app_image, "rocprofsys_pop_trace");
-    auto* reg_src_func   = find_function(app_image, "rocprofsys_register_source");
-    auto* reg_cov_func   = find_function(app_image, "rocprofsys_register_coverage");
-    auto* set_instr_func = find_function(app_image, "rocprofsys_set_instrumented");
-
-    if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
+    auto* init_func       = find_function(new_objects, "rocprofsys_init");
+    auto* fini_func       = find_function(new_objects, "rocprofsys_finalize");
+    auto* env_func        = find_function(new_objects, "rocprofsys_set_env");
+    auto* mpi_func        = find_function(new_objects, "rocprofsys_set_mpi");
+    auto* entr_trace      = find_function(new_objects, "rocprofsys_push_trace");
+    auto* entr_trace_args = find_function(new_objects, "rocprofsys_push_trace_with_args");
+    auto* exit_trace      = find_function(new_objects, "rocprofsys_pop_trace");
+    auto* reg_src_func    = find_function(new_objects, "rocprofsys_register_source");
+    auto* reg_cov_func    = find_function(new_objects, "rocprofsys_register_coverage");
+    auto* set_instr_func  = find_function(new_objects, "rocprofsys_set_instrumented");
 
     //----------------------------------------------------------------------------------//
     //
@@ -1787,8 +1827,8 @@ main(int argc, char** argv)
                    "Attempting to find instrumentation for '%s' via '%s' and '%s'...\n",
                    _name.c_str(), _beg.c_str(), _end.c_str());
         if(_beg.empty() || _end.empty()) return false;
-        auto* _beg_func = find_function(app_image, _beg);
-        auto* _end_func = find_function(app_image, _end);
+        auto* _beg_func = find_function(new_objects, _beg);
+        auto* _end_func = find_function(new_objects, _end);
         if(_beg_func && _end_func)
         {
             use_stubs[_name] = true;
@@ -1810,10 +1850,8 @@ main(int argc, char** argv)
 
     for(const auto& itr : extra_libs)
     {
-        string_t _name = itr;
-        size_t   _pos  = _name.find_last_of('/');
-        if(_pos != npos_v) _name = _name.substr(_pos + 1);
-        _pos = _name.find('.');
+        string_t _name = path::filename(itr);
+        size_t   _pos  = _name.find('.');
         if(_pos != npos_v) _name = _name.substr(0, _pos);
         _pos = _name.find("librocprof-sys-");
         if(_pos != npos_v)
@@ -1872,8 +1910,8 @@ main(int argc, char** argv)
         }
 
         // check standard function signature if no user-specified matches
-        if(add_instr_library(_name, TIMEMORY_JOIN("", "rocprofsys_register_" + _name),
-                             TIMEMORY_JOIN("", "rocprofsys_deregister_" + _name)))
+        if(add_instr_library(_name, "rocprofsys_register_" + _name,
+                             "rocprofsys_deregister_" + _name))
             continue;
 
     found_instr_functions:
@@ -1903,6 +1941,10 @@ main(int argc, char** argv)
                       itr.second.c_str());
         }
     }
+    if(!entr_trace_args)
+        verbprintf(0, "Warning! could not find optional function :: "
+                      "'rocprofsys_push_trace_with_args'. Falling back to "
+                      "'rocprofsys_push_trace'\n");
 
     //----------------------------------------------------------------------------------//
     //
@@ -1948,10 +1990,9 @@ main(int argc, char** argv)
 
     if(main_func) main_sign.get();
 
-    auto main_call_args = rocprofsys_call_expr(main_sign.get());
     auto init_call_args = rocprofsys_call_expr(instr_mode, binary_rewrite, "");
     auto fini_call_args = rocprofsys_call_expr();
-    auto umpi_call_args = rocprofsys_call_expr(use_mpi, is_attached);
+    auto umpi_call_args = rocprofsys_call_expr(use_mpi);
     auto none_call_args = rocprofsys_call_expr();
     auto set_instr_args = rocprofsys_call_expr(instr_mode_v_int);
 
@@ -1962,7 +2003,6 @@ main(int argc, char** argv)
     auto fini_call      = fini_call_args.get(fini_func);
     auto umpi_call      = umpi_call_args.get(mpi_func);
     auto set_instr_call = set_instr_args.get(set_instr_func);
-    auto main_beg_call  = main_call_args.get(entr_trace);
 
     verbprintf(2, "Done\n");
 
@@ -1986,17 +2026,15 @@ main(int argc, char** argv)
     }
     if(_libname.empty()) _libname = "librocprof-sys-dl.so";
 
-    if(!binary_rewrite && !is_attached) env_vars.clear();
+    if(!binary_rewrite) env_vars.clear();
 
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_INIT_ENABLED",
-                      (user_start_func && user_stop_func) ? "OFF" : "ON"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_MPIP",
-                                        (binary_rewrite && use_mpi) ? "ON" : "OFF"));
-    if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_PID", "ON"));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::USE_MPIP,
+                                      (binary_rewrite && use_mpi) ? "ON" : "OFF"));
+    if(use_mpi)
+        env_vars.emplace_back(fmt::format("{}=ON", rocprofsys::env_vars::USE_PID));
 
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_SCRIPT_PATH", _omni_internal_libexec_path));
+    env_vars.emplace_back(fmt::format("{}={}", rocprofsys::env_vars::SCRIPT_PATH,
+                                      _rocprofsys_internal_libexec_path));
 
     for(auto& itr : env_vars)
     {
@@ -2008,7 +2046,7 @@ main(int argc, char** argv)
         }
         auto _var = itr.substr(0, _pos);
         auto _val = itr.substr(_pos + 1);
-        tim::set_env(_var, _val);
+        rocprofsys::set_env(_var.c_str(), _val, 0);
         auto _expr = rocprofsys_call_expr(_var, _val);
         env_variables.emplace_back(_expr.get(env_func));
     }
@@ -2045,8 +2083,6 @@ main(int argc, char** argv)
 
     if(umpi_call) init_names.emplace_back(umpi_call.get());
     if(!binary_rewrite && init_call) init_names.emplace_back(init_call.get());
-    if(is_attached && main_func && main_beg_call)
-        init_names.emplace_back(main_beg_call.get());
 
     for(const auto& itr : end_expr)
         if(itr.second) fini_names.emplace_back(itr.second.get());
@@ -2111,7 +2147,6 @@ main(int argc, char** argv)
     auto _init_sequence = sequence_t{ init_names };
     auto _fini_sequence = sequence_t{ fini_names };
 
-    if(!is_attached)
     {
         auto _insert_init_callbacks = std::function<bool()>{};
         auto _insert_init_snippets  = std::function<bool()>{};
@@ -2174,6 +2209,7 @@ main(int argc, char** argv)
     {
         for(auto* itr : _objs)
         {
+            if(itr->name().find("librocprof-sys") != std::string::npos) continue;
             try
             {
                 itr->insertFiniCallback(_fini_sequence);
@@ -2200,7 +2236,7 @@ main(int argc, char** argv)
                            const string_t& _reason, const string_t& _name,
                            const std::string& _extra = {}) {
         static std::map<std::string, strset_t> already_reported{};
-        auto _key = TIMEMORY_JOIN('_', _type, _action, _reason, _name, _extra);
+        auto _key = fmt::format("{}_{}_{}_{}_{}", _type, _action, _reason, _name, _extra);
         if(already_reported[_key].count(_name) == 0)
         {
             verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
@@ -2218,7 +2254,7 @@ main(int argc, char** argv)
         for(const auto& itr : instrumented_module_functions)
         {
             if(itr.function == main_func) continue;
-            auto _count = itr(addr_space, entr_trace, exit_trace);
+            auto _count = itr(addr_space, entr_trace, entr_trace_args, exit_trace);
             _pass_info[itr.module_name].first += _count.first;
             _pass_info[itr.module_name].second += _count.second;
 
@@ -2294,29 +2330,29 @@ main(int argc, char** argv)
     if(app_thread)
     {
         verbprintf(2, "Finalizing insertion set...\n");
-        bool modified = true;
-        bool success  = addr_space->finalizeInsertionSet(true, &modified);
+        bool       modified = true;
+        const bool success  = addr_space->finalizeInsertionSet(true, &modified);
         if(!success)
         {
             verbprintf(
                 1,
                 "Using insertion set failed. Restarting with individual insertion...\n");
-            auto _execute_batch = [&addr_space, &entr_trace, &exit_trace](size_t _beg,
-                                                                          size_t _end) {
+            auto _execute_batch = [&addr_space, &entr_trace, &entr_trace_args,
+                                   &exit_trace](size_t _beg, size_t _end) {
                 verbprintf(1, "Instrumenting batch of functions [%lu, %lu)\n",
                            (unsigned long) _beg, (unsigned long) _end);
                 addr_space->beginInsertionSet();
                 auto itr = instrumented_module_functions.begin();
                 std::advance(itr, _beg);
                 for(size_t i = _beg; i < _end; ++i, ++itr)
-                    (*itr)(addr_space, entr_trace, exit_trace);
-                bool _modified = true;
-                bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
+                    (*itr)(addr_space, entr_trace, entr_trace_args, exit_trace);
+                bool       _modified = true;
+                const bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
                 return _success;
             };
 
             auto execute_batch = [&_execute_batch, &addr_space, &entr_trace,
-                                  &exit_trace](size_t _beg) {
+                                  &entr_trace_args, &exit_trace](size_t _beg) {
                 if(!_execute_batch(_beg, _beg + batch_size))
                 {
                     verbprintf(1,
@@ -2328,7 +2364,7 @@ main(int argc, char** argv)
                     std::advance(itr, _beg);
                     for(size_t i = _beg; i < _beg + batch_size && itr != _end; ++i, ++itr)
                     {
-                        (*itr)(addr_space, entr_trace, exit_trace);
+                        (*itr)(addr_space, entr_trace, entr_trace_args, exit_trace);
                     }
                 }
                 return _beg + batch_size;
@@ -2348,17 +2384,21 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    dump_info("available", available_module_functions, 0, werror,
-              "available_module_functions", print_formats);
-    dump_info("instrumented", instrumented_module_functions, 0, werror,
-              "instrumented_module_functions", print_formats);
-    dump_info("excluded", excluded_module_functions, 0, werror,
-              "excluded_module_functions", print_formats);
-    if(coverage_mode != CODECOV_NONE)
-        dump_info("coverage", coverage_module_functions, 0, werror,
-                  "coverage_module_functions", print_formats);
-    dump_info("overlapping", overlapping_module_functions, 0, werror,
-              "overlapping_module_functions", print_formats);
+    // Expensive depending on the number of procedures
+    if(dump_info_enabled)
+    {
+        dump_info("available", available_module_functions, 0, werror,
+                  "available_module_functions", print_formats);
+        dump_info("instrumented", instrumented_module_functions, 0, werror,
+                  "instrumented_module_functions", print_formats);
+        dump_info("excluded", excluded_module_functions, 0, werror,
+                  "excluded_module_functions", print_formats);
+        if(coverage_mode != CODECOV_NONE)
+            dump_info("coverage", coverage_module_functions, 0, werror,
+                      "coverage_module_functions", print_formats);
+        dump_info("overlapping", overlapping_module_functions, 0, werror,
+                  "overlapping_module_functions", print_formats);
+    }
 
     auto _dump_info = [](const std::string& _label, const string_t& _mode,
                          const fmodset_t& _modset) {
@@ -2374,36 +2414,36 @@ main(int argc, char** argv)
         if(_mode == "modules")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name, "]"));
+                _insert(itr.module_name, fmt::format("[{}]", itr.module_name));
         }
         else if(_mode == "functions")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.function_name, "][",
-                                                       itr.num_instructions, "]"));
+                _insert(itr.module_name,
+                        fmt::format("[{}][{}]", itr.function_name, itr.num_instructions));
         }
         else if(_mode == "functions+")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.signature.get(), "][",
-                                                       itr.num_instructions, "]"));
+                _insert(itr.module_name, fmt::format("[{}][{}]", itr.signature.get(),
+                                                     itr.num_instructions));
         }
         else if(_mode == "pair")
         {
             for(const auto& itr : _modset)
             {
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name,
-                                                       "] --> [", itr.function_name, "][",
-                                                       itr.num_instructions, "]"));
+                _insert(itr.module_name,
+                        fmt::format("[{}] --> [{}][{}]", itr.module_name,
+                                    itr.function_name, itr.num_instructions));
             }
         }
         else if(_mode == "pair+")
         {
             for(const auto& itr : _modset)
             {
-                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name,
-                                                       "] --> [", itr.signature.get(),
-                                                       "][", itr.num_instructions, "]"));
+                _insert(itr.module_name,
+                        fmt::format("[{}] --> [{}][{}]", itr.module_name,
+                                    itr.signature.get(), itr.num_instructions));
             }
         }
         else
@@ -2422,6 +2462,7 @@ main(int argc, char** argv)
         }
     };
 
+    // Print to stdout, inexpensive time-wise
     if(!print_available.empty())
         _dump_info("available", print_available, available_module_functions);
     if(!print_instrumented.empty())
@@ -2445,19 +2486,25 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        const auto& outf = outfile;
-        if(outf.find('/') != string_t::npos)
+        const auto outdir = path::parent_path(outfile);
+        if(!outdir.empty())
         {
-            auto outdir = outf.substr(0, outf.find_last_of('/'));
-            tim::makedir(outdir);
+            try
+            {
+                std::filesystem::create_directories(outdir);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                errprintf(0, "Failed to create output directory '%s': %s\n",
+                          outdir.c_str(), e.code().message().c_str());
+            }
         }
 
-        bool success = app_binary->writeFile(outfile.c_str());
-        code         = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
+        const bool success = app_binary->writeFile(outfile.c_str());
+        code               = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
         if(success)
         {
             verbprintf(0, "\n");
-            if(outfile.find('/') != 0)
+            if(!outfile.starts_with('/'))
             {
                 verbprintf(0, "The instrumented executable image is stored in '%s/%s'\n",
                            get_cwd().c_str(), outfile.c_str());
@@ -2515,20 +2562,21 @@ main(int argc, char** argv)
             else if(app_thread->terminationStatus() == ExitedViaSignal)
             {
                 auto sign = app_thread->getExitSignal();
-                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
+                fprintf(stderr, "\nApplication exited with signal: %i\n",
+                        static_cast<int>(sign));
             }
             code = app_thread->getExitCode();
         };
 
-        if(!app_thread->isTerminated() && !is_attached)
+        if(!app_thread->isTerminated())
         {
-            pid_t cpid   = app_thread->getPid();
-            int   status = 0;
+            const pid_t cpid   = app_thread->getPid();
+            int         status = 0;
             app_thread->detach(true);
             do
             {
-                status  = 0;
-                pid_t w = waitpid(cpid, &status, WUNTRACED);
+                status        = 0;
+                const pid_t w = waitpid(cpid, &status, WUNTRACED);
                 if(w == -1)
                 {
                     perror("waitpid");
@@ -2552,22 +2600,6 @@ main(int argc, char** argv)
                     WAITPID_DEBUG_MESSAGE(code = WIFCONTINUED(status));
                 }
             } while(WIFEXITED(status) == 0 && WIFSIGNALED(status) == 0);
-        }
-        else if(!app_thread->isTerminated() && is_attached)
-        {
-            bpatch->setDebugParsing(false);
-            bpatch->setDelayedParsing(true);
-            verbprintf(1, "Executing initial snippets...\n");
-            for(auto* itr : init_names)
-                app_thread->oneTimeCode(*itr);
-
-            app_thread->continueExecution();
-            while(!app_thread->isTerminated())
-            {
-                while(bpatch->waitForStatusChange())
-                    app_thread->continueExecution();
-            }
-            _compute_exit_code();
         }
         else
         {
@@ -2693,18 +2725,22 @@ namespace
 std::string
 canonicalize(std::string _path)
 {
-    if(_path.find("./") == 0)
-        _path = _path.replace(0, 1, get_cwd());
-    else if(_path.find("../") == 0)
-        _path = _path.insert(0, get_cwd() + "/");
-
-    auto _leading_dash = (_path.find('/') == 0);
-    auto _pieces       = tim::delimit(_path, "/");
-    std::reverse(_pieces.begin(), _pieces.end());
-    auto _tree = std::vector<std::string>{};
-    for(size_t i = 0; i < _pieces.size(); ++i)
+    if(_path.starts_with("./"))
     {
-        const auto& itr = _pieces.at(i);
+        _path = _path.replace(0, 1, get_cwd());
+    }
+    else if(_path.starts_with("../"))
+    {
+        _path = _path.insert(0, get_cwd() + "/");
+    }
+
+    auto leading_dash = _path.starts_with('/');
+    auto pieces       = rocprofsys::delimit(_path, "/");
+    std::ranges::reverse(pieces);
+    auto _tree = std::vector<std::string>{};
+    for(size_t i = 0; i < pieces.size(); ++i)
+    {
+        const auto& itr = pieces.at(i);
         if(itr == ".")
         {
             continue;
@@ -2715,11 +2751,11 @@ canonicalize(std::string _path)
             _tree.emplace_back(itr);
     }
     std::reverse(_tree.begin(), _tree.end());
-    auto _cpath = std::string{ (_leading_dash) ? "/" : "" };
+    auto cpath = std::string{ leading_dash ? "/" : "" };
     for(size_t i = 0; i < _tree.size() - 1; ++i)
-        _cpath += _tree.at(i) + "/";
-    _cpath += _tree.back();
-    return _cpath;
+        cpath += _tree.at(i) + "/";
+    cpath += _tree.back();
+    return cpath;
 }
 
 //======================================================================================//
@@ -2727,8 +2763,11 @@ canonicalize(std::string _path)
 std::string
 absolute(std::string _path)
 {
-    if(_path.find('/') == 0) return canonicalize(_path);
-    return canonicalize(JOIN('/', get_cwd(), _path));
+    if(_path.starts_with('/'))
+    {
+        return canonicalize(_path);
+    }
+    return canonicalize(fmt::format("{}/{}", get_cwd(), _path));
 }
 
 //======================================================================================//
@@ -2736,20 +2775,23 @@ absolute(std::string _path)
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
 {
-    if(!_name.empty() && (!exists(_name) || !is_file(_name)))
+    if(!_name.empty() && !path::is_regular_file(absolute(_name)))
     {
         auto _orig = _name;
         for(auto itr : _search_paths)
         {
-            if(!is_directory(itr) || is_file(itr)) itr = filepath::dirname(itr);
+            if(!path::is_directory(itr))
+            {
+                itr = path::parent_path(itr);
+            }
 
             auto _exists = false;
             ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
             for(const auto& pitr :
-                { absolute(JOIN('/', itr, _name)),
-                  absolute(JOIN('/', itr, filepath::basename(_name))) })
+                { absolute(fmt::format("{}/{}", itr, _name)),
+                  absolute(fmt::format("{}/{}", itr, path::filename(_name))) })
             {
-                _exists = exists(pitr) && is_file(pitr);
+                _exists = path::is_regular_file(pitr);
                 if(_exists)
                 {
                     _name = pitr;
@@ -2761,11 +2803,9 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
             if(_exists) break;
         }
 
-        if(!exists(_name))
+        if(!path::is_regular_file(absolute(_name)))
         {
-            using array_config_t = timemory::join::array_config;
-            auto _search_paths_v =
-                timemory::join::join(array_config_t{ ", ", "", "" }, bin_search_paths);
+            auto _search_paths_v = fmt::format("{}", fmt::join(bin_search_paths, ", "));
             verbprintf(
                 0, "Warning! File path to '%s' could not be determined... search: %s\n",
                 _name.c_str(), _search_paths_v.c_str());
@@ -2788,15 +2828,21 @@ get_absolute_filepath(std::string _name)
 {
     auto _search_paths  = strvec_t{};
     auto _combine_paths = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
-    auto _base_name     = std::string_view{ filepath::basename(_name) };
+    auto _base_name     = path::filename(_name);
     // if the name looks like a library, put the lib_search_paths first
-    if(_base_name.find("lib") == 0 || _base_name.find(".so") != std::string::npos ||
+    if(_base_name.starts_with("lib") || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
+    {
         std::reverse(_combine_paths.begin(), _combine_paths.end());
+    }
     _search_paths.reserve(bin_search_paths.size() + lib_search_paths.size());
     for(const auto& pitr : _combine_paths)
+    {
         for(const auto& itr : pitr)
+        {
             _search_paths.emplace_back(itr);
+        }
+    }
 
     return get_absolute_filepath(std::move(_name), _search_paths);
 }
@@ -2816,35 +2862,13 @@ get_absolute_lib_filepath(std::string lib_name)
 {
     auto _orig_name = lib_name;
     lib_name        = get_absolute_filepath(std::move(lib_name), lib_search_paths);
-    if(_orig_name == lib_name && !exists(lib_name) &&
+    if(_orig_name == lib_name && !path::is_regular_file(absolute(lib_name)) &&
        lib_name.find(".so") == std::string::npos &&
        lib_name.find(".a") == std::string::npos)
     {
         lib_name = get_absolute_filepath(lib_name + ".so", lib_search_paths);
     }
     return lib_name;
-}
-
-bool
-exists(const std::string& name)
-{
-    return filepath::exists(absolute(name));
-}
-
-bool
-is_file(std::string _name)
-{
-    _name = path::realpath(_name);
-    struct stat buffer;
-    return (stat(_name.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode) != 0);
-}
-
-bool
-is_directory(std::string _name)
-{
-    _name = path::realpath(_name);
-    struct stat buffer;
-    return (stat(_name.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode) != 0);
 }
 
 std::string
@@ -2862,36 +2886,34 @@ get_cwd()
 #endif
 }
 
-using tim::dirname;
-
 void
 find_dyn_api_rt()
 {
 #if defined(ROCPROFSYS_BUILD_DYNINST)
-    std::string _dyn_api_rt_base =
+    const std::string _dyn_api_rt_base =
         (binary_rewrite) ? "librocprof-sys-rt" : "libdyninstAPI_RT";
 #else
     std::string _dyn_api_rt_base = "libdyninstAPI_RT";
 #endif
 
     auto _dyn_api_rt_env =
-        tim::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
+        rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
     auto _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_env);
 
-    if(!exists(_dyn_api_rt_abs))
+    if(!path::is_regular_file(absolute(_dyn_api_rt_abs)))
         _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_base + ".a");
 
-    if(exists(_dyn_api_rt_abs))
+    if(path::is_regular_file(absolute(_dyn_api_rt_abs)))
     {
-        namespace join = ::timemory::join;
-        tim::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
-        tim::set_env<string_t>("DYNINST_REWRITER_PATHS",
-                               join::join(join::array_config{ ":", "", "" },
-                                          dirname(_dyn_api_rt_abs), lib_search_paths),
-                               1);
+        rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
+        rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
+                                      fmt::format("{}:{}",
+                                                  path::parent_path(_dyn_api_rt_abs),
+                                                  fmt::join(lib_search_paths, ":")),
+                                      1);
     }
 
-    auto _v = tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
+    auto _v = rocprofsys::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
     verbprintf(0, "DYNINST_API_RT: %s\n", (_v.empty()) ? "<unknown>" : _v.c_str());
 }
 }  // namespace

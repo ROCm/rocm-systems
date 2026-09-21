@@ -58,14 +58,14 @@ private:
                 roc_parser_ = std::make_shared<Av1VideoParser>();
                 break;
             default:
-                THROW("Unsupported parser type "+ TOSTR(params->codec_type));
+                THROW("Unsupported parser type "+ ROCDEC_TOSTR(params->codec_type));
                 break;
         }
 
         if (roc_parser_ ) {
             rocDecStatus ret = roc_parser_->Initialize(params);
             if (ret != ROCDEC_SUCCESS)
-                THROW("rocParser Initialization failed with error: "+ TOSTR(ret));
+                THROW("rocParser Initialization failed with error: "+ ROCDEC_TOSTR(ret));
         }
     }
     rocDecStatus DestroyParserInternal() {
@@ -73,7 +73,7 @@ private:
         if (roc_parser_) {
             ret = roc_parser_->UnInitialize();
             if (ret != ROCDEC_SUCCESS)
-                THROW("rocParser UnInitialization failed with error: "+ TOSTR(ret));
+                THROW("rocParser UnInitialization failed with error: "+ ROCDEC_TOSTR(ret));
         }
         return ret;
     }

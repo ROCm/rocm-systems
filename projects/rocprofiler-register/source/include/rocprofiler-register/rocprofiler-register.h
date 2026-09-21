@@ -131,7 +131,7 @@ typedef struct rocprofiler_register_registration_info_t
  * @brief Callback function for iterating over the libraries which have registered
  * with rocprofiler-register. @see rocprofiler_register_iterate_registration_info
  *
- * @param [in] info Pointer to library registration instance. Invokee should make a copy
+ * @param [in] info Pointer to library registration instance. Caller should make a copy
  * for reference outside of callback.
  * @param [in] data User data passed to ::rocprofiler_register_iterate_registration_info
  * @return int

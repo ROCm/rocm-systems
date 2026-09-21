@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/buffer_storage.hpp"
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -39,7 +21,7 @@ namespace
 
 template <typename T>
 void
-verify_buffer_contains(const T& sample, const uint8_t* buffer, size_t& buffer_pos)
+verify_buffer_contains(const T& sample, const std::uint8_t* buffer, size_t& buffer_pos)
 {
     auto type_id = *reinterpret_cast<const test_type_identifier_t*>(buffer + buffer_pos);
     EXPECT_EQ(type_id, T::type_identifier);
@@ -49,8 +31,8 @@ verify_buffer_contains(const T& sample, const uint8_t* buffer, size_t& buffer_po
     EXPECT_EQ(size, rocprofsys::trace_cache::get_size(sample));
     buffer_pos += sizeof(size_t);
 
-    uint8_t* deserialize_ptr = const_cast<uint8_t*>(buffer + buffer_pos);
-    auto     deserialized    = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
+    std::uint8_t* deserialize_ptr = const_cast<std::uint8_t*>(buffer + buffer_pos);
+    auto          deserialized = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
     EXPECT_EQ(deserialized, sample);
     buffer_pos += size;
 }
@@ -105,6 +87,30 @@ struct mock_worker_factory_t
     }
 };
 
+struct mock_scoped_guard_t
+{};
+
+struct gmock_thread_state_policy_t
+{
+    MOCK_METHOD(mock_scoped_guard_t, scoped, (rocprofsys::state::thread::State));
+};
+
+std::unique_ptr<::testing::StrictMock<gmock_thread_state_policy_t>>
+    g_mock_thread_state_policy;
+
+struct mock_thread_state_policy_t
+{
+    using State = rocprofsys::state::thread::State;
+
+    static constexpr rocprofsys::state::thread::State Internal =
+        rocprofsys::state::thread::Internal;
+
+    static mock_scoped_guard_t scoped(rocprofsys::state::thread::State state_to_set)
+    {
+        return g_mock_thread_state_policy->scoped(state_to_set);
+    }
+};
+
 }  // namespace
 
 class buffer_storage_test : public ::testing::Test
@@ -120,6 +126,7 @@ protected:
     {
         std::remove(test_file_path.c_str());
         g_mock_worker.reset();
+        g_mock_thread_state_policy.reset();
     }
 
     std::string             test_file_path;
@@ -177,7 +184,7 @@ TEST_F(buffer_storage_test, try_store_event_sample_throw)
     EXPECT_CALL(*g_mock_worker, start).Times(0);
     EXPECT_CALL(*g_mock_worker, stop).Times(0);
 
-    test_sample_1 sample{ 10, "test string" };
+    const test_sample_1 sample{ 10, "test string" };
     EXPECT_THROW(storage.store(sample), std::runtime_error);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -194,12 +201,12 @@ TEST_F(buffer_storage_test, store_after_shutdown)
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
     storage.start();
-    test_sample_1 before_shutdown(1, "before");
+    const test_sample_1 before_shutdown(1, "before");
     EXPECT_NO_THROW(storage.store(before_shutdown));
 
     EXPECT_NO_THROW(storage.shutdown());
 
-    test_sample_1 after_shutdown(2, "after");
+    const test_sample_1 after_shutdown(2, "after");
     EXPECT_THROW(storage.store(after_shutdown), std::runtime_error);
 }
 
@@ -213,10 +220,34 @@ TEST_F(buffer_storage_test, store_event_samples)
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
     EXPECT_NO_THROW(storage.start());
-    test_sample_1 sample{ 10, "test string" };
+    const test_sample_1 sample{ 10, "test string" };
     EXPECT_NO_THROW(storage.store(sample));
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_NO_THROW(storage.shutdown());
+}
+
+TEST_F(buffer_storage_test, store_sets_thread_state_to_internal)
+{
+    g_mock_thread_state_policy =
+        std::make_unique<::testing::StrictMock<gmock_thread_state_policy_t>>();
+
+    rocprofsys::trace_cache::buffer_storage<mock_worker_factory_t, test_type_identifier_t,
+                                            mock_thread_state_policy_t>
+        storage(test_file_path);
+    SetUpStartStopOnCall();
+
+    EXPECT_CALL(*g_mock_worker, start).Times(1);
+    EXPECT_CALL(*g_mock_worker, stop).Times(1);
+    EXPECT_CALL(*g_mock_thread_state_policy,
+                scoped(::testing::Eq(rocprofsys::state::thread::Internal)))
+        .Times(1)
+        .WillOnce(::testing::Return(mock_scoped_guard_t{}));
+
+    storage.start();
+    const test_sample_1 sample{ 10, "test string" };
+    EXPECT_NO_THROW(storage.store(sample));
+
     EXPECT_NO_THROW(storage.shutdown());
 }
 
@@ -243,7 +274,7 @@ TEST_F(buffer_storage_test, flush_below_threshold)
 
     EXPECT_NO_THROW(storage.start());
 
-    test_sample_1 sample{ 10, "test string" };
+    const test_sample_1 sample{ 10, "test string" };
     EXPECT_NO_THROW(storage.store(sample));
 
     EXPECT_NO_THROW(g_mock_worker->execute_flush());
@@ -260,13 +291,13 @@ TEST_F(buffer_storage_test, MixedSampleTypes)
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
     storage.start();
-    test_sample_1 sample1(42, "event_data");
-    test_sample_2 sample2(3.14159, 1001);
-    test_sample_3 sample3({ 0xAA, 0xBB, 0xCC, 0xDD });
+    const test_sample_1 sample1(42, "event_data");
+    const test_sample_2 sample2(3.14159, 1001);
+    const test_sample_3 sample3({ 0xAA, 0xBB, 0xCC, 0xDD });
 
     // Empty samples
-    test_sample_3 sample4;
-    test_sample_1 sample5;
+    const test_sample_3 sample4;
+    const test_sample_1 sample5;
 
     EXPECT_NO_THROW(storage.store(sample1));
     EXPECT_NO_THROW(storage.store(sample2));
@@ -282,8 +313,9 @@ TEST_F(buffer_storage_test, MixedSampleTypes)
     std::string buffer_data = g_mock_worker->m_output_string_stream.str();
     ASSERT_FALSE(buffer_data.empty());
 
-    const uint8_t* buffer     = reinterpret_cast<const uint8_t*>(buffer_data.data());
-    size_t         buffer_pos = 0;
+    const std::uint8_t* buffer =
+        reinterpret_cast<const std::uint8_t*>(buffer_data.data());
+    size_t buffer_pos = 0;
 
     verify_buffer_contains(sample1, buffer, buffer_pos);
     verify_buffer_contains(sample2, buffer, buffer_pos);
@@ -304,10 +336,10 @@ TEST_F(buffer_storage_test, mixed_sample_types_with_optional)
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
     storage.start();
-    test_sample_1 sample1(42, "event_data");
-    test_sample_5 sample5_with_value(std::optional<uint32_t>{ 99 });
-    test_sample_5 sample5_nullopt(std::nullopt);
-    test_sample_2 sample2(2.71828, 1002);
+    const test_sample_1 sample1(42, "event_data");
+    const test_sample_5 sample5_with_value(std::optional<std::uint32_t>{ 99 });
+    const test_sample_5 sample5_nullopt(std::nullopt);
+    const test_sample_2 sample2(2.71828, 1002);
 
     EXPECT_NO_THROW(storage.store(sample1));
     EXPECT_NO_THROW(storage.store(sample5_with_value));
@@ -321,8 +353,9 @@ TEST_F(buffer_storage_test, mixed_sample_types_with_optional)
     std::string buffer_data = g_mock_worker->m_output_string_stream.str();
     ASSERT_FALSE(buffer_data.empty());
 
-    const uint8_t* buffer     = reinterpret_cast<const uint8_t*>(buffer_data.data());
-    size_t         buffer_pos = 0;
+    const std::uint8_t* buffer =
+        reinterpret_cast<const std::uint8_t*>(buffer_data.data());
+    size_t buffer_pos = 0;
 
     verify_buffer_contains(sample1, buffer, buffer_pos);
     verify_buffer_contains(sample5_with_value, buffer, buffer_pos);
@@ -341,22 +374,23 @@ TEST_F(buffer_storage_test, large_payload_handling)
     EXPECT_CALL(*g_mock_worker, stop).Times(1);
 
     storage.start();
-    std::vector<uint8_t> large_payload(5000, 0xFF);
-    test_sample_3        large_sample(large_payload);
+    const std::vector<std::uint8_t> large_payload(5000, 0xFF);
+    const test_sample_3             large_sample(large_payload);
 
     EXPECT_NO_THROW(storage.store(large_sample));
 
     for(int i = 0; i < 10; ++i)
     {
-        std::vector<uint8_t> payload(1000 + i * 100, static_cast<uint8_t>(i));
-        test_sample_3        sample(payload);
+        const std::vector<std::uint8_t> payload(1000 + i * 100,
+                                                static_cast<std::uint8_t>(i));
+        const test_sample_3             sample(payload);
         EXPECT_NO_THROW(storage.store(sample));
     }
 
     for(int i = 0; i < 5; ++i)
     {
-        std::string   large_string(1000 + i * 200, 'A' + (i % 26));
-        test_sample_1 large_text_sample(i * 1000, large_string);
+        const std::string   large_string(1000 + i * 200, 'A' + (i % 26));
+        const test_sample_1 large_text_sample(i * 1000, large_string);
         EXPECT_NO_THROW(storage.store(large_text_sample));
     }
 
@@ -392,8 +426,8 @@ TEST_F(buffer_storage_test, concurrent_mixed_type_store)
                         EXPECT_NO_THROW(storage.store(test_sample_2(t * 2.5 + i, t + i)));
                         break;
                     case 2:
-                        EXPECT_NO_THROW(
-                            storage.store(test_sample_3(std::vector<uint8_t>(10, t))));
+                        EXPECT_NO_THROW(storage.store(
+                            test_sample_3(std::vector<std::uint8_t>(10, t))));
                         break;
                 }
             }
@@ -442,20 +476,20 @@ TEST_F(buffer_storage_test, repeated_fragmentation)
 
     storage.start();
 
-    const size_t         fragment_trigger_size = rocprofsys::trace_cache::buffer_size / 5;
-    std::vector<uint8_t> fragment_payload(fragment_trigger_size, 0xDD);
-    const int            cycle_count = 3;
-    const int            iter_count  = 2;
+    const size_t fragment_trigger_size = rocprofsys::trace_cache::buffer_size / 5;
+    const std::vector<std::uint8_t> fragment_payload(fragment_trigger_size, 0xDD);
+    const int                       cycle_count = 3;
+    const int                       iter_count  = 2;
 
     for(int cycle = 0; cycle < cycle_count; ++cycle)
     {
         for(int i = 0; i < iter_count; ++i)
         {
-            test_sample_3 sample(fragment_payload);
+            const test_sample_3 sample(fragment_payload);
             EXPECT_NO_THROW(storage.store(sample));
         }
 
-        test_sample_1 small_sample(cycle, "cycle_" + std::to_string(cycle));
+        const test_sample_1 small_sample(cycle, "cycle_" + std::to_string(cycle));
         EXPECT_NO_THROW(storage.store(small_sample));
 
         g_mock_worker->execute_flush(true);
@@ -463,12 +497,13 @@ TEST_F(buffer_storage_test, repeated_fragmentation)
 
     EXPECT_NO_THROW(storage.shutdown());
 
-    std::string    buffer_data = g_mock_worker->m_output_string_stream.str();
-    const uint8_t* buffer      = reinterpret_cast<const uint8_t*>(buffer_data.data());
-    size_t         buffer_pos  = 0;
-    size_t         fragmented_space_count = 0;
-    size_t         sample1_count          = 0;
-    size_t         sample3_count          = 0;
+    std::string         buffer_data = g_mock_worker->m_output_string_stream.str();
+    const std::uint8_t* buffer =
+        reinterpret_cast<const std::uint8_t*>(buffer_data.data());
+    size_t buffer_pos             = 0;
+    size_t fragmented_space_count = 0;
+    size_t sample1_count          = 0;
+    size_t sample3_count          = 0;
 
     while(buffer_pos < buffer_data.size())
     {

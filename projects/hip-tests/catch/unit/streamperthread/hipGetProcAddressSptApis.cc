@@ -605,8 +605,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memset) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memset2D3D) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemset2D_spt_ptr = nullptr;
   void* hipMemset2DAsync_spt_ptr = nullptr;
   void* hipMemset3D_spt_ptr = nullptr;
@@ -1861,8 +1859,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy3D) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemcpy3D_spt_ptr = nullptr;
   void* hipMemcpy3DAsync_spt_ptr = nullptr;
 
@@ -2505,13 +2501,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_LaunchKernel) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_spt_LaunchCooperativeKernel) {
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, 0));
-
-  if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST("Skipping since cooperative launch not supported");
-    return;
-  }
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
   void* hipLaunchCooperativeKernel_spt_ptr = nullptr;
 

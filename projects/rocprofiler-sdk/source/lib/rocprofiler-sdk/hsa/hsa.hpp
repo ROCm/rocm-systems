@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/defines.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -176,11 +177,25 @@ iterate_args(uint32_t                                           id,
 
 template <typename TableT>
 void
+restore_table(TableT* _orig, uint64_t _tbl_instance);
+
+template <typename TableT>
+void
 copy_table(TableT* _orig, uint64_t _tbl_instance);
 
 template <typename TableT>
 void
 update_table(TableT* _orig, uint64_t _tbl_instance);
+
+template <typename TableT>
+ROCPROFILER_WEAK void
+dlsym_table(TableT* _orig);
+
+extern template void
+dlsym_table<hsa_core_table_t>(hsa_core_table_t* _orig);
+
+extern template void
+dlsym_table<hsa_amd_ext_table_t>(hsa_amd_ext_table_t* _orig);
 
 int
 get_hsa_ref_count();

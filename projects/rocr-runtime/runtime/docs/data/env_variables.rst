@@ -28,7 +28,7 @@
         | Specifies the threshold for the amount of scratch memory allocated and reclaimed in kernel dispatches.
         | Enabling ``HSA_NO_SCRATCH_RECLAIM`` circumvents ``HSA_SCRATCH_SINGLE_LIMIT``, and treats ``HSA_SCRATCH_SINGLE_LIMIT`` as the maximum value.
         |
-        | **NOTE:** In the 7.0 release the developer can use the HIP enumerator ``hipExtLimitScratchCurrent`` to programmatically change the default scratch memory allocation size. For more information, see `Global enums and defines <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___global_defs.html>`_.
+        | **NOTE:** In the 7.0 release the developer can use the HIP enumerator ``hipExtLimitScratchCurrent`` to programmatically change the default scratch memory allocation size. For more information, see `Global enums and defines <https://rocm.docs.amd.com/projects/HIP/en/latest/reference/hip_runtime_api/global_defines_enums_structs_files.html>`_.
       - ``146800640``
       - 0 to 4GB per XCC
 
@@ -77,7 +77,7 @@
 
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
-      - ``0``
+      - ``1``
       - | 0: Disable
         | 1: Enable
 
@@ -93,6 +93,41 @@
       - | 0: Disable debug mode.
         | 1: Enable debug mode with additional validation and logging.
 
+    * - | ``HSA_HOTSWAP_DISABLE``
+        | Stops the runtime from loading the HotSwap tool, which retargets code objects for ``gfx1250`` A0 agents. The tool loads by default whenever such an agent is present.
+      - ``0``
+      - | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Load the HotSwap tool when a supported agent is present.
+        | Any other value: Never load the HotSwap tool.
+
+    * - | ``HSA_DISABLE_GFX12_STRICT``
+        | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.
+      - ``1``
+      - | 0: Report the strict ISA variant on A0 agents.
+        | 1, unset, empty, or any other value: Keep the base target on A0 agents.
+
+    * - | ``HSA_HOTSWAP_VERBOSE``
+        | Enables HotSwap diagnostic logging to stderr. Read by the HotSwap tool itself, not by the runtime, so it has no effect unless the tool is loaded. Errors are always reported regardless of this setting.
+      - ``0``
+      - | Unset, empty, or 0: Disable HotSwap diagnostic logging.
+        | Any other value: Enable HotSwap diagnostic logging.
+
+    * - | ``HSA_HOTSWAP_DUMP_SOURCE``
+        | Writes the source code object to disk when the HotSwap tool refuses to translate it. Off by default because these objects are large and a failed translation is not memoized, so the same bytes fail again on every load. At most one artifact is written per source, for at most 32 distinct sources per process; an out-of-resources failure is never captured.
+      - ``0``
+      - | Unset, empty, or 0: Do not write refused code objects.
+        | Any other value: Write each refused code object once.
+
+    * - | ``HSA_HOTSWAP_DUMP_DIR``
+        | Directory that receives the artifacts written by ``HSA_HOTSWAP_DUMP_SOURCE``. Naming a destination does not by itself enable capture.
+      - ``TMPDIR``, else ``/tmp``
+      - | Any non-empty path: Write artifacts there.
+        | Unset or empty: Fall back to ``TMPDIR``, then ``/tmp``.
+
+    * - | ``HSA_ENABLE_DXG_DETECTION``
+        | Controls detection of the DXG driver (/dev/dxg) on WSL2.
+      - ``1``
+      - | 0: Disable DXG detection.
+        | 1: Enable DXG detection, allowing ROCr to detect that it is running in WSL2.
 
 Hardware Debugging Environment Variables
 ----------------------------------------

@@ -245,7 +245,7 @@ pcs_parser_random_samples()
 }
 
 /**
- * Creates a few queues with a few dispatchs per queue.
+ * Creates a few queues with a few dispatches per queue.
  * Adds random samples per dispatch, and checks the result.
  */
 TEST(pcs_parser, random_samples)
@@ -354,7 +354,7 @@ pcs_parser_queue_hammer()
 }
 
 /**
- * Hammers the parser by creating and destrying queues at random, adding dispatches at random
+ * Hammers the parser by creating and destroying queues at random, adding dispatches at random
  * and generating PC samples at random. By default we use all 4 unique doorbells,
  * queue size is 16 and we generate 10k samples dispatch.
  */

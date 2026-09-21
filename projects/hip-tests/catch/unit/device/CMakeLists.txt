@@ -15,10 +15,12 @@ set(TEST_SRC
     hipGetDeviceAttribute.cc
     hipGetDeviceCount.cc
     hipGetDeviceProperties.cc
+    hipGetDeviceProperties_R0000.cc
     hipRuntimeGetVersion.cc
     hipGetSetDeviceFlags.cc
     hipSetGetDevice.cc
     hipDeviceGetUuid.cc
+    hipDeviceGetLuid.cc
     hipDeviceAPUCheck.cc
     hipDeviceGetDefaultMemPool.cc
     hipDeviceCanAccessPeer.cc
@@ -29,8 +31,12 @@ set(TEST_SRC
     hipDeviceReset.cc
     hipDeviceSetGetMemPool.cc
     hipInit.cc
+    hipInitDevice.cc
     hipDriverGetVersion.cc
     hipSetValidDevices.cc
+    hipIpcOpenMemHandle.cc
+    hipIpcGetMemHandle.cc
+    hipIpcCloseMemHandle.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
@@ -43,18 +49,15 @@ if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
-if(UNIX)
-    set(TEST_SRC ${TEST_SRC}
-                 hipIpcOpenMemHandle.cc
-                 hipIpcGetMemHandle.cc
-                 hipIpcCloseMemHandle.cc
-       )
-endif()
-
 add_executable(getDeviceCount EXCLUDE_FROM_ALL getDeviceCount_exe.cc)
 set_source_files_properties(getDeviceCount_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS getDeviceCount)
 target_link_libraries(getDeviceCount ${GPGPU_LINKER_LIBRARIES})
+
+add_executable(hipSetValidDevicesMultiProc EXCLUDE_FROM_ALL hipSetValidDevicesMultiProc_Exe.cc)
+set_source_files_properties(hipSetValidDevicesMultiProc_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipSetValidDevicesMultiProc)
+target_link_libraries(hipSetValidDevicesMultiProc ${GPGPU_LINKER_LIBRARIES})
 
 add_executable(chkUUIDFrmChildProc_Exe EXCLUDE_FROM_ALL chkUUIDFrmChildProc_Exe.cc)
 add_executable(chkUUIDInGrandChild_Exe EXCLUDE_FROM_ALL chkUUIDInGrandChild_Exe.cc)
@@ -105,7 +108,7 @@ endif()
 hip_add_exe_to_target(NAME DeviceTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-add_dependencies(build_tests getDeviceCount chkUUIDFrmChildProc_Exe chkUUIDInGrandChild_Exe setuuidGetDevCount multipleUUID setEnvInChildProc uuidList)
+add_dependencies(build_tests getDeviceCount hipSetValidDevicesMultiProc chkUUIDFrmChildProc_Exe chkUUIDInGrandChild_Exe setuuidGetDevCount multipleUUID setEnvInChildProc uuidList)
 #Disabled below two executable due to the defect ticket SWDEV-467665
 if(0)
 add_dependencies(build_tests passUUIDToGrandChild_Exe ResetUUIDInChild_Exe)
@@ -118,3 +121,12 @@ if(HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(hipDeviceSetGetScratchExe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 endif()
 
+if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS AND UNIX)
+  add_executable(hipGetProcAddressIpcEventImport EXCLUDE_FROM_ALL
+                 hipGetProcAddressIpcEventImport_Exe.cc)
+  set_source_files_properties(hipGetProcAddressIpcEventImport_Exe.cc
+                              PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipGetProcAddressIpcEventImport ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(DeviceTest hipGetProcAddressIpcEventImport)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetProcAddressIpcEventImport)
+endif()

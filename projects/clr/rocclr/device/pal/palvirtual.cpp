@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "platform/command_utils.hpp"
 #include "platform/perfctr.hpp"
 #include "platform/threadtrace.hpp"
 #include "platform/kernel.hpp"
@@ -25,6 +26,9 @@
 #include <sstream>
 #include <algorithm>
 #include <thread>
+#include <cstddef>
+#include <limits>
+#include <utility>
 #include "palQueue.h"
 #include "palFence.h"
 #include "palQueueSemaphore.h"
@@ -158,8 +162,9 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   }
 
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
-  VirtualGPU::Queue* queue =
-      new (allocSize) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
+  VirtualGPU::Queue* queue = amd::AllocWithTrailing<VirtualGPU::Queue>(
+      allocSize, gpu, palDev, residency_limit, max_command_buffers);
+
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
@@ -168,7 +173,8 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       uint32_t index = AllocedQueues(gpu, qCreateInfo.engineType);
       // Create PAL queue object
       if (index < GPU_MAX_HW_QUEUES) {
-        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo(gpu.dev());
+        Device::QueueRecycleInfo* info =
+            amd::AllocWithTrailing<Device::QueueRecycleInfo>(qSize, gpu.dev());
         if (info == nullptr) {
           LogError("Could not create QueueRecycleInfo!");
           return nullptr;
@@ -182,7 +188,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
           // Save uniqueue index for scratch buffer access
           info->index_ = index;
         } else {
-          delete queue;
+          amd::DestroyWithTrailing(queue);
           return nullptr;
         }
       } else {
@@ -210,7 +216,10 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       queue->lock_ = &info->queue_lock_;
       addrQ = reinterpret_cast<address>(&queue[1]);
     } else {
-      Device::QueueRecycleInfo* info = new Device::QueueRecycleInfo(gpu.dev());
+      // Exclusive-compute path: the PAL IQueue is placed into the Queue wrapper's trailing
+      // region (see addrQ assignment below), so QueueRecycleInfo carries no trailing payload.
+      Device::QueueRecycleInfo* info =
+          amd::AllocWithTrailing<Device::QueueRecycleInfo>(0, gpu.dev());
       if (info == nullptr) {
         LogError("Could not create QueueRecycleInfo!");
         return nullptr;
@@ -223,7 +232,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
     }
     if (result != Pal::Result::Success) {
-      delete queue;
+      amd::DestroyWithTrailing(queue);
       return nullptr;
     }
     queue->UpdateAppPowerProfile();
@@ -234,7 +243,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
     for (uint i = 0; i < max_command_buffers; ++i) {
       result = palDev->CreateCmdBuffer(cmdCreateInfo, &addrCmd[i * cmdSize], &queue->iCmdBuffs_[i]);
       if (result != Pal::Result::Success) {
-        delete queue;
+        amd::DestroyWithTrailing(queue);
         return nullptr;
       }
 
@@ -242,13 +251,13 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       fenceCreateinfo.flags.signaled = false;
       result = palDev->CreateFence(fenceCreateinfo, &addrF[i * fSize], &queue->iCmdFences_[i]);
       if (result != Pal::Result::Success) {
-        delete queue;
+        amd::DestroyWithTrailing(queue);
         return nullptr;
       }
       if (i == StartCmdBufIdx) {
         result = queue->iCmdBuffs_[i]->Begin(cmdBuildInfo);
         if (result != Pal::Result::Success) {
-          delete queue;
+          amd::DestroyWithTrailing(queue);
           return nullptr;
         }
       }
@@ -258,7 +267,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
 }
 
 VirtualGPU::Queue::~Queue() {
-  delete reinterpret_cast<Device::QueueRecycleInfo*>(info_);
+  amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
 
   if (nullptr != iQueue_) {
     // Make sure the queues are idle
@@ -269,10 +278,11 @@ VirtualGPU::Queue::~Queue() {
 
   // Remove all memory references
   std::vector<Pal::IGpuMemory*> memRef;
+  memRef.reserve(memReferences_.size());
   for (auto it : memReferences_) {
     memRef.push_back(it.first->iMem());
   }
-  if (memRef.size() != 0) {
+  if (!memRef.empty()) {
     iDev_->RemoveGpuMemoryReferences(memRef.size(), &memRef[0], iQueue_);
   }
   memReferences_.clear();
@@ -300,7 +310,7 @@ VirtualGPU::Queue::~Queue() {
             queue.second->index_--;
           }
         }
-        delete gpu_.dev().QueuePool().find(iQueue_)->second;
+        amd::DestroyWithTrailing(gpu_.dev().QueuePool().find(iQueue_)->second);
         const_cast<Device&>(gpu_.dev()).QueuePool().erase(iQueue_);
       }
     } else {
@@ -552,7 +562,7 @@ bool VirtualGPU::Queue::isDone(uint id) {
     // Flush the current command buffer
     if (!flush()) {
       // If flush failed, then exit earlier...
-      gpu_.dev().gpu_error_ = CL_INVALID_OPERATION;
+      gpu_.dev().gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
       return false;
     }
   }
@@ -1138,8 +1148,8 @@ VirtualGPU::~VirtualGPU() {
 
   {
     // Destroy queues
-    delete queues_[MainEngine];
-    delete queues_[SdmaEngine];
+    amd::DestroyWithTrailing(queues_[MainEngine]);
+    amd::DestroyWithTrailing(queues_[SdmaEngine]);
 
     if (nullptr != cmdAllocator_) {
       cmdAllocator_->Destroy();
@@ -1945,6 +1955,13 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   syncFlags.skipEntire_ = cmd.isEntireMemory();
   amd::Coord3D size = cmd.size();
 
+  if (!p2pAllowed) {
+    // Force-drain this vGPU's compute engine so data is valid before the staged cross-device read.
+    GpuEvent drainEvt;
+    drainEvt.id_ = queue(MainEngine).submit(/*forceFlush=*/true);
+    drainEvt.engineId_ = MainEngine;
+    waitForEvent(&drainEvt);
+  }
   bool result = false;
   switch (cmd.type()) {
     case CL_COMMAND_COPY_BUFFER: {
@@ -2107,6 +2124,59 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     for (const auto& op : copyOps) {
       op.dstMemory->signalWrite(&dev());
     }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchWriteMemoryOp>& write_ops = cmd.WriteOps();
+
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags sync_flags;
+    sync_flags.skipEntire_ = false;
+
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      dev().getGpuMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
+    }
+  }
+
+  if (!blitMgr().WriteBufferBatch(write_ops)) {
+    LogError("SubmitBatchWriteMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    if (!amd::IS_HIP) {
+      for (const amd::BatchWriteMemoryOp& op : write_ops) {
+        op.dst_memory->signalWrite(&dev());
+      }
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchReadMemoryOp>& read_ops = cmd.ReadOps();
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      dev().getGpuMemory(op.src_memory)->syncCacheFromHost(*this);
+    }
+  }
+
+  if (!blitMgr().ReadBufferBatch(read_ops)) {
+    LogError("SubmitBatchReadMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
   }
 
   profilingEnd(cmd);
@@ -2293,9 +2363,26 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWrite(*memory, value, offset,
-                                                                            sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    bool result;
+    switch (flags) {
+      case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
+        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
+        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
+        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      default: {
+        ShouldNotReachHere();
+        break;
+      }
+    }
+
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
@@ -2324,10 +2411,13 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   size_t vaddr_offset = 0;
   size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
-    constexpr bool kParent = false;
-    vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
-        phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
+    vaddr_sub_obj =
+        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+    if (vaddr_sub_obj == nullptr) {
+      LogError("PAL Command: MapMemObjBookkeeping failed!");
+      profilingEnd(vcmd);
+      return;
+    }
 
     pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
     phymem_igpu_mem = phys_pal_mem->iMem();
@@ -2361,22 +2451,19 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   setGpuEvent(event);
   if (result == Pal::Result::Success) {
     if (phys_mem_obj != nullptr) {
-      // assert the vaddr_mem_obj wasn't mapped already
-      assert(amd::MemObjMap::FindMemObj(vcmd.ptr()) == nullptr);
-      amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
-      vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
-      phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+      constexpr bool kImportVmmForInterprocess = false;
+      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
+                                         kImportVmmForInterprocess);
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
       vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
       assert(vaddr_sub_obj != nullptr);
       assert(vcmd.ptr() == vaddr_sub_obj->getSvmPtr());
 
-      amd::MemObjMap::RemoveMemObj(vcmd.ptr());
-      if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
-        vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
-        vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
-      }
+      constexpr bool kDestroyVirtualBuffer = false;
+      constexpr bool kReleaseSubObj = false;
+      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
+                                   kDestroyVirtualBuffer, kReleaseSubObj);
     }
   }
   profilingEnd(vcmd);
@@ -2490,8 +2577,10 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
-    LogError("Default device queue wasn't allocated");
-    return false;
+    // O0 may conservatively emit hidden device-enqueue ABI arguments even when the
+    // parent kernel does not enqueue children. Without a default device queue there
+    // is no scheduler work to set up, so allow the parent dispatch to proceed.
+    return true;
   } else {
     if (dev().settings().useDeviceQueue_) {
       *gpuDefQueue = static_cast<VirtualGPU*>(defQueue->vDev());
@@ -2807,7 +2896,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   AqlPacketUpdateTs(aql_index, gpuEvent);
 
   // Execute scheduler for device enqueue
-  if (hsaKernel.dynamicParallelism()) {
+  if (hsaKernel.dynamicParallelism() && gpuDefQueue != nullptr) {
     PostDeviceEnqueue(kernel, hsaKernel, gpuDefQueue, vmDefQueue, vmParentWrap, &gpuEvent);
   }
 
@@ -3182,7 +3271,7 @@ void VirtualGPU::submitMakeBuffersResident(amd::MakeBuffersResidentCommand& vcmd
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
-  std::vector<amd::Memory*> memObjects = vcmd.memObjects();
+  const std::vector<amd::Memory*>& memObjects = vcmd.memObjects();
   uint32_t numObjects = memObjects.size();
   Pal::GpuMemoryRef* pGpuMemRef = new Pal::GpuMemoryRef[numObjects];
   Pal::IGpuMemory** pGpuMems = new Pal::IGpuMemory*[numObjects];
@@ -3915,16 +4004,68 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+  uint32_t occupiedWords = (numPackets + 31) / 32;
+  size_t occupiedSize = occupiedWords * sizeof(uint32_t);
+  amd::Buffer* occupiedBuf =
+      new (dev().context()) amd::Buffer(dev().context(), CL_MEM_READ_WRITE, occupiedSize, nullptr);
+  if (occupiedBuf == nullptr || !occupiedBuf->create()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to allocate occupied bitfield for hostcall buffer");
+    if (occupiedBuf != nullptr) {
+      occupiedBuf->release();
+    }
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+  device::Memory* occupiedMem = occupiedBuf->getDeviceMemory(dev());
+  if (occupiedMem == nullptr || occupiedMem->virtualAddress() == 0) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to get device memory for hostcall occupied bitfield");
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+  uint32_t zero = 0;
+  // xferMgr() is synchronous, so the fill completes before any kernel reads it.
+  if (!dev().xferMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero), amd::Coord3D(occupiedSize, 1, 1),
+                                  amd::Coord3D(0, 0, 0), amd::Coord3D(occupiedSize, 1, 1), true)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to zero-initialize hostcall occupied bitfield");
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+#endif  // USE_NEW_HOSTCALL_IMPL
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == %d) for virtual "
           "queue %p\n",
           hostcallBuffer_, numPackets, size, align, this);
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+  if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets, occupiedBuf)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
+            hostcallBuffer_);
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+#else  // !USE_NEW_HOSTCALL_IMPL
   if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
     return nullptr;
   }
+#endif  // USE_NEW_HOSTCALL_IMPL
   return hostcallBuffer_;
 }
 

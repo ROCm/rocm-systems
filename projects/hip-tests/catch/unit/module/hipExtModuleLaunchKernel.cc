@@ -82,6 +82,11 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  *    - HIP_VERSION >= 5.7
  */
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
+#ifdef HIP_TESTS_SPIRV_BUILD
+  // SPIR-V builds emit copyKernel.s as SPIR-V, which carries no AMDGPU
+  // .uniform_work_group_size metadata for this test to parse.
+  HIP_SKIP_TEST("copyKernel.s has no AMDGPU metadata in SPIR-V builds.");
+#endif
   // Open copyKernel.s and read the file
   const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
@@ -106,8 +111,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
   // first check if uniform_work_group_size = 1.
   const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
   if (false == searchRegExpr(regexp, "copyKernel.s")) {
-    HipTest::HIP_SKIP_TEST("uniform_work_group_size != 1. Skipping test ...");
-    return;
+    HIP_SKIP_TEST("test requires uniform work group size 1.");
   }
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
   auto isEven = GENERATE(0, 1);
@@ -182,14 +186,14 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   SECTION("compressed fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed)); }
   SECTION("generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
   }
   SECTION("generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed));
@@ -758,6 +762,68 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Functional) {
     testStatus &= kernelLaunch.Module_WorkGroup_Test();
     REQUIRE(testStatus == true);
   }
+}
+
+TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
+  int device = -1;
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  const std::string arch(props.gcnArchName);
+  // Meant to run on gfx11xx & gfx12xx only.
+  if (!(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)) {
+    HIP_SKIP_TEST("Any-order launch supported only on gfx11xx/gfx12xx. Skipping test ...");
+    return;
+  }
+  int ticks_per_ms = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, device));
+  //TODO: Remove this once we gets correct wall clock rate from ROCR/KFD.
+  if (ticks_per_ms == 0) {
+    ticks_per_ms = 1000000;
+  }
+  // wait in first kernel.
+  int ticks_per_100us = ticks_per_ms / 10;
+  if (ticks_per_100us == 0) {
+    ticks_per_100us = 1;
+  }
+  hipFunction_t first;
+  hipFunction_t second;
+  hipModule_t module;
+  HIP_CHECK(hipModuleLoad(&module, "anyOrderLaunch.code"));
+  HIP_CHECK(hipModuleGetFunction(&first, module, "first"));
+  HIP_CHECK(hipModuleGetFunction(&second, module, "second"));
+
+  int* res;
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&res), sizeof(int), hipHostAllocMapped));
+  *res = 0;
+
+  int *dres;
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dres), res, 0));
+
+  struct {
+    int* _res;
+    int _ticks_per_100us;
+  } args;
+
+  args._res = dres;
+  args._ticks_per_100us = ticks_per_100us;
+
+  size_t size = sizeof(args);
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipExtModuleLaunchKernel(first, 1, 1, 1, 1, 1, 1, 0, stream, nullptr,
+                                    reinterpret_cast<void**>(&config1), 0, 0,
+                                    hipExtAnyOrderLaunch));
+  HIP_CHECK(hipExtModuleLaunchKernel(second, 1, 1, 1, 1, 1, 1, 0, stream, nullptr,
+                                    nullptr, 0, 0,
+                                    hipExtAnyOrderLaunch));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(*res == 1);
+  HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(res));
 }
 /**
  * End doxygen group KernelTest.

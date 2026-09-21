@@ -12,6 +12,8 @@
 #include <string>
 
 // Import commonly used guards into local scope
+using RCCLTestGuards::makeCommAutoGuard;
+using RCCLTestGuards::makeStreamAutoGuard;
 using RCCLTestGuards::makeScopeGuard;
 
 // Detect the number of unique nodes
@@ -363,46 +365,21 @@ ncclResult_t MPITestCore::cleanupTestCommunicator()
         return ncclSuccess; // Already cleaned up or never created
     }
 
-    int world_rank = MPIEnvironment::world_rank;
-
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // RAII guard: Ensure test_comm_ is destroyed even if stream cleanup fails
-    auto comm_guard = makeScopeGuard(
-        [this, world_rank]()
-        {
-            if(test_comm_)
-            {
-                ncclResult_t result = ncclCommDestroy(test_comm_);
-                if(result != ncclSuccess)
-                {
-                    TEST_WARN("Rank %d: ncclCommDestroy failed during cleanup: %s",
-                              world_rank,
-                              ncclGetErrorString(result));
-                }
-                test_comm_ = nullptr;
-            }
-        });
-
-    // RAII guard: Ensure test_stream_ is destroyed
-    auto stream_guard = makeScopeGuard(
-        [this, world_rank]()
-        {
-            if(test_stream_)
-            {
-                hipError_t hip_result = hipStreamDestroy(test_stream_);
-                if(hip_result != hipSuccess)
-                {
-                    TEST_WARN("Rank %d: hipStreamDestroy failed during cleanup: %s",
-                              world_rank,
-                              hipGetErrorString(hip_result));
-                }
-                test_stream_ = nullptr;
-            }
-        });
-
-    // Guards will automatically clean up when going out of scope
-    // Even if an exception were thrown (though we don't use exceptions)
+    // Nested scope: guards fire at }, which is BEFORE the post-cleanup barrier.
+    // This guarantees ncclCommDestroy completes on every rank before any rank
+    // enters the next test's createTestCommunicator.  This matters when the
+    // binary is run directly (mpirun ./rccl-UnitTestsMPI); the test runner
+    // avoids the scenario entirely by spawning one mpirun per test.
+    {
+        // Declare comm_guard first so it is destroyed last (LIFO):
+        // stream is destroyed first, then comm — matching creation order.
+        auto comm_guard   = makeCommAutoGuard(test_comm_);
+        test_comm_        = nullptr;
+        auto stream_guard = makeStreamAutoGuard(test_stream_);
+        test_stream_      = nullptr;
+    } // stream_guard fires, then comm_guard fires — both before MPI_Barrier
 
     MPI_Barrier(MPI_COMM_WORLD);
 

@@ -22,6 +22,7 @@
 //
 
 #include "config.hpp"
+#include "kernel_filter_range.hpp"
 
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
@@ -34,7 +35,7 @@
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <linux/limits.h>
 #include <unistd.h>
@@ -83,7 +84,7 @@ trim(std::string s, bool (*f)(int) = not_is_space)
     return s;
 }
 
-// replace unsuported specail chars with space
+// replace unsupported special chars with space
 void
 handle_special_chars(std::string& str)
 {
@@ -99,38 +100,6 @@ has_counter_format(std::string const& str)
     return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
                return (isalnum(ch) != 0 || ch == '_');
            }) != str.end();
-}
-
-// validate kernel names
-std::unordered_set<size_t>
-get_kernel_filter_range(const std::string& kernel_filter)
-{
-    if(kernel_filter.empty()) return {};
-
-    auto delim     = rocprofiler::sdk::parse::tokenize(kernel_filter, "[], ");
-    auto range_set = std::unordered_set<size_t>{};
-    for(const auto& itr : delim)
-    {
-        if(itr.find('-') != std::string::npos)
-        {
-            auto drange = rocprofiler::sdk::parse::tokenize(itr, "- ");
-
-            ROCP_FATAL_IF(drange.size() != 2)
-                << "bad range format for '" << itr << "'. Expected [A-B] where A and B are numbers";
-
-            size_t start_range = std::stoul(drange.front());
-            size_t end_range   = std::stoul(drange.back());
-            for(auto i = start_range; i <= end_range; i++)
-                range_set.emplace(i);
-        }
-        else
-        {
-            ROCP_FATAL_IF(itr.find_first_not_of("0123456789") != std::string::npos)
-                << "expected integer for " << itr << ". Non-integer value detected";
-            range_set.emplace(std::stoul(itr));
-        }
-    }
-    return range_set;
 }
 
 std::vector<att_perfcounter>
@@ -189,7 +158,7 @@ parse_att_counters(std::string line)
 }
 
 std::set<std::string>
-parse_counters(std::string line)
+parse_counters(std::string line, const std::string& qualifier)
 {
     auto counters = std::set<std::string>{};
 
@@ -205,14 +174,13 @@ parse_counters(std::string line)
     // check to see if comment stripping + trim resulted in empty line
     if(line.empty()) return counters;
 
-    constexpr auto pmc_qualifier = std::string_view{"pmc:"};
-    auto           pos           = std::string::npos;
+    auto pos = std::string::npos;
 
     // should we handle an "pmc:" not being present? Seems like it should be a fatal error
-    if((pos = line.find(pmc_qualifier)) != std::string::npos)
+    if((pos = line.find(qualifier)) != std::string::npos)
     {
         // strip out pmc qualifier
-        line = line.substr(pos + pmc_qualifier.length());
+        line = line.substr(pos + qualifier.length());
 
         handle_special_chars(line);
 
@@ -223,7 +191,7 @@ parse_counters(std::string line)
             input_ss >> counter;
             if(counter.empty())
                 break;
-            else if(counter != pmc_qualifier && has_counter_format(counter))
+            else if(counter != qualifier && has_counter_format(counter))
                 counters.emplace(counter);
         }
     }
@@ -236,7 +204,7 @@ parse_counter_envs()
 {
     if(auto single_counter = get_env("ROCPROF_COUNTERS", std::string{}); !single_counter.empty())
     {
-        return {parse_counters(single_counter)};
+        return {parse_counters(single_counter, "pmc:")};
     }
 
     if(auto group_counters = get_env("ROCPROF_COUNTER_GROUPS", std::string{});
@@ -245,7 +213,7 @@ parse_counter_envs()
         auto counters = std::vector<std::set<std::string>>{};
         for(const auto& group : rocprofiler::sdk::parse::tokenize(group_counters, "\n"))
         {
-            counters.emplace_back(parse_counters(group));
+            counters.emplace_back(parse_counters(group, "pmc:"));
         }
         return counters;
     }
@@ -258,9 +226,23 @@ config::config()
 , kernel_filter_range{get_kernel_filter_range(
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counter_envs()}
+, spm_counters({parse_counters(get_env("ROCPROF_SPM_COUNTERS", std::string()), "spm:")})
 , att_param_perfcounters{
       parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
 {
+    // SECURITY: ROCPROF_ATT_LIBRARY_PATH selects the directory from which the
+    // advanced-thread-trace decoder library (librocprof-trace-decoder.so) is
+    // dlopen'd. Do not honor this user-controllable environment variable in a
+    // secure-execution context (setuid/setgid binaries, file capabilities, etc.),
+    // otherwise an unprivileged local user could inject an arbitrary shared
+    // library into a privileged process. Fall back to the default library search.
+    if(common::is_at_secure() && !att_library_path.empty())
+    {
+        ROCP_WARNING << "[ROCPROF_ATT_LIBRARY_PATH] ignoring environment variable because the "
+                        "process is running in a secure-execution context (AT_SECURE)";
+        att_library_path.clear();
+    }
+
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 
     std::unordered_map<std::string_view, rocprofiler_pc_sampling_unit_t> pc_sampling_unit_map = {
@@ -273,6 +255,10 @@ config::config()
         {{"none", ROCPROFILER_PC_SAMPLING_METHOD_NONE},
          {"stochastic", ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC},
          {"host_trap", ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP}};
+
+    std::unordered_map<std::string_view, rocprofiler_spm_parameter_type_t> spm_type_map = {
+        {"none", ROCPROFILER_SPM_PARAMETER_TYPE_NONE},
+        {"sclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES}};
 
     try
     {
@@ -307,6 +293,16 @@ config::config()
                                                         std::stoull(_config_params.at(1)),
                                                         std::stoull(_config_params.at(2))});
         }
+    }
+
+    try
+    {
+        spm_sample_interval_unit_value = spm_type_map.at(spm_sample_interval_unit);
+    } catch(...)
+    {
+        ROCP_FATAL << "Invalid value for ROCPROF_SPM_SAMPLE_INTERVAL_UNIT: "
+                   << spm_sample_interval_unit << ". "
+                   << "Valid choices are: sclk_cycles\n";
     }
 
     // Benchmarking Enable/Disable

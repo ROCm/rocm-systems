@@ -1,60 +1,121 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
+import math
 import shutil
 import textwrap
-from pathlib import Path
+from io import StringIO
 from typing import Any, Optional, TextIO
 
 import pandas as pd
+from rich.console import Console as RichConsole
+from rich.panel import Panel as RichPanel
+from rich.table import Table as RichTable
+from rich.text import Text as RichText
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser, schema
-from utils.kernel_name_shortener import (
-    kernel_name_shortener,
-)
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import (
-    METRIC_ID_RE,
+from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
+from utils.metrics.aggregation import calc_pct_of_peak
+from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
-    convert_metric_id_to_panel_info,
-    get_panel_alias,
-    get_uuid,
+    build_operator_summary,
+    get_bw_scale_and_unit,
     simplify_kernel_name,
 )
+from utils.utils_common import (
+    convert_filter_blocks_to_panel_ids,
+    is_gfx9,
+    is_gfx115x,
+    is_gfx1250,
+)
+
+_GUIDANCE_PANEL_MIN_WIDTH = 100
+
+
+def _tty_view_is_table(args: argparse.Namespace) -> bool:
+    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
+    return getattr(args, "view", None) == "table"
+
 
 KERNEL_NAME_WRAP_WIDTH = 40
+
+PC_SAMPLING_TABLE_ID = "21.1"
+
+PC_SAMPLING_STALL_REASON_REFERENCE = (
+    "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+    "rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons"
+)
 
 
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
+
+
+def scale_bw_columns(
+    df: pd.DataFrame, value_columns: list[str], decimal: int = 2
+) -> pd.DataFrame:
+    """Scale Bytes/s rows to human-readable units; recalculate Percent of Peak."""
+    if "Unit" not in df.columns:
+        return df
+
+    df_copy = df.copy()
+
+    bw_rows = df_copy["Unit"].str.lower().str.contains("bytes/s", na=False)
+    if not bw_rows.any():
+        return df_copy
+
+    pct_cols = ["Percent of Peak"]
+    value_col = "Value" if "Value" in df_copy.columns else "Avg"
+    peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
+
+    for idx in df_copy.index[bw_rows]:
+        # Determine scale from the primary value column
+        primary_value = None
+        for col in ["Value", "Avg"]:
+            if col in df_copy.columns:
+                try:
+                    val = df_copy.loc[idx, col]
+                    if pd.notna(val) and val != "N/A":
+                        primary_value = float(val)
+                        break
+                except (ValueError, TypeError):
+                    continue
+
+        if primary_value is None or primary_value == 0:
+            continue
+
+        divisor, unit = get_bw_scale_and_unit(primary_value)
+
+        # Scale all numeric bandwidth columns with the same divisor
+        for col in value_columns:
+            if col not in df_copy.columns:
+                continue
+            try:
+                val = df_copy.loc[idx, col]
+                if pd.notna(val) and val != "N/A":
+                    df_copy.loc[idx, col] = round(float(val) / divisor, decimal)
+            except (ValueError, TypeError):
+                pass
+
+        for pct_col in pct_cols:
+            if pct_col in df_copy.columns:
+                pct = calc_pct_of_peak(
+                    df_copy.loc[idx, value_col], df_copy.loc[idx, peak_col]
+                )
+                if pct is not None:
+                    df_copy.loc[idx, pct_col] = round(pct, decimal)
+
+        df_copy.loc[idx, "Unit"] = unit
+
+    return df_copy
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
@@ -191,8 +252,6 @@ def is_roofline_shown(
             )
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
-            if not kernel_top_df.empty:
-                kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
             # Display roofline metrics
             for kernel_id, metrics in workload.roofline_metrics.items():
@@ -256,31 +315,66 @@ def is_roofline_shown(
     return True
 
 
-def list_torch_operators(
+def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
+    framework_label: str = "PyTorch",
 ) -> None:
-    """Display PyTorch operators as a unified call tree grouped by source location."""
+    """Display operators as a unified call tree grouped by source location.
+
+    ``framework_label`` sets the heading text (for example "PyTorch" or
+    "Triton").
+    """
     if not call_trees:
-        print(f"\nPyTorch Operators in: {workload_path}")
+        print(f"\n{framework_label} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print(f"{framework_label} Operator Call Tree: {workload_path}")
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
+    show_operator_summary(build_operator_summary(call_trees))
     print(f"\n{'=' * 80}")
 
 
-def format_stats(launches: int, duration_ms: float) -> str:
-    """Format launch count and duration as an inline parenthesized string."""
+def format_duration(duration_ms: Optional[float]) -> str:
+    """Format a duration in ms; switch to us below 0.01 ms; None/NaN render as N/A."""
+    if duration_ms is None:
+        return "N/A"
+    if isinstance(duration_ms, float) and math.isnan(duration_ms):
+        return "N/A"
     if duration_ms < 0.01:
-        formatted_duration = f"{duration_ms * 1000:.2f} us"
-    else:
-        formatted_duration = f"{duration_ms:.2f} ms"
-    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
+        return f"{duration_ms * 1000:.2f} us"
+    return f"{duration_ms:.2f} ms"
+
+
+def format_node_stats(node: CallTreeNode) -> str:
+    """Format operator-node stats (calls, dispatches, total, dispatch_mean/min/max).
+
+    dispatch_mean / dispatch_min / dispatch_max are per kernel dispatch.
+    The "calls:" segment is omitted when invocation_ids is empty (location
+    roots and frames recorded without Context_Id).
+    """
+    mean_ms = (
+        node.mean_dispatch_ns * NS_TO_MS if node.mean_dispatch_ns is not None else None
+    )
+    min_ms = (
+        node.min_dispatch_ns * NS_TO_MS if node.min_dispatch_ns is not None else None
+    )
+    max_ms = (
+        node.max_dispatch_ns * NS_TO_MS if node.max_dispatch_ns is not None else None
+    )
+    calls_prefix = f"calls: {node.call_count}, " if len(node.invocation_ids) > 0 else ""
+    return (
+        f"({calls_prefix}"
+        f"dispatches: {node.kernel_launches}, "
+        f"total: {format_duration(node.total_duration_ms)}, "
+        f"dispatch_mean: {format_duration(mean_ms)}, "
+        f"dispatch_min: {format_duration(min_ms)}, "
+        f"dispatch_max: {format_duration(max_ms)})"
+    )
 
 
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
@@ -368,7 +462,7 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
     for i, (location, root) in enumerate(sorted_locations):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        stats = format_node_stats(root)
         print(f"\n{location} {stats}")
         for child in sorted(
             root.children.values(),
@@ -376,6 +470,80 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
             reverse=True,
         ):
             print_operator_node(child)
+
+
+def show_operator_summary(summary_df: pd.DataFrame) -> None:
+    """Print a flat per-operator summary table alongside the call tree.
+
+    - Rendered as a fancy_grid bordered table via tabulate, matching the
+      rest of the analyze CLI.
+
+    - Operator column wraps long paths; numeric columns size to content.
+
+    - A header line above the table explains the aggregation so column
+      names can stay short.
+
+    - Time cells are formatted per-cell via format_duration (auto-switching
+      between ms and us). NaN renders as "N/A".
+    """
+    if summary_df is None or summary_df.empty:
+        print("\nOperator summary: (no operators with recorded dispatches)")
+        return
+
+    operator_name_wrap_width = 72
+
+    # (DataFrame column, display label) pairs. DataFrame names match the
+    # schema produced by build_operator_summary; display labels are short
+    # because the header line below explains the semantics and time cells
+    # self-label their unit.
+    column_map = [
+        ("Operator", "Operator"),
+        ("Calls", "Calls"),
+        ("Dispatches", "Dispatches"),
+        ("Total_GPU", "Total"),
+        ("Pct_Total_GPU", "% Total"),
+        ("Mean_Per_Call", "Mean/Call"),
+        ("Mean_Per_Dispatch", "Mean"),
+        ("Min_Dispatch", "Min"),
+        ("Max_Dispatch", "Max"),
+    ]
+    source_cols = [c for c, _ in column_map]
+    headers = [h for _, h in column_map]
+    time_cols = (
+        "Total_GPU",
+        "Mean_Per_Call",
+        "Mean_Per_Dispatch",
+        "Min_Dispatch",
+        "Max_Dispatch",
+    )
+
+    display_df = summary_df[source_cols].copy()
+    display_df["Operator"] = (
+        display_df["Operator"]
+        .astype(str)
+        .apply(lambda s: textwrap.fill(s, width=operator_name_wrap_width))
+    )
+    for col in time_cols:
+        display_df[col] = display_df[col].apply(format_duration)
+
+    # Time columns are pre-formatted strings; only % Total still needs floatfmt.
+    floatfmt = ("", "", "", "", ".2f", "", "", "", "")
+    colalign = ("left",) + ("right",) * (len(headers) - 1)
+
+    print(
+        "\nOperator summary (Min/Max/Mean are per-dispatch over the subtree; "
+        "sorted by Total):"
+    )
+    print(
+        tabulate(
+            display_df.values,
+            headers=headers,
+            tablefmt="fancy_grid",
+            floatfmt=floatfmt,
+            colalign=colalign,
+            missingval="N/A",
+        )
+    )
 
 
 def print_operator_node(
@@ -390,10 +558,13 @@ def print_operator_node(
     node_prefix = f"{indent}{branch_char}"
 
     if is_branching:
-        stats = format_stats(node.kernel_launches, node.total_duration_ms)
-        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
     else:
-        print_wrapped_tree_line(node_prefix, node.name)
+        if len(node.invocation_ids) > 0:
+            suffix = f" (calls: {node.call_count})"
+        else:
+            suffix = ""
+        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
 
     # Build new parent_pipes for children
     if is_last:
@@ -424,7 +595,7 @@ def print_operator_node(
         id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
         display_name = simplify_kernel_name(kernel_name)
         total_ms = duration_ns * NS_TO_MS
-        stats = format_stats(launches, total_ms)
+        stats = f"(dispatches: {launches}, total: {format_duration(total_ms)})"
 
         # Last kernel gets └─, others get ├─
         kernel_is_last = i == len(node.kernels) - 1
@@ -437,6 +608,19 @@ def print_operator_node(
             f"{id_suffix} {stats}".strip(),
             continuation_prefix=new_parent_pipes,
         )
+
+
+def _safe_round_value(
+    value: object,
+    decimal: int,
+) -> object:
+    """Round *value* to *decimal* places, returning ``"N/A"`` on failure."""
+    if value == "N/A":
+        return value
+    try:
+        return round(float(value), decimal)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return "N/A"
 
 
 def process_table_data(
@@ -490,6 +674,9 @@ def process_table_data(
 
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
+
+                if header not in cur_df.columns:
+                    continue
 
                 if (table_type == "raw_csv_table") or (
                     table_type == "metric_table" and header not in hidden_cols
@@ -546,12 +733,19 @@ def process_table_data(
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
                         cur_df_copy[header] = [
-                            (round(float(x), args.decimal) if x != "N/A" else x)
-                            for x in base_df[header]
+                            _safe_round_value(x, args.decimal) for x in base_df[header]
                         ]
                         result_df = pd.concat([result_df, cur_df_copy[header]], axis=1)
 
     return result_df
+
+
+def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
+    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
+    sources = panel.get("data source") or []
+    return bool(sources) and all(
+        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
+    )
 
 
 def format_table_output(
@@ -560,7 +754,8 @@ def format_table_output(
     df: pd.DataFrame,
     table_type: str,
     runs: dict[str, Any],
-    csv_dir: Optional[Path] = None,
+    gpu_arch: Optional[str] = None,
+    mem_data_override: Optional[dict[str, Any]] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -573,22 +768,23 @@ def format_table_output(
         for col_idx in range(len(df.columns))
     )
 
-    # Do not print the table if any column is empty
-    if is_empty_columns_exist:
+    # Do not print the table if any column is empty. PC sampling table 21.1 is
+    # exempt: its source column is all N/A when the workload lacks debug info.
+    if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
 
-    if "title" in table_config and table_config["title"]:
+    # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
+    # With --view table, keep titles so tabular output stays navigable.
+    skip_mem_chart_title = table_config.get(
+        "cli_style"
+    ) == "mem_chart" and not _tty_view_is_table(args)
+    if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
 
-    if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
-        if "title" in table_config and table_config["title"]:
-            table_id_str += f"_{table_config['title']}"
-
-        csv_filename = csv_dir / f"{table_id_str.replace(' ', '_')}.csv"
-        df.to_csv(csv_filename, index=False)
-        console_warning(f"Created file: {csv_filename}")
+    if table_id_str == PC_SAMPLING_TABLE_ID:
+        content += f"{PC_SAMPLING_STALL_REASON_REFERENCE}\n"
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -606,27 +802,191 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # enable mem_chart only with single run
-    if (
-        table_config.get("cli_style") == "mem_chart"
+    # For a single run, format Bytes/s metrics with human-readable units.
+    # For multiple runs (baseline comparison), keep Bytes for accurate comparison
+    is_single_run = len(runs) == 1
+
+    # Capture raw metric values before human-readable BW scaling so the chart
+    # renderer still receives Bytes/s floats.
+    raw_chart_values: Optional[dict[str, Any]] = None
+    if "Metric" in df.columns and "Value" in df.columns:
+        raw_chart_values = dict(zip(df["Metric"], df["Value"]))
+
+    if is_single_run and "Unit" in df.columns:
+        # Identify value columns to format
+        value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
+        df = scale_bw_columns(df, value_cols, args.decimal)
+
+    # When --view table is set, force table output and ignore cli_style from config
+    use_mem_chart = (
+        not _tty_view_is_table(args)
+        and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
-    ):
-        mem_data = (
-            pd
-            .DataFrame([df["Metric"], df["Value"]])
-            .transpose()
-            .set_index("Metric")
-            .to_dict()["Value"]
-        )
-        content += mem_chart.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
+        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
+    )
+
+    if use_mem_chart:
+        if mem_data_override is not None:
+            mem_data = mem_data_override
+        else:
+            mem_data = raw_chart_values or {}
+
+        if is_gfx115x(gpu_arch):
+            content += (
+                mem_chart_gfx11.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                )
+                + "\n"
+            )
+        elif is_gfx1250(gpu_arch):
+            content += (
+                mem_chart_gfx1250.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                )
+                + "\n"
+            )
+        else:
+            content += (
+                mem_chart_gfx9.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                    gpu_arch=gpu_arch,
+                )
+                + "\n"
+            )
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
         )
 
     return content
+
+
+def _max_line_width(rendered: str) -> int:
+    """Return the longest line width after stripping ANSI codes."""
+    stripped = strip_ansi(rendered)
+    if not stripped.strip():
+        return 0
+    return max(len(line) for line in stripped.splitlines())
+
+
+def _render_membw_guidance(
+    membw_result: MemBwAnalysisResult,
+    chart_width: int = 0,
+) -> str:
+    """Render membw guidance text to append below the memory chart."""
+    if not _has_active_nodes(membw_result.nodes):
+        return _render_membw_status_line(membw_result)
+    panel_output = _render_membw_guidance_panel(
+        membw_result.guidance_blocks,
+        chart_width=chart_width,
+    )
+    if panel_output:
+        return panel_output
+    return "Memory Bandwidth Analysis: Bottlenecks detected (see chart annotations).\n"
+
+
+def _has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
+    """True when any node in the tree is active."""
+    for node in nodes:
+        if node.state == "active":
+            return True
+        if _has_active_nodes(node.children):
+            return True
+    return False
+
+
+def _all_nodes_indeterminate(
+    nodes: tuple[BottleneckNode, ...],
+) -> bool:
+    """True when every root node is indeterminate."""
+    return bool(nodes) and all(n.state == "indeterminate" for n in nodes)
+
+
+def _render_membw_status_line(
+    membw_result: MemBwAnalysisResult,
+) -> str:
+    """Render a single status line when no bottlenecks are active."""
+    if membw_result.availability == "unavailable":
+        return (
+            "Memory Bandwidth Analysis: Unavailable "
+            f"({membw_result.availability_reason or 'no data'}).\n"
+        )
+    if membw_result.availability == "partial":
+        return (
+            "Memory Bandwidth Analysis: Partial data "
+            f"({membw_result.availability_reason}).\n"
+        )
+    if _all_nodes_indeterminate(membw_result.nodes):
+        return "Memory Bandwidth Analysis: Inconclusive (insufficient counter data).\n"
+    return "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).\n"
+
+
+def _style_guidance_block(block: str) -> RichText:
+    """Apply Rich styling to a single guidance block."""
+    text = RichText(block.rstrip())
+    first_newline = block.find("\n")
+    if first_newline > 0:
+        text.stylize("bold indian_red", 0, first_newline)
+    text.highlight_regex(
+        r"  (Condition|Measured|Impact)\s*:",
+        style="dim",
+    )
+    return text
+
+
+def _render_membw_guidance_panel(
+    guidance_blocks: tuple[str, ...],
+    chart_width: int = 0,
+) -> str:
+    """Render active guidance blocks in a styled Rich panel."""
+    sections = [_style_guidance_block(block) for block in guidance_blocks if block]
+    if not sections:
+        return ""
+
+    panel_width = max(chart_width, _GUIDANCE_PANEL_MIN_WIDTH)
+    col_gap = 4
+    # 2 border + 2*2 padding = 6; minus column gap
+    col_width = (panel_width - 6 - col_gap) // 2
+
+    grid = RichTable.grid(padding=(1, col_gap))
+    grid.add_column(width=col_width)
+    grid.add_column(width=col_width)
+
+    for i in range(0, len(sections), 2):
+        left = sections[i]
+        right = sections[i + 1] if i + 1 < len(sections) else RichText()
+        grid.add_row(left, right)
+
+    panel = RichPanel(
+        grid,
+        title="[bold]Memory Bandwidth Guided Analysis[/bold]",
+        border_style="indian_red",
+        width=panel_width,
+        padding=(1, 2),
+    )
+
+    buf = StringIO()
+    console = RichConsole(
+        file=buf,
+        force_terminal=True,
+        width=panel_width,
+    )
+    console.print(panel)
+    return buf.getvalue()
 
 
 def show_all(
@@ -641,46 +1001,21 @@ def show_all(
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
-    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
-    csv_dir = None
 
-    if isinstance(raw_filter_panel_ids, dict):
-        # For backward compatibility
-        raw_filter_panel_ids = [
-            name
-            for name, table_type in raw_filter_panel_ids.items()
-            if table_type == "metric_id"
-        ]
-
-    panel_alias = get_panel_alias()  # alias -> panel_id (string or int)
-
-    filter_panel_ids = set()
-    for bid in raw_filter_panel_ids:
-        bid_s = str(bid)
-
-        # If it's not already an ID, resolve alias -> ID
-        if not METRIC_ID_RE.match(bid_s):
-            try:
-                bid_s = str(panel_alias[bid_s])
-            except KeyError as e:
-                raise KeyError(f"Unknown panel alias: {bid_s!r}") from e
-
-        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
-        if file_id is not None:
-            filter_panel_ids.add(int(file_id))
+    first_run = next(iter(runs.values()))
+    gpu_arch = (
+        first_run.sys_info.iloc[0]["gpu_arch"]
+        if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
+        else None
+    )
+    filter_panel_ids = convert_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", []), gpu_arch
+    )
 
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
     else:
         hidden_cols = config.HIDDEN_COLUMNS_CLI
-
-    if args.output_format == "csv":
-        if args.output_name:
-            csv_dir = Path(f"{args.output_name}")
-        else:
-            csv_dir = Path(f"rocprof_compute_{get_uuid()}")
-        if not csv_dir.exists():
-            csv_dir.mkdir()
 
     # Check for valid roofline data once (used to skip roofline tables in the loop)
     has_valid_roofline = any(
@@ -698,23 +1033,27 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # NOTE: Experimental Feature Toggle
-        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
-        if panel_id == 3000 and not args.membw_analysis:
-            continue
-
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
         # Handle roofline panel (400) with custom display logic
-        if panel_id == 400:
+        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
+        if panel_id == 400 and not _tty_view_is_table(args):
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
+        mem_chart_data: dict[str, Any] = {}  # merged mem_chart metrics (gfx115x)
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
+                # Skip tables that were filtered out at build_dfs time
+                # (e.g. analyze-mode -b dropped this block). In baseline mode
+                # require the table in every run so per-run dfs[id] lookups
+                # downstream stay safe.
+                if not all(table_config["id"] in run.dfs for run in runs.values()):
+                    continue
+
                 # Emit warnings for roofline tables (401, 402)
                 # if roofline data is invalid
                 if table_config["id"] in [401, 402] and not has_valid_roofline:
@@ -784,16 +1123,95 @@ def show_all(
                     hidden_cols,
                 )
 
-                if not processed_df.empty:
-                    panel_content += format_table_output(
-                        args, table_config, processed_df, table_type, runs, csv_dir
+                if processed_df.empty:
+                    continue
+
+                # For mem_chart panels, collect all tables and merge
+                # into a single chart; skip individual table output.
+                # Gate to architectures with a renderer; unsupported arches fall back to
+                # normal table output.
+                is_mem_chart = (
+                    table_config.get("cli_style") == "mem_chart"
+                    and not _tty_view_is_table(args)
+                    and (
+                        is_gfx9(gpu_arch)
+                        or is_gfx115x(gpu_arch)
+                        or is_gfx1250(gpu_arch)
+                    )
+                )
+
+                if is_mem_chart and len(runs) == 1:
+                    has_cols = (
+                        "Metric" in processed_df.columns
+                        and "Value" in processed_df.columns
+                    )
+                    if has_cols:
+                        table_mem = dict(
+                            zip(processed_df["Metric"], processed_df["Value"])
+                        )
+                        mem_chart_data.update(table_mem)
+                    # Skip individual table output; merged chart emitted below
+                    continue
+
+                panel_content += format_table_output(
+                    args,
+                    table_config,
+                    processed_df,
+                    table_type,
+                    runs,
+                    gpu_arch,
+                )
+
+        # Emit the merged memory chart for the panel.
+        if mem_chart_data and not _tty_view_is_table(args):
+            heading = format_mem_chart_heading(
+                args.normal_unit,
+                panel_id=int((panel or {}).get("id", 300)),
+            )
+            if is_gfx115x(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx11.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
+                )
+            elif is_gfx1250(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx1250.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
+                )
+            else:
+                membw_result = getattr(first_run, "membw_result", None)
+                chart_output = mem_chart_gfx9.plot_mem_chart(
+                    mem_chart_data,
+                    chart_title=heading,
+                    gpu_arch=gpu_arch,
+                    membw=membw_result,
+                )
+                panel_content += chart_output + "\n"
+                if membw_result is not None:
+                    panel_content += _render_membw_guidance(
+                        membw_result,
+                        chart_width=_max_line_width(chart_output),
                     )
 
-        # Roofline printing is handled separately above in is_roofline_shown
-        if panel_content and table_config["id"] not in [401, 402]:
-            print(f"\n{'-' * 80}", file=output)
-            print(f"{panel_id // 100}. {panel['title']}", file=output)
-            print(panel_content, file=output)
+        # Roofline printing is handled separately above in is_roofline_shown.
+        # With --view table, roofline tables (401/402) render as normal tables.
+        if panel_content and (
+            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+        ):
+            if not hasattr(output, "isatty") or not output.isatty():
+                panel_content = strip_ansi(panel_content)
+            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+                print(panel_content, file=output)
+            else:
+                print(f"\n{'-' * 80}", file=output)
+                print(f"{panel_id // 100}. {panel['title']}", file=output)
+                print(panel_content, file=output)
 
 
 def show_roof_plot(roof_plot: str) -> None:
@@ -824,6 +1242,8 @@ def show_kernel_stats(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 for run, data in runs.items():
+                    if table_config["id"] not in data.dfs:
+                        continue
                     single_df = data.dfs[table_config["id"]]
                     # NB:
                     #   For pmc_kernel_top.csv, have to sort here if not

@@ -19,15 +19,18 @@ if(NOT DEFINED HIP_ARCH_DETECTION_DONE)
   elseif(NOT DEFINED CMAKE_HIP_ARCHITECTURES OR NOT CMAKE_HIP_ARCHITECTURES)
     # Auto-detect if not set
     if(NOT DEFINED ROCM_PATH)
+      # Derive ROCM_PATH from HIP_PATH
       if(DEFINED ENV{ROCM_PATH})
         set(ROCM_PATH $ENV{ROCM_PATH})
-      else()
-        set(ROCM_PATH "/opt/rocm")
+      elseif(DEFINED HIP_PATH)
+        set(ROCM_PATH ${HIP_PATH})
       endif()
     endif()
 
+    find_program(ROCM_AGENT_ENUM rocm_agent_enumerator
+      HINTS ${ROCM_PATH}/bin)
     execute_process(
-      COMMAND ${ROCM_PATH}/bin/rocm_agent_enumerator
+      COMMAND ${ROCM_AGENT_ENUM}
       OUTPUT_VARIABLE DETECTED_GPUS
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET

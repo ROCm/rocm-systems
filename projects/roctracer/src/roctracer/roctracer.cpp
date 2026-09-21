@@ -373,6 +373,16 @@ ActivityRegistrationTable<ACTIVITY_DOMAIN_HIP_OPS, IsStopped> hip_ops_activity_t
 ActivityRegistrationTable<ACTIVITY_DOMAIN_HSA_OPS, IsStopped> hsa_ops_activity_table;
 CallbackRegistrationTable<ACTIVITY_DOMAIN_HSA_EVT, IsStopped> hsa_evt_callback_table;
 
+// Pending HIP_OPS record tracking. CLR explicitly calls CommitRecord (sentinel data=0x1)
+// once per command to increment submitted. Delivered is deduplicated by correlation_id
+// so AccumulateCommand's N records per cid count as one delivery.
+static std::atomic<uint64_t> hip_ops_submitted{0};
+static std::atomic<uint64_t> hip_ops_delivered{0};
+
+// Reserved sentinel pointer value matching kCommitRecordSentinel in CLR's activity.cpp.
+// Must never be a valid activity_record_t pointer.
+static void* const kCommitRecordSentinel = reinterpret_cast<void*>(uintptr_t{1});
+
 int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API:
@@ -384,11 +394,17 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                   static_cast<HIP_ApiTracer::TraceData*>(data));
 
     case ACTIVITY_DOMAIN_HIP_OPS:
-      if (auto pool = hip_ops_activity_table.Get(operation_id)) {
-        if (auto record = static_cast<activity_record_t*>(data)) {
-          // If the record is for a kernel dispatch, write the kernel name in the pool's data,
-          // and make the record point to it. Older HIP runtimes do not provide a kernel
-          // name, so record.kernel_name might be null.
+      // data == kCommitRecordSentinel (0x1): CLR's CommitRecord() signals that a command
+      // has been created and will produce an activity record. Called once per command from
+      // IsActivityEnabledAndCommit() in command.cpp. Matched by hip_ops_delivered on the
+      // record delivery path below.
+      if (data == kCommitRecordSentinel) {
+        hip_ops_submitted.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+      }
+      if (data != nullptr) {
+        auto record = static_cast<activity_record_t*>(data);
+        if (auto pool = hip_ops_activity_table.GetForDrain(operation_id)) {
           if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr)
             (*pool)->Write(*record, record->kernel_name, strlen(record->kernel_name) + 1,
                            [](auto& record, const void* data) {
@@ -397,6 +413,17 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
           else
             (*pool)->Write(*record);
         }
+        // Deduplicate by correlation_id: AccumulateCommand delivers multiple records
+        // with the same cid — only count the transition to a new cid.
+        thread_local activity_correlation_id_t last_delivered_cid{0};
+        if (record->correlation_id != last_delivered_cid) {
+          last_delivered_cid = record->correlation_id;
+          hip_ops_delivered.fetch_add(1, std::memory_order_release);
+        }
+        return 0;
+      }
+      // IsEnabled query (data == nullptr)
+      if (auto pool = hip_ops_activity_table.Get(operation_id)) {
         return 0;
       }
       break;
@@ -833,14 +860,42 @@ roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_i
 
 // Start API
 ROCTRACER_API void roctracer_start() {
-  if (stopped_status.exchange(false, std::memory_order_relaxed) && roctracer_start_cb)
-    roctracer_start_cb();
+  if (stopped_status.exchange(false, std::memory_order_relaxed)) {
+    // Reset counters so prior divergence (e.g. from errored commands) doesn't
+    // cause spurious drain timeouts in the next stop() call.
+    hip_ops_submitted.store(0, std::memory_order_relaxed);
+    hip_ops_delivered.store(0, std::memory_order_relaxed);
+    if (roctracer_start_cb) roctracer_start_cb();
+  }
 }
 
 // Stop API
 ROCTRACER_API void roctracer_stop() {
-  if (!stopped_status.exchange(true, std::memory_order_relaxed) && roctracer_stop_cb)
-    roctracer_stop_cb();
+  if (!stopped_status.exchange(true, std::memory_order_relaxed)) {
+    // Drain in-flight activity records committed before stop.
+    // GPU work should already be complete (e.g. after hipDeviceSynchronize),
+    // async handlers just need time to fire and deliver records.
+    constexpr int kDrainTimeoutMs = 100;
+    for (int waited = 0;
+         hip_ops_delivered.load(std::memory_order_acquire) <
+             hip_ops_submitted.load(std::memory_order_acquire) &&
+         waited < kDrainTimeoutMs;
+         waited++) {
+      usleep(1000);
+    }
+    {
+      uint64_t delivered = hip_ops_delivered.load(std::memory_order_acquire);
+      uint64_t submitted = hip_ops_submitted.load(std::memory_order_acquire);
+      if (delivered < submitted) {
+        ERR_LOGGING("roctracer_stop: drain timeout after " << kDrainTimeoutMs
+                    << "ms, " << (submitted - delivered) << " activity records may be lost");
+      }
+    }
+    // Flush the pool so the client's buffer_callback_fun receives any records
+    // still sitting in the partially-filled buffer before stop returns.
+    roctracer_flush_activity_impl(nullptr);
+    if (roctracer_stop_cb) roctracer_stop_cb();
+  }
 }
 
 ROCTRACER_API roctracer_status_t roctracer_get_timestamp(roctracer_timestamp_t* timestamp) {

@@ -788,7 +788,7 @@ def getMemoryPartition(device, silent=True):
 
 
 def getMemoryPartitionCapabilities(device, silent=True):
-    """Return the current memory partition capablities of a given device
+    """Return the current memory partition capabilities of a given device
 
     :param device: DRM device identifier
     :param silent: Turn on to silence error output
@@ -2414,21 +2414,21 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                     device, rsmi_clk_names_dict[clk_defined], byref(freq)
                 )
                 if rsmi_ret_ok(ret, device, "get_gpu_clk_freq_" + str(clk_defined), silent=True):
-                    levl = freq.current
-                    if levl >= freq.num_supported:
+                    level = freq.current
+                    if level >= freq.num_supported:
                         printLog(
                             device, "%s current clock frequency not found" % (clk_defined), None
                         )
                         continue
-                    fr = freq.frequency[levl] / 1000000
-                    freq_index = levl
+                    fr = freq.frequency[level] / 1000000
+                    freq_index = level
                     if freq.has_deep_sleep:
                         # sleep state
-                        if levl == 0:
+                        if level == 0:
                             freq_index = "S"
                         # all indices are offset by 1 because Deep Sleep occupies index 0
                         else:
-                            freq_index = levl - 1
+                            freq_index = level - 1
                     if concise:  # in case function is used for concise output, no need to print.
                         return "{:.0f}Mhz".format(fr)
                     printLog(
@@ -2449,21 +2449,21 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         device, rsmi_clk_names_dict[clk_type], byref(freq)
                     )
                     if rsmi_ret_ok(ret, device, "get_clk_freq_" + str(clk_type), True):
-                        levl = freq.current
-                        if levl >= freq.num_supported:
+                        level = freq.current
+                        if level >= freq.num_supported:
                             printLog(
                                 device, "%s current clock frequency not found" % (clk_type), None
                             )
                             continue
-                        freq_index = levl
+                        freq_index = level
                         if freq.has_deep_sleep:
                             # sleep state
-                            if levl == 0:
+                            if level == 0:
                                 freq_index = "S"
                             # all indices are offset by 1 because Deep Sleep occupies index 0
                             else:
-                                freq_index = levl - 1
-                        fr = freq.frequency[levl] / 1000000
+                                freq_index = level - 1
+                        fr = freq.frequency[level] / 1000000
                         if PRINT_JSON:
                             printLog(
                                 device, "%s clock speed:" % (clk_type), "(%sMhz)" % (str(fr)[:-2])

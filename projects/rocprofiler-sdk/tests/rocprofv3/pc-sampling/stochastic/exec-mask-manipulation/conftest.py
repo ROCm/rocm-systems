@@ -50,6 +50,12 @@ def pytest_addoption(parser):
         help="All SW and HW units must be sampled.",
     )
 
+    parser.addoption(
+        "--input-agent-info-csv",
+        action="store",
+        help="Path to CSV file containing agents information.",
+    )
+
 
 @pytest.fixture
 def input_csv(request):
@@ -96,3 +102,17 @@ def input_json(request):
 def all_sampled(request):
     _all_sampled_str = request.config.getoption("--all-sampled")
     return _all_sampled_str == "True"
+
+
+@pytest.fixture
+def input_agent_info_csv(request):
+    filename = request.config.getoption("--input-agent-info-csv")
+    with open(filename, "r") as inp:
+        return pd.read_csv(
+            inp,
+            na_filter=False,  # parse empty fields as ""
+            keep_default_na=False,  # parse empty fields as ""
+            dtype={
+                "Name": str,
+            },
+        )

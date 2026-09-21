@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 check_rocprofsys_disable_examples("split-copy-compute-hw-queues" _SPLIT_COPY_COMPUTE_DISABLED)
 if(_SPLIT_COPY_COMPUTE_DISABLED)
@@ -41,10 +41,10 @@ if(IS_INSTINCT_APU)
     list(APPEND EXAMPLE_COMPILE_FLAGS -DMI300A_RUN)
 endif()
 
-set_source_files_properties(compute_comm_overlap.hip PROPERTIES LANGUAGE CXX)
+set_source_files_properties(compute-comm-overlap.hip PROPERTIES LANGUAGE CXX)
 
 set(HPC_EXAMPLE_NAME "split-copy-compute-hw-queues")
-add_executable(${HPC_EXAMPLE_NAME} compute_comm_overlap.hip)
+add_executable(${HPC_EXAMPLE_NAME} compute-comm-overlap.hip)
 target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -xhip ${EXAMPLE_COMPILE_FLAGS})
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)

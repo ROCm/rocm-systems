@@ -95,14 +95,13 @@ class SingleHeap {
   void* realloc(void* ptr, size_t size);
 
   /**
-   * @brief
+   * @brief Allocates aligned memory from the heap
    *
-   * @param[in]
-   * @param[in]
-   *
-   * @return
+   * @param[in,out] ptr        Address of raw pointer (&pointer_to_void)
+   * @param[in]     alignment  Required pointer alignment in bytes (power of 2)
+   * @param[in]     size       Size in bytes of memory allocation
    */
-  void* malign(size_t alignment, size_t size);
+  void malign(void** ptr, size_t alignment, size_t size);
 
   /**
    * @brief Accessor for heap base ptr
@@ -132,6 +131,27 @@ class SingleHeap {
    */
   size_t get_avail();
 
+  /**
+   * @brief Accessor for the allocator type backing the heap
+   *
+   * @return AllocatorType used to allocate the heap memory
+   */
+  AllocatorType get_type();
+
+  /**
+   * @brief Accessor for the allocation granularity of the heap allocator
+   *
+   * @return Allocation granularity in bytes
+   */
+  size_t get_granularity();
+
+  /**
+   * @brief Accessor for the allocator used to back the heap memory
+   *
+   * @return Pointer to the HIPAllocator that allocated the heap
+   */
+  HIPAllocator *get_allocator();
+
  private:
   /**
    * @brief Heap memory object
@@ -141,6 +161,10 @@ class SingleHeap {
    * @brief Allocation strategy object
    */
   ShmemAllocatorStrategy *strat_{nullptr};
+  /**
+   * @brief Allocator used to back the heap memory
+   */
+  HIPAllocator *allocator_{nullptr};
 };
 
 }  // namespace rocshmem

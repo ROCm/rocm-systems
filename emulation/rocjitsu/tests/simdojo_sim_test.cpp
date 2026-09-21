@@ -1,0 +1,1704 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file simdojo_sim_test.cpp
+/// @brief Tests for simdojo simulation engine: LBTS correctness, cross-partition
+/// communication, async causality, termination, pacing, spinlock, and stress.
+
+#include "simdojo/components/cache.h"
+#include "simdojo/sim/pacing_controller.h"
+#include "simdojo/sim/simulation.h"
+#include "util/spinlock.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <ctime>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace simdojo;
+
+// ============================================================================
+// Test Helper Components
+// ============================================================================
+
+namespace {
+
+/// Helper: create a message with an integer payload.
+inline std::unique_ptr<Message> make_test_msg(uint64_t val = 0) {
+  auto msg = std::make_unique<Message>();
+  msg->set_payload(static_cast<uintptr_t>(val));
+  return msg;
+}
+
+/// Leaf component that schedules N self-events at ticks 1..N during startup.
+/// Records each processing tick for later assertion.
+class CounterComponent : public Component {
+public:
+  CounterComponent(std::string name, uint32_t num_events)
+      : Component(std::move(name)), num_events_(num_events) {
+    timer_event_.set_handler([this](Tick ts, Message *) {
+      ticks_processed.push_back(ts);
+      ++count;
+      if (count < num_events_)
+        schedule_event(&timer_event_, ts + 1);
+    });
+  }
+
+  void startup() override {
+    if (num_events_ > 0)
+      schedule_event(&timer_event_, 1);
+  }
+
+  std::vector<Tick> ticks_processed;
+  uint32_t count = 0;
+
+private:
+  uint32_t num_events_;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Component with IN/OUT ports that replies to each received message.
+/// Optionally registers as primary (default: true).
+class PingPongComponent : public Component {
+public:
+  PingPongComponent(std::string name, uint32_t target, bool send_first = false,
+                    bool register_primary = true)
+      : Component(std::move(name)), target_count_(target), send_first_(send_first),
+        register_primary_(register_primary) {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN, PortProtocol::UNTYPED));
+    out_ =
+        add_port(std::make_unique<Port>("out", 1, this, PortDirection::OUT, PortProtocol::UNTYPED));
+    in_->set_handler([this](Tick ts, Message *) {
+      recv_ticks.push_back(ts);
+      ++recv_count;
+      if (recv_count >= target_count_) {
+        if (register_primary_)
+          engine()->primary_release();
+        return;
+      }
+      out_->send(make_test_msg(recv_count));
+    });
+  }
+
+  void startup() override {
+    if (register_primary_)
+      engine()->register_as_primary();
+    if (send_first_)
+      out_->send(make_test_msg(0));
+  }
+
+  Port *in_port() { return in_; }
+  Port *out_port() { return out_; }
+
+  std::vector<Tick> recv_ticks;
+  uint32_t recv_count = 0;
+
+private:
+  uint32_t target_count_;
+  bool send_first_;
+  bool register_primary_;
+  Port *in_ = nullptr;
+  Port *out_ = nullptr;
+};
+
+/// Component that sends N messages on its OUT port at consecutive ticks.
+/// Optionally registers as primary (default: true for backward compat).
+class ProducerComponent : public Component {
+public:
+  ProducerComponent(std::string name, uint32_t count, Tick start_tick = 1,
+                    bool register_primary = true)
+      : Component(std::move(name)), total_(count), start_tick_(start_tick),
+        register_primary_(register_primary) {
+    out_ =
+        add_port(std::make_unique<Port>("out", 0, this, PortDirection::OUT, PortProtocol::UNTYPED));
+    timer_event_.set_handler([this](Tick ts, Message *) {
+      out_->send(make_test_msg(sent_));
+      ++sent_;
+      if (sent_ < total_)
+        schedule_event(&timer_event_, ts + 10);
+      else if (register_primary_)
+        engine()->primary_release();
+    });
+  }
+
+  void startup() override {
+    if (register_primary_)
+      engine()->register_as_primary();
+    schedule_event(&timer_event_, start_tick_);
+  }
+
+  Port *out_port() { return out_; }
+  uint32_t sent_ = 0;
+
+private:
+  uint32_t total_;
+  Tick start_tick_;
+  bool register_primary_;
+  Port *out_ = nullptr;
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Component that records all received messages.
+class ConsumerComponent : public Component {
+public:
+  explicit ConsumerComponent(std::string name) : Component(std::move(name)) {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN, PortProtocol::UNTYPED));
+    in_->set_handler([this](Tick ts, Message *msg) {
+      uint64_t val = msg ? static_cast<uint64_t>(msg->payload()) : 0;
+      received.emplace_back(ts, val);
+    });
+  }
+
+  Port *in_port() { return in_; }
+  std::vector<std::pair<Tick, uint64_t>> received;
+
+private:
+  Port *in_ = nullptr;
+};
+
+/// Component that runs forever (for max_ticks / request_exit tests).
+class InfiniteComponent : public Component {
+public:
+  explicit InfiniteComponent(std::string name) : Component(std::move(name)) {
+    timer_event_.set_handler([this](Tick ts, Message *) { schedule_event(&timer_event_, ts + 1); });
+  }
+
+  void startup() override { schedule_event(&timer_event_, 1); }
+
+private:
+  Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Component that counts initialize()/startup()/shutdown() calls. Used to verify
+/// that shutdown() cleanup fires exactly once per initialized component, on both
+/// the normal shutdown path and the startup-failure unwind path. When given a
+/// shared order log, records its own name on shutdown() so tests can assert the
+/// reverse-topology-order shutdown contract.
+class LifecycleCountingComponent : public Component {
+public:
+  explicit LifecycleCountingComponent(std::string name,
+                                      std::vector<std::string> *shutdown_order = nullptr)
+      : Component(std::move(name)), shutdown_order_(shutdown_order) {}
+
+  void initialize() override { ++initializes; }
+  void startup() override { ++startups; }
+  void shutdown() override {
+    ++shutdowns;
+    if (shutdown_order_)
+      shutdown_order_->push_back(name());
+  }
+
+  uint32_t initializes = 0;
+  uint32_t startups = 0;
+  uint32_t shutdowns = 0;
+
+private:
+  std::vector<std::string> *shutdown_order_;
+};
+
+/// Component whose startup() requests an ordinary exit and only then throws.
+///
+/// @details Pins the precedence between the two terminal writers. The exit request
+/// records a code-0 status FIRST, so unless the failure outranks it, run() hands back
+/// success for a generation whose components never started.
+class ExitThenThrowStartupComponent : public Component {
+public:
+  explicit ExitThenThrowStartupComponent(std::string name) : Component(std::move(name)) {}
+
+  void startup() override {
+    engine()->request_exit("ordinary exit request from startup", /*code=*/0);
+    throw std::runtime_error("startup failed after requesting exit");
+  }
+};
+
+/// Component whose startup() throws the first N times it is called, then
+/// succeeds. Also counts shutdown() so tests can assert unwind cleanup.
+class FlakyStartupComponent : public Component {
+public:
+  FlakyStartupComponent(std::string name, uint32_t throws_before_success)
+      : Component(std::move(name)), remaining_throws_(throws_before_success) {}
+
+  void startup() override {
+    if (remaining_throws_ > 0) {
+      --remaining_throws_;
+      throw std::runtime_error("startup deliberately failing");
+    }
+    ++successful_startups;
+  }
+
+  void shutdown() override { ++shutdowns; }
+
+  uint32_t successful_startups = 0;
+  uint32_t shutdowns = 0;
+
+private:
+  uint32_t remaining_throws_;
+};
+
+/// Component whose startup() AND shutdown() both throw. Component::shutdown() is
+/// not noexcept, so the startup-failure unwind must survive a throwing shutdown
+/// hook without escaping the engine or stranding wait_until_started().
+class DoublyThrowingComponent : public Component {
+public:
+  explicit DoublyThrowingComponent(std::string name) : Component(std::move(name)) {}
+
+  void startup() override {
+    ++startups;
+    throw std::runtime_error("startup deliberately failing");
+  }
+
+  void shutdown() override {
+    ++shutdowns;
+    throw std::runtime_error("shutdown deliberately failing");
+  }
+
+  uint32_t startups = 0;
+  uint32_t shutdowns = 0;
+};
+
+/// Helper: build engine with manual partition assignment.
+/// assigner maps component name → partition ID.
+void build_with_manual_partitions(SimulationEngine &engine, uint32_t num_partitions,
+                                  std::function<PartitionID(Component *)> assigner) {
+  engine.topology().partition_manual(num_partitions, std::move(assigner));
+  engine.create();
+}
+
+/// Helper: partition by component name suffix digit (e.g., "a0" → 0, "b1" → 1).
+PartitionID partition_by_name_suffix(Component *comp) {
+  const auto &name = comp->name();
+  if (name.empty())
+    return 0;
+  char last = name.back();
+  if (last >= '0' && last <= '9')
+    return static_cast<PartitionID>(last - '0');
+  return 0;
+}
+
+} // namespace
+
+TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
+  // Topology borrows external endpoint owners, so external must outlive topology.
+  ProducerComponent external("external", 0, 1, false);
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto consumer = std::make_unique<ConsumerComponent>("consumer");
+  auto *consumer_ptr = consumer.get();
+  root->add_child(std::move(consumer));
+  topology.set_root(std::move(root));
+
+  topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
+
+  for (int pass = 0; pass < 2; ++pass) {
+    SCOPED_TRACE(::testing::Message() << "pass=" << pass);
+    topology.partition_manual(2, [](Component *) { return PartitionID{0}; });
+    EXPECT_EQ(external.partition_id(), 0u);
+    EXPECT_EQ(std::count(topology.partitions()[0].components.begin(),
+                         topology.partitions()[0].components.end(), &external),
+              1);
+  }
+}
+
+TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartition) {
+  // SimulationEngine borrows external endpoint owners, so external must outlive engine.
+  ProducerComponent external("external", 3);
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto consumer_component = std::make_unique<ConsumerComponent>("consumer");
+  auto *consumer = consumer_component.get();
+  root->add_child(std::move(consumer_component));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(external.out_port(), consumer->in_port(), 0);
+
+  engine.topology().partition_manual(2, [](Component *) { return PartitionID{1}; });
+
+  ASSERT_EQ(external.partition_id(), 1u);
+  ASSERT_EQ(consumer->partition_id(), 1u);
+  engine.create();
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(external.sent_, 3u);
+  ASSERT_EQ(consumer->received.size(), 3u);
+  for (size_t i = 0; i < consumer->received.size(); ++i)
+    EXPECT_EQ(consumer->received[i].second, i);
+}
+
+TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
+  // Topology borrows external endpoint owners, so external must outlive topology.
+  ProducerComponent external("external", 0, 1, false);
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto consumer = std::make_unique<ConsumerComponent>("consumer");
+  auto *consumer_ptr = consumer.get();
+  root->add_child(std::move(consumer));
+  topology.set_root(std::move(root));
+
+  topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
+
+  topology.partition_balanced(1);
+
+  ASSERT_EQ(topology.partitions().size(), 1u);
+  EXPECT_EQ(external.partition_id(), 0u);
+  EXPECT_EQ(std::count(topology.partitions()[0].components.begin(),
+                       topology.partitions()[0].components.end(), &external),
+            1);
+}
+
+TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
+  // Topology borrows external endpoint owners, so external must outlive topology.
+  ProducerComponent external("external", 0, 1, false);
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto consumer = std::make_unique<ConsumerComponent>("consumer");
+  auto *consumer_ptr = consumer.get();
+  root->add_child(std::move(consumer));
+  topology.set_root(std::move(root));
+
+  topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
+
+  for (int pass = 0; pass < 2; ++pass) {
+    SCOPED_TRACE(::testing::Message() << "pass=" << pass);
+    topology.partition_balanced(2);
+    ASSERT_EQ(topology.partitions().size(), 2u);
+    EXPECT_LT(external.partition_id(), 2u);
+
+    size_t occurrences = 0;
+    for (const auto &partition : topology.partitions())
+      occurrences +=
+          std::count(partition.components.begin(), partition.components.end(), &external);
+    EXPECT_EQ(occurrences, 1u);
+  }
+}
+
+TEST(TopologyPartitionTest, MultiThreadedEngineRequiresExplicitPolicy) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<CounterComponent>("counter0", 0));
+  root->add_child(std::make_unique<CounterComponent>("counter1", 0));
+  engine.topology().set_root(std::move(root));
+
+  EXPECT_THROW(engine.create(), std::invalid_argument);
+}
+
+TEST(TopologyPartitionTest, RejectsZeroPartitionCount) {
+  Topology topology;
+
+  EXPECT_THROW(topology.partition_balanced(0), std::invalid_argument);
+  EXPECT_TRUE(topology.partitions().empty());
+
+  EXPECT_THROW(topology.partition_manual(0, [](Component *) { return PartitionID{0}; }),
+               std::invalid_argument);
+  EXPECT_TRUE(topology.partitions().empty());
+}
+
+TEST(TopologyPartitionTest, OutOfRangeManualAssignmentLeavesExistingStateIntact) {
+  Topology topology;
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *counter0 = root->add_child(std::make_unique<CounterComponent>("counter0", 0));
+  auto *counter1 = root->add_child(std::make_unique<CounterComponent>("counter1", 0));
+  topology.set_root(std::move(root));
+  topology.partition_manual(1, [](Component *) { return PartitionID{0}; });
+
+  ASSERT_EQ(topology.partitions().size(), 1u);
+  ASSERT_EQ(counter0->partition_id(), 0u);
+  ASSERT_EQ(counter1->partition_id(), 0u);
+
+  EXPECT_THROW(topology.partition_manual(2, [](Component *) { return PartitionID{2}; }),
+               std::invalid_argument);
+  EXPECT_EQ(topology.partitions().size(), 1u);
+  EXPECT_EQ(counter0->partition_id(), 0u);
+  EXPECT_EQ(counter1->partition_id(), 0u);
+}
+
+TEST(TopologyPartitionTest, EngineRejectsZeroWorkerThreads) {
+  SimulationEngine engine({.num_threads = 0});
+
+  EXPECT_THROW(engine.create(), std::invalid_argument);
+  EXPECT_FALSE(engine.is_created());
+  EXPECT_TRUE(engine.topology().partitions().empty());
+}
+
+TEST(TopologyPartitionTest, EngineRejectsPartitionCountMismatch) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<CounterComponent>("counter0", 0));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_manual(1, [](Component *) { return PartitionID{0}; });
+
+  EXPECT_THROW(engine.create(), std::invalid_argument);
+  EXPECT_FALSE(engine.is_created());
+}
+
+TEST(TopologyPartitionTest, EngineRejectsZeroLatencyCrossPartitionLink) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto producer = std::make_unique<ProducerComponent>("producer0", 0, 1, false);
+  auto consumer = std::make_unique<ConsumerComponent>("consumer1");
+  auto *producer_ptr = producer.get();
+  auto *consumer_ptr = consumer.get();
+  root->add_child(std::move(producer));
+  root->add_child(std::move(consumer));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(producer_ptr->out_port(), consumer_ptr->in_port(), 0);
+  engine.topology().partition_manual(2, partition_by_name_suffix);
+
+  try {
+    engine.create();
+    FAIL() << "expected invalid cross-partition latency";
+  } catch (const std::invalid_argument &e) {
+    const std::string message = e.what();
+    EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
+    EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
+    EXPECT_NE(message.find("positive latency"), std::string::npos);
+  }
+  EXPECT_FALSE(engine.is_created());
+}
+
+TEST(TopologyPartitionTest, EngineRejectsCrossPartitionQueuedLink) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto producer = std::make_unique<ProducerComponent>("producer0", 0, 1, false);
+  auto consumer = std::make_unique<ConsumerComponent>("consumer1");
+  auto *producer_ptr = producer.get();
+  auto *consumer_ptr = consumer.get();
+  root->add_child(std::move(producer));
+  root->add_child(std::move(consumer));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_queued_link(producer_ptr->out_port(), consumer_ptr->in_port(), 1, 4);
+  engine.topology().partition_manual(2, partition_by_name_suffix);
+
+  try {
+    engine.create();
+    FAIL() << "expected cross-partition QueuedLink rejection";
+  } catch (const std::invalid_argument &e) {
+    const std::string message = e.what();
+    EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
+    EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
+    EXPECT_NE(message.find("QueuedLink"), std::string::npos);
+  }
+  EXPECT_FALSE(engine.is_created());
+}
+
+// ============================================================================
+// Area 5: PacingController Unit Tests
+// ============================================================================
+
+TEST(PacingControllerTest, DisabledIsNoop) {
+  PacingController pc;
+  EXPECT_FALSE(pc.enabled());
+  EXPECT_EQ(pc.sim_tick_now(), 0u);
+  EXPECT_EQ(pc.idle_wait_duration().count(), 0);
+  // throttle should not block.
+  auto start = std::chrono::steady_clock::now();
+  pc.throttle(999999);
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 10);
+}
+
+TEST(PacingControllerTest, StateTransitions) {
+  PacingController::Config cfg;
+  cfg.ratio = 1.0;
+  cfg.init_samples = 4;
+  cfg.stable_count = 8;
+  cfg.stable_offset_ns = 1e12;  // Extremely generous: 1s. Any realistic offset is "low".
+  cfg.burst_ns = 1e15;          // Huge burst to avoid throttling.
+  cfg.step_threshold_ns = 1e15; // Huge step threshold to avoid stepping.
+  PacingController pc(cfg);
+  pc.anchor(0);
+
+  EXPECT_EQ(pc.state(), PacingController::State::INIT);
+
+  // INIT → TRACKING after init_samples.
+  for (uint32_t i = 0; i < 4; ++i)
+    pc.throttle(pc.sim_tick_now());
+  EXPECT_EQ(pc.state(), PacingController::State::TRACKING);
+
+  // TRACKING → STABLE after stable_count low-offset calls.
+  // Pass sim_time well ahead of target to guarantee a positive offset even
+  // under sanitizer slowdown (TSan can add milliseconds between the caller's
+  // sim_tick_now() and the internal re-read in throttle).
+  for (uint32_t i = 0; i < 8; ++i)
+    pc.throttle(pc.sim_tick_now() +
+                100'000'000'000ULL); // +100ms wall-equivalent ensures positive offset under TSan.
+  EXPECT_EQ(pc.state(), PacingController::State::STABLE);
+}
+
+TEST(PacingControllerTest, StepThresholdResetsAnchor) {
+  PacingController::Config cfg;
+  cfg.ratio = 1.0;
+  cfg.init_samples = 1;
+  cfg.step_threshold_ns = 1e6; // 1ms.
+  cfg.burst_ns = 1e12;
+  PacingController pc(cfg);
+  pc.anchor(0);
+
+  pc.throttle(pc.sim_tick_now()); // Move past INIT.
+  EXPECT_EQ(pc.state(), PacingController::State::TRACKING);
+
+  // Trigger step with huge offset.
+  Tick huge = pc.sim_tick_now() + 1'000'000'000; // Way past threshold.
+  pc.throttle(huge);
+  // Should still be TRACKING (step resets but doesn't change state from TRACKING).
+  EXPECT_EQ(pc.state(), PacingController::State::TRACKING);
+}
+
+TEST(PacingControllerTest, PauseResumeNoDrift) {
+  PacingController::Config cfg;
+  cfg.ratio = 1.0;
+  PacingController pc(cfg);
+  pc.anchor(0);
+
+  // Active for ~20ms.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  Tick before_pause = pc.sim_tick_now();
+  EXPECT_GT(before_pause, 0u);
+
+  // Pause for 100ms.
+  pc.pause();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  pc.resume();
+
+  // After resume, sim_tick_now should be close to before_pause + a tiny delta,
+  // NOT before_pause + 100ms.
+  Tick after_resume = pc.sim_tick_now();
+  Tick drift = after_resume - before_pause;
+  // Should be < 20ms worth of ticks (some time passes during pause/resume calls).
+  Tick max_acceptable = 20'000'000'000ULL; // 20ms in ticks (at 1000 ticks/ns).
+  EXPECT_LT(drift, max_acceptable);
+}
+
+TEST(PacingControllerTest, SeqlockConcurrentReads) {
+  PacingController::Config cfg;
+  cfg.ratio = 1.0;
+  PacingController pc(cfg);
+  pc.anchor(0);
+
+  std::atomic<bool> done{false};
+  std::atomic<uint32_t> reads{0};
+
+  auto reader = [&]() {
+    while (!done.load(std::memory_order_relaxed)) {
+      Tick t = pc.sim_tick_now();
+      // If seqlock is broken, we'd get garbage values (e.g., > 1e18).
+      // A sane value for <1s of runtime at ratio=1.0 is < 1e15 ticks (1s in ps).
+      EXPECT_LT(t, 1'000'000'000'000'000ULL);
+      reads.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  std::vector<std::thread> readers_vec;
+  for (int i = 0; i < 4; ++i)
+    readers_vec.emplace_back(reader);
+
+  // Writer: pause/resume cycles.
+  for (int i = 0; i < 100; ++i) {
+    pc.pause();
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    pc.resume();
+  }
+
+  done.store(true, std::memory_order_relaxed);
+  for (auto &t : readers_vec)
+    t.join();
+
+  EXPECT_GT(reads.load(), 0u);
+}
+
+TEST(PacingControllerTest, TokenBucketAbsorbsBursts) {
+  PacingController::Config cfg;
+  cfg.ratio = 1.0;
+  cfg.init_samples = 1;
+  cfg.burst_ns = 4e6; // 4ms burst buffer.
+  PacingController pc(cfg);
+  pc.anchor(0);
+  pc.throttle(pc.sim_tick_now()); // Past INIT.
+
+  // Offset within burst: should not sleep.
+  Tick target = pc.sim_tick_now();
+  Tick within_burst = target + 2'000'000'000ULL; // 2ms ahead (within 4ms burst).
+  auto start = std::chrono::steady_clock::now();
+  pc.throttle(within_burst);
+  auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 5);
+}
+
+// ============================================================================
+// Area 6: Spinlock Unit Tests
+// ============================================================================
+
+TEST(SpinlockTest, BasicLockUnlock) {
+  util::Spinlock lock;
+  lock.lock();
+  EXPECT_FALSE(lock.try_lock()); // Already locked.
+  lock.unlock();
+  EXPECT_TRUE(lock.try_lock()); // Now free.
+  lock.unlock();
+}
+
+TEST(SpinlockTest, ConcurrentIncrement) {
+  util::Spinlock lock;
+  uint64_t counter = 0;
+  constexpr int THREADS = 8;
+  constexpr int ITERS = 100000;
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < THREADS; ++i) {
+    threads.emplace_back([&]() {
+      for (int j = 0; j < ITERS; ++j) {
+        std::lock_guard<util::Spinlock> guard(lock);
+        ++counter;
+      }
+    });
+  }
+  for (auto &t : threads)
+    t.join();
+
+  EXPECT_EQ(counter, static_cast<uint64_t>(THREADS) * ITERS);
+}
+
+TEST(SpinlockTest, CrossPartitionQueueHighContention) {
+  CrossPartitionQueue queue;
+  constexpr int WRITERS = 8;
+  constexpr int PER_WRITER = 10000;
+  std::atomic<uint64_t> drained_total{0};
+
+  // Each writer pushes entries with unique sequence numbers.
+  std::vector<std::thread> writers;
+  for (int w = 0; w < WRITERS; ++w) {
+    writers.emplace_back([&, w]() {
+      for (int i = 0; i < PER_WRITER; ++i) {
+        Event dummy_event{nullptr, EventType::TIMER_CALLBACK};
+        queue.push(
+            EventQueueEntry{static_cast<Tick>(w * PER_WRITER + i), 0, &dummy_event, nullptr});
+      }
+    });
+  }
+
+  // Reader thread drains continuously.
+  std::atomic<bool> writers_done{false};
+  std::thread reader([&]() {
+    EventQueue local_queue;
+    while (!writers_done.load(std::memory_order_relaxed) || !queue.empty()) {
+      drained_total.fetch_add(queue.drain_into(local_queue), std::memory_order_relaxed);
+      std::this_thread::yield();
+    }
+    // Final drain.
+    drained_total.fetch_add(queue.drain_into(local_queue), std::memory_order_relaxed);
+  });
+
+  for (auto &t : writers)
+    t.join();
+  writers_done.store(true, std::memory_order_relaxed);
+  reader.join();
+
+  EXPECT_EQ(drained_total.load(), static_cast<uint64_t>(WRITERS) * PER_WRITER);
+}
+
+TEST(SpinlockTest, CrossPartitionQueueEmptyDrain) {
+  CrossPartitionQueue queue;
+  EventQueue local;
+  EXPECT_EQ(queue.drain_into(local), 0u);
+  EXPECT_TRUE(queue.empty());
+}
+
+// ============================================================================
+// Area 4: Termination Tests
+// ============================================================================
+
+TEST(TerminationTest, QuiescenceDetection) {
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<CounterComponent>("c0", 10));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_NE(exit.message.find("quiescent"), std::string::npos);
+}
+
+TEST(TerminationTest, AllPrimaryDoneTrigger) {
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *p = root->add_child(std::make_unique<ProducerComponent>("p0", 5));
+  auto *c = root->add_child(std::make_unique<ConsumerComponent>("c0"));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(static_cast<ProducerComponent *>(p)->out_port(),
+                             static_cast<ConsumerComponent *>(c)->in_port(), 1);
+  engine.create();
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_NE(exit.message.find("primaries"), std::string::npos);
+  EXPECT_EQ(static_cast<ConsumerComponent *>(c)->received.size(), 5u);
+}
+
+TEST(TerminationTest, MaxTicksSentinel) {
+  SimulationEngine engine({.max_ticks = 100, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<InfiniteComponent>("inf0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_NE(exit.message.find("max ticks"), std::string::npos);
+}
+
+TEST(StartupReadinessTest, CleanStartupReportsReady) {
+  // A clean startup must make wait_until_started() return true without hanging.
+  SimulationEngine engine({.max_ticks = 5, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<LifecycleCountingComponent>("c0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  engine.step();
+  EXPECT_TRUE(engine.wait_until_started());
+}
+
+TEST(StartupReadinessTest, StartupFailureOutranksAnEarlierExitRequest) {
+  // The failure is recorded SECOND here, after an ordinary code-0 exit request that
+  // the same startup() issued. Whoever wrote first must not win: a generation whose
+  // components never started has to report failure, or the C API maps code 0 to
+  // success and a dead VM looks like a clean run.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<ExitThenThrowStartupComponent>("exit_then_throw0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(exit.code, 1) << "a startup failure must not be reported as a clean exit";
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(engine.last_exit().code, 1);
+}
+
+TEST(StartupReadinessTest, StartupFailureIsTerminalForTheGeneration) {
+  // A startup() throw leaves the partial attempt's event/primary/component state
+  // intact, so the create() generation is terminal: step() rethrows once, latches
+  // failure, and a same-generation retry must NOT re-run startup (it returns done).
+  // A clean retry requires shutdown() + create().
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky0", 1));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // First step(): startup throws, wait_until_started() observes failure.
+  EXPECT_THROW(engine.step(), std::runtime_error);
+  EXPECT_FALSE(engine.wait_until_started());
+
+  // step() must record the SAME failure ExitStatus run() would. Without it the
+  // create() default {COMPLETED, 0} survives and the terminal guard below hands
+  // back a success-looking status for a generation that never started.
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(engine.last_exit().code, 1);
+
+  // Same-generation retry: startup is NOT re-run (generation is terminal), so the
+  // component's startup() never succeeds and step() reports done.
+  EXPECT_FALSE(engine.step());
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
+
+  // A run() after the failed step() goes through the same terminal guard and must
+  // report the recorded failure, not the create() default.
+  auto after_failed_step = engine.run();
+  EXPECT_EQ(after_failed_step.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(after_failed_step.code, 1);
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
+
+  // A fresh generation (shutdown + create) starts cleanly and succeeds.
+  engine.shutdown();
+  engine.create();
+  engine.step();
+  EXPECT_TRUE(engine.wait_until_started());
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 1u);
+}
+
+TEST(StartupReadinessTest, ThrowingShutdownDuringStartupUnwindStillPublishesFailure) {
+  // Component::shutdown() is not noexcept. If the startup-failure unwind ran
+  // BEFORE the readiness latch, a throwing shutdown hook would escape the catch
+  // path — terminating the interposer's background run() thread — while
+  // wait_until_started() stayed blocked forever. The failure must therefore be
+  // published first and the unwind caught separately.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // run() must return the terminal status rather than letting the shutdown throw
+  // propagate out of the engine.
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(exit.code, 1);
+  EXPECT_FALSE(engine.wait_until_started());
+
+  auto *comp = static_cast<DoublyThrowingComponent *>(doubly);
+  EXPECT_EQ(comp->startups, 1u);
+  EXPECT_EQ(comp->shutdowns, 1u) << "the unwind must still attempt the shutdown hook";
+
+  // The engine's own shutdown() must also survive the throwing hook (it is guarded
+  // against a second invocation, so this asserts no rethrow escapes destruction).
+  EXPECT_NO_THROW(engine.shutdown());
+}
+
+TEST(StartupReadinessTest, ThrowingShutdownDuringStepUnwindRethrowsOnlyTheStartupError) {
+  // step() rethrows to its foreground caller. The exception it propagates must be
+  // the STARTUP failure, not whatever the best-effort unwind's shutdown hook threw
+  // on top of it, and readiness must still be published as failed.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *doubly = root->add_child(std::make_unique<DoublyThrowingComponent>("doubly0"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  try {
+    engine.step();
+    ADD_FAILURE() << "step() must rethrow the startup failure";
+  } catch (const std::runtime_error &e) {
+    EXPECT_STREQ(e.what(), "startup deliberately failing")
+        << "the unwind's shutdown throw must not replace the startup error";
+  }
+
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(engine.last_exit().code, 1);
+
+  auto *comp = static_cast<DoublyThrowingComponent *>(doubly);
+  EXPECT_EQ(comp->startups, 1u);
+  EXPECT_EQ(comp->shutdowns, 1u);
+}
+
+TEST(StartupReadinessTest, RunAfterFailedStartupFailsClosedWithoutRerun) {
+  // run()'s terminal-generation guard must be a RUNTIME check, not just an
+  // assert: under -DNDEBUG a second run() after a startup throw must fail closed
+  // (return the terminal INTERRUPTED status) instead of re-entering
+  // startup_components() on the dirty generation. This runs regardless of build
+  // type, so it covers the release path.
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky0", 1));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // First run(): startup throws; run() catches, latches failure, returns INTERRUPTED.
+  auto first = engine.run();
+  EXPECT_EQ(first.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(first.code, 1);
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
+
+  // Second run() on the same (dirty) generation must NOT re-run startup — it
+  // returns the terminal status. Without the runtime guard this would re-enter
+  // startup_components() on already-scheduled/registered state.
+  auto second = engine.run();
+  EXPECT_EQ(second.reason, ExitReason::INTERRUPTED);
+  EXPECT_EQ(second.code, 1);
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->successful_startups, 0u);
+}
+
+TEST(StartupReadinessTest, StartupFailureUnwindsEveryInitializedComponentOnce) {
+  // A throwing component partway through startup must not leave earlier components'
+  // resources dangling: shutdown() pairs with initialize(), so the unwind shuts
+  // down EVERY initialized component (not only the started prefix) exactly once —
+  // including the component that threw and the one after it that never started.
+  std::vector<std::string> shutdown_order;
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *before =
+      root->add_child(std::make_unique<LifecycleCountingComponent>("before", &shutdown_order));
+  auto *flaky = root->add_child(std::make_unique<FlakyStartupComponent>("flaky", 1));
+  auto *after =
+      root->add_child(std::make_unique<LifecycleCountingComponent>("after", &shutdown_order));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  EXPECT_THROW(engine.step(), std::runtime_error);
+
+  auto *before_c = static_cast<LifecycleCountingComponent *>(before);
+  auto *after_c = static_cast<LifecycleCountingComponent *>(after);
+  EXPECT_EQ(before_c->initializes, 1u);
+  EXPECT_EQ(before_c->startups, 1u);
+  EXPECT_EQ(before_c->shutdowns, 1u); // started, then unwound
+  EXPECT_EQ(after_c->initializes, 1u);
+  EXPECT_EQ(after_c->startups, 0u);  // never reached
+  EXPECT_EQ(after_c->shutdowns, 1u); // initialized, so still cleaned up
+  EXPECT_EQ(static_cast<FlakyStartupComponent *>(flaky)->shutdowns, 1u);
+
+  // shutdown() runs in reverse topology order. "flaky" has no counting log, but
+  // the two counting components bracket it, so "after" must be shut down before
+  // "before".
+  ASSERT_EQ(shutdown_order.size(), 2u);
+  EXPECT_EQ(shutdown_order[0], "after");
+  EXPECT_EQ(shutdown_order[1], "before");
+
+  // The engine's own shutdown() must not double-shut-down the already-unwound
+  // components.
+  engine.shutdown();
+  EXPECT_EQ(before_c->shutdowns, 1u);
+  EXPECT_EQ(after_c->shutdowns, 1u);
+}
+
+TEST(StartupReadinessTest, ThrowingShutdownStillCleansUpRemainingComponents) {
+  // shutdown_components() marks the generation shut down before invoking any
+  // callback, so a callback that throws must not be allowed to skip the components
+  // after it — there is no second chance to clean them up. Each callback is
+  // isolated; the first failure is reported once the rest have run.
+  std::vector<std::string> shutdown_order;
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *first =
+      root->add_child(std::make_unique<LifecycleCountingComponent>("first", &shutdown_order));
+  auto *thrower = root->add_child(std::make_unique<DoublyThrowingComponent>("thrower"));
+  auto *last =
+      root->add_child(std::make_unique<LifecycleCountingComponent>("last", &shutdown_order));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // Reverse order is last -> thrower -> first, so the throw lands between them.
+  // shutdown() must NOT propagate it: it is reached from ~SimulationEngine(), from
+  // the engine's own background thread, and across the C API, none of which can
+  // absorb an exception.
+  EXPECT_NO_THROW(engine.shutdown());
+  EXPECT_FALSE(engine.is_created()) << "engine cleanup must complete despite a throwing hook";
+
+  EXPECT_EQ(static_cast<DoublyThrowingComponent *>(thrower)->shutdowns, 1u);
+  EXPECT_EQ(static_cast<LifecycleCountingComponent *>(last)->shutdowns, 1u);
+  EXPECT_EQ(static_cast<LifecycleCountingComponent *>(first)->shutdowns, 1u)
+      << "a throwing callback must not skip cleanup for the components after it";
+  ASSERT_EQ(shutdown_order.size(), 2u);
+  EXPECT_EQ(shutdown_order[0], "last");
+  EXPECT_EQ(shutdown_order[1], "first");
+}
+
+TEST(StartupReadinessTest, CreateThenShutdownRunsComponentCleanup) {
+  // create() initializes every component; shutting the engine down before any
+  // run()/step() must still invoke shutdown() on each initialized component
+  // exactly once (shutdown() pairs with initialize(), not startup()).
+  SimulationEngine engine({.max_ticks = 10, .num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *comp = root->add_child(std::make_unique<LifecycleCountingComponent>("comp"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  auto *counting = static_cast<LifecycleCountingComponent *>(comp);
+  EXPECT_EQ(counting->initializes, 1u);
+  EXPECT_EQ(counting->startups, 0u);
+
+  engine.shutdown();
+  EXPECT_EQ(counting->shutdowns, 1u);
+}
+
+TEST(TerminationTest, RequestExitWakesAllPartitions) {
+  // Infinite work makes request_exit() the only termination path.
+  SimulationEngine engine({.num_threads = 4});
+  auto root = std::make_unique<CompositeComponent>("root");
+  for (int i = 0; i < 4; ++i)
+    root->add_child(std::make_unique<InfiniteComponent>("inf" + std::to_string(i)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(4);
+  engine.create();
+
+  ExitStatus exit_status;
+  std::thread runner([&]() { exit_status = engine.run(); });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  engine.request_exit("test stop");
+  runner.join();
+
+  EXPECT_EQ(exit_status.reason, ExitReason::EXIT_REQUEST);
+}
+
+// Regression: the host thread calling request_exit() must not touch the partition
+// contexts while the engine thread is destroying them in shutdown(). The daemon does
+// exactly this - teardown() requests exit while the VM thread may already be shutting
+// down after the guest exited - which TSan caught as a data race and a use-after-free
+// on the partition's idle_wakeup_ flag.
+TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
+  // Single-threaded mode is what arms the wake path that dereferences contexts_[0].
+  // Iterate: the two threads must interleave inside the narrow shutdown window.
+  for (int iter = 0; iter < 200; ++iter) {
+    SimulationEngine engine({.num_threads = 1});
+    auto root = std::make_unique<CompositeComponent>("root");
+    root->add_child(std::make_unique<CounterComponent>("c0", 4));
+    engine.topology().set_root(std::move(root));
+    engine.create();
+
+    // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
+    std::thread runner([&engine]() {
+      engine.run();
+      engine.shutdown();
+    });
+
+    // Mirrors the daemon teardown path landing concurrently with that shutdown.
+    engine.request_exit("test stop");
+    runner.join();
+  }
+}
+
+namespace {
+
+/// Waits for a peer partition by re-arming its own event every tick, the way the
+/// command processor re-checks a doorbell whose grid is still running on another
+/// XCD. It schedules nothing during startup: the engine has to come up fully
+/// quiescent so the first barrier publishes TICK_MAX, which is the state the
+/// stall has to survive.
+class PeerWaitComponent : public Component {
+public:
+  explicit PeerWaitComponent(std::string name) : Component(std::move(name)) {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN, PortProtocol::UNTYPED));
+    out_ =
+        add_port(std::make_unique<Port>("out", 1, this, PortDirection::OUT, PortProtocol::UNTYPED));
+    in_->set_handler([this](Tick, Message *) { replied = true; });
+    recheck_.set_handler([this](Tick ts, Message *) {
+      ++rechecks;
+      if (replied) {
+        engine()->primary_release();
+        return;
+      }
+      if (!sent_) {
+        sent_ = true;
+        out_->send(make_test_msg(1));
+      }
+      // The reply can only be delivered by a later epoch's incoming drain, so a
+      // re-check that outlives the epoch it was armed in is the whole point.
+      schedule_event(&recheck_, ts + 1);
+    });
+  }
+
+  void startup() override { engine()->register_as_primary(); }
+
+  Port *in_port() { return in_; }
+  Port *out_port() { return out_; }
+  Event *recheck_event() { return &recheck_; }
+
+  bool replied = false;
+  uint64_t rechecks = 0;
+
+private:
+  bool sent_ = false;
+  Port *in_ = nullptr;
+  Port *out_ = nullptr;
+  Event recheck_{this, EventType::TIMER_CALLBACK};
+};
+
+} // namespace
+
+// Regression: a partition that re-arms its own event while waiting on a peer must
+// not be able to run the epoch loop by itself.
+//
+// An engine that comes up with nothing scheduled publishes TICK_MAX at its first
+// barrier. TICK_MAX is the absence of a horizon, not an infinite one, but the
+// epoch loop used to compare against it like any other bound -- so the first
+// partition to receive async work processed events, and everything those handlers
+// re-armed, without ever arriving at the next barrier. Its peers stayed parked in
+// that barrier, the reply this partition was waiting for was never drained, and
+// the run hung. Reproduces at any partition count; rocjitsu hit it on every
+// multi-XCD config whose partition count was not exactly the XCD count.
+TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *waiter = static_cast<PeerWaitComponent *>(
+      root->add_child(std::make_unique<PeerWaitComponent>("waiter0")));
+  // target=2 so the responder replies to the message it receives instead of
+  // treating it as the last one; it is not a primary, so it never ends the run.
+  auto *responder = static_cast<PingPongComponent *>(root->add_child(
+      std::make_unique<PingPongComponent>("responder1", 2, false, /*register_primary=*/false)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(waiter->out_port(), responder->in_port(), 1);
+  engine.topology().add_link(responder->out_port(), waiter->in_port(), 1);
+  engine.topology().partition_manual(2, partition_by_name_suffix);
+  ASSERT_EQ(waiter->partition_id(), 0u);
+  ASSERT_EQ(responder->partition_id(), 1u);
+  engine.create();
+
+  ExitStatus exit_status;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit_status = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  ASSERT_TRUE(engine.wait_until_started());
+
+  // Let the engine settle into the quiescent state first. Nothing is scheduled,
+  // so the first barrier publishes TICK_MAX within microseconds of startup; the
+  // kick has to land after that, because an engine that never reaches a
+  // TICK_MAX barrier does not exercise this at all.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  // Kick the waiter from a foreign thread, exactly as a doorbell write does.
+  engine.schedule_event_now(waiter->recheck_event());
+
+  // Bounded wait: a regression deadlocks the engine, and the test has to fail
+  // rather than hang the suite. request_exit() unwinds the workers either way.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+  if (!finished_on_its_own)
+    engine.request_exit("regression timeout");
+  runner.join();
+
+  EXPECT_TRUE(finished_on_its_own) << "engine did not terminate: the waiting partition never "
+                                      "reached the barrier, so its peer's reply was never drained";
+  EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+  EXPECT_TRUE(waiter->replied);
+  EXPECT_EQ(responder->recv_count, 1u);
+}
+
+// Regression: a quiescent multi-partition engine must idle, not spin.
+//
+// With no idle wait in the epoch loop, every partition of an idle engine burns a
+// host core going round the barrier. rocjitsu's own suite runs many emulators at
+// once under `ctest -j`, and those spinning partitions starved the guest process
+// that had to ring the next doorbell -- so an idle engine never became busy
+// again. Measured as CPU time, which is what starves a peer; wall time is not.
+TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
+  SimulationEngine engine({.num_threads = 4});
+  auto root = std::make_unique<CompositeComponent>("root");
+  for (int i = 0; i < 4; ++i)
+    root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(4);
+  engine.create();
+
+  std::thread runner([&]() { engine.run(); });
+  ASSERT_TRUE(engine.wait_until_started());
+
+  const auto cpu_before = std::clock();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  const auto cpu_used =
+      static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
+
+  engine.request_exit("test stop");
+  runner.join();
+
+  // Four spinning partitions burn ~0.8s of CPU over this window; four idle ones
+  // burn milliseconds. The threshold is one core's worth, well clear of both.
+  EXPECT_LT(cpu_used, 0.2) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
+}
+
+TEST(TerminationTest, StepModeConsistency) {
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *c = root->add_child(std::make_unique<CounterComponent>("c0", 10));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  while (engine.step())
+    ;
+
+  EXPECT_EQ(static_cast<CounterComponent *>(c)->count, 10u);
+  EXPECT_EQ(engine.last_exit().reason, ExitReason::COMPLETED);
+}
+
+// ============================================================================
+// Area 1: LBTS Correctness Tests
+// ============================================================================
+
+TEST(LBTSTest, TwoPartitionPingPong) {
+  SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *a = root->add_child(std::make_unique<ProducerComponent>("p0", 1, 1, false));
+  auto *b = root->add_child(std::make_unique<ConsumerComponent>("c1"));
+  auto *prod = static_cast<ProducerComponent *>(a);
+  auto *cons = static_cast<ConsumerComponent *>(b);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(prod->out_port(), cons->in_port(), 5);
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(cons->received.size(), 1u);
+}
+
+TEST(LBTSTest, IdlePartitionDoesNotBlock) {
+  // 3 partitions: A sends to B, C is idle.
+  SimulationEngine engine({.max_ticks = 100000, .num_threads = 3});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *a = root->add_child(std::make_unique<ProducerComponent>("p0", 5, 1, false));
+  auto *b = root->add_child(std::make_unique<ConsumerComponent>("c1"));
+  root->add_child(std::make_unique<CounterComponent>("idle2", 0)); // Idle.
+
+  auto *pa = static_cast<ProducerComponent *>(a);
+  auto *cb = static_cast<ConsumerComponent *>(b);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(pa->out_port(), cb->in_port(), 10);
+  build_with_manual_partitions(engine, 3, partition_by_name_suffix);
+
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(cb->received.size(), 5u);
+}
+
+TEST(LBTSTest, TimestampAdvancesEnableProgress) {
+  // A → B (no return link). A sends one message, then finishes.
+  SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *a = root->add_child(std::make_unique<ProducerComponent>("p0", 1, 1, false));
+  auto *b = root->add_child(std::make_unique<ConsumerComponent>("c1"));
+
+  auto *pa = static_cast<ProducerComponent *>(a);
+  auto *cb = static_cast<ConsumerComponent *>(b);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(pa->out_port(), cb->in_port(), 20);
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(cb->received.size(), 1u);
+  // Message should arrive at start_tick (1) + latency (20) = 21.
+  EXPECT_EQ(cb->received[0].first, 21u);
+}
+
+// ============================================================================
+// Area 2: Cross-Partition Communication Tests
+// ============================================================================
+
+TEST(CrossPartitionTest, MessageDelivery) {
+  // max_ticks must be past last arrival: 20 msgs at ticks 1,11,...,191 + latency 100 = 291.
+  SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *p = root->add_child(std::make_unique<ProducerComponent>("p0", 20, 1, false));
+  auto *c = root->add_child(std::make_unique<ConsumerComponent>("c1"));
+
+  auto *prod = static_cast<ProducerComponent *>(p);
+  auto *cons = static_cast<ConsumerComponent *>(c);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(prod->out_port(), cons->in_port(), 100);
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(cons->received.size(), 20u);
+
+  // Verify messages arrive in order and at correct ticks.
+  for (size_t i = 1; i < cons->received.size(); ++i)
+    EXPECT_GE(cons->received[i].first, cons->received[i - 1].first);
+}
+
+TEST(CrossPartitionTest, LinkLatencyAdded) {
+  SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *p = root->add_child(std::make_unique<ProducerComponent>("p0", 1, 100, false));
+  auto *c = root->add_child(std::make_unique<ConsumerComponent>("c1"));
+
+  auto *prod = static_cast<ProducerComponent *>(p);
+  auto *cons = static_cast<ConsumerComponent *>(c);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(prod->out_port(), cons->in_port(), 42);
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  engine.run();
+  ASSERT_EQ(cons->received.size(), 1u);
+  EXPECT_EQ(cons->received[0].first, 142u); // 100 + 42.
+}
+
+// ============================================================================
+// Area 3: Async Event Causality Tests
+// ============================================================================
+
+TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
+  // Single-threaded, no pacing: schedule_event_now should use GVT (current_time_).
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *c = root->add_child(std::make_unique<CounterComponent>("c0", 5));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  // Run a few steps to advance time.
+  for (int i = 0; i < 3; ++i)
+    engine.step();
+
+  // Inject async event — it should get timestamp >= current_time.
+  Tick before = engine.global_time();
+  std::atomic<Tick> injected_tick{0};
+  Event test_event{static_cast<CounterComponent *>(c), EventType::TIMER_CALLBACK,
+                   [&](Tick ts, Message *) { injected_tick.store(ts, std::memory_order_relaxed); }};
+  engine.schedule_event_now(&test_event);
+
+  // Process remaining.
+  while (engine.step()) {
+  }
+
+  EXPECT_GE(injected_tick.load(), before);
+}
+
+// ============================================================================
+// Area 7: Stress / Integration Tests
+// ============================================================================
+
+TEST(StressTest, FourPartitionRingStress) {
+  constexpr uint32_t LAPS = 10;
+  SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
+  auto root = std::make_unique<CompositeComponent>("root");
+
+  // Create 4 ping-pong components in a ring (non-primary, rely on max_ticks).
+  auto *a = root->add_child(std::make_unique<PingPongComponent>("r0", LAPS, true, false));
+  auto *b = root->add_child(std::make_unique<PingPongComponent>("r1", LAPS, false, false));
+  auto *c = root->add_child(std::make_unique<PingPongComponent>("r2", LAPS, false, false));
+  auto *d = root->add_child(std::make_unique<PingPongComponent>("r3", LAPS, false, false));
+  auto *pa = static_cast<PingPongComponent *>(a);
+  auto *pb = static_cast<PingPongComponent *>(b);
+  auto *pc = static_cast<PingPongComponent *>(c);
+  auto *pd = static_cast<PingPongComponent *>(d);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(pa->out_port(), pb->in_port(), 5);
+  engine.topology().add_link(pb->out_port(), pc->in_port(), 5);
+  engine.topology().add_link(pc->out_port(), pd->in_port(), 5);
+  engine.topology().add_link(pd->out_port(), pa->in_port(), 5);
+  build_with_manual_partitions(engine, 4, partition_by_name_suffix);
+
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  // The initiator (r0) may stop replying on its last receive, causing
+  // downstream components to get one fewer message. Verify >=LAPS-1.
+  EXPECT_GE(pa->recv_count, LAPS - 1);
+  EXPECT_GE(pb->recv_count, LAPS - 1);
+  EXPECT_GE(pc->recv_count, LAPS - 1);
+  EXPECT_GE(pd->recv_count, LAPS - 1);
+}
+
+TEST(StressTest, LongRunningThousandsOfEvents) {
+  constexpr uint32_t MESSAGES = 10;
+  SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+
+  auto *a = root->add_child(std::make_unique<PingPongComponent>("pp0", MESSAGES, true, false));
+  auto *b = root->add_child(std::make_unique<PingPongComponent>("pp1", MESSAGES, false, false));
+  auto *pa = static_cast<PingPongComponent *>(a);
+  auto *pb = static_cast<PingPongComponent *>(b);
+
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(pa->out_port(), pb->in_port(), 1);
+  engine.topology().add_link(pb->out_port(), pa->in_port(), 1);
+  build_with_manual_partitions(engine, 2, partition_by_name_suffix);
+
+  auto exit = engine.run();
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  // Verify at least some messages were exchanged (the LBTS protocol has
+  // overhead that limits throughput in short simulations).
+  EXPECT_GT(pa->recv_count, 0u);
+  EXPECT_GT(pb->recv_count, 0u);
+  // Verify monotonic ordering for both.
+  for (size_t i = 1; i < pa->recv_ticks.size(); ++i)
+    EXPECT_GE(pa->recv_ticks[i], pa->recv_ticks[i - 1]);
+  for (size_t i = 1; i < pb->recv_ticks.size(); ++i)
+    EXPECT_GE(pb->recv_ticks[i], pb->recv_ticks[i - 1]);
+}
+
+TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
+  // Use InfiniteComponent to keep the simulation running while we inject.
+  // max_ticks as safety net. Keep low since each tick = one barrier round.
+  SimulationEngine engine({.max_ticks = 500, .num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  root->add_child(std::make_unique<InfiniteComponent>("inf0"));
+  root->add_child(std::make_unique<InfiniteComponent>("inf1"));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(2);
+  engine.create();
+
+  std::atomic<uint32_t> async_processed{0};
+  auto *target = engine.topology().partitions()[0].components[0];
+  Event async_event{target, EventType::TIMER_CALLBACK, [&](Tick, Message *) {
+                      async_processed.fetch_add(1, std::memory_order_relaxed);
+                    }};
+
+  // Inject async events before running, so they're available immediately.
+  for (int i = 0; i < 20; ++i)
+    engine.schedule_event_async(&async_event, static_cast<Tick>(i + 1));
+
+  auto exit = engine.run();
+
+  EXPECT_GT(async_processed.load(), 0u);
+}
+
+// ============================================================================
+// Cache storage, maintenance, and VMID invariants
+// ============================================================================
+//
+// Exercise byte storage lifetime, maintenance behavior, and VMID isolation
+// directly on the header-only Cache.
+
+namespace {
+// 64B lines, 4 sets, 2-way. Small associativity makes eviction easy to force.
+using TestCache = Cache<6, 4, 2>;
+
+// Fill the whole line for @p addr/@p vmid with a repeating 32-bit pattern.
+void fill_line_word(TestCache &cache, uint64_t addr, uint32_t vmid, uint32_t word) {
+  uint8_t line[TestCache::LINE_SIZE];
+  for (uint32_t i = 0; i < TestCache::LINE_SIZE; i += sizeof(word))
+    std::memcpy(line + i, &word, sizeof(word));
+  cache.allocate(addr, vmid);
+  cache.fill_line(addr, line, vmid);
+}
+
+uint32_t read_line_word(TestCache &cache, uint64_t addr, uint32_t vmid) {
+  uint32_t word = 0;
+  cache.read_line(addr, reinterpret_cast<uint8_t *>(&word), 0, sizeof(word), vmid);
+  return word;
+}
+} // namespace
+
+TEST(CacheStorageTest, InitialBytesAreZeroAndInvalidationRetainsData) {
+  TestCache cache;
+  for (uint32_t set = 0; set < 4; ++set) {
+    for (uint32_t way = 0; way < 2; ++way) {
+      const uint64_t addr = (set + way * 4) * TestCache::LINE_SIZE;
+      auto allocation = cache.allocate_with_data(addr);
+      ASSERT_NE(allocation.data, nullptr);
+      for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+        EXPECT_EQ(allocation.data[i], 0);
+      std::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
+    }
+  }
+  cache.invalidate_all();
+  TestCache invalid_copy(cache);
+  for (auto *retained : {&cache, &invalid_copy}) {
+    auto allocation = retained->allocate_with_data(0);
+    for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+      EXPECT_EQ(allocation.data[i], 0xA5);
+  }
+}
+
+TEST(CacheStorageTest, CopyIsIndependentAndMoveRetainsContents) {
+  TestCache original;
+  fill_line_word(original, 0x4000, 7, 0x12345678);
+  TestCache copied(original);
+  EXPECT_EQ(read_line_word(copied, 0x4000, 7), 0x12345678u);
+  const uint32_t replacement = 0x87654321;
+  copied.write_line(0x4000, reinterpret_cast<const uint8_t *>(&replacement), 0, sizeof(replacement),
+                    7);
+  EXPECT_EQ(read_line_word(original, 0x4000, 7), 0x12345678u);
+
+  TestCache assigned;
+  auto *assigned_bytes = assigned.allocate_with_data(0x4000, 7).data;
+  assigned = copied;
+  EXPECT_EQ(read_line_word(assigned, 0x4000, 7), replacement);
+  EXPECT_EQ(assigned.line_data_for_read(0x4000, 7), assigned_bytes);
+  TestCache moved(std::move(assigned));
+  EXPECT_EQ(read_line_word(moved, 0x4000, 7), replacement);
+  TestCache move_assigned;
+  move_assigned = std::move(moved);
+  EXPECT_EQ(read_line_word(move_assigned, 0x4000, 7), replacement);
+  // Assignment must also restore a moved-from cache to usable storage.
+  assigned = original;
+  EXPECT_EQ(read_line_word(assigned, 0x4000, 7), 0x12345678u);
+}
+
+TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
+  TestCache cache;
+  for (uint32_t round = 0; round < 4; ++round) {
+    const uint64_t addr = round * TestCache::LINE_SIZE;
+    auto *tag = cache.allocate(addr, round + 1);
+    tag->dirty = true;
+    tag->coherence = CoherenceState::MODIFIED;
+    tag->coherence_epoch = 17;
+
+    cache.invalidate_all();
+    EXPECT_FALSE(cache.lookup(addr, nullptr, round + 1));
+    EXPECT_FALSE(tag->valid);
+    EXPECT_FALSE(tag->dirty);
+    EXPECT_EQ(tag->coherence, CoherenceState::INVALID);
+    EXPECT_EQ(tag->coherence_epoch, 0u);
+    cache.invalidate_all();
+  }
+}
+
+TEST(CacheMaintenanceTest, DirtyWalkPreservesOrderAcrossReplacementAndInvalidation) {
+  TestCache cache;
+  constexpr uint64_t kLineSize = TestCache::LINE_SIZE;
+  auto fill_dirty = [&](uint64_t addr, uint32_t vmid) {
+    fill_line_word(cache, addr, vmid, vmid);
+    CacheTag *tag = nullptr;
+    ASSERT_TRUE(cache.lookup(addr, &tag, vmid));
+    tag->dirty = true;
+  };
+  // Set three is visited after set one regardless of allocation order.
+  fill_dirty(3 * kLineSize, 3);
+  fill_dirty(kLineSize, 1);
+  fill_dirty(5 * kLineSize, 5);
+  // Replace set one's LRU way without allocating into an invalid way.
+  fill_dirty(9 * kLineSize, 9);
+
+  auto dirty_addresses = [&] {
+    std::vector<uint64_t> addresses;
+    cache.for_each_dirty([&](CacheTag &tag, uint64_t addr, uint8_t *data) {
+      addresses.push_back(addr);
+      uint32_t word = 0;
+      std::memcpy(&word, data, sizeof(word));
+      EXPECT_EQ(tag.vmid, word);
+    });
+    return addresses;
+  };
+  EXPECT_EQ(dirty_addresses(),
+            (std::vector<uint64_t>{9 * kLineSize, 5 * kLineSize, 3 * kLineSize}));
+  cache.invalidate(5 * kLineSize, 5);
+  EXPECT_EQ(dirty_addresses(), (std::vector<uint64_t>{9 * kLineSize, 3 * kLineSize}));
+  cache.invalidate_all();
+  EXPECT_TRUE(dirty_addresses().empty());
+  fill_dirty(kLineSize, 11);
+  EXPECT_EQ(dirty_addresses(), (std::vector<uint64_t>{kLineSize}));
+}
+
+TEST(CacheMaintenanceTest, CopiesAndMovesRetainDirtyAndInvalidationState) {
+  TestCache original;
+  auto allocation = original.allocate_with_data(2 * TestCache::LINE_SIZE, 7);
+  allocation.data[0] = 42;
+  allocation.tag->dirty = true;
+  TestCache copied(original);
+  TestCache assigned;
+  assigned.allocate(0)->dirty = true;
+  assigned = original;
+  TestCache moved(std::move(copied));
+  original.invalidate_all();
+
+  for (auto *cache : {&assigned, &moved}) {
+    uint32_t count = 0;
+    cache->for_each_dirty([&](CacheTag &tag, uint64_t addr, uint8_t *data) {
+      ++count;
+      EXPECT_EQ(addr, 2u * TestCache::LINE_SIZE);
+      EXPECT_EQ(tag.vmid, 7u);
+      EXPECT_EQ(data[0], 42);
+    });
+    EXPECT_EQ(count, 1u);
+    cache->invalidate_all();
+    EXPECT_FALSE(cache->lookup(2 * TestCache::LINE_SIZE, nullptr, 7));
+    cache->for_each_dirty([](CacheTag &, uint64_t, uint8_t *) { ADD_FAILURE(); });
+  }
+}
+
+// The memory hierarchy tags every line by (vmid, addr) so two processes that
+// alias the same guest VA do not share a cached line. These tests exercise that
+// invariant directly on the header-only Cache: distinct data per VMID at the
+// same address, eviction reporting the evicted line's owner VMID, and per-VMID
+// invalidation.
+
+TEST(CacheVmidTest, SameAddressUnderTwoVmidsStoresDistinctData) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x4000;
+
+  fill_line_word(cache, kAddr, /*vmid=*/1, 0xAAAAAAAAu);
+  fill_line_word(cache, kAddr, /*vmid=*/2, 0xBBBBBBBBu);
+
+  // Two distinct lines coexist in the same set; each VMID sees its own data.
+  CacheTag *tag1 = nullptr;
+  CacheTag *tag2 = nullptr;
+  EXPECT_TRUE(cache.lookup(kAddr, &tag1, /*vmid=*/1));
+  EXPECT_TRUE(cache.lookup(kAddr, &tag2, /*vmid=*/2));
+  EXPECT_EQ(read_line_word(cache, kAddr, /*vmid=*/1), 0xAAAAAAAAu);
+  EXPECT_EQ(read_line_word(cache, kAddr, /*vmid=*/2), 0xBBBBBBBBu);
+}
+
+TEST(CacheVmidTest, EvictionReportsEvictedLineOwnerVmid) {
+  TestCache cache;
+  // Three addresses that map to the same set (set index = (addr >> 6) & 3).
+  // With 2 ways, allocating a third forces eviction of the LRU (first) line.
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(TestCache::LINE_SIZE) * 4;
+  const uint64_t addr_a = 0x1000;
+  const uint64_t addr_b = addr_a + kSetStride;
+  const uint64_t addr_c = addr_b + kSetStride;
+
+  // First line is owned by vmid 7 and marked dirty so a real cache would write
+  // it back under that vmid.
+  CacheTag *ta = cache.allocate(addr_a, /*vmid=*/7);
+  ta->dirty = true;
+  cache.allocate(addr_b, /*vmid=*/8);
+
+  CacheTag evicted;
+  cache.allocate(addr_c, /*vmid=*/9, &evicted);
+
+  EXPECT_TRUE(evicted.valid);
+  EXPECT_TRUE(evicted.dirty);
+  EXPECT_EQ(evicted.vmid, 7u); // writeback must use the evicted line's owner.
+}
+
+TEST(CacheVmidTest, InvalidatePerVmidLeavesOtherVmidIntact) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x8000;
+
+  fill_line_word(cache, kAddr, /*vmid=*/1, 0x11111111u);
+  fill_line_word(cache, kAddr, /*vmid=*/2, 0x22222222u);
+
+  cache.invalidate(kAddr, /*vmid=*/1);
+
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  EXPECT_TRUE(cache.lookup(kAddr, nullptr, /*vmid=*/2));
+  EXPECT_EQ(read_line_word(cache, kAddr, /*vmid=*/2), 0x22222222u);
+}
+
+TEST(CacheVmidTest, AllocateWithDataReturnsWritableLineAndEvictedBytes) {
+  TestCache cache;
+  constexpr uint64_t kSetStride = static_cast<uint64_t>(TestCache::LINE_SIZE) * 4;
+  constexpr uint64_t kAddrA = 0x1000;
+  constexpr uint64_t kAddrB = kAddrA + kSetStride;
+  constexpr uint64_t kAddrC = kAddrB + kSetStride;
+
+  auto first = cache.allocate_with_data(kAddrA, /*vmid=*/7);
+  ASSERT_NE(first.tag, nullptr);
+  ASSERT_NE(first.data, nullptr);
+  first.tag->dirty = true;
+  std::fill_n(first.data, TestCache::LINE_SIZE, 0xA5);
+  cache.allocate(kAddrB, /*vmid=*/8);
+
+  CacheTag evicted;
+  std::array<uint8_t, TestCache::LINE_SIZE> evicted_data{};
+  auto replacement = cache.allocate_with_data(kAddrC, /*vmid=*/9, &evicted, evicted_data.data());
+
+  ASSERT_NE(replacement.tag, nullptr);
+  ASSERT_NE(replacement.data, nullptr);
+  EXPECT_TRUE(evicted.valid);
+  EXPECT_TRUE(evicted.dirty);
+  EXPECT_EQ(evicted.vmid, 7u);
+  EXPECT_TRUE(std::all_of(evicted_data.begin(), evicted_data.end(),
+                          [](uint8_t byte) { return byte == 0xA5; }));
+}
+
+TEST(CacheVmidTest, InvalidateAllVmidsRemovesEveryAliasedLine) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0xC000;
+
+  fill_line_word(cache, kAddr, /*vmid=*/1, 0x11111111u);
+  fill_line_word(cache, kAddr, /*vmid=*/2, 0x22222222u);
+
+  cache.invalidate_all_vmids(kAddr);
+
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/1));
+  EXPECT_FALSE(cache.lookup(kAddr, nullptr, /*vmid=*/2));
+}
+
+TEST(CacheVmidTest, LineDataForReadReturnsMatchingVmidData) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x10000;
+
+  auto allocation = cache.allocate_with_data(kAddr, /*vmid=*/4);
+  ASSERT_NE(allocation.data, nullptr);
+  for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+    allocation.data[i] = static_cast<uint8_t>(i ^ 0x5A);
+
+  const uint8_t *line = cache.line_data_for_read(kAddr, /*vmid=*/4);
+  ASSERT_NE(line, nullptr);
+  for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+    EXPECT_EQ(line[i], static_cast<uint8_t>(i ^ 0x5A));
+  EXPECT_EQ(cache.line_data_for_read(kAddr, /*vmid=*/5), nullptr);
+}

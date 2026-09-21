@@ -65,14 +65,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
 endif()
 
 # Set supported GPU Targets
@@ -83,7 +78,7 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     endif()
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
-    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1151;gfx1200;gfx1201")
+    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
     if(HAS_ROCM_CHECK_TARGET_IDS)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
@@ -116,8 +111,9 @@ find_package(HIP QUIET)
 find_package(rocdecode QUIET)
 find_package(rocprofiler-register QUIET)
 find_package(FFmpeg QUIET)
+find_package(Threads QUIET)
 
-if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
     # FFMPEG
@@ -128,7 +124,6 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
     # threads
     set(THREADS_PREFER_PTHREAD_FLAG ON)
-    find_package(Threads REQUIRED)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
     # rocprofiler-register
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
@@ -141,6 +136,17 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND
                         ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
 
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
+    # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
+    # links the system libva, so both load at runtime. librocdecode already depends
+    # on the vendored libva, so force librocdecode to be the FIRST direct dependency
+    # of the executable -- ahead of FFmpeg -- so the vendored libva enters the global
+    # symbol scope first and wins VA symbol interposition, loading the matching
+    # vendored VA driver. It must be injected as a raw path because CMake
+    # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
+    if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+      set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
+    endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
     if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)
@@ -149,17 +155,20 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND
       target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
     endif()
 else()
-    message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
+    message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
     if (NOT HIP_FOUND)
-        message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
+        message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
     endif()
     if (NOT FFMPEG_FOUND)
-        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
+        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found!")
     endif()
     if (NOT rocdecode_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found! - please install rocdecode!")
+        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
+    endif()
+    if (NOT Threads_FOUND)
+        message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
     endif()
     if (NOT rocprofiler-register_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocprofiler-register Not Found! - please install rocprofiler-register!")
+        message(FATAL_ERROR "-- ERROR!: rocprofiler-register Not Found!")
     endif()
 endif()

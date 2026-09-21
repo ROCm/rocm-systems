@@ -24,7 +24,6 @@ from rocm_bootstrap.targets import (
     lookup_bundle,
 )
 
-
 # ---------------------------------------------------------------------------
 # Explicit naming expectations for each bundle level
 # ---------------------------------------------------------------------------
@@ -56,8 +55,8 @@ class TestSubFamilyNames:
             ("gfx9_5", "gfx9-5", "gfx9_5"),
             ("gfx10_1", "gfx10-1", "gfx10_1"),
             ("gfx10_3", "gfx10-3", "gfx10_3"),
-            ("gfx11_0", "gfx11-0", "gfx11_0"),
-            ("gfx11_5", "gfx11-5", "gfx11_5"),
+            ("gfx110x", "gfx110x", "gfx110x"),
+            ("gfx115x", "gfx115x", "gfx115x"),
             ("gfx12_0", "gfx12-0", "gfx12_0"),
             ("gfx12_5", "gfx12-5", "gfx12_5"),
         ],
@@ -146,12 +145,13 @@ class TestDeviceDistName:
         "prefix,key,expected",
         [
             ("rocm-sdk-device", "gfx11", "rocm-sdk-device-gfx11"),
-            ("rocm-sdk-device", "gfx11_5", "rocm-sdk-device-gfx11-5"),
+            ("rocm-sdk-device", "gfx115x", "rocm-sdk-device-gfx115x"),
             ("rocm-sdk-device", "gfx1151", "rocm-sdk-device-gfx1151"),
             ("rocm-sdk-device", "gfx9_4", "rocm-sdk-device-gfx9-4"),
             ("rocm-sdk-device", "gfx942", "rocm-sdk-device-gfx942"),
             ("rocm-sdk-device", "gfx90a", "rocm-sdk-device-gfx90a"),
             ("amd-torch-device", "gfx1100", "amd-torch-device-gfx1100"),
+            ("amd-torch-device", "gfx110x", "amd-torch-device-gfx110x"),
             ("amd-torch-device", "gfx12_0", "amd-torch-device-gfx12-0"),
         ],
     )
@@ -174,7 +174,7 @@ class TestDeviceModuleName:
         "prefix,key,expected",
         [
             ("rocm_sdk_device", "gfx11", "rocm_sdk_device_gfx11"),
-            ("rocm_sdk_device", "gfx11_5", "rocm_sdk_device_gfx11_5"),
+            ("rocm_sdk_device", "gfx115x", "rocm_sdk_device_gfx115x"),
             ("rocm_sdk_device", "gfx1151", "rocm_sdk_device_gfx1151"),
             ("rocm_sdk_device", "gfx9_4", "rocm_sdk_device_gfx9_4"),
             ("rocm_sdk_device", "gfx90a", "rocm_sdk_device_gfx90a"),
@@ -202,7 +202,7 @@ class TestDeviceModuleName:
 class TestIsValidDistName:
     @pytest.mark.parametrize(
         "name",
-        ["gfx11", "gfx9-4", "rocm-sdk-device-gfx11-5", "my.package", "a"],
+        ["gfx11", "gfx9-4", "rocm-sdk-device-gfx115x", "my.package", "a"],
     )
     def test_valid(self, name):
         assert is_valid_dist_name(name)
@@ -218,7 +218,7 @@ class TestIsValidDistName:
 class TestIsValidModuleName:
     @pytest.mark.parametrize(
         "name",
-        ["gfx11", "gfx9_4", "rocm_sdk_device_gfx11_5", "_private", "a"],
+        ["gfx11", "gfx9_4", "rocm_sdk_device_gfx115x", "_private", "a"],
     )
     def test_valid(self, name):
         assert is_valid_module_name(name)

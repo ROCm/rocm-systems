@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 NIC tests.
@@ -21,7 +21,6 @@ pytestmark = [pytest.mark.nic, pytest.mark.network]
 def nic_perf_env(rocprof_config) -> dict[str, str]:
     """Environment variables for NIC performance tests."""
     return {
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "trace",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
@@ -31,6 +30,7 @@ def nic_perf_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_NETWORK_INTERFACE": f"{rocprof_config.capabilities.default_nic}",
         "ROCPROFSYS_PAPI_EVENTS": f"{rocprof_config.capabilities.papi_nic_events}",
         "ROCPROFSYS_SAMPLING_DELAY": "0.05",
+        "PAPI_NET_REFRESH_LATENCY": "100000",
     }
 
 
@@ -51,12 +51,11 @@ def nic_perf_download_url_2() -> str:
 # =============================================================================
 
 
-# @pytest.mark.ci_disable("assert_perfetto")
 class TestNIC(RocprofsysTest):
     """Tests for NIC performance."""
 
-    PERFETTO_PASS_REGEX = [r"perfetto-trace\.proto validated"]
-    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.proto"]
+    PERFETTO_PASS_REGEX = [r"perfetto-trace\.pftrace validated"]
+    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.pftrace"]
 
     def test_performance(
         self,
@@ -81,12 +80,16 @@ class TestNIC(RocprofsysTest):
             target,
             run_args=download_cmd,
             env=nic_perf_env,
-            timeout=300,
         )
         self.assert_regex(result)
         self.assert_perfetto(
             result,
-            counter_names=["rx:byte", "rx:packet", "tx:byte", "tx:packet"],
+            counter_names=[
+                "receive byte",
+                "receive packet",
+                "transmit byte",
+                "transmit packet",
+            ],
             pass_regex=self.PERFETTO_PASS_REGEX,
             fail_regex=self.PERFETTO_FAIL_REGEX,
         )

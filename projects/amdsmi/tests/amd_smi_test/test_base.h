@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef TESTS_AMD_SMI_TEST_TEST_BASE_H_
 #define TESTS_AMD_SMI_TEST_TEST_BASE_H_
@@ -141,26 +122,37 @@ class TestBase {
   uint32_t num_iterations_;
 };
 
+#define VERB(VB) ((verbosity() && verbosity() >= (TestBase::VERBOSE_##VB)))
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))
 #define IF_NVERB(VB) if (verbosity() < (TestBase::VERBOSE_##VB))
 
-// Macros to be used within TestBase classes
-#define CHK_ERR_ASRT(RET)                                                                \
-  {                                                                                      \
-    if ((RET) != AMDSMI_STATUS_SUCCESS) {                                                \
-      std::cout << std::endl << "\t===> TEST FAILURE." << std::endl;                     \
-      const char* err_str;                                                               \
-      std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl;          \
-      amdsmi_status_code_to_string((RET), &err_str);                                     \
-      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
-      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
-    }                                                                                    \
-    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) {                               \
-      std::cout << "\t===> Abort is over-ridden due to dont_fail command line option."   \
-                << std::endl;                                                            \
-      return;                                                                            \
-    }                                                                                    \
-    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET));                                             \
+// Returns the global verbosity level; defined in test_common.cc.
+// Forward-declared here so PRINT_VERBOSITY() works outside TestBase fixtures.
+uint32_t GetTestVerbosity();
+
+// Prints the current verbosity level. Works in both TestBase-derived tests
+// and plain TEST() cases (uses the global verbosity, not the member).
+#define PRINT_VERBOSITY()                                              \
+  do {                                                                 \
+    const uint32_t _verb = GetTestVerbosity();                         \
+    if (_verb) {                                                       \
+      std::cout << "\tVerbosity level: " << _verb << " ("              \
+                << (_verb == TestBase::VERBOSE_MIN        ? "MIN"      \
+                    : _verb == TestBase::VERBOSE_STANDARD ? "STANDARD" \
+                    : _verb == TestBase::VERBOSE_PROGRESS ? "PROGRESS" \
+                                                          : "UNKNOWN") \
+                << ")" << std::endl;                                   \
+    }                                                                  \
+  } while (0)
+
+#define CHK_ERR_ASRT(RET)                                                              \
+  {                                                                                    \
+    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) {                             \
+      std::cout << "\t===> Abort is over-ridden due to dont_fail command line option." \
+                << std::endl;                                                          \
+      return;                                                                          \
+    }                                                                                  \
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET));                                           \
   }
 
 void MakeHeaderStr(const char* inStr, std::string* outStr);

@@ -50,6 +50,32 @@ enum ROCSHMEM_OP {
   ROCSHMEM_REPLACE
 };
 
+enum ROCSHMEM_TILE_ELEMENT_TYPE {
+  ROCSHMEM_TILE_ELEMENT_UNKNOWN = 0,
+  ROCSHMEM_TILE_ELEMENT_INT8 = 1,
+  ROCSHMEM_TILE_ELEMENT_UINT8 = 2,
+  ROCSHMEM_TILE_ELEMENT_INT16 = 3,
+  ROCSHMEM_TILE_ELEMENT_UINT16 = 4,
+  ROCSHMEM_TILE_ELEMENT_INT32 = 5,
+  ROCSHMEM_TILE_ELEMENT_UINT32 = 6,
+  ROCSHMEM_TILE_ELEMENT_INT64 = 7,
+  ROCSHMEM_TILE_ELEMENT_UINT64 = 8,
+  ROCSHMEM_TILE_ELEMENT_FLOAT = 9,
+  ROCSHMEM_TILE_ELEMENT_DOUBLE = 10,
+  ROCSHMEM_TILE_ELEMENT_SHORT = 11,
+  ROCSHMEM_TILE_ELEMENT_USHORT = 12,
+  ROCSHMEM_TILE_ELEMENT_INT = 13,
+  ROCSHMEM_TILE_ELEMENT_UINT = 14,
+  ROCSHMEM_TILE_ELEMENT_LONG = 15,
+  ROCSHMEM_TILE_ELEMENT_ULONG = 16,
+  ROCSHMEM_TILE_ELEMENT_LONGLONG = 17,
+  ROCSHMEM_TILE_ELEMENT_ULONGLONG = 18,
+};
+
+constexpr uint64_t ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT = 56;
+constexpr uint64_t ROCSHMEM_TILE_ELEMENT_TYPE_MASK =
+    0xffULL << ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT;
+
 enum ROCSHMEM_SIGNAL_OPS {
   ROCSHMEM_SIGNAL_SET,
   ROCSHMEM_SIGNAL_ADD,
@@ -133,6 +159,8 @@ extern "C" __device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROC
  * valid context.
  */
 extern __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID;
+
+extern __constant__  rocshmem_ctx_t *rocshmem_ctx_array;
 /**
  * Used internally to set default context.
  */
@@ -143,7 +171,7 @@ void set_internal_ctx(rocshmem_ctx_t *ctx);
  */
 //TODO: this should remain internal?
 enum class BackendType { GDA_BACKEND, RO_BACKEND, IPC_BACKEND };
-BackendType get_backend_type();
+BackendType rocshmem_query_backend_type();
 
 typedef uint64_t *rocshmem_team_t;
 
@@ -151,22 +179,32 @@ namespace device {
     extern "C" {
         extern __constant__ rocshmem_team_t
             __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+        extern __constant__ rocshmem_team_t
+            __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED;
     }
 }
 namespace host {
     extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+    extern rocshmem_team_t ROCSHMEM_TEAM_SHARED;
 }
 
 #if __HIP_DEVICE_COMPILE__
 using device::ROCSHMEM_TEAM_WORLD;
+using device::ROCSHMEM_TEAM_SHARED;
 #else
 using host::ROCSHMEM_TEAM_WORLD;
+using host::ROCSHMEM_TEAM_SHARED;
 #endif
 
 /**
  * Used internally to update the ROCSHMEM_TEAM_WORLD constant
  */
 void set_team_world_device(rocshmem_team_t team_world);
+
+/**
+ * Used internally to update the ROCSHMEM_TEAM_SHARED constant
+ */
+void set_team_shared_device(rocshmem_team_t team_shared);
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 
@@ -180,7 +218,7 @@ const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 using rocshmem_uniqueid_t = std::array<uint8_t, ROCSHMEM_UNIQUE_ID_BYTES>;
 
 /**
- * @brief Data structure used for attribute based 
+ * @brief Data structure used for attribute based
  *        initialization
  */
 struct rocshmem_init_attr_t  {

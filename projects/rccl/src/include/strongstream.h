@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_STRONGSTREAM_H_
 #define NCCL_STRONGSTREAM_H_
@@ -13,12 +14,13 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <stdint.h>
+#include <mutex>
 
 // ncclCudaContext: wraps a CUDA context with per-context state.
 struct ncclCudaContext;
 
 // Get a ncclCudaContext to track the currently active CUDA context.
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out);
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int launchOrderImplicit, uint64_t commHash);
 // Drop reference.
 void ncclCudaContextDrop(struct ncclCudaContext* cxt);
 
@@ -30,36 +32,38 @@ struct ncclCudaGraph {
   cudaStream_t origin;
   cudaGraph_t graph;
   unsigned long long graphId;
+  int graphUsageMode;
 #endif
 };
 
-inline struct ncclCudaGraph ncclCudaGraphNone() {
+inline struct ncclCudaGraph ncclCudaGraphNone(int graphUsageMode) {
   struct ncclCudaGraph tmp;
-  #if ROCM_VERSION >= 60100
-    tmp.origin = nullptr;
-    tmp.graph = nullptr;
-    tmp.graphId = ULLONG_MAX;
-  #endif
+#if ROCM_VERSION >= 60100
+  tmp.origin = nullptr;
+  tmp.graph = nullptr;
+  tmp.graphId = ULLONG_MAX;
+  tmp.graphUsageMode = graphUsageMode;
+#endif
   return tmp;
 }
 
 inline bool ncclCudaGraphValid(struct ncclCudaGraph graph) {
-  #if ROCM_VERSION >= 60100
-    return graph.graphId != ULLONG_MAX;
-  #else
-    return false;
-  #endif
+#if ROCM_VERSION >= 60100
+  return graph.graphId != ULLONG_MAX;
+#else
+  return false;
+#endif
 }
 
 inline bool ncclCudaGraphSame(struct ncclCudaGraph a, struct ncclCudaGraph b) {
-  #if ROCM_VERSION >= 60100
-    return a.graphId == b.graphId;
-  #else
-    return true;
-  #endif
+#if ROCM_VERSION >= 60100
+  return a.graphId == b.graphId;
+#else
+  return true;
+#endif
 }
 
-ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, cudaStream_t stream);
+ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, cudaStream_t stream, int graphUsageMode);
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph graph, cudaHostFn_t fn, void* arg);
 
 /* ncclStrongStream: An abstraction over CUDA streams that do not lose their
@@ -84,23 +88,20 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss);
 
 // Acquire the strong stream. Upon return `*workStream` will be usable to add work.
 // `concurrent` indicates if other threads may be using the strong stream.
-ncclResult_t ncclStrongStreamAcquire(
-  struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent, cudaStream_t* workStream
-);
+ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent,
+                                     cudaStream_t* workStream);
 
 // Get the workStream for an already acquired strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
-ncclResult_t ncclStrongStreamAcquiredWorkStream(
-  struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent, cudaStream_t* workStream
-);
+ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, struct ncclStrongStream* ss,
+                                                bool concurrent, cudaStream_t* workStream);
 
 // Release of the strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent);
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, cudaEvent_t event, cudaStream_t stream);
 
-ncclResult_t ncclStreamWaitStream(
-  cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent
-);
+ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent);
 
 // Like cudaStreamWaitEvent except `e` must be strictly ahead of everything in `s`.
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e);
@@ -119,7 +120,11 @@ struct ncclStrongStream {
 #if ROCM_VERSION >= 60100
   // This stream ever appeared in a graph capture.
   bool everCaptured;
-  pthread_mutex_t lock;
+  // serialEvent has been recorded at least once for the graph-origin path used when
+  // graphStreamOrdering=0. Separate from everCaptured, which is also set by captures that never
+  // record serialEvent (graphUsageMode != 2) and is shared with splitShare children.
+  bool graphOriginCaptured;
+  std::mutex mutex;
   struct ncclStrongStreamCapture* captureHead;
   // The event used to establish order between graphs and streams. During acquire
   // this event is waited on, during release it is recorded to.
@@ -131,6 +136,8 @@ struct ncclCudaContext {
   struct ncclCudaContext* next;
   int hcontext;
   int refCount;
+  bool launchOrderImplicitEverEnabled;
+  bool launchOrderImplicitEverDisabled;
   struct ncclStrongStream launchOrder;
 };
 

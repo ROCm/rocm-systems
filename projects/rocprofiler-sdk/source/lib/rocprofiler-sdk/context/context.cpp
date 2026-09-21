@@ -28,6 +28,8 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -288,7 +290,7 @@ start_context(rocprofiler_context_id_t context_id)
         {
             return ROCPROFILER_STATUS_SUCCESS;
         }
-        else if(cfg->counter_collection && itr->counter_collection)
+        else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection)
         {
             // conflicting context
             return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
@@ -325,6 +327,8 @@ start_context(rocprofiler_context_id_t context_id)
         get_num_active_contexts().fetch_add(1, std::memory_order_release);
     }
 
+    rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
+
     // atomic swap the pointer into the "active" array used internally
     const context* _expected = nullptr;
     bool           success   = active_contexts.at(idx).compare_exchange_strong(
@@ -332,13 +336,23 @@ start_context(rocprofiler_context_id_t context_id)
 
     if(!success)
     {
+        rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_stopped(
+            cfg);
         get_num_active_contexts().fetch_sub(1, std::memory_order_release);
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
     }
 
     auto status = ROCPROFILER_STATUS_SUCCESS;
 
-    if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
+    // A context that traces kernel dispatch is the only reason to arm the KFD
+    // dispatch-log ring, so arm it here rather than at startup. Idempotent, and
+    // early enough that the firmware is recording before the first dispatch.
+    if(cfg->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
+        rocprofiler::kfd::arm_dispatch_log_sessions();
+
+    if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
+    if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
@@ -369,14 +383,20 @@ stop_context(rocprofiler_context_id_t idx)
                 auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
                 if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
 
-                if(_expected->counter_collection)
+                if(_expected->dispatch_counter_collection)
                 {
                     rocprofiler::counters::stop_context(const_cast<context*>(_expected));
                 }
 
+                if(_expected->dispatch_spm)
+                    rocprofiler::spm::stop_context(const_cast<context*>(_expected));
+
                 if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
                 if(_expected->dispatch_thread_trace)
                     _expected->dispatch_thread_trace->stop_context();
+
+                rocprofiler::hsa::queue_interposition::
+                    notify_queue_interposition_consumer_context_stopped(_expected);
 
                 if(_expected->device_counter_collection)
                 {
@@ -436,12 +456,17 @@ stop_client_contexts(rocprofiler_client_id_t client_id)
 void
 deactivate_client_contexts(rocprofiler_client_id_t client_id)
 {
+    auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
     for(auto& itr : get_active_contexts_impl())
     {
-        const auto* itr_v = itr.load();
+        const context* itr_v = itr.load(std::memory_order_acquire);
         if(itr_v && itr_v->client_idx == client_id.handle)
         {
-            itr.store(nullptr);
+            if(itr.compare_exchange_strong(itr_v, nullptr))
+            {
+                rocprofiler::hsa::queue_interposition::
+                    notify_queue_interposition_consumer_context_stopped(itr_v);
+            }
         }
     }
 }

@@ -81,68 +81,6 @@ bool PrintfDbg::init(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& si
   return true;
 }
 
-bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled, const amd::NDRange& size,
-                       const std::vector<device::PrintfInfo>& printfInfo) {
-  // Are we expected to generate debug output?
-  if (printfEnabled && !printfInfo.empty()) {
-    uint32_t* workitemData;
-    size_t i, j, k, z;
-    bool realloc = false;
-
-    // Wait for kernel execution
-    gpu.waitAllEngines();
-
-    size_t zdim = 1;
-    size_t ydim = 1;
-    size_t xdim = 1;
-
-    switch (size.dimensions()) {
-      case 3:
-        zdim = size[2];
-      // Fall through ...
-      case 2:
-        ydim = size[1];
-      // Fall through ...
-      case 1:
-        xdim = size[0];
-      // Fall through ...
-      default:
-        break;
-    }
-
-    for (k = 0; k < zdim; ++k) {
-      for (j = 0; j < ydim; ++j) {
-        for (i = 0; i < xdim; ++i) {
-          size_t idx = (xdim * (ydim * k + j) + i);
-          workitemData = mapWorkitem(gpu, idx, &realloc);
-
-          if (nullptr != workitemData) {
-            uint32_t wp = workitemData[0];  // write pointer (i.e. first unwritten element)
-            // Walk through each PrintfDbg entry
-            for (z = 1; (z < (wiDbgSize() / sizeof(uint32_t))) && (z < wp);) {
-              if (printfInfo.size() < workitemData[z]) {
-                LogError("The format string wasn't reported");
-                return false;
-              }
-              // Get the PrintfDbg info
-              const device::PrintfInfo& info = printfInfo[workitemData[z++]];
-              // There's something in this buffer
-              outputDbgBuffer(info, workitemData, z);
-            }
-          }
-          unmapWorkitem(gpu, workitemData);
-        }
-      }
-    }
-
-    // Reallocate debug buffer if necessary
-    if (!allocate(realloc)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool PrintfDbg::allocate(bool realloc) {
   if (nullptr == dbgBuffer_) {
     dbgBuffer_ = dev().createScratchBuffer(dev().info().printfBufferSize_);
@@ -162,9 +100,11 @@ bool PrintfDbg::checkFloat(const std::string& fmt) const {
     case 'e':
     case 'E':
     case 'f':
+    case 'F':
     case 'g':
     case 'G':
     case 'a':
+    case 'A':
       return true;
       break;
     default:
@@ -193,9 +133,13 @@ int PrintfDbg::checkVectorSpecifier(const std::string& fmt, size_t startPos, siz
     else if (fmt[curPos - 4] == 'v') {
       size = 3;
     }
-    // the modifier is "hh"
+    // the modifier is "hh", or two-digit vector size (16) with "h" or "l"
     else if ((curPos >= 5) && (fmt[curPos - 5] == 'v')) {
       size = 4;
+    }
+    // two-digit vector size (16) with "hl" or "hh" modifier
+    else if ((curPos >= 6) && (fmt[curPos - 6] == 'v')) {
+      size = 5;
     }
     if (size > 0) {
       curPos = size;
@@ -240,16 +184,35 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
   if (checkString(fmt.c_str())) {
     // copiedBytes should be as number of printed chars
     copiedBytes = 0;
-    //(null) should be printed
-    if (*(reinterpret_cast<const unsigned char*>(argument)) == 0) {
+    uint32_t argVal = *(reinterpret_cast<const uint32_t*>(argument));
+    if (argVal == 0) {
+      // Null pointer: (null) should be printed
       amd::Os::printf(fmt.data(), 0);
       // copiedBytes = strlen("(null)")
       copiedBytes = 6;
+    } else if (argVal == 0xFFFFFF00) {
+      // Empty string sentinel from the compiler - print empty string
+      amd::Os::printf(fmt.data(), "");
+      copiedBytes = 4;
     } else {
       const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
-      amd::Os::printf(fmt.data(), argumentStr);
-      // copiedBytes = strlen(argumentStr)
-      while (argumentStr[copiedBytes++] != 0);
+      if (size > 0 && size < ConstStr) {
+        size_t len = 0;
+        while (len < size && argumentStr[len] != 0) len++;
+        // When strlen is a multiple of 4, the compiler stores only the string
+        // bytes without a null terminator (ArgSize = strlen + 4 but the last
+        // 4 bytes are never written). If no null was found, the real string
+        // length is size - 4.
+        if (len == size && size >= 4) {
+          len = size - 4;
+        }
+        std::string safeStr(reinterpret_cast<const char*>(argumentStr), len);
+        amd::Os::printf(fmt.data(), safeStr.c_str());
+        copiedBytes = size;
+      } else {
+        amd::Os::printf(fmt.data(), argumentStr);
+        while (argumentStr[copiedBytes++] != 0);
+      }
     }
   }
 
@@ -261,6 +224,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       hlFmt = fmt;
       hlFmt.erase(hlFmt.find_first_of("hl"), 2);
     }
+    static const char* fSpecifiers = "cdieEfFgGaAosuxXp";
     switch (size) {
       case 0: {
         const char* str = reinterpret_cast<const char*>(argument);
@@ -305,13 +269,14 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
         } else {
           bool hhModifier = (strstr(fmt.c_str(), "hh") != nullptr);
           if (hhModifier) {
-            // current implementation of printf in gcc 4.5.2 runtime libraries, doesn`t recognize
-            // "hh" modifier ==>
-            // argument should be explicitly converted to  unsigned char (uchar) before printing and
-            // fmt should be updated not to contain "hh" modifier
             std::string hhFmt = fmt;
             hhFmt.erase(hhFmt.find_first_of("h"), 2);
-            amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            char specifier = fmt[fmt.size() - 1];
+            if (specifier == 'd' || specifier == 'i') {
+              amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const signed char*>(argument)));
+            } else {
+              amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            }
           } else if (hlModifier) {
             amd::Os::printf(hlFmt.data(), size == 2
                                               ? *(reinterpret_cast<const uint16_t*>(argument))
@@ -352,7 +317,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
 
 void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* workitemData,
                                 size_t& i) const {
-  static const char* specifiers = "cdieEfgGaosuxXp";
+  static const char* specifiers = "cdieEfFgGaAosuxXp";
   static const char* modifiers = "hl";
   static const char* special = "%n";
   static const std::string sepStr = "%s";
@@ -467,7 +432,15 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
 
   if (pos != std::string::npos) {
     fmt = str.substr(pos, str.size() - pos);
-    outputArgument(sepStr, false, ConstStr, fmt.data());
+    // Resolve %% escape sequences to literal % before printing as a string
+    size_t p = 0;
+    while ((p = fmt.find("%%", p)) != std::string::npos) {
+      fmt.erase(p, 1);
+      p++;
+    }
+    if (!fmt.empty()) {
+      outputArgument(sepStr, false, ConstStr, fmt.data());
+    }
   }
 }
 

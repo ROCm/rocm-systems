@@ -29,6 +29,9 @@ on:
       - '!docs/**'
       - '!projects/*/docs/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -41,7 +44,7 @@ jobs:
         python-version: ['3.8', '3.10', '3.12']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-sdk
     - name: Set up Python ${{ matrix.python-version }}

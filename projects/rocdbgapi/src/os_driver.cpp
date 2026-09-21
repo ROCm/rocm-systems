@@ -137,24 +137,7 @@ template <>
 std::string
 to_string (os_exception_mask_t exception_mask)
 {
-  std::string str;
-
-  if (exception_mask == os_exception_mask_t::none)
-    return one_os_exception_to_string (exception_mask);
-
-  while (exception_mask != os_exception_mask_t::none)
-    {
-      os_exception_mask_t one_bit
-        = exception_mask ^ (exception_mask & (exception_mask - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_os_exception_to_string (one_bit);
-
-      exception_mask ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (exception_mask, one_os_exception_to_string);
 }
 
 template <>
@@ -173,13 +156,14 @@ to_string (os_agent_info_t os_agent_info)
     ".gfxip=[%d,%d,%d], .simd_count=%zd, .max_waves_per_simd=%zd, "
     ".shader_engine_count=%zd, .vendor_id=%#x, .device_id=%#x, "
     ".revision_id=%#x, .subsystem_vendor_id=%#x, .subsystem_device_id=%#x, "
-    ".fw_version=%d, .local_address_aperture_base=%s, "
-    ".local_address_aperture_limit=%s, .private_address_aperture_base=%s, "
-    ".private_address_aperture_limit=%s, .debugging_supported=%d, "
-    ".address_watch_supported=%d, .address_watch_register_count=%zd, "
-    ".address_watch_mask_bits=%#" PRIx64 ", .watchpoint_exclusive=%d, "
-    ".precise_memory_supported=%d, .precise_alu_exceptions_supported=%d,"
-    ".firmware_supported=%d, ttmps_always_initialized=%d }",
+    ".fw_version=%d, .agent_address_base=%s, .agent_address_limit=%s, "
+    ".local_address_aperture_base=%s, .local_address_aperture_limit=%s, "
+    ".private_address_aperture_base=%s, .private_address_aperture_limit=%s, "
+    ".debugging_supported=%d, .address_watch_supported=%d, "
+    ".address_watch_register_count=%zd, .address_watch_mask_bits=%#" PRIx64
+    ", .watchpoint_exclusive=%d, .precise_memory_supported=%d, "
+    ".precise_alu_exceptions_supported=%d, .firmware_supported=%d, "
+    "ttmps_always_initialized=%d }",
     os_agent_info.os_agent_id, os_agent_info.name.c_str (),
     os_agent_info.domain, os_agent_info.location_id, os_agent_info.gfxip[0],
     os_agent_info.gfxip[1], os_agent_info.gfxip[2], os_agent_info.simd_count,
@@ -187,6 +171,8 @@ to_string (os_agent_info_t os_agent_info)
     os_agent_info.vendor_id, os_agent_info.device_id,
     os_agent_info.revision_id, os_agent_info.subsystem_vendor_id,
     os_agent_info.subsystem_device_id, os_agent_info.fw_version,
+    to_cstring (os_agent_info.agent_address_base),
+    to_cstring (os_agent_info.agent_address_limit),
     to_cstring (os_agent_info.local_address_aperture_base),
     to_cstring (os_agent_info.local_address_aperture_limit),
     to_cstring (os_agent_info.private_address_aperture_base),
@@ -276,24 +262,7 @@ template <>
 std::string
 to_string (os_queue_state_t queue_state)
 {
-  std::string str;
-
-  if (!queue_state)
-    return one_queue_state_t_to_string (queue_state);
-
-  while (!!queue_state)
-    {
-      os_queue_state_t one_flag
-        = queue_state ^ (queue_state & (queue_state - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_queue_state_t_to_string (one_flag);
-
-      queue_state ^= one_flag;
-    }
-
-  return str;
+  return utils::flags_to_string (queue_state, one_queue_state_t_to_string);
 }
 
 template <>
@@ -304,14 +273,16 @@ to_string (os_queue_snapshot_entry_t snapshot)
     "{ .queue_id=%d, .state=%s, .gpu_id=%d, .queue_type=%s, "
     ".exception_status=%s, .ring_base_address=%s, .ring_size=%" PRId64 ", "
     ".write_pointer_address=%s, .read_pointer_address=%s, "
-    ".ctx_save_restore_address=%s, .ctx_save_restore_area_size=%" PRId64 " }",
+    ".ctx_save_restore_address=%s, .ctx_save_restore_area_size=%" PRId64
+    ", .compute_tmpring_size=%s }",
     snapshot.queue_id, to_cstring (snapshot.state), snapshot.gpu_id,
     to_cstring (snapshot.queue_type), to_cstring (snapshot.exception_status),
     to_cstring (snapshot.ring_base_address), snapshot.ring_size,
     to_cstring (snapshot.write_pointer_address),
     to_cstring (snapshot.read_pointer_address),
     to_cstring (snapshot.ctx_save_restore_address),
-    snapshot.ctx_save_restore_area_size);
+    snapshot.ctx_save_restore_area_size,
+    to_cstring (snapshot.compute_tmpring_size));
 }
 
 template <>
@@ -350,23 +321,7 @@ template <>
 std::string
 to_string (os_process_flags_t flags)
 {
-  std::string str;
-
-  if (!flags)
-    return one_os_process_flag_to_string (flags);
-
-  while (!!flags)
-    {
-      os_process_flags_t one_flag = flags ^ (flags & (flags - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_os_process_flag_to_string (one_flag);
-
-      flags ^= one_flag;
-    }
-
-  return str;
+  return utils::flags_to_string (flags, one_os_process_flag_to_string);
 }
 
 template <>

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 /*
  * Defines mpi functions and dummy functions when compiled without MPI
@@ -29,9 +10,10 @@
 
 #include <timemory/timemory.hpp>
 
-#include <timemory/environment/declaration.hpp>
+#include "common/environment.hpp"
 #include <timemory/utility/types.hpp>
 
+#include "common/env_vars.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdint>
@@ -57,13 +39,6 @@
 #        undef MPI_DOUBLE
 #    endif
 #    include <mpi.h>
-#endif
-
-#if defined(MPICH) && MPICH > 0
-#    define ROCPROFSYS_MPI_MPICH 1
-#elif defined(OMPI_MAJOR_VERSION) && defined(OMPI_MINOR_VERSION) &&                      \
-    defined(OMPI_PATCH_VERSION)
-#    define ROCPROFSYS_MPI_OPENMPI 1
 #endif
 
 namespace rocprofsys
@@ -156,10 +131,10 @@ enum : int
 
 #else  // dummy MPI types
 
-using comm_t                           = int32_t;
-using info_t                           = int32_t;
-using data_type_t                      = int32_t;
-using status_t                         = int32_t;
+using comm_t                           = std::int32_t;
+using info_t                           = std::int32_t;
+using data_type_t                      = std::int32_t;
+using status_t                         = std::int32_t;
 static const comm_t comm_world_v       = 0;
 static const comm_t comm_self_v        = 0;
 static const info_t info_null_v        = 0;
@@ -201,10 +176,10 @@ get_id()
 template <typename Tp>
 using communicator_map_t = std::unordered_map<comm_t, Tp>;
 
-inline int32_t rank(comm_t = comm_world_v);
-inline int32_t size(comm_t = comm_world_v);
-inline void    set_rank(int32_t, comm_t = comm_world_v);
-inline void    set_size(int32_t, comm_t = comm_world_v);
+inline std::int32_t rank(comm_t = comm_world_v);
+inline std::int32_t size(comm_t = comm_world_v);
+inline void         set_rank(std::int32_t, comm_t = comm_world_v);
+inline void         set_size(std::int32_t, comm_t = comm_world_v);
 
 //--------------------------------------------------------------------------------------//
 // Currently ROCPROFSYS_MPI_THREAD is just a placeholder for future
@@ -213,7 +188,7 @@ inline void    set_size(int32_t, comm_t = comm_world_v);
 inline bool&
 use_mpi_thread()
 {
-    static bool _instance = tim::get_env("ROCPROFSYS_MPI_THREAD", true);
+    static bool _instance = rocprofsys::get_env(env_vars::MPI_THREAD, true);
     return _instance;
 }
 
@@ -223,7 +198,7 @@ inline std::string&
 use_mpi_thread_type()
 {
     static std::string _instance =
-        tim::get_env<std::string>("ROCPROFSYS_MPI_THREAD_TYPE", "");
+        rocprofsys::get_env<std::string>(env_vars::MPI_THREAD_TYPE, "");
     return _instance;
 }
 
@@ -232,7 +207,7 @@ use_mpi_thread_type()
 inline bool&
 fail_on_error()
 {
-    static bool _instance = tim::get_env("ROCPROFSYS_MPI_FAIL_ON_ERROR", false);
+    static bool _instance = rocprofsys::get_env(env_vars::MPI_FAIL_ON_ERROR, false);
     return _instance;
 }
 
@@ -241,7 +216,7 @@ fail_on_error()
 inline bool&
 quiet()
 {
-    static bool _instance = tim::get_env("ROCPROFSYS_MPI_QUIET", false);
+    static bool _instance = rocprofsys::get_env(env_vars::MPI_QUIET, false);
     return _instance;
 }
 
@@ -260,7 +235,8 @@ quiet()
 //--------------------------------------------------------------------------------------//
 
 inline bool
-check_error(const char* _func, int err_code, comm_t _comm = mpi::comm_world_v)
+check_error([[maybe_unused]] const char* _func, [[maybe_unused]] int err_code,
+            [[maybe_unused]] comm_t _comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     bool _success = (err_code == MPI_SUCCESS);
@@ -278,7 +254,6 @@ check_error(const char* _func, int err_code, comm_t _comm = mpi::comm_world_v)
     if(!_success && fail_on_error()) PMPI_Abort(_comm, err_code);
     return (err_code == MPI_SUCCESS);
 #else
-    tim::consume_parameters(_func, err_code, _comm);
     return false;
 #endif
 }
@@ -304,7 +279,7 @@ inline bool&
 is_finalized()
 {
 #if defined(ROCPROFSYS_USE_MPI)
-    int32_t _fini = 0;
+    std::int32_t _fini = 0;
     PMPI_Finalized(&_fini);
     static bool _instance = static_cast<bool>(_fini);
     if(!_instance) _instance = static_cast<bool>(_fini);
@@ -321,11 +296,16 @@ inline std::function<bool()>&
 is_initialized_callback()
 {
     static std::function<bool()> _v = []() -> bool {
-        int32_t _init = 0;
 #if defined(ROCPROFSYS_USE_MPI)
-        if(!is_finalized()) PMPI_Initialized(&_init);
+        std::int32_t init = 0;
+        if(!is_finalized())
+        {
+            PMPI_Initialized(&init);
+        }
+        return init != 0;
+#else
+        return false;
 #endif
-        return (_init != 0) ? true : false;
     };
     return _v;
 }
@@ -341,7 +321,7 @@ is_initialized()
 //--------------------------------------------------------------------------------------//
 
 inline void
-initialize(int& argc, char**& argv)
+initialize([[maybe_unused]] int& argc, [[maybe_unused]] char**& argv)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(!is_initialized())
@@ -389,8 +369,6 @@ initialize(int& argc, char**& argv)
 
         if(!_success_v) ROCPROFSYS_MPI_ERROR_CHECK(MPI_Init(&argc, &argv));
     }
-#else
-    tim::consume_parameters(argc, argv);
 #endif
 }
 
@@ -422,15 +400,16 @@ finalize()
 
 #if defined(ROCPROFSYS_USE_MPI)
 
-int32_t
+std::int32_t
 rank(comm_t comm)
 {
-    int32_t _rank = 0;
+    std::int32_t _rank = 0;
     if(is_initialized())
     {
         // this is used to guard against the queries that might happen after an
         // application calls MPI_Finalize() directly
-        static communicator_map_t<int32_t>* _instance = new communicator_map_t<int32_t>();
+        static communicator_map_t<std::int32_t>* _instance =
+            new communicator_map_t<std::int32_t>();
         if(_instance->find(comm) == _instance->end())
         {
             PMPI_Comm_rank(comm, &_rank);
@@ -441,18 +420,19 @@ rank(comm_t comm)
             _rank = (*_instance)[comm];
         }
     }
-    return std::max(_rank, (int32_t) 0);
+    return std::max(_rank, (std::int32_t) 0);
 }
 
-int32_t
+std::int32_t
 size(comm_t comm)
 {
-    int32_t _size = 1;
+    std::int32_t _size = 1;
     if(is_initialized())
     {
         // this is used to guard against the queries that might happen after an
         // application calls MPI_Finalize() directly
-        static communicator_map_t<int32_t>* _instance = new communicator_map_t<int32_t>();
+        static communicator_map_t<std::int32_t>* _instance =
+            new communicator_map_t<std::int32_t>();
         if(_instance->find(comm) == _instance->end())
         {
             PMPI_Comm_size(comm, &_size);
@@ -463,27 +443,33 @@ size(comm_t comm)
             _size = (*_instance)[comm];
         }
     }
-    return std::max(_size, (int32_t) 1);
+    return std::max(_size, (std::int32_t) 1);
 }
 
 void
-set_rank(int32_t, comm_t)
+set_rank(std::int32_t, comm_t)
 {}
 void
-set_size(int32_t, comm_t)
+set_size(std::int32_t, comm_t)
 {}
 
 #else
 
 struct comm_data
 {
-    using entry_t = std::array<int32_t, 2>;
+    using entry_t = std::array<std::int32_t, 2>;
 
-    static int32_t rank(comm_t _comm) { return std::max<int32_t>(m_data()[_comm][0], 0); }
-    static int32_t size(comm_t _comm) { return std::max<int32_t>(m_data()[_comm][1], 1); }
+    static std::int32_t rank(comm_t _comm)
+    {
+        return std::max<std::int32_t>(m_data()[_comm][0], 0);
+    }
+    static std::int32_t size(comm_t _comm)
+    {
+        return std::max<std::int32_t>(m_data()[_comm][1], 1);
+    }
 
-    friend void set_rank(int32_t, comm_t);
-    friend void set_size(int32_t, comm_t);
+    friend void set_rank(std::int32_t, comm_t);
+    friend void set_size(std::int32_t, comm_t);
 
 private:
     static std::map<comm_t, entry_t>& m_data()
@@ -493,26 +479,26 @@ private:
     }
 };
 
-int32_t
+std::int32_t
 rank(comm_t comm)
 {
     return comm_data::rank(comm);
 }
 
-int32_t
+std::int32_t
 size(comm_t comm)
 {
     return comm_data::size(comm);
 }
 
 void
-set_rank(int32_t _rank, comm_t comm)
+set_rank(std::int32_t _rank, comm_t comm)
 {
     comm_data::m_data()[comm][0] = _rank;
 }
 
 void
-set_size(int32_t _size, comm_t comm)
+set_size(std::int32_t _size, comm_t comm)
 {
     comm_data::m_data()[comm][1] = _size;
 }
@@ -522,32 +508,31 @@ set_size(int32_t _size, comm_t comm)
 //--------------------------------------------------------------------------------------//
 
 inline void
-barrier(comm_t comm)
+barrier([[maybe_unused]] comm_t comm)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized()) PMPI_Barrier(comm);
-#else
-    tim::consume_parameters(comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-comm_split(comm_t comm, int split_size, int rank, comm_t* local_comm)
+comm_split([[maybe_unused]] comm_t comm, [[maybe_unused]] int split_size,
+           [[maybe_unused]] int rank, [[maybe_unused]] comm_t* local_comm)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
         ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Comm_split(comm, split_size, rank, local_comm));
-#else
-    tim::consume_parameters(comm, split_size, rank, local_comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-comm_split_type(comm_t comm, int split_size, int key, info_t info, comm_t* local_comm)
+comm_split_type([[maybe_unused]] comm_t comm, [[maybe_unused]] int split_size,
+                [[maybe_unused]] int key, [[maybe_unused]] info_t info,
+                [[maybe_unused]] comm_t* local_comm)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
@@ -555,8 +540,6 @@ comm_split_type(comm_t comm, int split_size, int key, info_t info, comm_t* local
         ROCPROFSYS_MPI_ERROR_CHECK(
             PMPI_Comm_split_type(comm, split_size, key, info, local_comm));
     }
-#else
-    tim::consume_parameters(comm, split_size, key, info, local_comm);
 #endif
 }
 
@@ -578,7 +561,7 @@ get_node_comm()
 
 //--------------------------------------------------------------------------------------//
 /// returns the number of ranks on a node
-inline int32_t
+inline std::int32_t
 get_num_ranks_per_node()
 {
     if(!is_initialized()) return 1;
@@ -587,7 +570,7 @@ get_num_ranks_per_node()
 
 //--------------------------------------------------------------------------------------//
 
-inline int32_t
+inline std::int32_t
 get_num_nodes()
 {
     if(!is_initialized()) return 1;
@@ -598,7 +581,7 @@ get_num_nodes()
 
 //--------------------------------------------------------------------------------------//
 
-inline int32_t
+inline std::int32_t
 get_node_index()
 {
     if(!is_initialized()) return 0;
@@ -608,7 +591,8 @@ get_node_index()
 //--------------------------------------------------------------------------------------//
 
 inline void
-send(const std::string& str, int dest, int tag, comm_t comm = mpi::comm_world_v)
+send([[maybe_unused]] const std::string& str, [[maybe_unused]] int dest,
+     [[maybe_unused]] int tag, [[maybe_unused]] comm_t comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     using ulli_t = unsigned long long;
@@ -637,15 +621,14 @@ send(const std::string& str, int dest, int tag, comm_t comm = mpi::comm_world_v)
                                                  MPI_LONG, dest, tag, comm));
         }
     }
-#else
-    tim::consume_parameters(str, dest, tag, comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-recv(std::string& str, int src, int tag, comm_t comm = mpi::comm_world_v)
+recv([[maybe_unused]] std::string& str, [[maybe_unused]] int src,
+     [[maybe_unused]] int tag, [[maybe_unused]] comm_t comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     using ulli_t   = unsigned long long;
@@ -689,16 +672,16 @@ recv(std::string& str, int src, int tag, comm_t comm = mpi::comm_world_v)
     {
         str.clear();
     }
-#else
-    tim::consume_parameters(str, src, tag, comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-gather(const void* sendbuf, int sendcount, data_type_t sendtype, void* recvbuf,
-       int recvcount, data_type_t recvtype, int root, comm_t comm = mpi::comm_world_v)
+gather([[maybe_unused]] const void* sendbuf, [[maybe_unused]] int sendcount,
+       [[maybe_unused]] data_type_t sendtype, [[maybe_unused]] void* recvbuf,
+       [[maybe_unused]] int recvcount, [[maybe_unused]] data_type_t recvtype,
+       [[maybe_unused]] int root, [[maybe_unused]] comm_t comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
@@ -706,18 +689,17 @@ gather(const void* sendbuf, int sendcount, data_type_t sendtype, void* recvbuf,
         ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf,
                                                recvcount, recvtype, root, comm));
     }
-#else
-    tim::consume_parameters(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype,
-                            root, comm);
 #endif
 }
 
 //--------------------------------------------------------------------------------------//
 
 inline void
-comm_spawn_multiple(int count, char** commands, char*** argv, const int* maxprocs,
-                    const info_t* info, int root, comm_t comm, comm_t* intercomm,
-                    int* errcodes)
+comm_spawn_multiple([[maybe_unused]] int count, [[maybe_unused]] char** commands,
+                    [[maybe_unused]] char*** argv, [[maybe_unused]] const int* maxprocs,
+                    [[maybe_unused]] const info_t* info, [[maybe_unused]] int root,
+                    [[maybe_unused]] comm_t comm, [[maybe_unused]] comm_t* intercomm,
+                    [[maybe_unused]] int* errcodes)
 {
 #if defined(ROCPROFSYS_USE_MPI)
     if(is_initialized())
@@ -725,9 +707,6 @@ comm_spawn_multiple(int count, char** commands, char*** argv, const int* maxproc
         ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Comm_spawn_multiple(
             count, commands, argv, maxprocs, info, root, comm, intercomm, errcodes));
     }
-#else
-    tim::consume_parameters(count, commands, argv, maxprocs, info, root, comm, intercomm,
-                            errcodes);
 #endif
 }
 

@@ -92,10 +92,10 @@ static void runTest(const int width, const int height, const int depth, const fl
     HIP_CHECK(hipFreeArray(arr));
     free(hData);
     if (res == hipErrorNotSupported && LinearFilter3D) {
-      printf("gfx90a doesn't support 3D linear filter! Skipped!\n");
-    } else {
-      result = false;
+      WARN("Skipping section: 3D linear texture filter is not supported on this device.");
+      return;
     }
+    result = false;
     REQUIRE(result);
     return;
   }

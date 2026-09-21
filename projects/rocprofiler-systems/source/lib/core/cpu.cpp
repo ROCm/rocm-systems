@@ -1,32 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cpu.hpp"
 #include "agent_manager.hpp"
+#include "common/string_utility.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
+#include <fcntl.h>
 #include <fstream>
 #include <functional>
+#include <map>
+#include <set>
+#include <unistd.h>
 #include <unordered_map>
 
 namespace rocprofsys
@@ -56,13 +43,6 @@ process_cpu_info_data()
         {
             return -1;
         }
-    };
-
-    auto trim_whitespace = [](const std::string& str) -> std::string {
-        size_t start = str.find_first_not_of(" \t");
-        if(start == std::string::npos) return "";
-        size_t end = str.find_last_not_of(" \t");
-        return str.substr(start, end - start + 1);
     };
 
     static const std::unordered_map<std::string,
@@ -105,26 +85,26 @@ process_cpu_info_data()
             if(has_processor_entry)
             {
                 cpu_data.push_back(current_cpu);
-                return cpu_data;  // Return immediately after first core
+                current_cpu         = cpu_info{};
+                has_processor_entry = false;
             }
             continue;
         }
 
-        size_t colon_pos = line.find(':');
+        const size_t colon_pos = line.find(':');
         if(colon_pos == std::string::npos)
         {
             continue;
         }
 
-        std::string key   = trim_whitespace(line.substr(0, colon_pos));
-        std::string value = trim_whitespace(line.substr(colon_pos + 1));
-
-        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+        const std::string key =
+            utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
+        const auto value = utility::string::trim(line.substr(colon_pos + 1));
 
         auto it = field_parsers.find(key);
         if(it != field_parsers.end())
         {
-            it->second(current_cpu, value);
+            it->second(current_cpu, std::string{ value });
             if(key == "processor")
             {
                 has_processor_entry = true;
@@ -150,41 +130,59 @@ get_cpu_info()
 size_t
 device_count()
 {
-    auto cpu_data = get_cpu_info();
-    return cpu_data.size();
+    // Return unique socket count from parsed CPU info
+    auto           cpu_data = get_cpu_info();
+    std::set<long> sockets;
+    for(const auto& cpu : cpu_data)
+    {
+        sockets.insert(std::max(0L, cpu.physical_id));
+    }
+    return sockets.empty() ? (cpu_data.empty() ? 0 : 1) : sockets.size();
 }
 
 void
 query_cpu_agents()
 {
-    int32_t  id_count   = 0;
-    uint32_t node_count = 0;
-    uint32_t cpu_count  = 0;
+    auto cpu_data = get_cpu_info();
+    if(cpu_data.empty()) return;
 
-    if(device_count() == 0)
+    // Group CPUs by socket (physical_id), collect model_name per socket
+    std::map<size_t, std::string> socket_model_names;
+    std::map<size_t, std::string> socket_vendor_ids;
+
+    for(const auto& cpu : cpu_data)
     {
-        return;
+        const auto socket_id = static_cast<size_t>(std::max(0L, cpu.physical_id));
+        if(socket_model_names.find(socket_id) == socket_model_names.end())
+        {
+            socket_model_names[socket_id] = cpu.model_name;
+            socket_vendor_ids[socket_id]  = cpu.vendor_id;
+        }
     }
 
-    auto& _agent_manager = get_agent_manager_instance();
-    auto  cpu_data       = get_cpu_info();
+    // Insert one agent per socket in ascending socket_id order
+    // so that device_type_index == socket_id
+    auto&         mgr        = get_agent_manager_instance();
+    std::uint32_t node_count = 0;
 
-    for(auto& cpu : cpu_data)
+    for(const auto& [socket_id, model_name] : socket_model_names)
     {
-        auto node_id    = node_count++;
-        auto logical_id = id_count++;
-        auto id         = cpu_count++;
-        auto cur_agent  = agent{ agent_type::CPU,
-                                0,
-                                id,
-                                node_id,
-                                logical_id,
-                                static_cast<int32_t>(id),
-                                cpu.model_name,
-                                cpu.model_name,
-                                cpu.vendor_id,
-                                "" };
-        _agent_manager.insert_agent(cur_agent);
+        const auto node_id     = node_count++;
+        const auto device_name = "CPU" + std::to_string(socket_id);
+        auto       cur_agent =
+            agent{ .type                 = agent_type::cpu,
+                   .handle               = 0,
+                   .device_id            = static_cast<std::uint32_t>(socket_id),
+                   .node_id              = node_id,
+                   .logical_node_id      = static_cast<std::int32_t>(socket_id),
+                   .logical_node_type_id = static_cast<std::int32_t>(socket_id),
+                   .name                 = device_name,
+                   .model_name           = model_name,
+                   .vendor_name          = socket_vendor_ids[socket_id],
+                   .product_name         = "",
+                   .device_type_index    = 0,
+                   .agent_info           = "" };
+        mgr.insert_agent(cur_agent);
     }
 }
 }  // namespace cpu

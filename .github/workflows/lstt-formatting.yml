@@ -13,6 +13,9 @@ on:
       - "!**/*.rst"
       - "!**/.readthedocs.yaml"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -47,5 +50,6 @@ jobs:
         run: >
           pre-commit run
           --show-diff-on-failure
+          --color=always
           --from-ref origin/${{ github.event.pull_request.base.ref || 'develop' }}
           --to-ref HEAD

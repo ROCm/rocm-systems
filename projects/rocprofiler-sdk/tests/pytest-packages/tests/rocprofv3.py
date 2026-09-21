@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@ def test_perfetto_data(
         "memory_allocation",
         "rocdecode_api",
         "rocjpeg_api",
+        "hipfile_api",
         "counter_collection",
         "scratch_memory",
     ),
@@ -49,8 +50,11 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
         "scratch_memory": ("scratch_memory", "scratch_memory"),
+        "ompt": ("openmp", "ompt"),
     }
 
     # make sure they specified valid categories
@@ -119,6 +123,10 @@ def test_otf2_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "ompt": ("openmp", "ompt"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
+        "hip_event": ("hip_event", "hip_event"),
     }
 
     # make sure they specified valid categories
@@ -145,6 +153,15 @@ def test_otf2_data(
                 )
 
             _json_data = [itr for itr in _json_data if roctx_mark_filter(itr) is not None]
+
+        # OMPT records can be instantaneous; OTF2 only encodes ranged regions.
+        # Drop instantaneous JSON records before comparing.
+        if json_category == "ompt":
+            _json_data = [
+                itr
+                for itr in _json_data
+                if itr["start_timestamp"] != itr["end_timestamp"]
+            ]
 
         assert len(_otf2_data) == len(
             _json_data
@@ -236,6 +253,7 @@ def test_rocpd_data(
         "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
         "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
         "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
+        "hipfile_api": ("hipfile_api", ("HIPFILE_API")),
     }
 
     view_mapping = {
@@ -245,9 +263,11 @@ def test_rocpd_data(
         "rccl_api": "regions",
         "rocdecode_api": "regions",
         "rocjpeg_api": "regions",
+        "hipfile_api": "regions",
         "kernel_dispatch": "kernels",
         "memory_copy": "memory_copies",
         "memory_allocation": "memory_allocations",
+        "ompt": "regions_and_samples",
     }
 
     # make sure they specified valid categories
@@ -516,3 +536,127 @@ def test_csv_data(
 
         for a, b in zip(_csv_data_sorted, _js_data_sorted):
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
+
+
+def test_perfetto_arg_annotations(pftrace_reader):
+    """
+    Test that function argument annotations are available in perfetto with --annotate-args.
+    """
+    # Query for API function argument annotations from --annotate-args
+    # Filter for hip_api/hsa_api/marker_api (KFD/kernel have args from other sources)
+    # Exclude metadata fields (always present, even without --annotate-args)
+    query = """
+    SELECT
+        slice.name as slice_name,
+        slice.category as slice_category,
+        slice.id as slice_id,
+        args.key as arg_name,
+        args.string_value as arg_value
+    FROM slice
+    JOIN args ON slice.arg_set_id = args.arg_set_id
+    WHERE args.key LIKE 'debug.%'
+      AND slice.category IN ('hip_api', 'hsa_api', 'marker_api')
+      AND args.key NOT IN (
+        'debug.begin_ns', 'debug.end_ns', 'debug.delta_ns',
+        'debug.tid', 'debug.kind', 'debug.operation',
+        'debug.corr_id', 'debug.ancestor_id'
+      )
+    """
+
+    result = pftrace_reader.query_tp(query)
+
+    # Function argument annotations must exist - perfetto was generated with --annotate-args
+    assert (
+        not result.empty
+    ), "Expected function argument annotations not found - --annotate-args may be broken. "
+
+
+def test_perfetto_event_id_annotations(pftrace_reader):
+    """
+    Test that hipEvent operations have properly annotated event IDs.
+    """
+    # Query for all hipEvent operations with their event annotations
+    event_ops_query = """
+    SELECT
+        slice.name as operation,
+        args.string_value as event_id,
+        slice.ts as timestamp
+    FROM slice
+    JOIN args ON slice.arg_set_id = args.arg_set_id
+    WHERE slice.name IN ('hipEventCreate', 'hipEventRecord', 'hipEventDestroy')
+      AND args.key = 'debug.event'
+    ORDER BY timestamp
+    """
+
+    event_ops = pftrace_reader.query_tp(event_ops_query)
+
+    # Validate we have event data
+    assert not event_ops.empty, (
+        "No hipEvent operations found with event ID annotations. "
+        "Ensure --annotate-args is enabled and the test app uses HIP events."
+    )
+
+    # Group by operation type
+    creates = event_ops[event_ops["operation"] == "hipEventCreate"]
+    records = event_ops[event_ops["operation"] == "hipEventRecord"]
+    destroys = event_ops[event_ops["operation"] == "hipEventDestroy"]
+
+    # Get unique event IDs for each operation
+    created_ids = set(creates["event_id"].unique())
+    recorded_ids = set(records["event_id"].unique())
+    destroyed_ids = set(destroys["event_id"].unique())
+
+    # Validate counts
+    num_creates = len(creates)
+    num_records = len(records)
+    num_destroys = len(destroys)
+    num_unique_created = len(created_ids)
+    num_unique_recorded = len(recorded_ids)
+    num_unique_destroyed = len(destroyed_ids)
+
+    assert num_creates > 0, "No hipEventCreate operations found"
+    assert num_records > 0, "No hipEventRecord operations found"
+    assert num_destroys > 0, "No hipEventDestroy operations found"
+
+    # hipEventRecord and hipEventDestroy receive event by value, so IDs should match
+    assert recorded_ids == destroyed_ids, (
+        f"Mismatch between recorded and destroyed event IDs.\n"
+        f"Recorded but not destroyed: {recorded_ids - destroyed_ids}\n"
+        f"Destroyed but not recorded: {destroyed_ids - recorded_ids}"
+    )
+
+    # NOTE: hipEventCreate annotations will show pointer addresses captured on API entry before being initialized, not event handles.
+    # Therefore, we cannot validate created_ids == recorded_ids.
+
+    # Each event should be created exactly once
+    create_counts = creates["event_id"].value_counts()
+    multiple_creates = create_counts[create_counts > 1]
+    assert multiple_creates.empty, (
+        f"Found {len(multiple_creates)} event(s) created multiple times: "
+        f"{dict(multiple_creates)}"
+    )
+
+    # Each event should be destroyed exactly once
+    destroy_counts = destroys["event_id"].value_counts()
+    multiple_destroys = destroy_counts[destroy_counts > 1]
+    assert multiple_destroys.empty, (
+        f"Found {len(multiple_destroys)} event(s) destroyed multiple times: "
+        f"{dict(multiple_destroys)}"
+    )
+
+    # Validate expected counts based on test parameters
+    expected_creates = 4  # 2 threads × 2 events per thread
+    expected_records = 2000  # 2 threads × 2 events × 500 iterations
+    expected_destroys = 4  # 2 threads × 2 events per thread
+
+    assert (
+        num_creates == expected_creates
+    ), f"Expected {expected_creates} hipEventCreate calls but found {num_creates}"
+
+    assert (
+        num_records == expected_records
+    ), f"Expected {expected_records} hipEventRecord calls but found {num_records}"
+
+    assert (
+        num_destroys == expected_destroys
+    ), f"Expected {expected_destroys} hipEventDestroy calls but found {num_destroys}"

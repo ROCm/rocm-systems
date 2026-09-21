@@ -9,6 +9,8 @@
 
 #include "stream_capture_common.hh"
 
+static size_t captureN() { return isQuickLevel() ? 10000 : 1000000; }
+
 /**
  * @addtogroup hipStreamIsCapturing hipStreamIsCapturing
  * @{
@@ -74,7 +76,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
 }
 
 void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  const size_t N = captureN();
 
   hipStreamCaptureStatus cStatus;
   size_t Nbytes = N * sizeof(float);
@@ -144,8 +146,8 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Functional) {
 
 static void thread_func(hipStream_t stream) {
   hipStreamCaptureStatus cStatus;
-  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
-  REQUIRE(hipStreamCaptureStatusActive == cStatus);
+  HIP_CHECK_THREAD(hipStreamIsCapturing(stream, &cStatus));
+  REQUIRE_THREAD(hipStreamCaptureStatusActive == cStatus);
 }
 
 /**
@@ -162,7 +164,7 @@ static void thread_func(hipStream_t stream) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
-  constexpr size_t N = 1000000;
+  const size_t N = captureN();
   size_t Nbytes = N * sizeof(float);
 
   hipGraph_t graph{nullptr};
@@ -180,6 +182,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
 
   std::thread t(thread_func, stream);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipGraphDestroy(graph));

@@ -60,7 +60,6 @@
 #ifndef _WIN32
 #define _open open
 #define _close close
-#define _tempnam tempnam
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -717,6 +716,11 @@ namespace elf {
 
       const char* data() override { assert(buffer); return buffer; }
       uint64_t size() override;
+      // Size in bytes of the raw backing buffer this image was initialized
+      // from, or 0 if the image is not buffer-backed. Unlike size(), this is
+      // not derived from attacker-controlled ELF header fields and is therefore
+      // safe to use for bounds checks.
+      size_t getBufferSize() const { return bufferSize; }
 
       bool push();
 
@@ -734,18 +738,28 @@ namespace elf {
       GElfStringTable* strtab() override;
       GElfSymbolTable* getReferencedSymbolTable(uint16_t index)
       {
-        return static_cast<GElfSymbolTable*>(section(index));
+        // index derives from an attacker-controlled sh_link. section() already
+        // bounds-checks and returns nullptr for an out-of-range index, but a
+        // crafted value may reference an in-range wrong-type section. Verify it
+        // is actually a symbol table so the static_cast cannot produce a
+        // mis-typed pointer later virtual-dispatched during relocation.
+        GElfSection* s = section(index);
+        if (s && (s->type() == SHT_SYMTAB || s->type() == SHT_DYNSYM))
+          return static_cast<GElfSymbolTable*>(s);
+        return nullptr;
       }
       GElfSymbolTable* getSymtab(uint16_t index) override
       {
-        if (section(index)->type() == SHT_SYMTAB)
-          return static_cast<GElfSymbolTable*>(section(index));
+        GElfSection* s = section(index);
+        if (s && s->type() == SHT_SYMTAB)
+          return static_cast<GElfSymbolTable*>(s);
         return nullptr;
       }
       GElfSymbolTable* getDynsym(uint16_t index) override
       {
-        if (section(index)->type() == SHT_DYNSYM)
-          return static_cast<GElfSymbolTable*>(section(index));
+        GElfSection* s = section(index);
+        if (s && s->type() == SHT_DYNSYM)
+          return static_cast<GElfSymbolTable*>(s);
         return nullptr;
       }
 
@@ -768,7 +782,12 @@ namespace elf {
       GElfSegment* segment(size_t i) override { return segments[i].get(); }
       Segment* segmentByVAddr(uint64_t vaddr) override;
       size_t sectionCount() override { return sections.size(); }
-      GElfSection* section(size_t i) override { return sections[i].get(); }
+      // Bounds-check attacker-controlled section indices (sh_link, sh_info,
+      // st_shndx). Out-of-range indices return nullptr instead of reading heap
+      // memory past the vector's internal array.
+      GElfSection* section(size_t i) override {
+        return i < sections.size() ? sections[i].get() : nullptr;
+      }
       Section* sectionByVAddr(uint64_t vaddr) override;
       uint16_t machine() const;
       uint16_t etype() const;
@@ -842,7 +861,16 @@ namespace elf {
 
     const char* GElfSegment::data() const
     {
-      return (const char*) elf->data() + phdr.p_offset;
+      if (!elf->buffer || elf->bufferSize == 0) {
+        return nullptr;
+      }
+      if (phdr.p_offset > elf->bufferSize) {
+        return nullptr;
+      }
+      if (phdr.p_filesz > elf->bufferSize - phdr.p_offset) {
+        return nullptr;
+      }
+      return elf->buffer + phdr.p_offset;
     }
 
     bool GElfImage::Freeze()
@@ -1119,10 +1147,15 @@ namespace elf {
 
     Section* GElfSymbol::section()
     {
-      if (Sym()->st_shndx != SHN_UNDEF) {
-        return symtab->elf->section(Sym()->st_shndx);
+      uint16_t shndx = Sym()->st_shndx;
+      // Reserved indices (SHN_LORESERVE..SHN_HIRESERVE, e.g. SHN_ABS,
+      // SHN_COMMON) do not refer to a real section, and any index >= the
+      // section count is out of bounds. section() itself bounds-checks, but
+      // guard here so a crafted st_shndx does not bypass the SHN_UNDEF check.
+      if (shndx == SHN_UNDEF || shndx >= SHN_LORESERVE) {
+        return 0;
       }
-      return 0;
+      return symtab->elf->section(shndx);
     }
 
     bool GElfSymbol::push(const std::string& name, uint64_t value, uint64_t size, unsigned char type, unsigned char binding, uint16_t shndx, unsigned char other)
@@ -1157,7 +1190,11 @@ namespace elf {
 
     bool GElfSymbolTable::pullData()
     {
+      // sh_link identifies this symbol table's string table; a crafted value
+      // out of section-table range yields nullptr. Reject the code object
+      // rather than storing a garbage string-table pointer.
       strtab = elf->getStringTable(hdr.sh_link);
+      if (!strtab) { return false; }
       for (size_t i = 0; i < data0.size() / sizeof(GElf_Sym); ++i) {
         symbols.push_back(std::unique_ptr<GElfSymbol>(new GElfSymbol(this, data0, i * sizeof(GElf_Sym))));
       }
@@ -1191,7 +1228,10 @@ namespace elf {
 
     Symbol* GElfSymbolTable::symbol(size_t i)
     {
-      return symbols[i].get();
+      // i derives from the attacker-controlled relocation r_info symbol index
+      // (GELF_R_SYM); reject out-of-range values instead of reading past the
+      // symbols vector.
+      return i < symbols.size() ? symbols[i].get() : nullptr;
     }
 
     GElfNoteSection::GElfNoteSection(GElfImage* elf)
@@ -1225,19 +1265,39 @@ namespace elf {
       Elf_Scn *scn = elf_getscn(elf->e, ndxscn);
       assert(scn);
       while ((data = elf_getdata(scn, data)) != 0) {
-        uint32_t note_offset = 0;
-        while (note_offset < data->d_size) {
+        size_t note_offset = 0;
+        const size_t data_size = data->d_size;
+        while (note_offset < data_size) {
+          if (note_offset + sizeof(Elf64_Nhdr) > data_size) {
+            return false;
+          }
           char* notec = (char *) data->d_buf + note_offset;
           Elf64_Nhdr* note = (Elf64_Nhdr*) notec;
+          const size_t namesz_aligned = alignUp(note->n_namesz, 4);
+          const size_t descsz_aligned = alignUp(note->n_descsz, 4);
+          size_t entry_size = sizeof(Elf64_Nhdr);
+          if (entry_size + namesz_aligned < entry_size ||
+              entry_size + namesz_aligned + descsz_aligned < entry_size + namesz_aligned) {
+            return false;
+          }
+          entry_size += namesz_aligned + descsz_aligned;
+          if (note_offset + entry_size > data_size || note_offset + entry_size < note_offset) {
+            return false;
+          }
           if (type == note->n_type) {
+            const size_t desc_offset = note_offset + sizeof(Elf64_Nhdr) + namesz_aligned;
+            if (note_offset + sizeof(Elf64_Nhdr) + note->n_namesz > data_size ||
+                desc_offset + note->n_descsz > data_size) {
+              return false;
+            }
             std::string note_name = GetNoteString(note->n_namesz, notec + sizeof(Elf64_Nhdr));
             if (name == note_name) {
-              *desc = notec + sizeof(Elf64_Nhdr) + alignUp(note->n_namesz, 4);
+              *desc = notec + sizeof(Elf64_Nhdr) + namesz_aligned;
               *desc_size = note->n_descsz;
               return true;
             }
           }
-          note_offset += sizeof(Elf64_Nhdr) + alignUp(note->n_namesz, 4) + alignUp(note->n_descsz, 4);
+          note_offset += entry_size;
         }
       }
       return false;
@@ -1286,8 +1346,21 @@ namespace elf {
 
     bool GElfRelocationSection::pullData()
     {
+      // sh_info/sh_link identify the target section and referenced symbol
+      // table and are attacker-controlled. sh_info == 0 (the SHN_UNDEF/null
+      // section) is legitimate: it marks a dynamic relocation section, and
+      // section() then returns nullptr, which the loader uses to route dynamic
+      // relocations. Only an out-of-range sh_info is malformed, so validate the
+      // index rather than the returned pointer.
+      if (hdr.sh_info >= elf->sectionCount()) { return false; }
       section = elf->section(hdr.sh_info);
+      // sh_link must reference the associated symbol table;
+      // getReferencedSymbolTable() returns nullptr for an out-of-range index or
+      // an in-range section that is not a symbol table. Reject rather than
+      // storing a garbage/mis-typed pointer that later gets virtual-dispatched
+      // during relocation.
       symtab = elf->getReferencedSymbolTable(hdr.sh_link);
+      if (!symtab) { return false; }
       Elf_Scn *lScn = elf_getscn(elf->e, ndxscn);
       assert(lScn);
       Elf_Data *lData = elf_getdata(lScn, nullptr);
@@ -1390,7 +1463,10 @@ namespace elf {
 
     bool GElfImage::initFromBuffer(const void* buffer, size_t size)
     {
-      if (size == 0) { size = ElfSize(buffer); }
+      if (size == 0) {
+        out << "Error: buffer size must be specified" << std::endl;
+        return false;
+      }
       if (!img.create()) { return imgError(); }
       if (!img.copyFrom(buffer, size)) { return imgError(); }
       if (!elfBegin(ELF_C_RDWR)) { return false; }
@@ -1399,7 +1475,13 @@ namespace elf {
 
     bool GElfImage::initAsBuffer(const void* buffer, size_t size)
     {
-      if (size == 0) { size = ElfSize(buffer); }
+      if (size == 0) {
+        size = ElfSize(buffer, 0);
+        if (size == 0) {
+          out << "Error: failed to determine buffer size" << std::endl;
+          return false;
+        }
+      }
       if ((e = elf_memory(reinterpret_cast<char*>(const_cast<void*>(buffer)), size
 #ifdef AMD_LIBELF
                        , NULL
@@ -1504,7 +1586,7 @@ namespace elf {
     uint64_t GElfImage::size()
     {
       if (buffer) {
-        return ElfSize(buffer);
+        return bufferSize;
       } else {
         return img.getSize();
       }
@@ -1609,7 +1691,16 @@ namespace elf {
 
     GElfStringTable* GElfImage::getStringTable(uint16_t index)
     {
-      return static_cast<GElfStringTable*>(sections[index].get());
+      // index derives from the attacker-controlled sh_link field; reject
+      // out-of-range values instead of reading past the sections vector.
+      if (index >= sections.size()) { return nullptr; }
+      // A crafted sh_link may reference an in-range but wrong-type section
+      // (e.g. SHT_PROGBITS). Reject it so the static_cast below cannot produce
+      // a mis-typed pointer later used as a string table (type confusion).
+      // Note: section index 0 (SHT_NULL) is stored as a null unique_ptr.
+      GElfSection* s = sections[index].get();
+      if (!s || s->type() != SHT_STRTAB) { return nullptr; }
+      return static_cast<GElfStringTable*>(s);
     }
 
     GElfSymbolTable* GElfImage::addSymbolTable(const std::string& name, StringTable* stab)
@@ -1737,27 +1828,63 @@ namespace elf {
     Image* NewElf32Image() { return new GElfImage(ELFCLASS32); }
     Image* NewElf64Image() { return new GElfImage(ELFCLASS64); }
 
-    uint64_t ElfSize(const void* emi)
+    uint64_t ElfSize(const void* emi, size_t buffer_size)
     {
-      const Elf64_Ehdr *ehdr = (const Elf64_Ehdr*) emi;
-      if (NULL == ehdr || EV_CURRENT != ehdr->e_version) {
-        return false;
+      if (emi == NULL) {
+        return 0;
       }
 
-      const Elf64_Shdr *shdr = (const Elf64_Shdr*)((char*)emi + ehdr->e_shoff);
-      if (NULL == shdr) {
-        return false;
+      const bool bounded = buffer_size != 0;
+      if (bounded && buffer_size < sizeof(Elf64_Ehdr)) {
+        return 0;
       }
+
+      const Elf64_Ehdr *ehdr = (const Elf64_Ehdr*) emi;
+      if (EV_CURRENT != ehdr->e_version) {
+        return 0;
+      }
+
+      // The loop indexes shdr[i] with sizeof(Elf64_Shdr) stride.
+      if (ehdr->e_shentsize != sizeof(Elf64_Shdr)) {
+        return 0;
+      }
+
+      if (bounded && ehdr->e_shoff >= buffer_size) {
+        return 0;
+      }
+
+      uint64_t shdr_table_size =
+          static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
+      if (bounded && shdr_table_size > buffer_size - ehdr->e_shoff) {
+        return 0;
+      }
+
+      const Elf64_Shdr *shdr = (const Elf64_Shdr*)((const char*)emi + ehdr->e_shoff);
 
       uint64_t max_offset = ehdr->e_shoff;
-      uint64_t total_size = max_offset + static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
+      uint64_t total_size = max_offset + shdr_table_size;
 
       for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+        if (bounded) {
+          uint64_t shdr_entry_offset =
+              static_cast<uint64_t>(ehdr->e_shoff) +
+              static_cast<uint64_t>(i) * sizeof(Elf64_Shdr);
+          if (shdr_entry_offset + sizeof(Elf64_Shdr) > buffer_size) {
+            return 0;
+          }
+        }
+
         uint64_t cur_offset = static_cast<uint64_t>(shdr[i].sh_offset);
         if (max_offset < cur_offset) {
           max_offset = cur_offset;
           total_size = max_offset;
+          if (bounded && cur_offset >= buffer_size) {
+            return 0;
+          }
           if (SHT_NOBITS != shdr[i].sh_type) {
+            if (bounded && shdr[i].sh_size > buffer_size - cur_offset) {
+              return 0;
+            }
             total_size += static_cast<uint64_t>(shdr[i].sh_size);
           }
         }

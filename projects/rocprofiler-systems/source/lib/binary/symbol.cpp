@@ -1,28 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/config.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
@@ -30,6 +11,15 @@
 
 #define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
+
+#include <elf.h>
+// The RELR (relative-relocation) types were added to glibc's <elf.h> in glibc 2.36.
+// Older glibc versions (e.g. RHEL 8/9) lack them, but they are referenced by the
+// binutils headers below, so define the typedefs here to avoid compile errors.
+#ifndef SHT_RELR
+typedef Elf32_Word  Elf32_Relr;
+typedef Elf64_Xword Elf64_Relr;
+#endif
 
 #include <bfd.h>
 #include <coff/external.h>
@@ -41,6 +31,7 @@
 #include <elfutils/libdw.h>
 #include <libcoff.h>
 
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
@@ -69,8 +60,7 @@ read_inliner_info(bfd* _inp)
         if(bfd_find_inliner_info(_inp, &_file, &_func, &_line) != 0)
         {
             if(_file && _func && _line > 0)
-                _data.emplace_back(inlined_symbol{
-                    _line, filepath::realpath(_file, nullptr, false), _func });
+                _data.emplace_back(inlined_symbol{ _line, path::realpath(_file), _func });
         }
         else
         {
@@ -222,9 +212,9 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 bool
 symbol::read_bfd_line_info(bfd_file& _bfd)
 {
-    auto*         _section = static_cast<asection*>(section);
-    bfd_vma       _vma     = bfd_section_vma(_section);
-    bfd_size_type _size    = bfd_section_size(_section);
+    auto*               _section = static_cast<asection*>(section);
+    const bfd_vma       _vma     = bfd_section_vma(_section);
+    const bfd_size_type _size    = bfd_section_size(_section);
 
     auto& _pc     = address.low;
     auto& _pc_end = address.high;
@@ -252,7 +242,7 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
                 file = bfd_get_filename(_inp);
             if(!func.empty())
             {
-                file    = filepath::realpath(file, nullptr, false);
+                file    = path::realpath(file);
                 line    = _line;
                 inlines = read_inliner_info(_inp);
                 return true;

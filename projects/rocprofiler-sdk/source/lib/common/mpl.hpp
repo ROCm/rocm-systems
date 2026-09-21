@@ -24,6 +24,8 @@
 
 #include "lib/common/details/mpl.hpp"
 
+#include <rocprofiler-sdk/cxx/details/mpl.hpp>
+
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -96,12 +98,16 @@ template <typename Tp>
 struct is_pair_impl
 {
     static constexpr auto value = false;
+    using first_type            = void;
+    using second_type           = void;
 };
 
 template <typename LhsT, typename RhsT>
 struct is_pair_impl<std::pair<LhsT, RhsT>>
 {
     static constexpr auto value = true;
+    using first_type            = LhsT;
+    using second_type           = RhsT;
 };
 
 template <typename Tp>
@@ -170,6 +176,9 @@ using function_traits = impl::function_traits<Tp>;
 
 template <typename Tp>
 using function_args_t = typename impl::function_traits<Tp>::args_type;
+
+template <typename Tp>
+using is_optional = sdk::mpl::is_optional<unqualified_type_t<Tp>>;
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler

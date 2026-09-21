@@ -86,7 +86,7 @@ void runTestReduceForTypes(hiprtcProgram& prog, const std::tuple<T, Types...>) {
 }
 
 template <class T, template <typename> class Op>
-void opToString(std::string& scalarName, std::string& intrinsicName) {
+void reduceOpToString(std::string& scalarName, std::string& intrinsicName) {
   if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
     scalarName = "std::plus";
     intrinsicName = "__reduce_add_sync";
@@ -97,13 +97,13 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
     scalarName = "MaxOp";
     intrinsicName = "__reduce_max_sync";
   } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
-    scalarName = "std::logical_and";
+    scalarName = "std::bit_and";
     intrinsicName = "__reduce_and_sync";
   } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
-    scalarName = "std::logical_or";
+    scalarName = "std::bit_or";
     intrinsicName = "__reduce_or_sync";
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-    scalarName = "LogicalXor";
+    scalarName = "std::bit_xor";
     intrinsicName = "__reduce_xor_sync";
   } else
     static_assert(std::is_void<T>::value, "Unexpected operator");
@@ -116,7 +116,7 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<>&) {
   hiprtcResult compileResult;
   const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES"};
 
-  opToString<int, Op>(scalarName, intrinsicName);
+  reduceOpToString<int, Op>(scalarName, intrinsicName);
   compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
 
@@ -136,19 +136,21 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   std::string scalarName, intrinsicName, kernelStr;
   hiprtcProgram prog;
 
-  opToString<int, Op>(scalarName, intrinsicName);
+  reduceOpToString<int, Op>(scalarName, intrinsicName);
   kernelStr = R"(
     template <class T, class MaskType>
     __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
     {
       int tid = threadIdx.x;
+      int laneId = tid % warpSize;
 
       for (int i = 0; i < *numReduces; i++) {
+        int idx = warpSize * i + laneId;
         if (masks[i] & (1ul << tid)) {
           // call the operator only if the lane is mentioned in the mask
-          T& result = output[warpSize * i + tid];
+          T& result = output[idx];
           result = )" +
-              intrinsicName + R"((masks[i], input[tid]);
+              intrinsicName + R"((masks[i], input[idx]);
         }
       }
    })";

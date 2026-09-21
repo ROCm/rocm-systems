@@ -101,7 +101,7 @@ void TeamSyncTester::preLaunchKernel() {
 }
 
 void TeamSyncTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                           int loop, size_t size) {
+                                           int loop, [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(TeamSyncTest, gridSize, blockSize, shared_bytes,
@@ -119,6 +119,6 @@ void TeamSyncTester::postLaunchKernel() {
   }
 }
 
-void TeamSyncTester::resetBuffers(size_t size) {}
+void TeamSyncTester::resetBuffers([[maybe_unused]] size_t size) {}
 
-void TeamSyncTester::verifyResults(size_t size) {}
+void TeamSyncTester::verifyResults([[maybe_unused]] size_t size) {}

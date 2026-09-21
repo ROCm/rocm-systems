@@ -7,7 +7,10 @@ multiproc:
   Unit_deviceAllocation_NewDelete_MultProcess: *level_2
   Unit_hipDeviceGet_MaskedDevices: *level_2
   Unit_hipDeviceGetPCIBusId_MaskedDevices: *level_2
-  Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci: *level_2
+  Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci:
+    <<: *level_2
+    # Note: no valid pci bdf in wsl
+    disabled: [amd_wsl]
   Unit_hipDeviceTotalMem_MaskedDevices: *level_2
   Unit_hipDeviceGetAttribute_MaskedDevices: *level_2
   Unit_hipGetDeviceCount_MaskedDevices: *level_2
@@ -45,7 +48,10 @@ multiproc:
   Unit_hipMemGetInfo_Functional_Scenario1: *level_2
   Unit_hipMemGetInfo_Functional_Scenario2: *level_2
   Unit_hipMemGetInfo_Functional_Scenario3: *level_2
-  Unit_hipMemGetInfo_Functional_scenario4: *level_2
+  Unit_hipMemGetInfo_Functional_scenario4:
+    <<: *level_2
+    # Test does not play well with Asan.
+    disabled: [asan]
   Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5: *level_2
   Unit_hipMemGetInfo_SetHiddenFreeMemFromChild: *level_2
   Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu: *level_2

@@ -344,7 +344,7 @@ typedef struct oam_net_dev_info {
 
 /**
  * \struct  oam_neighbour_info_t
- * \brief   Information about device neighburs
+ * \brief   Information about device neighbors
  * \details Structure to store information about device neighbours on the
  *          network
  */

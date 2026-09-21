@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "mproc.hpp"
 #include "common.hpp"
@@ -95,13 +76,13 @@ wait_pid(pid_t _pid, int _opts)
 int
 diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 {
-    bool _normal_exit      = (WIFEXITED(_status) > 0);
-    bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
-    bool _core_dump        = (WCOREDUMP(_status) > 0);
-    bool _stopped          = (WIFSTOPPED(_status) > 0);
-    int  _exit_status      = WEXITSTATUS(_status);
-    int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
-    int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
+    const bool _normal_exit      = (WIFEXITED(_status) > 0);
+    const bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
+    const bool _core_dump        = (WCOREDUMP(_status) > 0);
+    const bool _stopped          = (WIFSTOPPED(_status) > 0);
+    int        _exit_status      = WEXITSTATUS(_status);
+    int        _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
+    int        _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
 
     LOG_TRACE("diagnosing status for process {} :: status: {}... normal exit: {}, "
               "unhandled signal: {}, core dump: {}, stopped: {}, exit status: {}, stop "

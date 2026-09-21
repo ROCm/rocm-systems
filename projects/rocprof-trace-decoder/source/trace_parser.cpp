@@ -33,17 +33,12 @@
 #include "gfx12/gfx12wave.h"
 #include "gfx9/gfx9token.h"
 #include "gfx9/gfx9wave.h"
+#include "mi400/mi400token.h"
+#include "mi400/mi400wave.h"
 #include "stitch/stitch.hpp"
 
 void WaveDataInternal::lookbackpcs(class CSRegisterHandler& reg)
 {
-    for (size_t index : unattrib_pcs)
-        if (index < instructions.size())
-        {
-            auto& inst = instructions.at(index);
-            if (inst.pc.code_object_id == 0) inst.pc = reg.get_wave_start_delayed(inst.pc.address);
-        }
-
     for (auto& [_, info] : pc_infos)
     {
         if (info.code_object_id == 0) info = reg.get_wave_start_delayed(info.address);
@@ -56,13 +51,14 @@ std::unique_ptr<SQTTParser> AnalyseBinary_GFX9_internal(
     uint64_t buffersize,
     int target_cu,
     class Stitcher& stitch,
-    bool double_buffer
+    bool double_buffer,
+    bool is_mi350
 )
 {
     stitch.setgfxip(9);
 
     auto generator = gfx9::MITokenGenerator(tokendata, buffersize, 0, 0);
-    auto parser = std::make_unique<gfx9::MISQTTParser>(target_cu, double_buffer);
+    auto parser = std::make_unique<gfx9::MISQTTParser>(target_cu, double_buffer, is_mi350);
     parser->sqtt_simd_analysis(info, generator, stitch);
 
     return parser;
@@ -101,6 +97,19 @@ std::unique_ptr<SQTTParser> AnalyseBinary_GFX12_internal(
     stitch.setgfxip(12);
 
     auto generator = gfx12::TokenGenerator(tokendata, buffersize, 0, 0);
+    auto parser = std::make_unique<RDNASQTParser>();
+    parser->sqtt_simd_analysis(info, generator, stitch);
+
+    return parser;
+}
+
+std::unique_ptr<SQTTParser> AnalyseBinary_MI400_internal(
+    CppReturnInfo& info, const uint8_t* tokendata, uint64_t buffersize, class Stitcher& stitch
+)
+{
+    stitch.setgfxip(12);
+
+    auto generator = mi400::TokenGenerator(tokendata, buffersize, 0, 0);
     auto parser = std::make_unique<RDNASQTParser>();
     parser->sqtt_simd_analysis(info, generator, stitch);
 
@@ -146,6 +155,8 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
 {
     if (gfx9_target_cu < 0)
     {
+        if (BUFFER_SIZE < sizeof(rocprof_trace_decoder_gfx9_header_t)) return nullptr;
+
         auto gfx9_header = *reinterpret_cast<const rocprof_trace_decoder_gfx9_header_t*>(buffer);
         if ((gfx9_header.legacy_version == 0 || gfx9_header.legacy_version == 0x11) &&
             (gfx9_header.gfx9_version2 >= 4 && gfx9_header.gfx9_version2 <= 6))
@@ -155,14 +166,22 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
 
             BUFFER_SIZE -= sizeof(rocprof_trace_decoder_gfx9_header_t);
             return AnalyseBinary_GFX9_internal(
-                info, buffer, BUFFER_SIZE, gfx9_header.DCU, stitch, gfx9_header.double_buffer
+                info,
+                buffer,
+                BUFFER_SIZE,
+                gfx9_header.DCU,
+                stitch,
+                gfx9_header.double_buffer,
+                gfx9_header.gfx9_version2 >= 6
             );
         }
         else if (gfx9_header.legacy_version != 0)
         {
             auto hw_header = *reinterpret_cast<const header_type*>(buffer);
 
-            if (hw_header.version == 4)
+            if (hw_header.version == 5)
+                return AnalyseBinary_MI400_internal(info, buffer, BUFFER_SIZE, stitch);
+            else if (hw_header.version == 4)
                 return AnalyseBinary_GFX12_internal(info, buffer, BUFFER_SIZE, stitch);
             else if (hw_header.version == 3)
                 return AnalyseBinary_GFX11_internal(info, buffer, BUFFER_SIZE, stitch);
@@ -170,21 +189,51 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
                 return AnalyseBinary_GFX10_internal(info, buffer, BUFFER_SIZE, stitch);
         }
     }
-    else { return AnalyseBinary_GFX9_internal(info, buffer, BUFFER_SIZE, gfx9_target_cu, stitch, false); }
+    else { return AnalyseBinary_GFX9_internal(info, buffer, BUFFER_SIZE, gfx9_target_cu, stitch, false, false); }
 
     return nullptr;
 }
 
-pcinfo_t CodeobjTableTranslator::ToPcV2(uint64_t pc)
+// Header-only sniff: mirrors the dispatch in AnalyseBinary_internal without
+// constructing a parser or generator. Used by the bench to label results.
+TraceArch DetectArch_internal(const uint8_t* buffer, uint64_t buffer_size)
+{
+    if (!buffer || buffer_size < sizeof(rocprof_trace_decoder_gfx9_header_t)) return TraceArch::UNKNOWN;
+
+    auto gfx9_header = *reinterpret_cast<const rocprof_trace_decoder_gfx9_header_t*>(buffer);
+    if ((gfx9_header.legacy_version == 0 || gfx9_header.legacy_version == 0x11) &&
+        (gfx9_header.gfx9_version2 >= 4 && gfx9_header.gfx9_version2 <= 6))
+        return TraceArch::GFX9;
+
+    if (gfx9_header.legacy_version == 0) return TraceArch::UNKNOWN;
+    if (buffer_size < sizeof(header_type)) return TraceArch::UNKNOWN;
+
+    auto hw_header = *reinterpret_cast<const header_type*>(buffer);
+    switch (hw_header.version)
+    {
+        case 5: return TraceArch::MI400;
+        case 4: return TraceArch::GFX12;
+        case 3: return TraceArch::GFX11;
+        case 2:
+        case 1: return TraceArch::GFX10;
+        default: return TraceArch::UNKNOWN;
+    }
+}
+
+// IterateTokens_internal lives in source/iterate_tokens.hpp (header-only
+// template — visitor inlines into the loop). DetectArch_internal above is
+// the dispatch helper it shares with this TU.
+
+pcinfo_t ToPcV2(const CachedTable& table, uint64_t pc)
 {
     pcinfo_t pcinfo{.address = pc, .code_object_id = 0};
     try
     {
         address_range_t codeobj;
-        if (this->find_codeobj_in_range(pc, codeobj))
+        if (table.find(pc, codeobj))
         {
             pcinfo.code_object_id = codeobj.id;
-            pcinfo.address = pc - codeobj.vbegin;
+            pcinfo.address = pc - codeobj.addr;
         }
     }
     catch (const std::exception&)

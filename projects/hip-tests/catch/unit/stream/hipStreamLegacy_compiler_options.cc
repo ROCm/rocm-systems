@@ -67,14 +67,14 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithSptCompilerOption) {
  * Local helper function to copy data from host to device
  */
 static void copyHostToDevice(int* hostArr, int* devArr) {
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
+  HIP_CHECK_THREAD(hipMemcpyAsync(devArr, hostArr, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
 }
 
 /*
  * Local helper function to copy data from device to host
  */
 static void copyDeviceToHost(int* devArr, int* hostArr) {
-  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK_THREAD(hipMemcpyAsync(hostArr, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
 }
 
 /**
@@ -99,10 +99,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {
-    HipTest::HIP_SKIP_TEST(
-        "Skipping due to machine does't "
-        "support two concurrent threads");
-    return;
+    HIP_SKIP_TEST("Skipping due to machine doesn't support two concurrent threads");
   }
 
   int* hostArrSrc = new int[N];
@@ -121,6 +118,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption) {
   H2D_Thread.join();
   std::thread D2H_Thread(copyDeviceToHost, devArr, hostArrDst);
   D2H_Thread.join();
+  HIP_CHECK_THREAD_FINALIZE();
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
   for (int i = 0; i < N; i++) {

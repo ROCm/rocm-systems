@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from typing import Any
 
@@ -129,7 +107,7 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
         hbm_row = display_df[display_df["Metric"] == "HBM Bandwidth"]
         if not hbm_row.empty:
             hbm_bw = float(hbm_row["Avg"].iloc[0])
-            gb_data = display_df[display_df["Unit"] == "Gb/s"]
+            gb_data = display_df[display_df["Unit"] == "GB/s"]
             charts.append(
                 px.bar(
                     gb_data,
@@ -144,16 +122,15 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
             )
 
     elif table_id == 1101:
-        # Special formatting reference 'Pct of Peak' value
-        display_df["Pct of Peak"] = display_df["Pct of Peak"].apply(
+        display_df["Percent of Peak"] = display_df["Percent of Peak"].apply(
             lambda x: float(x) if x != "N/A" else 0.0
         )
         charts.append(
             px.bar(
                 display_df,
-                x="Pct of Peak",
+                x="Percent of Peak",
                 y="Metric",
-                color="Pct of Peak",
+                color="Percent of Peak",
                 range_color=[0, 100],
                 labels={"Avg": "%"},
                 height=400,
@@ -261,7 +238,7 @@ def build_table_chart(
     formatted_columns = []
     for col in display_df.columns:
         col_lower = str(col).lower()
-        if col_lower in {"pct", "pop", "percent"}:
+        if col_lower in {"pct", "percent", "percent of peak"}:
             formatted_columns.append({
                 "id": col,
                 "name": col,

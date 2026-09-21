@@ -1,30 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -32,7 +13,6 @@
 #include "library/components/callchain.hpp"
 #include "library/thread_data.hpp"
 
-#include <timemory/macros/language.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include <cstdint>
@@ -45,11 +25,14 @@ namespace rocprofsys
 namespace sampling
 {
 unique_ptr_t<std::set<int>>&
-get_signal_types(int64_t _tid);
+get_signal_types(std::int64_t _tid);
 
 std::set<int>
 setup();
 
+/// Deactivates sampling for the calling thread. In a child process, releases only the
+/// calling thread's sampler and returns an empty set; otherwise returns the configured
+/// signal types. Every current caller discards the return value.
 std::set<int>
 shutdown();
 
@@ -71,5 +54,30 @@ postfork_parent_reinit();
 
 void
 postfork_child_cleanup();
+
+/// Releases ownership of every inherited sampler slot without running destructors.
+/// Fork-child only: the pre-fork threads no longer exist in the child. Calling this from
+/// a live multi-threaded process clears sampler slots belonging to threads still inside
+/// configure(), which can then observe a null sampler.
+/// @note Exceptions must not escape the pthread_atfork() child handler; failures
+/// terminate.
+void
+postfork_child_release_samplers() noexcept;
+
+void
+prefork_lock_pmc_sampler();
+
+void
+postfork_parent_unlock_pmc_sampler();
+
+void
+postfork_child_reset_pmc_sampler_lock();
+
+void
+pause();
+
+void
+resume();
+
 }  // namespace sampling
 }  // namespace rocprofsys

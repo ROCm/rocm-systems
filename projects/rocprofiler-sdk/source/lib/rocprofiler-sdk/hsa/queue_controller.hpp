@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 
 #include "lib/rocprofiler-sdk-attach/table.h"
 
@@ -38,14 +39,17 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace hsa
 {
 // Tracks and manages HSA queues
 class QueueController
 {
 public:
-    using agent_callback_tuple_t =
-        std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
+    using agent_callback_tuple_t = std::tuple<rocprofiler_agent_t, queue_callbacks_t>;
     using queue_iterator_cb_t    = std::function<void(const Queue*)>;
     using callback_iterator_cb_t = std::function<void(ClientID, const agent_callback_tuple_t&)>;
     using queue_map_t            = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
@@ -57,16 +61,24 @@ public:
     // HSA has been inited.
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
 
-    // Called to add a queue that was created by the user program
-    void add_queue(hsa_queue_t*, std::unique_ptr<Queue>);
+    // Called to add a queue that was created by the user program. |is_compute|
+    // gates BOTH inline QueueState creation and the signal-less ownership/window
+    // bookkeeping: only a compute queue's doorbell can source a CP dispatch-log
+    // record (§3.9), and a non-compute (e.g. SDMA) queue's packet format is
+    // incompatible with AQL interposition. |is_attach| marks a queue adopted
+    // mid-life via the attach API: its earlier slot history went unseen, so it
+    // opens no window and latches the process-wide signal-less disable (§0.4,
+    // §3.9). Every call site passes both explicitly.
+    void add_queue(hsa_queue_t*,
+                   std::unique_ptr<Queue>,
+                   bool is_compute = true,
+                   bool is_attach  = false);
     void destroy_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client
     // id that can be used by callers to remove the callback. If no agent
     // is specified, callback will be applied to all agents.
-    ClientID add_callback(std::optional<rocprofiler_agent_t>,
-                          Queue::queue_cb_t,
-                          Queue::completed_cb_t);
+    ClientID add_callback(std::optional<rocprofiler_agent_t>, queue_callbacks_t callbacks);
     void     remove_callback(ClientID);
 
     const CoreApiTable& get_core_table() const { return _core_table; }
@@ -128,6 +140,9 @@ get_queue_controller();
 bool
 enable_queue_intercept();
 
+bool
+context_needs_queue_interposition_tracing(const context::context* ctx);
+
 void
 queue_controller_init(HsaApiTable* table);
 
@@ -142,5 +157,12 @@ queue_controller_init(RocAttachDispatchTable* table);
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
+
+// Resolve a queue's page-relative doorbell slot from its intercept queue's
+// hardware doorbell pointer (§3.2, pure derivation -- no bind, no GPU/queue id).
+// Capture and the reader MUST compute the identical slot for correlation to work.
+// nullopt when the queue's doorbell signal is missing or is not a doorbell kind.
+std::optional<uint32_t>
+capture_doorbell_key(const hsa_queue_t* intercept_queue);
 }  // namespace hsa
 }  // namespace rocprofiler

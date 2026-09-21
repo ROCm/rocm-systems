@@ -37,7 +37,7 @@
 #include "PM4Packet.hpp"
 #include "SDMAQueue.hpp"
 #include "SDMAPacket.hpp"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 
 /* Captures user specified time (seconds) to sleep */
 extern unsigned int g_SleepTime;
@@ -80,7 +80,7 @@ void KFDMemoryTest::MMapLarge(int gpuNode) {
 	const HSAuint64 nObjects = 1<<14;
     HSAuint64 *AlternateVAGPU = new HSAuint64[nObjects];
     ASSERT_NE_GPU((HSAuint64)AlternateVAGPU, 0, gpuNode);
-    HsaMemMapFlags mapFlags = {0};
+    HsaMemFlags memFlags = {0};
     HSAuint64 s;
     char *addr;
     HSAuint64 flags = MAP_ANONYMOUS | MAP_PRIVATE;
@@ -106,7 +106,7 @@ void KFDMemoryTest::MMapLarge(int gpuNode) {
         if (HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, addr + i, s - i))
             break;
         if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, addr + i, s - i,
-                    &AlternateVAGPU[i], mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode))) {
+                    &AlternateVAGPU[i], memFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode))) {
             HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, addr + i);
             break;
         }
@@ -196,12 +196,12 @@ void KFDMemoryTest::MapUnmapToNodes(int gpuNode) {
     dispatch0.SetArgs(srcBuffer.As<void*>(), dstBuffer.As<void*>());
     dispatch0.Submit(pm4Queue);
 
-    HsaMemMapFlags memFlags = {0};
+    HsaMemFlags memFlags = {0};
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     memFlags.ui32.HostAccess = 1;
 
     for (unsigned i = 0; i < 1<<14; i ++) {
-        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, (i>>5)&1+1, mapNodes);
+        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, ((i>>5)&1)+1, mapNodes);
     }
 
     /* Fill src buffer so shader quits */
@@ -516,7 +516,8 @@ void KFDMemoryTest::MemoryRegisterSamePtr(int gpuNode) {
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva2)));
 
     /* Same address, same size */
-    HsaMemMapFlags memFlags = {0};
+    HsaMemFlags memFlags = {0};
+    memFlags.ui32.CoarseGrain = 1;
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     memFlags.ui32.HostAccess = 1;
 
@@ -723,8 +724,6 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
                                         HSAuint64 highMB, int nodeToMap,
                                         HSAuint64 *lastSizeMB) {
     int ret;
-
-    HsaMemMapFlags mapFlags = {0};
     HSAuint64 granularityMB = 8;
 
     /* Testing big buffers in VRAM */
@@ -752,7 +751,7 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
         }
 
         ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, pDb, size, NULL,
-                        mapFlags, 1, reinterpret_cast<HSAuint32 *>(&nodeToMap));
+                        memFlags, 1, reinterpret_cast<HSAuint32 *>(&nodeToMap));
         if (ret) {
             EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, size), nodeToMap);
             highMB = sizeMB;
@@ -782,7 +781,10 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
  */
 void KFDMemoryTest::LargestSysBufferTest(int gpuNode) {
 
-    if (!hsakmt_is_dgpu()) {
+    /* Integrated flag is the authoritative APU indicator (hsakmt_is_dgpu()
+     * misreports on APUs like gfx1151 where CPU/GPU are separate nodes). */
+    const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    if ((pNodeProps && pNodeProps->Integrated) || !hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
@@ -823,7 +825,10 @@ TEST_F(KFDMemoryTest, LargestSysBufferTest) {
 
 void KFDMemoryTest::LargestVramBufferTest(int gpuNode) {
 
-    if (!hsakmt_is_dgpu()) {
+    /* Integrated flag is the authoritative APU indicator (hsakmt_is_dgpu()
+     * misreports on APUs like gfx1151 where CPU/GPU are separate nodes). */
+    const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    if ((pNodeProps && pNodeProps->Integrated) || !hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
@@ -873,13 +878,15 @@ TEST_F(KFDMemoryTest, LargestVramBufferTest) {
  */
 void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
 
-    if (!hsakmt_is_dgpu()) {
+    /* Integrated flag is the authoritative APU indicator (hsakmt_is_dgpu()
+     * misreports on APUs like gfx1151 where CPU/GPU are separate nodes). */
+    const HsaNodeProperties *pNodeProps = m_NodeInfo.GetNodeProperties(gpuNode);
+    if ((pNodeProps && pNodeProps->Integrated) || !hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
 
     HSAuint64 AlternateVAGPU;
-    HsaMemMapFlags mapFlags = {0};
     int ret;
 
     /* Repeatedly allocate and map big buffers in system memory until it fails,
@@ -902,7 +909,7 @@ void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
                 break;
 
             ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, pDb_array[i], block_size,
-                    &AlternateVAGPU, mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode));
+                    &AlternateVAGPU, GetHsaMemFlags(), 1, reinterpret_cast<HSAuint32 *>(&gpuNode));
             if (ret) {
                 EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb_array[i], block_size), gpuNode);
                 break;
@@ -965,7 +972,6 @@ void KFDMemoryTest::MMBench(int gpuNode) {
     unsigned i;
     HSAKMT_STATUS ret;
     HsaMemFlags memFlags = {0};
-    HsaMemMapFlags mapFlags = {0};
     HSAuint64 altVa;
 
     HSAuint64 vramSizeMB = GetVramSize(gpuNode) >> 20;
@@ -1079,7 +1085,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
         start = GetSystemTickCountInMicroSec();
         for (i = 0; i < nBufs; i++) {
             ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, bufs[i], bufSize,
-                                                     &altVa, mapFlags, 1,
+                                                     &altVa, memFlags, 1,
                                                      (HSAuint32*)&gpuNode),  gpuNode);
             INTERLEAVE_SDMA();
         }
@@ -1456,7 +1462,6 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
         return;
     }
 
-    HsaMemMapFlags mapFlags = {0};
     HsaMemFlags memFlags = {0};
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     /* Allocate host not accessible vram */
@@ -1473,7 +1478,7 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
 
     ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, size, memFlags, &mem), gpuNode);
     ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, mem, size, NULL,
-                                mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
+                                memFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
     /* Set the word before 4M boundary to 0xdeadbeefdeadbeef
      * and the word after 4M boundary to 0xcafebabecafebabe
      */
@@ -1561,7 +1566,7 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
     // dstBuffer is cpu accessible gtt memory
     HsaMemoryBuffer dstBuffer(PAGE_SIZE, gpuNode);
 
-    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(ScratchCopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
 
     Dispatch dispatch0(isaBuffer);
     dispatch0.SetArgs(mem0, dstBuffer.As<void*>());
@@ -1789,7 +1794,6 @@ void KFDMemoryTest::MMBandWidth(int gpuNode) {
     unsigned i;
     HSAKMT_STATUS ret;
     HsaMemFlags memFlags = {0};
-    HsaMemMapFlags mapFlags = {0};
 
     HSAuint64 vramSizeMB = GetVramSize(gpuNode) >> 20;
 
@@ -3070,6 +3074,11 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
         return;
     }
 
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
+        LOG() << "Skipping test: Test requires a large bar GPU." << std::endl;
+        return;
+    }
+
     // Use a GTT BO for export because it's conveniently CPU accessible.
     // On multi-GPU systems this also checks for interactions with driver-
     // internal DMA buf use for DMA attachment to multiple GPUs
@@ -3115,9 +3124,10 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
     buf = reinterpret_cast<HSAuint32 *>(info.MemoryAddress);
     ASSERT_EQ_GPU(info.SizeInBytes, PAGE_SIZE, gpuNode);
 
-    HsaMemMapFlags mapFlags = {0};
+    memFlags.Value = 0;
+    memFlags.ui32.CoarseGrain = 1;
     ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx,
-                                             buf, PAGE_SIZE, NULL, mapFlags, 1,
+                                             buf, PAGE_SIZE, NULL, memFlags, 1,
                                              (HSAuint32 *)&gpuNode), gpuNode);
 
     PM4Queue pm4Queue;
@@ -3165,8 +3175,7 @@ void KFDMemoryTest::VA_VRAM_Only_AllocTest(int gpuNode) {
     HsaMemFlags memFlags = GetHsaMemFlags();
     memFlags.ui32.NonPaged = 1;
     memFlags.ui32.HostAccess = 0;
-
-    HsaMemMapFlags mapFlags = {0};
+    memFlags.ui32.CoarseGrain = 1;
 
     HSAuint32 *buf;
 
@@ -3178,7 +3187,7 @@ void KFDMemoryTest::VA_VRAM_Only_AllocTest(int gpuNode) {
     /*mapping VA allocated by kfd api would fail*/
     ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL));
     ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL,
-                               mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)));
+                               memFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)));
 
     ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buf, PAGE_SIZE));
 
@@ -3191,7 +3200,7 @@ void KFDMemoryTest::VA_VRAM_Only_AllocTest(int gpuNode) {
     /*mapping handle allocated by kfd API would fail*/
     ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL));
     ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL,
-                               mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)));
+                               memFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)));
 
     ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buf, PAGE_SIZE));
 }

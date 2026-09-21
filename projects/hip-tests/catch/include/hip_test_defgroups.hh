@@ -131,6 +131,81 @@
  */
 
 /**
+ * @defgroup PerformanceTestEvent Event performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for the HIP event APIs.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestStream Stream performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for the HIP stream APIs.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestMemory Memory performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for the HIP memory management APIs
+ * (including memcpy, memset, and host/device allocation).
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestKernelLaunch Kernel launch performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for HIP kernel launch APIs.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestWarpSync Warp sync performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for HIP warp synchronization
+ * primitives.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestGraph Graph performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for the HIP graph APIs.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestCompute Compute performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for HIP compute workloads.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestDispatch Dispatch performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for HIP kernel dispatch.
+ * @}
+ */
+
+/**
+ * @defgroup PerformanceTestVMM Virtual memory management performance tests
+ * @ingroup PerformanceTest
+ * @{
+ * This section describes performance tests for HIP virtual memory management
+ * APIs.
+ * @}
+ */
+
+/**
  * @defgroup ShflTest warp shuffle function Management
  * @{
  * This section describes the warp shuffle types & functions of HIP runtime API.

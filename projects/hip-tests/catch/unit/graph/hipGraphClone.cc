@@ -229,10 +229,12 @@ HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
       if (canAccessPeer) {
         hipGraphClone_DeviceContextChange();
       } else {
-        SUCCEED("Machine does not seem to have P2P");
+        WARN("Skipping device context change section: peer access is not available between devices.");
+        return;
       }
     } else {
-      SUCCEED("skipped the testcase as no of devices is less than 2");
+      WARN("Skipping device context change section: fewer than two GPUs.");
+      return;
     }
   }
 }
@@ -262,21 +264,18 @@ HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   auto lambdaFunc = [&]() {
     hipGraph_t clonedgraph;
     hipGraphExec_t graphExec;
-    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+    HIP_CHECK_THREAD(hipGraphClone(&clonedgraph, graph));
     // Instantiate and launch the cloned graph
-    HIP_CHECK(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphLaunch(graphExec, 0));
-    HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK_THREAD(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0));
+    HIP_CHECK_THREAD(hipGraphLaunch(graphExec, 0));
+    HIP_CHECK_THREAD(hipStreamSynchronize(0));
 
     for (size_t i = 0; i < N; i++) {
-      if (A_h[i] != B_h[i]) {
-        INFO("Validation failed A_h[i] " << A_h[i] << " B_h[i] " << B_h[i]);
-        REQUIRE(false);
-      }
+      REQUIRE_THREAD(A_h[i] == B_h[i]);
     }
 
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-    HIP_CHECK(hipGraphDestroy(clonedgraph));
+    HIP_CHECK_THREAD(hipGraphExecDestroy(graphExec));
+    HIP_CHECK_THREAD(hipGraphDestroy(clonedgraph));
   };
   for (int i = 0; i < NUM_THREADS; i++) {
     std::thread t(lambdaFunc);
@@ -285,6 +284,7 @@ HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   for (auto& t : threads) {
     t.join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
   HipTest::freeArrays<int>(A_d, nullptr, nullptr, A_h, B_h, nullptr, false);
   HIP_CHECK(hipGraphDestroy(graph));
 }

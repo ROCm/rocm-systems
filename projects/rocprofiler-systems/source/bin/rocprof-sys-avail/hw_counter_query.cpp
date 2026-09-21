@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "hw_counter_query.hpp"
 
@@ -31,8 +12,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -46,7 +27,7 @@ namespace avail
 {
 namespace
 {
-// Local counter info struct — avoids depending on library/rocprofiler-sdk/fwd.hpp
+// Local counter info struct - avoids depending on library/rocprofiler-sdk/fwd.hpp
 struct counter_info
 {
     rocprofiler_agent_id_t                           agent_id       = {};
@@ -145,7 +126,7 @@ query_gpu_hw_counters()
     auto result = std::vector<hardware_counter_info>{};
 
     auto& agent_mngr   = get_agent_manager_instance();
-    auto  gpu_agents_v = agent_mngr.get_agents_by_type(agent_type::GPU);
+    auto  gpu_agents_v = agent_mngr.get_agents_by_type(agent_type::gpu);
     if(gpu_agents_v.empty()) return result;
 
     // Build the (device_type_index, agent*) pairs that get_agent_counter_info expects

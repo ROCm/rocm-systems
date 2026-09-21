@@ -48,6 +48,7 @@ subtrees:
       - file: how-to/hip_runtime_api/hipgraph
       - file: how-to/hip_runtime_api/cooperative_groups
       - file: how-to/hip_runtime_api/multi_device
+      - file: how-to/hip_runtime_api/execution_context
       - file: how-to/hip_runtime_api/opengl_interop
       - file: how-to/hip_runtime_api/external_interop
   - file: how-to/hip_cpp_language_extensions
@@ -55,6 +56,7 @@ subtrees:
   - file: how-to/hip_porting_guide
   - file: how-to/hip_rtc
   - file: understand/amd_clr
+  - file: how-to/hipDeviceProperties
 
 - caption: Reference
   entries:
@@ -83,6 +85,7 @@ subtrees:
               - file: reference/hip_runtime_api/modules/memory_management/texture_management_deprecated
               - file: reference/hip_runtime_api/modules/memory_management/surface_object
           - file: reference/hip_runtime_api/modules/peer_to_peer_device_memory_access
+          - file: reference/hip_runtime_api/modules/execution_context_management          
           - file: reference/hip_runtime_api/modules/context_management
           - file: reference/hip_runtime_api/modules/module_management
           - file: reference/hip_runtime_api/modules/occupancy

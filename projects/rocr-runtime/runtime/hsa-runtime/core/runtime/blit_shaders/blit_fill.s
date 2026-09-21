@@ -70,6 +70,14 @@
 	.endif
 .endm
 
+.macro S_WAITCNT_KMCNT
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+    s_wait_kmcnt             0
+  .else
+    s_waitcnt                lgkmcnt(0)
+  .endif
+.endm
+
 .set kFillVecWidth, 4
 .set kFillUnroll, 1
 
@@ -96,9 +104,13 @@ Fill:
     compute_pgm_rsrc2_tgid_x_en = 1
     enable_sgpr_kernarg_segment_ptr = 1
 
+    .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor == 5)
+      v_nop
+    .endif
+
     s_load_dwordx4  s[4:7], s[0:1], 0x0
     s_load_dwordx4  s[8:11], s[0:1], 0x10
-    s_waitcnt       lgkmcnt(0)
+    S_WAITCNT_KMCNT
 
    .if (.amdgcn.gfx_generation_number == 12)
      s_lshl_b32      s2, ttmp9, 0x6

@@ -83,8 +83,7 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_Positive_Threaded) {
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyPeerAsync) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int can_access_peer = 0;
@@ -178,8 +177,6 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync) {
  *  - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync) {
-  CHECK_IMAGE_SUPPORT
-
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(float)};
@@ -436,8 +433,6 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemPrefetchAsync) {
  */
 
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpy2DAsync) {
-  CHECK_IMAGE_SUPPORT
-
   int *A_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(int)};
@@ -564,9 +559,9 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync) {
 
 // Inside thread, both hipExtGetLastError() api call should not return error
 static void thread_wait_func(int sleep_time) {
-  HIP_CHECK(hipExtGetLastError());
+  HIP_CHECK_THREAD(hipExtGetLastError());
   std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time * 1000));
-  HIP_CHECK(hipExtGetLastError());
+  HIP_CHECK_THREAD(hipExtGetLastError());
 }
 
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync_thread) {
@@ -598,6 +593,8 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync_thread) {
                   hipErrorInvalidValue);
 
   t.join();
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());

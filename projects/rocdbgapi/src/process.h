@@ -32,6 +32,7 @@
 #include "handle_object.h"
 #include "initialization.h"
 #include "logging.h"
+#include "memory.h"
 #include "os_driver.h"
 #include "queue.h"
 #include "runtime_rdebug.h"
@@ -132,6 +133,10 @@ private:
     m_handle_object_sets{};
 
   const agent_t m_dummy_agent;
+
+  /* Maintain an index of all the loaded code objects, keyed by
+     load address.  */
+  std::unordered_map<host_address_t, code_object_t *> m_code_objects_index;
 
   std::pair<std::variant<process_t *, agent_t *, queue_t *>,
             os_exception_mask_t>
@@ -301,6 +306,10 @@ public:
   void update_waves ();
   void update_queues ();
   void update_code_objects ();
+
+  /* Refresh the metadata of queues we know of.  Unlike update_queues, this
+     will not try to create new queues reported by the os_driver.  */
+  void update_queue_info (const std::vector<queue_t *> &queues) const;
 
   void runtime_enable (os_runtime_info_t runtime_info);
 

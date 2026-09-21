@@ -33,25 +33,49 @@ git sparse-checkout set projects/rocprofiler-compute
 git checkout develop
 
 cd projects/rocprofiler-compute
+
+# Initialize submodule dependencies (vendored Python deps and src/lib/external C++ libs)
+git submodule update --init --recursive -- src/
+
+# Analyze mode dependencies only. Install these in a separate virtual environment.
 python3 -m pip install -r requirements.txt
+```
+
+**Note**: The packages in `requirements.txt` are needed for analyze mode only; profile mode uses the standard library. Install them in a virtual environment separate from your profiled application so their pinned versions don't conflict with the workload's own packages. See the [quickstart](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/install/quickstart.html) for supported Python versions.
+
+**Note**: When working from source, submodules live under `src/` (vendored Python dependencies like PyYAML in `src/vendored/`, and C++ libraries like googletest, fmt, and json in `src/lib/external/`). If you see import errors about missing vendored modules or missing C++ externals during a build, run `git submodule update --init --recursive -- src/`.
+
+### Development dependencies
+
+To install development tools (linter, pre-commit hooks, YAML utilities), run:
+
+```bash
+python3 -m pip install -r requirements-development.txt
 ```
 
 ## Testing
 
-Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.
-Populate the <rocm_build_image> variable in `docker/Dockerfile.customrocmtest` based on latest ROCm CI build information.
+Populate the <username> variable in `docker/docker-compose.therock.tarball.yml`.
+Populate the <tarball_name> variable in `docker/Dockerfile.therock.tarball` (see the comment there for the naming convention and nightly index).
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
-* If the docker image is not available on the machine, then build the image, otherwise skip this step: `docker compose -f docker-compose.customrocmtest.yml build`
-* Launch the container, and check the name of the container: `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d `
+* If the docker image is not available on the machine, then build the image, otherwise skip this step: `docker compose -f docker-compose.therock.tarball.yml build`
+* Launch the container, and check the name of the container: `docker compose -f docker-compose.therock.tarball.yml up --force-recreate -d `
 * Run bash shell on the launched container: `docker exec -it <container_name> bash`
 * If testing is done, kill the container: `docker container kill <container_name>`
 
 Inside the docker container, clean, build, then install the project with tests enabled:
 ```
-rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -DENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
+rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -D ENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
 ```
+
+Common CMake options:
+- `-D ENABLE_TESTS=ON` - Enable building test executables
+- `-D INSTALL_TESTS=ON` - Install test files and test suite
+- `-D ENABLE_COVERAGE=ON` - Enable code coverage reporting
+- `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
+- `-D ENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN` - Build with sanitizer instrumentation for development (default OFF)
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 
@@ -62,59 +86,6 @@ ctest
 ```
 
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
-
-## Standalone binary
-
-### Create standalone binary using docker container
-
-This method uses the cmake target inside a RHEL 8 docker container with Python3.11 installed.
-
-To create a standalone binary, run the following commands:
-* `cd docker`
-* Optionally, provide `--build-arg STANDALONEBINARY_EXTRACT_DIR=/<path>` option in build container command to change the absolute path where standalone binary will extract its contents. This option should be specified after the `build` keyword. Default is `/tmp`.
-* `docker compose -f docker-compose.standalone.yml build` (build container command)
-* `docker compose -f docker-compose.standalone.yml up --force-recreate -d && docker attach docker-standalone-1` (run container and attach to see its output)
-
-### Create standalone binary using cmake target locally without docker
-
-**NOTE: Python3.11 should be installed on the system to build the standalone binary**
-
-To create a standalone binary, run the following commands:
-
-* Optionally, provide `-D STANDALONEBINARY_EXTRACT_DIR=/<path>` option in cmake config. command to change the absolute path where standalone binary will extract its contents. Default is `/tmp`.
-* `cmake -B build -D CMAKE_INSTALL_PREFIX=install -D STANDALONEBINARY=ON -S .` (cmake config. command)
-* `cmake --build build --target install --parallel 8` (run cmake install target)
-
-### Standalone binary creation methodology
-
-To build the binary we follow these steps:
-* Use RHEL 8.10 docker image as the base image (only in docker method)
-* Install python3.11
-* Install python dependencies
-* Call the install cmake target with STANDALONEBINARY=ON cmake args. which will use Nuitka to build the standalone binary
-
-You should find the rocprof-compute.bin standalone binary inside the `install/libexec/rocprofiler-compute/rocprof-compute.bin` folder in the root directory of the project.
-
-### Things to note about standalone binary
-
-* [Nuitka](https://nuitka.net/user-documentation/) is used for compiling the python interpreter, python dependencies and source code into C and then to a executable. The whole process takes about 30 minutes. The self-extracting standalone binary itself is approximately 150 MB in size, however, the total size of the extracted compiled artifacts is approximately 650 MB.
-
-* By default, standalone binary extracts its contents to a directory `rocprof_compute_standalonebinary_<pid>` under `/tmp` parent directory upon execution, however, the parent directory can be configured as explained in standalone binary creation section.
-
-* When using docker method, since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than or equal to 2.28. glibc version can be checked using `ldd --version` command.
-
-* If not using docker, the minimum glibc version is determined by the OS where cmake is run.
-
-* When using docker, native counter collection tool is not compiled due to unavailability of rocprofiler-sdk. Instead, native counter collection tool will be runtime compiled based on the environment where the binary is running.
-
-### Test standalone binary
-
-Create standalone binary with tests enabled, then run the tests:
-
-* `cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -D STANDALONEBINARY=ON -S .`
-* `cmake --build build --target install --parallel 8`
-* `cd install/libexec/rocprofiler-compute`
-* `ctest`
 
 ## How to Cite
 

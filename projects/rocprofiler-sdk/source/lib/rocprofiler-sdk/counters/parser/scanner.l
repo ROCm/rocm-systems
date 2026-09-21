@@ -1,7 +1,7 @@
 %option noyywrap nodefault yylineno nounput
 
 %{
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include "raw_ast.hpp"
 #include "parser.h"

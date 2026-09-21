@@ -364,7 +364,7 @@ union drm_amdgpu_ctx {
  * For operation AMDGPU_USERQ_OP_CREATE: user is expected
  *  to set all fields, excep the parameter 'queue_id'.
  * For operation AMDGPU_USERQ_OP_FREE: the only input parameter expected
- *  to be set is 'queue_id', eveything else is ignored.
+ *  to be set is 'queue_id', everything else is ignored.
  */
 struct drm_amdgpu_userq_in {
   /** AMDGPU_USERQ_OP_* */
@@ -900,7 +900,7 @@ struct drm_amdgpu_gem_va {
 #define AMDGPU_HW_IP_UVD_ENC 5
 #define AMDGPU_HW_IP_VCN_DEC 6
 /*
- * From VCN4, AMDGPU_HW_IP_VCN_ENC is re-used to support
+ * From VCN4, AMDGPU_HW_IP_VCN_ENC is reused to support
  * both encoding and decoding jobs.
  */
 #define AMDGPU_HW_IP_VCN_ENC 7

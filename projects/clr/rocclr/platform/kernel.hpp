@@ -35,7 +35,7 @@ class Program;
  *  @{
  */
 
-class KernelSignature : public HeapObject {
+class KernelSignature {
  private:
   std::vector<KernelParameterDescriptor> params_;
   std::string attributes_;  //!< The kernel attributes
@@ -103,7 +103,7 @@ class KernelSignature : public HeapObject {
 
 // @todo: look into a copy-on-write model instead of copy-on-read.
 //
-class KernelParameters : protected HeapObject {
+class KernelParameters {
  private:
   //! The signature describing these parameters.
   KernelSignature& signature_;
@@ -233,9 +233,7 @@ class KernelParameters : protected HeapObject {
   //! add the svmPtr execInfo into container
   void addSvmPtr(void* const* execInfoArray, size_t count) {
     execSvmPtr_.clear();
-    for (size_t i = 0; i < count; i++) {
-      execSvmPtr_.push_back(execInfoArray[i]);
-    }
+    execSvmPtr_.insert(execSvmPtr_.end(), execInfoArray, execInfoArray + count);
   }
   //! get the number of svmPtr in the execInfo container
   size_t getNumberOfSvmPtr() const { return execSvmPtr_.size(); }

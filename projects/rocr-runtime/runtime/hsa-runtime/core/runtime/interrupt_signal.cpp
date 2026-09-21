@@ -134,6 +134,10 @@ void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
   SetEvent();
 }
+void InterruptSignal::StoreReleaseAndNotify(hsa_signal_value_t value) {
+  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  if (event_ != nullptr) HSAKMT_CALL(hsaKmtSetEvent(event_));
+}
 
 hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition,
                                                hsa_signal_value_t compare_value,
@@ -173,7 +177,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     if (wait_hint == HSA_WAIT_STATE_ACTIVE) {
       if (g_use_mwaitx) {
         // Short timeout for active waiting
-        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 1000);
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 1000, true);
       }
       continue;
     }
@@ -181,7 +185,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     if (now - start_time < kMaxElapsed) {
       if (g_use_mwaitx) {
         // Longer timeout with timer for passive waiting
-        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
       }
       continue;
     }

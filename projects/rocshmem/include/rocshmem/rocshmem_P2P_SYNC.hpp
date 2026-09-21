@@ -76,13 +76,13 @@ __host__ size_t rocshmem_float_wait_until_some(
     int cmp, float val);
 __host__ size_t rocshmem_float_wait_until_any_vector(
     float *ivars, size_t nelems, const int* status,
-    int cmp, float val);
+    int cmp, float* vals);
 __host__ void rocshmem_float_wait_until_all_vector(
     float *ivars, size_t nelems, const int* status,
-    int cmp, float val);
+    int cmp, float* vals);
 __host__ size_t rocshmem_float_wait_until_some_vector(
     float *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, float val);
+    int cmp, float* vals);
 
 __device__ void rocshmem_double_wait_until(
     double *ivars, int cmp, double val);
@@ -117,13 +117,13 @@ __host__ size_t rocshmem_double_wait_until_some(
     int cmp, double val);
 __host__ size_t rocshmem_double_wait_until_any_vector(
     double *ivars, size_t nelems, const int* status,
-    int cmp, double val);
+    int cmp, double* vals);
 __host__ void rocshmem_double_wait_until_all_vector(
     double *ivars, size_t nelems, const int* status,
-    int cmp, double val);
+    int cmp, double* vals);
 __host__ size_t rocshmem_double_wait_until_some_vector(
     double *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, double val);
+    int cmp, double* vals);
 
 __device__ void rocshmem_char_wait_until(
     char *ivars, int cmp, char val);
@@ -158,13 +158,13 @@ __host__ size_t rocshmem_char_wait_until_some(
     int cmp, char val);
 __host__ size_t rocshmem_char_wait_until_any_vector(
     char *ivars, size_t nelems, const int* status,
-    int cmp, char val);
+    int cmp, char* vals);
 __host__ void rocshmem_char_wait_until_all_vector(
     char *ivars, size_t nelems, const int* status,
-    int cmp, char val);
+    int cmp, char* vals);
 __host__ size_t rocshmem_char_wait_until_some_vector(
     char *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, char val);
+    int cmp, char* vals);
 
 __device__ void rocshmem_schar_wait_until(
     signed char *ivars, int cmp, signed char val);
@@ -199,13 +199,13 @@ __host__ size_t rocshmem_schar_wait_until_some(
     int cmp, signed char val);
 __host__ size_t rocshmem_schar_wait_until_any_vector(
     signed char *ivars, size_t nelems, const int* status,
-    int cmp, signed char val);
+    int cmp, signed char* vals);
 __host__ void rocshmem_schar_wait_until_all_vector(
     signed char *ivars, size_t nelems, const int* status,
-    int cmp, signed char val);
+    int cmp, signed char* vals);
 __host__ size_t rocshmem_schar_wait_until_some_vector(
     signed char *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, signed char val);
+    int cmp, signed char* vals);
 
 __device__ void rocshmem_short_wait_until(
     short *ivars, int cmp, short val);
@@ -240,13 +240,13 @@ __host__ size_t rocshmem_short_wait_until_some(
     int cmp, short val);
 __host__ size_t rocshmem_short_wait_until_any_vector(
     short *ivars, size_t nelems, const int* status,
-    int cmp, short val);
+    int cmp, short* vals);
 __host__ void rocshmem_short_wait_until_all_vector(
     short *ivars, size_t nelems, const int* status,
-    int cmp, short val);
+    int cmp, short* vals);
 __host__ size_t rocshmem_short_wait_until_some_vector(
     short *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, short val);
+    int cmp, short* vals);
 
 __device__ void rocshmem_int_wait_until(
     int *ivars, int cmp, int val);
@@ -281,13 +281,13 @@ __host__ size_t rocshmem_int_wait_until_some(
     int cmp, int val);
 __host__ size_t rocshmem_int_wait_until_any_vector(
     int *ivars, size_t nelems, const int* status,
-    int cmp, int val);
+    int cmp, int* vals);
 __host__ void rocshmem_int_wait_until_all_vector(
     int *ivars, size_t nelems, const int* status,
-    int cmp, int val);
+    int cmp, int* vals);
 __host__ size_t rocshmem_int_wait_until_some_vector(
     int *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, int val);
+    int cmp, int* vals);
 
 __device__ void rocshmem_long_wait_until(
     long *ivars, int cmp, long val);
@@ -322,13 +322,13 @@ __host__ size_t rocshmem_long_wait_until_some(
     int cmp, long val);
 __host__ size_t rocshmem_long_wait_until_any_vector(
     long *ivars, size_t nelems, const int* status,
-    int cmp, long val);
+    int cmp, long* vals);
 __host__ void rocshmem_long_wait_until_all_vector(
     long *ivars, size_t nelems, const int* status,
-    int cmp, long val);
+    int cmp, long* vals);
 __host__ size_t rocshmem_long_wait_until_some_vector(
     long *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, long val);
+    int cmp, long* vals);
 
 __device__ void rocshmem_longlong_wait_until(
     long long *ivars, int cmp, long long val);
@@ -363,13 +363,13 @@ __host__ size_t rocshmem_longlong_wait_until_some(
     int cmp, long long val);
 __host__ size_t rocshmem_longlong_wait_until_any_vector(
     long long *ivars, size_t nelems, const int* status,
-    int cmp, long long val);
+    int cmp, long long* vals);
 __host__ void rocshmem_longlong_wait_until_all_vector(
     long long *ivars, size_t nelems, const int* status,
-    int cmp, long long val);
+    int cmp, long long* vals);
 __host__ size_t rocshmem_longlong_wait_until_some_vector(
     long long *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, long long val);
+    int cmp, long long* vals);
 
 __device__ void rocshmem_uchar_wait_until(
     unsigned char *ivars, int cmp, unsigned char val);
@@ -404,13 +404,13 @@ __host__ size_t rocshmem_uchar_wait_until_some(
     int cmp, unsigned char val);
 __host__ size_t rocshmem_uchar_wait_until_any_vector(
     unsigned char *ivars, size_t nelems, const int* status,
-    int cmp, unsigned char val);
+    int cmp, unsigned char* vals);
 __host__ void rocshmem_uchar_wait_until_all_vector(
     unsigned char *ivars, size_t nelems, const int* status,
-    int cmp, unsigned char val);
+    int cmp, unsigned char* vals);
 __host__ size_t rocshmem_uchar_wait_until_some_vector(
     unsigned char *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, unsigned char val);
+    int cmp, unsigned char* vals);
 
 __device__ void rocshmem_ushort_wait_until(
     unsigned short *ivars, int cmp, unsigned short val);
@@ -445,13 +445,13 @@ __host__ size_t rocshmem_ushort_wait_until_some(
     int cmp, unsigned short val);
 __host__ size_t rocshmem_ushort_wait_until_any_vector(
     unsigned short *ivars, size_t nelems, const int* status,
-    int cmp, unsigned short val);
+    int cmp, unsigned short* vals);
 __host__ void rocshmem_ushort_wait_until_all_vector(
     unsigned short *ivars, size_t nelems, const int* status,
-    int cmp, unsigned short val);
+    int cmp, unsigned short* vals);
 __host__ size_t rocshmem_ushort_wait_until_some_vector(
     unsigned short *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, unsigned short val);
+    int cmp, unsigned short* vals);
 
 __device__ void rocshmem_uint_wait_until(
     unsigned int *ivars, int cmp, unsigned int val);
@@ -486,13 +486,13 @@ __host__ size_t rocshmem_uint_wait_until_some(
     int cmp, unsigned int val);
 __host__ size_t rocshmem_uint_wait_until_any_vector(
     unsigned int *ivars, size_t nelems, const int* status,
-    int cmp, unsigned int val);
+    int cmp, unsigned int* vals);
 __host__ void rocshmem_uint_wait_until_all_vector(
     unsigned int *ivars, size_t nelems, const int* status,
-    int cmp, unsigned int val);
+    int cmp, unsigned int* vals);
 __host__ size_t rocshmem_uint_wait_until_some_vector(
     unsigned int *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, unsigned int val);
+    int cmp, unsigned int* vals);
 
 __device__ void rocshmem_ulong_wait_until(
     unsigned long *ivars, int cmp, unsigned long val);
@@ -527,13 +527,13 @@ __host__ size_t rocshmem_ulong_wait_until_some(
     int cmp, unsigned long val);
 __host__ size_t rocshmem_ulong_wait_until_any_vector(
     unsigned long *ivars, size_t nelems, const int* status,
-    int cmp, unsigned long val);
+    int cmp, unsigned long* vals);
 __host__ void rocshmem_ulong_wait_until_all_vector(
     unsigned long *ivars, size_t nelems, const int* status,
-    int cmp, unsigned long val);
+    int cmp, unsigned long* vals);
 __host__ size_t rocshmem_ulong_wait_until_some_vector(
     unsigned long *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, unsigned long val);
+    int cmp, unsigned long* vals);
 
 __device__ void rocshmem_ulonglong_wait_until(
     unsigned long long *ivars, int cmp, unsigned long long val);
@@ -568,13 +568,13 @@ __host__ size_t rocshmem_ulonglong_wait_until_some(
     int cmp, unsigned long long val);
 __host__ size_t rocshmem_ulonglong_wait_until_any_vector(
     unsigned long long *ivars, size_t nelems, const int* status,
-    int cmp, unsigned long long val);
+    int cmp, unsigned long long* vals);
 __host__ void rocshmem_ulonglong_wait_until_all_vector(
     unsigned long long *ivars, size_t nelems, const int* status,
-    int cmp, unsigned long long val);
+    int cmp, unsigned long long* vals);
 __host__ size_t rocshmem_ulonglong_wait_until_some_vector(
     unsigned long long *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, unsigned long long val);
+    int cmp, unsigned long long* vals);
 
 __device__ void rocshmem_uint64_wait_until(
     uint64_t *ivars, int cmp, uint64_t val);
@@ -609,13 +609,13 @@ __host__ size_t rocshmem_uint64_wait_until_some(
     int cmp, uint64_t val);
 __host__ size_t rocshmem_uint64_wait_until_any_vector(
     uint64_t *ivars, size_t nelems, const int* status,
-    int cmp, uint64_t val);
+    int cmp, uint64_t* vals);
 __host__ void rocshmem_uint64_wait_until_all_vector(
     uint64_t *ivars, size_t nelems, const int* status,
-    int cmp, uint64_t val);
+    int cmp, uint64_t* vals);
 __host__ size_t rocshmem_uint64_wait_until_some_vector(
     uint64_t *ivars, size_t nelems, size_t* indices, const int* status,
-    int cmp, uint64_t val);
+    int cmp, uint64_t* vals);
 
 
 /**

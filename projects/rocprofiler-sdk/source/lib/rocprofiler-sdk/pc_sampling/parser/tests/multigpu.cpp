@@ -152,6 +152,12 @@ multithread_queue_hammer(size_t tid, Latch* latch)
             EXPECT_EQ(samples[i].correlation_id.internal, samples[i].pc.code_object_offset);
         delete[] samples;
     }
+
+    EXPECT_GT(num_reset_queues, 0);          // No queue was reset, test is not effective
+    EXPECT_GT(num_samples_generated, 0);     // No sample was generated, test is not effective
+    EXPECT_GT(num_dispatches_generated, 0);  // No dispatch was generated, test is not effective
+    EXPECT_GT(avg_q_occupancy, 0.0);         // No sample was generated, test is not effective
+    EXPECT_GT(max_q_occupancy, 0);           // No sample was generated, test is not effective
 }
 
 /**

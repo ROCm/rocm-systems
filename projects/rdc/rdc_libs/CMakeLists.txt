@@ -84,7 +84,7 @@ add_subdirectory(rdc_modules/rdc_rocr)
 add_subdirectory(rdc_modules/rdc_rocp)
 
 # add librdc_rvs.so to RDC_LIB_MODULES
-add_subdirectory(rdc_modules/rdc_rvs)
+#add_subdirectory(rdc_modules/rdc_rvs)
 
 # Create cmake target
 # Add all targets to the build-tree export set
@@ -115,7 +115,12 @@ if(RDC_LIB_MODULES)
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC} COMPONENT ${CLIENT_COMPONENT}
     )
-    set_target_properties(${RDC_LIB_MODULES} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+    set_target_properties(
+        ${RDC_LIB_MODULES}
+        PROPERTIES
+            INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
+            THEROCK_INSTALL_RPATH_ORIGIN "${CMAKE_INSTALL_LIBDIR}/${RDC}"
+    )
 endif()
 
 install(

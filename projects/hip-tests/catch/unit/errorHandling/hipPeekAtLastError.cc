@@ -191,12 +191,12 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_Error_Combinations) {
 }
 
 static void thread_func() {
-  HIP_CHECK_ERROR(hipPeekAtLastError(), hipSuccess);
-  HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
+  REQUIRE_THREAD(hipPeekAtLastError() == hipSuccess);
+  REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue);
+  REQUIRE_THREAD(hipPeekAtLastError() == hipErrorInvalidValue);
   int* A_d;
-  HIP_CHECK(hipMalloc(&A_d, 1024));
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK_THREAD(hipMalloc(&A_d, 1024));
+  HIP_CHECK_THREAD(hipFree(A_d));
 }
 /**
  * Test Description
@@ -217,6 +217,7 @@ HIP_TEST_CASE(Unit_hipPeekAtLastError_With_Thread) {
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     std::thread t(thread_func);
     t.join();
+    HIP_CHECK_THREAD_FINALIZE();
     HIP_CHECK(hipFree(A_d));
     HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
 }

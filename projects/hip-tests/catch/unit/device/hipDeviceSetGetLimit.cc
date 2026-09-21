@@ -246,10 +246,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_Negative) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   size_t scratchLimitCurrent = 0;
@@ -286,10 +285,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   // Get the current scratch
@@ -325,21 +323,21 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
   HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgValue));
 }
 
-static constexpr size_t SIZE = 4 * 1024;
-static constexpr size_t SIZE_BYTES = SIZE * sizeof(int);
+static constexpr size_t kBufferSize = 4 * 1024;
+static constexpr size_t kBufferSizeBytes = kBufferSize * sizeof(int);
 static constexpr int N_BYTES = sizeof(int);
 
 /*
  * Kernel function uses the scratch memory and fill the value
  */
 __global__ void addOneKernelUseScratch(int* arr) {
-  int localArr[SIZE];
-  for (int i = 0; i < SIZE; i++) {
+  int localArr[kBufferSize];
+  for (int i = 0; i < kBufferSize; i++) {
     localArr[i] = i;
   }
 
   int sum = 0;
-  for (int i = 0; i < SIZE; i += 1) {
+  for (int i = 0; i < kBufferSize; i += 1) {
     sum += localArr[i];
   }
 
@@ -365,10 +363,9 @@ __global__ void addOneKernelUseScratch(int* arr) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   hipStream_t stream;
@@ -381,16 +378,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
   size_t orgValue = 0;
   HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent));
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, SIZE_BYTES));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, kBufferSizeBytes));
 
   size_t getValue = 0;
   HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent));
-  REQUIRE(getValue == SIZE_BYTES);
+  REQUIRE(getValue == kBufferSizeBytes);
 
   addOneKernelUseScratch<<<1, 1, 0, stream>>>(devMem);
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  int hostMem = 0, expectedValue = ((SIZE - 1) * (SIZE)) / 2;
+  int hostMem = 0, expectedValue = ((kBufferSize - 1) * (kBufferSize)) / 2;
   HIP_CHECK(hipMemcpy(&hostMem, devMem, N_BYTES, hipMemcpyDeviceToHost));
   REQUIRE(hostMem == expectedValue);
 
@@ -410,26 +407,26 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
  * 5) Get the Current Scratch limit and validate it
  * 6) Set the Current Scratch limit to original value
  */
-void getMinMaxCurrentAndSetCurrent() {
+void getMinMaxCurrentAndSetCurrent(bool threadSafe = false) {
   size_t min = 0, max = 0, orgCurrent = 0;
 
-  HIP_CHECK(hipDeviceGetLimit(&min, hipExtLimitScratchMin));
-  REQUIRE(min == 0);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&min, hipExtLimitScratchMin));
+  REQUIRE_OPT_THREAD(threadSafe, min == 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&max, hipExtLimitScratchMax));
-  REQUIRE(max > 0);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&max, hipExtLimitScratchMax));
+  REQUIRE_OPT_THREAD(threadSafe, max > 0);
 
-  HIP_CHECK(hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(orgCurrent >= 0);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&orgCurrent, hipExtLimitScratchCurrent));
+  REQUIRE_OPT_THREAD(threadSafe, orgCurrent >= 0);
 
   size_t setCurrent = 0.5 * max;
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSetLimit(hipExtLimitScratchCurrent, setCurrent));
 
   size_t getCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(getCurrent == setCurrent);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
+  REQUIRE_OPT_THREAD(threadSafe, getCurrent == setCurrent);
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSetLimit(hipExtLimitScratchCurrent, orgCurrent));
 }
 
 /**
@@ -450,15 +447,13 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
@@ -484,14 +479,14 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InThread) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
-  std::thread threadObj(getMinMaxCurrentAndSetCurrent);
+  std::thread threadObj([]() { getMinMaxCurrentAndSetCurrent(true); });
   threadObj.join();
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 /**
@@ -510,10 +505,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InThread) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InChildProcess) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   hip::SpawnProc proc("hipDeviceSetGetScratchExe", true);
@@ -524,7 +518,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InChildProcess) {
  * Local function to set the given current scratch limit
  */
 void setScratchCurrent(size_t setValue) {
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue));
+  HIP_CHECK_THREAD(hipDeviceSetLimit(hipExtLimitScratchCurrent, setValue));
 }
 
 /*
@@ -533,8 +527,8 @@ void setScratchCurrent(size_t setValue) {
  */
 void getScratchCurrent(size_t checkValue) {
   size_t getCurrent = 0;
-  HIP_CHECK(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
-  REQUIRE(getCurrent == checkValue);
+  HIP_CHECK_THREAD(hipDeviceGetLimit(&getCurrent, hipExtLimitScratchCurrent));
+  REQUIRE_THREAD(getCurrent == checkValue);
 }
 
 /**
@@ -556,10 +550,9 @@ void getScratchCurrent(size_t checkValue) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   size_t max = 0, orgCurrent = 0;
@@ -581,6 +574,8 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads) {
 
   std::thread getThread2(getScratchCurrent, orgCurrent);
   getThread2.join();
+
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 #endif

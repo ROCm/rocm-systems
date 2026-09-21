@@ -28,7 +28,8 @@ enum LogLevel {
   LOG_INFO = 3,
   LOG_DEBUG = 4,
   LOG_DETAIL_DEBUG = 5,
-  LOG_EXTRA_DEBUG = 6
+  LOG_EXTRA_DEBUG = 6,
+  LOG_EXTRA_EXTRA_DEBUG = 7
 };
 
 enum LogMask {

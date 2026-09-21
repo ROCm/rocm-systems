@@ -1,5 +1,0 @@
-pmc:  CPF_CMP_UTCL1_STALL_ON_TRANSLATION
-
-gpu:
-range:
-kernel:

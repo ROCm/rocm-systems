@@ -323,6 +323,9 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS:
       *((uint32_t*)value) = 0;
       break;
+    case HSA_EXT_AGENT_INFO_IMAGE_SUPPORT:
+      *((bool*)value) = false;
+      break;
     case HSA_AMD_AGENT_INFO_CHIP_ID:
       *((uint32_t*)value) = properties_.DeviceId;
       break;
@@ -422,6 +425,21 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS:
       memset(value, 0, sizeof(hsa_amd_clock_counters_t));
       break;
+    case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
+      *((uint32_t*)value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED: {
+      /* CPU agents support host memory DMA-BUF allocations if:
+        - Virtual memory APIs are supported
+        - At least one GPU agent exists (needed for drm ops) */
+      bool supported = false;
+      if (core::Runtime::runtime_singleton_->VirtualMemApiSupported()) {
+        const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+        supported = !gpus.empty();
+      }
+      *static_cast<bool*>(value) = supported;
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -432,7 +450,7 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 hsa_status_t CpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
-                                   core::Queue** queue) {
+                                   bool metadata_queue, core::Queue** queue) {
   // No HW AQL packet processor on CPU device.
   return HSA_STATUS_ERROR;
 }

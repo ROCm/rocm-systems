@@ -44,6 +44,29 @@ class MPIEnvironment : public ::testing::Environment
 {
 public:
     /**
+     * @brief Destructor - ensures MPI is finalized even if TearDown fails
+     *
+     * Acts as a safety net to call MPI_Finalize if it wasn't already called.
+     * This prevents "exited without calling finalize" errors when tests fail
+     * or when the test filter matches no tests.
+     */
+    ~MPIEnvironment() override
+    {
+        if (mpi_initialized)
+        {
+            // Use MPI_Finalized to check if MPI_Finalize was already called
+            int finalized = 0;
+            MPI_Finalized(&finalized);
+            if (!finalized)
+            {
+                // Force finalize without synchronization (ranks may be out of sync)
+                MPI_Finalize();
+            }
+            mpi_initialized = false;
+        }
+    }
+
+    /**
      * @brief Current MPI rank in MPI_COMM_WORLD
      *
      * Valid after MPI initialization. Each rank corresponds to one GPU.
@@ -56,6 +79,25 @@ public:
      * Valid after MPI initialization. Must not exceed number of available GPUs.
      */
     inline static int world_size{0};
+
+    /**
+     * @brief Upper bound accepted for --net_ib_nthreads
+     *
+     * Mirrors the MAX_THREADS cap NetSocketTests.cpp applies to
+     * NCCL_SOCKET_NTHREADS: guards against a typo'd value spawning enough
+     * threads to exhaust the machine.
+     */
+    static constexpr int kMaxThreads{16};
+
+    /**
+     * @brief Number of worker threads each MPI rank should fan out into
+     *
+     * Set from the --net_ib_nthreads=N CLI flag (parsed in main_mpi.cpp before
+     * GTest consumes argv), validated consistently across ranks, and clamped
+     * to [1, kMaxThreads]. Defaults to 1, which preserves single-threaded
+     * behavior identical to before multithread support was added.
+     */
+    inline static int nThreads{1};
 
     /**
      * @brief Aggregated return code for test results

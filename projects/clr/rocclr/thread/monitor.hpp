@@ -21,8 +21,9 @@ namespace amd {
 class Monitor {
  public:
   explicit Monitor() {
-    waits_.store(0);                               // 0 waiting thread initially
-    notifyState_.store(notifyState::notNotified);  // initially not notified
+    waits_.store(0, std::memory_order_relaxed);  // 0 waiting thread initially
+    notifyState_.store(notifyState::notNotified,
+                       std::memory_order_relaxed);  // initially not notified
   }
 
   //! Try to acquire the lock, return true if successful, false if failed.
@@ -33,6 +34,13 @@ class Monitor {
 
   //! Release the lock and wake a single waiting thread if any.
   void unlock() { mutex_.unlock(); }
+
+  // GCC 12+ emits a false -Wstringop-overflow when it inlines atomic ops on
+  // class members through multiple call frames and loses size provenance.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
 
   /*! \brief Give up the lock and go to sleep.
    *
@@ -135,6 +143,10 @@ class Monitor {
       cv_.notify_all();
     }
   }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
  private:
   std::mutex mutex_;

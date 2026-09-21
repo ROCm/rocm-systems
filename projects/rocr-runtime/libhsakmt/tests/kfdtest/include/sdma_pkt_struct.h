@@ -40,6 +40,8 @@ const unsigned int SDMA_SUBOP_COPY_LINEAR = 0;
 
 const unsigned int SDMA_SUBOP_WRITE_LINEAR = 0;
 
+const unsigned int SDMA_SCOPE_SYS = 3;
+
 /*
 ** Definitions for SDMA_PKT_COPY_LINEAR packet
 */
@@ -64,8 +66,8 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG
     {
         struct
         {
-            unsigned int count:22;
-            unsigned int reserved_0:10;
+            unsigned int count:30;
+            unsigned int reserved_0:2;
         };
         unsigned int DW_1_DATA;
     } COUNT_UNION;
@@ -83,6 +85,16 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG
             unsigned int reserved_3:4;
             unsigned int src_ha:1;
             unsigned int reserved_4:1;
+        };
+        struct
+        {
+            unsigned int reserved_5:18;
+            unsigned int dst_scope:2;
+            unsigned int dst_temp_hint:3;
+            unsigned int reserved_6:3;
+            unsigned int src_scope:2;
+            unsigned int src_temp_hint:3;
+            unsigned int reserved_7:1;
         };
         unsigned int DW_2_DATA;
     } PARAMETER_UNION;
@@ -140,7 +152,9 @@ typedef struct SDMA_PKT_WRITE_UNTILED_TAG
         {
             unsigned int op:8;
             unsigned int sub_op:8;
-            unsigned int reserved_0:16;
+            unsigned int reserved_0:2;
+            unsigned int tmz:1;
+            unsigned int reserved_1:13;
         };
         unsigned int DW_0_DATA;
     } HEADER_UNION;
@@ -167,11 +181,26 @@ typedef struct SDMA_PKT_WRITE_UNTILED_TAG
     {
         struct
         {
-            unsigned int count:22;
-            unsigned int reserved_0:2;
+            unsigned int count:20;
+        };
+        struct
+        {
+            unsigned int reserved_0:24;
             unsigned int sw:2;
             unsigned int reserved_1:6;
         };
+	struct
+	{
+            unsigned int reserved_2:20;
+            unsigned int sys:1;
+            unsigned int reserved_3:1;
+            unsigned int snp:1;
+            unsigned int gpa:1;
+            unsigned int mtype:2;
+            unsigned int scope:2;
+            unsigned int temp_hint:3;
+            unsigned int reserved_4:1;
+	};
         unsigned int DW_3_DATA;
     } DW_3_UNION;
 
@@ -198,7 +227,15 @@ typedef struct SDMA_PKT_FENCE_TAG
         {
             unsigned int op:8;
             unsigned int sub_op:8;
-            unsigned int reserved_0:16;
+            unsigned int mtype:2;
+            unsigned int reserved_0:2;
+            unsigned int sys:1;
+            unsigned int reserved_1:1;
+            unsigned int snp:1;
+            unsigned int gpa:1;
+            unsigned int scope:2;
+            unsigned int temp_hint:3;
+            unsigned int reserved_3:3;
         };
         unsigned int DW_0_DATA;
     } HEADER_UNION;
@@ -244,8 +281,29 @@ typedef struct SDMA_PKT_CONSTANT_FILL_TAG
         {
             unsigned int op:8;
             unsigned int sub_op:8;
+        };
+        struct
+        {
+            unsigned int reserved_0:16;
             unsigned int sw:2;
-            unsigned int reserved_0:12;
+            unsigned int reserved_1:14;
+        };
+        struct
+        {
+            unsigned int reserved_2:16;
+            unsigned int mtype:2;
+            unsigned int reserved_3:2;
+            unsigned int sys:1;
+            unsigned int reserved_4:1;
+            unsigned int snp:1;
+            unsigned int gpa:1;
+            unsigned int scope:2;
+            unsigned int temp_hint:3;
+            unsigned int npd:1;
+        };
+        struct
+        {
+            unsigned int reserved_5:30;
             unsigned int fillsize:2;
         };
         unsigned int DW_0_DATA;
@@ -282,8 +340,8 @@ typedef struct SDMA_PKT_CONSTANT_FILL_TAG
     {
         struct
         {
-            unsigned int count:22;
-            unsigned int reserved_0:10;
+            unsigned int count:30;
+            unsigned int reserved_0:2;
         };
         unsigned int DW_4_DATA;
     } COUNT_UNION;

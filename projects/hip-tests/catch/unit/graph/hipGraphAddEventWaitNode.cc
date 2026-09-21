@@ -211,7 +211,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency) {
  * Scenario 3
  */
 HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultipleRun) {
-  validate_hipGraphAddEventWaitNode_internodedep(0, 100);
+  validate_hipGraphAddEventWaitNode_internodedep(0, isQuickLevel() ? 10 : 100);
 }
 
 /**

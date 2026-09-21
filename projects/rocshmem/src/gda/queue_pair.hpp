@@ -47,10 +47,105 @@
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
+#include "gda/gda_symm_table.hpp"
+
+#include <map>
 
 namespace rocshmem {
 
 class GDABackend;
+
+struct user_buf_info_t {
+  uintptr_t addr;
+  size_t    length;
+  uint32_t  lkey;
+};
+
+/**
+ * @brief Scope at which WQEs are issued and completed. This is used to
+ * determine how to synchronize threads and when to poll the CQ for
+ * completions.
+ * thread: Each thread issues WQEs independently
+ * wave: Thread 0 in each wave issues WQE
+ * wg: Thread 0 of WAVE 0 issues WQE
+ */
+
+enum class ThreadScope: int {
+  thread,
+  wave,
+  wg
+};
+
+class ActiveWFInfo {
+ public:
+  uint64_t    activemask{0};                  // Mask of active threads in the wavefront
+  uint64_t    pe_group_mask{0};               // Mask of active threads with the same PE
+  int         pe{-1};                         // PE for the threads in pe_group_mask
+  int         num_pe_group_lanes{0};          // Number of active lanes in pe_group_mask
+  int         pe_group_logical_lane_id{0};    // Logical lane id of this thread in pe_group_mask
+  int         pe_group_first_phys_lane_id{0}; // Physical lane id of first thread in pe_group_mask
+  int         pe_group_last_phys_lane_id{0};  // Physical lane id of last thread in pe_group_mask
+  ThreadScope scope{ThreadScope::thread};     // Threading scope
+  bool        is_pe_group_first{false};       // True if this is the first thread in pe_group_mask
+  bool        is_pe_group_last{false};        // True if this is the last thread in pe_group_mask
+
+  __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
+      : pe(pe), scope(scope) {
+    // Get active lane mask
+    activemask = get_active_lane_mask();
+
+    // Get mask of active lanes with the same PE
+    switch (scope) {
+      case ThreadScope::thread: {
+        pe_group_mask       = __match_any_sync(activemask, pe);
+        num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
+        pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+        pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
+        pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
+        break;
+      }
+      // Only thread 0 issues the WQE, so the group is just that thread
+      case ThreadScope::wave:
+      case ThreadScope::wg: {
+        pe_group_mask       = 1;
+        num_pe_group_lanes  = 1;
+        pe_group_logical_lane_id = get_active_lane_num(activemask);
+        pe_group_first_phys_lane_id = 0;
+        pe_group_last_phys_lane_id  = 0;
+      }
+    }
+    is_pe_group_first = (pe_group_logical_lane_id == 0);
+    is_pe_group_last  = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
+  }
+
+  // used in CAS based atomic operations at thread scope
+  __device__ void update(int _pe, ThreadScope _scope = ThreadScope::thread) {
+    // Get active lane mask
+    activemask          = get_active_lane_mask();
+    pe_group_mask       = __match_any_sync(activemask, pe);
+    num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
+    pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+    pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
+    pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
+    is_pe_group_first   = (pe_group_logical_lane_id == 0);
+    is_pe_group_last    = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
+    scope               = _scope;
+    pe                  = _pe;
+  }
+
+  __device__ void printInfo() {
+    printf("PE: %d, Scope: %d, activemask: %llx, "
+           "pe_group_mask: %llx, num_pe_group_lanes: %d, "
+           "thread_id: %u, pe_group_logical_lane_id: %d, "
+           "is_pe_group_first: %d, pe_group_first_phys_lane_id: %d, "
+           "is_pe_group_last: %d, pe_group_last_phys_lane_id: %d\n",
+           pe, static_cast<int>(scope), static_cast<unsigned long long>(activemask),
+           static_cast<unsigned long long>(pe_group_mask), num_pe_group_lanes,
+           threadIdx.x, pe_group_logical_lane_id,
+           static_cast<int>(is_pe_group_first), pe_group_first_phys_lane_id,
+           static_cast<int>(is_pe_group_last), pe_group_last_phys_lane_id);
+  }
+};
 
 class QueuePair {
  public:
@@ -66,73 +161,103 @@ class QueuePair {
    */
   virtual ~QueuePair();
 
-  enum Collectivity { THREAD, WAVE };
+  /**
+   * @brief Create and enqueue a non-blocking put to a symmetric destination.
+   *
+   * The target PE is this QP's connected peer. Resolves the
+   * remote address and remote key for @p dest and the local key for @p source
+   * internally (heap or registered buffer), so callers pass symmetric addresses
+   * only. Small transfers are inlined (no source key).
+   *
+   * @param[in] dest    Symmetric destination address (local address space).
+   * @param[in] source  Local source address.
+   * @param[in] length  Size in bytes of data transmission.
+   * @param[in] wf_info Wavefront information.
+   */
+  __device__ void put_nbi(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
+
+  __device__ void put_nbi_single(void *dest, const void *source, size_t length,
+      bool ring_db);
+
+  __device__ void put_nbi_single(void *raddr, uint32_t rkey,
+      const void *laddr, uint32_t lkey,
+      size_t length, bool ring_db = true);
 
   /**
-   * @brief Create and enqueue a non-blocking put work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking put with explicit rkey/lkey.
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
-   * @param[in] nelems Size in bytes of data transmission.
-   * @param[in] pe Destination processing element of data transmission.
+   * Used when each buffer registration has its own keys, distinct from
+   * the QP's default heap keys.
+   *
+   * @param[in] length Size in bytes of data transmission.
+   * @param[in] raddr Remote destination address.
+   * @param[in] rkey Remote key for the destination buffer.
+   * @param[in] laddr Local source address.
+   * @param[in] lkey Local key for the source buffer.
+   * @param[in] wf_info Wavefront information.
+   * @param[in] ring_db Ring doorbell after posting (default true).
    */
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
-
-  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
+  __device__ void put_nbi(void *raddr, uint32_t rkey,
+      const void *laddr, uint32_t lkey,
+      size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
 
   /**
-   * @brief Create and enqueue a non-blocking get work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking get from a symmetric source.
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
-   * @param[in] nelems Size in bytes of data transmission.
-   * @param[in] pe Destination processing element of data transmission.
+   * The target PE is this QP's connected peer. Resolves the
+   * remote address and remote key for @p source and the local key for @p dest
+   * internally (heap or registered buffer), so callers pass symmetric addresses
+   * only.
+   *
+   * @param[in] dest    Local destination address.
+   * @param[in] source  Symmetric source address (local address space).
+   * @param[in] length  Size in bytes of data transmission.
+   * @param[in] wf_info Wavefront information.
    */
-  __device__ void get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
+  __device__ void get_nbi(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
 
-  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
+  __device__ void get_nbi_single(void *dest, const void *source, size_t length,
+      bool ring_db);
 
   /**
    * @brief Empty all completions from the completion queue.
+   * @param[in] wf_info Wavefront information.
    */
-  __device__ void quiet(Collectivity cy = THREAD);
+  __device__ void quiet(ActiveWFInfo &wf_info);
+
   __device__ void quiet_single();
 
   /**
-   * @brief Create and enqueue an atomic fetch work queue entry (wqe).
-   *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
-   *
-   * @return An atomic value
+   * @brief Empty all completions from the completion queue.
+   * @param[in] wf_info Wavefront information.
    */
-  __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond, int pe);
+  __device__ void quiet_scope(ActiveWFInfo &wf_info);
 
   /**
-   * @brief Create and enqueue an atomic fetch work queue entry (wqe).
+   * @brief Create and enqueue an atomic fetch-and-add work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @return The previous value at dest.
    */
-  __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond, int pe);
-
-  __device__ void atomic_nofetch_single(void *dest, int64_t value);
+  __device__ int64_t atomic_fetch_add(void *dest, int64_t value,
+      ActiveWFInfo &wf_info);
 
   /**
-   * @brief Create and enqueue an atomic cas work queue entry (wqe).
+   * @brief Create and enqueue a non-fetching atomic add work queue entry (wqe).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
-   * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
-   *
-   * @return An atomic value
+   * @param[in] wf_info Wavefront information.
    */
-  __device__ int64_t atomic_cas(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe);
+  __device__ void atomic_add(void *dest, int64_t value,
+      ActiveWFInfo &wf_info);
+
+  __device__ void atomic_add_single(void *dest, int64_t value);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -140,72 +265,261 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
+   * @param[in] wf_info Wavefront information.
+   *
+   * @return An atomic value
    */
-  __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe);
+  __device__ int64_t atomic_cas(void *dest, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
-  char *const *base_heap{nullptr};
+  /**
+   * @brief Create and enqueue an atomic cas work queue entry (wqe).
+   *
+   * @param[in] dest Destination address for data transmission.
+   * @param[in] value Data value for the atomic operation.
+   * @param[in] cond Used in atomic comparisons.
+   * @param[in] wf_info Wavefront information.
+   */
+  __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Explicit remote-key atomic variants.
+   *
+   * Used when the destination is a symmetrically-registered user buffer whose
+   * remote key differs from the QP's default heap key. Mirror the default-key
+   * versions above but forward the caller-supplied @p rkey.
+   */
+  __device__ int64_t atomic_fetch_add(void *dest, uint32_t rkey, int64_t value,
+      ActiveWFInfo &wf_info);
+
+  __device__ void atomic_add(void *raddr, uint32_t rkey, int64_t value,
+      ActiveWFInfo &wf_info, bool fence = false);
+
+  __device__ void atomic_add_single(void *raddr, uint32_t rkey,
+      int64_t value, bool fence = false);
+
+  __device__ int64_t atomic_cas(void *dest, uint32_t rkey, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  __device__ int64_t atomic_cas_nofetch(void *dest, uint32_t rkey,
+      int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Explicit-key non-blocking put/get.
+   *
+   * get_nbi's default-key form derives the remote key from the QP heap key and
+   * the local key via get_lkey; this form takes both explicitly for symmetric
+   * user-buffer transfers. (put_nbi already provides an explicit-key overload.)
+   */
+  __device__ void get_nbi(void *dest, uint32_t lkey, const void *source,
+      uint32_t rkey, size_t length, ActiveWFInfo &wf_info);
+
+  uintptr_t base_heap = 0;
+  size_t base_heap_size = 0;
+
+  /**
+   * @brief Cached remote heap base for this QP's connected peer.
+   *
+   * Equals heap_bases[dest_pe], captured once at setup. Lets the (common) heap
+   * translation run as pure register arithmetic with no memory load.
+   */
+  uintptr_t remote_heap_base{0};
+
+  /**
+   * @brief Contiguous slice of registration entries for this QP's fixed
+   * (dest_pe, nic_idx), indexed by registration slot [0, *symm_count).
+   *
+   * Points into the backend's flat entry table; every entry is already
+   * specialized to this QP, so a match yields the remote address and keys with
+   * no further dereference. Null when symmetric registration is unavailable.
+   */
+  QpSymmEntry *symm_entries{nullptr};
+
+  /**
+   * @brief Shared registration count (number of live entries per slice).
+   *
+   * Single device int shared by all QPs; register/unregister publish updates
+   * here. One load per non-heap lookup (null when registration unavailable).
+   */
+  const int *symm_count{nullptr};
+
+  /**
+   * @brief Resolved remote address and remote key for a symmetric target.
+   */
+  struct raddr_info {
+    uintptr_t raddr;  //!< Remote address in the connected peer's address space.
+    uint32_t rkey;    //!< Remote key to use for the transfer.
+  };
+
+  /**
+   * @brief Resolve the remote address and remote key for a symmetric target.
+   *
+   * The target PE is this QP's connected peer. Common case is a
+   * symmetric-heap address, translated from the cached remote heap base using
+   * this QP's default heap key. Otherwise the address is matched against this
+   * QP's registration slice, which supplies the peer base and per-NIC key
+   * directly.
+   *
+   * @param[in] sym_addr Symmetric address (valid in the local address space)
+   * @return Remote address and remote key. Returns {0, 0} for a non-symmetric
+   *         pointer (undefined in SHMEM) so the NIC rejects the transfer,
+   *         rather than fabricating a heap offset that could silently corrupt
+   *         peer memory.
+   */
+  __device__ __forceinline__ raddr_info get_raddr_info(const void *sym_addr) {
+    uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+    if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+      return {remote_heap_base + (addr - base_heap), rkey};
+    }
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      uintptr_t local_base = symm_entries[i].local_base;
+      if (is_ptr_in_range(local_base, symm_entries[i].length, addr)) {
+        return {symm_entries[i].remote_base + (addr - local_base),
+                symm_entries[i].rkey};
+      }
+    }
+    return {0, 0};
+  }
+
+  /**
+   * @brief Resolve the local key for a locally-sourced buffer.
+   *
+   * Heap buffers use this QP's default heap key; per-QP registered user buffers
+   * and registered symmetric buffers use their own per-NIC local key. Aborts if
+   * the address belongs to none of them.
+   */
+  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr) {
+    /* Check if in heap */
+    if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+      return lkey;
+    }
+
+    /* Get the correct lkey for the user buffer */
+    for (size_t i = 0; i < num_user_buffers; i++) {
+      if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length,
+                          addr)) {
+        return user_buf_info[i].lkey;
+      }
+    }
+
+    /* Get the correct lkey for a registered symmetric buffer */
+    int n = symm_count ? *symm_count : 0;
+    for (int i = 0; i < n; ++i) {
+      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length,
+                          addr)) {
+        return symm_entries[i].lkey;
+      }
+    }
+
+    LOGD_ERROR_ABORT("Valid lkey buffer not found");
+    return 0;
+  }
 
  private:
   /**
    * @brief Helper method to build work requests for the send queue.
    *
-   * @param[in] pe Destination processing element of data transmission.
-   * @param[in] size Size in bytes of data transmission.
    * @param[in] raddr Remote address.
+   * @param[in] rkey Remote key.
    * @param[in] opcode Operation to be performed.
    * @param[in] atomic_data An atomic data value to be used.
-   * @param[in] atomic_cmp An atomic comparison operation to be performed.
+   * @param[in] atomic_cmp An atomic comparison value.
+   * @param[in] wf_info Wavefront information.
    * @param[in] fetching True if the operation returns a value.
+   * @param[in] fence True to set fence flag on the WQE.
    */
-  __device__ __attribute__((noinline)) uint64_t post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ __attribute__((noinline)) uint64_t
+  post_wqe_amo(uintptr_t raddr, uint32_t rkey, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+
+#if defined(GDA_IONIC)
+  __device__ uint64_t ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
+#if defined(GDA_BNXT)
+  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
+#if defined(GDA_MLX5)
+  __device__ uint64_t mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
+#endif
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
-                                                                    uint8_t opcode,
-                                                                    int64_t atomic_data,
-                                                                    int64_t atomic_cmp,
-                                                                    bool fetching);
+      uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching = false, bool fence = false);
 
   /**
-   * @brief Helper method to build work requests for the send queue.
+   * @brief Build and post an RMA work queue entry with explicit keys.
    *
-   * @param[in] pe Destination processing element of data transmission.
    * @param[in] size Size in bytes of data transmission.
-   * @param[in] laddr Local address.
    * @param[in] raddr Remote address.
+   * @param[in] rkey Remote key.
+   * @param[in] laddr Local address.
+   * @param[in] lkey Local key.
    * @param[in] opcode Operation to be performed.
+   * @param[in] wf_info Wavefront information.
+   * @param[in] ring_db Ring doorbell after posting.
    */
-  __device__ __attribute__((noinline)) void post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ __attribute__((noinline)) void post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma(int32_t length, uintptr_t raddr, uint32_t rkey,
+      uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_single(int32_t length, uintptr_t laddr, uint32_t lkey,
+      uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
 
 #if defined(GDA_MLX5)
-  __device__ uint64_t mlx5_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ uint64_t mlx5_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ void mlx5_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
-  __device__ void mlx5_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetch = false, bool fence = false);
+  __device__ void mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, bool ring_db);
+  __device__ void mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
 
-  __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, int32_t length, uint8_t opcode);
-  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+  __device__ void bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode);
+  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching, bool fence);
 
-  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
-  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
-
-  __device__ void bnxt_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
-
-  __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetching = false, bool fence = false);
+  __device__ void bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, bool ring_db);
+  __device__ void bnxt_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void bnxt_quiet();
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
-  __device__ uint64_t ionic_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ void ionic_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ void ionic_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ void ionic_quiet();
+  __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetch = false, bool fence = false);
+  __device__ void ionic_post_wqe_rma_single(int32_t length,
+      uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+      uint32_t rkey, uint8_t opcode, bool ring_db);
+  __device__ void ionic_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+  __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif
 
@@ -215,7 +529,7 @@ class QueuePair {
    * @param[in] db_val Doorbell value is written by method.
    */
 #if defined(GDA_MLX5)
-  __device__ void mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe);
+  __device__ void mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);
@@ -225,15 +539,15 @@ class QueuePair {
   __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
-  int gda_provider_{0};
-
+  // TODO: make private once gin_rocshmem_gda_factory uses a proper init API
+ public:
   /* GDAProvider::BNXT START */
   uint64_t *bnxt_dbr;
   struct bnxt_device_cq bnxt_cq;
   struct bnxt_device_sq bnxt_sq;
 
   __device__ void bnxt_poll_cq_until(uint32_t requested_available_slots);
-  __device__ void bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe);
+  [[maybe_unused]] __device__ __attribute__((noinline)) void bnxt_print_cqe_error(uint8_t status);
 
   /* GDAProvider::BNXT END */
 
@@ -243,7 +557,7 @@ class QueuePair {
   gda_mlx5_device_sq mlx5_sq;
 
   __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
-  __device__ void mlx5_check_cqe_error(const mlx5_cqe64* cqe);
+  [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
 
   /* GDAProvider::MLX5 END */
 
@@ -270,41 +584,49 @@ class QueuePair {
 
   /**
    * @brief Reserve space in the sq to post this many wqes.
-   * @param my_tid my logical thread id.
+   * @param wf_info Wavefront information.
    * @param num_wqes number of sq wqes to reserve for this wave.
    * @return position of my_tid=0's wqe.
    */
-  __device__ uint32_t reserve_sq(uint64_t active_lane_mask, uint32_t num_wqes);
+  __device__ uint32_t reserve_sq(ActiveWFInfo &wf_info, uint32_t num_wqes);
   __device__ uint32_t reserve_sq_single(uint32_t num_wqes);
 
   /**
    * @brief Ring the sq doorbell maintaining order between waves.
-   * @param last this is the last wqe posted in this wave.
+   * @param wf_info Wavefront information.
    * @param my_sq_prod position of my_tid=0's wqe.
    * @param num_wqes number of sq wqes posted in this wave.
    * @param wqe this thread's wqe.
    * @return doorbell producer index.
    */
-  __device__ uint32_t commit_sq(uint64_t activemask, uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
-  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
+  __device__ uint32_t commit_sq(ActiveWFInfo &wf_info, uint32_t my_sq_prod,
+      uint32_t my_sq_pos, uint32_t num_wqes);
+  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos,
+      uint32_t num_wqes);
 
   /**
    * @brief Helper method to poll the next completion queue entry.
    */
-  __device__ __attribute__((noinline)) void poll_wave_cqes(uint64_t active_lane_mask);
+  __device__ __attribute__((noinline))
+  void poll_wave_cqes(uint64_t active_lane_mask);
 
   /**
    * @brief Helper method to drain completion queue entries.
+   * @param wf_info Wavefront information.
    * @param cons wait for sq_msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe(uint64_t active_lane_mask, uint32_t cons);
-  __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe_single(uint32_t cons);
+  __device__ __attribute__((noinline))
+  void ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info, uint32_t cons);
+  __device__ __attribute__((noinline))
+  void ionic_quiet_internal_ccqe_single(uint32_t cons);
 
   /**
    * @brief Helper method to drain completion queue entries.
+   * @param wf_info Wavefront information.
    * @param cons wait for sq_msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void ionic_quiet_internal(uint64_t active_lane_mask, uint32_t cons);
+  __device__ __attribute__((noinline))
+  void ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t cons);
 
   /* GDAProvider::IONIC END */
 
@@ -326,7 +648,7 @@ class QueuePair {
 
   static constexpr uint32_t FETCHING_ATOMIC_CNT{1024};
   static_assert(FETCHING_ATOMIC_CNT % WF_SIZE == 0);
-  using FreeListT = FreeList<uint64_t*, HIPAllocator>;
+  using FreeListT = FreeList<uint64_t*>;
   FreeListT* fetching_atomic_freelist{nullptr};
 
   HIPAllocator allocator{};
@@ -335,6 +657,17 @@ class QueuePair {
   uint8_t gda_op_rdma_read;
   uint8_t gda_op_atomic_fa;
   uint8_t gda_op_atomic_cs;
+
+  struct ibv_pd* pd_;
+  std::map<uintptr_t, struct ibv_mr*> user_buffer_mrs;
+
+  struct user_buf_info_t *user_buf_info = nullptr;
+  size_t num_user_buffers = 0;
+  int gda_provider_{0};  // host-side only; device dispatch uses constmem.gda_provider
+
+  int buffer_register(uintptr_t addr, size_t length);
+  int buffer_unregister(uintptr_t addr);
+  void buffer_unregister_all();
 };
 
 }  // namespace rocshmem

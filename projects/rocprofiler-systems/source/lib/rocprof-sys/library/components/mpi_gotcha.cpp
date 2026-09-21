@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/mpi_gotcha.hpp"
 #include "api.hpp"
+#include "common/env_vars.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/mpi.hpp"
@@ -31,6 +13,7 @@
 #include "mpi_gotcha.hpp"
 #include "mpip.hpp"
 
+#include <mutex>
 #include <timemory/backends/process.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/signals/signal_mask.hpp>
@@ -50,6 +33,27 @@ namespace component
 namespace
 {
 using mpip_bundle_t = tim::component_tuple<category_region<category::mpi>, comm_data>;
+// NOLINTNEXTLINE(misc-include-cleaner)
+using mpip_gotcha_t = mpip_handle<mpip_bundle_t, project::rocprofsys>::mpip_gotcha_t;
+
+// set_ready() only writes wrappers that are already installed, and the MPI wrappers are
+// installed from the MPI_Init audit, which runs after the initial pause. Remember the
+// requested state so activation can adopt it.
+std::mutex g_mpip_mutex;
+bool       g_mpip_paused = false;  // guarded by g_mpip_mutex
+
+// MPI_Init/Comm_rank/Comm_size push their hidden host-category trace in one audit
+// function and pop it in another, so whether the push happened must survive the gap;
+// thread_local is safe since one call's incoming/outgoing audit pair runs synchronously
+// on a single thread.
+thread_local bool g_mpi_hidden_trace_pushed = false;
+
+bool
+mpip_paused()
+{
+    const std::scoped_lock<std::mutex> lock{ g_mpip_mutex };
+    return g_mpip_paused;
+}
 
 struct comm_rank_data
 {
@@ -77,7 +81,7 @@ struct comm_rank_data
 
     friend bool operator>(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
     {
-        if(get_is_continuous_integration() && !_lhs.updated() && !_rhs.updated())
+        if(!_lhs.updated() && !_rhs.updated())
         {
             throw std::runtime_error("Error! Comparing rank data that is not updated");
         }
@@ -98,10 +102,10 @@ struct comm_rank_data
     }
 };
 
-uint64_t mpip_index        = std::numeric_limits<uint64_t>::max();
-auto     last_comm_record  = comm_rank_data{};
-auto     mproc_comm_record = comm_rank_data{};
-auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
+std::uint64_t mpip_index        = std::numeric_limits<std::uint64_t>::max();
+auto          last_comm_record  = comm_rank_data{};
+auto          mproc_comm_record = comm_rank_data{};
+auto          mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
 
 using tim::auto_lock_t;
 using tim::type_mutex;
@@ -120,7 +124,7 @@ rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
+    if(mpip_index != std::numeric_limits<std::uint64_t>::max())
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
     if(is_root_process()) rocprofsys_finalize_hidden();
     return MPI_SUCCESS;
@@ -199,7 +203,7 @@ void
 mpi_gotcha::subscribe_to_init_event(
     const std::function<void(int rank, int size)>& _callback)
 {
-    std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
+    const std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
     if(_callback)
     {
         s_on_init_callbacks.push_back(_callback);
@@ -210,6 +214,22 @@ void
 mpi_gotcha::shutdown()
 {
     update();
+}
+
+void
+pause_mpip()
+{
+    const std::scoped_lock<std::mutex> pause_lock{ g_mpip_mutex };
+    g_mpip_paused = true;
+    mpip_gotcha_t::set_ready(false);
+}
+
+void
+resume_mpip()
+{
+    const std::scoped_lock<std::mutex> resume_lock{ g_mpip_mutex };
+    g_mpip_paused = false;
+    mpip_gotcha_t::set_ready(true);
 }
 
 bool
@@ -263,7 +283,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
     LOG_DEBUG("{}(int*, char***)", _data.tool_id);
 
-    rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    g_mpi_hidden_trace_pushed = !mpip_paused();
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return true; };
     rocprofsys::mpi::is_finalized()            = false;
@@ -275,7 +300,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 {
     LOG_DEBUG("{}(int*, char***, int, int*)", _data.tool_id);
 
-    rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    g_mpi_hidden_trace_pushed = !mpip_paused();
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return true; };
     rocprofsys::mpi::is_finalized()            = false;
@@ -291,14 +321,15 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
 
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
+    if(mpip_index != std::numeric_limits<std::uint64_t>::max())
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
 
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return false; };
     rocprofsys::mpi::is_finalized()            = true;
 #else
-    if(is_root_process() && rocprofsys::get_state() < rocprofsys::State::Finalized)
+    if(is_root_process() &&
+       rocprofsys::state::process::get() < rocprofsys::state::process::Finalized)
         rocprofsys_finalize_hidden();
 #endif
 }
@@ -308,15 +339,20 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
 {
     LOG_DEBUG("{}(comm_t _comm, int* _val)", _data.tool_id);
 
-    rocprofsys_push_trace_hidden(_data.tool_id.c_str());
-    if(_data.tool_id.find("MPI_Comm_rank") == 0 ||
-       _data.tool_id.find("PMPI_Comm_rank") == 0)
+    g_mpi_hidden_trace_pushed = !mpip_paused();
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_push_trace_hidden(_data.tool_id.c_str());
+    }
+
+    if(_data.tool_id.starts_with("MPI_Comm_rank") ||
+       _data.tool_id.starts_with("PMPI_Comm_rank"))
     {
         m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_rank_ptr = _val;
     }
-    else if(_data.tool_id.find("MPI_Comm_size") == 0 ||
-            _data.tool_id.find("PMPI_Comm_size") == 0)
+    else if(_data.tool_id.starts_with("MPI_Comm_size") ||
+            _data.tool_id.starts_with("PMPI_Comm_size"))
     {
         m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_size_ptr = _val;
@@ -336,7 +372,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
     if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
 
     if(_retval == rocprofsys::mpi::success_v &&
-       (_data.tool_id.find("MPI_Init") == 0 || _data.tool_id.find("PMPI_Init") == 0))
+       (_data.tool_id.starts_with("MPI_Init") || _data.tool_id.starts_with("PMPI_Init")))
     {
         rocprofsys_mpi_set_attr();
         // rocprof-sys will set this environment variable to true in binary rewrite mode
@@ -353,9 +389,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             configure_mpip<mpip_bundle_t, project::rocprofsys>(permit_bindings,
                                                                reject_bindings);
             mpip_index = activate_mpip<mpip_bundle_t, project::rocprofsys>();
+
+            const std::scoped_lock<std::mutex> mpip_lock{ g_mpip_mutex };
+            mpip_gotcha_t::set_ready(!g_mpip_paused);
         }
 
-        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(!mproc_comm_record.updated())
         {
             populate_rank_and_size();
@@ -364,10 +403,10 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         }
     }
     else if(_retval == rocprofsys::mpi::success_v &&
-            (_data.tool_id.find("MPI_Comm_") == 0 ||
-             _data.tool_id.find("PMPI_Comm_") == 0))
+            (_data.tool_id.starts_with("MPI_Comm_") ||
+             _data.tool_id.starts_with("PMPI_Comm_")))
     {
-        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(m_comm_val != null_comm())
         {
             auto& _comm_entry = mpi_comm_records[m_comm_val];
@@ -397,13 +436,17 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             if(_comm_entry.updated())
             {
                 static thread_local int _num_updates = 0;
-                static int              _disable_after =
-                    tim::get_env<int>("ROCPROFSYS_MPI_MAX_COMM_UPDATES", 4);
+                static const int        _disable_after =
+                    rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
                 if(_num_updates++ < _disable_after) update();
             }
         }
     }
-    rocprofsys_pop_trace_hidden(_data.tool_id.c_str());
+    if(g_mpi_hidden_trace_pushed)
+    {
+        rocprofsys_pop_trace_hidden(_data.tool_id.c_str());
+        g_mpi_hidden_trace_pushed = false;
+    }
 }
 
 void

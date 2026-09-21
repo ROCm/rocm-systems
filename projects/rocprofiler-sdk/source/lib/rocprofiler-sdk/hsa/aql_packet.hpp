@@ -22,16 +22,50 @@
 
 #pragma once
 
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/container/small_vector.hpp"
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/common/synchronized.hpp"
 
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include <atomic>
+#include <cstddef>
+#include <optional>
+
 namespace rocprofiler
 {
+namespace kfd
+{
+class kfd_copy_queue_t;
+class kfd_memory_pool_t;
+}  // namespace kfd
+
+namespace spm
+{
+/**
+ * @brief hsa::SPMPacket contains spm_descriptor_t
+ * aqlprofile_spm_buffer_desc_t is returned from aqlprofile
+ * aqlprofile_spm_buffer_desc_t has the metadata needed to decode the packet
+ * Data contains spm_desc_v0_t + event_map + data in aqlprofile_spm_buffer_desc_t
+ * size = sizeof(spm_desc_v0_t) + sizeof(spm_counter_instance_t)*num_events + aql_desc.size
+ * seg_size = output segment size
+ * buffer_num = number of XCCs
+ */
+typedef struct spm_descriptor_t
+{
+    void*  data{nullptr};
+    size_t size{0};
+    size_t seg_size{0};
+    size_t buffer_num{0};
+} spm_descriptor_t;
+struct spm_interface;
+}  // namespace spm
+
 namespace aql
 {
 class CounterPacketConstruct;
@@ -64,7 +98,7 @@ public:
     AQLPacket()          = default;
     virtual ~AQLPacket() = default;
 
-    // Keep move constuctors (i.e. std::move())
+    // Keep move constructors (i.e. std::move())
     AQLPacket(AQLPacket&& other) = default;
     AQLPacket& operator=(AQLPacket&& other) = default;
 
@@ -76,6 +110,7 @@ public:
     {
         before_krn_pkt.clear();
         after_krn_pkt.clear();
+        before_krn_barrier_pkt.clear();
     }
     bool isEmpty() const { return empty; }
 
@@ -86,8 +121,9 @@ public:
     aqlprofile_handle_t handle = {.handle = 0};
     bool                empty  = {true};
 
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt         = {};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt          = {};
+    common::container::small_vector<hsa_barrier_and_packet_t, 2>     before_krn_barrier_pkt = {};
 };
 
 class EmptyAQLPacket : public AQLPacket
@@ -151,15 +187,20 @@ struct TraceMemoryPool
 {
     using desc_t = aqlprofile_buffer_desc_flags_t;
 
-    hsa_agent_t                             gpu_agent;
-    hsa_amd_memory_pool_t                   cpu_pool_;
-    hsa_amd_memory_pool_t                   gpu_pool_;
-    decltype(hsa_amd_memory_pool_allocate)* allocate_fn;
-    decltype(hsa_amd_agents_allow_access)*  allow_access_fn;
-    decltype(hsa_amd_memory_pool_free)*     free_fn;
-    decltype(hsa_memory_copy)*              api_copy_fn;
+    hsa_agent_t                             gpu_agent{};
+    rocprofiler_agent_id_t                  agent_id{};
+    aqlprofile_agent_handle_t               aql_agent{};
+    hsa_amd_memory_pool_t                   cpu_pool_{};
+    hsa_amd_memory_pool_t                   gpu_pool_{};
+    decltype(hsa_amd_memory_pool_allocate)* allocate_fn{};
+    decltype(hsa_amd_agents_allow_access)*  allow_access_fn{};
+    decltype(hsa_amd_memory_pool_free)*     free_fn{};
+    decltype(hsa_memory_copy)*              api_copy_fn{};
 
-    aqlprofile_handle_t handle;
+    std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory{};
+    std::shared_ptr<kfd::kfd_copy_queue_t>  kfd_copy_queue{};
+
+    aqlprofile_handle_t handle{};
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 
     static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
@@ -184,7 +225,6 @@ public:
     void populate_after() override{};
 
     aqlprofile_handle_t GetHandle() const { return tracepool.handle; }
-    hsa_agent_t         GetAgent() const { return tracepool.gpu_agent; }
 
     hsa_ext_amd_aql_pm4_packet_t packet;
 
@@ -210,8 +250,8 @@ public:
         this->loaded_codeobj = other.loaded_codeobj;
     }
 
-    aqlprofile_handle_t GetHandle() const { return tracepool->handle; }
-    hsa_agent_t         GetAgent() const { return tracepool->gpu_agent; }
+    aqlprofile_handle_t    GetHandle() const { return tracepool->handle; }
+    rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
 
     void populate_before() override
     {
@@ -233,6 +273,120 @@ protected:
     aqlprofile_att_control_aql_packets_t packets;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
+};
+
+struct sqtt_buffer_status_t
+{
+    void*                        data{};
+    uint64_t                     size{};
+    uint64_t                     read_offset{};
+    hsa_ext_amd_aql_pm4_packet_t packet{};
+    bool                         gpu_full{};
+};
+
+// Virtual members for mocking in tests
+class SQTTBufferingPackets
+{
+public:
+    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
+    virtual ~SQTTBufferingPackets() = default;
+
+    hsa_ext_amd_aql_pm4_packet_t                query_status{};
+    virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+    virtual hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data)
+    {
+        return aqlprofile_att_iterate_data(handle, callback, data);
+    }
+
+    void reset_current_buffer() { current_buffer = 0; };
+
+    const aqlprofile_handle_t handle;
+    const int                 shader_engine_id;
+    uint64_t                  header{0};
+
+private:
+    size_t                                    current_buffer{0};
+    std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
+};
+struct SPMMemoryPool
+{
+    using desc_t                                            = aqlprofile_buffer_desc_flags_t;
+    using copy_fn_t                                         = decltype(hsa_memory_copy);
+    hsa_agent_t                             gpu_agent       = {.handle = 0};
+    hsa_amd_memory_pool_t                   cpu_pool_       = {.handle = 0};
+    hsa_amd_memory_pool_t                   gpu_pool_       = {.handle = 0};
+    hsa_amd_memory_pool_t                   kernarg_pool_   = {.handle = 0};
+    decltype(hsa_amd_memory_pool_allocate)* allocate_fn     = nullptr;
+    decltype(hsa_amd_agents_allow_access)*  allow_access_fn = nullptr;
+    decltype(hsa_amd_memory_pool_free)*     free_fn         = nullptr;
+    decltype(hsa_memory_copy)*              api_copy_fn     = nullptr;
+    decltype(hsa_amd_memory_fill)*          fill_fn         = nullptr;
+
+    SPMMemoryPool(const class AgentCache& agent, const class AmdExtTable& ext, copy_fn_t copy_fn);
+    ~SPMMemoryPool()                    = default;
+    SPMMemoryPool(const SPMMemoryPool&) = delete;
+    SPMMemoryPool& operator=(const SPMMemoryPool&) = delete;
+    explicit SPMMemoryPool()                       = default;
+    static hsa_status_t Alloc(void**                         ptr,
+                              size_t                         size,
+                              aqlprofile_buffer_desc_flags_t flags,
+                              void*                          data);
+    static void         Free(void* ptr, void* data);
+    static hsa_status_t Copy(void* dst, const void* src, size_t size, void* data);
+};
+
+struct SPMCallbackContext
+{
+    std::optional<rocprofiler_buffer_id_t>           buffer;
+    rocprofiler_user_data_t                          user_data{};
+    void*                                            record_callback_args{};
+    rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
+    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
+};
+
+struct SPMProfileData
+{
+    aqlprofile_spm_buffer_desc_t            aql_desc{};
+    rocprofiler::spm::spm_descriptor_t      spm_desc{};
+    std::shared_ptr<std::vector<char>>      container_desc_data{};
+    aqlprofile_spm_aql_packets_t            packets{};
+    std::vector<aqlprofile_pmc_event_t>     aql_events{};
+    std::vector<aqlprofile_spm_parameter_t> aql_params{};
+};
+
+class SPMPacket : public AQLPacket
+{
+public:
+    SPMPacket(aqlprofile_agent_handle_t                 aql_agent,
+              std::shared_ptr<SPMMemoryPool>            _pool,
+              std::vector<aqlprofile_pmc_event_t>&&     events,
+              std::vector<aqlprofile_spm_parameter_t>&& params);
+
+    ~SPMPacket() override;
+    SPMPacket& operator=(const SPMPacket&) = delete;
+    SPMPacket(const SPMPacket&)            = delete;
+
+    bool        kfd_start();
+    bool        kfd_stop();
+    hsa_agent_t GetAgent() const { return pool ? pool->gpu_agent : hsa_agent_t{}; }
+    void        populate_before() override;
+    void        populate_after() override;
+    bool        valid() const { return is_valid; }
+
+    void clear()
+    {
+        AQLPacket::clear();
+        cb = {};
+    }
+
+    SPMCallbackContext             cb{};
+    SPMProfileData                 profile{};
+    std::shared_ptr<SPMMemoryPool> pool{};
+    const spm::spm_interface*      sym = nullptr;
+
+private:
+    common::Synchronized<bool> running{false};
+    bool                       is_valid{false};
 };
 
 }  // namespace hsa

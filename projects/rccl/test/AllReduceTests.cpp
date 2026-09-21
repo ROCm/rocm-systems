@@ -193,7 +193,7 @@ namespace RcclUnitTesting
         for (int scalarMode = 0; scalarMode <= 1 && isCorrect; ++scalarMode)
         {
           if (testBed.ev.showNames)
-            TEST_INFO("%s %d-ranks AllReduce (custom-scalar Mode %d %s)\n",
+            TEST_INFO("%s %d-ranks AllReduce (custom-scalar Mode %d %s)",
                  isMultiProcess ? "MP" : "SP",
                  totalRanks, scalarMode, ncclDataTypeNames[dataType]);
 
@@ -311,7 +311,7 @@ namespace RcclUnitTesting
       // Check if architecture is gfx94 (covers gfx942) or gfx95 (covers gfx950)
       if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95)
       {
-          TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.\n");
+          TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.");
           return;
       }
 
@@ -350,7 +350,7 @@ namespace RcclUnitTesting
                                                              inPlace,
                                                              useManagedMem,
                                                              useHipGraph);
-                  TEST_INFO("  %s (with bias, count=%d)\n", name.c_str(), numElem);
+                  TEST_INFO("  %s (with bias, count=%d)", name.c_str(), numElem);
               }
 
               options.biasNumElements = numElem;
@@ -706,8 +706,70 @@ namespace RcclUnitTesting
   // If RCCL_ALLREDUCE_WITH_BIAS is not defined, skip all bias tests
   TEST(AllReduce, BiasNotAvailable)
   {
-      TEST_INFO("SKIPPED: RCCL_ALLREDUCE_WITH_BIAS not defined - bias tests skipped\n");
+      TEST_INFO("SKIPPED: RCCL_ALLREDUCE_WITH_BIAS not defined - bias tests skipped");
       return;
   }
 #endif
+
+  // Regression test for "one-rank avg reduction missing elements"
+  // (NVIDIA/nccl GitHub issue #1950, fixed upstream in NCCL v2.29.7-1; AICOMRCCL-1110).
+  //
+  // On a single-rank communicator, ncclAvg on floating-point types lowers to a
+  // PreMulSum reduction (scalar 1/nRanks), which is the only out-of-place path
+  // that is serviced by the oneRankReduce kernel (src/device/onerank.cu) rather
+  // than a plain memcpy. The kernel divided work across blocks using floor
+  // division (nElts/bn) instead of divUp(nElts, bn); when the element count was
+  // not a multiple of the launched block count, the trailing (nElts % bn)
+  // elements were never written, silently corrupting the tail of the output.
+  //
+  // Each count below is constructed so that floor(count/numBlocks) is already
+  // pack-aligned and the buffer is large enough to launch the maximum of 32
+  // blocks. This guarantees the pre-fix kernel under-covers the output by a
+  // fixed, non-zero remainder, so ValidateResults observes the corrupted tail.
+  // The test fails on the pre-fix kernel and passes once divUp is used.
+  TEST(AllReduce, OneRankAvgTailElements)
+  {
+    TestBed testBed;
+
+    if (testBed.numDevicesAvailable < 1)
+      GTEST_SKIP() << "Requires at least 1 GPU";
+
+    ncclFunc_t                  const funcType      = ncclCollAllReduce;
+    std::vector<ncclDataType_t> const dataTypes     = {ncclFloat32, ncclFloat64, ncclBfloat16};
+    bool                        const inPlace       = false; // out-of-place: tail of separate output buffer must be written
+    bool                        const useManagedMem = false;
+
+    // oneRankReduce only executes for a single-rank communicator.
+    testBed.InitComms(1);
+
+    OptionalColArgs options;
+    options.redOp = ncclAvg;
+
+    bool isCorrect = true;
+    for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
+    {
+      ncclDataType_t const dataType  = dataTypes[dataIdx];
+      size_t         const eltSize   = DataTypeToBytes(dataType);
+      // Mirror the kernel: EltPerPack = 16 / sizeof(T), grid.x capped at 32 blocks.
+      size_t         const eltPerPack = 16 / eltSize;
+      size_t         const numBlocks  = 32;
+      // Pack-aligned per-block segment, then add a remainder that is not a
+      // multiple of numBlocks so the pre-fix floor division drops the tail.
+      size_t         const perBlock   = eltPerPack * 4096;
+      size_t         const numElems   = numBlocks * perBlock + 17;
+
+      if (testBed.ev.showNames)
+        TEST_INFO("SP 1-rank AllReduce (avg) %s count %zu",
+                  ncclDataTypeNames[dataType], numElems);
+
+      testBed.SetCollectiveArgs(funcType, dataType, numElems, numElems, options);
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+    }
+    testBed.DestroyComms();
+    testBed.Finalize();
+  }
 }

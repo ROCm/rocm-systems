@@ -1,26 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/env_vars.hpp"
+#include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -28,21 +11,21 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
-#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -65,10 +48,8 @@
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
@@ -76,40 +57,27 @@
 #include "logger/debug.hpp"
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
-#include <chrono>
-#include <condition_variable>
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 
 #include <pthread.h>
 #include <signal.h>
 
-namespace tim
-{
-namespace math
-{
-template <typename Tp, typename Up>
-TIMEMORY_INLINE Tp
-plus(Tp&& _lhs, const Up& _rhs)
-{
-    Tp _v = _lhs;
-    plus(_v, _rhs);
-    return _v;
-}
-}  // namespace math
-}  // namespace tim
-namespace rocprofsys
-{
-namespace sampling
+namespace rocprofsys::sampling
 {
 using ::tim::sampling::dynamic;
 using ::tim::sampling::overflow;
@@ -143,19 +111,18 @@ using component::sampling_gpu_temp;
 using component::sampling_gpu_vcn;
 using component::sampling_percent;
 using component::sampling_wall_clock;
-}  // namespace sampling
-}  // namespace rocprofsys
+}  // namespace rocprofsys::sampling
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(prevent_reentry, sampling::sampler_t, std::true_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, sampling::sampler_t, std::false_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, sampling::sampler_t,
-                                 TIMEMORY_ESC(std::integral_constant<size_t, 2048>))
+                                 std::integral_constant<size_t, 2048>)
 
-namespace rocprofsys
-{
-namespace sampling
+using namespace std::chrono_literals;
+
+namespace rocprofsys::sampling
 {
 namespace
 {
@@ -163,7 +130,7 @@ using sampler_allocator_t = typename sampler_t::allocator_t;
 
 template <typename Category>
 inline std::string
-get_category_track_name(uint64_t tid)
+get_category_track_name(std::uint64_t tid)
 {
     return std::string(trait::name<Category>::value) + "_" + std::to_string(tid);
 }
@@ -208,8 +175,8 @@ template <typename Category>
 std::string
 get_track_name(const thread_info& _thread_info)
 {
-    size_t         thread_id     = _thread_info.index_data->system_value;
-    size_t         sequent_value = _thread_info.index_data->sequent_value;
+    const size_t   thread_id     = _thread_info.index_data->system_value;
+    const size_t   sequent_value = _thread_info.index_data->sequent_value;
     constexpr auto sample_type =
         std::is_same_v<Category, category::timer_sampling> ? "Timer" : "Overflow";
     std::stringstream name_ss;
@@ -237,7 +204,7 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -246,15 +213,15 @@ metadata_initialize_thread_info(size_t tid)
     trace_cache::get_metadata_registry().add_thread_info(
         { getppid(), getpid(),
           static_cast<size_t>(_thread_info->index_data->system_value),
-          static_cast<uint32_t>(_thread_info->get_start()),
-          static_cast<uint32_t>(_thread_info->get_stop()), "{}" });
+          static_cast<std::uint32_t>(_thread_info->get_start()),
+          static_cast<std::uint32_t>(_thread_info->get_stop()), "{}" });
 }
 
 void
-metadata_initialize_track(int64_t tid)
+metadata_initialize_track(std::int64_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -277,31 +244,33 @@ metadata_initialize_track(int64_t tid)
 
 struct timer_sampling_data
 {
-    int64_t                                   m_tid     = -1;
-    uint64_t                                  m_beg     = 0;
-    uint64_t                                  m_end     = 0;
+    std::int64_t                              m_tid     = -1;
+    std::uint64_t                             m_beg     = 0;
+    std::uint64_t                             m_end     = 0;
     std::vector<tim::unwind::processed_entry> m_stack   = {};
     backtrace_metrics                         m_metrics = {};
 };
 
 struct overflow_sampling_data
 {
-    int64_t                                   m_tid   = -1;
-    uint64_t                                  m_beg   = 0;
-    uint64_t                                  m_end   = 0;
+    std::int64_t                              m_tid   = -1;
+    std::uint64_t                             m_beg   = 0;
+    std::uint64_t                             m_end   = 0;
     std::vector<tim::unwind::processed_entry> m_stack = {};
 };
 
 std::vector<timer_sampling_data>
-parse_timer_data(int64_t _tid, const bundle_t* _init,
+parse_timer_data(std::int64_t _tid, const bundle_t* _init,
                  const std::vector<bundle_t*>& _data);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>& _data);
+parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+                    const std::vector<bundle_t*>& _data);
 
 // TODO: should we remove _tid? it's inside timer_data and overflow_data
 void
-cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+cache_sampling_data(std::int64_t                               _tid,
+                    const std::vector<timer_sampling_data>&    _timer_data,
                     const std::vector<overflow_sampling_data>& _overflow_data)
 {
     if(get_debug_sampling())
@@ -310,7 +279,7 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
@@ -329,16 +298,17 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _line_info  = generate_line_info_json(iitr);
 
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
-                static_cast<uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
+                static_cast<std::uint64_t>(_thread_info->index_data->system_value),
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::timer_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 
     auto _overflow_event =
-        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
+        get_setting_value<std::string>(std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+            .value_or("");
 
     if(!_overflow_event.empty())
     {
@@ -361,11 +331,11 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _line_info  = generate_line_info_json(iitr);
 
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
-                static_cast<uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
+                static_cast<std::uint64_t>(_thread_info->index_data->system_value),
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::overflow_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 }
@@ -378,7 +348,7 @@ get_sampler_allocators()
 }
 
 std::set<int>
-configure(bool _setup, int64_t _tid = threading::get_id());
+configure(bool _setup, std::int64_t _tid = threading::get_id());
 
 void
 configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
@@ -386,7 +356,7 @@ configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
     if(_v) return;
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     _v = std::make_shared<sampler_allocator_t>();
     _v->reserve(config::get_sampling_allocator_size());
@@ -399,7 +369,7 @@ configure_sampler_allocators()
     if(_allocators.empty())
     {
         // avoid lock until necessary
-        auto_lock_t _alloc_lk{ type_mutex<decltype(_allocators)>() };
+        const auto_lock_t _alloc_lk{ type_mutex<decltype(_allocators)>() };
         if(_allocators.empty())
         {
             _allocators.resize(std::ceil(config::get_num_threads_hint() /
@@ -417,9 +387,9 @@ get_sampler_allocator()
 
     auto& _allocators = get_sampler_allocators();
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
+    const auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
 
     for(auto& itr : _allocators)
     {
@@ -470,139 +440,39 @@ get_signal_names(Tp&& _v)
 }
 
 unique_ptr_t<sampler_t>&
-get_sampler(int64_t _tid = threading::get_id())
+get_sampler(std::int64_t _tid = threading::get_id())
 {
     static auto* _v = sampler_instances::get();
     return _v->at(_tid);
 }
 
 unique_ptr_t<bundle_t>&
-get_sampler_init(int64_t _tid = threading::get_id())
+get_sampler_init(std::int64_t _tid = threading::get_id())
 {
     return sampler_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
-get_sampler_running(int64_t _tid)
+get_sampler_running(std::int64_t _tid)
 {
     return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
 
-auto&
-get_duration_disabled()
-{
-    static auto _v = std::atomic<bool>{ false };
-    return _v;
-}
+// Hoisted ahead of configure() so the new-sampler guard can consult it.
+// pause_intervals / pause_mutex / pending_pause_ts stay near the pause/resume
+// implementation below since only those touch them.
+auto g_sampling_paused = std::atomic<bool>{ false };
 
-auto&
-get_is_duration_thread()
-{
-    static thread_local auto _v = false;
-    return _v;
-}
-
-auto&
-get_duration_cv()
-{
-    static auto _v = std::condition_variable{};
-    return _v;
-}
-
-auto&
-get_duration_mutex()
-{
-    static auto _v = std::mutex{};
-    return _v;
-}
-
-auto&
-get_duration_thread()
-{
-    static auto _v = std::unique_ptr<std::thread>{};
-    return _v;
-}
-
-auto
-notify_duration_thread()
-{
-    if(get_duration_thread() && !get_is_duration_thread())
-    {
-        std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-        if(!_lk.owns_lock()) _lk.lock();
-        get_duration_cv().notify_all();
-    }
-}
-
-void
-stop_duration_thread()
-{
-    if(get_duration_thread() && !get_is_duration_thread())
-    {
-        notify_duration_thread();
-        get_duration_thread()->join();
-        get_duration_thread().reset();
-    }
-}
-
-void
-start_duration_thread()
-{
-    static std::mutex            _start_mutex{};
-    std::unique_lock<std::mutex> _start_lk{ _start_mutex, std::defer_lock };
-    if(!_start_lk.owns_lock()) _start_lk.lock();
-
-    if(!get_duration_thread() && config::get_sampling_duration() > 0.0)
-    {
-        // we may need to protect against recursion bc of pthread wrapper
-        static bool _protect = false;
-        if(_protect) return;
-        _protect   = true;
-        auto _now  = std::chrono::steady_clock::now();
-        auto _end  = _now + std::chrono::nanoseconds{ static_cast<uint64_t>(
-                               config::get_sampling_duration() * units::sec) };
-        auto _func = [_end]() {
-            thread_info::init(true);
-            threading::set_thread_name("omni.samp.dur");
-            get_is_duration_thread() = true;
-            bool _wait               = true;
-            while(_wait)
-            {
-                _wait = false;
-                std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-                if(!_lk.owns_lock()) _lk.lock();
-                get_duration_cv().wait_until(_lk, _end);
-                auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (get_state() >= State::Finalized);
-                if(_premature && !_finalized)
-                {
-                    // protect against spurious wakeups
-                    LOG_WARNING("Spurious wakeup of sampling duration thread...");
-                    _wait = true;
-                }
-                else if(_finalized)
-                {
-                    break;
-                }
-                else
-                {
-                    get_duration_disabled().store(true);
-                    LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
-                             "Shutting down sampling...",
-                             config::get_sampling_duration());
-                    configure(false, 0);
-                }
-            }
-        };
-
-        LOG_INFO("Sampling will be disabled after {:.6f} seconds",
-                 config::get_sampling_duration());
-
-        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-        get_duration_thread() = std::make_unique<std::thread>(_func);
-        _protect              = false;
-    }
-}
+// Makes the paused flag and the timer state one transition. Without it
+// configure() can read "not paused", pause() can complete, and configure() then
+// arms timers inside the pause window.
+//
+// Held by configure() and by pause()/resume(). The latter run as control-session
+// subscriber callbacks, i.e. already under the session's notify mutex, so the
+// order is always session-mutex then this one - never the reverse. A subscriber
+// callback that transitively created a thread would re-enter configure() and
+// self-deadlock; none does today.
+auto g_timer_state_mutex = std::mutex{};
 
 auto&
 get_offload_file()
@@ -612,11 +482,12 @@ get_offload_file()
         if(get_use_tmp_files())
         {
             auto _success = _tmp_v->open();
-            if(get_is_continuous_integration() && !_success)
+            if(!_success)
             {
                 LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
                              _tmp_v->filename);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
         }
@@ -636,16 +507,16 @@ using sampler_bundle_t = typename sampler_t::bundle_type;
 using sampler_buffer_t = tim::data_storage::ring_buffer<sampler_bundle_t>;
 using pos_type         = typename std::fstream::pos_type;
 
-auto offload_seq_data = std::unordered_map<int64_t, std::set<pos_type>>{};
+auto offload_seq_data = std::unordered_map<std::int64_t, std::set<pos_type>>{};
 
 void
-offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
+offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
 {
     if(!get_use_tmp_files())
     {
         LOG_CRITICAL("sampling allocator tries to offload buffer of samples but "
                      "rocprof-sys was configured to not use temporary files");
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::exit(1);
     }
 
@@ -659,7 +530,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
         LOG_CRITICAL("sampling allocator tried to offload buffer of samples for "
                      "thread {} but the offload file does not exist",
                      _seq);
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::exit(1);
     }
 
@@ -672,7 +543,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
         LOG_CRITICAL("temporary file for offloading buffer is in an invalid state "
                      "during offload for thread {}",
                      _seq);
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         std::exit(1);
     }
 
@@ -685,7 +556,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
 }
 
 auto
-load_offload_buffer(int64_t _thread_idx)
+load_offload_buffer(std::int64_t _thread_idx)
 {
     auto _data = std::vector<sampler_buffer_t>{};
     if(!get_use_tmp_files())
@@ -723,7 +594,7 @@ load_offload_buffer(int64_t _thread_idx)
     {
         _fs.seekg(itr);  // set to the absolute position
 
-        int64_t _seq = 0;
+        std::int64_t _seq = 0;
         _fs.read(reinterpret_cast<char*>(&_seq), sizeof(_seq));
         if(_fs.eof()) break;
 
@@ -749,13 +620,13 @@ load_offload_buffer(int64_t _thread_idx)
 }
 
 std::set<int>
-configure(bool _setup, int64_t _tid)
+configure(bool _setup, std::int64_t _tid)
 {
     const auto& _info         = thread_info::get(_tid, SequentTID);
     auto&       _sampler      = sampling::get_sampler(_tid);
     auto&       _perf_sampler = perf::get_instance(_tid);
     auto&       _running      = get_sampler_running(_tid);
-    bool        _is_running   = (!_running) ? false : *_running;
+    const bool  _is_running   = (!_running) ? false : *_running;
     auto&       _signal_types = sampling::get_signal_types(_tid);
 
     if(get_use_causal())
@@ -765,7 +636,7 @@ configure(bool _setup, int64_t _tid)
     }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto&& _cputime_tids  = get_sampling_cputime_tids();
     auto&& _realtime_tids = get_sampling_realtime_tids();
@@ -788,15 +659,13 @@ configure(bool _setup, int64_t _tid)
 
     if(_setup && !_sampler && !_is_running && !_signal_types->empty())
     {
-        if(get_duration_disabled()) return std::set<int>{};
-
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
         // thus we should not start a sampler for it
         if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
-           get_thread_state() == ThreadState::Disabled)
+           state::thread::get() == state::thread::Disabled)
             return std::set<int>{};
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
@@ -847,10 +716,10 @@ configure(bool _setup, int64_t _tid)
             struct perf_event_attr _pe;
             memset(&_pe, 0, sizeof(_pe));
 
-            auto _freq = get_sampling_overflow_freq();
-            auto _overflow_event =
-                get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
-                    .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
+            auto _freq           = get_sampling_overflow_freq();
+            auto _overflow_event = get_setting_value<std::string>(
+                                       std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+                                       .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
 
             perf::config_overflow_sampling(_pe, _overflow_event, _freq);
 
@@ -877,28 +746,40 @@ configure(bool _setup, int64_t _tid)
             {
                 LOG_CRITICAL("perf backend for overflow failed to activate: {}",
                              *_perf_open_error);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::exit(1);
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
-            _sampler->configure(overflow{
-                get_sampling_overflow_signal(),
-                [](int _sig, pid_t, long, int64_t _idx) {
-                    perf::get_instance(_idx)->set_ready_signal(_sig);
-                    return true;
-                },
-                [](int, pid_t, long, int64_t _idx) {
-                    return perf::get_instance(_idx)->start();
-                },
-                [](int, pid_t, long, int64_t _idx) {
-                    if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
-                        return true;
-                    auto _stopped = perf::get_instance(_idx)->stop();
-                    if(_stopped) perf::get_instance(_idx)->close();
-                    return _stopped;
-                },
-                _tid, threading::get_sys_tid() });
+            _sampler->configure(overflow{ get_sampling_overflow_signal(),
+                                          [](int, pid_t, long, std::int64_t) {
+                                              // set_ready_signal() already ran once on
+                                              // the owning thread at the explicit call
+                                              // above. overflow::start() re-invokes this
+                                              // initer on every start() including resume,
+                                              // which runs on the time_window worker
+                                              // thread - redoing F_SETOWN there would
+                                              // rebind signal delivery to a thread that
+                                              // exits right after.
+                                              return true;
+                                          },
+                                          [](int, pid_t, long, std::int64_t idx) {
+                                              return perf::get_instance(idx)->start();
+                                          },
+                                          [](int, pid_t, long, std::int64_t idx) {
+                                              if(!perf::get_instance(idx) ||
+                                                 !perf::get_instance(idx)->is_open())
+                                              {
+                                                  return true;
+                                              }
+                                              // Disable only - keep the fd open so a
+                                              // later start() can re-enable it. Closing
+                                              // here would leave overflow sampling
+                                              // permanently dead after the first pause.
+                                              return perf::get_instance(idx)->stop();
+                                          },
+                                          _tid, threading::get_sys_tid() });
         }
 
         if(get_use_tmp_files())
@@ -935,7 +816,8 @@ configure(bool _setup, int64_t _tid)
             {
                 auto _freq = get_sampling_overflow_freq();
                 auto _overflow_event =
-                    get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
+                    get_setting_value<std::string>(
+                        std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
                         .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
                 LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
                          "{} events...",
@@ -952,8 +834,10 @@ configure(bool _setup, int64_t _tid)
                     LOG_INFO(
                         "[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                         "second of {}-time (every {:.3e} milliseconds)...",
-                        itr, _tid, _timer->get_frequency(units::sec), _type,
-                        _timer->get_period(units::msec));
+                        itr, _tid,
+                        _timer->get_frequency(std::chrono::nanoseconds{ 1s }.count()),
+                        _type,
+                        _timer->get_period(std::chrono::nanoseconds{ 1ms }.count()));
                 }
             }
         }
@@ -961,10 +845,23 @@ configure(bool _setup, int64_t _tid)
         metadata_initialize_thread_info(_tid);
         metadata_initialize_track(_tid);
 
-        *_running = true;
-        sampling::get_sampler_init(_tid)->sample();
-        start_duration_thread();
-        _sampler->start();
+        {
+            // Publishing *_running and deciding whether to arm must be one step
+            // with respect to pause()/resume(); see g_timer_state_mutex. The flag
+            // also gates set_sampler_timers(), so a sampler is never visible to
+            // it before this point.
+            const std::scoped_lock timer_lk{ g_timer_state_mutex };
+            *_running = true;
+            sampling::get_sampler_init(_tid)->sample();
+            // If sampling is currently paused, leave the sampler configured but
+            // unarmed - set_sampler_timers() will start it on the next resume().
+            // Starting it now would immediately begin delivering signals for a
+            // pause window this thread was created inside of.
+            if(!g_sampling_paused.load(std::memory_order_relaxed))
+            {
+                _sampler->start();
+            }
+        }
     }
     else if(!_setup && _sampler && _is_running)
     {
@@ -976,8 +873,6 @@ configure(bool _setup, int64_t _tid)
             sampling::block_signals(*_signal_types);
         }
 
-        notify_duration_thread();
-
         if(_tid == 0)
         {
             // this propagates to all threads
@@ -988,17 +883,31 @@ configure(bool _setup, int64_t _tid)
         _sampler->stop();
         _sampler->reset();
         *_running = false;
-        if(_perf_sampler) _perf_sampler->stop();
+        // close(), not stop(): pausing only disables the perf event so a later
+        // resume can re-enable it, but this is permanent teardown. The
+        // instances live in thread_data with static storage, so ~perf_event()
+        // effectively never runs and the fd and mmap would leak for the rest of
+        // the process.
+        if(_perf_sampler)
+        {
+            _perf_sampler->close();
+        }
 
         if(_tid == 0)
         {
-            for(int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
+            for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
-                if(sampling::get_sampler(i)) sampling::get_sampler(i)->stop();
-                if(perf::get_instance(i)) perf::get_instance(i)->stop();
+                if(sampling::get_sampler(i))
+                {
+                    sampling::get_sampler(i)->stop();
+                }
+                if(perf::get_instance(i))
+                {
+                    perf::get_instance(i)->close();
+                }
             }
 
-            for(int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
+            for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
                 if(sampling::get_sampler(i))
                 {
@@ -1010,8 +919,6 @@ configure(bool _setup, int64_t _tid)
             // wait for the samples to finish
             for(auto& itr : get_sampler_allocators())
                 if(itr) itr->flush();
-
-            stop_duration_thread();
         }
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
@@ -1024,30 +931,53 @@ configure(bool _setup, int64_t _tid)
 }
 
 std::vector<timer_sampling_data>
-parse_timer_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+parse_timer_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+parse_overflow_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
 
 void
-post_process_perfetto(int64_t, const std::vector<timer_sampling_data>&,
+post_process_perfetto(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
 
 void
-post_process_timemory(int64_t, const std::vector<timer_sampling_data>&,
+post_process_timemory(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
 
 void
-store_sampling_data_in_cache(int64_t                                    _tid,
+store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data);
 
 auto static_strings = std::set<std::string>{};
 
+struct pause_interval_t
+{
+    std::uint64_t pause_ts  = 0;
+    std::uint64_t resume_ts = 0;
+};
+
+auto pause_mutex      = std::mutex{};
+auto pause_intervals  = std::vector<pause_interval_t>{};
+auto pending_pause_ts = std::atomic<std::uint64_t>{ 0 };
+
+bool
+spans_pause_interval(std::uint64_t _beg, std::uint64_t _end)
+{
+    if(pause_intervals.empty()) return false;
+
+    const auto _it =
+        std::lower_bound(pause_intervals.cbegin(), pause_intervals.cend(), _beg,
+                         [](const auto& _interval, std::uint64_t _val) {
+                             return _interval.resume_ts < _val;
+                         });
+
+    return _it != pause_intervals.cend() && _it->pause_ts <= _end;
+}
 }  // namespace
 
 unique_ptr_t<std::set<int>>&
-get_signal_types(int64_t _tid)
+get_signal_types(std::int64_t _tid)
 {
     return signal_type_instances::instance(construct_on_thread{ _tid },
                                            rocprofsys::get_sampling_signals(_tid));
@@ -1060,31 +990,117 @@ setup()
     return configure(true);
 }
 
+void
+postfork_child_release_samplers() noexcept
+{
+    // release() rather than reset(): deliberately skips ~sampler_t() after fork().
+    auto* samplers = sampler_instances::get();
+    if(!samplers)
+    {
+        return;
+    }
+    for(auto& itr : *samplers)
+    {
+        (void) itr.release();
+    }
+}
+
 std::set<int>
 shutdown()
 {
+    // Prefer the ID captured in thread_info: the thread-local backing get_id() may
+    // already have been destroyed when shutdown() runs from a thread-local destructor.
+    const auto& info = thread_info::get();
+    const auto  tid  = (info && info->index_data) ? info->index_data->sequent_value
+                                                  : threading::get_id();
+
     if(is_child_process())
     {
-        for(auto& itr : *sampler_instances::get())
-            itr.release();
+        // Only this thread's sampler may be released here: shutdown() runs from the
+        // destructor of every exiting thread, and is_child_process() stays true for the
+        // child's whole lifetime, so releasing the whole array would destroy samplers
+        // belonging to threads still inside configure().
+        auto* samplers = sampler_instances::get();
+        if(samplers)
+        {
+            // Validate the signed thread ID before converting it and indexing sampler
+            // storage. This runs during thread teardown, so avoid throwing accessors.
+            if(tid >= 0 && static_cast<size_t>(tid) < samplers->size())
+            {
+                (void) (*samplers)[static_cast<size_t>(tid)].release();
+            }
+        }
         return std::set<int>{};
     }
 
-    auto _v = configure(false);
-    if(utility::get_thread_index() == 0) stop_duration_thread();
-    return _v;
+    return configure(false, tid);
 }
 
 void
 block_samples()
 {
+    LOG_DEBUG("Blocking sampling...");
     trait::runtime_enabled<sampler_t>::set(false);
 }
 
 void
 unblock_samples()
 {
+    LOG_DEBUG("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
+}
+
+enum class timer_state
+{
+    stopped,
+    running
+};
+
+// Blocking samples only makes the handler discard them; the OS timer keeps
+// firing and its signal keeps interrupting the target's sleeps. Stop the
+// timers themselves so a paused sampler is unobservable to the application.
+//
+// Pausing is asymmetric for the CPU-time trigger. timer::stop() deletes the
+// POSIX timer, so the matching start() would call timer_create() again from
+// whichever thread ran resume() - and CLOCK_THREAD_CPUTIME_ID binds to that
+// caller, silently reattributing the timer. It is never stopped: a CPU-time
+// timer cannot advance while its thread is blocked in a syscall, so it cannot
+// cut the target's sleeps short the way a wall-clock timer does, and
+// parse_timer_data() already drops any sample landing inside a pause interval.
+//
+// Resuming still starts it, because a thread created during a pause window has
+// a timer that configure() created but never armed. start() is a no-op once
+// active, and for an unarmed timer it only calls timer_settime() on a handle
+// timer_create()'d on the owning thread, which does not rebind it.
+void
+set_sampler_timers(timer_state state)
+{
+    for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
+    {
+        auto& sampler = get_sampler(i);
+        if(!sampler)
+        {
+            continue;
+        }
+
+        const auto& running = get_sampler_running(i);
+        if(!running || !*running)
+        {
+            continue;
+        }
+
+        for(const auto& trigger : sampler->get_triggers())
+        {
+            if(state == timer_state::running)
+            {
+                trigger->start();
+            }
+            else if(trigger->signal() != get_sampling_cputime_signal())
+            {
+                trigger->stop();
+            }
+        }
+    }
 }
 
 void
@@ -1124,7 +1140,7 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     size_t _total_data       = 0;
     size_t _total_threads    = 0;
@@ -1191,8 +1207,7 @@ post_process()
                       _raw_data.size());
         }
 
-        if(get_is_continuous_integration() &&
-           _sampler->get_sample_count() != _raw_data.size())
+        if(_sampler->get_sample_count() != _raw_data.size())
         {
             throw std::runtime_error(fmt::format(
                 "Error! sampler recorded {} samples but {} samples were returned",
@@ -1276,7 +1291,8 @@ post_process()
 namespace
 {
 std::vector<timer_sampling_data>
-parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t*>& _data)
+parse_timer_data(std::int64_t _tid, const bundle_t* _init,
+                 const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<timer_sampling_data>{};
 
@@ -1291,10 +1307,11 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
             continue;
 
-        auto _ret    = timer_sampling_data{};
-        _ret.m_tid   = _bt_time->get_tid();
-        _ret.m_beg   = _last->get<backtrace_timestamp>()->get_timestamp();
-        _ret.m_end   = _bt_time->get_timestamp();
+        auto _ret  = timer_sampling_data{};
+        _ret.m_tid = _bt_time->get_tid();
+        _ret.m_beg = _last->get<backtrace_timestamp>()->get_timestamp();
+        _ret.m_end = _bt_time->get_timestamp();
+
         _ret.m_stack = backtrace::filter_and_patch(_bt_data->get());
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
@@ -1311,7 +1328,10 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
             }
         }
 
-        _results.emplace_back(std::move(_ret));
+        if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+        {
+            _results.emplace_back(std::move(_ret));
+        }
         _last = itr;
     }
 
@@ -1322,12 +1342,13 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
 }
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>& _data)
+parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+                    const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<overflow_sampling_data>{};
 
-    uint64_t _last_call_ts   = 0;
-    uint64_t _perf_ts_offset = 0;
+    std::uint64_t _last_call_ts   = 0;
+    std::uint64_t _perf_ts_offset = 0;
     for(const auto& itr : _data)
     {
         auto* _bt_call = itr->get<callchain>();
@@ -1345,13 +1366,17 @@ parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>&
                 continue;
             }
 
-            auto _ret     = overflow_sampling_data{};
-            _ret.m_tid    = _bt_time->get_tid();
-            _ret.m_beg    = _last_call_ts + _perf_ts_offset;
-            _ret.m_end    = pitr.first + _perf_ts_offset;
+            auto _ret  = overflow_sampling_data{};
+            _ret.m_tid = _bt_time->get_tid();
+            _ret.m_beg = _last_call_ts + _perf_ts_offset;
+            _ret.m_end = pitr.first + _perf_ts_offset;
+
             _ret.m_stack  = pitr.second;
             _last_call_ts = pitr.first;
-            _results.emplace_back(std::move(_ret));
+            if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+            {
+                _results.emplace_back(std::move(_ret));
+            }
         }
     }
 
@@ -1362,7 +1387,8 @@ parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>&
 }
 
 void
-post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+post_process_perfetto(std::int64_t                               _tid,
+                      const std::vector<timer_sampling_data>&    _timer_data,
                       const std::vector<overflow_sampling_data>& _overflow_data)
 {
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
@@ -1390,14 +1416,15 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
     if(!_thread_info) return;
 
     auto _overflow_event =
-        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
+        get_setting_value<std::string>(std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
+            .value_or("");
 
     if(!_overflow_event.empty() && !_overflow_data.empty())
     {
@@ -1513,9 +1540,9 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
         for(const auto& itr : _timer_data)
         {
-            size_t   _ncount = 0;
-            uint64_t _beg    = itr.m_beg;
-            uint64_t _end    = itr.m_end;
+            size_t        _ncount = 0;
+            std::uint64_t _beg    = itr.m_beg;
+            std::uint64_t _end    = itr.m_end;
             if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
             for(const auto& iitr : itr.m_stack)
@@ -1634,7 +1661,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 }
 
 void
-post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+post_process_timemory(std::int64_t                               _tid,
+                      const std::vector<timer_sampling_data>&    _timer_data,
                       const std::vector<overflow_sampling_data>& _overflow_data)
 {
     if(get_debug_sampling())
@@ -1643,7 +1671,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
     }
 
     // compute the total number of entries
-    int64_t _sum = 0;
+    std::int64_t _sum = 0;
     for(const auto& itr : _overflow_data)
         _sum += itr.m_stack.size();
     for(const auto& itr : _timer_data)
@@ -1658,7 +1686,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1688,7 +1716,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         using bundle_t = tim::lightweight_tuple<comp::trip_count, sampling_wall_clock,
                                                 sampling_cpu_clock, hw_counters>;
 
-        double _elapsed_wc = (itr.m_end - itr.m_beg);
+        const double _elapsed_wc = (itr.m_end - itr.m_beg);
 
         auto _data = std::vector<bundle_t>{};
         _data.reserve(itr.m_stack.size());
@@ -1696,7 +1724,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1725,7 +1753,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 
                 if(_cc && _metrics && _metrics(category::thread_cpu_time{}))
                 {
-                    double _elapsed_cc = _metrics.get_cpu_timestamp();
+                    const double _elapsed_cc = _metrics.get_cpu_timestamp();
 
                     _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
                     _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
@@ -1760,7 +1788,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1787,7 +1815,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         // generate the instances of the tuple of components and start them
         for(const auto& iitr : itr.m_stack)
         {
-            _data.emplace_back(tim::string_view_t{ iitr.name });
+            _data.emplace_back(std::string_view{ iitr.name });
             _data.back().push(itr.m_tid);
             _data.back().start();
         }
@@ -1805,7 +1833,8 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 }
 
 void
-cache_backtrace_metrics(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data)
+cache_backtrace_metrics(std::int64_t                            _tid,
+                        const std::vector<timer_sampling_data>& _timer_data)
 {
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
@@ -1827,7 +1856,7 @@ cache_backtrace_metrics(int64_t _tid, const std::vector<timer_sampling_data>& _t
 }
 
 void
-store_sampling_data_in_cache(int64_t                                    _tid,
+store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data)
 {
@@ -1872,9 +1901,12 @@ struct sampling_initialization
         sampling_gpu_memory::label()       = "sampling_gpu_memory_usage";
         sampling_gpu_memory::description() = "Memory usage of GPU(s)";
 
-        sampling_gpu_power::label()        = "sampling_gpu_power";
-        sampling_gpu_power::description()  = "Power usage of GPU(s)";
-        sampling_gpu_power::unit()         = units::watt;
+        sampling_gpu_power::label()       = "sampling_gpu_power";
+        sampling_gpu_power::description() = "Power usage of GPU(s)";
+        sampling_gpu_power::unit()        = static_cast<std::int64_t>(
+            rocprofsys::common::units::power_cast<rocprofsys::common::units::nanowatt>(
+                rocprofsys::common::units::watt{ 1.0 })
+                .count());
         sampling_gpu_power::display_unit() = "watts";
         sampling_gpu_power::set_precision(2);
         sampling_gpu_power::set_format_flags(sampling_gpu_power::get_format_flags());
@@ -1903,17 +1935,85 @@ struct sampling_initialization
 void
 postfork_parent_reinit()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_parent_reinit();
+    if(config::get_use_process_sampling())
+    {
+        pmc::postfork_parent_reinit();
+    }
 }
 
 void
 postfork_child_cleanup()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_child_cleanup();
+    if(config::get_use_process_sampling())
+    {
+        pmc::postfork_child_cleanup();
+    }
 }
-}  // namespace sampling
-}  // namespace rocprofsys
+
+void
+prefork_lock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::prefork_lock_sampler();
+}
+
+void
+postfork_parent_unlock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_parent_unlock_sampler();
+}
+
+void
+postfork_child_reset_pmc_sampler_lock()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_child_reset_sampler_lock();
+}
+
+void
+pause()
+{
+    const std::scoped_lock timer_lk{ g_timer_state_mutex };
+
+    bool _expected = false;
+    if(!g_sampling_paused.compare_exchange_strong(_expected, true))
+    {
+        LOG_WARNING("sampling::pause() called but sampling is already paused");
+        return;
+    }
+
+    LOG_DEBUG("Pausing sampling...");
+    pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
+    block_samples();
+    set_sampler_timers(timer_state::stopped);
+}
+
+void
+resume()
+{
+    const std::scoped_lock timer_lk{ g_timer_state_mutex };
+
+    bool _expected = true;
+    if(!g_sampling_paused.compare_exchange_strong(_expected, false))
+    {
+        LOG_WARNING("sampling::resume() called but sampling is not paused");
+        return;
+    }
+
+    LOG_DEBUG("Resuming sampling...");
+    auto _pause_ts  = pending_pause_ts.exchange(0);
+    auto _resume_ts = tim::get_clock_real_now<std::uint64_t, std::nano>();
+    if(_pause_ts > 0)
+    {
+        auto _lk = std::lock_guard<std::mutex>{ pause_mutex };
+        pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
+    }
+
+    set_sampler_timers(timer_state::running);
+    unblock_samples();
+}
+
+}  // namespace rocprofsys::sampling
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::sampling::sampling_initialization)

@@ -8,24 +8,26 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
 #include "utils/flags.hpp"
 
 #include <unordered_map>
 #include <mutex>
+#include <limits>
+#include <cmath>
 
 namespace hip_impl {
 // ================================================================================================
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
-  auto* function = hip::DeviceFunc::asFunction(func);
-  const auto* kernel = function->kernel();
+  const auto* kernel = hip::asKernel(func);
 
   const auto* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   const int maxWorkGroupSize = static_cast<int>(device.info().maxWorkGroupSize_);
-  
+
   if (!bCalcPotentialBlkSz) {
     if (inputBlockSize <= 0) {
       return hipErrorInvalidValue;
@@ -39,7 +41,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   } else if (inputBlockSize > maxWorkGroupSize || inputBlockSize <= 0) {
     inputBlockSize = maxWorkGroupSize;
   }
-  
+
   // Find wave occupancy per CU => simd_per_cu * GPR usage
   // Limited by SPI 32 per CU, hence 8 per SIMD
   const size_t MaxWavesPerSimd = (device.isa().versionMajor() <= 9) ? 8 : 16;
@@ -61,10 +63,25 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     return hipErrorUnknown;
   }
 
+  // A wave costs its granule-rounded SGPRs plus the trap handler's reserve;
+  // omitting the reserve over-reports SGPR-bound kernels by a wave per SIMD.
+  // Mirrors LLVM AMDGPUUtils::getOccupancyWithNumSGPRs().
+  constexpr size_t DefaultSgprAllocGranule = 16;
+  const size_t sgprAllocGranule = device.info().sgprAllocGranularity_ != 0
+      ? device.info().sgprAllocGranularity_
+      : DefaultSgprAllocGranule;
+  const size_t sgprsPerWave =
+      amd::alignUp(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
+      device.info().sgprTrapHandlerReserve_;
   const size_t GprWaves = wrkGrpInfo->usedSGPRs_ > 0
-      ? std::min(VgprWaves, device.info().sgprsPerSimd_ /
-                            amd::alignUp(wrkGrpInfo->usedSGPRs_, 16))
+      ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)
       : VgprWaves;
+
+  if (GprWaves == 0) {
+    // As above: a bad SGPR count would zero alu_limited_threads, and hence
+    // bestBlockSize, giving a divide by zero when bestBlocksPerCU is computed.
+    return hipErrorUnknown;
+  }
 
   // The table contains SIMD per CU, not per WGP, so when WGP mode is set
   // on kernel metadata, multiply the number of SIMDs by 2, to account for
@@ -76,10 +93,23 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = static_cast<int>(alu_occupancy * wavefrontSize);
 
-  const size_t total_used_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
+  // The LDS limit must be expressed in the same unit as the ALU limit computed
+  // above. In WGP mode a workgroup allocates out of the LDS pool of the whole
+  // WGP (2 CUs), so the per-CU pool has to be doubled to match. Kernels
+  // compiled with -mcumode report isWGPMode_ == false and keep the per-CU pool.
+  const uint64_t lds_pool_size = static_cast<uint64_t>(device.info().localMemSizePerCU_) *
+      (wrkGrpInfo->isWGPMode_ ? 2 : 1);
+
+  // HW allocates LDS in fixed size alignment, so a workgroup is accounted for
+  // the aligned size rather than for the exact number of bytes requested.
+  const size_t lds_granularity = device.isa().ldsAlignment();
+  const size_t requested_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
+  const size_t total_used_lds = lds_granularity != 0
+      ? ((requested_lds + lds_granularity - 1) / lds_granularity) * lds_granularity
+      : requested_lds;
+
   const int lds_occupancy_wgs = total_used_lds != 0
-      ? static_cast<int>(device.info().localMemSize_ / total_used_lds)
-      : INT_MAX;
+      ? static_cast<int>(lds_pool_size / total_used_lds) : INT_MAX;
   // Calculate how many blocks of inputBlockSize we can fit per CU
   // Need to align with hardware wavefront size. If they want 65 threads, but
   // waves are 64, then we need 128 threads per block.
@@ -88,6 +118,13 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   *maxBlocksPerCU = alu_limited_threads / aligned_input_size;
   // Unless those blocks are further constrained by LDS size.
   *maxBlocksPerCU = std::min(*maxBlocksPerCU, lds_occupancy_wgs);
+
+  // The count above is per scheduling unit of the kernel: a WGP for a WGP mode
+  // kernel, a single CU for a kernel compiled with -mcumode.
+  if (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_) {
+    *maxBlocksPerCU = wrkGrpInfo->isWGPMode_
+        ? (*maxBlocksPerCU / 2) : (*maxBlocksPerCU * 2);
+  }
 
   // Return optimal block size: min of ALU limit and requested size
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
@@ -125,7 +162,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint32_t flags = 0, uint32_t params = 0,
                                   uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                                  uint32_t firstDevice = 0);
+                                  uint32_t firstDevice = 0,
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 // ================================================================================================
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
@@ -176,7 +214,7 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
                            const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid,
                            dim3* blockDim, dim3* gridDim, int* wSize) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
-  
+
   static const bool enable_deferred_loading = []() {
     const char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
     return var ? atoi(var) != 0 : true;
@@ -193,7 +231,7 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
 
   if (!enable_deferred_loading) {
     HIP_INIT_VOID();
-    
+
     for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
       hipFunction_t hfunc = nullptr;
       hipError_t hip_error = platform.StatCO().GetFunc(&hfunc, hostFunction, dev_idx);
@@ -263,7 +301,7 @@ void __hipRegisterManagedVar(
   } else {
     HIP_INIT_VOID();
     status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->setAllocFlag(true);
+    var_ptr->SetAllocFlag(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
@@ -300,9 +338,15 @@ void __hipUnregisterFatBinary(void** modules) {
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
     std::call_once(unregister_device_sync, []() {
       for (const auto& hipDevice : g_devices) {
-        // By synchronizing devices ensure that all HSA signal handlers
-        // complete before RemoveFatBinary
         hipDevice->SyncAllStreams(true);
+        // SyncAllStreams only guarantees the GPU finished and the host observed
+        // the completion signals — the HSA async-handler thread can still be
+        // inside a completion callback.  That callback reports kernel names that
+        // point into the Kernel objects RemoveFatBinary is about to destroy, so
+        // the handlers have to be drained too, not just the streams.
+        for (auto* device : hipDevice->devices()) {
+          device->WaitForHsaAsyncHandlersIdle();
+        }
       }
     });
   }
@@ -322,17 +366,17 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipSt
 // ================================================================================================
 hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                       hipStream_t stream) {
-  HIP_INIT_API(__hipPushCallConfiguration, gridDim, blockDim, sharedMem, stream);
+  HIP_INIT_API_NOLOG(__hipPushCallConfiguration);
 
   PlatformState::Instance().ConfigureCall(gridDim, blockDim, sharedMem, stream);
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN_NOLOG(hipSuccess);
 }
 
 // ================================================================================================
 hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                      hipStream_t* stream) {
-  HIP_INIT_API(__hipPopCallConfiguration, gridDim, blockDim, sharedMem, stream);
+  HIP_INIT_API_NOLOG(__hipPopCallConfiguration);
 
   ihipExec_t exec;
   PlatformState::Instance().PopExec(exec);
@@ -341,7 +385,7 @@ hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* shar
   *sharedMem = exec.sharedMem_;
   *stream = exec.hStream_;
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN_NOLOG(hipSuccess);
 }
 
 // ================================================================================================
@@ -385,7 +429,7 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
                                            exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
-                                           exec.sharedMem_);
+                                           exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -435,7 +479,7 @@ hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memor
     LogPrintfError("Cannot get Device Function for module: 0x%x", hmod);
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-  
+
   // Find the global Symbols
   if (!dev_program->createGlobalVarObj(amd_mem_obj, dptr, bytes, name)) {
     LogPrintfError("Cannot create Global Var obj for symbol: %s", name);
@@ -461,8 +505,8 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
-  auto* function = hip::DeviceFunc::asFunction(func);
-  if (function == nullptr) {
+  amd::Kernel* func_kernel = hip::asKernel(func);
+  if (func_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -474,13 +518,13 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
   }
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
-  const amd::Kernel& kernel = *function->kernel();
+  const amd::Kernel& kernel = *func_kernel;
   const auto* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
 
   const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
   const int maxDynamicSharedSizeBytes = wrkGrpInfo->maxDynamicSharedSizeBytes_;
   const int maxNumBlocks = prop.maxThreadsPerMultiProcessor / blockSize;
-  const int maxSharedMemoryPerMultiProcessor = prop.maxSharedMemoryPerMultiProcessor - 
+  const int maxSharedMemoryPerMultiProcessor = prop.maxSharedMemoryPerMultiProcessor -
       staticSharedMemoryUsage * std::min(numBlocks, maxNumBlocks);
   const int maxDynamicSmemSize = std::min(maxSharedMemoryPerMultiProcessor / maxNumBlocks,
                                           maxDynamicSharedSizeBytes);
@@ -493,224 +537,114 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 
   HIP_RETURN(hipSuccess);
 }
+}  // namespace hip
 
-// ================================================================================================
-hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
-                                             size_t dynSharedMemPerBlk, int blockSizeLimit) {
-  HIP_INIT_API(hipOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);
-  if (!gridSize || !blockSize) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  hipFunction_t func = nullptr;
-  const hipError_t hip_error =
-      PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
-  if (hip_error != hipSuccess || !func) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
-  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-  int max_blocks_per_grid = 0;
-  int num_blocks = 0;
-  int best_block_size = 0;
-  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &num_blocks, &max_blocks_per_grid, &best_block_size, device, func, blockSizeLimit,
-      dynSharedMemPerBlk, true);
-  if (ret == hipSuccess) {
-    *blockSize = best_block_size;
-    *gridSize = max_blocks_per_grid;
-  }
-  HIP_RETURN(ret);
-}
+namespace hip_impl {
+namespace {
+// based register usage for the device symbol and device capabilities, returns the maximum number
+// of threads that could be utilized
+int maxThreadsPerCU(const amd::device::Info& deviceInfo,
+                    const device::Kernel::WorkGroupInfo& wrkGrpInfo, amd::Isa isa) {
+  // Find wave occupancy per CU => simd_per_cu * GPR usage
+  size_t MaxWavesPerSimd;
 
-// ================================================================================================
-hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
-                                                   size_t dynSharedMemPerBlk, int blockSizeLimit) {
-    HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);
-    if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
-      HIP_RETURN(hipErrorInvalidValue);
+  if (isa.versionMajor() <= 9) {
+    MaxWavesPerSimd = 8;  // Limited by SPI 32 per CU, hence 8 per SIMD
+  } else {
+    MaxWavesPerSimd = 16;
+  }
+  size_t VgprWaves = MaxWavesPerSimd;
+  uint32_t VgprGranularity = deviceInfo.vgprAllocGranularity_;
+  size_t maxVGPRs = deviceInfo.vgprsPerSimd_;
+  size_t wavefrontSize = wrkGrpInfo.wavefrontSize_;
+  if (isa.versionMajor() >= 10) {
+    if (wavefrontSize == 64) {
+      maxVGPRs = maxVGPRs >> 1;
+      VgprGranularity = VgprGranularity >> 1;
     }
-    const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-    int max_blocks_per_grid = 0;
-    int num_blocks = 0;
-    int best_block_size = 0;
-    const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSizeLimit,
-        dynSharedMemPerBlk, true);
-    if (ret == hipSuccess) {
-      *blockSize = best_block_size;
-      *gridSize = max_blocks_per_grid;
+  }
+  if (wrkGrpInfo.usedVGPRs_ > 0) {
+    VgprWaves = maxVGPRs / amd::alignUp(wrkGrpInfo.usedVGPRs_, VgprGranularity);
+  }
+
+  if (VgprWaves == 0) {
+    // This should not happen ideally, but in case the value is
+    // incorrect, it can lead to a crash. By returning error, API can exit gracefully.
+    return hipErrorUnknown;
+  }
+
+  size_t GprWaves = VgprWaves;
+  if (wrkGrpInfo.usedSGPRs_ > 0) {
+    size_t maxSGPRs = deviceInfo.sgprsPerSimd_;
+    const size_t SgprWaves = maxSGPRs / amd::alignUp(wrkGrpInfo.usedSGPRs_, 16);
+    GprWaves = std::min(VgprWaves, SgprWaves);
+  }
+
+  // multiply the number of SIMDs by 2, to account for 2CUs in 1 WGP.
+  uint32_t simdPerCU = isa.simdPerCU();
+  if (wrkGrpInfo.isWGPMode_) {
+    simdPerCU *= 2;
+  }
+
+  const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
+  return alu_occupancy * wrkGrpInfo.wavefrontSize_;
+}
+}  // namespace
+
+// ================================================================================================
+// @launchConfig  a launch configuration that might have the cluster size unconfigured
+// @return        hipErrorInvalidClusterSize if the cluster dimensions are not specified
+//                hipErrorInvalidValue if the parameters contain inconsistent cluster dimensions
+//                hipSuccess otherwise
+static hipError_t clusterDimensions(dim3& dimensions, const hipLaunchConfig_t& launchConfig,
+                                    const device::Kernel::WorkGroupInfo& wrkGrpInfo,
+                                    const amd::device::Info& deviceInfo) {
+  int numAttr = 0;
+  const size_t* infoClusterSize = wrkGrpInfo.clusterSize_;
+
+  dimensions = {std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max(),
+                std::numeric_limits<uint32_t>::max()};
+
+  while (numAttr < launchConfig.numAttrs) {
+    const hipLaunchAttribute& attr = launchConfig.attrs[numAttr];
+
+    if (attr.id == hipLaunchAttributeClusterDimension) {
+      dimensions.x = attr.val.clusterDim.x;
+      dimensions.y = attr.val.clusterDim.y;
+      dimensions.z = attr.val.clusterDim.z;
     }
-    HIP_RETURN(ret);
-}
 
-// ================================================================================================
-hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
-                                                            hipFunction_t f,
-                                                            size_t dynSharedMemPerBlk,
-                                                            int blockSizeLimit,
-                                                            unsigned int flags) {
-  HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSizeWithFlags, f, dynSharedMemPerBlk,
-               blockSizeLimit, flags);
-  if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-  int max_blocks_per_grid = 0;
-  int num_blocks = 0;
-  int best_block_size = 0;
-  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSizeLimit,
-      dynSharedMemPerBlk, true);
-  if (ret == hipSuccess) {
-    *blockSize = best_block_size;
-    *gridSize = max_blocks_per_grid;
-  }
-  HIP_RETURN(ret);
-}
-
-// ================================================================================================
-hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunction_t f,
-                                                              int blockSize,
-                                                              size_t dynSharedMemPerBlk) {
-  HIP_INIT_API(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, f, blockSize,
-               dynSharedMemPerBlk);
-  if (numBlocks == nullptr || (f == nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-  int max_blocks_per_grid = 0;
-  int best_block_size = 0;
-  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-      numBlocks, &max_blocks_per_grid, &best_block_size, device, f, blockSize, dynSharedMemPerBlk,
-      false);
-  HIP_RETURN(ret);
-}
-
-// ================================================================================================
-hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
-    int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags) {
-  HIP_INIT_API(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, f, blockSize,
-               dynSharedMemPerBlk, flags);
-  if (numBlocks == nullptr || (f == nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-  int max_blocks_per_grid = 0;
-  int best_block_size = 0;
-  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-      numBlocks, &max_blocks_per_grid, &best_block_size, device, f, blockSize, dynSharedMemPerBlk,
-      false);
-  HIP_RETURN(ret);
-}
-
-// ================================================================================================
-hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
-                                                        int blockSize, size_t dynamicSMemSize) {
-  HIP_INIT_API(hipOccupancyMaxActiveBlocksPerMultiprocessor, f, blockSize, dynamicSMemSize);
-  if (numBlocks == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    numAttr++;
   }
 
-  hipFunction_t func = nullptr;
-  hipError_t ret = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
-  if (ret != hipSuccess || !func) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
-
-  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-  int max_blocks_per_grid = 0;
-  int best_block_size = 0;
-  ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-      numBlocks, &max_blocks_per_grid, &best_block_size, device, func, blockSize, dynamicSMemSize,
-      false);
-  HIP_RETURN(ret);
-}
-
-// ================================================================================================
-hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int* numBlocks, const void* f,
-                                                                 int blockSize,
-                                                                 size_t dynamicSMemSize,
-                                                                 unsigned int flags) {
-  HIP_INIT_API(hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, f, blockSize, dynamicSMemSize,
-               flags);
-  if (numBlocks == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-  hipFunction_t func = nullptr;
-  hipError_t ret = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
-  if (ret != hipSuccess || !func) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
-
-  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
-  int max_blocks_per_grid = 0;
-  int best_block_size = 0;
-  ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
-      numBlocks, &max_blocks_per_grid, &best_block_size, device, func, blockSize, dynamicSMemSize,
-      false);
-  HIP_RETURN(ret);
-}
-
-// ================================================================================================
-hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
-                            size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
-                            hipEvent_t stopEvent, int flags) {
-  if (!hip::isValid(stream)) {
-    return hipErrorInvalidValue;
-  }
-  if (hostFunction == nullptr) {
-    return hipErrorInvalidDeviceFunction;
-  }
-
-  const int deviceId = hip::Stream::DeviceId(stream);
-
-  const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
-    hipFunction_t f;
-    const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
-    
-    // Propagate specific invalid code object errors
-    if (err == hipErrorInvalidKernelFile ||
-        err == hipErrorInvalidDeviceFunction ||
-        err == hipErrorInvalidImage) {
-      return {err, nullptr};
+  if (dimensions.x == std::numeric_limits<uint32_t>::max()) {
+    // the cluster size must be specified at least once in either launchConfig
+    // or in the metadata of the actual device symbol. Also it cannot be zero
+    // in any dimension
+    if (!wrkGrpInfo.hasClusterAttr_) {
+      return hipErrorInvalidClusterSize;
     }
-    
-    // If successful lookup with valid function, use it
-    if (err == hipSuccess && f) {
-      return {hipSuccess, f};
-    }
-    
-    // Fallback: assume it's a hip function type
-    return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
-  }();
 
-  if (hip_error != hipSuccess) {
-    return hip_error;
+    dimensions.x = infoClusterSize[0];
+    dimensions.y = infoClusterSize[1];
+    dimensions.z = infoClusterSize[2];
+
+    // make sure the symbol's cluster dimension matches launchConfig, otherwise
+    // return an error (if __cluster_dims__() is specified, any of its dimensions is > 0)
+  } else if (wrkGrpInfo.hasClusterAttr_ &&
+             (dimensions.x != infoClusterSize[0] || dimensions.y != infoClusterSize[1] ||
+              dimensions.z != infoClusterSize[2])) {
+    return hipErrorInvalidClusterSize;
   }
 
-  constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  const auto* device = g_devices[deviceId]->devices()[0];
-  if (device->isa().versionMajor() >= 12 &&
-      (gridDim.y > gridDimYZmax || gridDim.z > gridDimYZmax)) {
-    return hipErrorInvalidConfiguration;
-  }
+  if (dimensions.x == 0 || dimensions.y == 0 || dimensions.z == 0 ||
+      dimensions.x * dimensions.y * dimensions.z > deviceInfo.clusterMaxSize_ ||
+      // ensure each grid dimension is divisible by the associated cluster dimension
+      launchConfig.gridDim.x % dimensions.x || launchConfig.gridDim.y % dimensions.y ||
+      launchConfig.gridDim.z % dimensions.z)
+    return hipErrorInvalidClusterSize;
 
-  amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes);
-  if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
-  }
-
-  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags);
+  return hipSuccess;
 }
 
 // ================================================================================================
@@ -788,6 +722,343 @@ extern "C"
     unsigned short
     __gnu_f2h_ieee(float f) {
   return (unsigned short)__convert_float_to_half(f);
+}
+
+}  // namespace hip_impl
+
+namespace hip {
+// ================================================================================================
+hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
+                            size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
+                            hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1},
+                            const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
+  if (hostFunction == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+
+  const int deviceId = hip::Stream::DeviceId(stream);
+
+  const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
+    hipFunction_t f = nullptr;
+    const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
+
+    // If successful lookup with valid function, use it
+    if (err == hipSuccess && f) {
+      return {hipSuccess, f};
+    }
+
+    // Not in the registered table: only a hipFunction_t from a dynamically loaded
+    // module can be cast, any other pointer would fault on dereference.
+    if (err == hipErrorInvalidSymbol) {
+      if (PlatformState::Instance().IsValidFuncHandle(hostFunction)) {
+        return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+      }
+      return {hipErrorInvalidDeviceFunction, nullptr};
+    }
+
+    // Propagate all other errors
+    return {err, nullptr};
+  }();
+
+  if (hip_error != hipSuccess) {
+    return hip_error;
+  }
+
+  constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
+  if (device->isa().versionMajor() >= 12 &&
+      (gridDim.y > gridDimYZmax || gridDim.z > gridDimYZmax)) {
+    return hipErrorInvalidConfiguration;
+  }
+
+  amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
+                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0,
+                                     clusterDim.x, clusterDim.y, clusterDim.z);
+  if (!launch_params.IsValidConfig()) {
+    return hipErrorInvalidConfiguration;
+  }
+
+  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
+                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
+}
+
+// ================================================================================================
+hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunction_t f,
+                                                              int blockSize,
+                                                              size_t dynSharedMemPerBlk) {
+  HIP_INIT_API(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, f, blockSize,
+               dynSharedMemPerBlk);
+  if (numBlocks == nullptr || (f == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int best_block_size = 0;
+  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      numBlocks, &max_blocks_per_grid, &best_block_size, device, f, blockSize, dynSharedMemPerBlk,
+      false);
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+    int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags) {
+  HIP_INIT_API(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, f, blockSize,
+               dynSharedMemPerBlk, flags);
+  if (numBlocks == nullptr || (f == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int best_block_size = 0;
+  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      numBlocks, &max_blocks_per_grid, &best_block_size, device, f, blockSize, dynSharedMemPerBlk,
+      false);
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
+                                             size_t dynSharedMemPerBlk, int blockSizeLimit) {
+  HIP_INIT_API(hipOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);
+  if (!gridSize || !blockSize) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipFunction_t func = nullptr;
+  const hipError_t hip_error =
+      PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
+  if (hip_error != hipSuccess || !func) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int num_blocks = 0;
+  int best_block_size = 0;
+  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &num_blocks, &max_blocks_per_grid, &best_block_size, device, func, blockSizeLimit,
+      dynSharedMemPerBlk, true);
+  if (ret == hipSuccess) {
+    *blockSize = best_block_size;
+    *gridSize = max_blocks_per_grid;
+  }
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
+                                                   size_t dynSharedMemPerBlk, int blockSizeLimit) {
+  HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);
+  if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int num_blocks = 0;
+  int best_block_size = 0;
+  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSizeLimit,
+      dynSharedMemPerBlk, true);
+  if (ret == hipSuccess) {
+    *blockSize = best_block_size;
+    *gridSize = max_blocks_per_grid;
+  }
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
+                                                            hipFunction_t f,
+                                                            size_t dynSharedMemPerBlk,
+                                                            int blockSizeLimit,
+                                                            unsigned int flags) {
+  HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSizeWithFlags, f, dynSharedMemPerBlk,
+               blockSizeLimit, flags);
+  if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int num_blocks = 0;
+  int best_block_size = 0;
+  const hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSizeLimit,
+      dynSharedMemPerBlk, true);
+  if (ret == hipSuccess) {
+    *blockSize = best_block_size;
+    *gridSize = max_blocks_per_grid;
+  }
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
+                                               const hipLaunchConfig_t* config) {
+  HIP_INIT_API(hipOccupancyMaxPotentialClusterSize, clusterSize, f, config);
+
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  hipFunction_t func;
+  hipError_t hip_error = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
+  const amd::device::Info& deviceInfo = device.info();
+
+  *clusterSize = 0;
+
+  if (hip_error != hipSuccess || func == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  const amd::Kernel* kernel = hip::asKernel(func);
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
+
+  const size_t total_used_lds = wrkGrpInfo->usedLDSSize_ + config->dynamicSmemBytes;
+
+  if (device.info().localMemSizePerCU_ < total_used_lds) {
+    // not enough shared memory to run any cluster which is not an error;
+    // simply means the maximum cluster size will be zero for this particular device
+    HIP_RETURN(hipSuccess);
+  }
+
+  if (deviceInfo.clusterMaxSize_ == 0) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  // the block size is bigger than what the CU can execute
+  if (config->blockDim.x * config->blockDim.y * config->blockDim.z >
+      device.info().maxWorkGroupSize_) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // 1 per CU (the result is the number CUs on the smallest Shader Engine of the design)
+  // Note that for devices not supporting clustered launches, clusterSize would be set
+  // to one
+  *clusterSize = device.info().clusterMaxSize_;
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int* numBlocks, const void* f,
+                                                                 int blockSize,
+                                                                 size_t dynamicSMemSize,
+                                                                 unsigned int flags) {
+  HIP_INIT_API(hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, f, blockSize, dynamicSMemSize,
+               flags);
+  if (numBlocks == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipFunction_t func = nullptr;
+  hipError_t ret = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
+  if (ret != hipSuccess || !func) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int best_block_size = 0;
+  ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      numBlocks, &max_blocks_per_grid, &best_block_size, device, func, blockSize, dynamicSMemSize,
+      false);
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
+                                                        int blockSize, size_t dynamicSMemSize) {
+  HIP_INIT_API(hipOccupancyMaxActiveBlocksPerMultiprocessor, f, blockSize, dynamicSMemSize);
+  if (numBlocks == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipFunction_t func = nullptr;
+  hipError_t ret = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
+  if (ret != hipSuccess || !func) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  int max_blocks_per_grid = 0;
+  int best_block_size = 0;
+  ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      numBlocks, &max_blocks_per_grid, &best_block_size, device, func, blockSize, dynamicSMemSize,
+      false);
+  HIP_RETURN(ret);
+}
+
+// ================================================================================================
+hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
+                                         const hipLaunchConfig_t* config) {
+  HIP_INIT_API(hipOccupancyMaxActiveClusters, numClusters, f, config);
+  dim3 clusterDim;
+  dim3 gridDim;
+  int totalClusterSize;
+  const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
+  hipFunction_t func;
+  hipError_t hip_error = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
+  const amd::device::Info& deviceInfo = device.info();
+  if ((hip_error != hipSuccess) || (func == nullptr)) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  const amd::Kernel* kernel = hip::asKernel(func);
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
+
+  hip_error = hip_impl::clusterDimensions(clusterDim, *config, *wrkGrpInfo, deviceInfo);
+
+  if (hip_error != hipSuccess) {
+    HIP_RETURN(hip_error);
+  }
+
+  totalClusterSize = clusterDim.x * clusterDim.y * clusterDim.z;
+
+  if (deviceInfo.clusterMaxSize_ == 0 && totalClusterSize > 0) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  if (!totalClusterSize) {
+    *numClusters = 0;
+    HIP_RETURN(hipSuccess);
+  }
+
+  // the block size is bigger than what the CU can execute
+  if (config->blockDim.x * config->blockDim.y * config->blockDim.z >
+      device.info().maxWorkGroupSize_) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  int maxBlocksPerGrid = 0;
+  int numBlocks = 0;
+  int bestBlockSize = 0;
+  const dim3& blockDim = config->blockDim;
+  const size_t total_used_lds = wrkGrpInfo->usedLDSSize_ + config->dynamicSmemBytes;
+
+  if (total_used_lds > device.info().localMemSizePerCU_) {
+    // not an error; simply 0 cluster can be launched
+    *numClusters = 0;
+    HIP_RETURN(hipSuccess);
+  }
+
+  hip_error = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &numBlocks, &maxBlocksPerGrid, &bestBlockSize, device, func,
+      blockDim.x * blockDim.y * blockDim.z, config->dynamicSmemBytes, false);
+
+  if (hip_error == hipSuccess) {
+    // a maximum of 15 total clusters in flight per shader engine are possible (gfx1250)
+    static constexpr int MaxClustersPerSE = 15;
+    int computeUnitsPerSE = deviceInfo.maxComputeUnits_ / deviceInfo.numberOfShaderEngines_;
+    int clustersPerSE = (numBlocks * computeUnitsPerSE) / totalClusterSize;
+
+    clustersPerSE = std::min(clustersPerSE, MaxClustersPerSE);
+    *numClusters = clustersPerSE * deviceInfo.numberOfShaderEngines_;
+  }
+
+  HIP_RETURN(hip_error);
 }
 
 // ================================================================================================
@@ -882,13 +1153,6 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
 }
 
 // ================================================================================================
-bool PlatformState::IsValidDynFunc(const void* hfunc) {
-  std::scoped_lock lock(lock_);
-  return std::any_of(dynCO_map_.begin(), dynCO_map_.end(),
-                     [hfunc](const auto& entry) { return entry.second->isValidDynFunc(hfunc); });
-}
-
-// ================================================================================================
 hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
                                           hipDeviceptr_t* dev_ptr, size_t* size_ptr) {
   std::scoped_lock lock(lock_);
@@ -902,22 +1166,7 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
     LogPrintfError("Cannot find the module: 0x%x", hmod);
     return hipErrorNotFound;
   }
-  if (dev_ptr) {
-    *dev_ptr = nullptr;
-  }
-  IHIP_RETURN_ONFAIL(it->second->getManagedVarPointer(hostVar, dev_ptr, size_ptr));
-  // if dev_ptr is nullptr, hostvar is not in managed variable list
-  if ((dev_ptr && !*dev_ptr) || (size_ptr && *size_ptr == 0)) {
-    auto* dvar = static_cast<hip::DeviceVar*>(nullptr);
-    IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, hostVar));
-    if (dev_ptr) {
-      *dev_ptr = dvar->device_ptr();
-    }
-    if (size_ptr) {
-      *size_ptr = dvar->size();
-    }
-  }
-  return hipSuccess;
+  return it->second->GetGlobal(hostVar, reinterpret_cast<void**>(dev_ptr), size_ptr);
 }
 
 // ================================================================================================
@@ -946,10 +1195,10 @@ hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDevice
     return hipErrorNotFound;
   }
 
-  hip::DeviceVar* dvar;
-  IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, tex_ref_entry.second));
-  *dev_ptr = dvar->device_ptr();
-  *size_ptr = dvar->size();
+  amd::Memory* mem = nullptr;
+  IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, tex_ref_entry.second));
+  *dev_ptr = memDevPtr(mem);
+  *size_ptr = mem->getSize();
 
   return hipSuccess;
 }
@@ -965,15 +1214,18 @@ hipError_t PlatformState::GetDynTexRef(const char* hostVar, hipModule_t hmod,
     return hipErrorNotFound;
   }
 
-  hip::DeviceVar* dvar;
-  IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, hostVar));
+  amd::Memory* mem = nullptr;
+  IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
 
-  if (dvar->size() != sizeof(textureReference)) {
+  if (mem->getSize() != sizeof(textureReference)) {
     return hipErrorNotFound;
   }
 
-  dvar->shadowVptr = new texture<char>();
-  *texRef = reinterpret_cast<textureReference*>(dvar->shadowVptr);
+  hip::Var* var = it->second->getVar(hostVar);
+  if (var->shadowVptr == nullptr) {
+    var->shadowVptr = new texture<char>();
+  }
+  *texRef = reinterpret_cast<textureReference*>(var->shadowVptr);
   return hipSuccess;
 }
 
@@ -995,41 +1247,6 @@ void PlatformState::ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
 void PlatformState::PopExec(ihipExec_t& exec) {
   exec = std::move(hip::tls.exec_stack_.top());
   hip::tls.exec_stack_.pop();
-}
-
-// ================================================================================================
-std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& file_path) {
-  std::scoped_lock lock(ufd_lock_);
-
-  auto it = ufd_map_.find(file_path);
-  if (it != ufd_map_.end()) {
-    return it->second;
-  }
-
-  // Get the file desc and file size from amd::Os API
-  amd::Os::FileDesc fdesc;
-  size_t fsize = 0;
-  if (!amd::Os::GetFileHandle(file_path.c_str(), &fdesc, &fsize)) {
-    return nullptr;
-  }
-  
-  auto ufd = std::make_shared<UniqueFD>(file_path, fdesc, fsize);
-  ufd_map_.emplace(file_path, ufd);
-  return ufd;
-}
-
-// ================================================================================================
-bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) {
-  std::scoped_lock lock(ufd_lock_);
-
-  // if use_count is 2, then there is 1 entry in the map and the current entry is the last close.
-  if (ufd.use_count() == 2) {
-    ufd_map_.erase(ufd->fpath_);
-    if (!amd::Os::CloseFileHandle(ufd->fdesc_)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // ================================================================================================

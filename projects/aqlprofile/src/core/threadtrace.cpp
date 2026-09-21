@@ -119,6 +119,8 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       size_t buf_num = memorymgr->config.buffer_data.at(se_index).size();
       sample_ptr = memorymgr->config.buffer_data.at(se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
       callback(se_index, sample_ptr, sample_size, userdata);
+      // Reset swaps for next thread trace start
+      memorymgr->buffer_swaps = 0;
       return status;
     }
   }

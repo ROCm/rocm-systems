@@ -1,16 +1,22 @@
 """
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
+
 subtree_to_project_map = {
-    "projects/amdsmi": "core",
+    "emulation/rocjitsu": "emulation",
+    "emulation/mirage": "emulation",
+    "projects/amdsmi": "amdsmi",  # amdsmi changes run amdsmi + its downstream dependents
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
+    "projects/hrr": "hrr",
+
     "projects/cuid": "rdc",
+    "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
     "projects/hip-tests": "runtimes",
     "projects/hipother": "runtimes",
     "projects/rdc": "dc_tools",
-    "projects/rocdbgapi": "debug_tools",
+    "projects/rocdbgapi": "debug_tools-dbgapi",
     # "projects/rocdecode": "media-libs",
     # "projects/rocjpeg": "media-libs",
     "projects/rocm-core": "core",
@@ -21,8 +27,7 @@ subtree_to_project_map = {
     "projects/rocprofiler-register": "profiler",
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
-    "projects/rocprofiler": "profiler",
-    "projects/rocr-debug-agent": "debug_tools",
+    "projects/rocr-debug-agent": "debug_tools-debug-agent",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
@@ -31,37 +36,90 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects_to_test": "",  # will run sanity test to cover rocminfo and amdsmi
+        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
+        "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
+    },
+    # amdsmi changes fan out to its downstream dependents across rocm-systems
+    # and rocm-libraries, so build everything and test amdsmi plus those consumers.
+    # Note: rccl is a downstream consumer but is intentionally excluded here.
+    # The main Linux build forces -DTHEROCK_ENABLE_RCCL=OFF (see therock-ci-linux.yml)
+    # and RCCL is exercised by its own dedicated pipeline (run_linux_rccl_ci),
+    # so listing it here would be a no-op.
+    "amdsmi": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "amdsmi, rocblas, hipblas, hipblaslt, rocprofiler-systems, rocrtst",
+    },
+    "emulation": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_EMULATION=ON"],
+        "projects_to_test": "",
     },
     "dc_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_DC_TOOLS=ON"],
         "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
-    "debug_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects_to_test": "rocr-debug-agent, rocgdb",
+    # dbgapi changes need to exercise both ROCgdb and debug agent.
+    "debug_tools-dbgapi": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
+        ],
+        "projects_to_test": "rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocgdb-corefile",
+    },
+    # debug agent changes don't have to exercise ROCgdb.
+    "debug_tools-debug-agent": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
+        ],
+        "projects_to_test": "rocr-debug-agent",
     },
     # media libs to be enabled in following PR
     # "media-libs": {
-    #     "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_MEDIA_LIBS=ON",
+    #     "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON", "-DTHEROCK_ENABLE_MEDIA_LIBS=ON"],
     #     "projects_to_test": "", # "rocdecode-tests, rocjpeg-tests",
     # },
     "profiler": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",
     },
     "rocshmem": {
-        "cmake_options": "-DTHEROCK_ENABLE_ROCSHMEM=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
+    "storage_libs": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_STORAGE_LIBS=ON",
+            "-DTHEROCK_ENABLE_ROCPROFV3=ON",
+        ],
+        "projects_to_test": "",  # hipfile testing to be enabled in a future PR
+    },
+    # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
     "runtimes": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocgdb-corefile",
+    },
+    # HRR changes require a blocking build of the runtime and HRR test binaries,
+    # but GPU execution is handled separately on datacenter/nightly runners.
+    "hrr": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_CORE=ON",
+            "-DTHEROCK_BUILD_TESTING=ON",
+        ],
+        "projects_to_test": "",
     },
     "all": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "amdsmi, hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocgdb-corefile",
+    },
+    # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
+    # Nightly (schedule) uses this entry explicitly for alignment.
+    # additional mathlib to test for nightly: rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma
+    # instead of above blanket addition of all tests, we can add logic to determine which mathlibs to test, based on file changes from last nightly run. Can be handled once the tests scripts move to component/monorepo src
+    "nightly": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "amdsmi, hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocgdb-corefile, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
     },
 }
 
@@ -79,6 +137,7 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/clr/*",
     "projects/hip/*",
     "projects/hip-tests/*",
+    "projects/rocdbgapi/*",
     "projects/rocr-runtime/*",
     "shared/amdgpu-windows-interop/**",
     ".github/*/therock*",

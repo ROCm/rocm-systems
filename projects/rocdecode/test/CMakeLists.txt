@@ -93,11 +93,74 @@ else()
 endif(BUILD_FROM_SOURCE)
 find_package(FFmpeg QUIET)
 
+# Check if ASAN is enabled via environment variables or compiler flags
+set(ASAN_ENABLED OFF)
+# Check common ASAN environment variables
+if(DEFINED ENV{ASAN_OPTIONS} OR DEFINED ENV{ASAN_SYMBOLIZER_PATH} OR DEFINED ENV{LSAN_OPTIONS})
+  set(ASAN_ENABLED ON)
+endif()
+# Check if -fsanitize=address is in the compiler flags
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR
+   CMAKE_C_FLAGS MATCHES "-fsanitize=address" OR
+   CMAKE_EXE_LINKER_FLAGS MATCHES "-fsanitize=address")
+  set(ASAN_ENABLED ON)
+endif()
+
+# Locate the ASAN runtime library if ASAN is enabled
+set(ASAN_PRELOAD "")
+if(ASAN_ENABLED)
+  set(ASAN_LIB_PATH "${ROCM_PATH}/lib/llvm/lib/clang")
+  # Try to get the clang version from the compiler
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} --version
+    OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  # Extract major version (e.g., "19" from "clang version 19.0.0")
+  if(CLANG_VERSION_OUTPUT MATCHES "clang version ([0-9]+)")
+    set(CLANG_MAJOR_VERSION "${CMAKE_MATCH_1}")
+    set(ASAN_LIB_CANDIDATE "${ASAN_LIB_PATH}/${CLANG_MAJOR_VERSION}/lib/linux/libclang_rt.asan-x86_64.so")
+    if(EXISTS "${ASAN_LIB_CANDIDATE}")
+      set(ASAN_PRELOAD "${ASAN_LIB_CANDIDATE}")
+      message("-- ${White}${PROJECT_NAME}: ASAN enabled, runtime library found -- ${ASAN_PRELOAD}${ColourReset}")
+    endif()
+  endif()
+  # Fallback: search available versions (sorted descending) if compiler detection failed
+  if(NOT ASAN_PRELOAD)
+    file(GLOB CLANG_VERSION_DIRS "${ASAN_LIB_PATH}/*")
+    list(SORT CLANG_VERSION_DIRS ORDER DESCENDING)
+    foreach(CLANG_DIR ${CLANG_VERSION_DIRS})
+      if(IS_DIRECTORY ${CLANG_DIR})
+        set(ASAN_LIB_CANDIDATE "${CLANG_DIR}/lib/linux/libclang_rt.asan-x86_64.so")
+        if(EXISTS "${ASAN_LIB_CANDIDATE}")
+          set(ASAN_PRELOAD "${ASAN_LIB_CANDIDATE}")
+          message("-- ${White}${PROJECT_NAME}: ASAN enabled, runtime library found (fallback) -- ${ASAN_PRELOAD}${ColourReset}")
+          break()
+        endif()
+      endif()
+    endforeach()
+  endif()
+  if(NOT ASAN_PRELOAD)
+    message(WARNING "${PROJECT_NAME}: ASAN detected but libclang_rt.asan-x86_64.so not found in ${ASAN_LIB_PATH}")
+  endif()
+endif()
+
 # Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
 set(USING_THE_ROCK OFF)
 if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   set(USING_THE_ROCK ON)
 endif()
+
+# Helper macro: apply test environment (ASAN preload when enabled).
+macro(set_test_env TEST_NAME)
+  if(ASAN_PRELOAD)
+    set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "LD_PRELOAD=${ASAN_PRELOAD}")
+  endif()
+endmacro()
+
+# Option to enable extended tests
+option(ENABLE_EXTENDED_TESTS "Enable extended FFmpeg-based tests" OFF)
 
 # 1 - videoDecodeRaw HEVC
 add_test(
@@ -111,6 +174,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.265
 )
+set_test_env(video_decodeRaw-HEVC)
 
 # 2 - videoDecodeRaw AVC
 add_test(
@@ -124,6 +188,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.264
 )
+set_test_env(video_decodeRaw-AVC)
 
 # 3 - videoDecodeRaw AV1
 add_test(
@@ -137,6 +202,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.ivf
 )
+set_test_env(video_decodeRaw-AV1)
 
 # 4 - videoDecodeRaw VP9
 add_test(
@@ -150,6 +216,7 @@ add_test(
             --test-command "videodecoderaw"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
 )
+set_test_env(video_decodeRaw-VP9)
 
 # 5 - rocdecDecode
 add_test(
@@ -163,6 +230,7 @@ add_test(
             --test-command "rocdecdecode"
             -i ${ROCM_PATH}/share/rocdecode/frames
 )
+set_test_env(rocdec_Decode-HEVC)
 
 # 6 - rocDecodeNegativeApiTests
 add_test(
@@ -175,10 +243,23 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "rocdecodenegativetest"
 )
+set_test_env(rocDecode_Negative_API_Tests)
 
-if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
-  message("-- ${Green}${PROJECT_NAME} FFmpeg found - rocdecode tests requiring FFmpeg added")
-  # 7 - videoDecode HEVC
+# 7 - videoDecodeCaps
+add_test(
+  NAME
+    video_decodeCaps
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeCaps"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeCaps"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodecaps"
+)
+set_test_env(video_decodeCaps)
+
+if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
+  # 8 - videoDecode HEVC
   add_test(
     NAME
       video_decode-HEVC
@@ -190,8 +271,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
+  set_test_env(video_decode-HEVC)
 
-  # 8 - videoDecode AVC
+  # 9 - videoDecode AVC
   add_test(
     NAME
       video_decode-AVC
@@ -203,8 +285,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
   )
+  set_test_env(video_decode-AVC)
 
-  # 9 - videoDecode AV1
+  # 10 - videoDecode AV1
   add_test(
     NAME
       video_decode-AV1
@@ -216,8 +299,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
   )
+  set_test_env(video_decode-AV1)
 
-  # 10 - videoDecode VP9
+  # 11 - videoDecode VP9
   add_test(
     NAME
       video_decode-VP9
@@ -229,8 +313,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecode"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
   )
+  set_test_env(video_decode-VP9)
 
-  # 11 - videoDecodePerf
+  # 12 - videoDecodePerf
   add_test(
     NAME
       video_decodePerf-HEVC
@@ -242,8 +327,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecodeperf"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
+  set_test_env(video_decodePerf-HEVC)
 
-  # 12 - videoDecodeBatch
+  # 13 - videoDecodeBatch
   add_test(
     NAME
       video_decodeBatch
@@ -255,8 +341,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecodebatch"
             -i ${ROCM_PATH}/share/rocdecode/video/ -t 2
   )
+  set_test_env(video_decodeBatch)
 
-  # 13 - videoDecodeRGB
+  # 14 - videoDecodeRGB
   add_test(
     NAME
       video_decodeRGB-HEVC
@@ -268,8 +355,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecodergb"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4 -of rgb
   )
+  set_test_env(video_decodeRGB-HEVC)
 
-  # 14 - videoDecodeMem
+  # 15 - videoDecodeMem
   add_test(
     NAME
       video_decodeMem-HEVC
@@ -281,8 +369,9 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecodemem"
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
+  set_test_env(video_decodeMem-HEVC)
 
-  # 15 - videoDecodeRGBResize
+  # 16 - videoDecodeRGBResize
   add_test(
     NAME
       video_decodeRGB-Resize
@@ -294,9 +383,10 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             --test-command "videodecodergb"
             -i "${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4" -resize 640x360 -of rgb
   )
+  set_test_env(video_decodeRGB-Resize)
 
-  if(rocdecode-host_FOUND)
-    # 16 - videoDecode Host backend
+  if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
+    # 17 - videoDecode Host backend
     add_test(
       NAME
         video_decode-Host-Backend
@@ -310,8 +400,12 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             -backend 1
     )
   else()
-    message("-- ${Yellow}${PROJECT_NAME} rocdecode-host NOT found. rocdecode tests requiring rocdecode-host excluded")
-  endif(rocdecode-host_FOUND)
+    if(NOT rocdecode-host_FOUND)
+      message("-- ${Yellow}${PROJECT_NAME} rocdecode-host NOT found. rocdecode tests requiring rocdecode-host excluded")
+    endif()
+  endif(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
 else()
-  message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
-endif(FFMPEG_FOUND AND NOT USING_THE_ROCK)
+  if(NOT FFMPEG_FOUND)
+    message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
+  endif()
+endif(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)

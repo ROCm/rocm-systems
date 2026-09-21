@@ -1,24 +1,5 @@
-/*
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "smi_nic.h"
 
@@ -519,21 +500,25 @@ std::optional<std::string> SmiNic::perm_address() const {
   }
 
   const std::string& port_iface = ports_[0].interface();
-  struct ethtool_perm_addr permaddr;
-  permaddr.cmd = ETHTOOL_GPERMADDR;
-  permaddr.size = 6;
+  constexpr size_t addr_len = 6;
+  // ethtool_perm_addr has a flexible array member data[], so we must
+  // allocate extra space beyond the struct header for the address bytes.
+  std::vector<uint8_t> buf(sizeof(struct ethtool_perm_addr) + addr_len, 0);
+  auto* permaddr = reinterpret_cast<struct ethtool_perm_addr*>(buf.data());
+  permaddr->cmd = ETHTOOL_GPERMADDR;
+  permaddr->size = addr_len;
 
-  int ret = smi_ethtool_ioctl(port_iface, &permaddr);
+  int ret = smi_ethtool_ioctl(port_iface, permaddr);
   if (ret != 0) {
     return std::nullopt;
   }
 
-  if (permaddr.size == 6) {
+  if (permaddr->size == addr_len) {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
-    for (int i = 0; i < 6; i++) {
+    for (size_t i = 0; i < addr_len; i++) {
       if (i > 0) ss << ":";
-      ss << std::setw(2) << static_cast<unsigned int>(permaddr.data[i]);
+      ss << std::setw(2) << static_cast<unsigned int>(permaddr->data[i]);
     }
     return ss.str();
   }

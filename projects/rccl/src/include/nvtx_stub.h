@@ -9,7 +9,9 @@
 
 #include <nvtx3/nvToolsExtPayload.h>
 
-struct nccl_domain{static constexpr char const* name{"NCCL"};};
+struct nccl_domain {
+  static constexpr char const* name{"NCCL"};
+};
 
 #define NVTX3_FUNC_RANGE_IN(domain)
 #define nvtxNameOsThreadA(syscall, thread)

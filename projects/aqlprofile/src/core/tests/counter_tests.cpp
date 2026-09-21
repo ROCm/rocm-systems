@@ -22,7 +22,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include <hsa/hsa.h>
+#include "hsa_includes.h"
 #include "aqlprofile-sdk/aql_profile_v2.h"
 
 // Mocks and helpers

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef KFD_IOCTL_H_INCLUDED
 #define KFD_IOCTL_H_INCLUDED
@@ -1068,7 +1049,7 @@ struct kfd_runtime_info {
  *
  * Coordinates debug exception signalling and debug device enablement with runtime.
  *
- * @r_debug - pointer to user struct for sharing information between ROCr and the debuggger
+ * @r_debug - pointer to user struct for sharing information between ROCr and the debugger
  * @mode_mask - mask to set mode
  *  KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK - enable runtime for debugging, otherwise disable
  *  KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK - enable trap temporary setup (ignore on disable)
@@ -1177,7 +1158,7 @@ enum kfd_dbg_trap_operations {
  *     @exception_mask (IN)  - exceptions to raise to the debugger
  *     @rinfo_ptr      (IN)  - pointer to runtime info buffer (see kfd_runtime_info)
  *     @rinfo_size     (IN/OUT)  - size of runtime info buffer in bytes
- *     @dbg_fd         (IN)  - fd the KFD will nofify the debugger with of raised
+ *     @dbg_fd         (IN)  - fd the KFD will notify the debugger with of raised
  *          exceptions set in exception_mask.
  *
  *     Generic errors apply (see kfd_dbg_trap_operations).

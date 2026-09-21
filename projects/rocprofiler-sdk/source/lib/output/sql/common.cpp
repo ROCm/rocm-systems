@@ -34,6 +34,7 @@
 #include <fmt/ranges.h>
 #include <sqlite3.h>
 
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -47,11 +48,15 @@ namespace sql
 namespace sdk = ::rocprofiler::sdk;
 
 void
-check(std::string_view function, int status, std::string_view stmt)
+check(std::string_view               function,
+      int                            status,
+      std::string_view               stmt,
+      const std::unordered_set<int>& valid_statuses)
 {
-    if(status != SQLITE_OK)
+    if(valid_statuses.find(status) == valid_statuses.end())
     {
-        ROCP_FATAL << "[" << function << "] " << stmt << " failed with error code " << status;
+        ROCP_FATAL << "[" << function << "] " << stmt << " failed with error code " << status
+                   << ": " << sqlite3_errstr(status);
     }
 }
 
@@ -139,6 +144,7 @@ extract_column_name(sqlite3_stmt* stmt, int32_t col)
     return std::string{sqlite3_column_name(stmt, col)};
 }
 
+template <bool WarnOnError>
 int64_t
 extract_row_count(sqlite3* conn, std::string_view query)
 {
@@ -147,14 +153,20 @@ extract_row_count(sqlite3* conn, std::string_view query)
     auto _count_query = fmt::format("SELECT COUNT(*) AS count FROM ({}) x;", _query);
 
     sqlite3_stmt* _stmt = nullptr;
-    if(sqlite3_prepare_v2(conn, _count_query.c_str(), -1, &_stmt, nullptr) != SQLITE_OK)
+    if(auto ec = sqlite3_prepare_v2(conn, _count_query.c_str(), -1, &_stmt, nullptr);
+       ec != SQLITE_OK)
     {
-        ROCP_CI_LOG(ERROR) << fmt::format(
-            "Error preparing select statement for '{}': {}", _count_query, sqlite3_errmsg(conn));
+        if constexpr(WarnOnError)
+        {
+            ROCP_CI_LOG(ERROR) << fmt::format("Error {} preparing select statement for '{}': {}",
+                                              ec,
+                                              _count_query,
+                                              sqlite3_errmsg(conn));
+        }
         return 0;
     }
 
-    ROCP_CI_LOG_IF(ERROR, _stmt == nullptr) << "Error preparing statment: " << query;
+    ROCP_CI_LOG_IF(ERROR, _stmt == nullptr) << "Error preparing statement: " << query;
 
     int64_t nrows = 0;
     if(_stmt && sqlite3_column_count(_stmt) == 1 && sqlite3_step(_stmt) == SQLITE_ROW)
@@ -165,6 +177,11 @@ extract_row_count(sqlite3* conn, std::string_view query)
     ROCP_INFO << fmt::format("SQL query '{}' contains {} rows", query, nrows);
     return nrows;
 }
+
+template int64_t
+extract_row_count<true>(sqlite3* conn, std::string_view query);
+template int64_t
+extract_row_count<false>(sqlite3* conn, std::string_view query);
 
 namespace
 {

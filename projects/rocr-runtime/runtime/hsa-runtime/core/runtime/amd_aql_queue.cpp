@@ -80,12 +80,14 @@ namespace AMD {
 
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
-                   void* err_data, uint64_t flags)
+                   void* err_data, bool metadata_prefetch, uint64_t flags)
     : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu(), agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       ring_buf_(nullptr),
       ring_buf_alloc_bytes_(0),
+      ring_buf_metadata_(nullptr),
+      ring_buf_metadata_alloc_bytes_(0),
       queue_id_(HSA_QUEUEID(-1)),
       active_(false),
       agent_(agent),
@@ -114,16 +116,19 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
                              "Requested queue with non-power of two packet capacity.\n");
 
+  if (core::Runtime::runtime_singleton_->KfdVersion().supports_metadata_prefetch &&
+      metadata_prefetch &&
+      agent_->supported_isas()[0]->GetMajorVersion() == 12
+      && agent_->supported_isas()[0]->GetMinorVersion() >= 5) {
+    /* First valid version of meta data prefetch - Version is 0.0 */
+    dispatch_version_.set_version(0, 0);
+    barrier_version_.set_version(0, 0);
+  }
+
   // Allocate the AQL packet ring buffer.
   AllocRegisteredRingBuffer(queue_size_pkts);
   if (ring_buf_ == nullptr) throw std::bad_alloc();
   MAKE_NAMED_SCOPE_GUARD(RingGuard, [&]() { FreeQueueMemory(); });
-
-  // Fill the ring buffer with invalid packet headers.
-  // Leave packet content uninitialized to help track errors.
-  for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id) {
-    (((core::AqlPacket*)ring_buf_)[pkt_id]).dispatch.header = HSA_PACKET_TYPE_INVALID;
-  }
 
   // Zero the amd_queue_ structure to clear RPTR/WPTR before queue attach.
   memset(&amd_queue_, 0, sizeof(amd_queue_));
@@ -201,7 +206,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   queue_scratch_.use_once_limit = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (queue_scratch_.use_once_limit > agent_->MaxScratchDevice()) {
-    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
+    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%zu max:%zu)!\n",
                     queue_scratch_.use_once_limit, agent_->MaxScratchDevice());
     queue_scratch_.use_once_limit = agent_->MaxScratchDevice();
   }
@@ -269,11 +274,15 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
     queue_rsrc.ErrorReason = &exception_signal_->signal_.value;
     status =
-        agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0, ring_buf_,
-                                    ring_buf_alloc_bytes_, queue_event(), queue_rsrc);
+        agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
+                                    ring_buf_, ring_buf_alloc_bytes_,
+                                    ring_buf_metadata_alloc_bytes_,
+                                    queue_event(), queue_rsrc);
   } else {
     status = agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
-                                         ring_buf_, ring_buf_alloc_bytes_, NULL, queue_rsrc);
+                                         ring_buf_, ring_buf_alloc_bytes_,
+                                         ring_buf_metadata_alloc_bytes_,
+                                         NULL, queue_rsrc);
   }
   if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
@@ -343,6 +352,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 }
 
 AqlQueue::~AqlQueue() {
+  agent_->UnregisterAqlQueue(this);
+
   // Remove error handler synchronously.
   // Sequences error handler callbacks with queue destroy.
   dynamicScratchState |= ERROR_HANDLER_TERMINATE;
@@ -486,6 +497,20 @@ void AqlQueue::StoreRelease(hsa_signal_value_t value) {
   StoreRelaxed(value);
 }
 
+void AqlQueue::GetInfoProperties(uint8_t value[8]) const {
+  auto setFlag = [&](uint32_t bit) {
+    assert(bit < 8 * 8 && "Flag value exceeds input parameter size");
+
+    uint index = bit / 8;
+    uint subBit = bit % 8;
+    ((uint8_t*)value)[index] |= 1 << subBit;
+  };
+
+  memset(value, 0, sizeof(uint8_t) * 8);
+
+  //TODO: Set future queue properties here
+}
+
 hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
@@ -508,8 +533,40 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
       break;
     case HSA_QUEUE_INFO_HW_ID:
       // Return the hardware queue ID for both counted and non-counted queues
-      *static_cast<uint32_t*>(value) = public_handle()->id; 
+      *static_cast<uint32_t*>(value) = public_handle()->id;
       break;
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR:
+      *(reinterpret_cast<uint8_t*>(value)) = dispatch_version_.major_version();
+      break;
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR:
+      *(reinterpret_cast<uint8_t*>(value)) = dispatch_version_.minor_version();
+      break;
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MAJOR:
+      *(reinterpret_cast<uint8_t*>(value)) = barrier_version_.major_version();
+      break;
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MINOR:
+      *(reinterpret_cast<uint8_t*>(value)) = barrier_version_.minor_version();
+      break;
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER:
+      *((uint64_t*)value) = (uint64_t)ring_buf_metadata_;
+      break;
+    case HSA_AMD_QUEUE_INFO_PROPERTIES:
+      GetInfoProperties(reinterpret_cast<uint8_t*>(value));
+      break;
+    case HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS:
+      *static_cast<bool*>(value) = vm_faulted_.load(std::memory_order_acquire);
+      break;
+    case HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS:
+      *reinterpret_cast<uint64_t*>(value) = vm_fault_address_;
+      break;
+    case HSA_AMD_QUEUE_INFO_VM_FAULT_REASON:
+      *reinterpret_cast<uint32_t*>(value) = vm_fault_reason_;
+      break;
+    case HSA_AMD_QUEUE_INFO_ENGINE_TYPE:
+      *static_cast<hsa_amd_queue_engine_t*>(value) = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+      break;
+    case HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -539,22 +596,57 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
   ring_buf_alloc_bytes_ = queue_size_pkts * sizeof(core::AqlPacket);
   assert(IsMultipleOf(ring_buf_alloc_bytes_, 4096) && "Ring buffer sizes must be 4KiB aligned.");
 
+  switch (dispatch_version_.major_version()) {
+    case 0: /* Only version 0 supported for now */
+        ring_buf_metadata_alloc_bytes_ = queue_size_pkts * sizeof(core::AqlMetadataPrefetchPacket);
+        assert(IsMultipleOf(ring_buf_metadata_alloc_bytes_, 4096) && "Ring buffer sizes must be 4KiB aligned.");
+        break;
+      default:
+        break;
+  }
+
   if (IsDeviceMemRingBuf()) {
     if (!agent_->LargeBarEnabled()) {
       throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
                                 "Trying to allocate an AQL ring buffer in device memory without "
                                 "large BAR PCIe enabled.");
     }
+    // AllocateExecutable: the CP hardware requests execute permissions for
+    // packet buffer accesses — it treats AQL packets as an execution language
+    // and will fault on ring buffers without the execute attribute.
+    //
+    // AllocateUncached: propagates through KFD (KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED)
+    // → AMDGPU (AMDGPU_GEM_CREATE_UNCACHED) and sets the page MTYPE to UC in the
+    // GPU page tables.  This is a GPU-side attribute, not CPU-side.
+    //
+    // Callers are responsible for the required CPU-side packet-store ordering
+    // (non-temporal stores + sfence / MOVDIR64B).
     ring_buf_ = agent_->coarsegrain_allocator()(
-        ring_buf_alloc_bytes_,
+        ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
         core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
   } else {
     ring_buf_ = agent_->system_allocator()(
-        ring_buf_alloc_bytes_, 0x1000,
+        ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,
         core::MemoryRegion::AllocateExecutable);
   }
 
   assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
+  // Fill the ring buffer with invalid packet headers.
+  // Leave packet content uninitialized to help track errors.
+  for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id)
+    (((core::AqlPacket*)ring_buf_)[pkt_id]).dispatch.header = HSA_PACKET_TYPE_INVALID;
+
+  if (ring_buf_metadata_alloc_bytes_) {
+    ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
+
+    // Fill the metadata ring buffer with invalid packet headers.
+    for (uint32_t pkt_id = 0; pkt_id < queue_size_pkts; ++pkt_id) {
+      ((((core::AqlMetadataPrefetchPacket*)ring_buf_metadata_)[pkt_id]).packet.header0).type = HSA_PACKET_TYPE_INVALID;
+      ((((core::AqlMetadataPrefetchPacket*)ring_buf_metadata_)[pkt_id]).packet.header1).type = HSA_PACKET_TYPE_INVALID;
+      ((((core::AqlMetadataPrefetchPacket*)ring_buf_metadata_)[pkt_id]).packet.header2).type = HSA_PACKET_TYPE_INVALID;
+      ((((core::AqlMetadataPrefetchPacket*)ring_buf_metadata_)[pkt_id]).packet.header3).type = HSA_PACKET_TYPE_INVALID;
+    }
+  }
 }
 
 void AqlQueue::FreeQueueMemory() {
@@ -575,8 +667,11 @@ void AqlQueue::FreeQueueMemory() {
     }
   }
 
-  ring_buf_ = NULL;
+  ring_buf_ = nullptr;
   ring_buf_alloc_bytes_ = 0;
+
+  ring_buf_metadata_ = nullptr;
+  ring_buf_metadata_alloc_bytes_ = 0;
 }
 
 void AqlQueue::CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const {
@@ -592,18 +687,19 @@ void AqlQueue::CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const {
 
 int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
                                  uint32_t ring_buf_phys_size_bytes) const {
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
   int fd;
-#ifdef HAVE_MEMFD_CREATE
-  fd = syscall(__NR_memfd_create, ring_buf_shm_path, 0);
 
-  if (fd == -1) return -1;
+  fd = memfd_create(ring_buf_shm_path, 0);
 
-  if (ftruncate(fd, ring_buf_phys_size_bytes) == -1) {
-    CloseRingBufferFD(ring_buf_shm_path, fd);
+  if (fd != -1) {
+    if (ftruncate(fd, ring_buf_phys_size_bytes) == 0) {
+      return fd;
+    }
+    close(fd);
     return -1;
   }
-#else
+
   fd = shm_open(ring_buf_shm_path, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
 
   if (fd == -1) return -1;
@@ -612,10 +708,10 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
     CloseRingBufferFD(ring_buf_shm_path, fd);
     return -1;
   }
-#endif
+
   return fd;
 #else
-  assert(false && "Function only needed on Linux.");
+  assert(false && "Function only needed on Linux and FreeBSD.");
   return -1;
 #endif
 }
@@ -625,6 +721,7 @@ void AqlQueue::Suspend() {
   auto err =
       agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
   assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+  (void)err;
 }
 
 void AqlQueue::Resume() {
@@ -633,6 +730,7 @@ void AqlQueue::Resume() {
     auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
                                             ring_buf_alloc_bytes_, NULL);
     assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+    (void)err;
   }
 }
 
@@ -641,6 +739,7 @@ hsa_status_t AqlQueue::Inactivate() {
   if (active) {
     auto err = agent_->driver().DestroyQueue(queue_id_);
     assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+    (void)err;
     atomic::Fence(std::memory_order_acquire);
   }
   return HSA_STATUS_SUCCESS;
@@ -928,6 +1027,26 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   core::AqlPacket *pkt = NULL;
   uint64_t dispatch_id = UINT64_MAX;
 
+  /* These fields need to be binary compatible between hsa_kernel_dispatch_packet_t and
+     hsa_amd_ext_kernel_dispatch_packet_t.
+   */
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, header) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, header),
+                "invalid offset for headers");
+
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_x) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_x),
+                "invalid offset for workgroup_size_x");
+
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_y) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_y),
+                "invalid offset for workgroup_size_y");
+
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_z) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_z),
+                "invalid offset for workgroup_size_z");
+
+
   auto get_dispatch_pkt = [&]() {
     dispatch_id = amd_queue_.read_dispatch_id;
     do {
@@ -939,7 +1058,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
       core::AqlPacket *dispatch_pkt =
           &((core::AqlPacket *)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
-      if (dispatch_pkt->IsDispatchAndNeedsScratch()) return dispatch_pkt;
+
+      if (dispatch_pkt->IsDispatchAndNeedsScratch())
+        return dispatch_pkt;
 
       dispatch_id++;
     } while (dispatch_id <= LoadWriteIndexRelaxed());
@@ -957,16 +1078,17 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   };
 
   auto calc_dispatch_groups = [&](core::AqlPacket& pkt) {
+    auto ceil_divide = [](uint64_t a, uint64_t b) { return (a + b - 1) / b; };
+
     const uint64_t lanes_per_group =
         (uint64_t(pkt.dispatch.workgroup_size_x) * pkt.dispatch.workgroup_size_y) *
         pkt.dispatch.workgroup_size_z;
 
-    uint64_t groups = ((uint64_t(pkt.dispatch.grid_size_x) + pkt.dispatch.workgroup_size_x - 1) /
-                       pkt.dispatch.workgroup_size_x) *
-                      ((uint64_t(pkt.dispatch.grid_size_y) + pkt.dispatch.workgroup_size_y - 1) /
-                       pkt.dispatch.workgroup_size_y) *
-                      ((uint64_t(pkt.dispatch.grid_size_z) + pkt.dispatch.workgroup_size_z - 1) /
-                       pkt.dispatch.workgroup_size_z);
+    uint64_t groups_x = ceil_divide(pkt.dispatch_grid_size_x(), pkt.dispatch.workgroup_size_x);
+    uint64_t groups_y = ceil_divide(pkt.dispatch_grid_size_y(), pkt.dispatch.workgroup_size_y);
+    uint64_t groups_z = ceil_divide(pkt.dispatch_grid_size_z(), pkt.dispatch.workgroup_size_z);
+    uint64_t groups = groups_x * groups_y * groups_z;
+
     const uint32_t cu_count = amd_queue_.max_cu_id + 1;
 
     const uint32_t engines = agent_->properties().NumShaderBanks;
@@ -1049,9 +1171,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
     agent_->AcquireQueueAltScratch(scratch);
     if (scratch.alt_queue_base) {
-      scratch.alt_dispatch_limit_x = pkt->dispatch.grid_size_x;
-      scratch.alt_dispatch_limit_y = pkt->dispatch.grid_size_y;
-      scratch.alt_dispatch_limit_z = pkt->dispatch.grid_size_z;
+      scratch.alt_dispatch_limit_x = pkt->dispatch_grid_size_x();
+      scratch.alt_dispatch_limit_y = pkt->dispatch_grid_size_y();
+      scratch.alt_dispatch_limit_z = pkt->dispatch_grid_size_z();
 
       InitScratchSRD();
       /*
@@ -1292,7 +1414,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
       // EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID
       { 21, HSA_STATUS_ERROR_INVALID_ARGUMENT },
       // EC_QUEUE_PACKET_DISPATCH_REGISTER_SIZE_INVALID
-      { 22, HSA_STATUS_ERROR_INVALID_ISA },
+      { 22, (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS },
       // EC_QUEUE_PACKET_VENDOR_UNSUPPORTED
       { 23, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT },
       // EC_QUEUE_PREEMPTION_ERROR
@@ -1331,22 +1453,35 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   // Undefined or unexpected code
   assert((errorCode != HSA_STATUS_ERROR) && "Undefined or unexpected queue error code");
 
-  // Suppress VM fault reporting.  This is more useful when reported through the system error
-  // handler.
+  // VM fault callback is handled by VMFaultHandler. Mark this queue as
+  // faulted so VMFaultHandler can identify it and stamp fault details.
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
-    debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
+    queue->MarkVMFaulted();
+    core::Runtime::runtime_singleton_->SignalVMFault();
+    log_warning_n(1,"Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
     return exceptionHandlerDone();
   }
 
+  const char* errorMsg = nullptr;
+  if (HSA::hsa_status_string(errorCode, &errorMsg) == HSA_STATUS_SUCCESS && errorMsg) {
+    log_warning_n(1, "Queue error: %s\n", errorMsg);
+  } else {
+    log_warning_n(1, "Queue error: code 0x%lx\n", (unsigned long)error_code);
+  }
+
+  // Suspend faulted queue first
+  queue->Suspend();
+
   // Fallback if KFD does not support GPU core dump. In this case, the core
   // dump is generated by hsa-runtime.
+  std::vector<AMD::AqlQueue*> suspended_queues;
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_core_dump &&
                 !(queue->agent_->supported_isas()[0]->GetMajorVersion() == 11
                   && queue->agent_->supported_isas()[0]->GetMinorVersion() < 5)) {
 
     if (pcs::PcsRuntime::instance()->SessionsActive())
       fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
-    else if (amd::coredump::dump_gpu_core())
+    else if (amd::coredump::dump_gpu_core(&suspended_queues))
       fprintf(stderr, "GPU core dump failed\n");
     // supports_core_dump flag is overwritten to avoid generate core dump file again
     // caught by a different exception handler. Such as VMFaultHandler.
@@ -1354,10 +1489,15 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
       core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging, true);
   }
 
-  queue->Suspend();
   if (queue->errors_callback_ != nullptr) {
     queue->errors_callback_(errorCode, queue->public_handle(), queue->errors_data_);
   }
+
+  // If callback returned (didn't abort), resume queues that we suspended
+  for (AMD::AqlQueue* q : suspended_queues) {
+    q->Resume();
+  }
+
   return exceptionHandlerDone();
 }
 
@@ -1412,7 +1552,10 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
   if ((!cu_mask_.empty()) || (num_cu_mask_count != 0) || (!global_mask.empty())) {
 
     // Devices with WGPs must conform to even-indexed contiguous pairwise CU enablement.
-    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10) {
+    // Disable WGP mode check for gfx1250
+    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 &&
+        !(agent_->supported_isas()[0]->GetMajorVersion() == 12 &&
+          agent_->supported_isas()[0]->GetMinorVersion() >= 5)) {
       for (int i = 0; i < mask.size() * 32; i += 2) {
         uint32_t cu_pair = (mask[i / 32] >> (i % 32)) & 0x3;
         if (cu_pair && cu_pair != 0x3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1442,7 +1585,22 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 }
 
 void AqlQueue::SetProfiling(bool enabled) {
+  bool need_update = false;
+  const bool cur = AMD_HSA_BITS_GET(amd_queue_.queue_properties,
+    AMD_QUEUE_PROPERTIES_ENABLE_PROFILING) != 0;
+
+  if (cur != enabled && LoadWriteIndexRelaxed() != 0) {
+    // If the queue is already enabled/disabled, we need to update the queue properties and we have already submitted packets,
+    // then we need to unmap and remap the queue for CP FW to re-read the queue properties.
+    need_update = true;
+  }
+
   Queue::SetProfiling(enabled);
+
+  if (need_update) {
+    Suspend();
+    Resume();
+  }
 
   if (enabled) agent_->CheckClockTicks();
   return;
@@ -1491,7 +1649,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   constexpr uint32_t slot_size_dw = uint32_t(slot_size_b / sizeof(uint32_t));
   uint32_t slot_data[slot_size_dw];
   hsa_signal_t local_signal = {0};
-  hsa_status_t err;
+  hsa_status_t err = HSA_STATUS_SUCCESS;
 
   if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
     // Construct a set of PM4 to fit inside the AQL packet slot.
@@ -1595,7 +1753,9 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
                                     HSA_WAIT_STATE_ACTIVE);
     err = hsa_signal_destroy(local_signal);
     assert(ret == 0 && err == HSA_STATUS_SUCCESS);
+    (void)ret;
   }
+  (void)err;
 }
 
 void AqlQueue::FillBufRsrcWord0() {

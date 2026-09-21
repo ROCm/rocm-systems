@@ -37,10 +37,10 @@ namespace rocshmem {
  ******************************* WAVE FREE LIST ******************************
  *****************************************************************************/
 
-template <typename TYPE, typename ALLOCATOR = HIPDefaultFinegrainedAllocator>
+template <typename TYPE>
 class AtomicWFQueue {
 
-  using MutexProxyType = ABQLBlockMutexProxy<ALLOCATOR>;
+  using MutexProxyType = ABQLBlockMutexProxy;
   using MutexType = ABQLBlockMutex;
 
   /**
@@ -92,7 +92,7 @@ class AtomicWFQueue {
    * @param allocator Allocator to use for allocating internal structures of the
    * AtomicWFQueue.
    */
-  explicit AtomicWFQueue(const ALLOCATOR& allocator = ALLOCATOR());
+  explicit AtomicWFQueue(const MemoryAllocator& allocator = *get_default_allocator());
 
   /**
    * @brief Destroy the AtomicWFQueue object
@@ -102,7 +102,7 @@ class AtomicWFQueue {
   /**
    * @brief Enqueues an element into the AtomicWFQueue.
    *
-   * This function inserts the specified value at the position indicated by 
+   * This function inserts the specified value at the position indicated by
    * the `tail_` of the AtomicWFQueue and increases the AtomicWFQueue size
    * by one. The enqueue operation follows a first-come, first-serve
    * execution order.
@@ -131,7 +131,7 @@ class AtomicWFQueue {
    * updating the `tail_` and `curr_size_` accordingly. It is intended for
    * initializing the AtomicWFQueue with initial values.
    *
-   * @note This function is not thread-safe and should only be used during 
+   * @note This function is not thread-safe and should only be used during
    *       the AtomicWFQueue initialization phase or in scenarios where thread
    *       safety is not a concern.
    *
@@ -177,7 +177,7 @@ class AtomicWFQueue {
    * in the wavefront. If `lowest_active` is true, the value is broadcasted
    * from the thread with the lowest active lane ID.
    *
-   * @param lowest_active If true, broadcasting starts from the lowest 
+   * @param lowest_active If true, broadcasting starts from the lowest
    *                      active thread in the wavefront.
    * @param val The value to be broadcasted.
    *
@@ -207,7 +207,7 @@ class AtomicWFQueue {
    */
   __host__ __device__ int get_curr_size() {
     return curr_size_;
-  }  
+  }
 
   /**
    * @brief Retrieves the tail index of the AtomicWFQueue.
@@ -288,7 +288,7 @@ class AtomicWFQueue {
    * @brief Internal memory allocator used to create internal structures of
    * the AtomicWFQueue.
    */
-  ALLOCATOR allocator_{};
+  MemoryAllocator allocator_{};
 
   /**
    * @brief Points to the index of first element in the AtomicWFQueue.
@@ -326,16 +326,18 @@ class AtomicWFQueue {
   MutexProxyType enqueue_mutex_;
 };
 
-template <typename ALLOCATOR, typename TYPE>
+template <typename TYPE>
 class AtomicWFQueueProxy {
-  using AtomicWFQueueT = AtomicWFQueue<TYPE, ALLOCATOR>;
-  using ProxyT = DeviceProxy<ALLOCATOR, AtomicWFQueueT>;
+  using AtomicWFQueueT = AtomicWFQueue<TYPE>;
+  using ProxyT = DeviceProxy<AtomicWFQueueT>;
 
  public:
   __host__ __device__ AtomicWFQueueT* get() { return proxy_.get(); }
 
-  AtomicWFQueueProxy(size_t num_elems = 1) : proxy_{num_elems} {
-    new (proxy_.get()) AtomicWFQueueT();
+  explicit AtomicWFQueueProxy(const MemoryAllocator& alloc = HIPAllocator(),
+                              size_t num_elems = 1)
+      : allocator_{alloc}, proxy_{num_elems, allocator_} {
+    new (proxy_.get()) AtomicWFQueueT(allocator_);
   }
 
   AtomicWFQueueProxy(const AtomicWFQueueProxy& other) = delete;
@@ -353,6 +355,7 @@ class AtomicWFQueueProxy {
   }
 
  private:
+  MemoryAllocator allocator_{};
   ProxyT proxy_{};
 };
 }  // namespace rocshmem

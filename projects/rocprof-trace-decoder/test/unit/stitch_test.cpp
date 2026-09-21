@@ -69,14 +69,6 @@ protected:
     }
 };
 
-TEST_F(StitcherTest, ConstructorInitializesRawCode)
-{
-    Stitcher stitcher(mock_service, test_callback, &cbdata);
-
-    ASSERT_FALSE(stitcher.raw_code.empty());
-    EXPECT_EQ(stitcher.raw_code[0]->line, "; Begin ASM");
-}
-
 TEST_F(StitcherTest, SetGfxipSetsValueAndCallsCallback)
 {
     Stitcher stitcher(mock_service, test_callback, &cbdata);
@@ -587,6 +579,60 @@ TEST(PCTranslatorTest, TryMatchSwapped)
 
     // Reverse should not match
     EXPECT_FALSE(pct.try_match_swapped(second, first, lineA));
+}
+
+TEST_F(StitcherTest, SkipsBadPcMarkerAndStitchesSwappedGfx9Pair)
+{
+    assemblyLine lineA{};
+    lineA.line = "v_add_f32 v0, v1, v2";
+    lineA.cat = InstCategory::VALU;
+    lineA.addr = {0x100, 1};
+    lineA.next = {0x104, 1};
+
+    assemblyLine lineB{};
+    lineB.line = "s_load_b64 s[0:1], s[2:3]";
+    lineB.cat = InstCategory::SMEM;
+    lineB.addr = {0x104, 1};
+    lineB.next = {0x108, 1};
+
+    assemblyLine lineC{};
+    lineC.line = "v_mul_f32 v3, v4, v5";
+    lineC.cat = InstCategory::VALU;
+    lineC.addr = {0x108, 1};
+    lineC.next = {0, 0};
+
+    ON_CALL(*mock_service, GetInstruction(testing::_, testing::_))
+        .WillByDefault(
+            [&](pcinfo_t addr, int) -> assemblyLine
+            {
+                if (addr.address == 0x100) return lineA;
+                if (addr.address == 0x104) return lineB;
+                if (addr.address == 0x108) return lineC;
+                throw std::runtime_error("unknown address");
+            }
+        );
+
+    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    stitcher.setgfxip(9);
+
+    WaveDataInternal wave(0, 0, 0, 0, {0xDEAD, 1}, false);
+    wave.pc_infos.push_back({
+        1, {0x100, 1}
+    });
+    wave.bIsComplete = true;
+    wave.instructions.push_back(Instruction(0, WaveInstCategory::SMEM, 4, 0));
+    wave.instructions.push_back(Instruction(4, WaveInstCategory::VALU, 4, 0));
+    wave.instructions.push_back(Instruction(8, WaveInstCategory::VALU, 4, 0));
+    wave.instructions.push_back(Instruction(12, WaveInstCategory::SMEM, 4, 0));
+
+    stitcher.stitch(wave);
+
+    EXPECT_EQ(wave.instructions[0].pc.address, 0u);
+    EXPECT_EQ(wave.instructions[1].pc.address, 0x100u);
+    EXPECT_EQ(wave.instructions[2].category, WaveInstCategory::SMEM);
+    EXPECT_EQ(wave.instructions[2].pc.address, 0x104u);
+    EXPECT_EQ(wave.instructions[3].category, WaveInstCategory::VALU);
+    EXPECT_EQ(wave.instructions[3].pc.address, 0x108u);
 }
 
 // Tests for s_waitcnt/_load_ stitch break path

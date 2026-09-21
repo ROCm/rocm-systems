@@ -314,3 +314,86 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple(1,  1,   1048576))
 );
+
+//=============================================================================
+// SDMA variants
+//=============================================================================
+#if defined(USE_SDMA)
+
+class SdmaBlockTiledFine : public IPCImplTiledFine<IpcSdmaTestConfig> {
+  public:
+    void copy(TestType test, dim3 grid, dim3 block) override {
+        execute(test, kernel_tiled_fine_copy_block<IpcSdmaImpl>, grid, block);
+    }
+};
+TEST_P(SdmaBlockTiledFine, write) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    size_t size = std::get<2>(GetParam());
+    auto n = block_signals_calculation(std::get<0>(GetParam()), std::get<1>(GetParam()), size);
+    write(grid, block, size, n);
+}
+TEST_P(SdmaBlockTiledFine, read) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    read(grid, block, std::get<2>(GetParam()));
+}
+INSTANTIATE_TEST_SUITE_P(SdmaTiledFine, SdmaBlockTiledFine, ::testing::Values(
+    std::make_tuple(1,  1024, 32),
+    std::make_tuple(1,  1024, 65536),
+    std::make_tuple(1,  1,    1048576),
+    std::make_tuple(1,  64,   1048576),
+    std::make_tuple(1,  1024, 1048576),
+    std::make_tuple(4,  1024, 1048576),
+    std::make_tuple(16, 1024, 1048576),
+    std::make_tuple(38, 1024, 1048576),
+    std::make_tuple(38, 1024, 4194304)));
+
+class SdmaWarpTiledFine : public IPCImplTiledFine<IpcSdmaTestConfig> {
+  public:
+    void copy(TestType test, dim3 grid, dim3 block) override {
+        execute(test, kernel_tiled_fine_copy_warp<IpcSdmaImpl>, grid, block);
+    }
+};
+TEST_P(SdmaWarpTiledFine, write) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    size_t size = std::get<2>(GetParam());
+    auto n = warp_signals_calculation(std::get<0>(GetParam()), std::get<1>(GetParam()), size);
+    write(grid, block, size, n);
+}
+TEST_P(SdmaWarpTiledFine, read) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    read(grid, block, std::get<2>(GetParam()));
+}
+INSTANTIATE_TEST_SUITE_P(SdmaTiledFine, SdmaWarpTiledFine, ::testing::Values(
+    std::make_tuple(1,  64,   32),
+    std::make_tuple(1,  64,   1048576),
+    std::make_tuple(1,  1,    1048576),
+    std::make_tuple(1,  32,   1048576),
+    std::make_tuple(4,  64,   1048576),
+    std::make_tuple(16, 64,   1048576),
+    std::make_tuple(38, 1024, 1048576),
+    std::make_tuple(38, 1024, 4194304)));
+
+class SdmaThreadTiledFine : public IPCImplTiledFine<IpcSdmaTestConfig> {
+  public:
+    void copy(TestType test, dim3 grid, dim3 block) override {
+        execute(test, kernel_tiled_fine_copy<IpcSdmaImpl>, grid, block);
+    }
+};
+TEST_P(SdmaThreadTiledFine, write) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    write(grid, block, std::get<2>(GetParam()), 1);
+}
+TEST_P(SdmaThreadTiledFine, read) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    read(grid, block, std::get<2>(GetParam()));
+}
+INSTANTIATE_TEST_SUITE_P(SdmaTiledFine, SdmaThreadTiledFine, ::testing::Values(
+    std::make_tuple(1, 1, 1048576)));
+
+#endif  // USE_SDMA

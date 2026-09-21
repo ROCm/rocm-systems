@@ -69,7 +69,7 @@ static void threadFunc(hipStream_t stream, hipPitchedPtr devpPtr, int memsetval,
 
   hipLaunchKernelGGL(func_set_value, dim3(blocks), dim3(threadsPerBlock), 0, stream, devpPtr,
                      extent, memsetval);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK_THREAD(hipGetLastError());
   HIPCHECK(hipMemset3DAsync(devpPtr, testval, extent, stream));
   HIPCHECK(hipMemcpy3DAsync(&myparms, stream));
 }
@@ -174,7 +174,6 @@ bool loopRegression(bool bAsync) {
  * on different gpus.
  */
 HIP_TEST_CASE(Unit_hipMemset3D_RegressInLoop) {
-  CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
 
@@ -187,7 +186,6 @@ HIP_TEST_CASE(Unit_hipMemset3D_RegressInLoop) {
  * on different gpus.
  */
 HIP_TEST_CASE(Unit_hipMemset3DAsync_RegressInLoop) {
-  CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
 
@@ -199,7 +197,6 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_RegressInLoop) {
  * Async commands queued concurrently and executed
  */
 HIP_TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread) {
-  CHECK_IMAGE_SUPPORT
 
   char* A_h;
   constexpr int memsetval = 1, testval = 2;
@@ -243,6 +240,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread) {
   for (auto& t : threadlist) {
     t.join();
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamSynchronize(stream));
 

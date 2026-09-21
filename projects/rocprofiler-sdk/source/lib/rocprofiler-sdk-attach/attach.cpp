@@ -23,6 +23,8 @@
 #include "attach.h"
 #include "code_object_registration.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
 #include "queue_registration.hpp"
 #include "table.hpp"
 
@@ -30,6 +32,13 @@
 
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <rocprofiler-sdk/version.h>
+
+#include <signal.h>
+#include <unistd.h>
+
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 #define ROCPROFILER_ATTACH_VERSION_MAJOR ROCPROFILER_VERSION_MAJOR
 #define ROCPROFILER_ATTACH_VERSION_MINOR ROCPROFILER_VERSION_MINOR
@@ -42,30 +51,90 @@
 using rocprofiler_register_library_api_table_func_t =
     decltype(::rocprofiler_register_library_api_table)*;
 
+namespace
+{
+// Dedicated idle background thread used as a safe ptrace injection target during
+// attach/detach. Previously, ptrace-based code injection targeted the main
+// application thread, which could deadlock if that thread held internal mutexes.
+//
+// This thread names itself "rocp-bg-attach" via pthread_setname_np so the attacher
+// can locate it by scanning /proc/<pid>/task/*/comm. It blocks all signals, holds
+// no application-owned locks, and waits on a condition variable indefinitely until
+// shutdown.
+struct BackgroundThread
+{
+    std::thread             thread;
+    std::mutex              mtx;
+    std::condition_variable cv;
+    bool                    should_stop = false;
+    pid_t                   tid         = 0;
+
+    void start()
+    {
+        if(thread.joinable()) return;
+
+        thread = std::thread([this]() {
+            pthread_setname_np(pthread_self(), "rocp-bg-attach");
+
+            // Prevent signals from interrupting this thread -- it exists solely as a
+            // safe ptrace injection target and must never run application signal handlers.
+            sigset_t all_signals;
+            sigfillset(&all_signals);
+            pthread_sigmask(SIG_BLOCK, &all_signals, nullptr);
+
+            tid = static_cast<pid_t>(rocprofiler::common::get_tid());
+
+            ROCP_INFO << "[rocprofiler-sdk-attach] Background thread started, TID=" << tid
+                      << " PID=" << getpid();
+
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait(lock, [this] { return should_stop; });
+        });
+    }
+
+    ~BackgroundThread()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            should_stop = true;
+        }
+        cv.notify_one();
+        if(thread.joinable()) thread.join();
+    }
+};
+
+BackgroundThread*
+get_background_thread()
+{
+    static auto*& _v = rocprofiler::common::static_object<BackgroundThread>::construct();
+    return _v;
+}
+}  // namespace
+
 ROCPROFILER_EXTERN_C_INIT
 
 int
-rocprofiler_attach_set_api_table(const char*                                   name,
-                                 uint64_t                                      lib_version,
-                                 uint64_t                                      lib_instance,
+rocprofiler_attach_set_api_table(const char* name,
+                                 uint64_t /*lib_version*/,
+                                 uint64_t /*lib_instance*/,
                                  void**                                        tables,
                                  uint64_t                                      num_tables,
                                  rocprofiler_register_library_api_table_func_t register_functor)
     ROCPROFILER_PUBLIC_API;
 
 int
-rocprofiler_attach_set_api_table(const char*                                   name,
-                                 uint64_t                                      lib_version,
-                                 uint64_t                                      lib_instance,
+rocprofiler_attach_set_api_table(const char* name,
+                                 uint64_t /*lib_version*/,
+                                 uint64_t /*lib_instance*/,
                                  void**                                        tables,
                                  uint64_t                                      num_tables,
                                  rocprofiler_register_library_api_table_func_t register_functor)
 {
     rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
 
+    get_background_thread()->start();
+
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
-    (void) lib_version;   // unused
-    (void) lib_instance;  // unused
 
     if(std::string_view{name} != "hsa")
     {

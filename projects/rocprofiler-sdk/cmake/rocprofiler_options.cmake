@@ -38,6 +38,7 @@ rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"
                        ${ROCPROFILER_BUILD_CI})
+
 rocprofiler_add_option(ROCPROFILER_BUILD_BENCHMARK "Enable building the benchmarks" OFF)
 rocprofiler_add_option(
     ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS
@@ -57,14 +58,23 @@ rocprofiler_add_option(
     "Enable building with ghc::filesystem library (via submodule) instead of the C++ filesystem library"
     ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_FMT "Enable building fmt library internally" ON)
-rocprofiler_add_option(ROCPROFILER_BUILD_GLOG
-                       "Enable building glog (Google logging) library internally" ON)
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_ABSEIL
+    "Enable building abseil-cpp (Abseil logging) library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_SQLITE3
                        "Enable building sqlite3 library internally" OFF)
 rocprofiler_add_option(ROCPROFILER_BUILD_PYBIND11
                        "Enable building pybind11 library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA
                        "Enable building gotcha library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_YAML_CPP
+                       "Enable building yaml-cpp library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_ELFIO "Enable building ELFIO library internally"
+                       ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_OTF2 "Enable building OTF2 library internally"
+                       ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_JSON "Enable building JSON library internally"
+                       ON)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
@@ -100,6 +110,9 @@ rocprofiler_add_option(
     ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
                        "Enable warnings for use of deprecated features" OFF ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_AQLPROFILE
+    "Enable building with internal AQLProfile library (recommended)" ON ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 foreach(_OPT ROCPROFILER_BUILD_WERROR)
@@ -156,7 +169,7 @@ include(rocprofiler_memcheck)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
+    "threw an exception|Permission denied|failed with error code|Subprocess aborted|Failed to resolve rocprofiler-sdk shared library path"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests" FORCE)
 
 # this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable

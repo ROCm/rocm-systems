@@ -42,7 +42,7 @@ endif()
 project(rocdecodenegativetest)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake ${ROCM_PATH}/share/rocmcmakebuildtools/cmake)
 
 # rocdecode sample build type
 set(DEFAULT_BUILD_TYPE "Release")
@@ -51,15 +51,46 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
 endif()
+
+# Set supported GPU Targets
+if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
+    find_package(ROCmCMakeBuildTools QUIET)
+    if(NOT ROCmCMakeBuildTools_FOUND)
+        find_package(ROCM QUIET)
+    endif()
+    include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
+
+    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
+    if(HAS_ROCM_CHECK_TARGET_IDS)
+        rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
+    else() # if we don't have rocm_check_target_ids, just assume the targets are available
+        set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
+    endif()
+    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+endif()
+
+# Set AMD GPU_TARGETS
+if((AMDGPU_TARGETS OR DEFINED ENV{AMDGPU_TARGETS}) AND (NOT GPU_TARGETS))
+  message("-- ${Red}${PROJECT_NAME} DEPRECATION -- AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS${ColourReset}")
+  if(DEFINED ENV{AMDGPU_TARGETS})
+    set(GPU_TARGETS $ENV{AMDGPU_TARGETS} CACHE STRING "List of specific machine types for library to target")
+  else()
+    set(GPU_TARGETS ${AMDGPU_TARGETS})
+  endif()
+endif()
+
+if(DEFINED ENV{GPU_ARCHS})
+  set(GPU_TARGETS $ENV{GPU_ARCHS} CACHE STRING "List of specific machine types for library to target")
+elseif(GPU_TARGETS)
+  message("-- ${White}${PROJECT_NAME} -- GPU_TARGETS set with -D option${ColourReset}")
+else()
+  set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+endif()
+message("-- ${White}${PROJECT_NAME} -- AMD GPU_TARGETS: ${GPU_TARGETS}${ColourReset}")
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
@@ -76,19 +107,18 @@ if(HIP_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecodenegativetest.cpp rocdecode_api_negative_tests.cpp)
-    # --all-warnings/-Wall Enable most warning messages
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
     add_executable(${PROJECT_NAME} ${SOURCES})
+    target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS} -Wall)
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 else()
-    message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
+    message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
     if (NOT HIP_FOUND)
-        message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
+        message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
     endif()
     if (NOT rocdecode_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found! - please install rocdecode!")
+        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
     endif()
     if (NOT rocprofiler-register_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocprofiler-register Not Found! - please install rocprofiler-register!")
+        message(FATAL_ERROR "-- ERROR!: rocprofiler-register Not Found!")
     endif()
 endif()

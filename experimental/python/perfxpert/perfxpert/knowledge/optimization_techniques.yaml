@@ -1,0 +1,74 @@
+# Catalog of AMD-specific optimization techniques.
+# Ref: llm-reference-guide.md lines 1482-1599; spec §6.5 proven_optimizations pattern.
+
+- id: reduce_vgpr
+  category: compute
+  technique: "Reduce VGPR usage"
+  preconditions:
+    - "vgpr_count > 64"
+    - "occupancy_pct < 0.5"
+  expected_impact: "25-40% speedup via doubled occupancy"
+  effort: low
+  risk: low
+  description: "Apply __launch_bounds__ or -mllvm -amdgpu-num-vgpr=N"
+
+- id: mfma_enablement
+  category: compute
+  technique: "Use MFMA intrinsics for matmul"
+  preconditions:
+    - "kernel_class == matmul"
+    - "mfma_util_pct == 0"
+    - "gpu_arch in [gfx942, gfx950]"
+  expected_impact: "400-1000% speedup on CDNA3/4"
+  effort: high
+  risk: medium
+
+- id: fast_math_flag
+  category: compute
+  technique: "-ffast-math compiler flag"
+  preconditions:
+    - "valu_util_pct > 0.6"
+    - "numerical_tolerance_ok: true"
+  expected_impact: "10-40%"
+  effort: very_low
+  risk: medium
+
+- id: memory_coalescing
+  category: memory
+  technique: "Fix memory coalescing / transpose layout"
+  preconditions:
+    - "hbm_bw_utilization < 0.25"
+    - "stride_pattern_detected: true"
+  expected_impact: "200-400%"
+  effort: medium
+  risk: medium
+
+- id: lds_tiling
+  category: memory
+  technique: "Introduce LDS tile (blocked algorithm)"
+  preconditions:
+    - "l1_hit_rate < 0.5"
+    - "kernel_class == matmul"
+  expected_impact: "150-500%"
+  effort: high
+  risk: low
+
+- id: hip_stream_overlap
+  category: latency
+  technique: "Async memcpy + multiple streams"
+  preconditions:
+    - "memcpy_pct > 0.15"
+    - "uses_blocking_hipMemcpy: true"
+  expected_impact: "30-70%"
+  effort: medium
+  risk: low
+
+- id: kernel_fusion
+  category: latency
+  technique: "Fuse adjacent small kernels"
+  preconditions:
+    - "total_kernel_calls > 1000"
+    - "avg_kernel_duration_ns < 10000"
+  expected_impact: "100-500%"
+  effort: high
+  risk: medium

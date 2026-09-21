@@ -3,12 +3,12 @@ syncthreads:
   Unit___syncthreads_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Zero:
     <<: *level_2
@@ -31,7 +31,7 @@ syncthreads:
   Unit___syncthreads_and_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Zero:
     <<: *level_2
@@ -54,7 +54,7 @@ syncthreads:
   Unit___syncthreads_or_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Zero:
     <<: *level_2

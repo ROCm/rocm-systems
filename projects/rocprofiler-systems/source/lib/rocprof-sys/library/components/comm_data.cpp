@@ -1,26 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/comm_data.hpp"
+#include "common/units/data_size.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
@@ -28,8 +10,11 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
-#include <timemory/units.hpp>
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys
 {
@@ -39,17 +24,17 @@ namespace
 {
 template <typename Tp, typename... Args>
 void
-write_perfetto_counter_track(uint64_t _val)
+write_perfetto_counter_track(std::uint64_t _val)
 {
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
     if(rocprofsys::get_use_perfetto() &&
-       rocprofsys::get_state() == rocprofsys::State::Active)
+       rocprofsys::state::process::get() == rocprofsys::state::process::Active)
     {
         auto _emplace = [](const size_t _idx) {
             if(!counter_track::exists(_idx))
             {
-                std::string _label =
+                const std::string _label =
                     (_idx > 0) ? fmt::format(" {} [{}]", Tp::label, _idx) : Tp::label;
                 counter_track::emplace(_idx, _label, "bytes");
             }
@@ -59,12 +44,12 @@ write_perfetto_counter_track(uint64_t _val)
         static std::once_flag _once{};
         std::call_once(_once, _emplace, _idx);
 
-        static std::mutex _mutex{};
-        static uint64_t   value = 0;
-        uint64_t          _now  = 0;
+        static std::mutex    _mutex{};
+        static std::uint64_t value = 0;
+        std::uint64_t        _now  = 0;
         {
-            std::unique_lock<std::mutex> _lk{ _mutex };
-            _now = rocprofsys::tracing::now<uint64_t>();
+            const std::unique_lock<std::mutex> _lk{ _mutex };
+            _now = rocprofsys::tracing::now<std::uint64_t>();
             _val = (value += _val);
         }
 
@@ -105,51 +90,103 @@ void
 metadata_initialize_comm_data_pmc()
 {
     // find the proper values for a following definitions
-    [[maybe_unused]] size_t                EVENT_CODE       = 0;
-    [[maybe_unused]] size_t                INSTANCE_ID      = 0;
-    [[maybe_unused]] constexpr const char* LONG_DESCRIPTION = "";
-    [[maybe_unused]] constexpr const char* COMPONENT        = "";
-    [[maybe_unused]] constexpr const char* BLOCK            = "";
-    [[maybe_unused]] constexpr const char* EXPRESSION       = "";
-    [[maybe_unused]] constexpr const char* MSG              = "bytes";
-    [[maybe_unused]] constexpr const auto* TARGET_ARCH      = "CPU";
-    auto                                   ni               = node_info::get_instance();
-    [[maybe_unused]] constexpr const auto  DEVICE_ID = 0;  // Assuming CPU device ID is 0
+    [[maybe_unused]] const size_t          event_code         = 0;
+    [[maybe_unused]] const size_t          instance_id        = 0;
+    [[maybe_unused]] constexpr const char* k_long_description = "";
+    [[maybe_unused]] constexpr const char* k_component        = "";
+    [[maybe_unused]] constexpr const char* k_block            = "";
+    [[maybe_unused]] constexpr const char* k_expression       = "";
+    [[maybe_unused]] constexpr const char* k_msg              = "bytes";
+    [[maybe_unused]] constexpr const auto* k_target_arch      = "CPU";
+    auto                                   n_info             = node_info::get_instance();
+    [[maybe_unused]] constexpr const auto k_device_id = 0;  // Assuming CPU device ID is 0
 
 #if defined(ROCPROFSYS_USE_MPI)
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::mpi_send::label, "Tracks MPI communication data sizes",
-          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::mpi_send::label,
+          .symbol           = "Tracks MPI communication data sizes",
+          .description      = trait::name<category::mpi>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::mpi_recv::label, "Tracks MPI communication data sizes",
-          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::mpi_recv::label,
+          .symbol           = "Tracks MPI communication data sizes",
+          .description      = trait::name<category::mpi>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
 #endif
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::ucx_send::label, "Tracks UCX communication data sizes",
-          trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::ucx_send::label,
+          .symbol           = "Tracks UCX communication data sizes",
+          .description      = trait::name<category::ucx>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          comm_data::ucx_recv::label, "Tracks UCX communication data sizes",
-          trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+        { .type             = agent_type::cpu,
+          .agent_type_index = k_device_id,
+          .target_arch      = k_target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = comm_data::ucx_recv::label,
+          .symbol           = "Tracks UCX communication data sizes",
+          .description      = trait::name<category::ucx>::description,
+          .long_description = k_long_description,
+          .component        = k_component,
+          .units            = k_msg,
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = k_block,
+          .expression       = k_expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
 }
 
 template <typename Track>
 void
-cache_comm_data_events(const uint32_t device_id, int bytes)
+cache_comm_data_events(const std::uint32_t device_id, int bytes)
 {
-    static std::mutex _mutex{};
-    static uint64_t   value = 0;
-    uint64_t          _now  = 0;
+    static std::mutex    _mutex{};
+    static std::uint64_t value = 0;
+    std::uint64_t        _now  = 0;
     {
-        std::unique_lock<std::mutex> _lk{ _mutex };
-        _now  = rocprofsys::tracing::now<uint64_t>();
+        const std::unique_lock<std::mutex> _lk{ _mutex };
+        _now  = rocprofsys::tracing::now<std::uint64_t>();
         bytes = (value += bytes);
     }
     const std::string track_name      = Track::label;
@@ -162,11 +199,10 @@ cache_comm_data_events(const uint32_t device_id, int bytes)
     const std::string line_info       = "{}";
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
-        static_cast<size_t>(category_enum_id<category::comm_data>::value),
-        track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
-        parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
-        static_cast<uint8_t>(agent_type::CPU), track_name.c_str(),
-        static_cast<double>(value), std::nullopt });
+        static_cast<size_t>(category_enum_id<category::comm_data>::value), track_name,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::cpu),
+        track_name, static_cast<double>(value), std::nullopt });
 }
 
 }  // namespace
@@ -209,7 +245,8 @@ comm_data::configure()
     comm_data_tracker_t::label()        = "comm_data";
     comm_data_tracker_t::description()  = "Tracks MPI/RCCL/UCX communication data sizes";
     comm_data_tracker_t::display_unit() = "MB";
-    comm_data_tracker_t::unit()         = units::megabyte;
+    comm_data_tracker_t::unit() =
+        static_cast<std::int64_t>(data_size_cast<bytes>(megabytes{ 1.0 }).to_bytes());
 
     auto _fmt_flags = comm_data_tracker_t::get_format_flags();
     _fmt_flags &= (std::ios_base::fixed & std::ios_base::scientific);
@@ -395,7 +432,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
             add(_b, sendcount * _send_size);
             tracker_t _c{ fmt::format("{}/send={}", _name, dst) };
             add(_b, sendcount * _send_size);
-            add(fmt::format("{}/send={}/tag={}", _name, sendtag), sendcount * _send_size);
+            add(fmt::format("{}/send/tag={}", _name, sendtag), sendcount * _send_size);
             add(fmt::format("{}/send={}/tag={}", _name, dst, sendtag),
                 sendcount * _send_size);
         }
@@ -404,7 +441,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
             add(_b, recvcount * _recv_size);
             tracker_t _c{ fmt::format("{}/recv={}", _name, src) };
             add(_b, recvcount * _recv_size);
-            add(fmt::format("{}/recv={}/tag={}", _name, recvtag), recvcount * _recv_size);
+            add(fmt::format("{}/recv/tag={}", _name, recvtag), recvcount * _recv_size);
             add(fmt::format("{}/recv={}/tag={}", _name, src, recvtag),
                 recvcount * _recv_size);
         }
@@ -479,11 +516,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 
 // UCX communication tracking implementations
 
-// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, uint64_t tag, const
+// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t tag, const
 // void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, uint64_t tag, const void*)
+                 size_t count, std::uint64_t tag, const void*)
 {
     if(count == 0) return;
 
@@ -502,11 +539,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, uint64_t tag, uint64_t
-// tag_mask, const void* param)
+// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, std::uint64_t tag,
+// std::uint64_t tag_mask, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 uint64_t tag, uint64_t tag_mask, const void*)
+                 std::uint64_t tag, std::uint64_t tag_mask, const void*)
 {
     if(count == 0) return;
 
@@ -526,11 +563,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
     }
 }
 
-// ucp_put_nbx: (void* ep, const void* buffer, size_t count, uint64_t remote_addr, void*
-// rkey, const void* param)
+// ucp_put_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t remote_addr,
+// void* rkey, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, uint64_t remote_addr, void*, const void*)
+                 size_t count, std::uint64_t remote_addr, void*, const void*)
 {
     if(count == 0) return;
 
@@ -549,11 +586,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_get_nbx: (void* ep, void* buffer, size_t count, uint64_t remote_addr, void* rkey,
-// const void* param)
+// ucp_get_nbx: (void* ep, void* buffer, size_t count, std::uint64_t remote_addr, void*
+// rkey, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 uint64_t remote_addr, void*, const void*)
+                 std::uint64_t remote_addr, void*, const void*)
 {
     if(count == 0) return;
 
@@ -581,7 +618,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
 {
     if(count == 0 && header_length == 0) return;
 
-    size_t total_size = header_length + count;
+    const size_t total_size = header_length + count;
     if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_size);
 
     {
@@ -685,11 +722,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 // ucp_put/get operations - RMA
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
-                 uint64_t, void*, void*)
+                 std::uint64_t, void*, void*)
 {
     if(length == 0) return;
 
-    bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
+    const bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
 
     if(get_use_perfetto())
     {
@@ -719,7 +756,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, void*,
                  size_t header_length, void*, size_t length, unsigned, void*)
 {
-    size_t total_length = header_length + length;
+    const size_t total_length = header_length + length;
     if(total_length == 0) return;
 
     if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_length);
@@ -743,7 +780,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 {
     if(count == 0) return;
 
-    bool is_send = _data.tool_id.find("send") != std::string::npos;
+    const bool is_send = _data.tool_id.find("send") != std::string::npos;
 
     if(get_use_perfetto())
     {
@@ -901,8 +938,3 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
 #endif
 }  // namespace component
 }  // namespace rocprofsys
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<float, tim::project::rocprofsys>), true, float)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(comm_data, false, void)

@@ -26,6 +26,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <new>
 
 namespace rocprofiler::common::container
@@ -106,12 +109,13 @@ record_header_buffer::clear()
     {
         auto _sz = m_buffer.capacity();
         if(!m_buffer.clear(std::nothrow_t{})) return 0;
-        std::for_each(m_headers.begin(), m_headers.end(), [](auto& itr) {
-            rocprofiler_record_header_t record = {};
-            record.hash                        = 0;
-            record.payload                     = nullptr;
-            itr                                = record;
-        });
+        // Only clear the used portion of m_headers (first _n elements)
+        // m_index is atomically incremented during every emplace, so it should
+        // indicate the number of used elements.
+        if(_n > 0)
+        {
+            std::memset(m_headers.data(), 0, _n * sizeof(rocprofiler_record_header_t));
+        }
         rocprofiler_record_header_t record = {};
         record.hash                        = 0;
         record.payload                     = nullptr;
@@ -141,11 +145,13 @@ record_header_buffer::save(std::fstream& _fs)
 {
     auto _lk = rhb_raii_lock{*this};
 
-    auto _idx = m_index.load(std::memory_order_acquire);
-    auto _sz  = m_headers.size();
+    auto        _idx  = m_index.load(std::memory_order_acquire);
+    auto        _sz   = m_headers.size();
+    const void* _base = m_buffer.data();
     _fs.write(reinterpret_cast<char*>(&_idx), sizeof(_idx));
     _fs.write(reinterpret_cast<char*>(&_sz), sizeof(_sz));
     _fs.write(reinterpret_cast<char*>(m_headers.data()), sizeof(rocprofiler_record_header_t) * _sz);
+    _fs.write(reinterpret_cast<const char*>(&_base), sizeof(_base));
     m_buffer.save(_fs);
 }
 
@@ -168,6 +174,28 @@ record_header_buffer::load(std::fstream& _fs)
                  sizeof(rocprofiler_record_header_t) * _sz);
     }
 
+    // Read the base address that the payload pointers were relative to when saved.
+    const void* _old_base = nullptr;
+    _fs.read(reinterpret_cast<char*>(&_old_base), sizeof(_old_base));
+
     m_buffer.load(_fs);
+
+    // The buffer was just remapped and may now live at a different base address. Relocate
+    // each payload pointer by the difference between the new and old base addresses so the
+    // restored absolute pointers reference the reloaded data instead of the stale mapping.
+    const auto _old_addr = reinterpret_cast<uintptr_t>(_old_base);
+    const auto _new_addr = reinterpret_cast<uintptr_t>(m_buffer.data());
+    if(_old_base != nullptr && _new_addr != 0 && _new_addr != _old_addr)
+    {
+        // Use pointer arithmetic (char* + ptrdiff_t) rather than casting an integer back to a
+        // pointer, which avoids the performance-no-int-to-ptr clang-tidy diagnostic.
+        const auto _delta = static_cast<std::ptrdiff_t>(_new_addr - _old_addr);
+        auto       _idx   = m_index.load(std::memory_order_acquire);
+        for(size_t i = 0; i < _idx; ++i)
+        {
+            auto& _hdr = m_headers.at(i);
+            if(_hdr.payload != nullptr) _hdr.payload = static_cast<char*>(_hdr.payload) + _delta;
+        }
+    }
 }
 }  // namespace rocprofiler::common::container

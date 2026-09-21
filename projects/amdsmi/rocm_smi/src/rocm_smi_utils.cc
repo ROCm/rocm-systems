@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #define _GNU_SOURCE \
   1  // REQUIRED: to utilize some GNU features/functions, see
@@ -38,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -87,7 +69,7 @@ bool FileExists(char const* filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static inline void debugFilesDiscovered(std::vector<std::string> files) {
+[[maybe_unused]] static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";
@@ -326,7 +308,13 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
       return RSMI_STATUS_PERMISSION;
     case EPERM:
     case ENOENT:
+    case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
+    case EROFS:
+      // Sysfs is read-only (e.g. unprivileged container). Distinct from a
+      // kernel-unsupported feature (ENOENT/ENOTSUP -> NOT_SUPPORTED above);
+      // map to PERMISSION so callers can tell the two apart.
+      return RSMI_STATUS_PERMISSION;
     case EBADF:
     case EISDIR:
       return RSMI_STATUS_FILE_ERROR;
@@ -345,6 +333,135 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
     default:
       return RSMI_STATUS_UNKNOWN_ERROR;
   }
+}
+
+// Helper function to read multi-line sysfs file into vector of strings
+static int ReadSysfsLines(const std::string& path, std::vector<std::string>* lines) {
+  auto is_regular_file_result = isRegularFile(path, nullptr);
+  if (is_regular_file_result != 0) {
+    return ENOENT;
+  }
+
+  std::ifstream fs(path);
+  if (!fs.is_open()) {
+    int ret = errno;
+    errno = 0;
+    std::ostringstream oss;
+    oss << __PRETTY_FUNCTION__ << " | Fail | Could not open file: " << path
+        << " | Returning: " << std::strerror(ret) << " |";
+    LOG_ERROR(oss);
+    return ret;
+  }
+
+  std::string line;
+  while (std::getline(fs, line)) {
+    lines->push_back(line);
+  }
+  fs.close();
+
+  std::ostringstream oss;
+  oss << "Successfully read " << lines->size() << " lines from SYSFS file (" << path << ")";
+  LOG_INFO(oss);
+  return 0;
+}
+
+int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse OD_RANGE values.
+  // File format (multi-line):
+  //   FAN_MINIMUM_PWM:
+  //   <value>
+  //   OD_RANGE:
+  //   MINIMUM_PWM: <min> <max>
+  std::vector<std::string> lines;
+  int ret = ReadSysfsLines(path, &lines);
+  if (ret != 0) {
+    return ret;
+  }
+
+  if (lines.empty()) {
+    return EINVAL;
+  }
+
+  // Use TextFileTagContents_t for structured parsing
+  amd::smi::TextFileTagContents_t parser(lines);
+  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
+
+  // Check if OD_RANGE section exists with MINIMUM_PWM key
+  if (!parser.contains_structured_key("OD_RANGE:", "MINIMUM_PWM:")) {
+    return EINVAL;
+  }
+
+  // Get "MINIMUM_PWM: <min> <max>" value
+  auto min_max_str = parser.get_structured_value_by_keys("OD_RANGE:", "MINIMUM_PWM:", false);
+
+  // Parse the two numbers from the string
+  std::istringstream iss(min_max_str);
+  uint64_t val1, val2;
+  if (!(iss >> val1 >> val2)) {
+    return EINVAL;
+  }
+
+  if (min_pwm) *min_pwm = val1;
+  if (max_pwm) *max_pwm = val2;
+  return 0;
+}
+
+int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
+  // File format (multi-line):
+  //   FAN_MINIMUM_PWM:
+  //   <value>
+  //   OD_RANGE:
+  //   MINIMUM_PWM: <min> <max>
+  std::vector<std::string> lines;
+  int ret = ReadSysfsLines(path, &lines);
+  if (ret != 0) {
+    return ret;
+  }
+
+  if (lines.empty()) {
+    return EINVAL;
+  }
+
+  // Use TextFileTagContents_t for structured parsing
+  amd::smi::TextFileTagContents_t parser(lines);
+  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
+
+  // Check if FAN_MINIMUM_PWM section exists
+  if (!parser.contains_title_key("FAN_MINIMUM_PWM:")) {
+    return EINVAL;
+  }
+
+  // Get the first value under FAN_MINIMUM_PWM section
+  auto current_str = parser.get_structured_data_subkey_first("FAN_MINIMUM_PWM:");
+
+  // Parse the value
+  uint64_t val;
+  std::istringstream iss(current_str);
+  if (!(iss >> val)) {
+    return EINVAL;
+  }
+
+  if (current_pwm) *current_pwm = val;
+  return 0;
+}
+
+rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
+  int write_ret = WriteSysfsStr(path, value);
+  if (write_ret != 0) {
+    return ErrnoToRsmiStatus(write_ret);
+  }
+
+  // Commit by writing 'c'
+  write_ret = WriteSysfsStr(path, "c");
+  if (write_ret != 0) {
+    return ErrnoToRsmiStatus(write_ret);
+  }
+  return RSMI_STATUS_SUCCESS;
 }
 
 rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
@@ -456,39 +573,6 @@ std::string removeString(const std::string origStr, const std::string& removeMe)
   return modifiedStr;
 }
 
-// defaults to trim stdOut
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
-  char buffer[128];
-  std::string stdoutAndErr;
-  bool successfulRun = true;
-  command = "stdbuf -i0 -o0 -e0 " + command;  // remove stdOut and err buffering
-
-  FILE* pipe = popen(command.c_str(), "r");
-  if (!pipe) {
-    stdoutAndErr = "[ERROR] popen failed to call " + command;
-    successfulRun = false;
-  } else {
-    // read until end of process
-    while (!feof(pipe)) {
-      // use buffer to read and add to stdoutAndErr
-      if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        stdoutAndErr += buffer;
-      }
-    }
-  }
-
-  // any return code other than 0, is a failed execution
-  if (pclose(pipe) != 0) {
-    successfulRun = false;
-  }
-
-  if (stdOut) {
-    // remove leading and trailing spaces of output and new lines
-    stdoutAndErr = trim(stdoutAndErr);
-  }
-  return std::make_pair(successfulRun, stdoutAndErr);
-}
-
 // originalString - string to search for substring
 // substring - string looking to find
 // displayComparisons = defaults to false, set to true to see debug prints
@@ -536,7 +620,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
   }
   // template for our file
   std::string fullTempFilePath = "/tmp/" + fullFileName + ".XXXXXX";
-  char* fileName = &fullTempFilePath[0];
+  char* fileName = fullTempFilePath.data();
   int fd = mkstemp(fileName);
   if (fd == -1) {
     return RSMI_STATUS_FILE_ERROR;
@@ -691,7 +775,7 @@ std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind, std::string stateName
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'
@@ -840,9 +924,9 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   std::ostringstream ss;
   // Silently ignore per-line values.
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+  unsigned char buff[65];  // Using largest possible value as bounded by [4,64]
 
   size_t i;
-  unsigned char buff[bytesPerLine + 1];
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 
@@ -956,8 +1040,7 @@ const char* my_fname(void) {
   dladdr(reinterpret_cast<void*>(my_fname), &dl_info);
   return (dl_info.dli_fname);
 #else
-  std::string emptyRet = "";
-  return emptyRet.c_str();
+  return "";
 #endif
 }
 
@@ -1267,7 +1350,7 @@ void system_wait(int milli_seconds) {
     LOG_DEBUG(ss);
   }
 
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {
@@ -1316,5 +1399,26 @@ uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
   (bdfid) &= 0xFFFFFFFF;                 // keep bottom 32 bits of pci_id
   bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
   return bdfid;
+}
+
+// Use nanosleep in a loop so that signals (e.g. SIGCHLD) do not
+// shorten the sleep and cause the full duration to be skipped.
+void sleep_interruptible(const struct timespec& duration) {
+  struct timespec remaining = duration;
+  while (remaining.tv_sec > 0 || remaining.tv_nsec > 0) {
+    struct timespec interval = remaining;
+    if (nanosleep(&interval, &remaining) == 0) {
+      break;
+    }
+    // EINTR: a signal interrupted the sleep; remaining has time left, retry.
+    // Any other error (e.g. EINVAL) is unrecoverable — stop to avoid looping forever.
+    if (errno != EINTR) {
+      break;
+    }
+  }
+}
+
+void sleep_interruptible(uint32_t seconds) {
+  sleep_interruptible({static_cast<time_t>(seconds), 0});
 }
 }  // namespace amd::smi

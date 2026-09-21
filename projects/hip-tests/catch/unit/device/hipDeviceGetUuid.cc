@@ -179,7 +179,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
     size_t start = 0;  // The devices will be reported from 0..
     std::map<int, std::string> uuid_map_copy;
     for (auto device : visible_devices) {
-      uuid_map_copy[start] = uuid_map[device];
+      uuid_map_copy[start++] = uuid_map[device];
     }
     uuid_map = uuid_map_copy;
   }
@@ -343,7 +343,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run()== 1);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
 #endif
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
 #ifdef __linux__
@@ -425,7 +425,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
     SECTION("Set Same UUID/Device ordinal more than once ") {
@@ -442,7 +442,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
     SECTION("Set Env Variable in child process") {
@@ -467,7 +467,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
     }
 #endif
   } else {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 1");  // NOLINT
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
   }
 }
 
@@ -476,16 +476,16 @@ void ChkUUID() {
     return;
   }
   int devCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&devCount));
+  HIP_CHECK_THREAD(hipGetDeviceCount(&devCount));
   if (devCount != 1) {
     tState = 0;
     return;
   }
   hipDevice_t device;
-  HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK_THREAD(hipSetDevice(0));
+  HIP_CHECK_THREAD(hipDeviceGet(&device, 0));
   hipUUID d_uuid{0};
-  HIP_CHECK(hipDeviceGetUuid(&d_uuid, device));
+  HIP_CHECK_THREAD(hipDeviceGetUuid(&d_uuid, device));
   std::map<int, std::string> uuid_map;
   auto getNthElem = [&uuid_map](int pos) {
      return std::next(uuid_map.begin(), pos)->second;
@@ -521,7 +521,6 @@ void setEnv() {
     setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
   } else {
     tState = 2;
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
   }
 }
 /**
@@ -542,9 +541,13 @@ HIP_TEST_CASE(Unit_UUID_setEnv_Thread) {
   // Create Thread one
   std::thread t1(setEnv);
   t1.join();
+  if (tState == 2) {
+    HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
+  }
   // Create Thread two
   std::thread t2(ChkUUID);
   t2.join();
+  HIP_CHECK_THREAD_FINALIZE();
   REQUIRE(tState != 0);
 }
 #endif

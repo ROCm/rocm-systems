@@ -14,14 +14,30 @@ choose.
 
 .. note::
 
-   Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
+   Analyze mode needs a Python version and a set of third-party packages that
+   profile mode does not. Install them in their own virtual environment. See
+   the Python version support table in :doc:`/install/quickstart`.
+
+.. note::
+
+   Analyze mode concatenates the per-pass ``results_*.csv.gz`` files written by
+   ``rocpd`` profiling into a unified ``pmc_perf.csv.gz`` for analysis. If the
+   workload directory already contains a ``pmc_perf.csv.gz``, that file is used
+   as-is.
+
+.. note::
+
+   Reading intermediate ``results_*.csv`` files produced by ``rocpd`` profiling is
+   deprecated and will be removed in a future release. The analyze step will read ``.db``
+   files directly.
 
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 
 * :doc:`cli`
-* :doc:`standalone-gui`
-* :doc:`tui`
+* :doc:`standalone-gui` (experimental feature)
+* :doc:`tui` (experimental feature)
+* :doc:`optiq` (graphical application)
 
 .. note::
 

@@ -9,9 +9,6 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 
-#undef hipChooseDevice
-#undef hipDeviceProp_t
-
 namespace hip {
 
 hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device);
@@ -442,11 +439,25 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeHostNumaId:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
+      break;
     case hipDeviceAttributeDmaBufSupported:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
       break;
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hostAllocDmabufSupported_);
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      *pi = static_cast<int>(
+          g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
+      break;
+    case hipDeviceAttributeHandleTypeFabricSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().fabric_handle_);
+      break;
     case hipDeviceAttributeExpertSchedMode:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
+      break;
+    case hipDeviceAttributeMaxDynDataPrefetchRegions:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().maxDynDataPrefetchRegions_);
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
@@ -595,6 +606,8 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
 
   // No way to set cache config yet.
 
+  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(
+      amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig)));
   HIP_RETURN(hipSuccess);
 }
 
@@ -784,10 +797,10 @@ hipError_t hipSetDevice(int device) {
   HIP_RETURN(hipErrorInvalidDevice);
 }
 
-hipError_t hipSetDeviceFlags(unsigned int flags) {
-  HIP_INIT_API(hipSetDeviceFlags, flags);
-  if (g_devices.empty()) {
-    HIP_RETURN(hipErrorNoDevice);
+// Validates and applies the device scheduling/context flags to the given device.
+hipError_t ihipSetDeviceFlags(hip::Device* dev, unsigned int flags) {
+  if (dev == nullptr) {
+    return hipErrorInvalidDevice;
   }
   constexpr uint32_t supportedFlags =
       hipDeviceScheduleMask | hipDeviceMapHost | hipDeviceLmemResizeToMax;
@@ -800,14 +813,14 @@ hipError_t hipSetDeviceFlags(unsigned int flags) {
       ((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleYield) &&
       ((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleBlockingSync) &&
       ((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleAuto)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   if (flags & ~supportedFlags) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
-  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  amd::Device* device = dev->devices()[0];
   switch (scheduleFlag) {
     case hipDeviceScheduleAuto:
       // Current behavior is different from the spec, due to MT usage in runtime
@@ -827,7 +840,49 @@ hipError_t hipSetDeviceFlags(unsigned int flags) {
     default:
       break;
   }
-  hip::getCurrentDevice()->setFlags(flags & hipDeviceScheduleMask);
+  dev->setFlags(flags & hipDeviceScheduleMask);
+
+  return hipSuccess;
+}
+
+hipError_t hipSetDeviceFlags(unsigned int flags) {
+  HIP_INIT_API(hipSetDeviceFlags, flags);
+  if (g_devices.empty()) {
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  HIP_RETURN(ihipSetDeviceFlags(hip::getCurrentDevice(), flags));
+}
+
+hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  HIP_INIT_API(hipInitDevice, device, deviceFlags, flags);
+
+  if (g_devices.empty()) {
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  if (flags != 0 && flags != hipInitDeviceFlagsAreValid) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (device < 0 || static_cast<unsigned int>(device) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  hip::Device* dev = g_devices[device];
+
+  // Apply the device scheduling flags only when hipInitDeviceFlagsAreValid is passed.
+  if (flags == hipInitDeviceFlagsAreValid) {
+    hipError_t err = ihipSetDeviceFlags(dev, deviceFlags);
+    if (err != hipSuccess) {
+      HIP_RETURN(err);
+    }
+  }
+
+  // creates default (null) stream on the initialized device.
+  if (dev->NullStream(false) == nullptr) {
+    HIP_RETURN(hipErrorOutOfMemory);
+  };
 
   HIP_RETURN(hipSuccess);
 }
@@ -861,7 +916,3 @@ hipError_t hipSetValidDevices(int* device_arr, int len) {
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip
-
-extern "C" hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0000* properties) {
-  return hip::hipChooseDeviceR0000(device, properties);
-}

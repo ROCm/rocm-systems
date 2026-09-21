@@ -1,47 +1,22 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include "core/exception.hpp"
-
-#include <array>
-#include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <stdexcept>
-#include <vector>
+#include <string>
+#include <typeinfo>
 
-namespace rocprofsys
-{
-namespace container
+namespace rocprofsys::container
 {
 template <typename Tp>
 struct c_array
 {
     // Construct an array wrapper from a base pointer and array size
-    c_array(Tp* _base, size_t _size)
-    : m_base{ _base }
-    , m_size{ _size }
+    constexpr c_array(Tp* base, size_t size)
+    : m_base{ base }
+    , m_size{ size }
     {}
 
     ~c_array()                             = default;
@@ -50,79 +25,94 @@ struct c_array
     c_array& operator=(c_array&&) noexcept = default;
 
     // Get the size of the wrapped array
-    size_t size() const { return m_size; }
+    [[nodiscard]] constexpr size_t size() const { return m_size; }
 
     // Access an element by index
-    Tp& operator[](size_t i) { return m_base[i]; }
+    constexpr Tp& operator[](size_t idx) { return m_base[idx]; }
 
     // Access an element by index
-    const Tp& operator[](size_t i) const { return m_base[i]; }
+    constexpr const Tp& operator[](size_t idx) const { return m_base[idx]; }
 
     // Access an element by index with bounds check
-    Tp& at(size_t i)
+    constexpr Tp& at(size_t idx)
     {
-        if(i < m_size) return m_base[i];
-        throw ::rocprofsys::exception<std::out_of_range>(
-            std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
-            std::to_string(m_size));
+        if(idx < m_size)
+        {
+            return m_base[idx];
+        }
+        throw std::out_of_range{ std::string{ typeid(*this).name() } +
+                                 std::to_string(idx) + " exceeds size " +
+                                 std::to_string(m_size) };
     }
 
     // Access an element by index with bounds check
-    const Tp& at(size_t i) const
+    constexpr const Tp& at(size_t idx) const
     {
-        if(i < m_size) return m_base[i];
-        throw ::rocprofsys::exception<std::out_of_range>(
-            std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
-            std::to_string(m_size));
+        if(idx < m_size)
+        {
+            return m_base[idx];
+        }
+        throw std::out_of_range{ std::string{ typeid(*this).name() } +
+                                 std::to_string(idx) + " exceeds size " +
+                                 std::to_string(m_size) };
     }
 
     // Get a slice of this array, from a start index (inclusive) to end index (exclusive)
-    c_array<Tp> slice(size_t start, size_t end)
+    constexpr c_array<Tp> slice(size_t start, size_t end)
     {
         return c_array<Tp>(&m_base[start], end - start);
     }
 
-    void pop_front()
+    constexpr void pop_front()
     {
         ++m_base;
         --m_size;
     }
 
-    void pop_back() { --m_size; }
+    constexpr void pop_back() { --m_size; }
 
-    operator Tp*() const { return m_base; }
+    constexpr operator Tp*() const { return m_base; }
 
     // Iterator class for convenient range-based for loop support
     template <typename Up>
     struct iterator
     {
         // Start the iterator at a given pointer
-        iterator(Tp* p)
-        : m_ptr{ p }
+        constexpr iterator(Tp* ptr)
+        : m_ptr{ ptr }
         {}
 
         // Advance to the next element
-        void operator++() { ++m_ptr; }
-        void operator++(int) { m_ptr++; }
+        constexpr void operator++() { ++m_ptr; }
+        constexpr void operator++(int) { m_ptr++; }
 
         // Get the current element
-        Up& operator*() const { return *m_ptr; }
+        constexpr Up& operator*() const { return *m_ptr; }
 
         // Compare iterators
-        bool operator==(const iterator& rhs) const { return m_ptr == rhs.m_ptr; }
-        bool operator!=(const iterator& rhs) const { return m_ptr != rhs.m_ptr; }
+        constexpr bool operator==(const iterator& rhs) const
+        {
+            return m_ptr == rhs.m_ptr;
+        }
+        constexpr bool operator!=(const iterator& rhs) const
+        {
+            return m_ptr != rhs.m_ptr;
+        }
 
     private:
         Tp* m_ptr = nullptr;
     };
 
     // Get an iterator positioned at the beginning of the wrapped array
-    iterator<Tp>       begin() { return iterator<Tp>{ m_base }; }
-    iterator<const Tp> begin() const { return iterator<const Tp>{ m_base }; }
+    constexpr iterator<Tp>       begin() { return iterator<Tp>{ m_base }; }
+    constexpr iterator<const Tp> begin() const { return iterator<const Tp>{ m_base }; }
 
     // Get an iterator positioned at the end of the wrapped array
-    iterator<Tp>       end() { return iterator<Tp>{ &m_base[m_size] }; }
-    iterator<const Tp> end() const { return iterator<const Tp>{ &m_base[m_size] }; }
+    constexpr iterator<Tp>       end() { return iterator<Tp>{ &m_base[m_size] }; }
+    constexpr iterator<const Tp> end() const
+    {
+        return iterator<const Tp>{ &m_base[m_size] };
+    }
 
 private:
     Tp*    m_base = nullptr;
@@ -131,10 +121,9 @@ private:
 
 // Function for automatic template argument deduction
 template <typename Tp>
-c_array<Tp>
+constexpr c_array<Tp>
 wrap_c_array(Tp* base, size_t size)
 {
     return c_array<Tp>(base, size);
 }
-}  // namespace container
-}  // namespace rocprofsys
+}  // namespace rocprofsys::container

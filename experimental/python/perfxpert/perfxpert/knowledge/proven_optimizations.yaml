@@ -1,0 +1,226 @@
+# Proven optimization case studies — see spec §6.5 and docs/contributing/proven_optimizations.md.
+# Every entry cites a source and is paired with before/after fixture DBs
+# in tests/fixtures/proven_optimizations/. Integration test
+# tests/test_integration/test_proven_optimizations.py asserts each case
+# passes all 5 correctness gates (§5).
+#
+# Growth strategy: nightly benchmark discovery appends; PRs add entries
+# with their fixture pair and description markdown.
+
+- id: vgpr_reduction_compute_bound
+  bottleneck_type: compute
+  technique: "launch_bounds VGPR reduction"
+  description: >
+    Kernel uses 128 VGPRs per thread giving 4 waves/EU. Adding
+    __launch_bounds__(256, 2) reduces VGPR pressure to 64 VGPRs, allowing
+    8 waves/EU. The latency-hiding improvement yields 25-40% speedup on
+    compute-bound kernels whose arithmetic intensity exceeds the ridge point.
+  measured_speedup_range: [1.25, 1.40]
+  source_citation: "GEAK paper + AMD CDNA3 Waves-per-EU VGPR occupancy table (knowledge/vgpr_occupancy_tables.yaml)"
+  preconditions:
+    - {metric: "vgpr_per_thread",      op: ">",  threshold: 96}
+    - {metric: "waves_per_eu",         op: "<=", threshold: 4}
+    - {metric: "arithmetic_intensity_above_ridge", op: "==", threshold: 1}
+    - {metric: "kernel_time_pct",      op: ">",  threshold: 0.10}
+  failure_modes:
+    - "Register spilling when VGPR target < 64 and kernel has live-range pressure (measure VMEM fills)"
+    - "LDS-bound kernels see no gain — check LDS bank conflicts first"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/vgpr_reduction_compute_bound.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/vgpr_reduction_compute_bound.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/vgpr_reduction_compute_bound.md"
+  applies_to_gfx: [gfx90a, gfx942, gfx950]
+
+- id: memory_coalescing_stride_fix
+  bottleneck_type: memory_transfer
+  technique: "data layout transpose for coalesced HBM access"
+  description: >
+    Original kernel reads [H,W,C] tensor with inner-most stride C ≠ 1 causing
+    uncoalesced HBM loads (hbm_bw_utilization < 0.15). Transposing to
+    [C,H,W] layout at host side before launch makes C the inner-most
+    contiguous dimension, restoring peak HBM bandwidth.
+  measured_speedup_range: [3.0, 5.0]
+  source_citation: "AMD CDNA3 Optimization Guide, ch. 'Coalesced Global Memory Access'"
+  preconditions:
+    - {metric: "hbm_bw_utilization", op: "<", threshold: 0.30}
+    - {metric: "memcpy_pct",         op: "<", threshold: 0.05}
+    - {metric: "l1_miss_rate",       op: ">", threshold: 0.80}
+  failure_modes:
+    - "Amortization fails when per-launch transpose cost exceeds saved kernel time"
+    - "Ping-pong transposes between layers can regress end-to-end"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/memory_coalescing_stride_fix.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/memory_coalescing_stride_fix.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/memory_coalescing_stride_fix.md"
+
+- id: mfma_enablement
+  bottleneck_type: compute
+  technique: "MFMA matrix intrinsics (v_mfma_*)"
+  description: >
+    Vector-ALU matmul replaced by MFMA intrinsic family (v_mfma_f32_16x16x16f16
+    etc.) unlocking dedicated matrix pipelines on CDNA3/4. Typical 4-10×
+    speedup for GEMM-shaped inner kernels when shapes are supported.
+  measured_speedup_range: [4.0, 10.0]
+  source_citation: "AMD Matrix Instruction Calculator + GEAK paper + MI300X ISA manual"
+  preconditions:
+    - {metric: "mfma_util_pct",      op: "<", threshold: 0.05}
+    - {metric: "valu_util_pct",      op: ">", threshold: 0.60}
+    - {metric: "kernel_matmul_like", op: "==", threshold: 1}
+  failure_modes:
+    - "Shape mismatch — MFMA requires specific multiples of 16 or 32 depending on dtype"
+    - "Non-FP16/BF16/FP8 dtypes have narrower MFMA support; FP32 MFMA much smaller gains"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/mfma_enablement.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/mfma_enablement.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/mfma_enablement.md"
+  applies_to_gfx: [gfx942, gfx950]
+
+- id: fast_math_compiler_flag
+  bottleneck_type: compute
+  technique: "-ffast-math compiler flag"
+  description: >
+    Compiler flag -ffast-math enables unsafe floating-point transforms
+    (reassoc, no-NaN/Inf, reciprocal approximations) that materially
+    reduce VALU op counts on transcendental-heavy kernels.
+  measured_speedup_range: [2.5, 3.5]
+  source_citation: "LLVM fast-math documentation + ROCm compiler reference"
+  preconditions:
+    - {metric: "transcendental_op_count", op: ">", threshold: 100}
+    - {metric: "valu_util_pct",           op: ">", threshold: 0.50}
+    - {metric: "kernel_time_pct",         op: ">", threshold: 0.05}
+  failure_modes:
+    - "Numerical regressions — must be gated on correctness gate Gate 5 output comparison"
+    - "Division-heavy kernels gain less than sqrt/exp/log-heavy kernels"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/fast_math_compiler_flag.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/fast_math_compiler_flag.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/fast_math_compiler_flag.md"
+
+- id: lds_tiling_matmul
+  bottleneck_type: memory_transfer
+  technique: "LDS tile-and-reuse for matmul"
+  description: >
+    Global-memory-bound matmul tiled into LDS: each thread-block loads one
+    tile of A and B into LDS then threads reuse tile for the block-inner
+    multiply-accumulate. Reduces HBM pressure by tile-size factor (typically
+    16-64×) converting a memory-bound kernel to compute-bound.
+  measured_speedup_range: [2.5, 6.0]
+  source_citation: "AMD CDNA Optimization Guide, ch. 'LDS-Tiled Matrix Multiplication'"
+  preconditions:
+    - {metric: "hbm_bw_utilization", op: ">", threshold: 0.60}
+    - {metric: "lds_usage_bytes",    op: "<", threshold: 8192}
+    - {metric: "kernel_matmul_like", op: "==", threshold: 1}
+  failure_modes:
+    - "LDS bank conflicts from bad tile strides (use padded tile dimensions)"
+    - "Tiles too large reduce occupancy — must match per-arch lds_kb (64 or 160)"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/lds_tiling_matmul.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/lds_tiling_matmul.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/lds_tiling_matmul.md"
+
+- id: hip_stream_overlap
+  bottleneck_type: latency
+  technique: "async memcpy + multi-stream kernel overlap"
+  description: >
+    Default stream serialization causes HBM transfers to block kernels.
+    Splitting workload across 2-4 streams with hipMemcpyAsync lets H2D
+    transfer overlap with compute, hiding 30-70% of memcpy wall time.
+  measured_speedup_range: [1.30, 1.70]
+  source_citation: "HIP API best practices + AMD optimization guide 'Concurrent Execution'"
+  preconditions:
+    - {metric: "memcpy_pct",        op: ">", threshold: 0.20}
+    - {metric: "num_streams_used",  op: "<=", threshold: 1}
+    - {metric: "avg_memcpy_size_mb", op: ">", threshold: 1.0}
+  failure_modes:
+    - "Too-many streams → launch-overhead dominated again; sweet spot 2-4"
+    - "Pageable host memory blocks overlap; must use hipHostMalloc pinned memory"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/hip_stream_overlap.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/hip_stream_overlap.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/hip_stream_overlap.md"
+
+- id: kernel_fusion_small_launches
+  bottleneck_type: latency
+  technique: "fuse pointwise kernels into one launch"
+  description: >
+    Chains of short pointwise kernels (e.g. add → relu → clip) each
+    incurring ~5-10 µs launch overhead are fused into one kernel.
+    When kernel count > 1000 and avg duration < 10 µs the latency saving
+    can be 2-6×.
+  measured_speedup_range: [2.0, 6.0]
+  source_citation: "Meta KernelEvolve blog + standard GPU fusion patterns"
+  preconditions:
+    - {metric: "total_kernel_calls",      op: ">", threshold: 1000}
+    - {metric: "avg_kernel_duration_us",  op: "<", threshold: 10.0}
+    - {metric: "api_overhead_pct",        op: ">", threshold: 0.15}
+  failure_modes:
+    - "Fused kernel may regress occupancy if VGPR/LDS combined exceeds waves-per-EU target"
+    - "Loses kernel-granularity profiling — harder to debug post-fusion"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/kernel_fusion_small_launches.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/kernel_fusion_small_launches.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/kernel_fusion_small_launches.md"
+
+- id: device_sync_removal
+  bottleneck_type: latency
+  technique: "remove spurious hipDeviceSynchronize"
+  description: >
+    Legacy code sprinkled with hipDeviceSynchronize() at end of every helper
+    function collapses pipeline parallelism. Removing unnecessary syncs
+    (keeping only event-based syncs at boundaries) yields 20-80% speedup.
+  measured_speedup_range: [1.20, 1.80]
+  source_citation: "HIP API guide + common source-analysis anti-pattern"
+  preconditions:
+    - {metric: "hipDeviceSynchronize_call_count", op: ">", threshold: 5}
+    - {metric: "gpu_idle_pct",                    op: ">", threshold: 0.20}
+    - {metric: "api_overhead_pct",                op: ">", threshold: 0.10}
+  failure_modes:
+    - "Removing required syncs → data races or WAW hazards (must pair with correctness gate)"
+    - "Pre-sync timing assumptions in user code break"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/device_sync_removal.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/device_sync_removal.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/device_sync_removal.md"
+
+- id: warp_primitives_reduction
+  bottleneck_type: memory_transfer
+  technique: "__shfl_sync warp-scoped reduction (replaces LDS)"
+  description: >
+    Warp-wide reductions done via LDS incur 2-3 LDS round-trips. Replacing
+    with __shfl_xor_sync keeps values in VGPR register file, removing LDS
+    traffic and enabling lower-latency reductions (30-80% kernel speedup
+    when reduction is on the hot path).
+  measured_speedup_range: [1.30, 1.80]
+  source_citation: "CDNA Programming Guide + RDNA ISA manual"
+  preconditions:
+    - {metric: "lds_usage_bytes",         op: ">", threshold: 256}
+    - {metric: "reduction_pattern_detected", op: "==", threshold: 1}
+    - {metric: "lds_bank_conflict_rate",  op: ">", threshold: 0.10}
+  failure_modes:
+    - "Warp size differences — wave32 (RDNA) vs wave64 (CDNA) require different masks"
+    - "Cross-warp reductions still need LDS; __shfl alone insufficient"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/warp_primitives_reduction.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/warp_primitives_reduction.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/warp_primitives_reduction.md"
+
+- id: cache_blocking_kernel
+  bottleneck_type: memory_transfer
+  technique: "block-size tuning for L2 cache reuse"
+  description: >
+    Block dimensions tuned such that per-block working set fits into L2
+    cache. Cold miss traffic on repeated passes collapses; hbm_bw_utilization
+    drops while kernel throughput rises.
+  measured_speedup_range: [1.20, 2.00]
+  source_citation: "AMD CDNA3/4 ISA Guide, ch. 'Cache Hierarchy and Blocking'"
+  preconditions:
+    - {metric: "l2_hit_rate",        op: "<", threshold: 0.50}
+    - {metric: "hbm_bw_utilization", op: ">", threshold: 0.40}
+    - {metric: "working_set_mb",     op: "<", threshold: 16}
+  failure_modes:
+    - "Block-size sweep is arch-dependent — gfx942 L2 = 256 MB, gfx950 L2 larger"
+    - "Excessive block-size reduces occupancy (fewer blocks on-chip)"
+  fixture_pair:
+    baseline_db:    "tests/fixtures/proven_optimizations/cache_blocking_kernel.baseline.db"
+    optimized_db:   "tests/fixtures/proven_optimizations/cache_blocking_kernel.optimized.db"
+    description_md: "tests/fixtures/proven_optimizations/cache_blocking_kernel.md"

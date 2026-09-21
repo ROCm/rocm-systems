@@ -50,7 +50,7 @@ updates:
       rocprofiler-systems-docs-dependencies:
         patterns:
           - "*"
-  
+
   - package-ecosystem: "pip"
     directory: "projects/rocprofiler-sdk/source/docs/sphinx" # Location of package manifests
     open-pull-requests-limit: 5
@@ -60,7 +60,7 @@ updates:
       rocprofiler-sdk-docs-dependencies:
         patterns:
           - "*"
-  
+
   - package-ecosystem: "pip"
     directory: "projects/rocm-smi-lib/docs/sphinx" # Location of package manifests
     open-pull-requests-limit: 5
@@ -110,4 +110,13 @@ updates:
       amdsmi-docs-dependencies:
         patterns:
           - "*"
-          
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocr-debug-agent/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocr-debug-agent-docs-dependencies:
+        patterns:
+          - "*"

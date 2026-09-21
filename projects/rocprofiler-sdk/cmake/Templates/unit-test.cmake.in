@@ -15,6 +15,7 @@ set(_SKIP_REGEX "@RAUT_SKIP_REGULAR_EXPRESSION@")
 set(_DISABLED "@RAUT_DISABLED@")
 set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
 set(_PREFIX "@RAUT_TEST_PREFIX@")
+set(_RESOURCE_LOCK "@RAUT_RESOURCE_LOCK@")
 
 function(rocprofiler_sdk_update_unit_test_environment _VAR _NAME)
     set(_UPD) # temporary variable to hold updated list
@@ -26,10 +27,13 @@ function(rocprofiler_sdk_update_unit_test_environment _VAR _NAME)
         endif()
     endforeach()
     # propagate to parent scope
-    set(${_VAR} "${_UPD}" PARENT_SCOPE)
+    set(${_VAR}
+        "${_UPD}"
+        PARENT_SCOPE)
 endfunction()
 
-rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "LD_LIBRARY_PATH" "$ENV{LD_LIBRARY_PATH}")
+rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "LD_LIBRARY_PATH"
+                                             "$ENV{LD_LIBRARY_PATH}")
 rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "ROCPROFILER_METRICS_PATH"
                                              "$ENV{ROCPROFILER_METRICS_PATH}")
 
@@ -59,14 +63,33 @@ set_tests_properties(
                SKIP_REGULAR_EXPRESSION
                "${_SKIP_REGEX}"
                ENVIRONMENT
-               "${_ENVIRONMENT}"
-               DISABLED
-               "${_DISABLED}")
+               "${_ENVIRONMENT}")
+
+if(_DISABLED)
+    set_tests_properties(${@RAUT_TARGET@_TESTS} PROPERTIES DISABLED "${_DISABLED}")
+endif()
+
+if(_RESOURCE_LOCK)
+    set_tests_properties(${@RAUT_TARGET@_TESTS} PROPERTIES RESOURCE_LOCK
+                                                           "${_RESOURCE_LOCK}")
+endif()
 
 # Disable specific tests
 set(_DISABLE_TESTS "@RAUT_DISABLE_TESTS@")
 if(_DISABLE_TESTS)
-    set_tests_properties(
-        ${_DISABLE_TESTS}
-        PROPERTIES DISABLED ON)
+    set_tests_properties(${_DISABLE_TESTS} PROPERTIES DISABLED ON)
 endif()
+
+set(_SPM_TESTS @RAUT_SPM_TESTS@)
+foreach(_spm_test IN LISTS _SPM_TESTS)
+    if(_spm_test)
+        get_property(
+            _labels
+            TEST ${_spm_test}
+            PROPERTY LABELS)
+        if(NOT "spm" IN_LIST _labels)
+            list(APPEND _labels "spm")
+            set_tests_properties(${_spm_test} PROPERTIES LABELS "${_labels}")
+        endif()
+    endif()
+endforeach()

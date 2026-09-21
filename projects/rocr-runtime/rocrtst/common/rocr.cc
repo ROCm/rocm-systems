@@ -45,6 +45,7 @@
 
 #include "common/rocr.h"
 System System::sys;
+#include "hsa/hsa_ven_amd_loader.h"
 
 bool DeviceDiscovery(System& devices) {
   hsa_status_t err;
@@ -201,7 +202,7 @@ bool CodeObject::GetKernel(std::string name, Kernel& kern) {
   err = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &kern.group);
   CHECK(err);
   //printf("LDS: %d\n", kern.group);
-  
+
   // Remaining needs code object v2 or comgr.
   err = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kern.kernarg_size);
   CHECK(err);
@@ -223,7 +224,7 @@ bool SubmitPacket(hsa_queue_t* queue, Aql& pkt) {
   uint64_t read = hsa_queue_load_read_index_relaxed(queue);
   //if(write - read + 1 > queue->size)
   //  return false;
-  
+
   Aql& dst = ring[write & mask];
 
   uint16_t header = pkt.header.raw;

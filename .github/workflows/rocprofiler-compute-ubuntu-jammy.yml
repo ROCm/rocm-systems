@@ -31,6 +31,9 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -50,11 +53,18 @@ jobs:
           apt-get install -y git
           apt-get install -y python3-pip
           apt-get install -y cmake
+          apt-get install -y libdw-dev zlib1g-dev pkg-config
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-compute
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
 
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute

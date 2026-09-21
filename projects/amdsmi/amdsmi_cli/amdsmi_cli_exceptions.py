@@ -1,40 +1,23 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import json
 
 
 AMDSMI_ERROR_MESSAGES = {
-    0: "Sucess",
+    0: "Success",
     1: "Invalid parameters",
     2: "Command not supported",
     3: "Command not yet implemented",
     4: "Failed load module",
-    5: "Failed load symbole",
+    5: "Failed load symbol",
     6: "Drm error",
     7: "API call failed",
     8: "Timeout in API call",
     9: "Retry operation",
     10: "Permission Denied",
-    11: "Interrupt ocurred during execution",
+    11: "Interrupt occurred during execution",
     12: "I/O Error",
     13: "Address fault",
     14: "Error opening file",
@@ -87,6 +70,7 @@ class AmdSmiException(Exception):
         self.message = ""
         self.output_format = ""
         self.device_type = ""
+        self.value = 0
 
     def __str__(self):
         # Return message according to the current output format
@@ -179,7 +163,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterValueException(AmdSmiException):
-    def __init__(self, command, arg, outputformat: str):
+    def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
         self.value = -5
         self.command = command
@@ -187,6 +171,8 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
         self.output_format = outputformat
 
         common_message = f"Value '{self.arg}' is not of valid type or format. Run 'amd-smi {self.command} -h' for more info."
+        if hint:
+            common_message += f" {hint}"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

@@ -1,26 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/storage_parser.hpp"
@@ -31,7 +13,6 @@
 #include <memory>
 #include <random>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -58,8 +39,8 @@ struct sample_2_hash
 {
     size_t operator()(const test_sample_2& s) const
     {
-        size_t h1 = std::hash<double>{}(s.data);
-        size_t h2 = std::hash<uint32_t>{}(s.sample_id);
+        const size_t h1 = std::hash<double>{}(s.data);
+        const size_t h2 = std::hash<std::uint32_t>{}(s.sample_id);
         return h1 ^ (h2 << 1);
     }
 };
@@ -71,7 +52,7 @@ struct sample_3_hash
         size_t h = 0;
         for(auto byte : s.payload)
         {
-            h ^= std::hash<uint8_t>{}(byte) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<std::uint8_t>{}(byte) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
         return h;
     }
@@ -84,7 +65,7 @@ struct sample_4_hash
         size_t h = 0;
         for(auto val : s.data)
         {
-            h ^= std::hash<uint32_t>{}(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<std::uint32_t>{}(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
         return h;
     }
@@ -96,7 +77,7 @@ struct sample_5_hash
     {
         if(s.data.has_value())
         {
-            return std::hash<uint32_t>{}(s.data.value()) ^ 0x1;
+            return std::hash<std::uint32_t>{}(s.data.value()) ^ 0x1;
         }
         return 0;
     }
@@ -111,7 +92,7 @@ public:
 
     void set_expected_samples_1(const std::vector<test_sample_1>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_1.clear();
         for(const auto& s : samples)
         {
@@ -121,7 +102,7 @@ public:
 
     void set_expected_samples_2(const std::vector<test_sample_2>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_2.clear();
         for(const auto& s : samples)
         {
@@ -131,7 +112,7 @@ public:
 
     void set_expected_samples_3(const std::vector<test_sample_3>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_3.clear();
         for(const auto& s : samples)
         {
@@ -141,7 +122,7 @@ public:
 
     void set_expected_samples_4(const std::vector<test_sample_4>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_4.clear();
         for(const auto& s : samples)
         {
@@ -151,7 +132,7 @@ public:
 
     void set_expected_samples_5(const std::vector<test_sample_5>& samples)
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         m_expected_samples_5.clear();
         for(const auto& s : samples)
         {
@@ -167,7 +148,7 @@ public:
             case test_type_identifier_t::sample_type_1:
             {
                 const auto& sample = static_cast<const test_sample_1&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
                 m_sample_1_count++;
                 check_sample_1(sample);
                 break;
@@ -175,7 +156,7 @@ public:
             case test_type_identifier_t::sample_type_2:
             {
                 const auto& sample = static_cast<const test_sample_2&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
                 m_sample_2_count++;
                 check_sample_2(sample);
                 break;
@@ -183,7 +164,7 @@ public:
             case test_type_identifier_t::sample_type_3:
             {
                 const auto& sample = static_cast<const test_sample_3&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
                 m_sample_3_count++;
                 check_sample_3(sample);
                 break;
@@ -191,7 +172,7 @@ public:
             case test_type_identifier_t::sample_type_4:
             {
                 const auto& sample = static_cast<const test_sample_4&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
                 m_sample_4_count++;
                 check_sample_4(sample);
                 break;
@@ -199,7 +180,7 @@ public:
             case test_type_identifier_t::sample_type_5:
             {
                 const auto& sample = static_cast<const test_sample_5&>(value);
-                std::lock_guard<std::mutex> lock(m_data_mutex);
+                const std::lock_guard<std::mutex> lock(m_data_mutex);
                 m_sample_5_count++;
                 check_sample_5(sample);
                 break;
@@ -215,7 +196,7 @@ public:
     int  get_sample_5_count() const { return m_sample_5_count.load(); }
     bool all_expected_samples_found() const
     {
-        std::lock_guard<std::mutex> lock(m_data_mutex);
+        const std::lock_guard<std::mutex> lock(m_data_mutex);
         return m_expected_samples_1.empty() && m_expected_samples_2.empty() &&
                m_expected_samples_3.empty() && m_expected_samples_4.empty() &&
                m_expected_samples_5.empty();
@@ -337,7 +318,7 @@ TEST_F(trace_cache_module_integration_test, buffer_fragmentation_handling)
         large_texts.push_back(std::string(1000, 'A' + (i % 26)));
         large_samples.push_back({ i, large_texts[i] });
 
-        std::vector<uint8_t> small_payload(10, static_cast<uint8_t>(i));
+        const std::vector<std::uint8_t> small_payload(10, static_cast<std::uint8_t>(i));
         small_samples.emplace_back(small_payload);
     }
 
@@ -390,22 +371,21 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
     strings.emplace_back("");
     strings.emplace_back("Special\n\t\r\0chars");
 
-    test_sample_1 max_int(std::numeric_limits<int>::max(), strings[0]);
-    test_sample_1 min_int(std::numeric_limits<int>::min(), strings[1]);
-    test_sample_1 zero_int(0, strings[2]);
-    test_sample_1 special_chars(123, strings[3]);
+    const test_sample_1 max_int(std::numeric_limits<int>::max(), strings[0]);
+    const test_sample_1 min_int(std::numeric_limits<int>::min(), strings[1]);
+    const test_sample_1 zero_int(0, strings[2]);
+    const test_sample_1 special_chars(123, strings[3]);
 
-    test_sample_2 max_double(std::numeric_limits<double>::max(),
-                             std::numeric_limits<uint32_t>::max());
-    test_sample_2 min_double(std::numeric_limits<double>::lowest(), 0);
-    test_sample_2 infinity(std::numeric_limits<double>::infinity(), 42);
-    test_sample_2 neg_infinity(-std::numeric_limits<double>::infinity(), 43);
+    const test_sample_2 max_double(std::numeric_limits<double>::max(),
+                                   std::numeric_limits<std::uint32_t>::max());
+    const test_sample_2 min_double(std::numeric_limits<double>::lowest(), 0);
+    const test_sample_2 infinity(std::numeric_limits<double>::infinity(), 42);
+    const test_sample_2 neg_infinity(-std::numeric_limits<double>::infinity(), 43);
 
-    std::vector<uint8_t> max_vector(10000, 0xFF);
-    test_sample_3        large_payload(max_vector);
-    test_sample_3        empty_payload;
-    std::vector<uint8_t> single_zero = { 0x00 };
-    test_sample_3        zero_payload(single_zero);
+    const std::vector<std::uint8_t> max_vector(10000, 0xFF);
+    const test_sample_3             large_payload(max_vector);
+    const test_sample_3             empty_payload;
+    const test_sample_3             zero_payload({ 0x00 });
 
     std::vector<test_sample_1> expected_1;
     std::vector<test_sample_2> expected_2;
@@ -487,11 +467,11 @@ TEST_F(trace_cache_module_integration_test, stress_test_multiple_fragmentations)
         {
             for(int i = 0; i < samples_per_iteration; ++i)
             {
-                int    value     = value_dist(rng);
-                size_t text_size = size_dist(rng);
+                const int    value     = value_dist(rng);
+                const size_t text_size = size_dist(rng);
                 texts.push_back(std::string(text_size, 'X'));
 
-                test_sample_1 sample(value, texts.back());
+                const test_sample_1 sample(value, texts.back());
                 expected_1.push_back(sample);
                 storage.store(sample);
             }
@@ -549,9 +529,9 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
         std::chrono::duration_cast<unit>(end_time - start_time);
     auto period = static_cast<double>(unit::period().den);
 
-    double avg_write_time =
+    const double avg_write_time =
         static_cast<double>(duration_in_microseconds.count()) / sample_count;
-    double throughput =
+    const double throughput =
         (sample_count * payload_size) / (duration_in_microseconds.count() / period);
 
     EXPECT_LT(avg_write_time, 50.0);
@@ -609,7 +589,7 @@ TEST_F(trace_cache_module_integration_test, concurrent_write_read_validation)
             writers.emplace_back([&, thread_id = t]() {
                 for(int i = 0; i < samples_per_thread; ++i)
                 {
-                    test_sample_1 sample(thread_id, thread_strings[thread_id][i]);
+                    const test_sample_1 sample(thread_id, thread_strings[thread_id][i]);
 
                     storage.store(sample);
                     thread_counters[thread_id]++;
@@ -632,7 +612,7 @@ TEST_F(trace_cache_module_integration_test, concurrent_write_read_validation)
     }
 
     int total_written = 0;
-    for(int counter : thread_counters)
+    for(const int counter : thread_counters)
     {
         EXPECT_EQ(counter, samples_per_thread);
         total_written += counter;
@@ -664,13 +644,13 @@ TEST_F(trace_cache_module_integration_test, uint32_vector_element_size_handling)
 
         for(int i = 0; i < 100; ++i)
         {
-            std::vector<uint32_t> data;
+            std::vector<std::uint32_t> data;
             data.reserve(10);
             for(int j = 0; j < 10; ++j)
             {
-                data.push_back(static_cast<uint32_t>(i * 1000 + j));
+                data.push_back(static_cast<std::uint32_t>(i * 1000 + j));
             }
-            test_sample_4 sample(data);
+            const test_sample_4 sample(data);
             expected_4.push_back(sample);
             storage.store(sample);
         }
@@ -707,20 +687,20 @@ TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
         {
             if(i % 2 == 0)
             {
-                std::vector<uint8_t> payload(20, static_cast<uint8_t>(i));
-                test_sample_3        sample(payload);
+                const std::vector<std::uint8_t> payload(20, static_cast<std::uint8_t>(i));
+                const test_sample_3             sample(payload);
                 expected_3.push_back(sample);
                 storage.store(sample);
             }
             else
             {
-                std::vector<uint32_t> data;
+                std::vector<std::uint32_t> data;
                 data.reserve(5);
                 for(int j = 0; j < 5; ++j)
                 {
-                    data.push_back(static_cast<uint32_t>(i * 100 + j));
+                    data.push_back(static_cast<std::uint32_t>(i * 100 + j));
                 }
-                test_sample_4 sample(data);
+                const test_sample_4 sample(data);
                 expected_4.push_back(sample);
                 storage.store(sample);
             }
@@ -745,16 +725,16 @@ TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
 
 TEST_F(trace_cache_module_integration_test, optional_field_roundtrip)
 {
-    std::string text_1 = "optional_test";
+    const std::string text_1 = "optional_test";
 
-    test_sample_1 sample1(42, text_1);
-    test_sample_5 sample5_with_value(std::optional<uint32_t>{ 12345 });
-    test_sample_5 sample5_nullopt(std::nullopt);
-    test_sample_2 sample2(2.71828, 999);
+    const test_sample_1 sample1(42, text_1);
+    const test_sample_5 sample5_with_value(std::optional<std::uint32_t>{ 12345 });
+    const test_sample_5 sample5_nullopt(std::nullopt);
+    const test_sample_2 sample2(2.71828, 999);
 
-    std::vector<test_sample_1> expected_1 = { sample1 };
-    std::vector<test_sample_2> expected_2 = { sample2 };
-    std::vector<test_sample_5> expected_5 = { sample5_with_value, sample5_nullopt };
+    const std::vector<test_sample_1> expected_1 = { sample1 };
+    const std::vector<test_sample_2> expected_2 = { sample2 };
+    const std::vector<test_sample_5> expected_5 = { sample5_with_value, sample5_nullopt };
 
     {
         rocprofsys::trace_cache::buffer_storage<

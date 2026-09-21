@@ -1,26 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "dwarf_entry.hpp"
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -120,7 +102,7 @@ get_dwarf_entry(Dwarf_Die* _die)
                 if(_lineno > 0) itr.line = _lineno;
                 const auto* _file = dwarf_linesrc(_line, nullptr, nullptr);
                 if(!_file) _file = dwarf_diename(_die);
-                itr.file = filepath::realpath(_file, nullptr, false);
+                itr.file = path::realpath(_file);
             }
         }
     }
@@ -168,9 +150,11 @@ dwarf_entry::process_dwarf(int _fd)
         auto& _ranges  = std::get<1>(_data_v);
         auto& _bkpts   = std::get<2>(_data_v);
 
+        // NOLINTBEGIN(misc-const-correctness)
         size_t    cu_header_size = 0;
         Dwarf_Off cu_off         = 0;
         Dwarf_Off next_cu_off    = 0;
+        // NOLINTEND(misc-const-correctness)
         for(; dwarf_nextcu(_dwarf_v, cu_off, &next_cu_off, &cu_header_size, nullptr,
                            nullptr, nullptr) == 0;
             cu_off = next_cu_off)

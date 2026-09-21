@@ -9,6 +9,7 @@ This module provides functionality to split TheRock build artifacts into:
 """
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Set
@@ -27,6 +28,24 @@ from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.compression import ZstdCompressor
 from rocm_kpack.kpack_transform import kpack_offload_binary, NotFatBinaryError
+
+
+def strip_target_features(target: str) -> str:
+    """Strip GPU target feature flags (e.g. 'gfx942:sramecc+:xnack-' -> 'gfx942')."""
+    colon_pos = target.find(":")
+    return target[:colon_pos] if colon_pos >= 0 else target
+
+
+# Known LLVM AMDGPU target features that ride on a base arch, in either the
+# colon form (gfx942:xnack+) or the Tensile kernel-filename hyphen form
+# (gfx90a-xnack-). Normalizing the hyphen form to colon lets one colon-split
+# drop every feature variant regardless of how many features are present.
+_HYPHEN_FEATURE_RE = re.compile(r"-(xnack|sramecc)")
+
+
+def base_arch(arch: str) -> str:
+    """Strip known feature suffixes in colon or hyphen form (e.g. 'gfx90a-xnack-' -> 'gfx90a')."""
+    return strip_target_features(_HYPHEN_FEATURE_RE.sub(r":\1", arch))
 
 
 @dataclass
@@ -57,6 +76,7 @@ class FileClassificationVisitor:
         toolchain: Toolchain,
         database_handlers: Optional[List[DatabaseHandler]] = None,
         verbose: bool = False,
+        gpu_targets: Optional[Set[str]] = None,
     ):
         """
         Initialize the classification visitor.
@@ -65,10 +85,12 @@ class FileClassificationVisitor:
             toolchain: Toolchain instance for binary operations
             database_handlers: List of database handler instances
             verbose: Enable verbose output
+            gpu_targets: If set, only produce per-arch artifacts for these GPU targets
         """
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
         self.verbose = verbose
+        self.gpu_targets = gpu_targets
 
         # Accumulated results
         self.fat_binaries: List[Path] = []
@@ -88,24 +110,42 @@ class FileClassificationVisitor:
         if not file_path.is_file():
             return
 
-        # Check if it's a fat binary
-        if is_fat_binary(file_path, self.toolchain):
-            self.fat_binaries.append(file_path)
-            if self.verbose:
-                print(f"  Found fat binary: {file_path.relative_to(prefix_path)}")
-            return
-
-        # Check database handlers
+        # Check database handlers first — some files (e.g. MIOpen CK per-arch
+        # .so files) are also fat binaries, but compiled per-arch. Matching
+        # them here prevents them from entering the kpack processing path.
         for handler in self.database_handlers:
             arch = handler.detect(file_path, prefix_path)
             if arch:
+                # detect() returns the Tensile hyphen form ('gfx90a-xnack-');
+                # collapse onto the bare base arch used by gpu_targets and the
+                # shard key so xnack variants are not dropped (ROCM-25535).
+                arch = base_arch(arch)
+                if self.gpu_targets is not None and arch not in self.gpu_targets:
+                    if self.verbose:
+                        print(
+                            f"  Skipping {handler.name()} file for {arch} "
+                            f"(not in gpu_targets): {file_path.relative_to(prefix_path)}"
+                        )
+                    # Exclude from generic (per-arch content doesn't belong
+                    # there) but don't add to database_files_by_arch so no
+                    # per-arch artifact is created. The correct arch job will
+                    # produce this file. The return also prevents the file
+                    # from falling through to the fat binary / kpack path.
+                    self.exclude_from_generic.add(file_path)
+                    return
                 self.database_files_by_arch[arch].append((file_path, handler))
                 self.exclude_from_generic.add(file_path)
                 if self.verbose:
                     print(
                         f"  Found {handler.name()} database file for {arch}: {file_path.relative_to(prefix_path)}"
                     )
-                break  # First matching handler wins
+                return  # First matching handler wins
+
+        # Check if it's a fat binary
+        if is_fat_binary(file_path, self.toolchain):
+            self.fat_binaries.append(file_path)
+            if self.verbose:
+                print(f"  Found fat binary: {file_path.relative_to(prefix_path)}")
 
     def get_statistics(self) -> str:
         """Get a summary of classification results."""
@@ -194,6 +234,7 @@ class ArtifactSplitter:
         toolchain: Toolchain,
         database_handlers: Optional[List[DatabaseHandler]] = None,
         verbose: bool = False,
+        gpu_targets: Optional[List[str]] = None,
     ):
         """
         Initialize the artifact splitter.
@@ -203,11 +244,16 @@ class ArtifactSplitter:
             toolchain: Toolchain instance for binary operations
             database_handlers: Optional list of DatabaseHandler instances for kernel databases
             verbose: Enable verbose output
+            gpu_targets: If set, only create per-arch artifacts for these GPU targets.
+                         Target feature flags are stripped (e.g. 'gfx942:sramecc+:xnack-' -> 'gfx942').
         """
         self.artifact_prefix = artifact_prefix
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
         self.verbose = verbose
+        self.gpu_targets: Optional[Set[str]] = (
+            {base_arch(t) for t in gpu_targets} if gpu_targets else None
+        )
 
     def compute_kpack_search_pattern(self, binary_path: Path, prefix_root: Path) -> str:
         """
@@ -328,6 +374,17 @@ class ArtifactSplitter:
                     # Extract architecture from target name (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
                     arch = extract_architecture_from_target(target_name)
                     if arch:
+                        if self.gpu_targets is not None:
+                            bare_arch = strip_target_features(arch)
+                            if bare_arch not in self.gpu_targets:
+                                code_object_index[arch] += 1
+                                if self.verbose:
+                                    print(
+                                        f"    Skipping kernel for {arch}: "
+                                        f"{file_name} (not in gpu_targets)"
+                                    )
+                                continue
+
                         kernel_path = unbundled.dest_dir / file_name
                         # Read kernel data while the file still exists
                         kernel_data = kernel_path.read_bytes()
@@ -426,6 +483,7 @@ class ArtifactSplitter:
                 group_name=self.artifact_prefix,
                 gfx_arch_family=arch,  # Use specific arch, not family
                 gfx_arches=[arch],
+                compressor=ZstdCompressor(),
             )
 
             # Add kernels to archive
@@ -683,7 +741,10 @@ class ArtifactSplitter:
 
             # Phase 1: Classify files using visitor
             classifier = FileClassificationVisitor(
-                self.toolchain, self.database_handlers, self.verbose
+                self.toolchain,
+                self.database_handlers,
+                self.verbose,
+                gpu_targets=self.gpu_targets,
             )
             self.scan_prefix(prefix_path, classifier)
 
@@ -736,6 +797,21 @@ class ArtifactSplitter:
         if all_kernels_by_arch:
             kpack_info_by_arch = self.create_kpack_files(
                 all_kernels_by_arch, output_dir
+            )
+
+        if (
+            fat_binaries_by_prefix
+            and self.gpu_targets is not None
+            and not kpack_info_by_arch
+        ):
+            target_list = ", ".join(sorted(self.gpu_targets))
+            fat_binary_count = sum(
+                len(paths) for paths in fat_binaries_by_prefix.values()
+            )
+            raise RuntimeError(
+                f"Found {fat_binary_count} fat binaries, but no device code objects "
+                f"matched --gpu-targets ({target_list}). Refusing to emit an "
+                "untransformed generic artifact."
             )
 
         # Phase 6: Inject kpack references and strip device code from fat binaries

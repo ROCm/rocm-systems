@@ -37,34 +37,12 @@ find_package_handle_standard_args(
 )
 
 if(${NAME}_FOUND AND NOT TARGET ${NAME}::${NAME})
-    add_library(${NAME}::${NAME} UNKNOWN IMPORTED)
+    add_library(${NAME}::${NAME} SHARED IMPORTED)
     set_target_properties(
         ${NAME}::${NAME}
         PROPERTIES
             IMPORTED_LOCATION "${${NAME}_LIBRARY}"
             INTERFACE_COMPILE_OPTIONS "${PC_${NAME}_CFLAGS_OTHER}"
             INTERFACE_INCLUDE_DIRECTORIES "${${NAME}_INCLUDE_DIR}"
-    )
-    find_library(rocm-core NAMES rocm-core REQUIRED)
-    find_package(yaml-cpp REQUIRED)
-    find_package(rocblas REQUIRED)
-    find_package(hipblaslt REQUIRED)
-    find_package(hsakmt REQUIRED)
-    find_package(hip REQUIRED)
-    find_package(hiprand REQUIRED)
-    find_package(hsa-runtime64 REQUIRED)
-    find_package(amd_smi REQUIRED)
-    target_link_libraries(
-        ${NAME}::${NAME}
-        INTERFACE
-            ${rocm-core}
-            yaml-cpp
-            roc::rocblas
-            roc::hipblaslt
-            hsakmt::hsakmt
-            hip::amdhip64
-            hip::hiprand
-            hsa-runtime64::hsa-runtime64
-            amd_smi
     )
 endif()

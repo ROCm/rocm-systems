@@ -91,20 +91,20 @@ gpu_workload()
     roctxRangeStop(rangeId);
 }
 
-// Function executed in a separate thread with ROCTx annotations.
+// Worker thread: demonstrates markers and ranges on a secondary thread.
 void
-roctxThreadFunc()
+worker_func()
 {
     roctxNameOsThread("roctxNameOsThread_New");
     roctxMark("roctxMark_Thread_Start");
     gpu_workload();
-    roctxMark("roctxMark_End");
+    roctxMark("roctxMark_Thread_End");
 }
 
 void
 run_profiling()
 {
-    // Label HIP device and stream
+    // Label HIP device and stream.
     int deviceId{ 0 };
     HIP_API_CALL(hipGetDevice(&deviceId));
     roctxNameHipDevice("roctxNameHipDevice_device_id", deviceId);
@@ -113,43 +113,23 @@ run_profiling()
     HIP_API_CALL(hipStreamCreate(&stream));
     roctxNameHipStream("roctxNameHipStream_hip_stream", stream);
 
-    // Insert a marker before the GPU workload
     roctxMark("roctxMark_GPU_workload");
-
-    // Start a nested profiling range.
     roctxRangePush("roctxRangePush_run_profiling");
 
-    // Execute GPU workload
     gpu_workload();
 
-    // Pause profiling steps using ROCTx APIs.
-    roctx_thread_id_t roctx_tid{};  // Thread identifier structure
-    roctxGetThreadId(&roctx_tid);
-
-    // Set names for OS thread, HSA agent, HIP device and stream.
-    roctxNameOsThread(std::to_string(roctx_tid).c_str());
-    // Prepare an hsa_agent_t with roctx thread id as a handle (example usage):
-    hsa_agent_t hsa_agent = { .handle = roctx_tid };
-    roctxNameHsaAgent("roctxNameHsaAgent_hsa_agent", &hsa_agent);
-    roctxNameHipDevice("roctxNameHipDevice_hipdevice", 0);
-    auto* hip_stream = hipStream_t{};
-    roctxNameHipStream("roctxNameHipStream_hip_stream", hip_stream);
-
-    // Pause ROCTx profiling for the current thread.
-    roctxProfilerPause(roctx_tid);
-    roctxMark("roctxMark_RoctxProfilerPause_End");
-
-    // Start a separate thread executing additional profiling-annotated work.
-    std::thread worker(roctxThreadFunc);
+    // Secondary thread — its markers and ranges are captured independently.
+    std::thread worker(worker_func);
     worker.join();
 
-    // Resume ROCTx profiling.
-    roctxProfilerResume(roctx_tid);
+    // Name the main thread and agent after the worker completes.
+    roctx_thread_id_t roctx_tid{};
+    roctxGetThreadId(&roctx_tid);
+    roctxNameOsThread(std::to_string(roctx_tid).c_str());
+    hsa_agent_t hsa_agent = { .handle = roctx_tid };
+    roctxNameHsaAgent("roctxNameHsaAgent_hsa_agent", &hsa_agent);
 
-    // End the nested profiling range.
     roctxRangePop();
-
-    // Insert a marker after execution of workload.
     roctxMark("roctxMark_Finished_GPU");
     HIP_API_CALL(hipStreamDestroy(stream));
 }

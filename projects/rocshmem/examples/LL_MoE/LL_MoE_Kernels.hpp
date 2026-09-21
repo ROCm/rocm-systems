@@ -1,21 +1,21 @@
 /******************************************************************************
  * MIT License
- * 
+ *
  * Copyright (c) 2025 DeepSeek
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- * 
+ *
  * SPDX-License-Identifier: MIT
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,7 +23,7 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
- * 
+ *
  *****************************************************************************/
 
 #include <rocshmem/rocshmem.hpp>
@@ -128,8 +128,7 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
   const size_t num_bytes_per_msg = sizeof(int) + hidden_bytes;
 
   DEVICE_ASSERT(num_bytes_per_msg % sizeof(int) == 0);
-  const size_t num_int_per_msg = num_bytes_per_msg / sizeof(int);
-  
+
   // Expert counts
   __shared__ int shared_num_tokens_sent_per_expert[kNumWaveGroups];
   if (wave_id < num_waves) {
@@ -152,7 +151,7 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
 
       // thread 0 in the warp writes the source token index
       thread_id == 0 ? (*(rdma_x_src_idx) = token_idx) : 0;
-      
+
       // #pragma unroll
       for (int i = thread_id; i < hidden; i += num_threads) {
         // Each thread in the thread block copies a portion of the token data
@@ -458,7 +457,6 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
   const int num_wgs = static_cast<int>(gridDim.x);
   const int num_threads = static_cast<int>(blockDim.x);
   const int lane_id = thread_id % kWaveSize;
-  constexpr int num_waves = kNumWavesPerGroup * kNumWaveGroups;
   const int num_local_experts = num_experts / num_ranks;
   const int wave_group_id = wave_id / kNumWavesPerGroup;
   const int sub_wave_id = wave_id % kNumWavesPerGroup;
@@ -545,8 +543,7 @@ void combine_kernel(T* combined_x, void* rdma_recv_x, int64_t* rdma_recv_flag,
 
     // Synchronize sub-warps in the warp group
     if (lane_id == 0) {
-      volatile int ret = __hip_atomic_fetch_add(
-          &sync_large_warp_counters[wave_group_id], 1,
+      __hip_atomic_fetch_add(&sync_large_warp_counters[wave_group_id], 1,
           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
       warp_sync();
       while (sync_large_warp_counters[wave_group_id] < kNumWavesPerGroup);

@@ -8,7 +8,7 @@ The rocDecode core APIs
 
 The rocDecode core APIs are intended for users who want to have full control of the decoding pipeline and interact with the core components instead of the utility classes. The :doc:`Using the rocDecode videodecode sample <../how-to/using-rocDecode-videodecode-sample>` provides an introduction to using the utility classes.
 
-The rocDecode core APIs are exposed in header files in the |apifolder|_ folder of the `rocDecode project <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. 
+The rocDecode core APIs are exposed in header files in the |apifolder|_ of the `rocDecode project <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. 
 
 :doc:`The rocDecode parser API <./rocDecode-parser>` is exposed in |rocparser|_. It contains functions that create and destroy the parser, as well as functions that parse the bitstream.
 

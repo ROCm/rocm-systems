@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/causal/data.hpp"
 #include "binary/address_multirange.hpp"
@@ -26,6 +7,8 @@
 #include "binary/binary_info.hpp"
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -38,7 +21,6 @@
 #include "library/causal/sample_data.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/causal/selected_entry.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -47,7 +29,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -79,17 +60,17 @@ using random_engine_t    = std::mt19937_64;
 using progress_bundles_t = component_bundle_cache<component::progress_point>;
 
 auto speedup_seeds     = std::vector<size_t>{};
-auto speedup_divisions = get_env<uint16_t>("ROCPROFSYS_CAUSAL_SPEEDUP_DIVISIONS", 5);
+auto speedup_divisions = get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIONS, 5);
 auto speedup_dist      = []() {
-    size_t                _n = std::max<size_t>(1, 100 / speedup_divisions);
-    std::vector<uint16_t> _v(_n, uint16_t{ 0 });
+    const size_t               _n = std::max<size_t>(1, 100 / speedup_divisions);
+    std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
     std::generate(_v.begin(), _v.end(),
                        [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
-    size_t _nzero = std::ceil(_v.size() / 4.0);
+    const size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    if(get_is_continuous_integration() && _v.back() > 100)
+    if(_v.back() > 100)
     {
         throw std::runtime_error(
             fmt::format("Error! last value is too large: {}", _v.back()));
@@ -102,7 +83,7 @@ auto perform_experiment_impl_completed = std::unique_ptr<std::promise<void>>{};
 auto num_progress_points               = std::atomic<size_t>{ 0 };
 
 auto&
-get_progress_bundles(int64_t _tid = utility::get_thread_index())
+get_progress_bundles(std::int64_t _tid = utility::get_thread_index())
 {
     return progress_bundles_t::instance(construct_on_thread{ _tid });
 }
@@ -112,9 +93,9 @@ auto&
 get_engine()
 {
     static auto _seed = []() -> hash_value_t {
-        auto _seed_v =
-            config::get_setting_value<uint64_t>("ROCPROFSYS_CAUSAL_RANDOM_SEED")
-                .value_or(0);
+        auto _seed_v = config::get_setting_value<std::uint64_t>(
+                           std::string{ env_vars::CAUSAL_RANDOM_SEED })
+                           .value_or(0);
         if(_seed_v == 0) _seed_v = std::random_device{}();
         return _seed_v;
     }();
@@ -148,13 +129,14 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // in function mode, it generally doesn't help to experiment on main function since
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
-    if(config::get_causal_mode() == CausalMode::Function &&
+    if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
 
-    bool _use_default_excludes =
-        config::get_setting_value<bool>("ROCPROFSYS_CAUSAL_FUNCTION_EXCLUDE_DEFAULTS")
+    const bool _use_default_excludes =
+        config::get_setting_value<bool>(
+            std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE_DEFAULTS })
             .value_or(true);
 
     if(_use_default_excludes && _scopes.count(sf::FUNCTION_FILTER) > 0)
@@ -162,7 +144,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         // symbols starting with leading underscore are generally system functions
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "^_" });
 
-        if(config::get_causal_mode() == CausalMode::Function)
+        if(config::get_causal_mode() == state::process::CausalMode::function)
         {
             // exclude STL implementation functions
             _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, "::_M" });
@@ -172,7 +154,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     // in function mode, it generally doesn't help to claim
     // "make main function" faster since it contains everything
     // that could be made faster
-    if(config::get_causal_mode() == CausalMode::Function &&
+    if(config::get_causal_mode() == state::process::CausalMode::function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
@@ -470,7 +452,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     using duration_sec_t  = std::chrono::duration<double, std::ratio<1>>;
 
     const auto& _thr_info = thread_info::init(true);
-    set_thread_state(ThreadState::Disabled);
+    state::thread::set(state::thread::Disabled);
     if(!_thr_info->is_offset)
     {
         throw std::runtime_error("Error! causal profiling thread should be offset");
@@ -501,17 +483,19 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
 
     double _delay_sec =
-        config::get_setting_value<double>("ROCPROFSYS_CAUSAL_DELAY").value_or(0.0);
+        config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DELAY })
+            .value_or(0.0);
     double _duration_sec =
-        config::get_setting_value<double>("ROCPROFSYS_CAUSAL_DURATION").value_or(0.0);
-    auto _duration_nsec = duration_nsec_t{ _duration_sec * units::sec };
+        config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DURATION })
+            .value_or(0.0);
+    const auto duration_nsec = std::chrono::duration_cast<duration_nsec_t>(
+        std::chrono::duration<double>{ _duration_sec });
 
     if(_delay_sec > 0.0)
     {
         LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
-        uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
+        std::this_thread::sleep_for(std::chrono::duration<double>{ _delay_sec });
     }
 
     auto _impl_count        = 0;
@@ -520,7 +504,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         if(_duration_sec > 1.0e-3)
         {
             auto _elapsed = clock_type::now() - _start_time;
-            if(_elapsed >= _duration_nsec)
+            if(_elapsed >= duration_nsec)
             {
                 LOG_DEBUG("[causal] stopping experimentation after {} seconds "
                           "(elapsed: {} seconds)...",
@@ -533,7 +517,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         return false;
     };
 
-    while(get_state() < State::Finalized)
+    while(state::process::get() < state::process::Finalized)
     {
         auto _impl_no = _impl_count++;
         auto _experim = experiment{};
@@ -541,7 +525,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         // loop until started or finalized
         while(!_experim.start())
         {
-            if(get_state() == State::Finalized)
+            if(state::process::get() == state::process::Finalized)
             {
                 if(_impl_no > 0) return;
 
@@ -637,8 +621,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
                 auto _omni_causal_launcher =
-                    get_env<std::string>("ROCPROFSYS_LAUNCHER", "", false) ==
-                    "rocprof-sys-causal";
+                    get_env<std::string>(env_vars::LAUNCHER, "") == "rocprof-sys-causal";
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
                 {
@@ -668,7 +651,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         if(config::get_causal_end_to_end())
         {
             mark_progress_point(config::get_exe_name(), true);
-            while(get_state() < State::Finalized)
+            while(state::process::get() < state::process::Finalized)
             {
                 std::this_thread::yield();
                 std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
@@ -682,7 +665,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
         while(!_experim.stop())
         {
-            if(get_state() == State::Finalized) return;
+            if(state::process::get() == state::process::Finalized) return;
         }
 
         if(_exceeded_duration()) return;
@@ -715,11 +698,13 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
     auto _write = [_verbose](const std::string& ofname, const auto& _data,
                              const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
-        if(tim::filepath::open(_ofs, ofname))
+        if(path::create_parent_dirs_and_open_ofstream(_ofs, ofname))
         {
             if(_verbose >= 0)
+            {
                 operation::file_output_message<binary::symbol>{}(
                     ofname, std::string{ "causal_symbol_info" });
+            }
             save_line_info_impl(_ofs, _data, _info);
             save_maps_info_impl(_ofs);
         }
@@ -757,7 +742,7 @@ set_current_selection(unwind_addr_t _stack)
 }
 
 size_t
-set_current_selection(container::c_array<uint64_t> _stack)
+set_current_selection(container::c_array<std::uint64_t> _stack)
 {
     for(auto itr : _stack)
     {
@@ -787,7 +772,7 @@ reset_sample_selection()
 selected_entry
 sample_selection(size_t _nitr, size_t _wait_ns)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto _select_address = [&](auto& _address_vec) {
         // this isn't necessary bc of check before calling this lambda but
@@ -814,8 +799,10 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
             eligible_pc_history[_addr] += 1;
 
-            if(get_causal_mode() == CausalMode::Function)
+            if(get_causal_mode() == state::process::CausalMode::function)
+            {
                 _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
+            }
 
             // lookup the PC line info at either the address or the symbol address
             auto linfo = get_line_info(_lookup_addr, false);
@@ -823,14 +810,11 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             // unlikely this will be empty but just in case
             if(linfo.empty()) continue;
 
-            // debugging for continuous integration
-            if(ROCPROFSYS_UNLIKELY(config::get_is_continuous_integration() ||
-                                   config::get_debug()))
+            if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
                 auto _location =
                     (_dl_info.location)
-                        ? filepath::realpath(std::string{ _dl_info.location.name },
-                                             nullptr, false)
+                        ? path::realpath(std::string{ _dl_info.location.name })
                         : std::string{};
                 for(const auto& itr : linfo)
                 {
@@ -848,9 +832,10 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 }
             }
 
-            auto& _linfo_v = (config::get_causal_mode() == CausalMode::Function)
-                                 ? linfo.front()
-                                 : linfo.back();
+            auto& _linfo_v =
+                (config::get_causal_mode() == state::process::CausalMode::function)
+                    ? linfo.front()
+                    : linfo.back();
             return selected_entry{ _addr, _sym_addr, _linfo_v };
         }
         return selected_entry{};
@@ -873,7 +858,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 continue;
             }
 
-            uintptr_t _addr = aitr->load();
+            const uintptr_t _addr = aitr->load();
             if(_addr > 0) _addresses.emplace_back(_addr);
         }
 
@@ -901,7 +886,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
 
             // make sure the address is in the coarse grained mapped regions
             // before performing an exhaustive search
-            bool _is_mapped =
+            const bool _is_mapped =
                 std::find_if(litr.mappings.begin(), litr.mappings.end(),
                                     [_addr](const auto& mitr) {
                                  return binary::address_range{ mitr.load_address,
@@ -925,7 +910,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                 if(!_ipaddr.contains(_addr)) continue;
 
                 if(_include_discarded ||
-                   config::get_causal_mode() == CausalMode::Function)
+                   config::get_causal_mode() == state::process::CausalMode::function)
                 {
                     // check if the primary symbol satisfy the constraints
                     if(ditr(_filters)) _local_data.emplace_back(ditr);
@@ -935,7 +920,8 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     utility::combine(_local_data, ditr.get_inline_symbols(_filters));
                 }
 
-                if(_include_discarded || config::get_causal_mode() == CausalMode::Line)
+                if(_include_discarded ||
+                   config::get_causal_mode() == state::process::CausalMode::line)
                 {
                     auto _debug_data = std::deque<binary::symbol>{};
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
@@ -1035,7 +1021,7 @@ mark_progress_point(std::string_view _name, bool _force)
     }
 }
 
-uint16_t
+std::uint16_t
 sample_virtual_speedup()
 {
     if(speedup_dist.empty())
@@ -1055,7 +1041,7 @@ sample_virtual_speedup()
 void
 start_experimenting()
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     auto _user_speedup_dist = config::get_causal_fixed_speedup();
     if(!_user_speedup_dist.empty())
@@ -1069,14 +1055,14 @@ start_experimenting()
                           "Invalid virtual speedup: {}",
                           itr);
             }
-            speedup_dist.emplace_back(static_cast<uint16_t>(itr));
+            speedup_dist.emplace_back(static_cast<std::uint16_t>(itr));
         }
     }
 
     delay::setup();
     compute_eligible_lines();
 
-    if(get_state() < State::Finalized)
+    if(state::process::get() < state::process::Finalized)
     {
         ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
         auto _promise = std::make_shared<std::promise<void>>();

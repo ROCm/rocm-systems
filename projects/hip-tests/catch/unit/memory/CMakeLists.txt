@@ -41,6 +41,7 @@ set(TEST_SRC
     hipMemcpyHtoA_old.cc
     hipMemcpyAllApiNegative.cc
     hipMemcpy_MultiThread.cc
+    hipMemcpyDynamicQueueChurn.cc
     hipHostRegister.cc
     hipHostUnregister.cc
     hipHostGetFlags.cc
@@ -48,6 +49,7 @@ set(TEST_SRC
     hipMallocHost.cc
     hipMemAllocHost.cc
     hipMallocManaged_MultiScenario.cc
+    hipManagedMultiGpuVaConsistency.cc
     hipMemsetNegative.cc
     hipMemset.cc
     hipMemset3D.cc
@@ -70,6 +72,8 @@ set(TEST_SRC
     hipMemcpy2DArrayToArray.cc
     hipMemcpy3DBatchAsync.cc
     hipMemcpyBatchAsync.cc
+    hipMemcpyBatchAsync_p2p.cc
+    hipMemDiscardBatchAsync.cc
     hipMemsetD2D8.cc
     hipMemsetD2D8Async.cc
     hipMemsetD2D16.cc
@@ -78,14 +82,10 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
-    )
-
-if(UNIX)
-  set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
-  hipMemPoolExportToShareableHandle.cc
-  hipMemPoolImportFromShareableHandle.cc
-  hipMemPoolImportPointer.cc)
-endif()
+    hipMemPoolExportPointer.cc
+    hipMemPoolExportToShareableHandle.cc
+    hipMemPoolImportFromShareableHandle.cc
+    hipMemPoolImportPointer.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -121,8 +121,14 @@ if(UNIX)
     set(NUMA "${NUMA_LIBRARIES}")
   else()
     find_library(NUMA NAMES numa REQUIRED)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+  endif()
+  if(NUMA_INCLUDE_DIR)
+    target_include_directories(MemoryTest1 PRIVATE ${NUMA_INCLUDE_DIR})
   endif()
   target_link_libraries(MemoryTest1 ${NUMA})
+  # link rt for shm_open/shm_unlink used by cross-platform IPC helpers
+  target_link_libraries(MemoryTest1 rt)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd" AND UNIX)
@@ -176,6 +182,7 @@ set(TEST_SRC
     hipPointerGetAttribute.cc
     hipDrvPtrGetAttributes.cc
     hipMemPrefetchAsync.cc
+    hipMemPrefetchBatchAsync.cc
     hipMemGetInfo.cc
     hipFree.cc
     hipFreeArray.cc
@@ -193,9 +200,11 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
+    hipMipmappedArrayMemoryLeak.cc
     hipHostAlloc.cc
     hipMemSetMemPool.cc
-    hipMemGetMemPool.cc)
+    hipMemGetMemPool.cc
+    hipMemGetDefaultMemPool.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

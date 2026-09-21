@@ -418,10 +418,50 @@ template <typename T> static bool TestMemoryAccessInAllThread(int test_type, int
 }
 
 /**
- * Local function: Launch kerAlloc<<<>>>
+ * Local function: Thread-safe variant launched from worker threads. Uses the
+ * *_THREAD check macros (which defer failures and early-return on error, so this
+ * must be void) and stores its result in thread_results for the main thread to
+ * validate after HIP_CHECK_THREAD_FINALIZE().
  */
 template <typename T> static void runTestMemoryAccessInAllThread(int test_type, int thread_idx) {
-  thread_results[thread_idx] = TestMemoryAccessInAllThread<T>(test_type, thread_idx);
+  // Default to failure so an early bail-out never leaves a stale result for the
+  // main thread to validate.
+  thread_results[thread_idx] = false;
+
+  T *outputVec_d{nullptr}, *outputVec_h{nullptr};
+  size_t arraysize = (BLOCKSIZE * GRIDSIZE);
+  T data_value = std::numeric_limits<T>::max();
+
+  outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
+  REQUIRE_THREAD(outputVec_h != nullptr);
+  if (outputVec_h == nullptr) {
+    return;
+  }
+
+  HIP_CHECK_THREAD(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  if (outputVec_d == nullptr) {
+    free(outputVec_h);
+    return;
+  }
+
+  // Launch Test Kernel
+  kerTestAccessInAllThreadsInBlock<T>
+      <<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type, data_value, thread_idx);
+
+  HIP_CHECK_THREAD(hipDeviceSynchronize());
+  // Copy to host buffer and validate only when the prior steps succeeded.
+  HIP_CHECK_THREAD(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
+  bool bPassed = true;
+  for (size_t idx = 0; idx < arraysize; idx++) {
+    if (outputVec_h[idx] != data_value) {
+      bPassed = false;
+      break;
+    }
+  }
+  thread_results[thread_idx] = bPassed;
+
+  free(outputVec_h);
+  HIP_CHECK_THREAD(hipFree(outputVec_d));
 }
 
 /**
@@ -757,7 +797,9 @@ static bool TestAlloc_Load_MultKernels(int test_type, int value) {
  */
 template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_type) {
   T *outputVec_d{nullptr}, *outputVec_h{nullptr};
-  size_t arraysize = (BLOCKSIZE * GRIDSIZE);
+  const int gridSize = isQuickLevel() ? 4 : GRIDSIZE;
+  const int blockSize = isQuickLevel() ? 16 : BLOCKSIZE;
+  size_t arraysize = (blockSize * gridSize);
   T data_value = std::numeric_limits<T>::max();
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE(outputVec_h != nullptr);
@@ -773,8 +815,8 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   hipKernelNodeParams kernelNodeParams1{};
   void* kernelArgs1[] = {reinterpret_cast<void*>(&test_type)};
   kernelNodeParams1.func = reinterpret_cast<void*>(kerAlloc<T>);
-  kernelNodeParams1.gridDim = dim3(GRIDSIZE);
-  kernelNodeParams1.blockDim = dim3(BLOCKSIZE);
+  kernelNodeParams1.gridDim = dim3(gridSize);
+  kernelNodeParams1.blockDim = dim3(blockSize);
   kernelNodeParams1.sharedMemBytes = 0;
   kernelNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams1.extra = nullptr;
@@ -784,8 +826,8 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   hipKernelNodeParams kernelNodeParams2{};
   void* kernelArgs2[] = {reinterpret_cast<void*>(&data_value)};
   kernelNodeParams2.func = reinterpret_cast<void*>(kerWrite<T>);
-  kernelNodeParams2.gridDim = dim3(GRIDSIZE);
-  kernelNodeParams2.blockDim = dim3(BLOCKSIZE);
+  kernelNodeParams2.gridDim = dim3(gridSize);
+  kernelNodeParams2.blockDim = dim3(blockSize);
   kernelNodeParams2.sharedMemBytes = 0;
   kernelNodeParams2.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams2.extra = nullptr;
@@ -795,8 +837,8 @@ template <typename T> static bool TestMemoryAcrossMulKernelsUsingGraph(int test_
   hipKernelNodeParams kernelNodeParams3{};
   void* kernelArgs3[] = {&outputVec_d, reinterpret_cast<void*>(&test_type)};
   kernelNodeParams3.func = reinterpret_cast<void*>(kerFree<T>);
-  kernelNodeParams3.gridDim = dim3(GRIDSIZE);
-  kernelNodeParams3.blockDim = dim3(BLOCKSIZE);
+  kernelNodeParams3.gridDim = dim3(gridSize);
+  kernelNodeParams3.blockDim = dim3(blockSize);
   kernelNodeParams3.sharedMemBytes = 0;
   kernelNodeParams3.kernelParams = reinterpret_cast<void**>(kernelArgs3);
   kernelNodeParams3.extra = nullptr;
@@ -857,404 +899,331 @@ static bool TestAllocInDeviceFunc(int test_type) {
 
 /**
  * Scenario: This test validates device allocation and deallocation
- * using malloc/free in every gpu thread and block for primitive data
- * types like char, short, int etc.
+ * using malloc/free and new/delete for primitive data types (char, short, int, float, double)
+ * across various scenarios: per thread, one thread access, across kernels, graph execution,
+ * and multi-threaded kernels.
  */
 HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   constexpr size_t sizePerThread = 128;
 
-  // malloc()/free() tests
-  SECTION("Test char datatype allocation with malloc") {
+  SECTION("PerThread - char with malloc") {
     REQUIRE(true == TestAllocInAllThread<char>(TEST_MALLOC_FREE, SCHAR_MAX, sizePerThread));
   }
 
-  SECTION("Test short datatype allocation with malloc") {
+  SECTION("PerThread - short with malloc") {
     REQUIRE(true == TestAllocInAllThread<int16_t>(TEST_MALLOC_FREE, SHRT_MAX, sizePerThread));
   }
 
-  SECTION("Test int datatype allocation with malloc") {
+  SECTION("PerThread - int with malloc") {
     REQUIRE(true == TestAllocInAllThread<int32_t>(TEST_MALLOC_FREE, INT_MAX, sizePerThread));
   }
 
-  SECTION("Test float datatype allocation with malloc") {
+  SECTION("PerThread - float with malloc") {
     REQUIRE(true == TestAllocInAllThread<float>(TEST_MALLOC_FREE, FLT_MAX, sizePerThread));
   }
 
-  SECTION("Test double datatype allocation with malloc") {
+  SECTION("PerThread - double with malloc") {
     REQUIRE(true == TestAllocInAllThread<double>(TEST_MALLOC_FREE, DBL_MAX, sizePerThread));
   }
-}
 
-/**
- * Scenario: This test validates device allocation and deallocation
- * using new/delete in every gpu thread and block for primitive data
- * types like char, short, int etc.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_PrimitiveDataType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  constexpr size_t sizePerThread = 128;
-
-  // new/delete tests
-  SECTION("Test char datatype allocation with new") {
+  SECTION("PerThread - char with new") {
     REQUIRE(true == TestAllocInAllThread<char>(TEST_NEW_DELETE, SCHAR_MAX, sizePerThread));
   }
 
-  SECTION("Test short datatype allocation with new") {
+  SECTION("PerThread - short with new") {
     REQUIRE(true == TestAllocInAllThread<int16_t>(TEST_NEW_DELETE, SHRT_MAX, sizePerThread));
   }
 
-  SECTION("Test int datatype allocation with new") {
+  SECTION("PerThread - int with new") {
     REQUIRE(true == TestAllocInAllThread<int32_t>(TEST_NEW_DELETE, INT_MAX, sizePerThread));
   }
 
-  SECTION("Test float datatype allocation with new") {
+  SECTION("PerThread - float with new") {
     REQUIRE(true == TestAllocInAllThread<float>(TEST_NEW_DELETE, FLT_MAX, sizePerThread));
   }
 
-  SECTION("Test double datatype allocation with new") {
+  SECTION("PerThread - double with new") {
     REQUIRE(true == TestAllocInAllThread<double>(TEST_NEW_DELETE, DBL_MAX, sizePerThread));
   }
-}
 
-/**
- * Scenario: This test validates device allocation and deallocation
- * using malloc/free in every gpu thread and block for structure.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_StructDataType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  constexpr size_t sizePerThread = 64;
-  struct simpleStruct sampleStr{INT_MAX,  DBL_MAX,   FLT_MAX,
-                                SHRT_MAX, SCHAR_MAX, {1, 2, 3, 4, 5, 6, 7, 8}};
-  REQUIRE(true ==
-          TestAllocInAllThread<struct simpleStruct>(TEST_MALLOC_FREE, sampleStr, sizePerThread));
-}
-
-/**
- * Scenario: This test validates device allocation and deallocation
- * using new/delete in every gpu thread and block for structure.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_StructDataType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  constexpr size_t sizePerThread = 64;
-  struct simpleStruct sampleStr{INT_MAX,  DBL_MAX,   FLT_MAX,
-                                SHRT_MAX, SCHAR_MAX, {1, 2, 3, 4, 5, 6, 7, 8}};
-  REQUIRE(true ==
-          TestAllocInAllThread<struct simpleStruct>(TEST_NEW_DELETE, sampleStr, sizePerThread));
-}
-
-/**
- * Scenario: This test validates device memory allocation and free
- * in 1 thread and access in block for different primitive types like
- * char, short, int etc.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_InOneThread_AccessInAllThreads) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-
-  // malloc()/free() tests
-  SECTION("Test char datatype allocation with malloc") {
+  SECTION("InOneThread_AccessInAllThreads - char with malloc") {
     REQUIRE(true == TestMemoryAccessInAllThread<char>(TEST_MALLOC_FREE, 0));
   }
 
-  SECTION("Test short datatype allocation with malloc") {
+  SECTION("InOneThread_AccessInAllThreads - short with malloc") {
     REQUIRE(true == TestMemoryAccessInAllThread<int16_t>(TEST_MALLOC_FREE, 0));
   }
 
-  SECTION("Test int datatype allocation with malloc") {
+  SECTION("InOneThread_AccessInAllThreads - int with malloc") {
     REQUIRE(true == TestMemoryAccessInAllThread<int32_t>(TEST_MALLOC_FREE, 0));
   }
 
-  SECTION("Test float datatype allocation with malloc") {
+  SECTION("InOneThread_AccessInAllThreads - float with malloc") {
     REQUIRE(true == TestMemoryAccessInAllThread<float>(TEST_MALLOC_FREE, 0));
   }
 
-  SECTION("Test double datatype allocation with malloc") {
+  SECTION("InOneThread_AccessInAllThreads - double with malloc") {
     REQUIRE(true == TestMemoryAccessInAllThread<double>(TEST_MALLOC_FREE, 0));
   }
 
-  // new/delete tests
-  SECTION("Test char datatype allocation with new") {
+  SECTION("InOneThread_AccessInAllThreads - char with new") {
     REQUIRE(true == TestMemoryAccessInAllThread<char>(TEST_NEW_DELETE, 0));
   }
 
-  SECTION("Test short datatype allocation with new") {
+  SECTION("InOneThread_AccessInAllThreads - short with new") {
     REQUIRE(true == TestMemoryAccessInAllThread<int16_t>(TEST_NEW_DELETE, 0));
   }
 
-  SECTION("Test int datatype allocation with new") {
+  SECTION("InOneThread_AccessInAllThreads - int with new") {
     REQUIRE(true == TestMemoryAccessInAllThread<int32_t>(TEST_NEW_DELETE, 0));
   }
 
-  SECTION("Test float datatype allocation with new") {
+  SECTION("InOneThread_AccessInAllThreads - float with new") {
     REQUIRE(true == TestMemoryAccessInAllThread<float>(TEST_NEW_DELETE, 0));
   }
 
-  SECTION("Test double datatype allocation with new") {
+  SECTION("InOneThread_AccessInAllThreads - double with new") {
     REQUIRE(true == TestMemoryAccessInAllThread<double>(TEST_NEW_DELETE, 0));
   }
-}
 
-/**
- * Scenario: This test validates device allocation malloc, access and free
- * across multiple kernels for different primitive types like char, short,
- * int etc.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_AcrossKernels) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // malloc()/free() tests
-  SECTION("Test char datatype allocation with malloc") {
+  SECTION("AcrossKernels - char with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<char>(TEST_MALLOC_FREE));
   }
 
-  SECTION("Test short datatype allocation with malloc") {
+  SECTION("AcrossKernels - short with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int16_t>(TEST_MALLOC_FREE));
   }
 
-  SECTION("Test int datatype allocation with malloc") {
+  SECTION("AcrossKernels - int with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int32_t>(TEST_MALLOC_FREE));
   }
 
-  SECTION("Test float datatype allocation with malloc") {
+  SECTION("AcrossKernels - float with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<float>(TEST_MALLOC_FREE));
   }
 
-  SECTION("Test double datatype allocation with malloc") {
+  SECTION("AcrossKernels - double with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<double>(TEST_MALLOC_FREE));
   }
-}
 
-/**
- * Scenario: This test validates device new, access and delete
- * across multiple kernels for different primitive types like char, short,
- * int etc.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_AcrossKernels) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // new/delete tests
-  SECTION("Test char datatype allocation with new") {
+  SECTION("AcrossKernels - char with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<char>(TEST_NEW_DELETE));
   }
 
-  SECTION("Test short datatype allocation with new") {
+  SECTION("AcrossKernels - short with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int16_t>(TEST_NEW_DELETE));
   }
 
-  SECTION("Test int datatype allocation with new") {
+  SECTION("AcrossKernels - int with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int32_t>(TEST_NEW_DELETE));
   }
 
-  SECTION("Test float datatype allocation with new") {
+  SECTION("AcrossKernels - float with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<float>(TEST_NEW_DELETE));
   }
 
-  SECTION("Test double datatype allocation with new") {
+  SECTION("AcrossKernels - double with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<double>(TEST_NEW_DELETE));
   }
-}
 
-/**
- * Scenarios:
- * A) This test validates device allocation malloc, access and free
- * across multiple kernels for nested structure.
- * B) This test also validates memory allocation and deallocation through
- * __device__ functions.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_ComplexDataType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+  SECTION("Graph - char with malloc") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<char>(TEST_MALLOC_FREE));
   }
 
-  // malloc()/free() tests
-  REQUIRE(true == TestMemoryAccessInAllThread_CmplxStr(TEST_MALLOC_FREE));
+  SECTION("Graph - short with malloc") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int16_t>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("Graph - int with malloc") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int32_t>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("Graph - float with malloc") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<float>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("Graph - double with malloc") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<double>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("Graph - char with new") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<char>(TEST_NEW_DELETE));
+  }
+
+  SECTION("Graph - short with new") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int16_t>(TEST_NEW_DELETE));
+  }
+
+  SECTION("Graph - int with new") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int32_t>(TEST_NEW_DELETE));
+  }
+
+  SECTION("Graph - float with new") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<float>(TEST_NEW_DELETE));
+  }
+
+  SECTION("Graph - double with new") {
+    REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<double>(TEST_NEW_DELETE));
+  }
+
+  SECTION("MulKernels_MulThreads - char with malloc") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<char>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("MulKernels_MulThreads - short with malloc") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int16_t>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("MulKernels_MulThreads - int with malloc") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int32_t>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("MulKernels_MulThreads - float with malloc") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<float>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("MulKernels_MulThreads - double with malloc") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<double>(TEST_MALLOC_FREE));
+  }
+
+  SECTION("MulKernels_MulThreads - char with new") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<char>(TEST_NEW_DELETE));
+  }
+
+  SECTION("MulKernels_MulThreads - short with new") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int16_t>(TEST_NEW_DELETE));
+  }
+
+  SECTION("MulKernels_MulThreads - int with new") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int32_t>(TEST_NEW_DELETE));
+  }
+
+  SECTION("MulKernels_MulThreads - float with new") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<float>(TEST_NEW_DELETE));
+  }
+
+  SECTION("MulKernels_MulThreads - double with new") {
+    REQUIRE(true == TestDevMemAllocMulKerMulThrd<double>(TEST_NEW_DELETE));
+  }
 }
 
-/**
- * Scenario:
- * A) This test validates device allocation malloc, access and free
- * across multiple kernels for nested structure.
- * B) This test also validates memory allocation and deallocation through
- * __device__ functions.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_ComplexDataType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // new/delete tests
-  REQUIRE(true == TestMemoryAccessInAllThread_CmplxStr(TEST_NEW_DELETE));
-}
 
 /**
- * Scenario: This test validates device allocation malloc, access and free
- * across multiple kernels for Union data type.
+ * Scenario: This test validates device allocation and deallocation
+ * using malloc/free and new/delete for complex data types (struct, complex structure, union).
  */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_UnionType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // malloc()/free() tests
-  REQUIRE(true == TestMemoryAccessInAllThread_Union(TEST_MALLOC_FREE));
-}
+HIP_TEST_CASE(Unit_deviceAllocation_ComplexDataType) {
+  CHECK_PCIE_ATOMIC_SUPPORT;
+  constexpr size_t sizePerThread = 64;
 
-/**
- * Scenario: This test validates device allocation new, access and delete
- * across multiple kernels for Union data type.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_UnionType) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+  SECTION("Struct - malloc") {
+    struct simpleStruct sampleStr{INT_MAX,  DBL_MAX,   FLT_MAX,
+                                  SHRT_MAX, SCHAR_MAX, {1, 2, 3, 4, 5, 6, 7, 8}};
+    REQUIRE(true ==
+            TestAllocInAllThread<struct simpleStruct>(TEST_MALLOC_FREE, sampleStr, sizePerThread));
   }
-  // new/delete tests
-  REQUIRE(true == TestMemoryAccessInAllThread_Union(TEST_NEW_DELETE));
+
+  SECTION("Struct - new") {
+    struct simpleStruct sampleStr{INT_MAX,  DBL_MAX,   FLT_MAX,
+                                  SHRT_MAX, SCHAR_MAX, {1, 2, 3, 4, 5, 6, 7, 8}};
+    REQUIRE(true ==
+            TestAllocInAllThread<struct simpleStruct>(TEST_NEW_DELETE, sampleStr, sizePerThread));
+  }
+
+  SECTION("ComplexStructure - malloc") {
+    REQUIRE(true == TestMemoryAccessInAllThread_CmplxStr(TEST_MALLOC_FREE));
+  }
+
+  SECTION("ComplexStructure - new") {
+    REQUIRE(true == TestMemoryAccessInAllThread_CmplxStr(TEST_NEW_DELETE));
+  }
+
+  SECTION("Union - malloc") {
+    REQUIRE(true == TestMemoryAccessInAllThread_Union(TEST_MALLOC_FREE));
+  }
+
+  SECTION("Union - new") { REQUIRE(true == TestMemoryAccessInAllThread_Union(TEST_NEW_DELETE)); }
 }
 
 /**
  * Scenario: This test validates device allocation and deallocation
- * using malloc/free in every gpu thread and block using Single
- * Code Object kernel.
+ * using malloc/free and new/delete with code objects (single and multiple code objects).
  */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_SingleCodeObj) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+HIP_TEST_CASE(Unit_deviceAllocation_CodeObjects) {
+  CHECK_PCIE_ATOMIC_SUPPORT;
   constexpr size_t sizePerThread = 128;
 
-  REQUIRE(true == TestAlloc_Load_SingleKer_AllocFree(TEST_MALLOC_FREE, INT_MAX, sizePerThread));
-}
-
-/**
- * Scenario: This test validates device allocation and deallocation
- * using new/delete in every gpu thread and block using Single
- * Code Object kernel.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_SingleCodeObj) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+  SECTION("SingleCodeObj - malloc") {
+    REQUIRE(true == TestAlloc_Load_SingleKer_AllocFree(TEST_MALLOC_FREE, INT_MAX, sizePerThread));
   }
-  constexpr size_t sizePerThread = 128;
 
-  REQUIRE(true == TestAlloc_Load_SingleKer_AllocFree(TEST_NEW_DELETE, INT_MAX, sizePerThread));
-}
+  SECTION("SingleCodeObj - new") {
+    REQUIRE(true == TestAlloc_Load_SingleKer_AllocFree(TEST_NEW_DELETE, INT_MAX, sizePerThread));
+  }
+
+  SECTION("MulCodeObj - malloc") {
+    REQUIRE(true == TestAlloc_Load_MultKernels(TEST_MALLOC_FREE, INT_MAX));
+  }
+
+  SECTION("MulCodeObj - new") {
+    REQUIRE(true == TestAlloc_Load_MultKernels(TEST_NEW_DELETE, INT_MAX));
+  }
 
 #if HT_NVIDIA
 /**
  * Scenario: This test validates device allocation and deallocation
- * using malloc/free in multikernel and multistream environment.
+ * using malloc/free and new/delete in multikernel and multistream environment.
  */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm) {
   // malloc()/free() tests
-  SECTION("Test char datatype allocation with malloc") {
+  SECTION("char with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<char>(TEST_MALLOC_FREE, true));
   }
 
-  SECTION("Test short datatype allocation with malloc") {
+  SECTION("short with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int16_t>(TEST_MALLOC_FREE, true));
   }
 
-  SECTION("Test int datatype allocation with malloc") {
+  SECTION("int with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int32_t>(TEST_MALLOC_FREE, true));
   }
 
-  SECTION("Test float datatype allocation with malloc") {
+  SECTION("float with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<float>(TEST_MALLOC_FREE, true));
   }
 
-  SECTION("Test double datatype allocation with malloc") {
+  SECTION("double with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<double>(TEST_MALLOC_FREE, true));
   }
-}
 
-/**
- * Scenario: This test validates device allocation and deallocation
- * using new/delete in multikernel and multistream environment.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_MultKerMultStrm) {
-  // new/delete tests
-  SECTION("Test char datatype allocation with new") {
+  SECTION("char with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<char>(TEST_NEW_DELETE, true));
   }
 
-  SECTION("Test short datatype allocation with new") {
+  SECTION("short with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int16_t>(TEST_NEW_DELETE, true));
   }
 
-  SECTION("Test int datatype allocation with new") {
+  SECTION("int with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<int32_t>(TEST_NEW_DELETE, true));
   }
 
-  SECTION("Test float datatype allocation with new") {
+  SECTION("float with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<float>(TEST_NEW_DELETE, true));
   }
 
-  SECTION("Test double datatype allocation with new") {
+  SECTION("double with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<double>(TEST_NEW_DELETE, true));
   }
-}
 #endif
+}
 
 /**
  * Scenario: This test validates device allocation and deallocation
  * using malloc/free in graph.
  */
 HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   // malloc()/free() tests
   SECTION("Test char datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<char>(TEST_MALLOC_FREE));
@@ -1282,12 +1251,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
  * using new/delete in graph.
  */
 HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   // new/delete tests
   SECTION("Test char datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<char>(TEST_NEW_DELETE));
@@ -1311,45 +1275,26 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
 }
 
 /**
- * Scenario: This test validates device allocation malloc, access and free
+ * Scenario: This test validates device allocation malloc/new, access and free/delete
  * using pointers to device functions.
  */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_DeviceFunc) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // malloc/free tests
-  REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
-}
+HIP_TEST_CASE(Unit_deviceAllocation_DeviceFunc) {
+  CHECK_PCIE_ATOMIC_SUPPORT;
 
-/**
- * Scenario: This test validates device allocation new, access and delete
- * using pointers to device functions.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_DeviceFunc) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+  SECTION("Test device function allocation with malloc") {
+    REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
   }
-  // new/delete tests
-  REQUIRE(true == TestAllocInDeviceFunc(TEST_NEW_DELETE));
+
+  SECTION("Test device function allocation with new") {
+    REQUIRE(true == TestAllocInDeviceFunc(TEST_NEW_DELETE));
+  }
 }
 
 /**
  * Scenario: This test validates device allocation using vitual functions
  */
 HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   int *outputVec_d{nullptr}, *outputVec_h{nullptr};
   constexpr size_t sizeBufferPerThread = 8;
   size_t arraysize = (sizeBufferPerThread * BLOCKSIZE * GRIDSIZE);
@@ -1373,128 +1318,49 @@ HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
   free(outputVec_h);
 }
 
-/**
- * Scenario: This test validates device allocation malloc, access and free
- * across multiple kernels launched using threads.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MulKernels_MulThreads) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // malloc()/free() tests
-  SECTION("Test char datatype allocation with malloc") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<char>(TEST_MALLOC_FREE));
-  }
-
-  SECTION("Test short datatype allocation with malloc") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int16_t>(TEST_MALLOC_FREE));
-  }
-
-  SECTION("Test int datatype allocation with malloc") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int32_t>(TEST_MALLOC_FREE));
-  }
-
-  SECTION("Test float datatype allocation with malloc") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<float>(TEST_MALLOC_FREE));
-  }
-
-  SECTION("Test double datatype allocation with malloc") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<double>(TEST_MALLOC_FREE));
-  }
-}
-
-/**
- * Scenario: This test validates device new, access and delete
- * across multiple kernels launched using threads.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_MulKernels_MulThreads) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // new/delete tests
-  SECTION("Test char datatype allocation with new") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<char>(TEST_NEW_DELETE));
-  }
-
-  SECTION("Test short datatype allocation with new") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int16_t>(TEST_NEW_DELETE));
-  }
-
-  SECTION("Test int datatype allocation with new") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<int32_t>(TEST_NEW_DELETE));
-  }
-
-  SECTION("Test float datatype allocation with new") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<float>(TEST_NEW_DELETE));
-  }
-
-  SECTION("Test double datatype allocation with new") {
-    REQUIRE(true == TestDevMemAllocMulKerMulThrd<double>(TEST_NEW_DELETE));
-  }
-}
-
 #if HT_AMD
-// Scenarios Unit_deviceAllocation_Malloc_SingKernels_MulThreads and
-// are failing on NVIDIA platform.
+// Scenarios Unit_deviceAllocation_SingKernels_MulThreads are failing on NVIDIA platform.
 /**
- * Scenario: This test validates device allocation malloc, access and free
+ * Scenario: This test validates device allocation malloc/new, access and free/delete
  * in a single kernel launched using threads.
  */
-HIP_TEST_CASE(Unit_deviceAllocation_Malloc_SingKernels_MulThreads) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
-  // malloc()/free() tests
-  std::vector<std::thread> tests;
-  // Spawn the test threads
-  for (int idx = 0; idx < num_threads; idx++) {
-    thread_results[idx] = false;
-    tests.push_back(std::thread(runTestMemoryAccessInAllThread<int32_t>, TEST_MALLOC_FREE, idx));
-  }
-  // Wait for all threads to complete
-  for (std::thread& t : tests) {
-    t.join();
-  }
-  // Verify All Results
-  for (int idx = 0; idx < num_threads; idx++) {
-    REQUIRE(thread_results[idx]);
-  }
-}
+HIP_TEST_CASE(Unit_deviceAllocation_SingKernels_MulThreads) {
+  CHECK_PCIE_ATOMIC_SUPPORT;
 
-/**
- * Scenario: This test validates device new, access and delete
- * in a single kernel launched using threads.
- */
-HIP_TEST_CASE(Unit_deviceAllocation_New_SingKernels_MulThreads) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+  SECTION("Test single kernel multi-thread allocation with malloc") {
+    std::vector<std::thread> tests;
+    // Spawn the test threads
+    for (int idx = 0; idx < num_threads; idx++) {
+      thread_results[idx] = false;
+      tests.push_back(std::thread(runTestMemoryAccessInAllThread<int32_t>, TEST_MALLOC_FREE, idx));
+    }
+    // Wait for all threads to complete
+    for (std::thread& t : tests) {
+      t.join();
+    }
+    HIP_CHECK_THREAD_FINALIZE();
+    // Verify All Results
+    for (int idx = 0; idx < num_threads; idx++) {
+      REQUIRE(thread_results[idx]);
+    }
   }
-  // new/delete tests
-  std::vector<std::thread> tests;
-  // Spawn the test threads
-  for (int idx = 0; idx < num_threads; idx++) {
-    thread_results[idx] = false;
-    tests.push_back(std::thread(runTestMemoryAccessInAllThread<int32_t>, TEST_NEW_DELETE, idx));
-  }
-  // Wait for all threads to complete
-  for (std::thread& t : tests) {
-    t.join();
-  }
-  // Verify All Results
-  for (int idx = 0; idx < num_threads; idx++) {
-    REQUIRE(thread_results[idx]);
+
+  SECTION("Test single kernel multi-thread allocation with new") {
+    std::vector<std::thread> tests;
+    // Spawn the test threads
+    for (int idx = 0; idx < num_threads; idx++) {
+      thread_results[idx] = false;
+      tests.push_back(std::thread(runTestMemoryAccessInAllThread<int32_t>, TEST_NEW_DELETE, idx));
+    }
+    // Wait for all threads to complete
+    for (std::thread& t : tests) {
+      t.join();
+    }
+    HIP_CHECK_THREAD_FINALIZE();
+    // Verify All Results
+    for (int idx = 0; idx < num_threads; idx++) {
+      REQUIRE(thread_results[idx]);
+    }
   }
 }
 #endif
@@ -1504,12 +1370,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_SingKernels_MulThreads) {
  * code object kernels defined in different source files.
  */
 HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MulCodeObj) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   REQUIRE(true == TestAlloc_Load_MultKernels(TEST_MALLOC_FREE, INT_MAX));
 }
 
@@ -1518,12 +1379,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MulCodeObj) {
  * code object kernels defined in different source files.
  */
 HIP_TEST_CASE(Unit_deviceAllocation_New_MulCodeObj) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   REQUIRE(true == TestAlloc_Load_MultKernels(TEST_NEW_DELETE, INT_MAX));
 }
 
@@ -1533,12 +1389,53 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_MulCodeObj) {
  * When using hipDeviceReset(), memory should not be released twice or leaked.
  */
 HIP_TEST_CASE(Unit_deviceAllocationFollowedByDeviceReset) {
-  int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
-  if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
-  }
+  CHECK_PCIE_ATOMIC_SUPPORT;
   REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
   HIP_CHECK(hipDeviceReset());
+}
+
+/**
+ * Kernel that performs a large device-side allocation, writes to it, and frees it.
+ * The allocation size (102400 bytes) is chosen to exceed the device-libs
+ * suballocation threshold so that it is backed by a host-call block allocation.
+ */
+static __global__ void kerAllocWriteFree(int* result) {
+  if (threadIdx.x == 0) {
+    int* mem = static_cast<int*>(malloc(102400));
+    if (mem == nullptr) {
+      printf("Device Allocation Failed \n");
+      return;
+    }
+    *mem = 10;
+    free(mem);
+    *result = 1;
+  }
+}
+
+static bool TestAllocWriteFree() {
+  int* result_d{nullptr};
+  int result_h = 0;
+  HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+  HIP_CHECK(hipMemset(result_d, 0, sizeof(int)));
+  kerAllocWriteFree<<<1, 1>>>(result_d);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(&result_h, result_d, sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipFree(result_d));
+  return result_h == 1;
+}
+
+/**
+ * @brief Regression test: device-side allocations must work after hipDeviceReset.
+ *
+ * When device-libs suballocates from a block of memory, hipDeviceReset() frees
+ * that block.  Subsequent device-side malloc calls must not crash by reusing the
+ * freed block.  This test launches a kernel that does device malloc/free, resets
+ * the device, then launches the same kernel again to verify correctness.
+ */
+HIP_TEST_CASE(Unit_deviceAllocationAfterDeviceReset) {
+  CHECK_PCIE_ATOMIC_SUPPORT;
+
+  REQUIRE(true == TestAllocWriteFree());
+  HIP_CHECK(hipDeviceReset());
+  REQUIRE(true == TestAllocWriteFree());
 }

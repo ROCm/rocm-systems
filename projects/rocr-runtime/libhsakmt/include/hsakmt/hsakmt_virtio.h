@@ -26,12 +26,7 @@
 #ifndef HSAKMT_VIRTIO_H
 #define HSAKMT_VIRTIO_H
 
-#if defined(__linux__)
-#include "hsakmt/linux/kfd_ioctl.h"
-#endif
-
-// Forward declaration for HsaKFDContext to avoid dependency issues
-typedef struct _HsaKFDContext HsaKFDContext;
+#include "kfd_ioctl.h"
 
 #include "hsakmt/hsakmt.h"
 #include <libdrm/amdgpu.h>
@@ -50,7 +45,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
 HSAKMT_STATUS HSAKMTAPI vhsaKmtFreeMemory(void* MemoryAddress, HSAuint64 SizeInBytes);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                    HSAuint64* AlternateVAGPU,
-                                                   HsaMemMapFlags MemMapFlags,
+                                                   HsaMemFlags MemFlags,
                                                    HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapMemoryToGPU(void* MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAvailableMemory(HSAuint32 Node, HSAuint64* AvailableBytes);
@@ -102,6 +97,12 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSetTrapHandler(HSAuint32 NodeId, void* TrapHandle
                                               HSAuint64 TrapHandlerSizeInBytes,
                                               void* TrapBufferBaseAddress,
                                               HSAuint64 TrapBufferSizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueV2(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
+                                                HSAuint32 QueuePercentage,
+                                                HSA_QUEUE_PRIORITY Priority, HSAuint32 SdmaEngineId,
+                                                void* QueueAddress, HSAuint64 QueueSizeInBytes,
+                                                HSAuint64 MetaDataQueueSizeInBytes,
+                                                HsaEvent* Event, HsaQueueResource* QueueResource);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                                               HSAuint32 QueuePercentage,
                                               HSA_QUEUE_PRIORITY Priority, HSAuint32 SdmaEngineId,

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "patternProperties": {
+    "^gfx[0-9a-f]+$": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "max_vgprs",
+          "waves_per_eu"
+        ],
+        "properties": {
+          "max_vgprs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "waves_per_eu": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,10 @@
-name: Setup additonal subtrees for super-repo
+name: Setup additional subtrees for super-repo
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   SUPER_REPO_URL: github.com/ROCm/rocm-systems.git

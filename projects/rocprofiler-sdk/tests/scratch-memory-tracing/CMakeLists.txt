@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-scratch-memory-tracing
@@ -28,8 +28,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=scratch-memory-tracing-test.json"
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    FIXTURES_SETUP test-scratch-memory-tracing
-    UNSTABLE)
+    FIXTURES_SETUP test-scratch-memory-tracing)
 
 # copy to binary directory
 rocprofiler_add_integration_validate_test(
@@ -40,5 +39,4 @@ rocprofiler_add_integration_validate_test(
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-tracing-test.json
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED test-scratch-memory-tracing
-    UNSTABLE)
+    FIXTURES_REQUIRED test-scratch-memory-tracing)

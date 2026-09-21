@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,7 +47,7 @@ struct reserve_size
     : value{_v}
     {}
 
-    size_t value;
+    size_t value = 0;
 };
 
 template <typename Tp, size_t ChunkSizeV = 64>
@@ -200,6 +200,9 @@ public:
     void reserve(size_type new_capacity);
     void shrink_to_fit() noexcept {}
 
+    // ensure m_chunks can hold at least num_chunks without reallocating
+    void reserve_chunks(size_type num_chunks);
+
     bool operator==(const this_type& c) const
     {
         return size() == c.size() && std::equal(cbegin(), cend(), c.cbegin());
@@ -230,6 +233,8 @@ public:
 
     const_reference at(size_type i) const;
 
+    void clear() noexcept { m_chunks.clear(); }
+
 private:
     using chunk_type   = container::static_vector<Tp, ChunkSizeV, true>;
     using storage_type = std::vector<std::unique_ptr<chunk_type>>;
@@ -237,7 +242,7 @@ private:
     void        add_chunk();
     chunk_type& last_chunk();
 
-    storage_type m_chunks;
+    storage_type m_chunks = {};
 };
 
 template <typename Tp, size_t ChunkSizeV>
@@ -333,6 +338,13 @@ stable_vector<Tp, ChunkSizeV>::reserve(size_type new_capacity)
     {
         add_chunk();
     }
+}
+
+template <typename Tp, size_t ChunkSizeV>
+void
+stable_vector<Tp, ChunkSizeV>::reserve_chunks(size_type num_chunks)
+{
+    m_chunks.reserve(num_chunks);
 }
 
 template <typename Tp, size_t ChunkSizeV>

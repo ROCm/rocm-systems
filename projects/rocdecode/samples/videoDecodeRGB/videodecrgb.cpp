@@ -45,6 +45,8 @@ THE SOFTWARE.
 #include "md5.h"
 
 std::vector<std::string> st_output_format_name = {"native", "bgr", "bgr48", "rgb", "rgb48", "bgra", "bgra64", "rgba", "rgba64"};
+std::vector<std::string> st_color_standard_name = {"bt709", "fcc", "bt470", "bt601", "smpte240m", "bt2020", "bt2020c"};
+std::vector<int> st_color_standard_value = {ColorSpaceStandard_BT709, ColorSpaceStandard_FCC, ColorSpaceStandard_BT470, ColorSpaceStandard_BT601, ColorSpaceStandard_SMPTE240M, ColorSpaceStandard_BT2020, ColorSpaceStandard_BT2020C};
 
 void ShowHelpAndExit(const char *option = NULL) {
     std::cout << "Options:" << std::endl
@@ -54,7 +56,9 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-of Output Format name - (native, bgr, bgr48, rgb, rgb48, bgra, bgra64, rgba, rgba64; converts native YUV frame to RGB image format; optional; default: 0" << std::endl
     << "-resize WxH - (where W is resize width and H is resize height) optional; default: no resize " << std::endl
     << "-crop crop rectangle for output (not used when using interopped decoded frame); optional; default: 0" << std::endl
-    << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl;
+    << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl
+    << "-f number of frames to decode - optional; default: 0, meaning decode the entire stream" << std::endl
+    << "-cs Color Standard - (bt709, fcc, bt470, bt601, smpte240m, bt2020, bt2020c); optional; default: bt709" << std::endl;
 
     exit(0);
 }
@@ -66,8 +70,8 @@ std::queue<int> frame_indices_q;
 uint8_t* frame_buffers[frame_buffers_size] = {0};
 
 void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool convert_to_rgb, Dim *p_resize_dim, OutputSurfaceInfo **surf_info, OutputSurfaceInfo **res_surf_info,
-        OutputFormatEnum e_output_format, uint8_t *p_rgb_dev_mem, uint8_t *p_resize_dev_mem, bool dump_output_frames,
-        std::string &output_file_path, RocVideoDecoder &viddec, VideoPostProcess &post_proc, MD5Generator *md5_gen_handle, bool b_generate_md5, int device_id, hipStream_t hip_stream) {
+        OutputFormatEnum e_output_format, uint8_t *&p_rgb_dev_mem, uint8_t *&p_resize_dev_mem, bool dump_output_frames,
+        std::string &output_file_path, RocVideoDecoder &viddec, VideoPostProcess &post_proc, MD5Generator *md5_gen_handle, bool b_generate_md5, int device_id, hipStream_t hip_stream, int col_standard) {
 
     size_t rgb_image_size, resize_image_size;
     hipError_t hip_status = hipSuccess;
@@ -133,7 +137,7 @@ void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool con
                     return;
                 }
             }
-            post_proc.ColorConvertYUV2RGB(out_frame, p_surf_info, p_rgb_dev_mem, e_output_format, hip_stream);
+            post_proc.ColorConvertYUV2RGB(out_frame, p_surf_info, p_rgb_dev_mem, e_output_format, hip_stream, col_standard);
         }
         if (dump_output_frames) {
             if (convert_to_rgb)
@@ -163,6 +167,7 @@ int main(int argc, char **argv) {
     std::fstream ref_md5_file;
     bool b_generate_md5 = false;
     bool b_md5_check = false;
+    bool b_md5_check_failed = false;
     bool dump_output_frames = false;
     bool convert_to_rgb = false;
     int device_id = 0;
@@ -177,11 +182,13 @@ int main(int argc, char **argv) {
     uint8_t *p_rgb_dev_mem = nullptr;
     uint8_t *p_resize_dev_mem = nullptr;
     OutputSurfaceMemoryType mem_type = OUT_SURFACE_MEM_DEV_INTERNAL;
-    OutputFormatEnum e_output_format = native; 
+    OutputFormatEnum e_output_format = native;
+    int col_standard = ColorSpaceStandard_BT709;
     int rgb_width;
     int current_frame_index = 0;
     hipStream_t hip_stream_dec = 0;
     hipStream_t hip_stream_csc = 0;
+    uint32_t num_decoded_frames = 0;  // default value is 0, meaning decode the entire stream
 
     // Parse command-line arguments
     if(argc <= 1) {
@@ -245,6 +252,17 @@ int main(int argc, char **argv) {
             e_output_format = (OutputFormatEnum)(it - st_output_format_name.begin());
             continue;
         }
+        if (!strcmp(argv[i], "-cs")) {
+            if (++i == argc) {
+                ShowHelpAndExit("-cs");
+            }
+            auto it = std::find(st_color_standard_name.begin(), st_color_standard_name.end(), argv[i]);
+            if (it == st_color_standard_name.end()) {
+                ShowHelpAndExit("-cs");
+            }
+            col_standard = st_color_standard_value[it - st_color_standard_name.begin()];
+            continue;
+        }
         if (!strcmp(argv[i], "-md5")) {
             if (i == argc) {
                 ShowHelpAndExit("-md5");
@@ -268,6 +286,13 @@ int main(int argc, char **argv) {
             disp_delay = atoi(argv[i]);
             continue;
         }
+        if (!strcmp(argv[i], "-f")) {
+            if (++i == argc) {
+                ShowHelpAndExit("-f");
+            }
+            num_decoded_frames = atoi(argv[i]);
+            continue;
+        }
         ShowHelpAndExit(argv[i]);
     }
 
@@ -276,9 +301,9 @@ int main(int argc, char **argv) {
         rocDecVideoCodec rocdec_codec_id = AVCodec2RocDecVideoCodec(demuxer.GetCodecID());
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, false, p_crop_rect, b_extract_sei_messages, disp_delay);
         if(!viddec.CodecSupported(device_id, rocdec_codec_id, demuxer.GetBitDepth())) {
-            std::cerr << "GPU doesn't support codec!" << std::endl;
-            return 0;
-        }  
+            std::cerr << "Error: GPU doesn't support codec!" << std::endl;
+            return 1;
+        }
         VideoPostProcess post_process;
         MD5Generator *md5_generator = nullptr;
 
@@ -309,7 +334,7 @@ int main(int argc, char **argv) {
         convert_to_rgb = e_output_format != native;
         std::atomic<bool> continue_processing(true);
         std::thread color_space_conversion_thread(ColorSpaceConversionThread, std::ref(continue_processing), std::ref(convert_to_rgb), &resize_dim, &surf_info, &resize_surf_info, std::ref(e_output_format),
-                                    std::ref(p_rgb_dev_mem), std::ref(p_resize_dev_mem), std::ref(dump_output_frames), std::ref(output_file_path), std::ref(viddec), std::ref(post_process), md5_generator, b_generate_md5, device_id, hip_stream_csc);
+                                    std::ref(p_rgb_dev_mem), std::ref(p_resize_dev_mem), std::ref(dump_output_frames), std::ref(output_file_path), std::ref(viddec), std::ref(post_process), md5_generator, b_generate_md5, device_id, hip_stream_csc, col_standard);
 
         auto startTime = std::chrono::high_resolution_clock::now();
         do {
@@ -319,13 +344,22 @@ int main(int argc, char **argv) {
                 std::cerr << "Error: Failed to get Output Image Info!" << std::endl;
                 break;
             }
+            if (!n_frame && convert_to_rgb) {
+                bool is_bt2020 = (col_standard == ColorSpaceStandard_BT2020 || col_standard == ColorSpaceStandard_BT2020C);
+                if (is_bt2020 && surf_info->bit_depth <= 8) {
+                    std::cerr << "Warning: BT.2020 color standard is intended for 10-bit content but input is " << surf_info->bit_depth << "-bit." << std::endl;
+                } else if (!is_bt2020 && surf_info->bit_depth > 8) {
+                    std::cerr << "Warning: " << st_color_standard_name[std::find(st_color_standard_value.begin(), st_color_standard_value.end(), col_standard) - st_color_standard_value.begin()]
+                              << " color standard uses 8-bit range but input is " << surf_info->bit_depth << "-bit." << std::endl;
+                }
+            }
             if (resize_dim.w && resize_dim.h && !resize_surf_info) {
                 resize_surf_info = new OutputSurfaceInfo;
                 memcpy(resize_surf_info, surf_info, sizeof(OutputSurfaceInfo));
             }
 
             int last_index = 0;
-            for (int i = 0; i < n_frames_returned; i++) {
+            for (int i = 0; i < n_frames_returned && (!num_decoded_frames || n_frame < num_decoded_frames); i++) {
                 p_frame = viddec.GetFrame(&pts);
                 // allocate extra device memories to use double-buffering for keeping two decoded frames
                 if (frame_buffers[0] == nullptr) {
@@ -346,9 +380,12 @@ int main(int argc, char **argv) {
                 viddec.ReleaseFrame(pts);
                 current_frame_index = (current_frame_index + 1) % frame_buffers_size; // update the current_frame_index to the next index in the frame_buffers
                 cv.notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
+                n_frame++;
             }
 
-            n_frame += n_frames_returned;
+            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+                break;
+            }
         } while (n_video_bytes);
 
         {
@@ -372,6 +409,13 @@ int main(int argc, char **argv) {
                 return -1;
             }
         }
+        if (p_resize_dev_mem != nullptr) {
+            hip_status = hipFree(p_resize_dev_mem);
+            if (hip_status != hipSuccess) {
+                std::cout << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
+                return -1;
+            }
+        }
         for (int i = 0; i < frame_buffers_size; i++) {
             hip_status = hipFree(frame_buffers[i]);
             if (hip_status != hipSuccess) {
@@ -386,6 +430,10 @@ int main(int argc, char **argv) {
         }
 
         std::cout << "info: Total frame decoded: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::string info_message = "info: avg decoding time per frame (ms): ";
             if (convert_to_rgb) {
@@ -426,6 +474,7 @@ int main(int argc, char **argv) {
                     std::cout << "MD5 digest matches the reference MD5 digest: ";
                 } else {
                     std::cout << "MD5 digest does not match the reference MD5 digest: ";
+                    b_md5_check_failed = true;
                 }
                 std::cout << ref_md5_string << std::endl;
                 ref_md5_file.close();
@@ -437,5 +486,5 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    return 0;
+    return b_md5_check_failed ? 1 : 0;
 }

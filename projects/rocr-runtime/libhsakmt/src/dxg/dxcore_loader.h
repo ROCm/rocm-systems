@@ -78,12 +78,15 @@ public:
     typedef NTSTATUS (DXCORE_DEF(D3DKMTShareObjects))(size_t num_allocations, WinResourceHandle* resource, OBJECT_ATTRIBUTES* obj_attr, uint32_t flags, void** nt_handle);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryResourceInfoFromNtHandle))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenResourceFromNtHandle))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenSyncObjectFromNtHandle2))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTCreateHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTDestroyHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTSubmitCommandToHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTEnumAdapters3))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryResourceInfo))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenResource))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTEnumProcesses))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo))(void* args);
 
     static DxcoreLoader& Instance() {
         static DxcoreLoader* instance = new DxcoreLoader();
@@ -124,12 +127,15 @@ public:
     DXCORE_DEF(D3DKMTShareObjects)* DXCORE_PFN(D3DKMTShareObjects);
     DXCORE_DEF(D3DKMTQueryResourceInfoFromNtHandle)* DXCORE_PFN(D3DKMTQueryResourceInfoFromNtHandle);
     DXCORE_DEF(D3DKMTOpenResourceFromNtHandle)* DXCORE_PFN(D3DKMTOpenResourceFromNtHandle);
+    DXCORE_DEF(D3DKMTOpenSyncObjectFromNtHandle2)* DXCORE_PFN(D3DKMTOpenSyncObjectFromNtHandle2);
     DXCORE_DEF(D3DKMTCreateHwQueue)* DXCORE_PFN(D3DKMTCreateHwQueue);
     DXCORE_DEF(D3DKMTDestroyHwQueue)* DXCORE_PFN(D3DKMTDestroyHwQueue);
     DXCORE_DEF(D3DKMTSubmitCommandToHwQueue)* DXCORE_PFN(D3DKMTSubmitCommandToHwQueue);
     DXCORE_DEF(D3DKMTEnumAdapters3)* DXCORE_PFN(D3DKMTEnumAdapters3);
     DXCORE_DEF(D3DKMTQueryResourceInfo) * DXCORE_PFN(D3DKMTQueryResourceInfo);
     DXCORE_DEF(D3DKMTOpenResource) * DXCORE_PFN(D3DKMTOpenResource);
+    DXCORE_DEF(D3DKMTEnumProcesses)* DXCORE_PFN(D3DKMTEnumProcesses);
+    DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)* DXCORE_PFN(D3DKMTQueryVideoMemoryInfo);
 
 private:
     DxcoreLoader();
@@ -148,4 +154,3 @@ private:
 } // namespace dxcore
 } // namespace thunk
 } // namespace wsl
-

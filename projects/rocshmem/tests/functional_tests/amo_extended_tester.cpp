@@ -29,15 +29,6 @@
 
 using namespace rocshmem;
 
-/* Declare the global kernel template with a generic implementation */
-template <typename T>
-__global__ void AMOExtendedTest(int loop, int skip, long long int *start_time,
-                                long long int *end_time, T *dest, T *ret_val,
-                                AddrMode addr_mode, TestType type,
-                                ShmemContextType ctx_type) {
-  return;
-}
-
 template <class T>
 __device__ inline T* compute_target_ptr(T* base_ptr, AddrMode addr_mode,
                                         int wg_idx, int itr, int n_wgs) {
@@ -58,41 +49,25 @@ template <typename T>
 AMOExtendedTester<T>::AMOExtendedTester(TesterArguments args) : Tester(args) {
   n_out   = (args.addr_mode == AddrMode::PerBlock) ? args.num_wgs : 1;
   n_in    = args.num_wgs * args.wg_size;
-  n_loops = args.loop + args.skip;
+  n_loops = std::max(args.loop, args.loop_large) + args.skip;
 
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
 
-  dest = (T *)rocshmem_malloc(max_msg_size * n_out * n_loops);
-  if (dest == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "dest: " << (void*)dest << std::endl;
-  }
+  dest = (T *) alloc_test_buffer(max_msg_size * n_out * n_loops);
 }
 
 template <typename T>
 AMOExtendedTester<T>::~AMOExtendedTester() {
   CHECK_HIP(hipFree(ret_val));
-  rocshmem_free(dest);
+  free_test_buffer(dest);
 }
 
 template <typename T>
-void AMOExtendedTester<T>::resetBuffers(size_t size) {
+void AMOExtendedTester<T>::resetBuffers([[maybe_unused]] size_t size) {
+  n_loops = num_loops + args.skip;
   memset(ret_val, 0, max_msg_size * n_in  * n_loops);
   memset(dest,    0, max_msg_size * n_out * n_loops);
-}
-
-template <typename T>
-void AMOExtendedTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loop,
-                                        size_t size) {
-  size_t shared_bytes = 0;
-
-  hipLaunchKernelGGL(AMOExtendedTest, gridsize, blocksize, shared_bytes, stream,
-                     args.loop, args.skip, start_time, end_time, dest,
-                     ret_val, args.addr_mode, _type, _shmem_context);
-
-  num_msgs       = n_loops   * gridsize.x * blocksize.x;
-  num_timed_msgs = args.loop * gridsize.x * blocksize.x;
 }
 
 template <typename G>
@@ -218,11 +193,10 @@ void AMOExtendedTester<T>::verifyResults(size_t /*size*/) {
 }
 
 #define AMO_EXTENDED_DEF_GEN(T, TNAME)                                        \
-  template <>                                                                 \
-  __global__ void AMOExtendedTest<T>(                                         \
-      int loop, int skip, long long int *start_time,                          \
-      long long int *end_time, T *dest, T *ret_val,                           \
-      AddrMode addr_mode, TestType type, ShmemContextType ctx_type) {         \
+  template <TestType Type>                                                    \
+  __global__ void AMOExtendedTest_##TNAME(                                    \
+      int loop, int skip, long long int *start_time, long long int *end_time, \
+      T *dest, T *ret_val, AddrMode addr_mode, ShmemContextType ctx_type) {   \
     __shared__ rocshmem_ctx_t ctx;                                            \
     int wg_id     = get_flat_grid_id();                                       \
     int global_id = get_flat_id();                                            \
@@ -231,30 +205,58 @@ void AMOExtendedTester<T>::verifyResults(size_t /*size*/) {
     int n_wgs     = get_grid_num_blocks();                                    \
     rocshmem_wg_ctx_create(ctx_type, &ctx);                                   \
     for (int i = 0; i < loop + skip; i++) {                                   \
-    T *ptr = compute_target_ptr<T>(dest, addr_mode, wg_id, i, n_wgs);         \
-    T ret = 0;                                                                \
+      T *ptr = compute_target_ptr<T>(dest, addr_mode, wg_id, i, n_wgs);       \
+      T ret = 0;                                                              \
       if (i == skip) {                                                        \
         start_time[wg_id] = wall_clock64();                                   \
       }                                                                       \
-      switch (type) {                                                         \
-        case AMO_FetchTestType:                                               \
-          ret = rocshmem_ctx_##TNAME##_atomic_fetch(ctx, ptr, 1);             \
-          break;                                                              \
-        case AMO_SetTestType:                                                 \
-          rocshmem_ctx_##TNAME##_atomic_set(ctx, ptr, (T)17, 1);              \
-          break;                                                              \
-        case AMO_SwapTestType:                                                \
-          ret = rocshmem_ctx_##TNAME##_atomic_swap(ctx, ptr, (T)(t_id + 1),1);\
-          break;                                                              \
-        default:                                                              \
-          break;                                                              \
+      if constexpr (Type == AMO_FetchTestType) {                              \
+        ret = rocshmem_ctx_##TNAME##_atomic_fetch(ctx, ptr, 1);               \
+      } else if constexpr (Type == AMO_SetTestType) {                         \
+        rocshmem_ctx_##TNAME##_atomic_set(ctx, ptr, (T)17, 1);                \
+      } else if constexpr (Type == AMO_SwapTestType) {                        \
+        ret = rocshmem_ctx_##TNAME##_atomic_swap(ctx, ptr, (T)(t_id + 1), 1); \
       }                                                                       \
-    ret_val[global_id + i * n_threads] = ret;                                 \
+      ret_val[global_id + i * n_threads] = ret;                               \
     }                                                                         \
     rocshmem_ctx_quiet(ctx);                                                  \
     end_time[wg_id] = wall_clock64();                                         \
     __syncthreads();                                                          \
     rocshmem_wg_ctx_destroy(&ctx);                                            \
+  }                                                                           \
+  template <>                                                                 \
+  void AMOExtendedTester<T>::launchKernel(dim3 gridsize, dim3 blocksize,      \
+                                          int loop,                           \
+                                          [[maybe_unused]] size_t size) {     \
+    size_t shared_bytes = 0;                                                  \
+    n_loops = loop + args.skip;                                               \
+    switch (_type) {                                                          \
+      case AMO_FetchTestType:                                                 \
+        hipLaunchKernelGGL((AMOExtendedTest_##TNAME<AMO_FetchTestType>),      \
+                           gridsize, blocksize, shared_bytes, stream, loop,   \
+                           args.skip, start_time, end_time, dest, ret_val,    \
+                           args.addr_mode, _shmem_context);                   \
+        break;                                                                \
+      case AMO_SetTestType:                                                   \
+        hipLaunchKernelGGL((AMOExtendedTest_##TNAME<AMO_SetTestType>),        \
+                           gridsize, blocksize, shared_bytes, stream, loop,   \
+                           args.skip, start_time, end_time, dest, ret_val,    \
+                           args.addr_mode, _shmem_context);                   \
+        break;                                                                \
+      case AMO_SwapTestType:                                                  \
+        hipLaunchKernelGGL((AMOExtendedTest_##TNAME<AMO_SwapTestType>),       \
+                           gridsize, blocksize, shared_bytes, stream, loop,   \
+                           args.skip, start_time, end_time, dest, ret_val,    \
+                           args.addr_mode, _shmem_context);                   \
+        break;                                                                \
+      default:                                                                \
+        std::cerr << "Invalid Test: unhandled TestType " << _type             \
+                  << " in AMOExtendedTester<" #TNAME ">::launchKernel"        \
+                  << std::endl;                                               \
+        exit(-1);                                                             \
+    }                                                                         \
+    num_msgs = n_loops * gridsize.x * blocksize.x;                            \
+    num_timed_msgs = loop * gridsize.x * blocksize.x;                         \
   }                                                                           \
   template class AMOExtendedTester<T>;
 

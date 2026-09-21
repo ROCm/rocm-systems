@@ -12,7 +12,9 @@
 
 HIP_TEST_CASE(Unit_hipMemcpyAsync_Positive_Basic) {
   using namespace std::placeholders;
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = isQuickLevel()
+      ? GENERATE(Streams::created)
+      : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 

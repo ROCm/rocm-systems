@@ -112,7 +112,45 @@ struct agent_pools_t{
 
 extern size_t pool_size_limit;
 
+/// Platform types for test filtering
+enum class PlatformType {
+  REAL_HARDWARE,
+  EMULATOR,
+  FFM_SIMULATOR,
+  UNKNOWN
+};
+
+/// Platform detection utilities
+class PlatformDetector {
+public:
+  /// Detect the current platform type
+  /// \returns PlatformType indicating the detected platform
+  static PlatformType detectPlatform();
+
+  /// Check if FFM simulator environment is active
+  /// \returns true if HSA_MODEL_TOPOLOGY environment variable is set
+  static bool isFFMEnvironment();
+
+  /// Get string name for platform type
+  /// \param platform The platform type
+  /// \returns String representation of the platform type
+  static const char* platformName(PlatformType platform);
+};
+
+/// Check if emulator mode is enabled
+/// This function is used for test size adjustments on slow emulators
+/// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
+
+/// Check if running under Windows Subsystem for Linux (WSL / DXG backend).
+/// \returns true if a WSL environment is detected
+bool isWslEnvironment();
+
+/// If running on WSL/DXG, print a "[ SKIPPED ]" line with the reason and return
+/// true so the caller can return early; returns false otherwise.
+/// \param reason Why the test is skipped on WSL
+/// \returns true if the test should be skipped (WSL detected)
+bool SkipOnWsl(const char* reason);
 
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
@@ -158,6 +196,15 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data);
 ///  to the agent upon return
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
 hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data);
+
+/// If the provided agent is associated with an AIE, return that agent through
+/// output parameter. This function is meant to be the call-back function used
+/// with hsa_iterate_agents to find  all the AIE agents.
+/// \param[in] agent Agent to evaluate if AIE
+/// \param[out] data If agent is associated with an AIE, this pointer will point
+///  to the agent upon return
+/// \returns HSA_STATUS_SUCCESS if no errors are encountered.
+hsa_status_t IterateAIEAgents(hsa_agent_t agent, void* data);
 
 /// Find a GLOBAL memory pool. By this, we mean not a kernel args pool.
 /// This function is meant to be the call-back function used

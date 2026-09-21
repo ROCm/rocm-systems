@@ -1,34 +1,10 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from __future__ import annotations
 
 import math
-import sys
 import traceback
-from io import StringIO
 from typing import Any, Optional
 
 import pandas as pd
@@ -37,7 +13,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from textual.widgets import Static
 
-from utils.mem_chart import plot_mem_chart
+from utils.mem_chart_common import format_mem_chart_heading
+from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
+from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
+from utils.mem_chart_gfx1250 import plot_mem_chart as plot_mem_chart_gfx1250
+from utils.utils_common import is_gfx9, is_gfx115x, is_gfx1250
 
 # Constants
 MIN_PLOT_WIDTH = 20
@@ -50,6 +30,23 @@ WIDTH_THRESHOLD_TINY = 1
 HEIGHT_THRESHOLD_SMALL = 20
 HEIGHT_THRESHOLD_TINY = 0.5
 DEFAULT_WIDTH_OFFSET = 40
+
+
+def _render_memory_chart(metric_dict: dict[str, Any], gpu_arch: str) -> str:
+    """Render memory-chart metrics with the architecture-specific renderer."""
+    # TUI has no normalization picker; the heading always uses per_kernel.
+    heading = format_mem_chart_heading("per_kernel")
+    if is_gfx9(gpu_arch):
+        return plot_mem_chart_gfx9(
+            metric_dict,
+            chart_title=heading,
+            gpu_arch=gpu_arch,
+        )
+    if is_gfx115x(gpu_arch):
+        return plot_mem_chart_gfx11(metric_dict, chart_title=heading)
+    if is_gfx1250(gpu_arch):
+        return plot_mem_chart_gfx1250(metric_dict, chart_title=heading)
+    raise ValueError("Memory chart not supported by this architecture.")
 
 
 def simple_bar(df: pd.DataFrame, title: Optional[str] = None) -> Optional[str]:
@@ -147,10 +144,10 @@ def simple_box(
         df.fillna(0).replace("", 0).replace(float("inf"), -1).replace(float("-inf"), -1)
     )
     for _, row in t_df.iterrows():
-        column_name = row.get("Metric") or row.get("Channel")
+        column_name = row.get("Metric")
 
         if column_name is None:
-            raise KeyError("Neither 'Metric' nor 'Channel' column found")
+            raise KeyError("No 'Metric' column found")
 
         labels.append(column_name)
         # TODO: need better fix for horizontal overflow
@@ -214,7 +211,7 @@ def px_simple_bar(
         range_color = [0, 100]
         xrange = [0, 110]
     if id == 1701.2:
-        label_txt = "Gb/s"
+        label_txt = "GB/s"
         range_color = [0, 1638]
         xrange = [0, 1638]
 
@@ -322,6 +319,7 @@ class MemoryChart(Static):
         super().__init__("", classes="mem-chart", **kwargs)
         self.df = df
 
+    def on_mount(self) -> None:
         try:
             if self.df is None or self.df.empty:
                 self.update("No chart data generated")
@@ -333,19 +331,11 @@ class MemoryChart(Static):
 
             metric_dict = dict(zip(self.df["Metric"], self.df["Value"]))
 
-            original_stdout = sys.stdout
-            try:
-                with StringIO() as string_buffer:
-                    sys.stdout = string_buffer
-                    result = plot_mem_chart("", "per_kernel", metric_dict)
-                    stdout_output = string_buffer.getvalue()
-            finally:
-                sys.stdout = original_stdout
-
-            plot_str = next(
-                (x for x in [stdout_output, str(result) if result else None] if x),
-                "No chart data generated",
-            )
+            # Route to arch-specific chart renderer
+            mspec = getattr(self.app, "mspec", None)
+            gpu_arch = mspec.gpu_arch if mspec else ""
+            result = _render_memory_chart(metric_dict, gpu_arch)
+            plot_str = str(result) if result else "No chart data generated"
             self.update(plot_str)
 
         except Exception as e:

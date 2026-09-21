@@ -94,7 +94,7 @@ void TestMeasureApiExecutionTime::Run(void) {
    * We need to read 2x:
    * 1) reading metric's header to check support (~900 microseconds)
    * 2) read full metric based on defined structure (~900 microseconds)
-   * 3) Setup backwards compatiblity (~100 microseconds)
+   * 3) Setup backwards compatibility (~100 microseconds)
    * 4) Put data into structures (~100 microseconds)
    * 5) Pass to public structure (~100 microseconds)
    * 6) Additional gpu_metric read time for Navi (~1000 microseconds)
@@ -104,12 +104,12 @@ void TestMeasureApiExecutionTime::Run(void) {
    * Note: performance of fread/mmap/read
    * https://github.com/nurettn/c-read-vs-mmap-vs-fread
    *
-   * Possible improvments ideas:
+   * Possible improvements ideas:
    * a) Initize "N/A" / Max UINT only for non-backwards comptable public struct
    * or arrays
    * b) Directly put data into public structure - this skips other copy/fill
    * procedures
-   * c) Expirement with other file reading options
+   * c) Experiment with other file reading options
    **/
   constexpr float kMETRICS_ELAPSED_MICROSEC_BASE = (3100);
   bool skip = false;

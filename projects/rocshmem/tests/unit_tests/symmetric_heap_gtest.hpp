@@ -47,6 +47,7 @@ class SymmetricHeapTestFixture : public ::testing::Test
     }
 
     void TearDown() override {
+      delete symmetric_heap_;
       MPIInstance::mpilib_dl_close();
     }
 };

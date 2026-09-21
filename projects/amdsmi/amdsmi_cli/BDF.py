@@ -1,21 +1,5 @@
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import logging
 import re
@@ -46,9 +30,11 @@ class BDF:
             #   - BB: 2 hex digits (bus)
             #   - DD: 2 hex digits (device)
             #   - F: 1 hex digit 0-7 (function) - MUST be single digit
-            bdf_format_regex = r'^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$'
+            bdf_format_regex = r"^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
             if not re.match(bdf_format_regex, bdf):
-                raise self.BDFError(f"Invalid BDF format: '{bdf}'. Expected format: [SSSS:]BB:DD.F (where F is 0-7)")
+                raise self.BDFError(
+                    f"Invalid BDF format: '{bdf}'. Expected format: [SSSS:]BB:DD.F (where F is 0-7)"
+                )
 
             try:
                 bdf_components = [int(x, 16) for x in re.split("[:.]", bdf)]
@@ -93,7 +79,7 @@ class BDF:
 
     def __ne__(self, passed_bdf):
         """Overrides the != operator and allows for BDF objects to be compared to BDF strings"""
-        # Since we overrided the == operator we can use that to make this simple
+        # Since we overrode the == operator we can use that to make this simple
         return not self == passed_bdf
 
     def __add__(self, passed_bdf):
@@ -121,7 +107,7 @@ class BDF:
         yield from (self.segment, self.bus, self.device, self.function)
 
     def __contains__(self, passed_bdf):
-        """Overrided the 'in' comparator in python"""
+        """Overrode the 'in' comparator in python"""
         passed_bdf = str(BDF(passed_bdf))
 
         bdf_regex = "(?:[0-6]?[0-9a-fA-F]{1,4}:)?[0-2]?[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}\\.[0-7]"

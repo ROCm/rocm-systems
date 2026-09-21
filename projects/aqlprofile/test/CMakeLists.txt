@@ -41,6 +41,7 @@ target_include_directories ( ${EXE_NAME}
     ${ROCM_ROOT_DIR}/include
     ${TEST_DIR}/parser/
     ${TEST_DIR}/../src/core/include
+    ${TEST_DIR}/../src
 )
 target_link_libraries( ${EXE_NAME}
   PRIVATE
@@ -100,6 +101,6 @@ add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
 
 option(AQLPROFILE_BUILD_INTEGERATION_TESTS "Build integration tests" ON)
 
-if(AQLPROFILE_BUILD_INTEGERATION_TESTS)
+if(AQLPROFILE_BUILD_INTEGERATION_TESTS AND NOT WIN32)
     add_subdirectory(integration)
 endif()

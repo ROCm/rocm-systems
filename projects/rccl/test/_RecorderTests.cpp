@@ -9,7 +9,9 @@
 
 #include "RcclMockFuncs.hpp"
 #include "comm.h"
+#include "common/ProcessIsolatedTestRunner.hpp"
 
+#include <fstream>
 #include <thread>
 
 #define HIPCALL(cmd)                                                                          \
@@ -33,33 +35,38 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Recorder, ParseJson)
   {
-    int pid = getpid();
-    hipStream_t stream;
-    HIPCALL(hipStreamCreate(&stream));
+    RUN_ISOLATED_TEST_WITH_ENV(
+      "ParseJson",
+      []()
+      {
+        int pid = getpid();
+        hipStream_t stream;
+        HIPCALL(hipStreamCreate(&stream));
 
-    setenv("RCCL_REPLAY_FILE", "/tmp/test.json", 1);
+        int array[] = {2, 3, 5};
+        ncclComm comm{.nRanks = 1, .localRank = 1, .localRankToRank = array, .opCount = 8, .planner = {.nTasksColl = 13, .nTasksP2p = 21}};
+        rccl::rcclApiCall call(rccl::rrAllToAllv, {.sendbuff = (void*)0x7f22f9600000, .recvbuff = (void*)0x7f22f9601000, .count = 0, .datatype = ncclFloat32, .comm = &comm, .stream = stream});
+        rccl::Recorder::instance().record(call);
 
-    int array[] = {2, 3, 5};
-    ncclComm comm{.nRanks = 1, .localRank = 1, .localRankToRank = array, .opCount = 8, .planner = {.nTasksColl = 13, .nTasksP2p = 21}};
-    rccl::rcclApiCall call(rccl::rrAllToAllv, {.sendbuff = (void*)0x7f22f9600000, .recvbuff = (void*)0x7f22f9601000, .count = 0, .datatype = ncclFloat32, .comm = &comm, .stream = stream});
-    rccl::Recorder::instance().record(call);
-
-    std::vector<rccl::rcclApiCall> calls;
-    char entry[4096];
-    gethostname(entry, 256);
-    //parse the outfile
-    std::string filename = "/tmp/test." + std::to_string(pid) + "." + std::string(entry) + ".json";
-    std::ifstream fp(filename);
-    fp.getline(entry, 4096);
-    fp.getline(entry, 4096);
-    fp.getline(entry, 4096);
-    parseJsonEntry(entry, calls);
-    // compare only the fields after the pid field
-    int result = memcmp(&(calls[0].pid)+1, &(call.pid)+1, sizeof(rccl::rcclApiCall)-sizeof(call.pid));
-    fp.close(); // care that recorder is not designed to anticipate fp closing before destructor
-    //remove(filename.c_str()); TODO: after implement fp closing mechanism via envvar, remove file after test case
-    unsetenv("RCCL_REPLAY_FILE");
-    assert(!result);
+        std::vector<rccl::rcclApiCall> calls;
+        char entry[4096];
+        gethostname(entry, 256);
+        // Parse the output file written by the Recorder
+        std::string filename = "/tmp/test." + std::to_string(pid) + "." + std::string(entry) + ".json";
+        std::ifstream fp(filename);
+        ASSERT_TRUE(fp.is_open()) << "Recorder did not create expected file: " << filename;
+        fp.getline(entry, 4096); // line 1: "{"
+        fp.getline(entry, 4096); // line 2: "  version : 1,"
+        fp.getline(entry, 4096); // line 3: the serialised API call
+        parseJsonEntry(entry, calls);
+        ASSERT_FALSE(calls.empty()) << "parseJsonEntry produced no results; raw line: " << entry;
+        // Compare all fields after pid (pid is the child's pid, not the outer test's)
+        int result = memcmp(&(calls[0].pid)+1, &(call.pid)+1, sizeof(rccl::rcclApiCall)-sizeof(call.pid));
+        fp.close();
+        EXPECT_EQ(result, 0) << "Round-tripped rcclApiCall fields do not match";
+      },
+      {{"RCCL_REPLAY_FILE", "/tmp/test.json"}}
+    );
   }
 
   /**

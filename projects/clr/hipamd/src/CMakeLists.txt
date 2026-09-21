@@ -102,6 +102,7 @@ target_sources(amdhip64 PRIVATE
   hip_event_ipc.cpp
   hip_fatbin.cpp
   hip_global.cpp
+  hip_executionctx.cpp
   hip_graph_internal.cpp
   hip_graph.cpp
   hip_hmm.cpp
@@ -123,9 +124,11 @@ target_sources(amdhip64 PRIVATE
   hip_vm.cpp
   hip_api_trace.cpp
   hip_table_interface.cpp
-  hip_table_interface_c.cpp
+  hip_deprecated_abi.cpp
   hip_comgr_helper.cpp
-  hip_library.cpp)
+  hip_library.cpp
+  profiler/hip_clr_profiler.cpp
+  profiler/hip_clr_dispatch_wrappers.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
@@ -133,8 +136,31 @@ endif()
 
 if(BUILD_SHARED_LIBS)
   if(WIN32)
-    target_sources(amdhip64 PRIVATE amdhip.def)
+    set(AMDHIP_DEF_OUTPUT "${PROJECT_BINARY_DIR}/amdhip.def")
+
+    # ROCCLR_ENABLE_HSA is known at configure time; use configure_file to
+    # conditionally include the HSA export block instead of invoking the C
+    # preprocessor at build time (cl.exe does not support GCC-style -E -P -o).
+    if(ROCCLR_ENABLE_HSA)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def")
+      file(READ "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def" HSA_EXPORTS)
+    else()
+      set(HSA_EXPORTS "")
+    endif()
+
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/amdhip.def.in" "${AMDHIP_DEF_OUTPUT}" @ONLY)
+
+    # For MSVC, pass the .def file directly to the linker with /DEF: flag
+    string(REPLACE "/" "\\" AMDHIP_DEF_OUTPUT_NATIVE "${AMDHIP_DEF_OUTPUT}")
+    target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
+    set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
+    # Unix compiler and linker default visibility to visible. Let's change to
+    # hidden so we only expose what we need.
+    set_target_properties(amdhip64 PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON)
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
   endif()
@@ -152,13 +178,15 @@ target_include_directories(amdhip64
     ${PROJECT_BINARY_DIR}/include)
 
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
+
+target_compile_definitions(amdhip64 PRIVATE HIP_ABI_IMPL)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
   find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(amd_comgr 3.2 REQUIRED)
   target_link_libraries(amdhip64 PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
@@ -194,6 +222,10 @@ if(__HIP_ENABLE_PCH)
   # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
   if(NOT DEFINED HIP_LLVM_ROOT)
     set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
+    if(NOT EXISTS "${HIP_LLVM_ROOT}/bin/clang")
+      # required because Rock installs llvm to /opt/rocm/lib/llvm
+      set(HIP_LLVM_ROOT "${LLVM_DIR}/../../llvm")
+    endif()
   endif()
 
   execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -207,6 +239,9 @@ endif()
 
 # Add hiprtc
 add_subdirectory(hiprtc)
+
+# HRR in-tree capture layer
+add_subdirectory(hrr)
 
 #############################
 # Profiling API support
@@ -236,16 +271,21 @@ if(USE_PROF_API)
   ")
   endif()
 
+
+  if(MSVC)
+    set(pp_out /P /Fi:${PROF_API_NEWHDR}.i)
+  else()
+    set(pp_out -E -o ${PROF_API_NEWHDR}.i)  # note: -E before input
+  endif()
+
   add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i
     COMMAND ${CMAKE_COMMAND} -E cat ${PROF_API_HDR} ${PROF_GL_HDR} > ${PROF_API_NEWHDR}
     COMMAND ${CMAKE_C_COMPILER}
         "-D$<JOIN:$<TARGET_PROPERTY:amdhip64,COMPILE_DEFINITIONS>,;-D>"
-        "-I$<JOIN:$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,;-I>"
+        "$<LIST:TRANSFORM,$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,PREPEND,-I>" # Directory name may contain spaces.
         "-DHIP_INCLUDE_HIP_HIP_RUNTIME_PT_API_H=1"
-        ${c_flags}
         $<TARGET_PROPERTY:amdhip64,COMPILE_OPTIONS>
-        ${CPP_EXTRA_C_FLAGS}
-        -E ${PROF_API_NEWHDR} -o ${PROF_API_NEWHDR}.i
+        ${pp_out} ${PROF_API_NEWHDR}
     COMMAND_EXPAND_LISTS VERBATIM
     IMPLICIT_DEPENDS C ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
     DEPENDS ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
@@ -292,7 +332,7 @@ endif()
 if(HIP_ENABLE_ROCPROFILER_REGISTER)
     find_package(rocprofiler-register REQUIRED
         HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
-        PATHS /opt/rocm)
+        PATHS ${ROCM_PATH})
 
     # don't use HIP_VERSION_PATCH because it is too large (> 100) for rocprofiler register
     target_compile_definitions(amdhip64 PRIVATE HIP_ROCPROFILER_REGISTER=1

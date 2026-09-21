@@ -1,0 +1,26 @@
+{
+    "domains": {
+        "gpu": {
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "general",
+        "cli_flag": "--detailed",
+        "description": "Detailed profiling mode: full trace, profile, and system metrics",
+        "name": "detailed",
+        "use_case": "Deep analysis with full system visibility; higher overhead but comprehensive data"
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "sampling": {
+        "cpus": {
+            "value": "all"
+        },
+        "enabled": true
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

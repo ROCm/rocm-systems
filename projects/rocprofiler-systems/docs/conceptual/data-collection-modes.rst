@@ -30,9 +30,6 @@ ROCm Systems Profiler supports several modes of recording trace and profiling da
 |                             | dynamic library/executable, like ``pthread_mutex_lock`` |
 |                             | in ``libpthread.so`` or ``MPI_Init`` in the MPI library |
 +-----------------------------+---------------------------------------------------------+
-| User API (deprecated)       | User-defined regions and controls for User API ROCm     |
-|                             | Systems Profiler                                        |
-+-----------------------------+---------------------------------------------------------+
 
 The two most generic and important modes are binary instrumentation and statistical sampling.
 It is important to understand their advantages and disadvantages.
@@ -189,7 +186,7 @@ Additional configuration options to control the tracing behavior include:
 - ``ROCPROFSYS_TRACE_DELAY`` (``--trace-wait``): Delay before starting trace collection (in seconds).
 - ``ROCPROFSYS_TRACE_DURATION`` (``--trace-duration``): Duration of trace collection (in seconds).
 - ``ROCPROFSYS_TRACE_PERIODS`` (``--trace-periods``): Specifies multiple delay/duration periods in the format ``<DELAY>:<DURATION>``, ``<DELAY>:<DURATION>:<REPEAT>``, or ``<DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>``.
-- ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing, such as ``realtime``, ``monotonic``, ``cputime``.
+- ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing, either ``realtime`` (default) or ``cputime``.
 
 Profile mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -205,6 +202,46 @@ Profile types:
 
 .. tip:: Start with a flat profile to identify high-impact functions, then use a hierarchical profile to analyze critical paths.
 
+.. _data-collection-modes-output-formats:
+
+Selecting output formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Starting ROCm 7.14, the `--output-format` option (in `rocprof-sys-run` and `rocprof-sys-sample`) selects which output format(s) to produce in a single option. The selection is authoritative: only the formats you name are produced. The existing individual flags and environment variables remain available; use either `--output-format` or those flags on the same command line, not both.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 28 25 35
+
+   * - Token
+     - Output
+     - Individual CLI flag
+     - Equivalent environment variable(s)
+   * - ``proto``
+     - Perfetto trace
+     - ``--trace`` or ``-T``
+     - ``ROCPROFSYS_TRACE=true``
+   * - ``rocpd``
+     - RocPD SQLite database
+     - (none; use ``--output-format rocpd``)
+     - ``ROCPROFSYS_USE_ROCPD=true``
+   * - ``json``
+     - Timemory profile, JSON serialization
+     - ``--profile`` and ``--profile-format json``
+     - ``ROCPROFSYS_PROFILE=true`` and ``ROCPROFSYS_JSON_OUTPUT=true``
+   * - ``text`` (alias ``txt``)
+     - Timemory profile, text serialization
+     - ``--profile``
+     - ``ROCPROFSYS_PROFILE=true`` and ``ROCPROFSYS_TEXT_OUTPUT=true``
+
+Tokens are space- or comma-separated and can be combined, for example:
+
+.. code-block:: shell
+
+   rocprof-sys-run --output-format proto rocpd -- ./myapp
+
+The ``--trace``, ``--profile``, ``--flat-profile``, and ``--profile-format`` flags and their environment variables remain available, but cannot be combined with ``--output-format`` on the same command line: because ``--output-format`` is authoritative over the same settings, mixing it with those flags is rejected to avoid an ambiguous result. Use either ``--output-format`` or the individual flags, not both.
+
 Sampling mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -214,7 +251,7 @@ Sampling types:
 
 1. **CPU-Time sampling** (default)
 
-* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--sample-cputime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
@@ -222,7 +259,7 @@ Sampling types:
 
 2. **Real-Time sampling**
 
-* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--sample-realtime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``
@@ -245,7 +282,17 @@ Sampling types:
   * ``ROCPROFSYS_SAMPLING_CPUS``
   * ``ROCPROFSYS_SAMPLING_GPUS``
 
-.. note:: If sampling is enabled but no specific type is selected, CPU-time sampling is used by default.
+.. note::
+
+   * ``ROCPROFSYS_SAMPLING_GPUS`` is further restricted to the GPUs that the ROCm runtime
+     exposes, as controlled by ``ROCR_VISIBLE_DEVICES`` and ``HIP_VISIBLE_DEVICES``. A GPU
+     masked off by either variable is never sampled, even when it is selected explicitly.
+   * The indices passed to ``ROCPROFSYS_SAMPLING_GPUS`` identify GPUs by their position in
+     the system's full device list, before any masking is applied; masking does not
+     renumber them. For example, with ``HIP_VISIBLE_DEVICES=4,5``, select those two GPUs
+     with ``ROCPROFSYS_SAMPLING_GPUS=4,5``, not ``0,1``.
+   * If sampling is enabled but no specific type is selected, CPU-time sampling is used by
+     default.
 
 To enable sampling:
 

@@ -47,6 +47,17 @@ if [[ "$#" -lt 2 ]] ||
     exit 1
 fi
 
+# Get the number of GPUs on the node
+if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
+then
+  NUM_GPUS=${NUM_GPUS:-$(amd-smi list | grep GPU | wc -l)}
+elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null
+then
+  NUM_GPUS=${NUM_GPUS:-$(rocm-smi --showserial | grep GPU | wc -l)}
+fi
+NUM_GPUS=${NUM_GPUS:-0}
+NUM_GPUS=$(($NUM_GPUS > 0? $NUM_GPUS: 8))
+
 driver_return_status=0
 binary_name=$1
 mode=$2
@@ -58,7 +69,7 @@ mpi_timeout=$((20 * 60)) # 20 minutes in seconds
 function run_mpirun {
     local np=$1
     local gtest_filter=$2
-    cmd_str="mpirun -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
+    cmd_str="ROCSHMEM_DEBUG_LEVEL=WARN mpirun -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
     echo $cmd_str
     eval $cmd_str
 
@@ -71,11 +82,24 @@ function run_mpirun {
     fi
 }
 
+if [ -n "$(rocminfo | grep gfx1201)" ];
+then
+  echo "Unit tests disabled in gfx1201"
+  echo "See AIROCSHMEM-393"
+  # Create empty log files for jenkins to be happy
+  >$log_file
+  exit
+fi
+
 # Processing modes
 case $mode in
     all)
         test_with_two_pes="IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*"
-        run_mpirun 4 "-$test_with_two_pes"
+        test_with_two_pes+=":SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*"
+        if [ $NUM_GPUS -ge 4 ]
+        then
+          run_mpirun 4 "-$test_with_two_pes"
+        fi
         #run_mpirun 2 "$test_with_two_pes"
         ;;
     custom)

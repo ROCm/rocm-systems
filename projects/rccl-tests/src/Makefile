@@ -42,11 +42,16 @@ HIP_MINOR = $(shell echo $(HIP_VERSION) | cut -d "." -f 2)
 
 # Better define GPU_TARGETS in your environment to the minimal set
 # of archs to reduce compile time.
-# Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201
+# Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201,gfx1250
 ifndef GPU_TARGETS
 GPU_TARGETS = gfx906 gfx908 gfx90a
   ifeq ($(shell test "0$(HIP_MAJOR)" -ge 7; echo $$?),0)
     GPU_TARGETS += gfx942 gfx950
+    # gfx1250 - HIP compatibility is not yet fixed, currently gated by HIP version >= 7.2.0
+    # as ROCm 7.12.0 is based on HIP 7.2.0
+    ifeq ($(shell test "0$(HIP_MINOR)" -ge 2; echo $$?),0)
+      GPU_TARGETS += gfx1250
+    endif
   else ifeq ($(shell test "0$(HIP_MAJOR)" -eq 6; echo $$?),0)
     # Include gfx942 support if we're using ROCm 6.0 or above
     GPU_TARGETS += gfx942
@@ -146,12 +151,18 @@ OBJ_FILES := $(SRC_FILES:%.cu=${DST_DIR}/%.o)
 BIN_FILES_LIST := all_reduce all_gather broadcast reduce_scatter reduce alltoall scatter gather sendrecv alltoallv hypercube all_reduce_bias
 BIN_FILES := $(BIN_FILES_LIST:%=${DST_DIR}/%_perf${NAME_SUFFIX})
 
+TEST_OS_SRCDIR := ../os
+TEST_OS_BUILDDIR := $(BUILDDIR)/os
+TEST_OS_LIB := $(TEST_OS_BUILDDIR)/libnccl_test_os.a
+HIPCUFLAGS += -I$(TEST_OS_SRCDIR) -DNCCL_OS_LINUX -DNCCL_GIN_PROXY_ENABLE=1
+HIPLDFLAGS += -L$(TEST_OS_BUILDDIR) -lnccl_test_os
+
 GIT_VERSION_FILE := ${DST_DIR}/src/git_version.cpp
 GIT_REV          := $(shell git log --pretty=format:'%h' -n 1)
 GIT_DIFF         := $(shell git diff --quiet --exit-code || echo +)
 GIT_BRANCH       := $(shell git rev-parse --abbrev-ref HEAD)
 
-build: ${BIN_FILES}
+build: os.build ${BIN_FILES}
 
 clean:
 	rm -rf ${DST_DIR}
@@ -175,19 +186,25 @@ ${HIPIFY_DIR}/%.h: %.h
 	@mkdir -p ${HIPIFY_DIR}
 	${HIPIFY_PL_EXE} ${HIPIFY_PL_FLAGS} $< > $@
 
+$(TEST_OS_LIB): os.build
+	@:
+
+os.%:
+	${MAKE} -C $(TEST_OS_SRCDIR) $* BUILDDIR=$(BUILDDIR) CXX="$(CXX)"
+
 .PRECIOUS: ${DST_DIR}/%.o
 
-${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h ${HIPIFY_DIR}/rccl_float8.h ${HIPIFY_DIR}/verifiable.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
-	$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<
+	$(HIPCC) $(HIPCUFLAGS) -I. -I${HIPIFY_DIR} -c -o $@ $<
 
-${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h ${HIPIFY_DIR}/rccl_float8.h ${HIPIFY_DIR}/verifiable.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
-	$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<
+	$(HIPCC) $(HIPCUFLAGS) -I. -I${HIPIFY_DIR} -c -o $@ $<
 
 ${DST_DIR}/timer.o: timer.cc timer.h
 	@printf "Compiling  %-35s > %s\n" $< $@
@@ -195,13 +212,13 @@ ${DST_DIR}/timer.o: timer.cc timer.h
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
 ifeq ($(DSO), 1)
-${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(DST_DIR)/src/git_version.cpp
+${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(DST_DIR)/src/git_version.cpp $(TEST_OS_LIB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) -o $@ $^ $(HIPLDFLAGS)"
-	$(HIPCC) -o $@ $^ $(HIPLDFLAGS) -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable -Xlinker "--enable-new-dtags" -Xlinker "-rpath,\$$ORIGIN:\$$ORIGIN/verifiable"
+	$(HIPCC) -o $@ $^ $(HIPLDFLAGS) -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable -Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN:$$ORIGIN/verifiable'
 else
-${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(DST_DIR)/src/git_version.cpp
+${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(DST_DIR)/src/git_version.cpp $(TEST_OS_LIB)
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) -o $@ $^ $(HIPLDFLAGS)"
@@ -210,4 +227,3 @@ endif
 
 clean_intermediates:
 	rm -f ${DST_DIR}/*.o $(TEST_VERIFIABLE_OBJS)
-

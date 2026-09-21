@@ -20,15 +20,21 @@ rtc:
     tags: [integration]
   Unit_hiprtcGetLoweredName_templateKrnls:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_cpp17:
     <<: *level_2
     tags: [compile]
   Unit_hiprtc_namehandling:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_getloweredname:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_test_hip_bfloat16:
     <<: *level_2
@@ -39,13 +45,10 @@ rtc:
   Unit_RTC_LinkDestroy_Negative:
     <<: *level_2
     tags: [link]
-  Unit_hiprtc_fp8_simple:
-    <<: *level_2
-    tags: [compile]
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [link]
   Unit_RTC_LinkerAPI:
     <<: *level_2
@@ -58,19 +61,24 @@ rtc:
     tags: [link]
   Unit_hiprtc_half_shuffle:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [integration]
   Unit_hiprtc_half_shuffle_sync:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [integration]
   Unit_Rtc_ReduceRandom:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_stdheaders:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
-    disabled: [amd_wsl]
+    # AIRUNTIME-2410
+    disabled: [amd_wsl, asan]
     tags: [header]
   Unit_Rtc_MathConstants_header:
     <<: *level_2
@@ -218,3 +226,31 @@ rtc:
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
     tags: [compile]
+  Unit_Rtc_CoopReduce:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    # Asan: AIRUNTIME-2410
+    disabled: [amd_windows, asan]
+  Unit_Rtc_CoopScan:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    # Asan: AIRUNTIME-2410
+    disabled: [amd_windows, asan]
+  Unit_RTC_BUNDLE_FROM_FILE:
+    <<: *level_2
+    tags: [link]
+  Unit_hiprtc_fp4_simple:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_fp6_simple:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_fp8_simple:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_spirv_compilation:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_spirv_linker:
+    <<: *level_2
+    tags: [link]

@@ -312,7 +312,7 @@ TEST(pc_sampling, query_configs_after_service_setup)
             const auto* cfg = &configs[0];
             EXPECT_EQ(cfg->method, picked_cfg->method);
             EXPECT_EQ(cfg->unit, picked_cfg->unit);
-            // Min and max interval are equeal when PC sampling is enabled
+            // Min and max interval are equal when PC sampling is enabled
             EXPECT_EQ(cfg->min_interval, cfg->max_interval);
             // When set up the PC sampling, we used the max_interval of the picked_cfg
             EXPECT_EQ(cfg->max_interval, picked_cfg->max_interval);

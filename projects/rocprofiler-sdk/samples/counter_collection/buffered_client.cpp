@@ -226,7 +226,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
  * get_gpu_device_agents()) and a set of counter names to collect. It returns a profile
  * that can be used when a dispatch is received for the agent to collect the specified
  * counters. Note: while you can dynamically create these profiles, it is more efficient
- * to consturct them once in advance (i.e. in tool_init()) since there are non-trivial
+ * to construct them once in advance (i.e. in tool_init()) since there are non-trivial
  * costs associated with constructing the profile.
  */
 rocprofiler_counter_config_id_t
@@ -349,7 +349,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
     {
         // get_profile_cache() is a map that can be accessed by dispatch_callback
         // below to select the profile config to use when a kernel dispatch is
-        // recieved.
+        // received.
         get_profile_cache().emplace(
             agent.id.handle, build_profile_for_agent(agent.id, std::set<std::string>{"TCC_HIT"}));
     }

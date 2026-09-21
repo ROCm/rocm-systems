@@ -128,7 +128,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     return;
   }
 
-  // initial_num_devices - keep this value static, due to parition changes
+  // initial_num_devices - keep this value static, due to partition changes
   // fluctuating # of devices. We should end up with same # of devices at
   // end of test.
   uint32_t initial_num_devices = num_monitor_devs();

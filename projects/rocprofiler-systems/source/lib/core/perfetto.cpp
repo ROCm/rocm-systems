@@ -1,32 +1,25 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "perfetto.hpp"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
+#include "common/units/data_size.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
+#include "output_file_registry.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
 
 #include <chrono>
+#include <fstream>
+#include <ios>
+
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::gigabytes;
+using rocprofsys::common::units::kilobytes;
+using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys
 {
@@ -104,6 +97,12 @@ setup()
     if(get_perfetto_backend() != "inprocess") args.backends |= ::perfetto::kSystemBackend;
     if(get_perfetto_backend() != "system") args.backends |= ::perfetto::kInProcessBackend;
 
+    // Silence all Perfetto log output on log-disabled ranks with empty callback
+    if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+    }
+
     ::perfetto::Tracing::Initialize(args);
     ::perfetto::TrackEvent::Register();
 }
@@ -123,14 +122,14 @@ start()
     {
         if(!_tmp_file)
         {
-            _tmp_file = config::get_tmp_file("perfetto-trace", "proto");
+            _tmp_file = config::get_tmp_file("perfetto-trace", "pftrace");
             _tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
         }
     }
 
     LOG_DEBUG("Setup perfetto...");
-    int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
-    auto& cfg = get_config();
+    const int _fd = (_tmp_file) ? _tmp_file->fd : -1;
+    auto&     cfg = get_config();
     tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
         if(_err.code == ::perfetto::TracingError::kTracingFailed)
             LOG_WARNING("Perfetto encountered a tracing error: {}", _err.message);
@@ -146,7 +145,7 @@ stop()
 
     auto& tracing_session = get_perfetto_session();
 
-    if(get_is_continuous_integration() && tracing_session == nullptr)
+    if(tracing_session == nullptr)
     {
         throw std::runtime_error("Null pointer to the tracing session");
     }
@@ -164,7 +163,8 @@ stop()
 }
 
 void
-post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
+post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
+             output_file_registry& _output_registry)
 {
     using char_vec_t = std::vector<char>;
 
@@ -196,7 +196,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
             ::fclose(_fdata);
 
-            if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+            if(_fnum_read != _fnum_elem)
             {
                 throw std::runtime_error(fmt::format(
                     "read {} elements from perfetto trace file '{}'. Expected {}",
@@ -244,44 +244,58 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
     auto _filename = config::get_perfetto_output_filename();
 
-    if(!trace_data.empty())
+    if(config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
-        operation::file_output_message<tim::project::rocprofsys> _fom{};
-        // Write the trace into a file.
-        if(config::get_verbose() >= 0)
-            _fom(_filename, std::string{ "perfetto" },
-                 " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
-        std::ofstream ofs{};
-        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+        // In MPI combined-trace mode, only rank 0 has non-empty trace_data
+        // after the gather, so only rank 0 writes and registers the file.
+        if(!trace_data.empty())
         {
-            _fom.append("Error opening '%s'...", _filename.c_str());
-            _perfetto_output_error = true;
-        }
-        else
-        {
+            operation::file_output_message<tim::project::rocprofsys> _fom{};
             // Write the trace into a file.
-            ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-            if(_timemory_manager)
-                _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
+            if(config::get_verbose() >= 0)
+                _fom(_filename, std::string{ "perfetto" },
+                     " (%.2f KB / %.2f MB / %.2f GB)... ",
+                     data_size_cast<kilobytes>(
+                         bytes{ static_cast<double>(trace_data.size()) })
+                         .count(),
+                     data_size_cast<megabytes>(
+                         bytes{ static_cast<double>(trace_data.size()) })
+                         .count(),
+                     data_size_cast<gigabytes>(
+                         bytes{ static_cast<double>(trace_data.size()) })
+                         .count());
+            std::ofstream ofs{};
+            if(!path::create_parent_dirs_and_open_ofstream(
+                   ofs, _filename, std::ios::out | std::ios::binary))
+            {
+                _fom.append("Error opening '%s'...", _filename.c_str());
+                _perfetto_output_error = true;
+            }
+            else
+            {
+                // Write the trace into a file.
+                ofs.write(trace_data.data(), trace_data.size());
+                if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+                if(_timemory_manager)
+                    _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
+                _output_registry.register_file(_filename, output_format::perfetto);
+            }
+            ofs.close();
         }
-        ofs.close();
-    }
-    else if(dmp::rank() == 0)
-    {
-        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                  _filename);
+        else if(dmp::rank() == 0)
+        {
+            LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                      _filename);
+        }
     }
 
-    // Merge the output files, if rank 0
-    if(dmp::rank() == 0)
+    // Merge the output files, if rank 0 and output is enabled for this rank
+    if(dmp::rank() == 0 &&
+       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
-        auto _output_folder = filepath::dirname(_filename);
+        auto _output_folder = path::parent_path(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+        auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
         if(!_script_dir.empty())
         {
@@ -289,7 +303,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
         }
 
         // Test that the script exists
-        if(!filepath::exists(_script_path))
+        if(!path::is_regular_file(_script_path))
         {
             LOG_WARNING("Script not found: {}", _script_path);
         }
@@ -298,7 +312,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             auto _command = _script_path + " '" + _output_folder + "'";
 
             // Execute the merge script
-            int result = system(_command.c_str());
+            const int result = system(_command.c_str());
 
             if(result != 0)
             {

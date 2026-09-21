@@ -176,6 +176,7 @@ global:
     hipStreamQuery;
     hipStreamSynchronize;
     hipStreamWaitEvent;
+    __hipOnError;
     __hipPopCallConfiguration;
     __hipPushCallConfiguration;
     __hipRegisterFatBinary;
@@ -185,8 +186,6 @@ global:
     __hipRegisterTexture;
     __hipRegisterManagedVar;
     __hipUnregisterFatBinary;
-    __gnu_h2f_ieee;
-    __gnu_f2h_ieee;
     hipConfigureCall;
     hipSetupArgument;
     hipLaunchByPtr;
@@ -197,22 +196,6 @@ global:
     hipGetStreamDeviceId;
     hipProfilerStart;
     hipProfilerStop;
-    hiprtcCompileProgram;
-    hiprtcCreateProgram;
-    hiprtcDestroyProgram;
-    hiprtcGetLoweredName;
-    hiprtcGetProgramLog;
-    hiprtcGetProgramLogSize;
-    hiprtcGetCode;
-    hiprtcGetCodeSize;
-    hiprtcGetErrorString;
-    hiprtcAddNameExpression;
-    hiprtcVersion;
-    hiprtcLinkCreate;
-    hiprtcLinkAddFile;
-    hiprtcLinkAddData;
-    hiprtcLinkComplete;
-    hiprtcLinkDestroy;
     hipBindTexture;
     hipBindTexture2D;
     hipBindTextureToArray;
@@ -306,6 +289,7 @@ global:
     hipDestroyExternalSemaphore;
     hipImportExternalMemory;
     hipExternalMemoryGetMappedBuffer;
+    hipExternalMemoryGetMappedMipmappedArray;
     hipDestroyExternalMemory;
     hipMemcpy2DToArrayAsync;
     hipDrvMemcpy2DUnaligned;
@@ -470,8 +454,6 @@ local:
 hip_5.3 {
 global:
     hipDeviceSetLimit;
-    hiprtcGetBitcode;
-    hiprtcGetBitcodeSize;
     hipGraphLaunch_spt;
     hipStreamBeginCapture_spt;
     hipStreamEndCapture_spt;
@@ -602,6 +584,8 @@ global:
     hipLaunchKernelExC;
     hipDrvLaunchKernelEx;
     hipMemGetHandleForAddressRange;
+    hipOccupancyMaxPotentialClusterSize;
+    hipOccupancyMaxActiveClusters;
 local:
     *;
 } hip_6.4;
@@ -638,6 +622,8 @@ global:
     hipLibraryUnload;
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
+    hipLibraryGetGlobal;
+    hipLibraryGetManaged;
     hipStreamCopyAttributes;
     hipLibraryEnumerateKernels;
     hipKernelGetLibrary;
@@ -654,6 +640,57 @@ global:
     hipKernelGetAttribute;
     hipKernelSetAttribute;
     hipKernelGetFunction;
+    hipMemPrefetchBatchAsync;
+    hipMemDiscardBatchAsync;
+    hipDrvMemDiscardBatchAsync;
+    hipMemDiscardAndPrefetchBatchAsync;
+    hipDrvMemDiscardAndPrefetchBatchAsync;
 local:
     *;
 } hip_7.1;
+
+hip_profiler_ext {
+global:
+    hipProfilerEnableExt;
+    hipProfilerDisableExt;
+    hipProfilerGetRecordsExt;
+    hipProfilerRegisterChunkCallbackExt;
+local:
+    *;
+} hip_7.2;
+
+hip_7.14 {
+global:
+    hipGreenCtxCreate;
+    hipExecutionCtxDestroy;
+    hipExecutionCtxStreamCreate;
+    hipDeviceGetDevResource;
+    hipDevSmResourceSplitByCount;
+    hipDevSmResourceSplit;
+    hipDevResourceGenerateDesc;
+    hipDeviceGetExecutionCtx;
+    hipExecutionCtxGetDevResource;
+    hipExecutionCtxGetDevice;
+    hipExecutionCtxGetId;
+    hipStreamGetDevResource;
+    hipExecutionCtxRecordEvent;
+    hipExecutionCtxSynchronize;
+    hipExecutionCtxWaitEvent;
+local:
+    *;
+} hip_7.2;
+
+hip_7.15 {
+global:
+    hipMemGetDefaultMemPool;
+local:
+    *;
+} hip_7.14;
+
+hip_10.1 {
+global:
+    hipDeviceGetLuid;
+    hipInitDevice;
+local:
+    *;
+} hip_7.15;

@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <unistd.h>
 
@@ -42,7 +23,7 @@
       status = amdsmi_get_esmi_err_msg(RET, &err_str);                                        \
       std::cout << "AMDSMI call returned " << status << " at line " << __LINE__ << std::endl; \
       std::cout << err_str << std::endl;                                                      \
-      return RET;                                                                             \
+      return static_cast<int>(RET);                                                           \
     }                                                                                         \
   }
 
@@ -72,7 +53,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
   vector<amdsmi_socket_handle> sockets(socket_count);
 
   // Get the sockets of the system
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   CHK_AMDSMI_RET(ret)
 
   cout << "Total Socket: " << socket_count << endl;
@@ -84,7 +65,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     uint32_t core_count = 0;
 
     // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU
-    processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+    amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
     ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, nullptr, &cpu_count);
     CHK_AMDSMI_RET(ret)
 
@@ -92,7 +73,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     vector<amdsmi_processor_handle> plist(cpu_count);
 
     // Get the cpus for each socket
-    ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, &plist[0], &cpu_count);
+    ret =
+        amdsmi_get_processor_handles_by_type(sockets[i], processor_type, plist.data(), &cpu_count);
     CHK_AMDSMI_RET(ret)
 
     // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE
@@ -104,7 +86,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     vector<amdsmi_processor_handle> core_list(core_count);
 
     // Get the cpu cores for each socket
-    ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, &core_list[0],
+    ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, core_list.data(),
                                                &core_count);
     CHK_AMDSMI_RET(ret)
 
@@ -127,8 +109,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
            << "." << (unsigned)smu_fw.debug << "\t\t |" << endl;
       cout << "------------------------------------------\n";
 
-      uint32_t err_bits = 0;
-
       uint32_t prochot;
       cout << setprecision(3) << " CPU " << index << "\t|";
       cout << "\n-------------------------------------------------";
@@ -141,7 +121,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if (!ret) {
         cout << setprecision(7) << (prochot ? "active" : "inactive") << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
       cout << "\n-------------------------------------------------\n";
@@ -156,7 +135,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
       len = strlen(str);
       uint32_t fclk, mclk;
-      err_bits = 0;
 
       ret = amdsmi_get_cpu_fclk_mclk(plist[index], &fclk, &mclk);
       if (ret != AMDSMI_STATUS_SUCCESS)
@@ -166,7 +144,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << setprecision(7) << " " << fclk << "\t\t|";
         retVal = snprintf(str + len, SHOWLINESZ - len, " %d\t\t|", mclk);
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err: " << setprecision(2) << ret << "     |";
         retVal = snprintf(str + len, SHOWLINESZ - len, " NA (Err: %-2d)     |", ret);
       }
@@ -188,9 +165,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(socket_power) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(socket_power) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
 
@@ -203,9 +179,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(power_limit) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
 
@@ -218,9 +193,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << "] " << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(power_max) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(power_max) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
       cout << "\n-------------------------------------------------\n";
@@ -238,7 +212,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if ((ret == AMDSMI_STATUS_SUCCESS) && (input_power > power_max)) {
         cout << "Input power is more than max power limit,"
                 " limiting to "
-             << static_cast<double>(power_max) / 1000 << "Watts\n";
+             << static_cast<double>(power_max) << "Watts\n";
         input_power = power_max;
       }
 
@@ -249,7 +223,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
       if (!ret) {
         cout << "CPU [" << index << "] power_limit set to " << fixed << setprecision(3)
-             << static_cast<double>(input_power) / 1000 << " Watts successfully\n";
+             << static_cast<double>(input_power) << " Watts successfully\n";
       }
 
       power_limit = 0;
@@ -261,9 +235,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(power_limit) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
-        err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
       }
       cout << "\n-------------------------------------------------\n";

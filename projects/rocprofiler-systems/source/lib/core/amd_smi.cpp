@@ -1,6 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "backends/amd_smi/ainic_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
+
+#include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
@@ -9,7 +14,6 @@
 
 #include "logger/debug.hpp"
 
-#include <cctype>
 #include <string_view>
 
 namespace rocprofsys
@@ -18,31 +22,17 @@ namespace amd_smi
 {
 namespace
 {
-std::string
-get_setting_name(std::string_view input)
-{
-    constexpr auto prefix = std::string_view{ "rocprofsys_" };
-
-    std::string result;
-    result.reserve(input.size());
-    for(auto c : input)
-        result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-
-    if(result.compare(0, prefix.size(), prefix) == 0) return result.substr(prefix.size());
-
-    return result;
-}
-
 #define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
+            ENV_NAME, std::string{ utility::string::strip_rocprofsys_prefix(ENV_NAME) }, \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                          \
             std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
-                        ENV_NAME);                                                       \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(ENV_NAME), ENV_NAME);   \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
@@ -53,7 +43,8 @@ config_settings(const std::shared_ptr<settings>& _config)
 {
     if(!get_use_amd_smi() || !gpu::initialize_amdsmi()) return;
 
-    std::string default_metrics = "busy, temp, power, mem_usage, sdma_usage";
+    std::string default_metrics =
+        "busy, temp, power, mem_usage, sdma_usage, gfx_clock, mem_clock";
     // No distinction between busy and activity shown in description
     std::string jpeg_activity_support{};
     std::string vcn_activity_support{};
@@ -61,7 +52,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     std::string pcie_support{};
     std::string sdma_support{};
 
-    size_t device_count = gpu::get_processor_count();
+    const size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)
     {
         if(gpu::vcn_is_device_level_only(i) || gpu::is_vcn_busy_supported(i))
@@ -100,7 +91,7 @@ config_settings(const std::shared_ptr<settings>& _config)
 #endif
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_AMD_SMI_METRICS",
+        std::string, env_vars::AMD_SMI_METRICS,
         "amd-smi metrics to collect: " + default_metrics + jpeg_activity_support +
             vcn_activity_support + xgmi_support + pcie_support + sdma_support + ". " +
             "An empty value implies 'all' and 'none' suppresses all.",

@@ -191,10 +191,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -203,6 +200,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
   hipStream_t stream;
   hipGraphNode_t allocNodeA, freeNodeA;
   hipMemAllocNodeParams allocParam;
+
+  size_t before = 0, after = 0;
+  HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, hipGraphMemAttrUsedMemCurrent, &before));
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&stream));
@@ -220,9 +221,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-  size_t before = 0, after = 0;
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  HIP_CHECK(hipDeviceGetGraphMemAttribute(0, hipGraphMemAttrUsedMemCurrent, &before));
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipDeviceGraphMemTrim(0));

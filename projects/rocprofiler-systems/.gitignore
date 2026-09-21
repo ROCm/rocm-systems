@@ -51,7 +51,9 @@ _toc.yml
 
 /.vscode
 /.cache
-/.clangd
+/.claude
+/.cursor
+/.pytest_cache
 
 /compile_commands.json
 /rocprof-sys-install.py

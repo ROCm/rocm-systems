@@ -75,10 +75,7 @@ class MemoryAlignmentTest : public TestBase {
 
   void MemoryPoolAlignment(void);
 
-
- private:
-  void MemoryPoolAlignment(hsa_agent_t agent,
-                             hsa_amd_memory_pool_t pool);
+  void TestPoolAllocationsAlignment(hsa_amd_memory_pool_t pool);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_MEMORY_ALIGNMENT_H_

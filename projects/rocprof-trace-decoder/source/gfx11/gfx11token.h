@@ -25,9 +25,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
 #include "gfx10/gfx10parser.h"
 #include "gfx10/gfx10token.h"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 namespace gfx11
 {
@@ -44,7 +44,6 @@ union timestamp_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -52,7 +51,6 @@ union timestamp_type
         return ss;
     }
     const char* typestr() const { return "TIMESTAMP"; };
-#endif
 };
 
 union util_ctr_type
@@ -77,10 +75,8 @@ union util_ctr_type
 
     static const int ctr_size = 4;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const { return std::stringstream{}; }
     const char* typestr() const { return "UTILCTR"; };
-#endif
 };
 
 union shader_data_type
@@ -105,7 +101,6 @@ union shader_data_type
         return common;
     }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -113,7 +108,6 @@ union shader_data_type
         return ss;
     }
     const char* typestr() const { return "SHADER_DATA"; };
-#endif
 };
 
 union shader_data_short_type
@@ -139,7 +133,6 @@ union shader_data_short_type
         return common;
     }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -147,7 +140,6 @@ union shader_data_short_type
         return ss;
     }
     const char* typestr() const { return "SHADER_DATA_SHORT"; };
-#endif
 };
 
 class Token : public gfx10::Token

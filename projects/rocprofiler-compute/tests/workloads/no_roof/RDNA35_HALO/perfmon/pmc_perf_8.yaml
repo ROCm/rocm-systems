@@ -1,0 +1,5 @@
+jobs:
+- pmc:
+  - CPC_GUS_WRITE_REQUEST_SENT_sum
+  - GCEA_WDRAM_NUM_BANKS_VLD_sum
+  - GCEA_SARB_REQ_PER_VC_sum

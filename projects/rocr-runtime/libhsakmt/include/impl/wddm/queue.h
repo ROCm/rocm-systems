@@ -54,6 +54,7 @@
 #include "hsa-runtime/inc/amd_hsa_queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
 #include "impl/wddm/cmd_util.h"
+#include "util/atomic_helpers.h"
 
 namespace wsl {
 namespace thunk {
@@ -86,6 +87,9 @@ public:
   virtual hsa_status_t Fini(void) { return HSA_STATUS_SUCCESS; }
   virtual void RingDoorbell(uint64_t value) { }
   virtual void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
+
+  // amd_queue_t backing memory; only ComputeQueue has one, SDMAQueue returns nullptr.
+  virtual GpuMemory* GetAmdQueueMemory(void) const { return nullptr; }
 
   hsa_status_t SwsInit(void);
   hsa_status_t SwsFini(void);
@@ -140,6 +144,12 @@ public:
   std::atomic<uint64_t>* ring_rptr = nullptr;
 
   uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
+
+  bool needs_cwsr_ = true;                        //!< false for SDMA queues (mirrors Linux handle_concrete_asic() SDMA early-return)
+  GpuMemoryHandle cwsr_mem_ = nullptr;           //!< CWSR (Context Wave Save/Restore) memory allocation
+  D3DKMT_HANDLE cwsr_mem_handle_ = 0;           //!< KMT allocation handle of CWSR region (passed as CwsrMemHandle)
+  volatile int64_t* error_reason_ = nullptr;     //!< ErrorReason payload ptr (QueueResource::ErrorReason)
+  HSAuint32 error_event_id_ = 0;                 //!< ErrorEventId from HsaEvent::EventId (0 if no event)
 };
 
 class ComputeQueue : public WDDMQueue {
@@ -152,7 +162,8 @@ public:
                volatile int64_t *error_addr,
                uint32_t cmdbuf_size,
                uint32_t engine,
-               bool use_hws = true);
+               bool use_hws = true,
+               HSAuint32 event_id = 0);
 
   ~ComputeQueue();
 
@@ -172,14 +183,17 @@ public:
   bool IsInvalidPacket(void) const {
     uint16_t *packet = (uint16_t *)((char *)ring +
                        (cmdbuf_aql_frame_write_index % ring_size) * 64);
-    return ((*packet >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
+    // Acquire-load to pair with the producer's release publication, consistent
+    // with SwitchAql2PM4(); a plain read races a burst commit's not-yet-published slot.
+    uint16_t header = rocr::atomic::Load(packet, std::memory_order_acquire);
+    return ((header >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
            == HSA_PACKET_TYPE_INVALID;
   }
 
   hsa_status_t Process(void);
   uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
   void RingDoorbell(uint64_t value);
-  GpuMemory* GetAmdQueueMemory() const { return amd_queue_memory_; }
+  GpuMemory* GetAmdQueueMemory() const override { return amd_queue_memory_; }
 
  private:
   hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);
@@ -202,8 +216,8 @@ public:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring;         //!< AQL queue, allocated in ROCR and points to the AQL packets
-  uint64_t ring_size; //!< AQL queue size in packets
+  void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
+  uint64_t ring_size;
 
   // ib_start_addr is the current ib start address
   uint64_t ib_start_addr;
@@ -229,7 +243,7 @@ private:
     return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
-  bool UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32);
+  bool UpdateScratch(uint32_t private_segment_size, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
@@ -257,7 +271,7 @@ private:
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
 
-  uint64_t max_scratch_waves_;
+  uint64_t scratch_waves_;
   uint64_t dispatch_waves_;
   uint64_t scratch_size_per_wave_;
   uint64_t scratch_size_;
@@ -267,7 +281,7 @@ private:
   GpuMemoryHandle scratch_mem_;
 
   std::vector<int> scratch_base_offset_array_;
-  bool aql_;  //!< The queue is configured to the AQL execution
+  bool native_aql_ = false;  //!< Queue submits AQL packets directly without PM4 translation
 };
 
 class SDMAQueue : public WDDMQueue {

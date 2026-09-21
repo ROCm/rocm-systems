@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Phase-10 Feature G Flash/SDPA/KV-cache attention signatures. Consumed by the Compute Specialist.",
+  "required": ["version", "patterns"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "applies_to_gfx", "description"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "applies_to_gfx": {
+            "type": "array",
+            "description": "gfx_ids this attention pattern applies to. Detection logic matches any modern AMD GPU, but the HBM / MFMA thresholds are calibrated for CDNA2+ (gfx90a, gfx942, gfx950).",
+            "items": {"type": "string", "pattern": "^gfx[0-9a-f]+$"},
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "description": {"type": "string"},
+          "signature": {"type": "object"},
+          "verdict": {"type": "string"},
+          "recommend": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "recommend_if_absent": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "derivation": {"type": "object"},
+    "notes": {"type": "string"}
+  }
+}

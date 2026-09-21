@@ -1,36 +1,17 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-
-#include <timemory/units.hpp>
-
 #include "logger/debug.hpp"
 
-namespace rocprofsys
+#include <chrono>
+#include <cstdint>
+#include <linux/perf_event.h>
+
+using namespace std::chrono_literals;
+
+namespace rocprofsys::perf
 {
-namespace perf
-{
-namespace units = ::tim::units;
 
 event_type
 get_event_type(std::string_view _v)
@@ -172,27 +153,28 @@ get_hw_cache_config(std::string_view _v)
 }
 
 void
-config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
-                         double _freq)
+config_overflow_sampling(struct perf_event_attr& perf_event_att, std::string_view event,
+                         double freq)
 {
-    auto _period = (1.0 / _freq) * units::sec;
+    const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ 1.0 / freq });
 
-    _pe.type = static_cast<int>(perf::get_event_type(_event));
-    switch(_pe.type)
+    perf_event_att.type = static_cast<int>(perf::get_event_type(event));
+    switch(perf_event_att.type)
     {
         case PERF_TYPE_HARDWARE:
         {
-            _pe.config = static_cast<int>(perf::get_hw_config(_event));
+            perf_event_att.config = static_cast<int>(perf::get_hw_config(event));
             break;
         }
         case PERF_TYPE_SOFTWARE:
         {
-            _pe.config = static_cast<int>(perf::get_sw_config(_event));
+            perf_event_att.config = static_cast<int>(perf::get_sw_config(event));
             break;
         }
         case PERF_TYPE_HW_CACHE:
         {
-            _pe.config = static_cast<int>(perf::get_hw_cache_config(_event));
+            perf_event_att.config = static_cast<int>(perf::get_hw_cache_config(event));
             break;
         }
         case PERF_TYPE_BREAKPOINT:
@@ -205,15 +187,15 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         }
     };
 
-    if(_pe.type == PERF_TYPE_SOFTWARE &&
-       (_pe.config == PERF_COUNT_SW_CPU_CLOCK || _pe.config == PERF_COUNT_SW_TASK_CLOCK))
+    if(perf_event_att.type == PERF_TYPE_SOFTWARE &&
+       (perf_event_att.config == PERF_COUNT_SW_CPU_CLOCK ||
+        perf_event_att.config == PERF_COUNT_SW_TASK_CLOCK))
     {
-        _pe.sample_period = static_cast<uint64_t>(_period);
+        perf_event_att.sample_period = static_cast<std::uint64_t>(period.count());
     }
     else
     {
-        _pe.sample_period = static_cast<uint64_t>(_freq);
+        perf_event_att.sample_period = static_cast<std::uint64_t>(freq);
     }
 }
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf
