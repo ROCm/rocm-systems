@@ -31,7 +31,7 @@ ConSan instrumentation. No separate waitcheck tool or settings are required.
 
 | Variable | Default | When to use it |
 | --- | --- | --- |
-| `RJ_CONSAN_PRESET=low\|default\|high\|max` | `default` | Adjust coverage versus overhead in the default mode. |
+| `RJ_CONSAN_PRESET=low\|default\|high\|higher\|max` | `default` | Adjust coverage versus overhead in the default mode. |
 | `RJ_CONSAN_KERNEL_ALLOWLIST=name[,name...]` | All kernels | Check a few exact kernel entry names. |
 | `RJ_CONSAN_KERNEL_ALLOWLIST_FILE=path` | All kernels | Check a generated list, one exact name per line. |
 | `RJ_CONSAN_LOG=N` | Logging disabled | Set `1` to inspect instrumentation, coverage, and results; `3` adds per-site details. |
@@ -48,20 +48,22 @@ more. The preset does not change the analysis mode.
 | --- | ---: | ---: | --- |
 | `low` | 1024 | 1024 | Large workloads where you want to try lower overhead and accept more misses. |
 | `default` | 256 | 256 | Ordinary runs. Unset, empty, and `default` have the same behavior. |
-| `high` | 16 | 16 | Increased sampling between the default and focused-repro settings. |
-| `higher` | 1 | 4 | Small or minimized repros: select every workgroup and one in four LDS cells. |
+| `high` | 16 | 16 | Increased sampling on large grids, between the default and focused-repro settings. |
+| `higher` | 1 | 4 | Small or minimized repros: select every workgroup and one in four LDS cells. Workgroup stride 1 removes dispatch-identity selection misses; see [sampling controls](EXPERT_CONTROLS.md#consan-event-and-sampling-controls). |
 | `max` | 1 | 1 | Investigating an issue missed by `higher`: remove workgroup and cell filtering. |
 
 For a small repro:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_PRESET=high RJ_CONSAN_LOG=1 \
+  RJ_CONSAN_PRESET=higher RJ_CONSAN_LOG=1 \
   ./repro 2>consan.log
 ```
 
-If it misses an expected race, try `higher`, then `max`. Even `max` retains bounded evidence
-and has analysis limitations; a clean run does not prove race freedom.
+`higher` is the first preset that selects every workgroup (stride 1). Use `high`
+for large grids. If the small repro misses an expected race, try `max`. Even
+`max` retains bounded evidence and has analysis limitations; a clean run does
+not prove race freedom.
 
 Preset names are case-insensitive. Other settings keep their standard defaults.
 
@@ -181,7 +183,7 @@ non-trapping mismatch marker; no expert controls are needed to start.
 | --- | --- |
 | Startup is expensive or transformation uses too much memory | Generate an allowlist to avoid transforming unrelated code. |
 | Recording overhead is too high | Try `low` in the default mode, accepting reduced coverage. |
-| A small known-racy repro gives no diagnostic | Confirm instrumentation and dispatch, then try `high`, `higher`, and `max`. |
+| A small known-racy repro gives no diagnostic | Confirm instrumentation and dispatch, then try `higher` and `max`. Use `high` for larger grids. |
 | Coverage is incomplete or report allocation fails | Read the reported reason; consult [capabilities](CAPABILITIES.md) or [report controls](EXPERT_CONTROLS.md#consan-report-buffers). |
 | A focused validation run must reject ineffective instrumentation | Use `RJ_CONSAN_POLICY=strict`. It can reject helper code objects and terminate with exit code 92; it does not make race diagnostics fatal. |
 

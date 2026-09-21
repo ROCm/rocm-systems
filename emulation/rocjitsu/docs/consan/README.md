@@ -64,7 +64,7 @@ If the program's own correctness checks pass, ConSan preserved its result for
 that run; this does not prove the program race-free. A failure, timeout, signal,
 or GPU reset is not by itself a ConSan diagnostic.
 
-For small repros, use `RJ_CONSAN_PRESET=high`; use `max` to remove
+For small repros, use `RJ_CONSAN_PRESET=higher`; use `max` to remove
 workgroup and cell sampling. `low` trades coverage for lower recording overhead,
 and `default` preserves standard behavior. See [ConSan presets](USAGE.md#presets)
 for exact settings, overrides, and bounded-retention limitations.

@@ -38,7 +38,7 @@ before running it:
 export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-For small repros, use `RJ_CONSAN_PRESET=high`; use `max` to remove
+For small repros, use `RJ_CONSAN_PRESET=higher`; use `max` to remove
 workgroup and cell sampling. `low` trades coverage for lower recording overhead,
 and `default` preserves standard behavior. See [ConSan presets](USAGE.md#presets)
 for exact settings, overrides, and bounded-retention limitations.
@@ -88,7 +88,7 @@ a complementary value-instability signal.
 | **ConSan (default)** | Host analysis attributes conflicts between retained accesses. | Bounded state and probabilistic detection. |
 | **SuperCollider** | A delayed redundant observation changes the mismatch marker. | Instability signal rather than a happens-before diagnosis. |
 
-For a small testcase, raise ConSan coverage with `RJ_CONSAN_PRESET=high` or
+For a small testcase, raise ConSan coverage with `RJ_CONSAN_PRESET=higher` or
 `max`; see [sampling controls](USAGE.md) for the precise settings and remaining
 limits. Neither setting proves race freedom when it reports no conflict.
 
